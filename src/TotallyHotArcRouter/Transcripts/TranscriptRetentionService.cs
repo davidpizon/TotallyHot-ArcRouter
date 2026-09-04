@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Transcripts;
@@ -15,8 +13,8 @@ public sealed class TranscriptRetentionService : BackgroundService
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<TranscriptRetentionService> _logger;
-    private readonly ITranscriptStore _transcriptStore;
     private readonly TranscriptOptions _options;
+    private readonly ITranscriptStore _transcriptStore;
 
     /// <summary>Initializes a new instance of the <see cref="TranscriptRetentionService"/> class.</summary>
     /// <param name="logger">The logger.</param>
@@ -36,7 +34,7 @@ public sealed class TranscriptRetentionService : BackgroundService
         _options = options.Value;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!_options.Enabled)
@@ -56,10 +54,10 @@ public sealed class TranscriptRetentionService : BackgroundService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Transcript retention check threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "Transcript retention check threw unexpectedly; continuing.");
                 }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -76,34 +74,31 @@ public sealed class TranscriptRetentionService : BackgroundService
     /// <param name="cancellationToken">A cancellation token.</param>
     internal async Task CheckAndPurgeAsync(CancellationToken cancellationToken)
     {
-        if (!_options.Enabled)
-        {
-            return;
-        }
+        if (!_options.Enabled) return;
 
         var rowCount = await _transcriptStore.GetRowCountAsync(cancellationToken).ConfigureAwait(false);
         var deletedByOverage = 0;
-        var deletedByAge = 0;
 
         // First, enforce the max-rows bound by deleting oldest-first if over the limit
         if (rowCount > _options.MaxRows)
         {
             var overageCount = rowCount - _options.MaxRows;
-            deletedByOverage = await _transcriptStore.DeleteOldestAsync(overageCount, cancellationToken)
+            deletedByOverage = await _transcriptStore
+                .DeleteOldestAsync(count: overageCount, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
 
         // Then, delete rows past the retention age
         var cutoffTime = DateTimeOffset.UtcNow - TimeSpan.FromDays(_options.RetentionDays);
-        deletedByAge = await _transcriptStore.DeleteBeforeAsync(cutoffTime, cancellationToken)
+        var deletedByAge = await _transcriptStore
+            .DeleteBeforeAsync(cutoff: cutoffTime, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (deletedByOverage > 0 || deletedByAge > 0)
-        {
             _logger.LogInformation(
+                message:
                 "Transcript retention purge complete: {DeletedByOverage} rows deleted by overage, {DeletedByAge} rows deleted by age.",
                 deletedByOverage,
                 deletedByAge);
-        }
     }
 }

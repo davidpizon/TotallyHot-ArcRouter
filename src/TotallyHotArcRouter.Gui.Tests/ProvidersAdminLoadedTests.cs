@@ -1,11 +1,12 @@
-using System.Linq;
+using AwesomeAssertions;
+using Bunit;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
-using Bunit;
-using AwesomeAssertions;
+using IElement = AngleSharp.Dom.IElement;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -28,87 +29,257 @@ public sealed class ProvidersAdminLoadedTests
     /// of the card's conditional branches at once rather than needing a fixture per branch.
     /// </summary>
     private const string ProvidersJson = """
-        {
-          "providers": [
-            {
-              "key": "anthropic",
-              "name": "Anthropic Prod",
-              "baseUrl": "https://api.anthropic.com",
-              "authHeaderName": "x-api-key",
-              "authHeaderScheme": "",
-              "hasApiKey": true,
-              "apiKeyEnvVar": null,
-              "providerType": "Anthropic",
-              "models": [
-                { "modelName": "claude-opus", "providerModelId": "claude-opus-5", "dialect": "openai-native", "confidence": "Observed", "enabled": true, "presentUpstream": true },
-                { "modelName": "claude-haiku", "providerModelId": "claude-haiku-4-5", "dialect": null, "confidence": null, "enabled": false, "presentUpstream": false }
-              ],
-              "headers": [ { "name": "anthropic-version", "source": "literal", "valueEnvVar": null } ],
-              "isFree": false,
-              "dollarCap": 100.0,
-              "tokenCap": 1000000,
-              "dollarSpent": 42.5,
-              "tokensUsed": 250000,
-              "enabled": true,
-              "endpointCapabilities": {
-                "providerKey": "anthropic",
-                "openAiCompatible": false,
-                "lmStudioNative": false,
-                "ollamaNative": false,
-                "anthropicCompatible": true,
-                "scannedAtUtc": "2026-08-01T00:00:00Z",
-                "scanError": null
-              }
-            },
-            {
-              "key": "ollama",
-              "name": null,
-              "baseUrl": "http://localhost:11434/v1",
-              "authHeaderName": "Authorization",
-              "authHeaderScheme": "Bearer",
-              "hasApiKey": false,
-              "apiKeyEnvVar": null,
-              "providerType": "LocalRuntime",
-              "models": [],
-              "headers": [],
-              "isFree": true,
-              "dollarCap": null,
-              "tokenCap": null,
-              "dollarSpent": 0.0,
-              "tokensUsed": 0,
-              "enabled": false,
-              "endpointCapabilities": null
-            },
-            {
-              "key": "openai",
-              "name": "OpenAI",
-              "baseUrl": "https://api.openai.com/v1",
-              "authHeaderName": "Authorization",
-              "authHeaderScheme": "Bearer",
-              "hasApiKey": false,
-              "apiKeyEnvVar": "OPENAI_API_KEY",
-              "providerType": "OpenAI",
-              "models": [],
-              "headers": [],
-              "isFree": false,
-              "dollarCap": null,
-              "tokenCap": null,
-              "dollarSpent": 3.25,
-              "tokensUsed": 900,
-              "enabled": true,
-              "endpointCapabilities": {
-                "providerKey": "openai",
-                "openAiCompatible": false,
-                "lmStudioNative": false,
-                "ollamaNative": false,
-                "anthropicCompatible": false,
-                "scannedAtUtc": "2026-08-01T00:00:00Z",
-                "scanError": "timed out"
-              }
-            }
-          ]
-        }
-        """;
+                                         {
+                                           "providers": [
+                                             {
+                                               "key": "anthropic",
+                                               "name": "Anthropic Prod",
+                                               "baseUrl": "https://api.anthropic.com",
+                                               "authHeaderName": "x-api-key",
+                                               "authHeaderScheme": "",
+                                               "hasApiKey": true,
+                                               "apiKeyEnvVar": null,
+                                               "providerType": "Anthropic",
+                                               "models": [
+                                                 { "modelName": "claude-opus", "providerModelId": "claude-opus-5", "dialect": "openai-native", "confidence": "Observed", "enabled": true, "presentUpstream": true },
+                                                 { "modelName": "claude-haiku", "providerModelId": "claude-haiku-4-5", "dialect": null, "confidence": null, "enabled": false, "presentUpstream": false }
+                                               ],
+                                               "headers": [ { "name": "anthropic-version", "source": "literal", "valueEnvVar": null } ],
+                                               "isFree": false,
+                                               "dollarCap": 100.0,
+                                               "tokenCap": 1000000,
+                                               "dollarSpent": 42.5,
+                                               "tokensUsed": 250000,
+                                               "enabled": true,
+                                               "endpointCapabilities": {
+                                                 "providerKey": "anthropic",
+                                                 "openAiCompatible": false,
+                                                 "lmStudioNative": false,
+                                                 "ollamaNative": false,
+                                                 "anthropicCompatible": true,
+                                                 "scannedAtUtc": "2026-08-01T00:00:00Z",
+                                                 "scanError": null
+                                               }
+                                             },
+                                             {
+                                               "key": "ollama",
+                                               "name": null,
+                                               "baseUrl": "http://localhost:11434/v1",
+                                               "authHeaderName": "Authorization",
+                                               "authHeaderScheme": "Bearer",
+                                               "hasApiKey": false,
+                                               "apiKeyEnvVar": null,
+                                               "providerType": "LocalRuntime",
+                                               "models": [],
+                                               "headers": [],
+                                               "isFree": true,
+                                               "dollarCap": null,
+                                               "tokenCap": null,
+                                               "dollarSpent": 0.0,
+                                               "tokensUsed": 0,
+                                               "enabled": false,
+                                               "endpointCapabilities": null
+                                             },
+                                             {
+                                               "key": "openai",
+                                               "name": "OpenAI",
+                                               "baseUrl": "https://api.openai.com/v1",
+                                               "authHeaderName": "Authorization",
+                                               "authHeaderScheme": "Bearer",
+                                               "hasApiKey": false,
+                                               "apiKeyEnvVar": "OPENAI_API_KEY",
+                                               "providerType": "OpenAI",
+                                               "models": [],
+                                               "headers": [],
+                                               "isFree": false,
+                                               "dollarCap": null,
+                                               "tokenCap": null,
+                                               "dollarSpent": 3.25,
+                                               "tokensUsed": 900,
+                                               "enabled": true,
+                                               "endpointCapabilities": {
+                                                 "providerKey": "openai",
+                                                 "openAiCompatible": false,
+                                                 "lmStudioNative": false,
+                                                 "ollamaNative": false,
+                                                 "anthropicCompatible": false,
+                                                 "scannedAtUtc": "2026-08-01T00:00:00Z",
+                                                 "scanError": "timed out"
+                                               }
+                                             }
+                                           ]
+                                         }
+                                         """;
+
+    // Same anthropic provider as ProvidersJson, but with reportedUsage rows and a stored admin key -
+    // exercises the populated-data branches of the reported-usage section (§8.2), which must render from
+    // these backend-supplied values, never the GUI clock.
+    private const string ProvidersJsonWithReportedUsage = """
+                                                          {
+                                                            "providers": [
+                                                              {
+                                                                "key": "anthropic",
+                                                                "name": "Anthropic Prod",
+                                                                "baseUrl": "https://api.anthropic.com",
+                                                                "authHeaderName": "x-api-key",
+                                                                "authHeaderScheme": "",
+                                                                "hasApiKey": true,
+                                                                "apiKeyEnvVar": null,
+                                                                "providerType": "Anthropic",
+                                                                "models": [],
+                                                                "headers": [],
+                                                                "isFree": false,
+                                                                "dollarCap": null,
+                                                                "tokenCap": null,
+                                                                "dollarSpent": 0.0,
+                                                                "tokensUsed": 0,
+                                                                "enabled": true,
+                                                                "endpointCapabilities": null,
+                                                                "hasStoredAdminKey": true,
+                                                                "reportedUsage": {
+                                                                  "rows": [
+                                                                    { "usageDay": "2026-03-01", "model": "claude-opus-4-1", "inputTokens": 100, "outputTokens": 50, "cacheCreationTokens": 5, "cacheReadTokens": 10 }
+                                                                  ],
+                                                                  "fetchedAtUtc": "2026-03-02T04:00:00Z"
+                                                                }
+                                                              }
+                                                            ]
+                                                          }
+                                                          """;
+
+    // Same fixture as ProvidersJsonWithUsageAndRateLimit but IsStale is set and no projections - exercises
+    // the "As of ... stale" branch distinctly from the fresh-and-projected one.
+    private const string ProvidersJsonWithStaleRateLimit = """
+                                                           {
+                                                             "providers": [
+                                                               {
+                                                                 "key": "anthropic",
+                                                                 "name": "Anthropic Prod",
+                                                                 "baseUrl": "https://api.anthropic.com",
+                                                                 "authHeaderName": "x-api-key",
+                                                                 "authHeaderScheme": "",
+                                                                 "hasApiKey": true,
+                                                                 "apiKeyEnvVar": null,
+                                                                 "providerType": "Anthropic",
+                                                                 "models": [],
+                                                                 "headers": [],
+                                                                 "isFree": false,
+                                                                 "dollarCap": null,
+                                                                 "tokenCap": null,
+                                                                 "dollarSpent": 12.5,
+                                                                 "tokensUsed": 158000,
+                                                                 "enabled": true,
+                                                                 "endpointCapabilities": null,
+                                                                 "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
+                                                                 "rateLimit": {
+                                                                   "snapshot": {
+                                                                     "standardDimensions": {
+                                                                       "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
+                                                                     },
+                                                                     "unifiedStatus": null,
+                                                                     "unifiedResetAt": null,
+                                                                     "unifiedWindows": {},
+                                                                     "representativeClaim": null,
+                                                                     "rawHeaders": {}
+                                                                   },
+                                                                   "observedAtUtc": "2026-03-01T12:00:00Z",
+                                                                   "isStale": true
+                                                                 }
+                                                               }
+                                                             ]
+                                                           }
+                                                           """;
+
+    // Same three providers as ProvidersJson, but the anthropic entry carries a populated
+    // usageLastRecordedAtUtc and rateLimit - exercises the card's populated-data branches, which the
+    // GUI must render from these backend-supplied values, never the GUI clock.
+    private const string ProvidersJsonWithUsageAndRateLimit = """
+                                                              {
+                                                                "providers": [
+                                                                  {
+                                                                    "key": "anthropic",
+                                                                    "name": "Anthropic Prod",
+                                                                    "baseUrl": "https://api.anthropic.com",
+                                                                    "authHeaderName": "x-api-key",
+                                                                    "authHeaderScheme": "",
+                                                                    "hasApiKey": true,
+                                                                    "apiKeyEnvVar": null,
+                                                                    "providerType": "Anthropic",
+                                                                    "models": [],
+                                                                    "headers": [],
+                                                                    "isFree": false,
+                                                                    "dollarCap": null,
+                                                                    "tokenCap": null,
+                                                                    "dollarSpent": 12.5,
+                                                                    "tokensUsed": 158000,
+                                                                    "enabled": true,
+                                                                    "endpointCapabilities": null,
+                                                                    "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
+                                                                    "rateLimit": {
+                                                                      "snapshot": {
+                                                                        "standardDimensions": {
+                                                                          "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
+                                                                        },
+                                                                        "unifiedStatus": "allowed",
+                                                                        "unifiedResetAt": null,
+                                                                        "unifiedWindows": {
+                                                                          "5h": { "status": "allowed", "remaining": null, "resetAt": "2026-03-01T13:00:00Z" }
+                                                                        },
+                                                                        "representativeClaim": null,
+                                                                        "rawHeaders": {}
+                                                                      },
+                                                                      "observedAtUtc": "2026-03-01T12:00:00Z",
+                                                                      "projections": {
+                                                                        "tokens": { "timeToExhaustion": "00:19:00", "burnRatePerMinute": 2210.5 }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                ]
+                                                              }
+                                                              """;
+
+    // Same anthropic/ollama/openai providers as ProvidersJson, but openai's adminAction carries a
+    // failed "Refresh from endpoint" - the expired-API-key scenario that motivated the warning icon/toast.
+    private const string ProvidersJsonWithFailedInteraction = """
+                                                              {
+                                                                "providers": [
+                                                                  {
+                                                                    "key": "anthropic",
+                                                                    "name": "Anthropic Prod",
+                                                                    "baseUrl": "https://api.anthropic.com",
+                                                                    "authHeaderName": "x-api-key",
+                                                                    "authHeaderScheme": "",
+                                                                    "hasApiKey": true,
+                                                                    "apiKeyEnvVar": null,
+                                                                    "providerType": "Anthropic",
+                                                                    "models": [],
+                                                                    "headers": [],
+                                                                    "isFree": false,
+                                                                    "enabled": true
+                                                                  },
+                                                                  {
+                                                                    "key": "openai",
+                                                                    "name": "OpenAI",
+                                                                    "baseUrl": "https://api.openai.com/v1",
+                                                                    "authHeaderName": "Authorization",
+                                                                    "authHeaderScheme": "Bearer",
+                                                                    "hasApiKey": false,
+                                                                    "apiKeyEnvVar": "OPENAI_API_KEY",
+                                                                    "providerType": "OpenAI",
+                                                                    "models": [],
+                                                                    "headers": [],
+                                                                    "isFree": false,
+                                                                    "enabled": true,
+                                                                    "adminAction": {
+                                                                      "ok": false,
+                                                                      "operation": "Refresh from endpoint",
+                                                                      "message": "Provider returned 401 for https://api.openai.com/v1/models.",
+                                                                      "atUtc": "2026-08-24T09:00:00Z"
+                                                                    }
+                                                                  }
+                                                                ]
+                                                              }
+                                                              """;
 
     private static BunitContext NewContext(StubTransport transport)
     {
@@ -126,11 +297,15 @@ public sealed class ProvidersAdminLoadedTests
     private static IRenderedComponent<ProvidersAdmin> RenderLoaded(BunitContext ctx)
     {
         var cut = ctx.Render<ProvidersAdmin>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Configured Providers"), TimeSpan.FromSeconds(4));
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Configured Providers"),
+            timeout: TimeSpan.FromSeconds(4));
         return cut;
     }
 
-    /// <summary>Same as <see cref="NewContext"/>, but also registers a <see cref="ToastService"/> so a mutation's toast can be asserted on.</summary>
+    /// <summary>
+    /// Same as <see cref="NewContext"/>, but also registers a <see cref="ToastService"/> so a mutation's toast can be
+    /// asserted on.
+    /// </summary>
     private static (BunitContext Context, ToastService Toasts) NewContextWithToasts(StubTransport transport)
     {
         var toasts = new ToastService();
@@ -151,8 +326,10 @@ public sealed class ProvidersAdminLoadedTests
     /// <c>First(b =&gt; b.TextContent == "Save")</c> silently clicks the budget panel instead, which passes
     /// some assertions for entirely the wrong reason.
     /// </summary>
-    private static AngleSharp.Dom.IElement FindDialogButton(IRenderedComponent<ProvidersAdmin> cut, string label) =>
-        cut.FindAll(".overlay-panel button").First(b => b.TextContent.Trim() == label);
+    private static IElement FindDialogButton(IRenderedComponent<ProvidersAdmin> cut, string label)
+    {
+        return cut.FindAll(".overlay-panel button").First(b => b.TextContent.Trim() == label);
+    }
 
     [Fact]
     public void Renders_a_card_per_provider_with_its_display_name_and_endpoint()
@@ -224,7 +401,7 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
             r.Method == "PUT" && r.Path.EndsWith("admin/providers/anthropic/enabled", StringComparison.Ordinal)));
-        transport.LastBody.Should().Contain("false", Exactly.Once());
+        transport.LastBody.Should().Contain(expected: "false", occurrenceConstraint: Exactly.Once());
     }
 
     [Fact]
@@ -260,7 +437,8 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.Find("select[aria-label='Tool-call dialect for claude-opus']").Change("hermes");
 
-        cut.WaitForAssertion(() => transport.LastBody.Should().Contain("hermes", Exactly.Once()));
+        cut.WaitForAssertion(() =>
+            transport.LastBody.Should().Contain(expected: "hermes", occurrenceConstraint: Exactly.Once()));
         transport.Requests.Should().Contain(r =>
             r.Path.EndsWith("admin/providers/anthropic/models/claude-opus/tool-dialect", StringComparison.Ordinal));
     }
@@ -359,7 +537,7 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
             r.Path.EndsWith("admin/providers/anthropic/models/claude-sonnet", StringComparison.Ordinal)));
-        transport.LastBody.Should().Contain("claude-sonnet-5", Exactly.Once());
+        transport.LastBody.Should().Contain(expected: "claude-sonnet-5", occurrenceConstraint: Exactly.Once());
     }
 
     [Fact]
@@ -386,7 +564,8 @@ public sealed class ProvidersAdminLoadedTests
         cut.Find("button[title='Remove model']").Click();
 
         cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Method == "DELETE" && r.Path.EndsWith("admin/providers/anthropic/models/claude-opus", StringComparison.Ordinal)));
+            r.Method == "DELETE" &&
+            r.Path.EndsWith("admin/providers/anthropic/models/claude-opus", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -412,7 +591,7 @@ public sealed class ProvidersAdminLoadedTests
         var cut = RenderLoaded(ctx);
         cut.Find("button[aria-label='Remove provider anthropic']").Click();
 
-        FindDialogButton(cut, "Cancel").Click();
+        FindDialogButton(cut: cut, label: "Cancel").Click();
 
         cut.FindAll(".overlay-panel").Should().BeEmpty();
         transport.Requests.Should().OnlyContain(r => r.Method == "GET");
@@ -425,7 +604,9 @@ public sealed class ProvidersAdminLoadedTests
         using var ctx = NewContext(transport);
         var cut = RenderLoaded(ctx);
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Add Provider", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Add Provider", comparisonType: StringComparison.Ordinal))
+            .Click();
 
         cut.Find(".overlay-panel span").TextContent.Trim().Should().Be("Add Provider");
         cut.Find("[data-testid='provider-name']").GetAttribute("value").Should().BeNullOrEmpty();
@@ -454,11 +635,12 @@ public sealed class ProvidersAdminLoadedTests
         var cut = RenderLoaded(ctx);
         cut.FindAll("button[title='Config']")[0].Click();
 
-        FindDialogButton(cut, "Save").Click();
+        FindDialogButton(cut: cut, label: "Save").Click();
 
         cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
             r.Method == "PUT" && r.Path.EndsWith("admin/providers/anthropic", StringComparison.Ordinal)));
-        transport.LastBody.Should().Contain("\"providerType\":\"Anthropic\"", Exactly.Once());
+        transport.LastBody.Should()
+            .Contain(expected: "\"providerType\":\"Anthropic\"", occurrenceConstraint: Exactly.Once());
     }
 
     [Fact]
@@ -469,7 +651,7 @@ public sealed class ProvidersAdminLoadedTests
         var cut = RenderLoaded(ctx);
         cut.FindAll("button[title='Config']")[0].Click();
 
-        FindDialogButton(cut, "Cancel").Click();
+        FindDialogButton(cut: cut, label: "Cancel").Click();
 
         cut.FindAll(".overlay-panel").Should().BeEmpty();
         transport.Requests.Should().OnlyContain(r => r.Method == "GET");
@@ -484,7 +666,7 @@ public sealed class ProvidersAdminLoadedTests
         cut.FindAll("button[title='Config']")[0].Click();
         transport.NextFailure = "BaseUrl must be an absolute URI.";
 
-        FindDialogButton(cut, "Save").Click();
+        FindDialogButton(cut: cut, label: "Save").Click();
 
         // The dialog stays open carrying the reason, rather than closing over a write that didn't happen.
         cut.WaitForAssertion(() => cut.Find("[data-testid='dialog-error']").TextContent
@@ -522,7 +704,7 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
             r.Path.EndsWith("admin/providers/anthropic/budget", StringComparison.Ordinal)));
-        transport.LastBody.Should().Contain("250", Exactly.Once());
+        transport.LastBody.Should().Contain(expected: "250", occurrenceConstraint: Exactly.Once());
     }
 
     [Fact]
@@ -569,7 +751,7 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.Markup.Should().Contain("Reported Usage (Anthropic)");
         cut.Markup.Should().Contain("No reported usage fetched yet");
-        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "Reported Usage \\(Anthropic\\)").Count.Should().Be(1);
+        Regex.Matches(input: cut.Markup, pattern: "Reported Usage \\(Anthropic\\)").Count.Should().Be(1);
     }
 
     [Fact]
@@ -582,7 +764,8 @@ public sealed class ProvidersAdminLoadedTests
 
         // anthropic and openai are both recognized (docs/router/agent-cost-tracking.md §3.5); the fixture's
         // "ollama" provider is neither, so its card must not offer the field at all.
-        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "Admin API Key \\(cost reconciliation, optional\\)").Count.Should().Be(2);
+        Regex.Matches(input: cut.Markup, pattern: "Admin API Key \\(cost reconciliation, optional\\)").Count.Should()
+            .Be(2);
     }
 
     [Fact]
@@ -597,42 +780,6 @@ public sealed class ProvidersAdminLoadedTests
         cut.Markup.Should().NotContain("No reported usage fetched yet");
         cut.Markup.Should().Contain("•••••••• stored");
     }
-
-    // Same anthropic provider as ProvidersJson, but with reportedUsage rows and a stored admin key -
-    // exercises the populated-data branches of the reported-usage section (§8.2), which must render from
-    // these backend-supplied values, never the GUI clock.
-    private const string ProvidersJsonWithReportedUsage = """
-        {
-          "providers": [
-            {
-              "key": "anthropic",
-              "name": "Anthropic Prod",
-              "baseUrl": "https://api.anthropic.com",
-              "authHeaderName": "x-api-key",
-              "authHeaderScheme": "",
-              "hasApiKey": true,
-              "apiKeyEnvVar": null,
-              "providerType": "Anthropic",
-              "models": [],
-              "headers": [],
-              "isFree": false,
-              "dollarCap": null,
-              "tokenCap": null,
-              "dollarSpent": 0.0,
-              "tokensUsed": 0,
-              "enabled": true,
-              "endpointCapabilities": null,
-              "hasStoredAdminKey": true,
-              "reportedUsage": {
-                "rows": [
-                  { "usageDay": "2026-03-01", "model": "claude-opus-4-1", "inputTokens": 100, "outputTokens": 50, "cacheCreationTokens": 5, "cacheReadTokens": 10 }
-                ],
-                "fetchedAtUtc": "2026-03-02T04:00:00Z"
-              }
-            }
-          ]
-        }
-        """;
 
     [Fact]
     public void Anthropic_Usage_card_shows_empty_states_when_nothing_recorded_yet()
@@ -685,140 +832,6 @@ public sealed class ProvidersAdminLoadedTests
         cut.Markup.Should().Contain("at current rate");
     }
 
-    // Same fixture as ProvidersJsonWithUsageAndRateLimit but IsStale is set and no projections - exercises
-    // the "As of ... stale" branch distinctly from the fresh-and-projected one.
-    private const string ProvidersJsonWithStaleRateLimit = """
-        {
-          "providers": [
-            {
-              "key": "anthropic",
-              "name": "Anthropic Prod",
-              "baseUrl": "https://api.anthropic.com",
-              "authHeaderName": "x-api-key",
-              "authHeaderScheme": "",
-              "hasApiKey": true,
-              "apiKeyEnvVar": null,
-              "providerType": "Anthropic",
-              "models": [],
-              "headers": [],
-              "isFree": false,
-              "dollarCap": null,
-              "tokenCap": null,
-              "dollarSpent": 12.5,
-              "tokensUsed": 158000,
-              "enabled": true,
-              "endpointCapabilities": null,
-              "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
-              "rateLimit": {
-                "snapshot": {
-                  "standardDimensions": {
-                    "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
-                  },
-                  "unifiedStatus": null,
-                  "unifiedResetAt": null,
-                  "unifiedWindows": {},
-                  "representativeClaim": null,
-                  "rawHeaders": {}
-                },
-                "observedAtUtc": "2026-03-01T12:00:00Z",
-                "isStale": true
-              }
-            }
-          ]
-        }
-        """;
-
-    // Same three providers as ProvidersJson, but the anthropic entry carries a populated
-    // usageLastRecordedAtUtc and rateLimit - exercises the card's populated-data branches, which the
-    // GUI must render from these backend-supplied values, never the GUI clock.
-    private const string ProvidersJsonWithUsageAndRateLimit = """
-        {
-          "providers": [
-            {
-              "key": "anthropic",
-              "name": "Anthropic Prod",
-              "baseUrl": "https://api.anthropic.com",
-              "authHeaderName": "x-api-key",
-              "authHeaderScheme": "",
-              "hasApiKey": true,
-              "apiKeyEnvVar": null,
-              "providerType": "Anthropic",
-              "models": [],
-              "headers": [],
-              "isFree": false,
-              "dollarCap": null,
-              "tokenCap": null,
-              "dollarSpent": 12.5,
-              "tokensUsed": 158000,
-              "enabled": true,
-              "endpointCapabilities": null,
-              "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
-              "rateLimit": {
-                "snapshot": {
-                  "standardDimensions": {
-                    "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
-                  },
-                  "unifiedStatus": "allowed",
-                  "unifiedResetAt": null,
-                  "unifiedWindows": {
-                    "5h": { "status": "allowed", "remaining": null, "resetAt": "2026-03-01T13:00:00Z" }
-                  },
-                  "representativeClaim": null,
-                  "rawHeaders": {}
-                },
-                "observedAtUtc": "2026-03-01T12:00:00Z",
-                "projections": {
-                  "tokens": { "timeToExhaustion": "00:19:00", "burnRatePerMinute": 2210.5 }
-                }
-              }
-            }
-          ]
-        }
-        """;
-
-    // Same anthropic/ollama/openai providers as ProvidersJson, but openai's adminAction carries a
-    // failed "Refresh from endpoint" - the expired-API-key scenario that motivated the warning icon/toast.
-    private const string ProvidersJsonWithFailedInteraction = """
-        {
-          "providers": [
-            {
-              "key": "anthropic",
-              "name": "Anthropic Prod",
-              "baseUrl": "https://api.anthropic.com",
-              "authHeaderName": "x-api-key",
-              "authHeaderScheme": "",
-              "hasApiKey": true,
-              "apiKeyEnvVar": null,
-              "providerType": "Anthropic",
-              "models": [],
-              "headers": [],
-              "isFree": false,
-              "enabled": true
-            },
-            {
-              "key": "openai",
-              "name": "OpenAI",
-              "baseUrl": "https://api.openai.com/v1",
-              "authHeaderName": "Authorization",
-              "authHeaderScheme": "Bearer",
-              "hasApiKey": false,
-              "apiKeyEnvVar": "OPENAI_API_KEY",
-              "providerType": "OpenAI",
-              "models": [],
-              "headers": [],
-              "isFree": false,
-              "enabled": true,
-              "adminAction": {
-                "ok": false,
-                "operation": "Refresh from endpoint",
-                "message": "Provider returned 401 for https://api.openai.com/v1/models.",
-                "atUtc": "2026-08-24T09:00:00Z"
-              }
-            }
-          ]
-        }
-        """;
-
     /// <summary>A record of one request the component caused, for asserting what reached the wire.</summary>
     private sealed record RecordedRequest(string Method, string Path);
 
@@ -841,27 +854,26 @@ public sealed class ProvidersAdminLoadedTests
         /// <summary>When set, every GET answers with this JSON instead of the default <see cref="ProvidersJson"/> fixture.</summary>
         public string? ResponseOverride { get; set; }
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
-            _requests.Add(new RecordedRequest(request.Method.Method, request.RequestUri!.AbsolutePath));
+            _requests.Add(new RecordedRequest(Method: request.Method.Method, Path: request.RequestUri!.AbsolutePath));
 
-            if (request.Content is not null)
-            {
-                LastBody = await request.Content.ReadAsStringAsync(cancellationToken);
-            }
+            if (request.Content is not null) LastBody = await request.Content.ReadAsStringAsync(cancellationToken);
 
             if (NextFailure is { } failure && request.Method != HttpMethod.Get)
             {
                 NextFailure = null;
                 return new HttpResponseMessage(HttpStatusCode.BadRequest)
                 {
-                    Content = new StringContent(failure, Encoding.UTF8, "text/plain"),
+                    Content = new StringContent(content: failure, encoding: Encoding.UTF8, mediaType: "text/plain")
                 };
             }
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(ResponseOverride ?? ProvidersJson, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: ResponseOverride ?? ProvidersJson, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         }
     }

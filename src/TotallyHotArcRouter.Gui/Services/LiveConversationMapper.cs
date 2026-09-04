@@ -1,3 +1,4 @@
+using System.Globalization;
 using TotallyHot.ArcRouter.Gui.Charts;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Telemetry;
@@ -15,12 +16,18 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// Several <see cref="ConversationTurn"/> fields have no live-data source given the proxy's current
 /// telemetry scope and are set to explicit, honest defaults here rather than fabricated:
 /// <list type="bullet">
-/// <item><see cref="ConversationTurn.RoutingRoi"/> - no "worst case" baseline cost is computed for live
-/// requests (defaults to 0).</item>
-/// <item><see cref="ConversationTurn.ToolExecutionSteps"/> - the proxy does not introspect tool calls
-/// within a turn (defaults to 0).</item>
-/// <item><see cref="ConversationTurn.ContextBufferPercent"/> - no per-model context-window-size
-/// configuration exists (defaults to 0).</item>
+/// <item>
+/// <see cref="ConversationTurn.RoutingRoi"/> - no "worst case" baseline cost is computed for live
+/// requests (defaults to 0).
+/// </item>
+/// <item>
+/// <see cref="ConversationTurn.ToolExecutionSteps"/> - the proxy does not introspect tool calls
+/// within a turn (defaults to 0).
+/// </item>
+/// <item>
+/// <see cref="ConversationTurn.ContextBufferPercent"/> - no per-model context-window-size
+/// configuration exists (defaults to 0).
+/// </item>
 /// </list>
 /// <see cref="ConversationTurn.RequestSummary"/> / <see cref="ConversationTurn.ResponseSummary"/> ARE
 /// real: they pass straight through from <see cref="LiveConversationTurn"/> (the proxy's newest-user-message
@@ -39,7 +46,21 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// </remarks>
 public static class LiveConversationMapper
 {
-    /// <summary>Maps one <see cref="LiveConversation"/> (and its turns) onto the dashboard's <see cref="Conversation"/> view model.</summary>
+    /// <summary>
+    /// Substitution reasons that describe the client's own choice rather than an override, and so must
+    /// not surface a warning step (docs/router/orchestrator-live-path-plan.md §M3.1): a request naming
+    /// no concrete model was never denied anything.
+    /// </summary>
+    private static readonly HashSet<string> SilentSubstitutionReasons = new(StringComparer.Ordinal)
+    {
+        "None",
+        "AutoSelect"
+    };
+
+    /// <summary>
+    /// Maps one <see cref="LiveConversation"/> (and its turns) onto the dashboard's <see cref="Conversation"/> view
+    /// model.
+    /// </summary>
     public static Conversation ToModel(LiveConversation conversation)
     {
         ArgumentNullException.ThrowIfNull(conversation);
@@ -53,7 +74,7 @@ public static class LiveConversationMapper
             TotalPromptTokens: conversation.TotalPromptTokens,
             TotalCompletionTokens: conversation.TotalCompletionTokens,
             HasFallbackTurns: conversation.HasFallbackTurns,
-            Turns: conversation.Turns.Select(ToModel).ToList(),
+            Turns: [.. conversation.Turns.Select(ToModel)],
             UnpricedTurns: conversation.UnpricedTurns);
     }
 
@@ -67,12 +88,13 @@ public static class LiveConversationMapper
             TurnNumber: turn.TurnNumber,
             PromptTokens: turn.PromptTokens,
             CompletionTokens: turn.CompletionTokens,
-            RoutingRoi: 0m,
+            0m,
             TotalCost: turn.EstimatedCostUsd,
-            ToolExecutionSteps: 0,
-            CacheHitRate: CostChartBuilder.CacheHitRate(turn.PromptTokens, turn.CacheCreationTokens, turn.CacheReadTokens),
-            TimeToFirstTokenMs: (int)Math.Clamp(turn.LatencyToHeadersMs, 0, int.MaxValue),
-            ContextBufferPercent: 0m,
+            0,
+            CacheHitRate: CostChartBuilder.CacheHitRate(promptTokens: turn.PromptTokens,
+                cacheCreationTokens: turn.CacheCreationTokens, cacheReadTokens: turn.CacheReadTokens),
+            TimeToFirstTokenMs: (int)Math.Clamp(value: turn.LatencyToHeadersMs, 0, max: int.MaxValue),
+            0m,
             Timestamp: FormatTimestamp(turn.TimestampUtc),
             RoutingSteps: BuildRoutingSteps(turn),
             RequestSummary: turn.RequestSummary,
@@ -86,49 +108,43 @@ public static class LiveConversationMapper
     }
 
     /// <summary>
-    /// Substitution reasons that describe the client's own choice rather than an override, and so must
-    /// not surface a warning step (docs/router/orchestrator-live-path-plan.md §M3.1): a request naming
-    /// no concrete model was never denied anything.
+    /// Builds the display routing steps for a turn, flagging fallback routing, a visible substitution, and naming the
+    /// confirmed model.
     /// </summary>
-    private static readonly HashSet<string> SilentSubstitutionReasons = new(StringComparer.Ordinal)
-    {
-        "None",
-        "AutoSelect",
-    };
-
-    /// <summary>Builds the display routing steps for a turn, flagging fallback routing, a visible substitution, and naming the confirmed model.</summary>
     private static IReadOnlyList<RoutingStep> BuildRoutingSteps(LiveConversationTurn turn)
     {
         List<RoutingStep> steps = [];
         if (turn.IsFallback)
-        {
-            steps.Add(new RoutingStep(StepStatus.Warn, "Fallback routing was used for this turn."));
-        }
+            steps.Add(new RoutingStep(Status: StepStatus.Warn, Message: "Fallback routing was used for this turn."));
 
         if (turn.SubstitutionReason is { } reason && !SilentSubstitutionReasons.Contains(reason)
-            && turn.RequestedModel is not null && turn.RoutedModel is not null)
-        {
+                                                  && turn.RequestedModel is not null && turn.RoutedModel is not null)
             steps.Add(new RoutingStep(
-                StepStatus.Warn,
-                $"Requested {turn.RequestedModel} → routed to {turn.RoutedModel} ({reason})."));
-        }
+                Status: StepStatus.Warn,
+                Message: $"Requested {turn.RequestedModel} → routed to {turn.RoutedModel} ({reason})."));
 
-        steps.Add(new RoutingStep(StepStatus.Info, $"Route Confirmed: {turn.Model}"));
+        steps.Add(new RoutingStep(Status: StepStatus.Info, Message: $"Route Confirmed: {turn.Model}"));
         return steps;
     }
 
     /// <summary>Builds the conversation card's display title, marking untracked (synthesized) sessions distinctly.</summary>
-    private static string BuildTitle(LiveConversation conversation) =>
-        conversation.IsSessionSynthesized
+    private static string BuildTitle(LiveConversation conversation)
+    {
+        return conversation.IsSessionSynthesized
             ? $"Untracked session ({ShortId(conversation.SessionId)})"
             : $"Session {ShortId(conversation.SessionId)}";
+    }
 
     /// <summary>Truncates a session id to its first 8 characters for compact display, leaving shorter ids untouched.</summary>
-    private static string ShortId(string sessionId) =>
-        sessionId.Length <= 8 ? sessionId : sessionId[..8];
+    private static string ShortId(string sessionId)
+    {
+        return sessionId.Length <= 8 ? sessionId : sessionId[..8];
+    }
 
     /// <summary>Formats a UTC timestamp as a local-time "HH:mm:ss" string for display.</summary>
-    private static string FormatTimestamp(DateTimeOffset timestamp) =>
-        timestamp.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+    private static string FormatTimestamp(DateTimeOffset timestamp)
+    {
+        return timestamp.ToLocalTime().ToString(format: "HH:mm:ss",
+            formatProvider: CultureInfo.InvariantCulture);
+    }
 }
-

@@ -28,6 +28,9 @@ public sealed class PriceCatalogOptions
     /// </summary>
     public const string OpenRouterSourceName = "openrouter";
 
+    private const int MinPollIntervalHours = 4;
+    private const int MaxPollIntervalHours = 12;
+
     /// <summary>
     /// The sources that have a client and can therefore actually be polled. This is what
     /// <see cref="PriceCatalogDatabase.EnsureCreated"/> seeds into <c>aggregator_sources</c> and what
@@ -49,12 +52,9 @@ public sealed class PriceCatalogOptions
     /// </remarks>
     public static readonly IReadOnlyList<KnownPriceSource> KnownSources =
     [
-        new(LiteLlmSourceName, DefaultPriorityScore: 0, DefaultEnabled: true),
-        new(OpenRouterSourceName, DefaultPriorityScore: -10, DefaultEnabled: true),
+        new(Name: LiteLlmSourceName, 0, true),
+        new(Name: OpenRouterSourceName, -10, true)
     ];
-
-    private const int MinPollIntervalHours = 4;
-    private const int MaxPollIntervalHours = 12;
 
     /// <summary>
     /// Gets how often the background ingestion service refreshes prices. Must land in the documented
@@ -82,10 +82,8 @@ public sealed class PriceCatalogOptions
         var errors = new List<string>();
 
         if (PollIntervalHours is < MinPollIntervalHours or > MaxPollIntervalHours)
-        {
             errors.Add(
                 $"PollIntervalHours must be between {MinPollIntervalHours} and {MaxPollIntervalHours} (was {PollIntervalHours}).");
-        }
 
         foreach (var (name, source) in Sources)
         {
@@ -94,46 +92,51 @@ public sealed class PriceCatalogOptions
             // model-price-catalog.md) is a hard error, not a silent no-op: an operator who configures a
             // source and gets no polling has been misled.
             if (!IsKnownSourceName(name))
-            {
                 errors.Add(
                     $"Unknown price source '{name}'. Recognized sources are: " +
-                    $"{string.Join(", ", KnownSources.Select(s => $"'{s.Name}'"))}.");
-            }
+                    $"{string.Join(separator: ", ", values: KnownSources.Select(s => $"'{s.Name}'"))}.");
 
-            if (source is null)
-            {
-                errors.Add($"Price source '{name}' has no configuration object.");
-            }
+            if (source is null) errors.Add($"Price source '{name}' has no configuration object.");
         }
 
         if (errors.Count > 0)
-        {
-            throw new OptionsValidationException(nameof(PriceCatalogOptions), typeof(PriceCatalogOptions), errors);
-        }
+            throw new OptionsValidationException(optionsName: nameof(PriceCatalogOptions),
+                optionsType: typeof(PriceCatalogOptions), failureMessages: errors);
     }
 
     /// <summary>
     /// Gets the configured endpoint override for <paramref name="sourceName"/>, or <see langword="null"/>
     /// when the source should use its client's built-in canonical URL.
     /// </summary>
-    public string? GetSourceUrl(string sourceName) =>
-        Sources.TryGetValue(sourceName, out var source) && !string.IsNullOrWhiteSpace(source?.Url)
+    public string? GetSourceUrl(string sourceName)
+    {
+        // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - Sources is bound from
+        // configuration, where a key present with no body deserializes to a null value.
+        return Sources.TryGetValue(key: sourceName, value: out var source) && !string.IsNullOrWhiteSpace(source?.Url)
             ? source.Url
             : null;
+    }
 
     /// <summary>
     /// Determines whether <paramref name="name"/> matches one of the known aggregator source names
     /// (case-insensitive).
     /// </summary>
-    private static bool IsKnownSourceName(string name) =>
-        KnownSources.Any(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+    private static bool IsKnownSourceName(string name)
+    {
+        return KnownSources.Any(s =>
+            string.Equals(a: s.Name, b: name, comparisonType: StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 /// <summary>
 /// A source that has a client and can therefore be polled. Its defaults apply only when the source is first
 /// seeded into <c>aggregator_sources</c>; from then on the database owns both values and these are ignored.
 /// </summary>
-/// <param name="Name">The registry name, matching <see cref="TotallyHot.ArcRouter.PriceCatalog.Sources.IPriceSourceClient.Name"/>.</param>
+/// <param name="Name">
+/// The registry name, matching
+/// <see cref="TotallyHot.ArcRouter.PriceCatalog.Sources.IPriceSourceClient.Name"/>.
+/// </param>
 /// <param name="DefaultPriorityScore">
 /// The rank assigned on first seed. Ranking now arbitrates contested cells (see
 /// <c>PriceRepository.UpsertPrices</c>'s priority gate); this default only ever applies once, when a
@@ -155,4 +158,3 @@ public sealed class PriceSourceOptions
     /// </summary>
     public string? Url { get; init; }
 }
-

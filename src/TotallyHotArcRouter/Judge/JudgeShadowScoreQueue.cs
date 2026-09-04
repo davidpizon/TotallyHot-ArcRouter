@@ -1,5 +1,5 @@
-using System.Threading.Channels;
 using Microsoft.Extensions.Options;
+using System.Threading.Channels;
 
 namespace TotallyHot.ArcRouter.Judge;
 
@@ -21,7 +21,7 @@ public sealed class JudgeShadowScoreQueue : IJudgeShadowScoreQueue
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var capacity = Math.Max(1, options.Value.QueueCapacity);
+        var capacity = Math.Max(1, val2: options.Value.QueueCapacity);
         // BoundedChannelFullMode.Wait makes TryWrite return false (without blocking) when the channel is
         // full, which is what drop-on-full accounting needs - the Drop* modes would instead return true
         // while silently discarding an item, hiding the drop from DroppedCount.
@@ -29,28 +29,27 @@ public sealed class JudgeShadowScoreQueue : IJudgeShadowScoreQueue
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = false,
-            SingleWriter = false,
+            SingleWriter = false
         });
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public long DroppedCount => Interlocked.Read(ref _droppedCount);
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public bool TryEnqueue(JudgeShadowScoringJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
 
-        if (_channel.Writer.TryWrite(job))
-        {
-            return true;
-        }
+        if (_channel.Writer.TryWrite(job)) return true;
 
         Interlocked.Increment(ref _droppedCount);
         return false;
     }
 
-    /// <inheritdoc />
-    public IAsyncEnumerable<JudgeShadowScoringJob> DequeueAllAsync(CancellationToken cancellationToken) =>
-        _channel.Reader.ReadAllAsync(cancellationToken);
+    /// <inheritdoc/>
+    public IAsyncEnumerable<JudgeShadowScoringJob> DequeueAllAsync(CancellationToken cancellationToken)
+    {
+        return _channel.Reader.ReadAllAsync(cancellationToken);
+    }
 }

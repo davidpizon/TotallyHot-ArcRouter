@@ -1,24 +1,24 @@
-using TotallyHot.ArcRouter.Tests.TestSupport;
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 
 /// <summary>
 /// Covers <see cref="OrchestratorRoutingPolicy"/>'s weighted vote, argmax, and voter-abstention degrade
-/// path - PLAN.md Phase L's exit criterion is <see cref="DecideAsync_ResearchDocWorkedExample_ResolvesToKimiK25AtWeightedScore1_47"/>.
+/// path - PLAN.md Phase L's exit criterion is
+/// <see cref="DecideAsync_ResearchDocWorkedExample_ResolvesToKimiK25AtWeightedScore1_47"/>.
 /// Every voter is a deterministic <see cref="FakeVoter"/> so this stays fast and requires no real
 /// embedding/benchmark/model state (AGENTS.md's 5-second heavy-test bound).
 /// </summary>
 public class OrchestratorRoutingPolicyTests
 {
-    private static readonly RoutingCandidate MiniMax = new("minimax-m2.7", "openai", IsFree: false);
-    private static readonly RoutingCandidate Glm = new("glm-5", "openai", IsFree: false);
-    private static readonly RoutingCandidate Kimi = new("kimi-k2.5", "openai", IsFree: false);
+    private static readonly RoutingCandidate MiniMax = new(ModelName: "minimax-m2.7", Provider: "openai", false);
+    private static readonly RoutingCandidate Glm = new(ModelName: "glm-5", Provider: "openai", false);
+    private static readonly RoutingCandidate Kimi = new(ModelName: "kimi-k2.5", Provider: "openai", false);
 
     /// <summary>
     /// PLAN.md Phase L's exit criterion: research-doc §3.3's worked example - <c>api_llm</c> (this
@@ -34,32 +34,34 @@ public class OrchestratorRoutingPolicyTests
     {
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0),
-            new FakeVoter(VoterNames.MemoryKnn, "kimi-k2.5", confidence: 1.0),
-            new FakeVoter(VoterNames.LogReg, "glm-5", confidence: 1.0),
-            new FakeVoter(VoterNames.LlmRouter, "minimax-m2.7", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0),
+            new FakeVoter(name: VoterNames.MemoryKnn, modelName: "kimi-k2.5", 1.0),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "glm-5", 1.0),
+            new FakeVoter(name: VoterNames.LlmRouter, modelName: "minimax-m2.7", 1.0)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [MiniMax, Glm, Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
-        Assert.Equal(1.47, decision.CandidateScores["kimi-k2.5"], precision: 6);
-        Assert.Equal(0.64, decision.CandidateScores["minimax-m2.7"], precision: 6);
-        Assert.Equal(0.43, decision.CandidateScores["glm-5"], precision: 6);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
+        Assert.Equal(1.47, actual: decision.CandidateScores["kimi-k2.5"], 6);
+        Assert.Equal(0.64, actual: decision.CandidateScores["minimax-m2.7"], 6);
+        Assert.Equal(0.43, actual: decision.CandidateScores["glm-5"], 6);
     }
 
     [Fact]
     public async Task SelectModelAsync_ReturnsTheDecisionsSelectedModel()
     {
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var selected = await policy.SelectModelAsync(context, TestContext.Current.CancellationToken);
+        var selected =
+            await policy.SelectModelAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", selected);
+        Assert.Equal(expected: "kimi-k2.5", actual: selected);
     }
 
     /// <summary>
@@ -70,28 +72,29 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task SelectModelAsync_WithSignals_ForwardsTaskTextAndEmbeddingToVoters()
     {
-        var recordingVoter = new RecordingVoter(VoterNames.DimBest, "kimi-k2.5");
+        var recordingVoter = new RecordingVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5");
         var policy = CreatePolicy([recordingVoter]);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
-        var embedding = new float[] { 1f, 2f, 3f };
-        var signals = new RoutingSignals("refactor this function", embedding);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
+        var embedding = new[] { 1f, 2f, 3f };
+        var signals = new RoutingSignals(TaskText: "refactor this function", TaskEmbedding: embedding);
 
-        var selected = await policy.SelectModelAsync(context, signals, TestContext.Current.CancellationToken);
+        var selected = await policy.SelectModelAsync(context: context, signals: signals,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", selected);
+        Assert.Equal(expected: "kimi-k2.5", actual: selected);
         Assert.NotNull(recordingVoter.LastContext);
-        Assert.Equal("refactor this function", recordingVoter.LastContext!.TaskText);
-        Assert.Same(embedding, recordingVoter.LastContext.TaskEmbedding);
+        Assert.Equal(expected: "refactor this function", actual: recordingVoter.LastContext!.TaskText);
+        Assert.Same(expected: embedding, actual: recordingVoter.LastContext.TaskEmbedding);
     }
 
     [Fact]
     public async Task SelectModelAsync_NoSignals_ForwardsNullTaskTextAndEmbedding()
     {
-        var recordingVoter = new RecordingVoter(VoterNames.DimBest, "kimi-k2.5");
+        var recordingVoter = new RecordingVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5");
         var policy = CreatePolicy([recordingVoter]);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        await policy.SelectModelAsync(context, TestContext.Current.CancellationToken);
+        await policy.SelectModelAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(recordingVoter.LastContext);
         Assert.Null(recordingVoter.LastContext!.TaskText);
@@ -107,17 +110,19 @@ public class OrchestratorRoutingPolicyTests
         // never even reaches the generation client for a text-less context.
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0),
-            new FakeVoter(VoterNames.MemoryKnn, "kimi-k2.5", confidence: 1.0),
-            new FakeVoter(VoterNames.LogReg, "glm-5", confidence: 1.0),
-            new LlmRouterVoter(new NeverCalledTextGenerationClient(), NullLogger<LlmRouterVoter>.Instance),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0),
+            new FakeVoter(name: VoterNames.MemoryKnn, modelName: "kimi-k2.5", 1.0),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "glm-5", 1.0),
+            new LlmRouterVoter(generationClient: new NeverCalledTextGenerationClient(),
+                logger: NullLogger<LlmRouterVoter>.Instance)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Glm, Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Glm, Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
         Assert.False(decision.CandidateScores.ContainsKey("minimax-m2.7"));
     }
 
@@ -131,40 +136,48 @@ public class OrchestratorRoutingPolicyTests
     {
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0),
-            new FakeVoter(VoterNames.MemoryKnn, "kimi-k2.5", confidence: 1.0),
-            new FakeVoter(VoterNames.LogReg, "glm-5", confidence: 1.0),
-            new FakeVoter(VoterNames.LlmRouter, "minimax-m2.7", confidence: 1.0),
-            new FakeVoter(VoterNames.ClusterBest, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0),
+            new FakeVoter(name: VoterNames.MemoryKnn, modelName: "kimi-k2.5", 1.0),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "glm-5", 1.0),
+            new FakeVoter(name: VoterNames.LlmRouter, modelName: "minimax-m2.7", 1.0),
+            new FakeVoter(name: VoterNames.ClusterBest, modelName: "kimi-k2.5", 1.0)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [MiniMax, Glm, Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
-        foreach (var voterName in new[] { VoterNames.DimBest, VoterNames.MemoryKnn, VoterNames.LogReg, VoterNames.LlmRouter, VoterNames.ClusterBest })
-        {
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
+        foreach (var voterName in new[]
+                 {
+                     VoterNames.DimBest, VoterNames.MemoryKnn, VoterNames.LogReg, VoterNames.LlmRouter,
+                     VoterNames.ClusterBest
+                 })
             Assert.True(
-                decision.CandidateScores.ContainsKey($"voter:{voterName}:kimi-k2.5") ||
-                decision.CandidateScores.ContainsKey($"voter:{voterName}:glm-5") ||
-                decision.CandidateScores.ContainsKey($"voter:{voterName}:minimax-m2.7"),
-                $"Expected a breakdown entry for voter '{voterName}'.");
-        }
+                condition: decision.CandidateScores.ContainsKey($"voter:{voterName}:kimi-k2.5") ||
+                           decision.CandidateScores.ContainsKey($"voter:{voterName}:glm-5") ||
+                           decision.CandidateScores.ContainsKey($"voter:{voterName}:minimax-m2.7"),
+                userMessage: $"Expected a breakdown entry for voter '{voterName}'.");
     }
 
     [Fact]
     public async Task DecideAsync_EveryVoterAbstains_FallsBackToDefaultModel()
     {
-        var voters = new IRoutingVoter[] { new LlmRouterVoter(new NeverCalledTextGenerationClient(), NullLogger<LlmRouterVoter>.Instance) };
-        var policy = CreatePolicy(voters, defaultModel: "kimi-k2.5");
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var voters = new IRoutingVoter[]
+        {
+            new LlmRouterVoter(generationClient: new NeverCalledTextGenerationClient(),
+                logger: NullLogger<LlmRouterVoter>.Instance)
+        };
+        var policy = CreatePolicy(voters: voters, defaultModel: "kimi-k2.5");
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
-        Assert.Equal(0, decision.Confidence);
-        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
+        Assert.Equal(0, actual: decision.Confidence);
+        Assert.Equal(expected: RouterConstants.FallbackReason, actual: decision.Rationale);
         Assert.False(decision.IsExploratory);
     }
 
@@ -177,27 +190,29 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task DecideAsync_ExplorationRollFires_SelectsRandomCandidateAndFlagsExploratory()
     {
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
-        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 1.0);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
+        var policy = CreatePolicy(voters: voters, enableExploration: true, explorationRate: 1.0);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
         Assert.True(decision.IsExploratory);
     }
 
     [Fact]
     public async Task DecideAsync_ExplorationDisabled_NeverFlagsExploratory()
     {
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
         var policy = CreatePolicy(voters); // exploration disabled by default via CreatePolicy
 
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
         Assert.False(decision.IsExploratory);
     }
 
@@ -209,15 +224,21 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task DecideAsync_EveryVoterAbstains_ExplorationRateOne_FallbackIsNeverExploratory()
     {
-        var voters = new IRoutingVoter[] { new LlmRouterVoter(new NeverCalledTextGenerationClient(), NullLogger<LlmRouterVoter>.Instance) };
-        var policy = CreatePolicy(voters, defaultModel: "kimi-k2.5", enableExploration: true, explorationRate: 1.0);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var voters = new IRoutingVoter[]
+        {
+            new LlmRouterVoter(generationClient: new NeverCalledTextGenerationClient(),
+                logger: NullLogger<LlmRouterVoter>.Instance)
+        };
+        var policy = CreatePolicy(voters: voters, defaultModel: "kimi-k2.5", enableExploration: true,
+            explorationRate: 1.0);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
         Assert.False(decision.IsExploratory);
-        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
+        Assert.Equal(expected: RouterConstants.FallbackReason, actual: decision.Rationale);
     }
 
     /// <summary>
@@ -227,16 +248,17 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task DecideAsync_ExplorationEnabled_GreedyPick_PropensityIsOneMinusEpsPlusEpsOverK()
     {
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
         // explorationRate 0 keeps the roll deterministic (never exploratory) while EnableExploration
         // stays true, so the propensity formula's eps term is exercised without RNG flakiness.
-        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 0.0);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+        var policy = CreatePolicy(voters: voters, enableExploration: true, explorationRate: 0.0);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [MiniMax, Glm, Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(decision.IsExploratory);
-        Assert.Equal(1.0, decision.Propensity, precision: 6);
+        Assert.Equal(1.0, actual: decision.Propensity, 6);
     }
 
     /// <summary>
@@ -246,14 +268,15 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task DecideAsync_ExplorationRollFires_PropensityIsEpsOverK()
     {
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
-        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 1.0);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
+        var policy = CreatePolicy(voters: voters, enableExploration: true, explorationRate: 1.0);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [MiniMax, Glm, Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(decision.IsExploratory);
-        Assert.Equal(1.0 / 3.0, decision.Propensity, precision: 6);
+        Assert.Equal(expected: 1.0 / 3.0, actual: decision.Propensity, 6);
     }
 
     /// <summary>
@@ -263,35 +286,38 @@ public class OrchestratorRoutingPolicyTests
     [Fact]
     public async Task DecideAsync_ExplorationDisabled_PropensityIsAlwaysOne()
     {
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
         var policy = CreatePolicy(voters); // exploration disabled by default via CreatePolicy
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm, Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [MiniMax, Glm, Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(decision.IsExploratory);
-        Assert.Equal(1.0, decision.Propensity, precision: 6);
+        Assert.Equal(1.0, actual: decision.Propensity, 6);
     }
 
     /// <summary>
-    /// docs/router/self-organizing-classification-plan.md Phase T1c: <see cref="OrchestratorRoutingPolicy.DecideOutcomeAsync"/>
+    /// docs/router/self-organizing-classification-plan.md Phase T1c:
+    /// <see cref="OrchestratorRoutingPolicy.DecideOutcomeAsync"/>
     /// delegates directly to <see cref="OrchestratorRoutingPolicy.DecideAsync"/>, so it reports the same
     /// real provenance rather than the interface default's always-certain wrap.
     /// </summary>
     [Fact]
     public async Task DecideOutcomeAsync_DelegatesToDecideAsync_PreservingRealProvenance()
     {
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
-        var policy = CreatePolicy(voters, enableExploration: true, explorationRate: 1.0);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
-        var signals = new RoutingSignals("some task", [1f, 2f, 3f]);
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
+        var policy = CreatePolicy(voters: voters, enableExploration: true, explorationRate: 1.0);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
+        var signals = new RoutingSignals(TaskText: "some task", TaskEmbedding: [1f, 2f, 3f]);
 
         IRoutingPolicy asInterface = policy;
-        var decision = await asInterface.DecideOutcomeAsync(context, signals, TestContext.Current.CancellationToken);
+        var decision = await asInterface.DecideOutcomeAsync(context: context, signals: signals,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
         Assert.True(decision.IsExploratory);
-        Assert.Equal(1.0, decision.Propensity, precision: 6);
+        Assert.Equal(1.0, actual: decision.Propensity, 6);
     }
 
     [Fact]
@@ -299,15 +325,16 @@ public class OrchestratorRoutingPolicyTests
     {
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "minimax-m2.7", confidence: 1.0),
-            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "minimax-m2.7", 1.0),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "kimi-k2.5", 1.0)
         };
-        var policy = CreatePolicy(voters, enableLogReg: false);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Kimi]);
+        var policy = CreatePolicy(voters: voters, enableLogReg: false);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [MiniMax, Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("minimax-m2.7", decision.SelectedModel);
+        Assert.Equal(expected: "minimax-m2.7", actual: decision.SelectedModel);
         Assert.False(decision.CandidateScores.ContainsKey("kimi-k2.5"));
     }
 
@@ -317,14 +344,15 @@ public class OrchestratorRoutingPolicyTests
         var voters = new IRoutingVoter[]
         {
             new ThrowingVoter(VoterNames.DimBest),
-            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "kimi-k2.5", 1.0)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
     }
 
     [Fact]
@@ -334,15 +362,16 @@ public class OrchestratorRoutingPolicyTests
         // must not corrupt the decision - it degrades to an abstention like any other unusable vote.
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "not-a-candidate", confidence: 1.0),
-            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "not-a-candidate", 1.0),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "kimi-k2.5", 1.0)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
         Assert.False(decision.CandidateScores.ContainsKey("not-a-candidate"));
     }
 
@@ -352,16 +381,17 @@ public class OrchestratorRoutingPolicyTests
         // Votes are matched against candidates case-insensitively, so a voter is free to echo back a
         // different casing than the candidate list uses. CandidateScores keys must still come out in the
         // candidate's own casing so they line up with context.Candidates and SelectedModel when enumerated.
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "KIMI-K2.5", confidence: 1.0) };
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "KIMI-K2.5", 1.0) };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
-        Assert.Contains("kimi-k2.5", decision.CandidateScores.Keys);
-        Assert.DoesNotContain("KIMI-K2.5", decision.CandidateScores.Keys);
-        Assert.Contains($"voter:{VoterNames.DimBest}:kimi-k2.5", decision.CandidateScores.Keys);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
+        Assert.Contains(expected: "kimi-k2.5", collection: decision.CandidateScores.Keys);
+        Assert.DoesNotContain(expected: "KIMI-K2.5", collection: decision.CandidateScores.Keys);
+        Assert.Contains(expected: $"voter:{VoterNames.DimBest}:kimi-k2.5", collection: decision.CandidateScores.Keys);
     }
 
     [Fact]
@@ -370,15 +400,16 @@ public class OrchestratorRoutingPolicyTests
         // Matching tolerates a "." vs "-" version separator (cosmetic spelling only) - the candidate list
         // spells this model "claude-opus-4-6", and a voter returning the dotted "claude-opus-4.6" still
         // means the exact same, interchangeable model.
-        var opus = new RoutingCandidate("claude-opus-4-6", "anthropic", IsFree: false);
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "claude-opus-4.6", confidence: 1.0) };
+        var opus = new RoutingCandidate(ModelName: "claude-opus-4-6", Provider: "anthropic", false);
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "claude-opus-4.6", 1.0) };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [opus]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [opus]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("claude-opus-4-6", decision.SelectedModel);
-        Assert.Contains("claude-opus-4-6", decision.CandidateScores.Keys);
+        Assert.Equal(expected: "claude-opus-4-6", actual: decision.SelectedModel);
+        Assert.Contains(expected: "claude-opus-4-6", collection: decision.CandidateScores.Keys);
     }
 
     [Fact]
@@ -387,12 +418,14 @@ public class OrchestratorRoutingPolicyTests
         // A dated snapshot pins a specific, non-interchangeable release: "claude-opus-4.6-20250929" is not
         // the same model as "claude-opus-4-6" and must not be treated as a match, unlike the purely
         // cosmetic casing/separator differences covered above.
-        var opus = new RoutingCandidate("claude-opus-4-6", "anthropic", IsFree: false);
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "claude-opus-4.6-20250929", confidence: 1.0) };
-        var policy = CreatePolicy(voters, defaultModel: "claude-opus-4-6");
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [opus]);
+        var opus = new RoutingCandidate(ModelName: "claude-opus-4-6", Provider: "anthropic", false);
+        var voters = new IRoutingVoter[]
+            { new FakeVoter(name: VoterNames.DimBest, modelName: "claude-opus-4.6-20250929", 1.0) };
+        var policy = CreatePolicy(voters: voters, defaultModel: "claude-opus-4-6");
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [opus]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(decision.CandidateScores.ContainsKey("claude-opus-4-6"));
         Assert.False(decision.CandidateScores.ContainsKey("claude-opus-4.6-20250929"));
@@ -403,35 +436,38 @@ public class OrchestratorRoutingPolicyTests
     {
         // A voter's Confidence is not itself range-validated (unlike RoutingDecision.Confidence), so the
         // ensemble must clamp it before using it as a weight multiplier rather than trusting it verbatim.
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 5.0) };
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 5.0) };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
-        Assert.Equal(0.9, decision.CandidateScores["kimi-k2.5"], precision: 6);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
+        Assert.Equal(0.9, actual: decision.CandidateScores["kimi-k2.5"], 6);
     }
 
     [Theory]
     [InlineData(double.NaN)]
     [InlineData(double.PositiveInfinity)]
     [InlineData(double.NegativeInfinity)]
-    public async Task DecideAsync_VoterConfidenceIsNonFinite_TreatedAsAbstentionRatherThanPoisoningTheScore(double confidence)
+    public async Task DecideAsync_VoterConfidenceIsNonFinite_TreatedAsAbstentionRatherThanPoisoningTheScore(
+        double confidence)
     {
         // Math.Clamp does not sanitize NaN/Infinity, so a non-finite confidence must be caught before it
         // can turn contribution (and everything summed from it) into NaN.
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "minimax-m2.7", confidence),
-            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "minimax-m2.7", confidence: confidence),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "kimi-k2.5", 1.0)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi, MiniMax]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi, MiniMax]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
         Assert.False(double.IsNaN(decision.Confidence));
         Assert.False(decision.CandidateScores.ContainsKey("minimax-m2.7"));
     }
@@ -444,12 +480,12 @@ public class OrchestratorRoutingPolicyTests
         // ThenBy(model name) tie-break must make this reproducible instead.
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "minimax-m2.7", confidence: 1.0),
-            new FakeVoter(VoterNames.MemoryKnn, "glm-5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "minimax-m2.7", 1.0),
+            new FakeVoter(name: VoterNames.MemoryKnn, modelName: "glm-5", 1.0)
         };
         var policy = new OrchestratorRoutingPolicy(
-            voters,
-            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+            voters: voters,
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
             {
                 DefaultModel = "kimi-k2.5",
                 DimBestVoterWeight = 0.5,
@@ -458,14 +494,15 @@ public class OrchestratorRoutingPolicyTests
                 // this tie-break assertion can't flake on an exploration roll (docs/router/
                 // orchestrator-live-path-plan.md M1.2).
                 EnableExploration = false,
-                ExplorationRate = 0,
+                ExplorationRate = 0
             }),
-            NullLogger<OrchestratorRoutingPolicy>.Instance);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [MiniMax, Glm]);
+            logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [MiniMax, Glm]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("glm-5", decision.SelectedModel);
+        Assert.Equal(expected: "glm-5", actual: decision.SelectedModel);
     }
 
     [Fact]
@@ -474,14 +511,15 @@ public class OrchestratorRoutingPolicyTests
         // The argmax must select only from context.Candidates rather than filtering candidateScores keys
         // by a "voter:" prefix - a real candidate model named "voter:custom" would otherwise be wrongly
         // excluded from its own win.
-        var prefixedCandidate = new RoutingCandidate("voter:custom", "openai", IsFree: false);
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "voter:custom", confidence: 1.0) };
+        var prefixedCandidate = new RoutingCandidate(ModelName: "voter:custom", Provider: "openai", false);
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "voter:custom", 1.0) };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [prefixedCandidate]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [prefixedCandidate]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("voter:custom", decision.SelectedModel);
+        Assert.Equal(expected: "voter:custom", actual: decision.SelectedModel);
     }
 
     [Fact]
@@ -491,20 +529,21 @@ public class OrchestratorRoutingPolicyTests
         // "voter:dim_best:kimi-k2.5" from the first voter's pick. A second, real candidate is coincidentally
         // named the same thing. Its own aggregate score (from the second voter) must survive in
         // CandidateScores rather than being overwritten by the unrelated per-voter breakdown entry.
-        var collidingCandidate = new RoutingCandidate("voter:dim_best:kimi-k2.5", "openai", IsFree: false);
+        var collidingCandidate = new RoutingCandidate(ModelName: "voter:dim_best:kimi-k2.5", Provider: "openai", false);
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0),
-            new FakeVoter(VoterNames.MemoryKnn, "voter:dim_best:kimi-k2.5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0),
+            new FakeVoter(name: VoterNames.MemoryKnn, modelName: "voter:dim_best:kimi-k2.5", 1.0)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi, collidingCandidate]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi, collidingCandidate]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
-        Assert.Equal(0.9, decision.CandidateScores["kimi-k2.5"], precision: 6);
-        Assert.Equal(0.57, decision.CandidateScores["voter:dim_best:kimi-k2.5"], precision: 6);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
+        Assert.Equal(0.9, actual: decision.CandidateScores["kimi-k2.5"], 6);
+        Assert.Equal(0.57, actual: decision.CandidateScores["voter:dim_best:kimi-k2.5"], 6);
     }
 
     [Fact]
@@ -515,15 +554,16 @@ public class OrchestratorRoutingPolicyTests
         // whitespace and would hard-fail the whole decision.
         var voters = new IRoutingVoter[]
         {
-            new FakeVoter(VoterNames.DimBest, "   ", confidence: 1.0),
-            new FakeVoter(VoterNames.LogReg, "kimi-k2.5", confidence: 1.0),
+            new FakeVoter(name: VoterNames.DimBest, modelName: "   ", 1.0),
+            new FakeVoter(name: VoterNames.LogReg, modelName: "kimi-k2.5", 1.0)
         };
         var policy = CreatePolicy(voters);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("kimi-k2.5", decision.SelectedModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: decision.SelectedModel);
     }
 
     [Fact]
@@ -533,36 +573,41 @@ public class OrchestratorRoutingPolicyTests
         // nothing while still counting toward participatingVoters would let an all-zero-weight
         // configuration deterministically "win" a candidate via the tie-break with no effective ensemble
         // weight behind it. It must instead degrade the same way a fully-abstained vote does.
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "kimi-k2.5", confidence: 1.0) };
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "kimi-k2.5", 1.0) };
         var policy = new OrchestratorRoutingPolicy(
-            voters,
-            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { DefaultModel = "kimi-k2.5", DimBestVoterWeight = 0d }),
-            NullLogger<OrchestratorRoutingPolicy>.Instance);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [Kimi]);
+            voters: voters,
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+            { DefaultModel = "kimi-k2.5", DimBestVoterWeight = 0d }),
+            logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: [Kimi]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(RouterConstants.FallbackReason, decision.Rationale);
-        Assert.Equal(0, decision.Confidence);
+        Assert.Equal(expected: RouterConstants.FallbackReason, actual: decision.Rationale);
+        Assert.Equal(0, actual: decision.Confidence);
     }
 
     [Fact]
-    public async Task DecideAsync_CandidateModelNameContainsSlashNotMatchingItsOwnProvider_NotConflatedWithADifferentCandidate()
+    public async Task
+        DecideAsync_CandidateModelNameContainsSlashNotMatchingItsOwnProvider_NotConflatedWithADifferentCandidate()
     {
         // Canonicalizing with provider=null strips ANY leading "segment/", so two distinct candidates -
         // one whose ModelName legitimately contains a slash unrelated to its own Provider, and one with no
         // slash at all - could collapse onto the same comparison key and let a vote for the bare name match
         // whichever candidate happened to be listed first. Canonicalizing with the matched candidate's own
         // Provider must keep them distinct.
-        var llamaViaOpenRouter = new RoutingCandidate("meta-llama/llama-3.1", "openrouter", IsFree: false);
-        var bareLlama = new RoutingCandidate("llama-3.1", "some-other-provider", IsFree: false);
-        var voters = new IRoutingVoter[] { new FakeVoter(VoterNames.DimBest, "llama-3.1", confidence: 1.0) };
-        var policy = CreatePolicy(voters, defaultModel: "llama-3.1");
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, [llamaViaOpenRouter, bareLlama]);
+        var llamaViaOpenRouter = new RoutingCandidate(ModelName: "meta-llama/llama-3.1", Provider: "openrouter", false);
+        var bareLlama = new RoutingCandidate(ModelName: "llama-3.1", Provider: "some-other-provider", false);
+        var voters = new IRoutingVoter[] { new FakeVoter(name: VoterNames.DimBest, modelName: "llama-3.1", 1.0) };
+        var policy = CreatePolicy(voters: voters, defaultModel: "llama-3.1");
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false,
+            Candidates: [llamaViaOpenRouter, bareLlama]);
 
-        var decision = await policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken);
+        var decision = await policy.DecideAsync(context: context, null, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("llama-3.1", decision.SelectedModel);
+        Assert.Equal(expected: "llama-3.1", actual: decision.SelectedModel);
         Assert.False(decision.CandidateScores.ContainsKey("meta-llama/llama-3.1"));
     }
 
@@ -570,10 +615,10 @@ public class OrchestratorRoutingPolicyTests
     public async Task DecideAsync_NoCandidates_Throws()
     {
         var policy = CreatePolicy([]);
-        var context = new RoutingContext("live:bug_fixing", IsUtility: false, []);
+        var context = new RoutingContext(Dimension: "live:bug_fixing", false, Candidates: []);
 
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => policy.DecideAsync(context, taskEmbedding: null, taskText: null, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            policy.DecideAsync(context: context, null, null, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     private static OrchestratorRoutingPolicy CreatePolicy(
@@ -581,10 +626,11 @@ public class OrchestratorRoutingPolicyTests
         string defaultModel = "kimi-k2.5",
         bool enableLogReg = true,
         bool enableExploration = false,
-        double explorationRate = 0d) =>
-        new(
-            voters,
-            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+        double explorationRate = 0d)
+    {
+        return new OrchestratorRoutingPolicy(
+            voters: voters,
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
             {
                 DefaultModel = defaultModel,
                 DimBestVoterWeight = 0.9,
@@ -600,28 +646,30 @@ public class OrchestratorRoutingPolicyTests
                 // requires the adaptive-routing master switch, on top of EnableClusterBestVoter. This
                 // helper's tests exercise the ensemble in general, not T6's own gating (which has its
                 // own dedicated tests), so it opts in here to keep cluster_best participating as before.
-                EnableAdaptiveRouting = true,
+                EnableAdaptiveRouting = true
             }),
-            NullLogger<OrchestratorRoutingPolicy>.Instance);
+            logger: NullLogger<OrchestratorRoutingPolicy>.Instance);
+    }
 
     private sealed class FakeVoter(string name, string modelName, double confidence) : IRoutingVoter
     {
         public string Name { get; } = name;
 
-        public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new VoterVote(Name, modelName, confidence));
+        public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new VoterVote(VoterName: Name, ModelName: modelName, Confidence: confidence));
+        }
     }
 
     private sealed class RecordingVoter(string name, string modelName) : IRoutingVoter
     {
-        public string Name { get; } = name;
-
         public VotingContext? LastContext { get; private set; }
+        public string Name { get; } = name;
 
         public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
         {
             LastContext = context;
-            return Task.FromResult(new VoterVote(Name, modelName, Confidence: 1.0));
+            return Task.FromResult(new VoterVote(VoterName: Name, ModelName: modelName, 1.0));
         }
     }
 
@@ -629,8 +677,10 @@ public class OrchestratorRoutingPolicyTests
     {
         public string Name { get; } = name;
 
-        public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default) =>
+        public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
+        {
             throw new InvalidOperationException("Simulated voter failure.");
+        }
     }
 
     /// <summary>
@@ -640,7 +690,10 @@ public class OrchestratorRoutingPolicyTests
     /// </summary>
     private sealed class NeverCalledTextGenerationClient : ITextGenerationClient
     {
-        public Task<string> GenerateAsync(string prompt, CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("LlmRouterVoter should have abstained before calling the generation client.");
+        public Task<string> GenerateAsync(string prompt, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException(
+                "LlmRouterVoter should have abstained before calling the generation client.");
+        }
     }
 }

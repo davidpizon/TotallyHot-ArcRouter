@@ -19,26 +19,17 @@ public static class RequestTextExtractor
     /// </summary>
     public static string? ExtractNewestUserMessage(JsonObject? requestBody)
     {
-        if (requestBody?["messages"] is not JsonArray messages)
-        {
-            return null;
-        }
+        if (requestBody?["messages"] is not JsonArray messages) return null;
 
         for (var i = messages.Count - 1; i >= 0; i--)
         {
-            if (messages[i] is not JsonObject message)
-            {
-                continue;
-            }
+            if (messages[i] is not JsonObject message) continue;
 
             var role = message["role"] is JsonValue roleValue && roleValue.TryGetValue<string>(out var roleString)
                 ? roleString
                 : null;
 
-            if (!string.Equals(role, "user", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            if (!string.Equals(a: role, b: "user", comparisonType: StringComparison.OrdinalIgnoreCase)) continue;
 
             return MessageContentTextExtractor.ExtractText(message["content"]);
         }
@@ -46,4 +37,3 @@ public static class RequestTextExtractor
         return null;
     }
 }
-

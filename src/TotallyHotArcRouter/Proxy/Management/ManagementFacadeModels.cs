@@ -4,7 +4,10 @@ using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
-/// <summary>The kind of failure a <see cref="ManagementFacade"/> call reports, so each surface can map it to its own error shape.</summary>
+/// <summary>
+/// The kind of failure a <see cref="ManagementFacade"/> call reports, so each surface can map it to its own error
+/// shape.
+/// </summary>
 public enum ManagementErrorType
 {
     /// <summary>No error; <see cref="ManagementResult{T}.Success"/> is <see langword="true"/>.</summary>
@@ -28,16 +31,29 @@ public enum ManagementErrorType
 /// success, or an <see cref="ManagementErrorType"/> and message on failure. Both the REST endpoints and the
 /// MCP tools translate this into their own transport's error shape (HTTP status codes / MCP tool errors).
 /// </summary>
-public readonly record struct ManagementResult<T>(bool Success, T? Value, ManagementErrorType ErrorType, string? ErrorMessage)
+public readonly record struct ManagementResult<T>(
+    bool Success,
+    T? Value,
+    ManagementErrorType ErrorType,
+    string? ErrorMessage)
 {
     /// <summary>Creates a successful result carrying <paramref name="value"/>.</summary>
-    public static ManagementResult<T> Ok(T value) => new(true, value, ManagementErrorType.None, null);
+    public static ManagementResult<T> Ok(T value)
+    {
+        return new ManagementResult<T>(true, Value: value, ErrorType: ManagementErrorType.None, null);
+    }
 
     /// <summary>Creates a failed result with the given <paramref name="errorType"/> and <paramref name="message"/>.</summary>
-    public static ManagementResult<T> Fail(ManagementErrorType errorType, string message) => new(false, default, errorType, message);
+    public static ManagementResult<T> Fail(ManagementErrorType errorType, string message)
+    {
+        return new ManagementResult<T>(false, default, ErrorType: errorType, ErrorMessage: message);
+    }
 }
 
-/// <summary>The credential source for a stored custom header, mirrored in <c>TotallyHot.ArcRouter.Gui.Admin.HeaderValueSource</c>'s naming.</summary>
+/// <summary>
+/// The credential source for a stored custom header, mirrored in
+/// <c>TotallyHot.ArcRouter.Gui.Admin.HeaderValueSource</c>'s naming.
+/// </summary>
 public static class HeaderValueSource
 {
     /// <summary>A literal value is stored (never returned by any surface; only this source marker is).</summary>
@@ -163,7 +179,10 @@ public sealed record ProviderView(
 /// returned to a management caller.
 /// </summary>
 /// <param name="Rows">Every currently-stored row, ordered by day then model.</param>
-/// <param name="FetchedAtUtc">The most recent instant any of <paramref name="Rows"/> was fetched - the GUI's "Fetched" footer.</param>
+/// <param name="FetchedAtUtc">
+/// The most recent instant any of <paramref name="Rows"/> was fetched - the GUI's "Fetched"
+/// footer.
+/// </param>
 public sealed record ProviderReportedUsageView(IReadOnlyList<ReportedUsageRowView> Rows, DateTimeOffset FetchedAtUtc);
 
 /// <summary>One (day, model) row of <see cref="ProviderReportedUsageView.Rows"/>. Raw reported counts - no derived totals.</summary>
@@ -208,13 +227,17 @@ public sealed record ProviderRateLimitView(
 
 /// <summary>One dimension's history points for the Providers card's rate-limit trend chart (§5.9).</summary>
 /// <param name="BucketUtc">The minute bucket's start instant, UTC.</param>
-/// <param name="Remaining">What was left in this bucket, or <see langword="null"/> if the header was absent/unparsable that minute.</param>
+/// <param name="Remaining">
+/// What was left in this bucket, or <see langword="null"/> if the header was absent/unparsable
+/// that minute.
+/// </param>
 /// <param name="Limit">The dimension's configured cap in this bucket, or <see langword="null"/> if unknown.</param>
 public sealed record RateLimitHistoryPointView(DateTimeOffset BucketUtc, long? Remaining, long? Limit);
 
 /// <summary>The <c>GET /admin/providers/{key}/rate-limit-history</c> response: per-dimension history series.</summary>
 /// <param name="Dimensions">History points per standard-family dimension name, chronologically ordered.</param>
-public sealed record RateLimitHistoryResponse(IReadOnlyDictionary<string, IReadOnlyList<RateLimitHistoryPointView>> Dimensions);
+public sealed record RateLimitHistoryResponse(
+    IReadOnlyDictionary<string, IReadOnlyList<RateLimitHistoryPointView>> Dimensions);
 
 /// <summary>A single configured model as returned to a management caller.</summary>
 /// <param name="ModelName">The client-facing model name.</param>
@@ -254,33 +277,55 @@ public sealed record ModelView(
 /// </summary>
 /// <param name="Name">The header name.</param>
 /// <param name="Source">One of <see cref="HeaderValueSource"/>: where this header's value comes from.</param>
-/// <param name="ValueEnvVar">The environment variable name holding the value, when <paramref name="Source"/> is <see cref="HeaderValueSource.EnvVar"/>.</param>
-/// <param name="Value">The literal value, but only for an unlocked literal header; null whenever
-/// <paramref name="Locked"/> is set or the value comes from elsewhere.</param>
+/// <param name="ValueEnvVar">
+/// The environment variable name holding the value, when <paramref name="Source"/> is
+/// <see cref="HeaderValueSource.EnvVar"/>.
+/// </param>
+/// <param name="Value">
+/// The literal value, but only for an unlocked literal header; null whenever
+/// <paramref name="Locked"/> is set or the value comes from elsewhere.
+/// </param>
 /// <param name="Locked">Whether this header's value is a secret withheld from management callers.</param>
-public sealed record HeaderView(string Name, string Source, string? ValueEnvVar, string? Value = null, bool Locked = false);
+public sealed record HeaderView(
+    string Name,
+    string Source,
+    string? ValueEnvVar,
+    string? Value = null,
+    bool Locked = false);
 
 /// <summary>The <c>GET /admin/providers</c> (and MCP <c>list_providers</c>) response envelope.</summary>
 /// <param name="Providers">All configured providers, ordered by key.</param>
 public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 
-/// <summary>The body for adding or editing a provider. Fields fall back to the existing value when
-/// omitted. Authentication is expressed purely via <paramref name="Headers"/>.</summary>
+/// <summary>
+/// The body for adding or editing a provider. Fields fall back to the existing value when
+/// omitted. Authentication is expressed purely via <paramref name="Headers"/>.
+/// </summary>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
 /// <param name="AuthHeaderName">The header carrying the credential.</param>
-/// <param name="Headers">The full set of custom headers to store (replaces the existing set, one header at
-/// a time via the blank-preserves-existing rule); null keeps the existing headers (legacy callers).</param>
-/// <param name="IsFree">Whether this provider costs nothing; null keeps the existing value, so a partial
-/// write can't silently un-free a provider.</param>
-/// <param name="Enabled">Whether the provider is switched on; null keeps the existing value, so a partial
-/// write can't silently restart a stopped provider.</param>
-/// <param name="ProviderName">The user-friendly display name for this provider. Null preserves the existing value.
+/// <param name="Headers">
+/// The full set of custom headers to store (replaces the existing set, one header at
+/// a time via the blank-preserves-existing rule); null keeps the existing headers (legacy callers).
+/// </param>
+/// <param name="IsFree">
+/// Whether this provider costs nothing; null keeps the existing value, so a partial
+/// write can't silently un-free a provider.
+/// </param>
+/// <param name="Enabled">
+/// Whether the provider is switched on; null keeps the existing value, so a partial
+/// write can't silently restart a stopped provider.
+/// </param>
+/// <param name="ProviderName">
+/// The user-friendly display name for this provider. Null preserves the existing value.
 /// Any other value (including empty/whitespace) is normalized: empty/whitespace becomes null (an explicit clear);
-/// non-empty becomes the trimmed string.</param>
-/// <param name="ProviderType">The provider family selected in the editor (see
+/// non-empty becomes the trimmed string.
+/// </param>
+/// <param name="ProviderType">
+/// The provider family selected in the editor (see
 /// <see cref="ProviderOptions.ProviderType"/>). Normalized exactly like <paramref name="ProviderName"/>:
 /// null keeps the existing value, so a partial write can't silently reset a provider's type; any other
-/// value is trimmed, and empty/whitespace becomes null (an explicit clear).</param>
+/// value is trimmed, and empty/whitespace becomes null (an explicit clear).
+/// </param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
     string? AuthHeaderName,
@@ -298,21 +343,29 @@ public sealed record ProviderWriteRequest(
 /// <param name="Enabled">The provider's new on/off state.</param>
 public sealed record ProviderEnabledWriteRequest(bool Enabled);
 
-/// <summary>The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7). See <see cref="ManagementFacade.SetSecret"/> for which names are accepted.</summary>
+/// <summary>
+/// The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7).
+/// See <see cref="ManagementFacade.SetSecret"/> for which names are accepted.
+/// </summary>
 /// <param name="Value">The secret value to store.</param>
 public sealed record SecretWriteRequest(string Value);
 
 /// <summary>A single custom header to store for a provider.</summary>
 /// <param name="Name">The header name.</param>
 /// <param name="Value">A literal value; takes precedence over <paramref name="ValueEnvVar"/> when non-empty.</param>
-/// <param name="ValueEnvVar">The name of an environment variable holding the value, used when <paramref name="Value"/> is blank.</param>
-/// <param name="Locked">Whether the literal value is a secret to withhold from future reads. Applies to the
+/// <param name="ValueEnvVar">
+/// The name of an environment variable holding the value, used when <paramref name="Value"/> is
+/// blank.
+/// </param>
+/// <param name="Locked">
+/// Whether the literal value is a secret to withhold from future reads. Applies to the
 /// header whether or not <paramref name="Value"/> is resent, so a value can be locked without retyping it,
 /// and it also decides what a blank write means: <see langword="true"/> preserves the stored value (the
 /// caller was never shown it), while an explicit <see langword="false"/> clears it (the caller could see
 /// the field and left it empty - this is how the editor's unlock clears a secret). Null is the legacy
 /// shape, kept for callers that predate the flag: blank preserves, and a literal stores locked. Ignored
-/// for an env-var-backed header, which always stores unlocked.</param>
+/// for an env-var-backed header, which always stores unlocked.
+/// </param>
 public sealed record HeaderWriteRequest(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
 
 /// <summary>The body for adding or editing a model under a provider.</summary>
@@ -344,15 +397,26 @@ public sealed record ModelToolDialectWriteRequest(string? Dialect);
 /// The window the caps reset on: <c>"Monthly"</c>, <c>"Weekly"</c>, or <c>"RollingHours"</c>. Null (the
 /// default) keeps today's behavior - <see cref="ProviderBudgetStore.SetBudget"/> defaults to Monthly.
 /// </param>
-/// <param name="WindowHours">Required and must be positive when <paramref name="WindowKind"/> is <c>"RollingHours"</c>; otherwise ignored.</param>
-public sealed record ProviderBudgetWriteRequest(decimal? DollarCap, long? TokenCap, string? WindowKind = null, int? WindowHours = null);
+/// <param name="WindowHours">
+/// Required and must be positive when <paramref name="WindowKind"/> is <c>"RollingHours"</c>;
+/// otherwise ignored.
+/// </param>
+public sealed record ProviderBudgetWriteRequest(
+    decimal? DollarCap,
+    long? TokenCap,
+    string? WindowKind = null,
+    int? WindowHours = null);
 
 /// <summary>
-/// The body for adding or replacing an operator price override (§5.7's <see cref="ResolutionRung.OperatorOverride"/> rung).
+/// The body for adding or replacing an operator price override (§5.7's <see cref="ResolutionRung.OperatorOverride"/>
+/// rung).
 /// </summary>
 /// <param name="SourceName">The aggregator source this override applies to (e.g. <c>LiteLLM</c>).</param>
 /// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
-/// <param name="ModelName">The client-facing <c>ModelRouting:ModelList[].ModelName</c> to resolve to; must already be configured.</param>
+/// <param name="ModelName">
+/// The client-facing <c>ModelRouting:ModelList[].ModelName</c> to resolve to; must already be
+/// configured.
+/// </param>
 public sealed record PriceOverrideWriteRequest(string SourceName, string AggregatorModelKey, string ModelName);
 
 /// <summary>

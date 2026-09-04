@@ -28,14 +28,14 @@ public sealed class ProviderInteractionStatusStoreTests
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
         var store = new ProviderInteractionStatusStore(clock);
 
-        store.RecordSuccess("openai", "Refresh from endpoint");
+        store.RecordSuccess(providerKey: "openai", operation: "Refresh from endpoint");
 
         var status = store.Get("openai");
         Assert.NotNull(status);
-        Assert.True(status!.Ok);
-        Assert.Equal("Refresh from endpoint", status.Operation);
+        Assert.True(status.Ok);
+        Assert.Equal(expected: "Refresh from endpoint", actual: status.Operation);
         Assert.Null(status.Message);
-        Assert.Equal(clock.GetUtcNow(), status.AtUtc);
+        Assert.Equal(expected: clock.GetUtcNow(), actual: status.AtUtc);
     }
 
     [Fact]
@@ -43,22 +43,23 @@ public sealed class ProviderInteractionStatusStoreTests
     {
         var store = new ProviderInteractionStatusStore();
 
-        store.RecordFailure("openai", "Refresh from endpoint", "Provider returned 401 for https://api.openai.com/v1/models.");
+        store.RecordFailure(providerKey: "openai", operation: "Refresh from endpoint",
+            message: "Provider returned 401 for https://api.openai.com/v1/models.");
 
         var status = store.Get("openai");
         Assert.NotNull(status);
-        Assert.False(status!.Ok);
-        Assert.Equal("Refresh from endpoint", status.Operation);
-        Assert.Equal("Provider returned 401 for https://api.openai.com/v1/models.", status.Message);
+        Assert.False(status.Ok);
+        Assert.Equal(expected: "Refresh from endpoint", actual: status.Operation);
+        Assert.Equal(expected: "Provider returned 401 for https://api.openai.com/v1/models.", actual: status.Message);
     }
 
     [Fact]
     public void RecordSuccess_AfterAFailure_OverwritesIt()
     {
         var store = new ProviderInteractionStatusStore();
-        store.RecordFailure("openai", "Refresh from endpoint", "boom");
+        store.RecordFailure(providerKey: "openai", operation: "Refresh from endpoint", message: "boom");
 
-        store.RecordSuccess("openai", "Refresh from endpoint");
+        store.RecordSuccess(providerKey: "openai", operation: "Refresh from endpoint");
 
         Assert.True(store.Get("openai")!.Ok);
     }
@@ -67,7 +68,7 @@ public sealed class ProviderInteractionStatusStoreTests
     public void Remove_ClearsTheRecordedStatus()
     {
         var store = new ProviderInteractionStatusStore();
-        store.RecordFailure("openai", "Refresh from endpoint", "boom");
+        store.RecordFailure(providerKey: "openai", operation: "Refresh from endpoint", message: "boom");
 
         store.Remove("openai");
 
@@ -78,7 +79,7 @@ public sealed class ProviderInteractionStatusStoreTests
     public void ProviderKeys_AreCaseInsensitive()
     {
         var store = new ProviderInteractionStatusStore();
-        store.RecordFailure("OpenAI", "Refresh from endpoint", "boom");
+        store.RecordFailure(providerKey: "OpenAI", operation: "Refresh from endpoint", message: "boom");
 
         Assert.NotNull(store.Get("openai"));
     }
@@ -97,29 +98,31 @@ public sealed class ProviderInteractionStatusStoreTests
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
         var store = new ProviderInteractionStatusStore(clock);
 
-        store.RecordLiveTrafficFailure("openai", ProviderInteractionKind.OutOfCredits, "Your credit balance is too low.");
+        store.RecordLiveTrafficFailure(providerKey: "openai", kind: ProviderInteractionKind.OutOfCredits,
+            message: "Your credit balance is too low.");
 
         var status = store.GetLiveTraffic("openai");
         Assert.NotNull(status);
-        Assert.False(status!.Ok);
-        Assert.Equal("Live traffic", status.Operation);
-        Assert.Equal(ProviderInteractionKind.OutOfCredits, status.Kind);
-        Assert.Equal("Your credit balance is too low.", status.Message);
-        Assert.Equal(clock.GetUtcNow(), status.AtUtc);
+        Assert.False(status.Ok);
+        Assert.Equal(expected: "Live traffic", actual: status.Operation);
+        Assert.Equal(expected: ProviderInteractionKind.OutOfCredits, actual: status.Kind);
+        Assert.Equal(expected: "Your credit balance is too low.", actual: status.Message);
+        Assert.Equal(expected: clock.GetUtcNow(), actual: status.AtUtc);
     }
 
     [Fact]
     public void RecordLiveTrafficSuccess_AfterAFailure_OverwritesIt()
     {
         var store = new ProviderInteractionStatusStore();
-        store.RecordLiveTrafficFailure("openai", ProviderInteractionKind.OutOfCredits, "boom");
+        store.RecordLiveTrafficFailure(providerKey: "openai", kind: ProviderInteractionKind.OutOfCredits,
+            message: "boom");
 
-        store.RecordLiveTrafficSuccess("openai", "Live traffic");
+        store.RecordLiveTrafficSuccess(providerKey: "openai", operation: "Live traffic");
 
         var status = store.GetLiveTraffic("openai");
         Assert.NotNull(status);
-        Assert.True(status!.Ok);
-        Assert.Equal(ProviderInteractionKind.None, status.Kind);
+        Assert.True(status.Ok);
+        Assert.Equal(expected: ProviderInteractionKind.None, actual: status.Kind);
     }
 
     [Fact]
@@ -129,17 +132,18 @@ public sealed class ProviderInteractionStatusStoreTests
         // other's reader, in either direction.
         var store = new ProviderInteractionStatusStore();
 
-        store.RecordFailure("openai", "Refresh from endpoint", "admin failure");
+        store.RecordFailure(providerKey: "openai", operation: "Refresh from endpoint", message: "admin failure");
         Assert.Null(store.GetLiveTraffic("openai"));
 
-        store.RecordLiveTrafficFailure("openai", ProviderInteractionKind.OutOfCredits, "live-traffic failure");
+        store.RecordLiveTrafficFailure(providerKey: "openai", kind: ProviderInteractionKind.OutOfCredits,
+            message: "live-traffic failure");
         Assert.False(store.Get("openai")!.Ok);
-        Assert.Equal("admin failure", store.Get("openai")!.Message);
+        Assert.Equal(expected: "admin failure", actual: store.Get("openai")!.Message);
 
-        store.RecordSuccess("openai", "Refresh from endpoint");
+        store.RecordSuccess(providerKey: "openai", operation: "Refresh from endpoint");
         Assert.False(store.GetLiveTraffic("openai")!.Ok);
 
-        store.RecordLiveTrafficSuccess("openai", "Live traffic");
+        store.RecordLiveTrafficSuccess(providerKey: "openai", operation: "Live traffic");
         Assert.True(store.Get("openai")!.Ok);
         Assert.True(store.GetLiveTraffic("openai")!.Ok);
     }
@@ -148,8 +152,9 @@ public sealed class ProviderInteractionStatusStoreTests
     public void Remove_ClearsBothTracks()
     {
         var store = new ProviderInteractionStatusStore();
-        store.RecordFailure("openai", "Refresh from endpoint", "admin failure");
-        store.RecordLiveTrafficFailure("openai", ProviderInteractionKind.OutOfCredits, "live-traffic failure");
+        store.RecordFailure(providerKey: "openai", operation: "Refresh from endpoint", message: "admin failure");
+        store.RecordLiveTrafficFailure(providerKey: "openai", kind: ProviderInteractionKind.OutOfCredits,
+            message: "live-traffic failure");
 
         store.Remove("openai");
 
@@ -157,11 +162,16 @@ public sealed class ProviderInteractionStatusStoreTests
         Assert.Null(store.GetLiveTraffic("openai"));
     }
 
-    /// <summary>A <see cref="TimeProvider"/> whose clock only moves when explicitly advanced, for deterministic timestamp assertions.</summary>
+    /// <summary>
+    /// A <see cref="TimeProvider"/> whose clock only moves when explicitly advanced, for deterministic timestamp
+    /// assertions.
+    /// </summary>
     private sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
     {
-        private readonly DateTimeOffset _now = start;
 
-        public override DateTimeOffset GetUtcNow() => _now;
+        public override DateTimeOffset GetUtcNow()
+        {
+            return start;
+        }
     }
 }

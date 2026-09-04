@@ -10,12 +10,12 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 public class KnnRetrievalArtifactSerializerTests
 {
     private static readonly KnnRetrievalArtifact ValidArtifact = new(
-        EmbeddingDimension: 2,
+        2,
         EmbeddingModel: "test-embedding-model",
         Entries:
         [
-            new KnnRetrievalEntry("t1", [1f, 0f], "model-a"),
-            new KnnRetrievalEntry("t2", [0f, 1f], "model-b"),
+            new KnnRetrievalEntry(TaskId: "t1", Embedding: [1f, 0f], Label: "model-a"),
+            new KnnRetrievalEntry(TaskId: "t2", Embedding: [0f, 1f], Label: "model-b")
         ],
         TrainedFrom: "unit test fixture");
 
@@ -26,12 +26,12 @@ public class KnnRetrievalArtifactSerializerTests
 
         var artifact = KnnRetrievalArtifactSerializer.Deserialize(json);
 
-        Assert.Equal(ValidArtifact.EmbeddingDimension, artifact.EmbeddingDimension);
-        Assert.Equal(ValidArtifact.EmbeddingModel, artifact.EmbeddingModel);
-        Assert.Equal(ValidArtifact.TrainedFrom, artifact.TrainedFrom);
-        Assert.Equal(2, artifact.Entries.Count);
-        Assert.Equal("model-a", artifact.Entries.Single(e => e.TaskId == "t1").Label);
-        Assert.Equal([1f, 0f], artifact.Entries.Single(e => e.TaskId == "t1").Embedding);
+        Assert.Equal(expected: ValidArtifact.EmbeddingDimension, actual: artifact.EmbeddingDimension);
+        Assert.Equal(expected: ValidArtifact.EmbeddingModel, actual: artifact.EmbeddingModel);
+        Assert.Equal(expected: ValidArtifact.TrainedFrom, actual: artifact.TrainedFrom);
+        Assert.Equal(2, actual: artifact.Entries.Count);
+        Assert.Equal(expected: "model-a", actual: artifact.Entries.Single(e => e.TaskId == "t1").Label);
+        Assert.Equal(expected: [1f, 0f], actual: artifact.Entries.Single(e => e.TaskId == "t1").Embedding);
     }
 
     [Fact]
@@ -53,7 +53,8 @@ public class KnnRetrievalArtifactSerializerTests
     [Fact]
     public void Deserialize_EmbeddingLengthMismatch_Throws()
     {
-        var json = """{"embeddingDimension":2,"embeddingModel":"m","entries":[{"taskId":"t1","embedding":[1.0],"label":"model-a"}],"trainedFrom":"x"}""";
+        var json =
+            """{"embeddingDimension":2,"embeddingModel":"m","entries":[{"taskId":"t1","embedding":[1.0],"label":"model-a"}],"trainedFrom":"x"}""";
 
         Assert.Throws<FormatException>(() => KnnRetrievalArtifactSerializer.Deserialize(json));
     }
@@ -62,11 +63,11 @@ public class KnnRetrievalArtifactSerializerTests
     public void Deserialize_DuplicateTaskId_Throws()
     {
         var json = """
-            {"embeddingDimension":1,"embeddingModel":"m","entries":[
-                {"taskId":"t1","embedding":[1.0],"label":"model-a"},
-                {"taskId":"t1","embedding":[0.5],"label":"model-b"}
-            ],"trainedFrom":"x"}
-            """;
+                   {"embeddingDimension":1,"embeddingModel":"m","entries":[
+                       {"taskId":"t1","embedding":[1.0],"label":"model-a"},
+                       {"taskId":"t1","embedding":[0.5],"label":"model-b"}
+                   ],"trainedFrom":"x"}
+                   """;
 
         Assert.Throws<FormatException>(() => KnnRetrievalArtifactSerializer.Deserialize(json));
     }
@@ -78,12 +79,15 @@ public class KnnRetrievalArtifactSerializerTests
     [Fact]
     public void Deserialize_EmbeddingOverflowsToInfinity_Throws()
     {
-        var json = """{"embeddingDimension":1,"embeddingModel":"m","entries":[{"taskId":"t1","embedding":[1e400],"label":"model-a"}],"trainedFrom":"x"}""";
+        var json =
+            """{"embeddingDimension":1,"embeddingModel":"m","entries":[{"taskId":"t1","embedding":[1e400],"label":"model-a"}],"trainedFrom":"x"}""";
 
         Assert.Throws<FormatException>(() => KnnRetrievalArtifactSerializer.Deserialize(json));
     }
 
     [Fact]
-    public void Deserialize_NullDocument_Throws() =>
+    public void Deserialize_NullDocument_Throws()
+    {
         Assert.Throws<FormatException>(() => KnnRetrievalArtifactSerializer.Deserialize("null"));
+    }
 }

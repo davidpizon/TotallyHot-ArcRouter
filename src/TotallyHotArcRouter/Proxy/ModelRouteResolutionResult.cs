@@ -15,7 +15,10 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// payload translator).
 /// </summary>
 /// <param name="Route">The resolved upstream route for this candidate.</param>
-/// <param name="RewrittenBody">The request body with <c>model</c> rewritten to <see cref="ResolvedModelRoute.ProviderModelId"/>.</param>
+/// <param name="RewrittenBody">
+/// The request body with <c>model</c> rewritten to
+/// <see cref="ResolvedModelRoute.ProviderModelId"/>.
+/// </param>
 /// <param name="CarriesTools">
 /// Whether the client's request body carried a non-empty <c>tools</c> array. Read off the
 /// <c>JsonObject</c> already parsed to rewrite <c>model</c>, so it costs nothing beyond the check itself -
@@ -263,7 +266,10 @@ public sealed record ModelRouteResolutionResult
     /// Creates a successful resolution result from an ordered candidate list (primary first, then fallbacks).
     /// </summary>
     /// <param name="candidates">The ordered candidate list; must contain at least the primary route.</param>
-    /// <param name="requestedModelName">See <see cref="RequestedModelName"/>. No default - a silently-omitted client-literal name is worse than a compile error, same reasoning <see cref="RouteCandidate.CarriesTools"/> already applies.</param>
+    /// <param name="requestedModelName">
+    /// See <see cref="RequestedModelName"/>. No default - a silently-omitted client-literal
+    /// name is worse than a compile error, same reasoning <see cref="RouteCandidate.CarriesTools"/> already applies.
+    /// </param>
     /// <param name="substitutionReason">See <see cref="SubstitutionReason"/>.</param>
     /// <param name="taskEmbedding">See <see cref="TaskEmbedding"/>.</param>
     /// <param name="routerTokens">See <see cref="RouterTokens"/>.</param>
@@ -273,7 +279,10 @@ public sealed record ModelRouteResolutionResult
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
     /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
-    /// <exception cref="ArgumentException"><paramref name="candidates"/> is empty - a success must have at least the primary route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="candidates"/> is empty - a success must have at least the primary
+    /// route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.
+    /// </exception>
     public static ModelRouteResolutionResult Success(
         IReadOnlyList<RouteCandidate> candidates,
         string requestedModelName,
@@ -289,11 +298,15 @@ public sealed record ModelRouteResolutionResult
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
-        {
-            throw new ArgumentException("A successful resolution must contain at least the primary route candidate.", nameof(candidates));
-        }
+            throw new ArgumentException(
+                message: "A successful resolution must contain at least the primary route candidate.",
+                paramName: nameof(candidates));
 
-        return new(true, candidates, null, requestedModelName, substitutionReason, taskEmbedding, routerTokens, isExploratory, propensity, classification, taskText, dimBestModel, explicitCircuitTripBlockMessage);
+        return new ModelRouteResolutionResult(true, candidates: candidates, null,
+            requestedModelName: requestedModelName, substitutionReason: substitutionReason,
+            taskEmbedding: taskEmbedding, routerTokens: routerTokens, isExploratory: isExploratory,
+            propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
+            explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);
     }
 
     /// <summary>
@@ -304,7 +317,10 @@ public sealed record ModelRouteResolutionResult
     /// failed resolution never reaches <c>ProxyMiddleware.PublishTelemetryAsync</c>, so there is no event
     /// for the figure to appear on and no savings denominator it could distort.
     /// </remarks>
-    public static ModelRouteResolutionResult Failure(string errorMessage) =>
-        new(false, null, errorMessage, null, RoutingSubstitutionReason.None, null, 0, false, 1.0, null, null, null, null);
+    public static ModelRouteResolutionResult Failure(string errorMessage)
+    {
+        return new ModelRouteResolutionResult(false, null, errorMessage: errorMessage, null,
+            substitutionReason: RoutingSubstitutionReason.None,
+            null, 0, false, 1.0, null, null, null, null);
+    }
 }
-

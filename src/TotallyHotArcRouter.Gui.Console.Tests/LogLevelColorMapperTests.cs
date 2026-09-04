@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Console;
-
 namespace TotallyHot.ArcRouter.Gui.Console.Tests;
 
 /// <summary>Covers <see cref="LogLevelColorMapper"/>: level-to-color mapping for the log viewport.</summary>
@@ -19,13 +17,13 @@ public class LogLevelColorMapperTests
     [InlineData("CRITICAL", LogLevelColorMapper.FatalColor)]
     public void GetColor_KnownLevel_ReturnsSpecColor(string level, string expectedColor)
     {
-        Assert.Equal(expectedColor, LogLevelColorMapper.GetColor(level));
+        Assert.Equal(expected: expectedColor, actual: LogLevelColorMapper.GetColor(level));
     }
 
     [Fact]
     public void GetColor_MixedCaseWithWhitespace_IsCaseAndTrimInsensitive()
     {
-        Assert.Equal(LogLevelColorMapper.ErrorColor, LogLevelColorMapper.GetColor("  Error  "));
+        Assert.Equal(expected: LogLevelColorMapper.ErrorColor, actual: LogLevelColorMapper.GetColor("  Error  "));
     }
 
     [Theory]
@@ -35,7 +33,6 @@ public class LogLevelColorMapperTests
     [InlineData("NOTALEVEL")]
     public void GetColor_UnrecognizedLevel_FallsBackWithoutThrowing(string? level)
     {
-        Assert.Equal(LogLevelColorMapper.UnknownColor, LogLevelColorMapper.GetColor(level));
+        Assert.Equal(expected: LogLevelColorMapper.UnknownColor, actual: LogLevelColorMapper.GetColor(level));
     }
 }
-

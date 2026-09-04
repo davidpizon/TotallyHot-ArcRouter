@@ -1,8 +1,7 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Tests.TestSupport;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.Router;
 
@@ -28,8 +27,9 @@ public sealed class EmbeddingMemoryModelIdentityTests
 
         // A pre-existing 3-dimensional entry, as if written before the embedding dimension changed.
         await store.AppendAsync(
-            new MemoryEntry(0, [1f, 0f, 0f], "old-model", 0.9, 0.0, null, DateTimeOffset.UtcNow),
-            TestContext.Current.CancellationToken);
+            entry: new MemoryEntry(0, TaskEmbedding: [1f, 0f, 0f], ChosenModel: "old-model", 0.9, 0.0, null,
+                CreatedAtUtc: DateTimeOffset.UtcNow),
+            cancellationToken: TestContext.Current.CancellationToken);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var neighbors = memory.FindNearest([1f, 0f]);
@@ -46,11 +46,12 @@ public sealed class EmbeddingMemoryModelIdentityTests
     public async Task FindNearest_EntryFromADifferentEmbeddingModel_IsSkipped()
     {
         var store = new InMemoryMemoryEntryStore();
-        var memory = CreateMemory(store, modelIdentity: "model-b");
+        var memory = CreateMemory(store: store, modelIdentity: "model-b");
 
-        await store.AppendAsync(new MemoryEntry(
-            0, [1f, 0f], "old-model", 0.9, 0.0, null, DateTimeOffset.UtcNow, EmbeddingModel: "model-a"),
-            TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: new MemoryEntry(
+                0, TaskEmbedding: [1f, 0f], ChosenModel: "old-model", 0.9, 0.0, null,
+                CreatedAtUtc: DateTimeOffset.UtcNow, EmbeddingModel: "model-a"),
+            cancellationToken: TestContext.Current.CancellationToken);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var neighbors = memory.FindNearest([1f, 0f]);
@@ -63,16 +64,17 @@ public sealed class EmbeddingMemoryModelIdentityTests
     public async Task FindNearest_EntryFromTheSameEmbeddingModel_IsReturned()
     {
         var store = new InMemoryMemoryEntryStore();
-        var memory = CreateMemory(store, modelIdentity: "model-a");
+        var memory = CreateMemory(store: store, modelIdentity: "model-a");
 
-        await store.AppendAsync(new MemoryEntry(
-            0, [1f, 0f], "chosen-model", 0.9, 0.0, null, DateTimeOffset.UtcNow, EmbeddingModel: "model-a"),
-            TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: new MemoryEntry(
+                0, TaskEmbedding: [1f, 0f], ChosenModel: "chosen-model", 0.9, 0.0, null,
+                CreatedAtUtc: DateTimeOffset.UtcNow, EmbeddingModel: "model-a"),
+            cancellationToken: TestContext.Current.CancellationToken);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var neighbors = memory.FindNearest([1f, 0f]);
 
-        Assert.Equal("chosen-model", Assert.Single(neighbors).Entry.ChosenModel);
+        Assert.Equal(expected: "chosen-model", actual: Assert.Single(neighbors).Entry.ChosenModel);
     }
 
     /// <summary>
@@ -85,16 +87,17 @@ public sealed class EmbeddingMemoryModelIdentityTests
     public async Task FindNearest_LegacyEntryWithNoRecordedModel_IsTreatedAsComparable()
     {
         var store = new InMemoryMemoryEntryStore();
-        var memory = CreateMemory(store, modelIdentity: "model-a");
+        var memory = CreateMemory(store: store, modelIdentity: "model-a");
 
-        await store.AppendAsync(new MemoryEntry(
-            0, [1f, 0f], "chosen-model", 0.9, 0.0, null, DateTimeOffset.UtcNow, EmbeddingModel: null),
-            TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: new MemoryEntry(
+                0, TaskEmbedding: [1f, 0f], ChosenModel: "chosen-model", 0.9, 0.0, null,
+                CreatedAtUtc: DateTimeOffset.UtcNow, EmbeddingModel: null),
+            cancellationToken: TestContext.Current.CancellationToken);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var neighbors = memory.FindNearest([1f, 0f]);
 
-        Assert.Equal("chosen-model", Assert.Single(neighbors).Entry.ChosenModel);
+        Assert.Equal(expected: "chosen-model", actual: Assert.Single(neighbors).Entry.ChosenModel);
     }
 
     /// <summary>A comparable entry is still returned even when an incomparable one sits ahead of it.</summary>
@@ -102,22 +105,25 @@ public sealed class EmbeddingMemoryModelIdentityTests
     public async Task FindNearest_MixedComparableAndIncomparableEntries_ReturnsOnlyTheComparableOnes()
     {
         var store = new InMemoryMemoryEntryStore();
-        var memory = CreateMemory(store, modelIdentity: "model-b");
+        var memory = CreateMemory(store: store, modelIdentity: "model-b");
 
-        await store.AppendAsync(new MemoryEntry(
-            0, [1f, 0f, 0f], "wrong-length", 1.0, 0.0, null, DateTimeOffset.UtcNow, EmbeddingModel: "model-b"),
-            TestContext.Current.CancellationToken);
-        await store.AppendAsync(new MemoryEntry(
-            0, [1f, 0f], "wrong-model", 1.0, 0.0, null, DateTimeOffset.UtcNow, EmbeddingModel: "model-a"),
-            TestContext.Current.CancellationToken);
-        await store.AppendAsync(new MemoryEntry(
-            0, [1f, 0f], "keeper", 0.5, 0.0, null, DateTimeOffset.UtcNow, EmbeddingModel: "model-b"),
-            TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: new MemoryEntry(
+                0, TaskEmbedding: [1f, 0f, 0f], ChosenModel: "wrong-length", 1.0, 0.0, null,
+                CreatedAtUtc: DateTimeOffset.UtcNow, EmbeddingModel: "model-b"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: new MemoryEntry(
+                0, TaskEmbedding: [1f, 0f], ChosenModel: "wrong-model", 1.0, 0.0, null,
+                CreatedAtUtc: DateTimeOffset.UtcNow, EmbeddingModel: "model-a"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.AppendAsync(entry: new MemoryEntry(
+                0, TaskEmbedding: [1f, 0f], ChosenModel: "keeper", 0.5, 0.0, null, CreatedAtUtc: DateTimeOffset.UtcNow,
+                EmbeddingModel: "model-b"),
+            cancellationToken: TestContext.Current.CancellationToken);
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var neighbors = memory.FindNearest([1f, 0f]);
 
-        Assert.Equal("keeper", Assert.Single(neighbors).Entry.ChosenModel);
+        Assert.Equal(expected: "keeper", actual: Assert.Single(neighbors).Entry.ChosenModel);
     }
 
     /// <summary>Entries written through the memory carry the producing client's identity.</summary>
@@ -125,25 +131,28 @@ public sealed class EmbeddingMemoryModelIdentityTests
     public async Task AddEntryAsync_StampsTheCurrentEmbeddingModelIdentity()
     {
         var store = new InMemoryMemoryEntryStore();
-        var memory = CreateMemory(store, modelIdentity: "model-a");
+        var memory = CreateMemory(store: store, modelIdentity: "model-a");
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
-        var entry = await memory.AddEntryAsync([1f, 0f], "chosen-model", 0.8, 0.0, null, TestContext.Current.CancellationToken);
+        var entry = await memory.AddEntryAsync(taskEmbedding: [1f, 0f], chosenModel: "chosen-model", 0.8, 0.0, null,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("model-a", entry.EmbeddingModel);
+        Assert.Equal(expected: "model-a", actual: entry.EmbeddingModel);
     }
 
-    private static EmbeddingMemory CreateMemory(IMemoryEntryStore store, string? modelIdentity = null) =>
-        new(
-            store,
-            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
+    private static EmbeddingMemory CreateMemory(IMemoryEntryStore store, string? modelIdentity = null)
+    {
+        return new EmbeddingMemory(
+            store: store,
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions
             {
                 EmbeddingSimilarityThreshold = 0.1,
                 MaxNeighborCount = 10,
-                EmbeddingMemoryCapacity = 100,
+                EmbeddingMemoryCapacity = 100
             }),
-            new StubEmbeddingClient(modelIdentity),
-            NullLogger<EmbeddingMemory>.Instance);
+            embeddingClient: new StubEmbeddingClient(modelIdentity),
+            logger: NullLogger<EmbeddingMemory>.Instance);
+    }
 
     /// <summary>A minimal in-memory <see cref="IMemoryEntryStore"/> assigning increasing ids on append.</summary>
     private sealed class InMemoryMemoryEntryStore : IMemoryEntryStore
@@ -151,11 +160,13 @@ public sealed class EmbeddingMemoryModelIdentityTests
         private readonly List<MemoryEntry> _entries = [];
         private long _nextId = 1;
 
-        /// <inheritdoc />
-        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
+        /// <inheritdoc/>
+        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
+        }
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             var persisted = entry with { Id = _nextId++ };
@@ -163,15 +174,17 @@ public sealed class EmbeddingMemoryModelIdentityTests
             return Task.FromResult(persisted);
         }
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public Task DeleteAsync(long id, CancellationToken cancellationToken = default)
         {
             _entries.RemoveAll(entry => entry.Id == id);
             return Task.CompletedTask;
         }
 
-        /// <inheritdoc />
-        public Task<long> GetMaxIdAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(_entries.Count == 0 ? 0 : _entries.Max(entry => entry.Id));
+        /// <inheritdoc/>
+        public Task<long> GetMaxIdAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(_entries.Count == 0 ? 0 : _entries.Max(entry => entry.Id));
+        }
     }
 }

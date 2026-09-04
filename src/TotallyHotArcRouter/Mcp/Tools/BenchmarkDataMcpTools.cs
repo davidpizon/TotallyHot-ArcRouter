@@ -1,7 +1,7 @@
-using System.ComponentModel;
-using TotallyHot.ArcRouter.CodeRouterBench;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
+using System.ComponentModel;
+using TotallyHot.ArcRouter.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Mcp.Tools;
 
@@ -14,9 +14,9 @@ namespace TotallyHot.ArcRouter.Mcp.Tools;
 [McpServerToolType]
 public sealed class BenchmarkDataMcpTools
 {
+    private readonly BenchmarkSyncOptions _options;
     private readonly BenchmarkDataStatusService _statusService;
     private readonly BenchmarkSyncService _syncService;
-    private readonly BenchmarkSyncOptions _options;
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkDataMcpTools"/> class.</summary>
     public BenchmarkDataMcpTools(
@@ -38,13 +38,19 @@ public sealed class BenchmarkDataMcpTools
     /// tool is called before <c>StartupHealthCheckHostedService</c>'s own startup probe completes).
     /// </summary>
     [McpServerTool(Name = "get_benchmark_data_status")]
-    [Description("Reports the CodeRouterBench corpus's sync freshness relative to the published Hugging Face dataset: Current, Update, or CheckFailed.")]
-    public async Task<BenchmarkDataStatus> GetBenchmarkDataStatusAsync(CancellationToken cancellationToken) =>
-        _statusService.Current ?? await _statusService.RecheckAsync(cancellationToken).ConfigureAwait(false);
+    [Description(
+        "Reports the CodeRouterBench corpus's sync freshness relative to the published Hugging Face dataset: Current, Update, or CheckFailed.")]
+    public async Task<BenchmarkDataStatus> GetBenchmarkDataStatusAsync(CancellationToken cancellationToken)
+    {
+        return _statusService.Current ?? await _statusService.RecheckAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>Runs one corpus sync now, downloading, verifying, and importing every file.</summary>
     [McpServerTool(Name = "sync_benchmark_data")]
-    [Description("Downloads, verifies, and imports the CodeRouterBench corpus from Hugging Face now, replacing any existing rows for each file that succeeds. A per-file failure (checksum or row-count mismatch) leaves that file's prior data untouched and is reported in the result rather than thrown.")]
-    public Task<BenchmarkSyncResult> SyncBenchmarkDataAsync(CancellationToken cancellationToken) =>
-        _syncService.SyncAsync(_options.DatasetRef, progress: null, cancellationToken);
+    [Description(
+        "Downloads, verifies, and imports the CodeRouterBench corpus from Hugging Face now, replacing any existing rows for each file that succeeds. A per-file failure (checksum or row-count mismatch) leaves that file's prior data untouched and is reported in the result rather than thrown.")]
+    public Task<BenchmarkSyncResult> SyncBenchmarkDataAsync(CancellationToken cancellationToken)
+    {
+        return _syncService.SyncAsync(datasetRef: _options.DatasetRef, null, cancellationToken: cancellationToken);
+    }
 }

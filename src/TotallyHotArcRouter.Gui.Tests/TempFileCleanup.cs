@@ -11,9 +11,6 @@ internal sealed class TempFileCleanup(string path) : IDisposable
     /// <summary>Deletes the file at <paramref name="path"/> if it still exists.</summary>
     public void Dispose()
     {
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
+        if (File.Exists(path)) File.Delete(path);
     }
 }

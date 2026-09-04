@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
@@ -19,6 +19,6 @@ public class CostReconciliationOptionsTests
     {
         var options = new CostReconciliationOptions { PollIntervalHours = pollIntervalHours };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 }

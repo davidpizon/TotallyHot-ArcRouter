@@ -1,5 +1,5 @@
-using System.Reflection;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Transcripts;
@@ -8,8 +8,12 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// Layers <see cref="RouterSettingsStore"/>'s stored override onto <see cref="TranscriptOptions.Enabled"/>,
 /// the <see cref="TranscriptOptions"/> counterpart of <see cref="Router.RouterSettingsConfigureOptions"/>.
 /// Registered as the last <c>IConfigureOptions&lt;TranscriptOptions&gt;</c> step, so it runs after the
-/// <c>appsettings.json</c>-binding step and wins - <b>stored override &gt; appsettings.json &gt; coded
-/// default</b>, the same three-level precedence <see cref="Router.RouterSettingsConfigureOptions"/>
+/// <c>appsettings.json</c>-binding step and wins -
+/// <b>
+/// stored override &gt; appsettings.json &gt; coded
+/// default
+/// </b>
+/// , the same three-level precedence <see cref="Router.RouterSettingsConfigureOptions"/>
 /// documents for <see cref="Models.RoutingOptions"/>. Only ever overwrites <see cref="TranscriptOptions.Enabled"/>,
 /// and only when a row actually exists for <see cref="RouterSettingsStore.TranscriptCaptureEnabledKey"/> - a
 /// missing row means "no override", leaving whatever the earlier steps already produced untouched.
@@ -36,14 +40,12 @@ public sealed class TranscriptSettingsConfigureOptions : IConfigureOptions<Trans
         _store = store;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Configure(TranscriptOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (_store.TryGetBool(RouterSettingsStore.TranscriptCaptureEnabledKey, out var enabled))
-        {
-            EnabledProperty.SetValue(options, enabled);
-        }
+        if (_store.TryGetBool(key: RouterSettingsStore.TranscriptCaptureEnabledKey, value: out var enabled))
+            EnabledProperty.SetValue(obj: options, value: enabled);
     }
 }

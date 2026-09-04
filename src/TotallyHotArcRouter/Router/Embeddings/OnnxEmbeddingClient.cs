@@ -1,5 +1,4 @@
 using FastBertTokenizer;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -26,11 +25,12 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
     /// <summary>The cached tokenizer JSON file's name within <see cref="EmbeddingOptions.ModelCacheDirectory"/>.</summary>
     private const string TokenizerFileName = "tokenizer.json";
 
-    private readonly EmbeddingOptions _options;
-    private readonly ILogger<OnnxEmbeddingClient> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly SemaphoreSlim _initLock = new(1, 1);
     private readonly SemaphoreSlim _inferenceLock = new(1, 1);
+    private readonly SemaphoreSlim _initLock = new(1, 1);
+    private readonly ILogger<OnnxEmbeddingClient> _logger;
+
+    private readonly EmbeddingOptions _options;
 
     private InferenceSession? _session;
     private BertTokenizer? _tokenizer;
@@ -56,7 +56,25 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        await _initLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _session?.Dispose();
+            _session = null;
+        }
+        finally
+        {
+            _initLock.Release();
+        }
+
+        _initLock.Dispose();
+        _inferenceLock.Dispose();
+    }
+
+    /// <inheritdoc/>
     /// <remarks>
     /// The configured <see cref="EmbeddingOptions.ModelUrl"/>, which is what actually determines the
     /// weights this session loads. Deliberately not combined with
@@ -66,7 +84,7 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
     /// </remarks>
     public string ModelIdentity => _options.ModelUrl;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -95,12 +113,13 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
     /// </summary>
     private EmbeddingResult RunInference(string text)
     {
-        var (inputIds, attentionMask, tokenTypeIds) = _tokenizer!.Encode(text, _options.MaxTokens, null);
+        var (inputIds, attentionMask, tokenTypeIds) =
+            _tokenizer!.Encode(input: text, maximumTokens: _options.MaxTokens);
         var sequenceLength = inputIds.Length;
 
-        var inputIdsTensor = new DenseTensor<long>(new[] { 1, sequenceLength });
-        var attentionMaskTensor = new DenseTensor<long>(new[] { 1, sequenceLength });
-        var tokenTypeIdsTensor = new DenseTensor<long>(new[] { 1, sequenceLength });
+        var inputIdsTensor = new DenseTensor<long>([1, sequenceLength]);
+        var attentionMaskTensor = new DenseTensor<long>([1, sequenceLength]);
+        var tokenTypeIdsTensor = new DenseTensor<long>([1, sequenceLength]);
 
         for (var i = 0; i < sequenceLength; i++)
         {
@@ -111,9 +130,9 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
 
         var inputs = new List<NamedOnnxValue>
         {
-            NamedOnnxValue.CreateFromTensor("input_ids", inputIdsTensor),
-            NamedOnnxValue.CreateFromTensor("attention_mask", attentionMaskTensor),
-            NamedOnnxValue.CreateFromTensor("token_type_ids", tokenTypeIdsTensor),
+            NamedOnnxValue.CreateFromTensor(name: "input_ids", value: inputIdsTensor),
+            NamedOnnxValue.CreateFromTensor(name: "attention_mask", value: attentionMaskTensor),
+            NamedOnnxValue.CreateFromTensor(name: "token_type_ids", value: tokenTypeIdsTensor)
         };
 
         using var results = _session!.Run(inputs);
@@ -122,41 +141,30 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         // [CLS] pooling: the first token position of the last hidden state, per BGE's model card.
         var hiddenSize = hiddenState.Dimensions[^1];
         if (hiddenSize != _options.EmbeddingDimension)
-        {
             throw new InvalidOperationException(
                 $"BGE ONNX model produced a {hiddenSize}-dimensional embedding, but {_options.EmbeddingDimension} was configured.");
-        }
 
         var embedding = new float[hiddenSize];
-        for (var i = 0; i < hiddenSize; i++)
-        {
-            embedding[i] = hiddenState[0, 0, i];
-        }
+        for (var i = 0; i < hiddenSize; i++) embedding[i] = hiddenState[0, 0, i];
 
         Normalize(embedding);
-        return new EmbeddingResult(embedding, sequenceLength);
+        return new EmbeddingResult(Vector: embedding, TokenCount: sequenceLength);
     }
 
-    /// <summary>L2-normalizes <paramref name="vector"/> in place so its magnitude is 1, leaving an all-zero vector unchanged rather than dividing by zero.</summary>
+    /// <summary>
+    /// L2-normalizes <paramref name="vector"/> in place so its magnitude is 1, leaving an all-zero vector unchanged
+    /// rather than dividing by zero.
+    /// </summary>
     /// <param name="vector">The vector to normalize.</param>
     private static void Normalize(float[] vector)
     {
         var sumOfSquares = 0.0;
-        foreach (var component in vector)
-        {
-            sumOfSquares += (double)component * component;
-        }
+        foreach (var component in vector) sumOfSquares += (double)component * component;
 
         var norm = Math.Sqrt(sumOfSquares);
-        if (norm <= 0)
-        {
-            return;
-        }
+        if (norm <= 0) return;
 
-        for (var i = 0; i < vector.Length; i++)
-        {
-            vector[i] = (float)(vector[i] / norm);
-        }
+        for (var i = 0; i < vector.Length; i++) vector[i] = (float)(vector[i] / norm);
     }
 
     /// <summary>
@@ -167,27 +175,23 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
     /// <param name="cancellationToken">A cancellation token.</param>
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
-        if (_session is not null && _tokenizer is not null)
-        {
-            return;
-        }
+        if (_session is not null && _tokenizer is not null) return;
 
         await _initLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_session is not null && _tokenizer is not null)
-            {
-                return;
-            }
+            if (_session is not null && _tokenizer is not null) return;
 
             var cacheDirectory = _options.ResolveModelCacheDirectory();
             Directory.CreateDirectory(cacheDirectory);
 
-            var modelPath = Path.Combine(cacheDirectory, ModelFileName);
-            var tokenizerPath = Path.Combine(cacheDirectory, TokenizerFileName);
+            var modelPath = Path.Combine(path1: cacheDirectory, path2: ModelFileName);
+            var tokenizerPath = Path.Combine(path1: cacheDirectory, path2: TokenizerFileName);
 
-            await EnsureArtifactCachedAsync(modelPath, _options.ModelUrl, cancellationToken).ConfigureAwait(false);
-            await EnsureArtifactCachedAsync(tokenizerPath, _options.TokenizerJsonUrl, cancellationToken).ConfigureAwait(false);
+            await EnsureArtifactCachedAsync(destinationPath: modelPath, sourceUrl: _options.ModelUrl,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            await EnsureArtifactCachedAsync(destinationPath: tokenizerPath, sourceUrl: _options.TokenizerJsonUrl,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
 
             var tokenizer = new BertTokenizer();
             await tokenizer.LoadTokenizerJsonAsync(tokenizerPath).ConfigureAwait(false);
@@ -196,7 +200,7 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
             _session = new InferenceSession(modelPath);
 
             _logger.LogInformation(
-                "Loaded BGE embedding model from {CacheDirectory}.", cacheDirectory);
+                message: "Loaded BGE embedding model from {CacheDirectory}.", cacheDirectory);
         }
         finally
         {
@@ -208,15 +212,13 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
     /// Downloads an artifact to <paramref name="destinationPath"/> if it is not already present -
     /// the documented cold-start path for a first run before the model has been cached locally.
     /// </summary>
-    private async Task EnsureArtifactCachedAsync(string destinationPath, string sourceUrl, CancellationToken cancellationToken)
+    private async Task EnsureArtifactCachedAsync(string destinationPath, string sourceUrl,
+        CancellationToken cancellationToken)
     {
-        if (File.Exists(destinationPath))
-        {
-            return;
-        }
+        if (File.Exists(destinationPath)) return;
 
         _logger.LogInformation(
-            "Embedding artifact {DestinationPath} not found in cache; downloading from {SourceUrl}.",
+            message: "Embedding artifact {DestinationPath} not found in cache; downloading from {SourceUrl}.",
             destinationPath,
             sourceUrl);
 
@@ -224,17 +226,19 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         try
         {
             using var httpClient = _httpClientFactory.CreateClient(nameof(OnnxEmbeddingClient));
-            using var response = await httpClient.GetAsync(sourceUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            using var response = await httpClient.GetAsync(requestUri: sourceUrl,
+                    completionOption: HttpCompletionOption.ResponseHeadersRead, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
             await using (var destination = File.Create(temporaryPath))
             {
-                await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+                await source.CopyToAsync(destination: destination, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
             }
 
-            File.Move(temporaryPath, destinationPath, overwrite: true);
+            File.Move(sourceFileName: temporaryPath, destFileName: destinationPath, true);
         }
         catch (OperationCanceledException)
         {
@@ -245,29 +249,12 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
         {
             File.Delete(temporaryPath);
             _logger.LogError(
-                ex,
+                exception: ex,
+                message:
                 "Failed to download embedding artifact from {SourceUrl}. Routing memory retrieval is unavailable until this artifact is cached, either by network access or by manually placing the file at {DestinationPath}.",
                 sourceUrl,
                 destinationPath);
             throw;
         }
-    }
-
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        await _initLock.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            _session?.Dispose();
-            _session = null;
-        }
-        finally
-        {
-            _initLock.Release();
-        }
-
-        _initLock.Dispose();
-        _inferenceLock.Dispose();
     }
 }

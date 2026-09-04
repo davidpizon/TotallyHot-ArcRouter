@@ -18,19 +18,22 @@ public sealed class IncrementalUsageScanner
     /// <summary>Default tail window size: generous relative to a single trailing SSE usage event.</summary>
     public const int DefaultMaxTailBytes = 65_536;
 
-    private readonly int _maxTailBytes;
     private readonly byte[] _buffer;
-    private int _writePos;
+
+    private readonly int _maxTailBytes;
     private int _count;
+    private int _writePos;
 
     /// <summary>Initializes a new instance of the <see cref="IncrementalUsageScanner"/> class.</summary>
-    /// <param name="maxTailBytes">The maximum number of trailing bytes retained. Defaults to <see cref="DefaultMaxTailBytes"/>.</param>
+    /// <param name="maxTailBytes">
+    /// The maximum number of trailing bytes retained. Defaults to <see cref="DefaultMaxTailBytes"/>
+    /// .
+    /// </param>
     public IncrementalUsageScanner(int maxTailBytes = DefaultMaxTailBytes)
     {
         if (maxTailBytes <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maxTailBytes), maxTailBytes, "Must be positive.");
-        }
+            throw new ArgumentOutOfRangeException(paramName: nameof(maxTailBytes), actualValue: maxTailBytes,
+                message: "Must be positive.");
 
         _maxTailBytes = maxTailBytes;
         _buffer = new byte[maxTailBytes];
@@ -45,10 +48,7 @@ public sealed class IncrementalUsageScanner
     /// </summary>
     public void Append(ReadOnlySpan<byte> chunk)
     {
-        if (chunk.IsEmpty)
-        {
-            return;
-        }
+        if (chunk.IsEmpty) return;
 
         if (chunk.Length >= _maxTailBytes)
         {
@@ -61,16 +61,13 @@ public sealed class IncrementalUsageScanner
             return;
         }
 
-        var firstLen = Math.Min(chunk.Length, _maxTailBytes - _writePos);
+        var firstLen = Math.Min(val1: chunk.Length, val2: _maxTailBytes - _writePos);
         chunk[..firstLen].CopyTo(_buffer.AsSpan(_writePos));
         var remaining = chunk.Length - firstLen;
-        if (remaining > 0)
-        {
-            chunk[firstLen..].CopyTo(_buffer.AsSpan(0, remaining));
-        }
+        if (remaining > 0) chunk[firstLen..].CopyTo(_buffer.AsSpan(0, length: remaining));
 
         _writePos = (_writePos + chunk.Length) % _maxTailBytes;
-        _count = Math.Min(_count + chunk.Length, _maxTailBytes);
+        _count = Math.Min(val1: _count + chunk.Length, val2: _maxTailBytes);
     }
 
     /// <summary>
@@ -89,12 +86,10 @@ public sealed class IncrementalUsageScanner
         ArgumentNullException.ThrowIfNull(extractor);
 
         usage = default;
-        if (_count == 0)
-        {
-            return false;
-        }
+        if (_count == 0) return false;
 
-        return extractor.TryExtractUsage(provider, isStreaming, MaterializeTail(), out usage);
+        return extractor.TryExtractUsage(provider: provider, isStreaming: isStreaming,
+            bufferedResponseBody: MaterializeTail(), usage: out usage);
     }
 
     /// <summary>Copies the circular buffer's valid range, oldest byte first, into a contiguous array.</summary>
@@ -102,13 +97,10 @@ public sealed class IncrementalUsageScanner
     {
         var result = new byte[_count];
         var oldestIndex = (_writePos - _count + _maxTailBytes) % _maxTailBytes;
-        var firstLen = Math.Min(_count, _maxTailBytes - oldestIndex);
-        _buffer.AsSpan(oldestIndex, firstLen).CopyTo(result);
+        var firstLen = Math.Min(val1: _count, val2: _maxTailBytes - oldestIndex);
+        _buffer.AsSpan(start: oldestIndex, length: firstLen).CopyTo(result);
         var remaining = _count - firstLen;
-        if (remaining > 0)
-        {
-            _buffer.AsSpan(0, remaining).CopyTo(result.AsSpan(firstLen));
-        }
+        if (remaining > 0) _buffer.AsSpan(0, length: remaining).CopyTo(result.AsSpan(firstLen));
 
         return result;
     }

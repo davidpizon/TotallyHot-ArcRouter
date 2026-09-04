@@ -38,16 +38,13 @@ internal static class SecureFile
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
             RestrictToCurrentUserWindows(path);
-        }
         else
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
+            File.SetUnixFileMode(path: path, mode: UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        stream.Write(content, 0, content.Length);
+        using var stream = new FileStream(path: path, mode: FileMode.Create, access: FileAccess.Write,
+            share: FileShare.None);
+        stream.Write(buffer: content, 0, count: content.Length);
         stream.Flush();
     }
 
@@ -78,19 +75,16 @@ internal static class SecureFile
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
             RestrictToMachineAccountsWindows(path);
-        }
         else
-        {
             // 0644: owner writes, everyone reads - the POSIX equivalent of the Windows ACL above.
             File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
-        }
+                path: path,
+                mode: UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
 
-        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        stream.Write(content, 0, content.Length);
+        using var stream = new FileStream(path: path, mode: FileMode.Create, access: FileAccess.Write,
+            share: FileShare.None);
+        stream.Write(buffer: content, 0, count: content.Length);
         stream.Flush();
     }
 
@@ -112,36 +106,34 @@ internal static class SecureFile
         var security = new FileSecurity();
         // Break inheritance and drop every inherited rule first, so the rules below are the complete access
         // list - not "these plus whatever the parent folder already allowed".
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetAccessRuleProtection(true, false);
 
         // These two are well-known SIDs present on every Windows installation, so unlike
         // RestrictToCurrentUserWindows there is no resolution failure to guard against here.
         security.AddAccessRule(new FileSystemAccessRule(
-            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, domainSid: null),
-            FileSystemRights.FullControl,
-            AccessControlType.Allow));
+            identity: new SecurityIdentifier(sidType: WellKnownSidType.LocalSystemSid, null),
+            fileSystemRights: FileSystemRights.FullControl,
+            type: AccessControlType.Allow));
 
         security.AddAccessRule(new FileSystemAccessRule(
-            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, domainSid: null),
-            FileSystemRights.FullControl,
-            AccessControlType.Allow));
+            identity: new SecurityIdentifier(sidType: WellKnownSidType.BuiltinAdministratorsSid, null),
+            fileSystemRights: FileSystemRights.FullControl,
+            type: AccessControlType.Allow));
 
         // Read, not FullControl: the interactive user presents this credential but never mints it, so write
         // access would let any local account replace the token the service trusts.
         security.AddAccessRule(new FileSystemAccessRule(
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
-            FileSystemRights.Read,
-            AccessControlType.Allow));
+            identity: new SecurityIdentifier(sidType: WellKnownSidType.BuiltinUsersSid, null),
+            fileSystemRights: FileSystemRights.Read,
+            type: AccessControlType.Allow));
 
         // See the remarks: without this, a writer who is neither LocalSystem nor an administrator locks
         // itself out of the file it is in the middle of creating.
         if (WindowsIdentity.GetCurrent().User is { } currentUser)
-        {
             security.AddAccessRule(new FileSystemAccessRule(
-                currentUser,
-                FileSystemRights.FullControl,
-                AccessControlType.Allow));
-        }
+                identity: currentUser,
+                fileSystemRights: FileSystemRights.FullControl,
+                type: AccessControlType.Allow));
 
         new FileInfo(path).SetAccessControl(security);
     }
@@ -156,19 +148,16 @@ internal static class SecureFile
     private static void RestrictToCurrentUserWindows(string path)
     {
         var currentUser = WindowsIdentity.GetCurrent().User;
-        if (currentUser is null)
-        {
-            return;
-        }
+        if (currentUser is null) return;
 
         var security = new FileSecurity();
         // Break inheritance and drop every inherited rule first, so the only access granted is the one
         // rule added below - not "current user plus whatever the parent folder already allowed".
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetAccessRuleProtection(true, false);
         security.AddAccessRule(new FileSystemAccessRule(
-            currentUser,
-            FileSystemRights.FullControl,
-            AccessControlType.Allow));
+            identity: currentUser,
+            fileSystemRights: FileSystemRights.FullControl,
+            type: AccessControlType.Allow));
 
         new FileInfo(path).SetAccessControl(security);
     }

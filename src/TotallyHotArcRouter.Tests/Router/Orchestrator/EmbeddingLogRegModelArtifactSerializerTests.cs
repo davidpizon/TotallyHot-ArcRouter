@@ -12,14 +12,14 @@ namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 public class EmbeddingLogRegModelArtifactSerializerTests
 {
     private static readonly EmbeddingLogRegModelArtifact ValidModel = new(
-        EmbeddingDimension: 2,
+        2,
         ClassWeights: new Dictionary<string, double[]>
         {
-            ["model-a"] = [0.0, 5.0, 0.0],
+            ["model-a"] = [0.0, 5.0, 0.0]
         },
         TrainedFrom: "unit test fixture",
-        BootstrapTaskCount: 176,
-        MemoryEntryCount: 42);
+        176,
+        42);
 
     [Fact]
     public void Deserialize_ValidArtifact_RoundTrips()
@@ -28,17 +28,18 @@ public class EmbeddingLogRegModelArtifactSerializerTests
 
         var artifact = EmbeddingLogRegModelArtifactSerializer.Deserialize(json);
 
-        Assert.Equal(ValidModel.EmbeddingDimension, artifact.EmbeddingDimension);
-        Assert.Equal(ValidModel.TrainedFrom, artifact.TrainedFrom);
-        Assert.Equal(ValidModel.BootstrapTaskCount, artifact.BootstrapTaskCount);
-        Assert.Equal(ValidModel.MemoryEntryCount, artifact.MemoryEntryCount);
-        Assert.Equal(ValidModel.ClassWeights["model-a"], artifact.ClassWeights["model-a"]);
+        Assert.Equal(expected: ValidModel.EmbeddingDimension, actual: artifact.EmbeddingDimension);
+        Assert.Equal(expected: ValidModel.TrainedFrom, actual: artifact.TrainedFrom);
+        Assert.Equal(expected: ValidModel.BootstrapTaskCount, actual: artifact.BootstrapTaskCount);
+        Assert.Equal(expected: ValidModel.MemoryEntryCount, actual: artifact.MemoryEntryCount);
+        Assert.Equal(expected: ValidModel.ClassWeights["model-a"], actual: artifact.ClassWeights["model-a"]);
     }
 
     [Fact]
     public void Deserialize_NonPositiveEmbeddingDimension_Throws()
     {
-        var json = """{"embeddingDimension":0,"classWeights":{},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
+        var json =
+            """{"embeddingDimension":0,"classWeights":{},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
 
         Assert.Throws<FormatException>(() => EmbeddingLogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -47,7 +48,8 @@ public class EmbeddingLogRegModelArtifactSerializerTests
     public void Deserialize_WeightVectorLengthMismatch_Throws()
     {
         // embeddingDimension is 2, so a valid vector must have length 3 (bias + 2 components).
-        var json = """{"embeddingDimension":2,"classWeights":{"model-a":[0.0,5.0]},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
+        var json =
+            """{"embeddingDimension":2,"classWeights":{"model-a":[0.0,5.0]},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
 
         Assert.Throws<FormatException>(() => EmbeddingLogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -61,7 +63,8 @@ public class EmbeddingLogRegModelArtifactSerializerTests
     [InlineData("-1e400")]
     public void Deserialize_WeightOverflowsToInfinity_Throws(string overflowingLiteral)
     {
-        var json = $$"""{"embeddingDimension":2,"classWeights":{"model-a":[0.0,{{overflowingLiteral}},0.0]},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
+        var json =
+            $$"""{"embeddingDimension":2,"classWeights":{"model-a":[0.0,{{overflowingLiteral}},0.0]},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
 
         Assert.Throws<FormatException>(() => EmbeddingLogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -69,7 +72,8 @@ public class EmbeddingLogRegModelArtifactSerializerTests
     [Fact]
     public void Deserialize_ClassWeightsEntryIsNull_ThrowsFormatExceptionRatherThanNullReferenceException()
     {
-        var json = """{"embeddingDimension":2,"classWeights":{"model-a":null},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
+        var json =
+            """{"embeddingDimension":2,"classWeights":{"model-a":null},"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
 
         Assert.Throws<FormatException>(() => EmbeddingLogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -77,7 +81,8 @@ public class EmbeddingLogRegModelArtifactSerializerTests
     [Fact]
     public void Deserialize_ClassWeightsIsNull_ThrowsFormatExceptionRatherThanNullReferenceException()
     {
-        var json = """{"embeddingDimension":2,"classWeights":null,"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
+        var json =
+            """{"embeddingDimension":2,"classWeights":null,"trainedFrom":"x","bootstrapTaskCount":0,"memoryEntryCount":0}""";
 
         Assert.Throws<FormatException>(() => EmbeddingLogRegModelArtifactSerializer.Deserialize(json));
     }
@@ -95,11 +100,11 @@ public class EmbeddingLogRegModelArtifactSerializerTests
         // candidate has weights) - only a positive dimension and well-formed per-class vectors are
         // required here.
         var artifact = new EmbeddingLogRegModelArtifact(
-            EmbeddingDimension: 4,
+            4,
             ClassWeights: new Dictionary<string, double[]>(),
             TrainedFrom: "x",
-            BootstrapTaskCount: 0,
-            MemoryEntryCount: 0);
+            0,
+            0);
 
         var exception = Record.Exception(() => EmbeddingLogRegModelArtifactSerializer.Validate(artifact));
 

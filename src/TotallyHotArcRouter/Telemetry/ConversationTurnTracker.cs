@@ -27,15 +27,14 @@ public sealed class ConversationTurnTracker : IConversationTurnTracker
 {
     private readonly ConcurrentDictionary<string, int> _turnsBySession = new(StringComparer.Ordinal);
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public int NextTurn(string sessionId)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            throw new ArgumentException("Session id must not be null or whitespace.", nameof(sessionId));
-        }
+            throw new ArgumentException(message: "Session id must not be null or whitespace.",
+                paramName: nameof(sessionId));
 
-        return _turnsBySession.AddOrUpdate(sessionId, addValueFactory: _ => 1, updateValueFactory: (_, existing) => existing + 1);
+        return _turnsBySession.AddOrUpdate(key: sessionId, addValueFactory: _ => 1,
+            updateValueFactory: (_, existing) => existing + 1);
     }
 }
-

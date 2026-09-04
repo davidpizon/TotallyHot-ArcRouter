@@ -10,7 +10,9 @@
             <div class="ls-chat-turn-separator flex items-center gap-2 flex-wrap">
                 <span>Turn @turn.TurnNumber</span>
                 <span class="shrink-0 rounded px-1.5 py-0.5 font-semibold normal-case"
-                      style="background:@(AgentColorFor(turn))22;color:@AgentColorFor(turn);border:1px solid @(AgentColorFor(turn))44">@turn.Agent</span>
+                      style="background:@(AgentColorFor(turn))22;color:@AgentColorFor(turn);border:1px solid @(AgentColorFor(turn))44">
+                    @turn.Agent
+                </span>
                 <span class="font-mono normal-case">@turn.Model</span>
                 <span class="font-mono normal-case ml-auto">@turn.Timestamp</span>
             </div>
@@ -28,19 +30,34 @@
 </div>
 
 @code {
+
     /// <summary>The conversation whose turns are reproduced as a chat-style thread.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public Conversation Conversation { get; set; } = null!;
 
     /// <summary><see cref="Conversation"/>'s turns in ascending <see cref="ConversationTurn.TurnNumber"/> order.</summary>
     private IEnumerable<ConversationTurn> OrderedTurns => Conversation.Turns.OrderBy(t => t.TurnNumber);
 
-    /// <summary>The accent color for <paramref name="turn"/>'s agent, matching the coloring TurnCard and the routing-decision log use.</summary>
-    private static string AgentColorFor(ConversationTurn turn) => ColorUtils.GetColorForAgent(turn.Agent);
+    /// <summary>
+    /// The accent color for <paramref name="turn"/>'s agent, matching the coloring TurnCard and the routing-decision
+    /// log use.
+    /// </summary>
+    private static string AgentColorFor(ConversationTurn turn)
+    {
+        return ColorUtils.GetColorForAgent(turn.Agent);
+    }
 
     /// <summary>Whether <paramref name="turn"/> captured a non-empty request summary.</summary>
-    private static bool HasRequest(ConversationTurn turn) => !string.IsNullOrWhiteSpace(turn.RequestSummary);
+    private static bool HasRequest(ConversationTurn turn)
+    {
+        return !string.IsNullOrWhiteSpace(turn.RequestSummary);
+    }
 
     /// <summary>Whether <paramref name="turn"/> captured a non-empty response summary.</summary>
-    private static bool HasResponse(ConversationTurn turn) => !string.IsNullOrWhiteSpace(turn.ResponseSummary);
+    private static bool HasResponse(ConversationTurn turn)
+    {
+        return !string.IsNullOrWhiteSpace(turn.ResponseSummary);
+    }
+
 }

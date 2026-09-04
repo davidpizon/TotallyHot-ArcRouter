@@ -7,14 +7,11 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 /// <see cref="TotallyHot.ArcRouter.CodeRouterBench.BenchmarkSyncService"/> tests, which now create a fresh
 /// client per operation instead of capturing one for their lifetime.
 /// </summary>
-internal sealed class FakeHttpClientFactory : IHttpClientFactory
+internal sealed class FakeHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
 {
-    private readonly HttpMessageHandler _handler;
 
-    public FakeHttpClientFactory(HttpMessageHandler handler)
+    public HttpClient CreateClient(string name)
     {
-        _handler = handler;
+        return new HttpClient(handler: handler, false);
     }
-
-    public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
 }

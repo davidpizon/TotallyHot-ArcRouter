@@ -14,9 +14,13 @@ public class CodeRouterBenchCsvReaderTests
             "0.001,t1,code_generation,claude-opus-4-6,1.0",
             "0.002,t2,bug_fixing,claude-opus-4-6,0.0");
 
-        Assert.Equal(2, rows.Count);
-        Assert.Equal(new CodeRouterBenchResultRow("t1", "code_generation", "claude-opus-4-6", 1.0), rows[0]);
-        Assert.Equal(new CodeRouterBenchResultRow("t2", "bug_fixing", "claude-opus-4-6", 0.0), rows[1]);
+        Assert.Equal(2, actual: rows.Count);
+        Assert.Equal(
+            expected: new CodeRouterBenchResultRow(TaskId: "t1", Dimension: "code_generation", Model: "claude-opus-4-6",
+                1.0), actual: rows[0]);
+        Assert.Equal(
+            expected: new CodeRouterBenchResultRow(TaskId: "t2", Dimension: "bug_fixing", Model: "claude-opus-4-6",
+                0.0), actual: rows[1]);
     }
 
     // The released tables spell several models differently from the router's own configuration, so the
@@ -31,7 +35,7 @@ public class CodeRouterBenchCsvReaderTests
             "task_id,dimension,model,score",
             $"t1,code_generation,{rawModel},1.0");
 
-        Assert.Equal(expected, rows[0].Model);
+        Assert.Equal(expected: expected, actual: rows[0].Model);
     }
 
     [Fact]
@@ -40,7 +44,8 @@ public class CodeRouterBenchCsvReaderTests
         var ex = Assert.Throws<FormatException>(() => Read(
             "task_id,dimension,model,score",
             "t1,code_generation,,1.0"));
-        Assert.Contains("row 2", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedSubstring: "row 2", actualString: ex.Message,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -50,7 +55,7 @@ public class CodeRouterBenchCsvReaderTests
             "task_id,dimension,model,score",
             "t1,algorithm,glm-5,0.5");
 
-        Assert.Equal(RouterDimension.AlgorithmDesign, rows[0].Dimension);
+        Assert.Equal(expected: RouterDimension.AlgorithmDesign, actual: rows[0].Dimension);
     }
 
     [Fact]
@@ -60,7 +65,7 @@ public class CodeRouterBenchCsvReaderTests
             "task_id,dimension,model,score",
             "t1,data_science,glm-5,0.5");
 
-        Assert.Equal(RouterDimension.DataScience, rows[0].Dimension);
+        Assert.Equal(expected: RouterDimension.DataScience, actual: rows[0].Dimension);
     }
 
     [Fact]
@@ -70,7 +75,7 @@ public class CodeRouterBenchCsvReaderTests
             "task_id,dimension,model,score,cost_source",
             "t1,code_generation,claude-opus-4-6,1.0,\"token_log_pricing, fallback\"");
 
-        Assert.Equal("t1", rows[0].TaskId);
+        Assert.Equal(expected: "t1", actual: rows[0].TaskId);
     }
 
     [Fact]
@@ -82,7 +87,7 @@ public class CodeRouterBenchCsvReaderTests
             "",
             "t2,code_generation,claude-opus-4-6,0.0");
 
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(2, actual: rows.Count);
     }
 
     [Fact]
@@ -91,7 +96,8 @@ public class CodeRouterBenchCsvReaderTests
         var ex = Assert.Throws<FormatException>(() => Read(
             "task_id,model,score",
             "t1,claude-opus-4-6,1.0"));
-        Assert.Contains("dimension", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedSubstring: "dimension", actualString: ex.Message,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -100,7 +106,8 @@ public class CodeRouterBenchCsvReaderTests
         var ex = Assert.Throws<FormatException>(() => Read(
             "task_id,dimension,model,score",
             "t1,code_generation,claude-opus-4-6"));
-        Assert.Contains("row 2", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedSubstring: "row 2", actualString: ex.Message,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -111,7 +118,7 @@ public class CodeRouterBenchCsvReaderTests
 
     private static IReadOnlyList<CodeRouterBenchResultRow> Read(params string[] lines)
     {
-        using var reader = new StringReader(string.Join('\n', lines));
-        return CodeRouterBenchCsvReader.Read(reader, "fixture");
+        using var reader = new StringReader(string.Join('\n', value: lines));
+        return CodeRouterBenchCsvReader.Read(reader: reader, sourceLabel: "fixture");
     }
 }

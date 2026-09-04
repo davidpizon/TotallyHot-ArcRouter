@@ -30,8 +30,9 @@ internal static class ProviderUrlBuilder
     public static string BuildModelsUrl(string baseUrl)
     {
         var trimmed = baseUrl.TrimEnd('/');
-        var hasVersionSegment = trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Contains("/v1beta", StringComparison.OrdinalIgnoreCase);
+        var hasVersionSegment = trimmed.EndsWith(value: "/v1", comparisonType: StringComparison.OrdinalIgnoreCase)
+                                || trimmed.Contains(value: "/v1beta",
+                                    comparisonType: StringComparison.OrdinalIgnoreCase);
         return hasVersionSegment ? $"{trimmed}/models" : $"{trimmed}/v1/models";
     }
 
@@ -44,8 +45,9 @@ internal static class ProviderUrlBuilder
     public static string BuildMessagesUrl(string baseUrl)
     {
         var trimmed = baseUrl.TrimEnd('/');
-        var hasVersionSegment = trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Contains("/v1beta", StringComparison.OrdinalIgnoreCase);
+        var hasVersionSegment = trimmed.EndsWith(value: "/v1", comparisonType: StringComparison.OrdinalIgnoreCase)
+                                || trimmed.Contains(value: "/v1beta",
+                                    comparisonType: StringComparison.OrdinalIgnoreCase);
         return hasVersionSegment ? $"{trimmed}/messages" : $"{trimmed}/v1/messages";
     }
 
@@ -63,7 +65,7 @@ internal static class ProviderUrlBuilder
     public static string StripVersionSuffix(string baseUrl)
     {
         var trimmed = baseUrl.TrimEnd('/');
-        return trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
+        return trimmed.EndsWith(value: "/v1", comparisonType: StringComparison.OrdinalIgnoreCase)
             ? trimmed[..^"/v1".Length]
             : trimmed;
     }
@@ -102,8 +104,14 @@ internal static class ProviderUrlBuilder
     /// </para>
     /// </remarks>
     /// <param name="baseUrl">The passthrough provider's configured base URL.</param>
-    /// <param name="requestPath">The client's request path, leading <c>/</c> included; <see langword="null"/> or empty both mean the client sent none.</param>
-    /// <param name="queryString">The client's query string, leading <c>?</c> included; <see langword="null"/> or empty both mean the client sent none.</param>
+    /// <param name="requestPath">
+    /// The client's request path, leading <c>/</c> included; <see langword="null"/> or empty both
+    /// mean the client sent none.
+    /// </param>
+    /// <param name="queryString">
+    /// The client's query string, leading <c>?</c> included; <see langword="null"/> or empty both
+    /// mean the client sent none.
+    /// </param>
     public static string BuildPassthroughUrl(Uri baseUrl, string? requestPath, string? queryString)
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
@@ -125,38 +133,33 @@ internal static class ProviderUrlBuilder
         // shared prefix wins: a base of "/openai/v1" meeting "/openai/v1/chat/completions" collapses both
         // segments rather than stopping at the one-segment match it would also satisfy.
         var overlap = 0;
-        for (var k = Math.Min(baseSegments.Length, requestSegments.Length); k > 0; k--)
-        {
-            if (baseSegments.AsSpan(baseSegments.Length - k).SequenceEqual(requestSegments.AsSpan(0, k)))
+        for (var k = Math.Min(val1: baseSegments.Length, val2: requestSegments.Length); k > 0; k--)
+            if (baseSegments.AsSpan(baseSegments.Length - k).SequenceEqual(requestSegments.AsSpan(0, length: k)))
             {
                 overlap = k;
                 break;
             }
-        }
 
         // Sliced out of the original string rather than rejoined from the split segments: the remainder is
         // then forwarded byte-for-byte, keeping the client's own escaping and any trailing slash it sent
         // (some upstreams route "/v1/models/" and "/v1/models" differently). With overlap 0 - the
         // path-less-base case, which is every provider that worked before this method existed - the slice
         // is the whole path and this is exactly the concatenation it replaces.
-        return $"{trimmedBase}{SkipLeadingSegments(path, overlap)}{query}";
+        return $"{trimmedBase}{SkipLeadingSegments(path: path, count: overlap)}{query}";
     }
 
-    /// <summary>Returns <paramref name="path"/> with its first <paramref name="count"/> segments removed, leading <c>/</c> and all.</summary>
+    /// <summary>
+    /// Returns <paramref name="path"/> with its first <paramref name="count"/> segments removed, leading <c>/</c> and
+    /// all.
+    /// </summary>
     private static string SkipLeadingSegments(string path, int count)
     {
         var index = 0;
         for (var skipped = 0; skipped < count; skipped++)
         {
-            while (index < path.Length && path[index] == '/')
-            {
-                index++;
-            }
+            while (index < path.Length && path[index] == '/') index++;
 
-            while (index < path.Length && path[index] != '/')
-            {
-                index++;
-            }
+            while (index < path.Length && path[index] != '/') index++;
         }
 
         return path[index..];
@@ -164,9 +167,10 @@ internal static class ProviderUrlBuilder
 
     /// <summary>Splits a path into its non-empty segments, ignoring leading/trailing/duplicate slashes.</summary>
     /// <param name="path">The path to split; <see langword="null"/> or empty yields no segments.</param>
-    private static string[] SplitSegments(string path) =>
-        string.IsNullOrEmpty(path)
+    private static string[] SplitSegments(string path)
+    {
+        return string.IsNullOrEmpty(path)
             ? []
-            : path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            : path.Split('/', options: StringSplitOptions.RemoveEmptyEntries);
+    }
 }
-

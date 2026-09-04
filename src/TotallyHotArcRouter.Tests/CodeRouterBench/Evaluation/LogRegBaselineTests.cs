@@ -18,32 +18,36 @@ public class LogRegBaselineTests
 
         for (var i = 0; i < 20; i++)
         {
-            InsertTask(temp.Database, $"bug-{i}", "bug_fixing", "There is a bug and an error to fix.");
-            InsertResult(temp.Database, $"bug-{i}", "model-bug", resolved: true);
-            InsertResult(temp.Database, $"bug-{i}", "model-algo", resolved: false);
+            InsertTask(database: temp.Database, taskId: $"bug-{i}", dimension: "bug_fixing",
+                prompt: "There is a bug and an error to fix.");
+            InsertResult(database: temp.Database, taskId: $"bug-{i}", model: "model-bug", true);
+            InsertResult(database: temp.Database, taskId: $"bug-{i}", model: "model-algo", false);
 
-            InsertTask(temp.Database, $"algo-{i}", "algorithm", "Optimize this algorithm for lower complexity.");
-            InsertResult(temp.Database, $"algo-{i}", "model-algo", resolved: true);
-            InsertResult(temp.Database, $"algo-{i}", "model-bug", resolved: false);
+            InsertTask(database: temp.Database, taskId: $"algo-{i}", dimension: "algorithm",
+                prompt: "Optimize this algorithm for lower complexity.");
+            InsertResult(database: temp.Database, taskId: $"algo-{i}", model: "model-algo", true);
+            InsertResult(database: temp.Database, taskId: $"algo-{i}", model: "model-bug", false);
         }
 
-        return LogRegTrainer.Train(temp.Database, vocabularySize: 50, epochs: 200, learningRate: 0.5);
+        return LogRegTrainer.Train(database: temp.Database, 50, 200);
     }
 
     [Fact]
     public void Route_TaskTextPresent_PicksTheTrainedWinningClass()
     {
         var baseline = new LogRegBaseline(TrainTwoClassArtifact());
-        var context = new RegretReplayContext("t1", "bug_fixing", ["model-bug", "model-algo"], "another bug causing an error");
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "bug_fixing",
+            CandidateModelIds: ["model-bug", "model-algo"], TaskText: "another bug causing an error");
 
-        Assert.Equal("model-bug", baseline.Route(context));
+        Assert.Equal(expected: "model-bug", actual: baseline.Route(context));
     }
 
     [Fact]
     public void Route_TaskTextAbsent_ReturnsNull()
     {
         var baseline = new LogRegBaseline(TrainTwoClassArtifact());
-        var context = new RegretReplayContext("t1", "bug_fixing", ["model-bug", "model-algo"], TaskText: null);
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "bug_fixing",
+            CandidateModelIds: ["model-bug", "model-algo"]);
 
         Assert.Null(baseline.Route(context));
     }
@@ -52,7 +56,8 @@ public class LogRegBaselineTests
     public void Route_NoCandidateIsAKnownClass_ReturnsNull()
     {
         var baseline = new LogRegBaseline(TrainTwoClassArtifact());
-        var context = new RegretReplayContext("t1", "bug_fixing", ["model-unseen"], "fix the bug");
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "bug_fixing",
+            CandidateModelIds: ["model-unseen"], TaskText: "fix the bug");
 
         Assert.Null(baseline.Route(context));
     }
@@ -64,26 +69,30 @@ public class LogRegBaselineTests
 
         // The text strongly favors "model-bug", but it is not in the candidate pool for this task's
         // outcome row, so the baseline must fall back to whichever candidate it does know about.
-        var context = new RegretReplayContext("t1", "bug_fixing", ["model-algo"], "another bug causing an error");
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "bug_fixing", CandidateModelIds: ["model-algo"],
+            TaskText: "another bug causing an error");
 
-        Assert.Equal("model-algo", baseline.Route(context));
+        Assert.Equal(expected: "model-algo", actual: baseline.Route(context));
     }
 
     [Fact]
-    public void Constructor_NullArtifact_Throws() =>
+    public void Constructor_NullArtifact_Throws()
+    {
         Assert.Throws<ArgumentNullException>(() => new LogRegBaseline(null!));
+    }
 
     private static void InsertTask(BenchmarkDatabase database, string taskId, string dimension, string prompt)
     {
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_ood_tasks (task_id, source_split, bench, dimension, raw_json)
-            VALUES ($taskId, 'test', 'test-bench', $dimension, $rawJson);
-            """;
-        command.Parameters.AddWithValue("$taskId", taskId);
-        command.Parameters.AddWithValue("$dimension", dimension);
-        command.Parameters.AddWithValue("$rawJson", $$"""{"task_id":"{{taskId}}","prompt":"{{prompt}}"}""");
+                              INSERT INTO benchmark_ood_tasks (task_id, source_split, bench, dimension, raw_json)
+                              VALUES ($taskId, 'test', 'test-bench', $dimension, $rawJson);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$taskId", value: taskId);
+        command.Parameters.AddWithValue(parameterName: "$dimension", value: dimension);
+        command.Parameters.AddWithValue(parameterName: "$rawJson",
+            value: $$"""{"task_id":"{{taskId}}","prompt":"{{prompt}}"}""");
         command.ExecuteNonQuery();
     }
 
@@ -92,19 +101,19 @@ public class LogRegBaselineTests
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO benchmark_ood_results (task_id, source_split, bench, dimension, model, resolved, cost_usd)
-            VALUES (
-                $taskId,
-                'test',
-                'test-bench',
-                (SELECT dimension FROM benchmark_ood_tasks WHERE task_id = $taskId),
-                $model,
-                $resolved,
-                0.01);
-            """;
-        command.Parameters.AddWithValue("$taskId", taskId);
-        command.Parameters.AddWithValue("$model", model);
-        command.Parameters.AddWithValue("$resolved", resolved ? 1 : 0);
+                              INSERT INTO benchmark_ood_results (task_id, source_split, bench, dimension, model, resolved, cost_usd)
+                              VALUES (
+                                  $taskId,
+                                  'test',
+                                  'test-bench',
+                                  (SELECT dimension FROM benchmark_ood_tasks WHERE task_id = $taskId),
+                                  $model,
+                                  $resolved,
+                                  0.01);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$taskId", value: taskId);
+        command.Parameters.AddWithValue(parameterName: "$model", value: model);
+        command.Parameters.AddWithValue(parameterName: "$resolved", value: resolved ? 1 : 0);
         command.ExecuteNonQuery();
     }
 }

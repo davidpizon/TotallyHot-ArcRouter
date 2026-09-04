@@ -50,4 +50,3 @@ public interface IBedrockStreamChunkTranslator
     /// </summary>
     byte[] Flush();
 }
-

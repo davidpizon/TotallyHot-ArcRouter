@@ -1,13 +1,12 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Tests.Proxy;
-using TotallyHot.ArcRouter.Tests.TestSupport;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
@@ -26,7 +25,8 @@ public sealed class JudgeSettingsConfigureOptionsTests
     {
         var options = new JudgeOptions { ModelName = "set-by-code" };
 
-        new JudgeSettingsConfigureOptions(CreateStore(), NoFreeModels(), NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
+        new JudgeSettingsConfigureOptions(store: CreateStore(), routeResolver: NoFreeModels(),
+            logger: NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
 
         options.ModelName.Should().Be("set-by-code");
     }
@@ -36,7 +36,8 @@ public sealed class JudgeSettingsConfigureOptionsTests
     {
         var options = new JudgeOptions { Enabled = false };
 
-        new JudgeSettingsConfigureOptions(CreateStore(), OneFreeModel(), NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
+        new JudgeSettingsConfigureOptions(store: CreateStore(), routeResolver: OneFreeModel(),
+            logger: NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
 
         options.Enabled.Should().BeTrue();
     }
@@ -46,7 +47,8 @@ public sealed class JudgeSettingsConfigureOptionsTests
     {
         var options = new JudgeOptions { Enabled = true };
 
-        new JudgeSettingsConfigureOptions(CreateStore(), NoFreeModels(), NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
+        new JudgeSettingsConfigureOptions(store: CreateStore(), routeResolver: NoFreeModels(),
+            logger: NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
 
         options.Enabled.Should().BeFalse();
     }
@@ -57,10 +59,11 @@ public sealed class JudgeSettingsConfigureOptionsTests
     public void Configure_StoredEnabledFalse_BeatsTheAutoDetectEvenWithAFreeBackbone()
     {
         var store = CreateStore();
-        store.SetBool(RouterSettingsStore.JudgeEnabledKey, false);
+        store.SetBool(key: RouterSettingsStore.JudgeEnabledKey, false);
 
         var options = new JudgeOptions { Enabled = true };
-        new JudgeSettingsConfigureOptions(store, OneFreeModel(), NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
+        new JudgeSettingsConfigureOptions(store: store, routeResolver: OneFreeModel(),
+            logger: NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
 
         options.Enabled.Should().BeFalse();
     }
@@ -69,11 +72,12 @@ public sealed class JudgeSettingsConfigureOptionsTests
     public void Configure_StoredRows_OverrideTheCodedDefaults()
     {
         var store = CreateStore();
-        store.SetBool(RouterSettingsStore.JudgeEnabledKey, true);
-        store.SetString(RouterSettingsStore.JudgeModelNameKey, "free-judge");
+        store.SetBool(key: RouterSettingsStore.JudgeEnabledKey, true);
+        store.SetString(key: RouterSettingsStore.JudgeModelNameKey, value: "free-judge");
 
         var options = new JudgeOptions();
-        new JudgeSettingsConfigureOptions(store, NoFreeModels(), NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
+        new JudgeSettingsConfigureOptions(store: store, routeResolver: NoFreeModels(),
+            logger: NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
 
         options.Enabled.Should().BeTrue();
         options.ModelName.Should().Be("free-judge");
@@ -87,44 +91,54 @@ public sealed class JudgeSettingsConfigureOptionsTests
     public void Configure_StoredEmptyModelName_OverridesToAutomatic()
     {
         var store = CreateStore();
-        store.SetString(RouterSettingsStore.JudgeModelNameKey, string.Empty);
+        store.SetString(key: RouterSettingsStore.JudgeModelNameKey, value: string.Empty);
 
         var options = new JudgeOptions { ModelName = "previously-chosen" };
-        new JudgeSettingsConfigureOptions(store, NoFreeModels(), NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
+        new JudgeSettingsConfigureOptions(store: store, routeResolver: NoFreeModels(),
+            logger: NullLogger<JudgeSettingsConfigureOptions>.Instance).Configure(options);
 
         options.ModelName.Should().BeEmpty();
     }
 
     /// <summary>One free, enabled, OpenAI-shaped provider - so <c>Resolve()</c> finds a backbone.</summary>
-    private static IModelRouteResolver OneFreeModel() =>
-        Resolver(new ModelRoutingOptions
+    private static IModelRouteResolver OneFreeModel()
+    {
+        return Resolver(new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["lmstudio"] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1", IsFree = true },
+                ["lmstudio"] = new() { BaseUrl = "http://localhost:1234/v1", IsFree = true }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "free-a", Provider = "lmstudio", ProviderModelId = "a" }],
+            ModelList = [new ModelRouteEntry { ModelName = "free-a", Provider = "lmstudio", ProviderModelId = "a" }]
         });
+    }
 
     /// <summary>Only a paid provider, so <c>Resolve()</c> abstains and the judge has nothing to run on.</summary>
-    private static IModelRouteResolver NoFreeModels() =>
-        Resolver(new ModelRoutingOptions
+    private static IModelRouteResolver NoFreeModels()
+    {
+        return Resolver(new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["paid"] = new ProviderOptions { BaseUrl = "https://api.example.com/v1", IsFree = false },
+                ["paid"] = new() { BaseUrl = "https://api.example.com/v1", IsFree = false }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "paid-a", Provider = "paid", ProviderModelId = "a" }],
+            ModelList = [new ModelRouteEntry { ModelName = "paid-a", Provider = "paid", ProviderModelId = "a" }]
         });
+    }
 
-    private static IModelRouteResolver Resolver(ModelRoutingOptions options) =>
-        new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+    private static IModelRouteResolver Resolver(ModelRoutingOptions options)
+    {
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+    }
 
     private static RouterSettingsStore CreateStore()
     {
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        var dbPath = Path.Combine(tempDirectory, "router_embedding_memory.db");
-        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
-        return new RouterSettingsStore(database, NullLogger<RouterSettingsStore>.Instance);
+        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        var dbPath = Path.Combine(path1: tempDirectory, path2: "router_embedding_memory.db");
+        var database =
+            new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
+        return new RouterSettingsStore(database: database, logger: NullLogger<RouterSettingsStore>.Instance);
     }
 }

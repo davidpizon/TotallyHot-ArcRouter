@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -26,32 +27,22 @@ public static class SseEventReader
         foreach (var rawLine in sseText.Split('\n'))
         {
             var line = rawLine.TrimEnd('\r').AsSpan().Trim();
-            if (!line.StartsWith(DataPrefix, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!line.StartsWith(value: DataPrefix, comparisonType: StringComparison.Ordinal)) continue;
 
             var payload = line[DataPrefix.Length..].Trim();
-            if (payload.IsEmpty || payload.SequenceEqual(DoneSentinel))
-            {
-                continue;
-            }
+            if (payload.IsEmpty || payload.SequenceEqual(DoneSentinel)) continue;
 
             JsonNode? node;
             try
             {
                 node = JsonNode.Parse(payload.ToString());
             }
-            catch (System.Text.Json.JsonException)
+            catch (JsonException)
             {
                 continue;
             }
 
-            if (node is JsonObject obj)
-            {
-                yield return obj;
-            }
+            if (node is JsonObject obj) yield return obj;
         }
     }
 }
-

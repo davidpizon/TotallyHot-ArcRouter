@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 
@@ -13,12 +13,15 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class RoutingModeStore : IDisposable
 {
     private readonly IRoutingModeAdminClient _client;
-    private readonly IDisposable? _ownedClient;
     private readonly ILogger<RoutingModeStore>? _logger;
+    private readonly IDisposable? _ownedClient;
 
     /// <summary>Initializes a new instance of the <see cref="RoutingModeStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
     public RoutingModeStore(
         ILogger<RoutingModeStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
@@ -53,6 +56,12 @@ public sealed class RoutingModeStore : IDisposable
     /// <summary>The message from the last failure to reach the proxy, if any.</summary>
     public string? LastError { get; private set; }
 
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+    }
+
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
 
@@ -73,7 +82,7 @@ public sealed class RoutingModeStore : IDisposable
         {
             IsReachable = false;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load the routing mode from the router.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load the routing mode from the router.");
         }
         finally
         {
@@ -81,7 +90,4 @@ public sealed class RoutingModeStore : IDisposable
             Changed?.Invoke();
         }
     }
-
-    /// <inheritdoc />
-    public void Dispose() => _ownedClient?.Dispose();
 }

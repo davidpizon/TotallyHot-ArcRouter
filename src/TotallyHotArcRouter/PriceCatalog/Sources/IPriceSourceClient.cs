@@ -24,13 +24,25 @@ public interface IPriceSourceClient
 /// of the record because a source publishes a (model, provider) matrix - a normalizer that dropped it
 /// could not produce a well-keyed row.
 /// </summary>
-/// <param name="ModelIdentifier">The source's own model key (resolved to an internal id via <c>model_aliases</c> at ingest, D3).</param>
+/// <param name="ModelIdentifier">
+/// The source's own model key (resolved to an internal id via <c>model_aliases</c> at
+/// ingest, D3).
+/// </param>
 /// <param name="Provider">The provider that serves this model, e.g. <c>"openai"</c> (D7).</param>
 /// <param name="StandardInputPrice">USD per 1M standard input tokens, or <see langword="null"/> if unpublished.</param>
 /// <param name="StandardOutputPrice">USD per 1M standard output tokens, or <see langword="null"/> if unpublished.</param>
-/// <param name="CachedInputPrice">USD per 1M cached (repeated-context) input tokens, or <see langword="null"/> where caching is not offered.</param>
-/// <param name="BatchInputPrice">USD per 1M input tokens at batch/off-peak rates, or <see langword="null"/> where batch is not offered.</param>
-/// <param name="BatchOutputPrice">USD per 1M output tokens at batch/off-peak rates, or <see langword="null"/> where batch is not offered.</param>
+/// <param name="CachedInputPrice">
+/// USD per 1M cached (repeated-context) input tokens, or <see langword="null"/> where
+/// caching is not offered.
+/// </param>
+/// <param name="BatchInputPrice">
+/// USD per 1M input tokens at batch/off-peak rates, or <see langword="null"/> where batch is
+/// not offered.
+/// </param>
+/// <param name="BatchOutputPrice">
+/// USD per 1M output tokens at batch/off-peak rates, or <see langword="null"/> where batch
+/// is not offered.
+/// </param>
 /// <param name="CacheWriteInputPrice">
 /// USD per 1M input tokens spent writing a new prompt cache entry, or <see langword="null"/> if the source
 /// doesn't publish a cache-write rate for this model. Distinct from <paramref name="CachedInputPrice"/>
@@ -46,4 +58,3 @@ public sealed record NormalizedPrice(
     decimal? BatchInputPrice,
     decimal? BatchOutputPrice,
     decimal? CacheWriteInputPrice = null);
-

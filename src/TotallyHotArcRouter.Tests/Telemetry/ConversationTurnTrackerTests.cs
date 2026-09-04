@@ -23,7 +23,7 @@ public class ConversationTurnTrackerTests
 
         var turn = tracker.NextTurn("sess-1");
 
-        Assert.Equal(1, turn);
+        Assert.Equal(1, actual: turn);
     }
 
     [Fact]
@@ -31,9 +31,9 @@ public class ConversationTurnTrackerTests
     {
         var tracker = new ConversationTurnTracker();
 
-        Assert.Equal(1, tracker.NextTurn("sess-1"));
-        Assert.Equal(2, tracker.NextTurn("sess-1"));
-        Assert.Equal(3, tracker.NextTurn("sess-1"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-1"));
+        Assert.Equal(2, actual: tracker.NextTurn("sess-1"));
+        Assert.Equal(3, actual: tracker.NextTurn("sess-1"));
     }
 
     [Fact]
@@ -41,10 +41,10 @@ public class ConversationTurnTrackerTests
     {
         var tracker = new ConversationTurnTracker();
 
-        Assert.Equal(1, tracker.NextTurn("sess-a"));
-        Assert.Equal(1, tracker.NextTurn("sess-b"));
-        Assert.Equal(2, tracker.NextTurn("sess-a"));
-        Assert.Equal(2, tracker.NextTurn("sess-b"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-a"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-b"));
+        Assert.Equal(2, actual: tracker.NextTurn("sess-a"));
+        Assert.Equal(2, actual: tracker.NextTurn("sess-b"));
     }
 
     [Fact]
@@ -53,15 +53,14 @@ public class ConversationTurnTrackerTests
         var tracker = new ConversationTurnTracker();
         const int callCount = 200;
 
-        var tasks = Enumerable.Range(0, callCount)
+        var tasks = Enumerable.Range(0, count: callCount)
             .Select(_ => Task.Run(() => tracker.NextTurn("sess-concurrent")))
             .ToArray();
 
         await Task.WhenAll(tasks);
 
         var results = tasks.Select(t => t.Result).OrderBy(v => v).ToArray();
-        var expected = Enumerable.Range(1, callCount).ToArray();
-        Assert.Equal(expected, results);
+        var expected = Enumerable.Range(1, count: callCount).ToArray();
+        Assert.Equal(expected: expected, actual: results);
     }
 }
-

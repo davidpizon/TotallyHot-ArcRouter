@@ -1,10 +1,10 @@
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.Proxy;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Net;
 using System.Text;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -33,19 +33,16 @@ public class ProxyMiddlewareModelEnabledTests
         var primaryCalled = false;
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == PrimaryHost)
-            {
-                primaryCalled = true;
-            }
+            if (request.RequestUri!.Host == PrimaryHost) primaryCalled = true;
 
             return Ok("served-by-backup");
         });
 
-        var context = await RunAsync(resolver, handler);
+        var context = await RunAsync(resolver: resolver, handler: handler);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         Assert.False(primaryCalled); // the stopped model is never attempted
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -60,19 +57,16 @@ public class ProxyMiddlewareModelEnabledTests
         var primaryCalled = false;
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == PrimaryHost)
-            {
-                primaryCalled = true;
-            }
+            if (request.RequestUri!.Host == PrimaryHost) primaryCalled = true;
 
             return Ok("served-by-backup");
         });
 
-        var context = await RunAsync(resolver, handler);
+        var context = await RunAsync(resolver: resolver, handler: handler);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         Assert.False(primaryCalled);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -93,33 +87,30 @@ public class ProxyMiddlewareModelEnabledTests
             return Ok("should-not-be-served");
         });
 
-        var context = await RunAsync(resolver, handler);
+        var context = await RunAsync(resolver: resolver, handler: handler);
 
-        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status400BadRequest, actual: context.Response.StatusCode);
         Assert.False(upstreamCalled);
     }
 
     // -- helpers -------------------------------------------------------------
 
     private static IModelRouteResolver CreateResolver(
-        params (string ModelName, string Provider, string ProviderModelId, string BaseUrl, bool enabled, bool presentUpstream)[] models)
+        params (string ModelName, string Provider, string ProviderModelId, string BaseUrl, bool enabled, bool
+            presentUpstream)[] models)
     {
         var providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase);
         foreach (var model in models)
-        {
             if (!providers.ContainsKey(model.Provider))
-            {
                 providers[model.Provider] = new ProviderOptions
                 {
                     BaseUrl = model.BaseUrl
                 };
-            }
-        }
 
         var options = new ModelRoutingOptions
         {
             Providers = providers,
-            ModelList = models
+            ModelList = [.. models
                 .Select(m => new ModelRouteEntry
                 {
                     ModelName = m.ModelName,
@@ -127,20 +118,23 @@ public class ProxyMiddlewareModelEnabledTests
                     ProviderModelId = m.ProviderModelId,
                     Enabled = m.enabled,
                     PresentUpstream = m.presentUpstream
-                })
-                .ToList()
+                })]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 
-    private static HttpResponseMessage Ok(string body) =>
-        new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "text/plain") };
+    private static HttpResponseMessage Ok(string body)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
+    }
 
     private static async Task<string> ReadBodyAsync(HttpContext context)
     {
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         return await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
     }
 
@@ -149,11 +143,12 @@ public class ProxyMiddlewareModelEnabledTests
         RoutingHandlerStub handler,
         string requestedModel = "primary")
     {
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler));
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -166,14 +161,16 @@ public class ProxyMiddlewareModelEnabledTests
         context.Response.Body = new MemoryStream();
         context.RequestAborted = TestContext.Current.CancellationToken;
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
         return context;
     }
 
     private sealed class RoutingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(handler(request));
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(handler(request));
+        }
     }
 }
-

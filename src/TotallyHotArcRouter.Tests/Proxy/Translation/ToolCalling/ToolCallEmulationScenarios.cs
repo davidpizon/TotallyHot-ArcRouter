@@ -3,7 +3,10 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// <summary>
 /// One question put to an emulated model, and what its reply must yield after normalization.
 /// </summary>
-/// <param name="Name">Stable key this scenario's recorded reply is stored under in a <see cref="RecordedModelTranscript"/>.</param>
+/// <param name="Name">
+/// Stable key this scenario's recorded reply is stored under in a <see cref="RecordedModelTranscript"/>
+/// .
+/// </param>
 /// <param name="Tools">The tool schemas offered, as the client would send them.</param>
 /// <param name="Question">The user turn.</param>
 /// <param name="ExpectedCalls">
@@ -19,13 +22,11 @@ internal sealed record EmulationScenario(
 /// <summary>
 /// The fixed probe used to judge whether a model can be emulated at all
 /// (<c>docs/router/tool-call-normalization.md</c> Phase 5).
-///
 /// <para>
 /// Held in one place because two things consume it: the replay tests, which run every recorded model
 /// against it offline, and the recording recipe in <see cref="RecordedModelTranscripts"/>, which needs the
 /// identical questions or a new model's transcript would not be comparable to an existing one.
 /// </para>
-///
 /// <para>
 /// Five scenarios chosen to separate the ways emulation fails rather than to cover surface area. A model
 /// can frame one call correctly and still lose the arguments; can frame a call and pick the wrong tool
@@ -47,11 +48,15 @@ internal static class ToolCallEmulationScenarios
 
     public static IReadOnlyList<EmulationScenario> All { get; } =
     [
-        new("single", [GetTime], "What time is it in Tokyo?", ["get_time"]),
-        new("arguments", [GetWeather], "What's the weather in Paris in celsius?", ["get_weather"]),
-        new("pick-one-of-three", [GetTime, GetWeather, ReadFile], "Read the contents of /etc/hosts for me.", ["read_file"]),
-        new("no-tool-needed", [GetTime, GetWeather], "Write a haiku about the sea. Do not use any tools.", []),
-        new("two-at-once", [GetTime, GetWeather], "Get me both the time in Tokyo and the weather in Paris.", ["get_time", "get_weather"]),
+        new(Name: "single", Tools: [GetTime], Question: "What time is it in Tokyo?", ExpectedCalls: ["get_time"]),
+        new(Name: "arguments", Tools: [GetWeather], Question: "What's the weather in Paris in celsius?",
+            ExpectedCalls: ["get_weather"]),
+        new(Name: "pick-one-of-three", Tools: [GetTime, GetWeather, ReadFile],
+            Question: "Read the contents of /etc/hosts for me.", ExpectedCalls: ["read_file"]),
+        new(Name: "no-tool-needed", Tools: [GetTime, GetWeather],
+            Question: "Write a haiku about the sea. Do not use any tools.", ExpectedCalls: []),
+        new(Name: "two-at-once", Tools: [GetTime, GetWeather],
+            Question: "Get me both the time in Tokyo and the weather in Paris.",
+            ExpectedCalls: ["get_time", "get_weather"])
     ];
 }
-

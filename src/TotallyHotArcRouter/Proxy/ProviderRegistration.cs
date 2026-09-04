@@ -29,7 +29,7 @@ public enum UsageParserShape
     /// <see cref="OpenAiCompatible"/> before the bytes are captured, exactly like the other two Bedrock
     /// translators.
     /// </summary>
-    Native,
+    Native
 }
 
 /// <summary>
@@ -56,4 +56,7 @@ public enum UsageParserShape
 /// are untouched and keep working exactly as they did before this record existed; this field exists so a
 /// future task can populate it per provider without another dispatch table appearing alongside this one.
 /// </param>
-public sealed record ProviderRegistration(string ProviderKey, UsageParserShape UsageParserShape, IProviderCostReconciler? CostReconciler);
+public sealed record ProviderRegistration(
+    string ProviderKey,
+    UsageParserShape UsageParserShape,
+    IProviderCostReconciler? CostReconciler);

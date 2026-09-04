@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 
@@ -13,12 +13,15 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class ClusterModelAdminStore : IDisposable
 {
     private readonly IClusterModelAdminClient _client;
-    private readonly IDisposable? _ownedClient;
     private readonly ILogger<ClusterModelAdminStore>? _logger;
+    private readonly IDisposable? _ownedClient;
 
     /// <summary>Initializes a new instance of the <see cref="ClusterModelAdminStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
     public ClusterModelAdminStore(
         ILogger<ClusterModelAdminStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
@@ -72,6 +75,12 @@ public sealed class ClusterModelAdminStore : IDisposable
     /// <summary>The most recent retrain's outcome message, or <see langword="null"/> before any retrain has run this session.</summary>
     public string? LastRetrainMessage { get; private set; }
 
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+    }
+
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
 
@@ -98,7 +107,7 @@ public sealed class ClusterModelAdminStore : IDisposable
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load the cluster model status from the router.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load the cluster model status from the router.");
         }
         finally
         {
@@ -166,17 +175,11 @@ public sealed class ClusterModelAdminStore : IDisposable
     /// </remarks>
     private void RecordFailure(ClusterModelAdminException ex)
     {
-        if (!ex.IsUnavailable)
-        {
-            return;
-        }
+        if (!ex.IsUnavailable) return;
 
         IsReachable = false;
         LastError = ex.Message;
-        _logger?.LogWarning(ex, "The router became unreachable during a cluster-model operation.");
+        _logger?.LogWarning(exception: ex, message: "The router became unreachable during a cluster-model operation.");
         Changed?.Invoke();
     }
-
-    /// <inheritdoc />
-    public void Dispose() => _ownedClient?.Dispose();
 }

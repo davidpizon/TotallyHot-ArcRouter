@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -11,7 +11,8 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// </summary>
 public class CircuitBreakerTests
 {
-    private static readonly CircuitBreakerTargetKey Target = new("openai", "https://api.openai.com/", "gpt-5.4");
+    private static readonly CircuitBreakerTargetKey Target = new(Provider: "openai", BaseUrl: "https://api.openai.com/",
+        ProviderModelId: "gpt-5.4");
 
     private static CircuitBreaker Create(
         int failureThreshold = 3,
@@ -23,10 +24,10 @@ public class CircuitBreakerTests
         {
             FailureThreshold = failureThreshold,
             BaseCooldown = baseCooldown ?? TimeSpan.FromSeconds(10),
-            MaxCooldown = maxCooldown ?? TimeSpan.FromMinutes(5),
+            MaxCooldown = maxCooldown ?? TimeSpan.FromMinutes(5)
         };
 
-        return new CircuitBreaker(Options.Create(options), timeProvider);
+        return new CircuitBreaker(options: Options.Create(options), timeProvider: timeProvider);
     }
 
     [Fact]
@@ -83,7 +84,7 @@ public class CircuitBreakerTests
     public void Open_BeforeCooldownExpires_StaysBypassed()
     {
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
-        var breaker = Create(failureThreshold: 1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
+        var breaker = Create(1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
 
         breaker.RecordFailure(Target);
         Assert.True(breaker.IsOpen(Target));
@@ -98,7 +99,7 @@ public class CircuitBreakerTests
     public void Open_AfterCooldownExpires_IsNotOpen_AndAllowsExactlyOneProbe()
     {
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
-        var breaker = Create(failureThreshold: 1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
+        var breaker = Create(1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
 
         breaker.RecordFailure(Target);
         clock.Advance(TimeSpan.FromSeconds(10));
@@ -118,7 +119,7 @@ public class CircuitBreakerTests
     public void HalfOpenProbe_Succeeds_ClosesCircuit_AndResetsTripCount()
     {
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
-        var breaker = Create(failureThreshold: 1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
+        var breaker = Create(1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
 
         breaker.RecordFailure(Target);
         clock.Advance(TimeSpan.FromSeconds(10));
@@ -138,7 +139,7 @@ public class CircuitBreakerTests
     public void HalfOpenProbe_Fails_ReOpensImmediately_AndDoublesCooldown()
     {
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
-        var breaker = Create(failureThreshold: 1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
+        var breaker = Create(1, baseCooldown: TimeSpan.FromSeconds(10), timeProvider: clock);
 
         breaker.RecordFailure(Target); // trip #1: 10s cooldown
         clock.Advance(TimeSpan.FromSeconds(10));
@@ -160,7 +161,7 @@ public class CircuitBreakerTests
     {
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
         var breaker = Create(
-            failureThreshold: 1,
+            1,
             baseCooldown: TimeSpan.FromSeconds(10),
             maxCooldown: TimeSpan.FromSeconds(25),
             timeProvider: clock);
@@ -184,7 +185,8 @@ public class CircuitBreakerTests
     public void DifferentTargets_AreTrackedIndependently()
     {
         var breaker = Create(failureThreshold: 1);
-        var other = new CircuitBreakerTargetKey("anthropic", "https://api.anthropic.com/", "claude-sonnet-5");
+        var other = new CircuitBreakerTargetKey(Provider: "anthropic", BaseUrl: "https://api.anthropic.com/",
+            ProviderModelId: "claude-sonnet-5");
 
         breaker.RecordFailure(Target);
 
@@ -209,7 +211,8 @@ public class CircuitBreakerTests
     public void RecordProviderFailure_TripsEveryModelOnThatProvider_NotJustOneTarget()
     {
         var breaker = Create();
-        var otherModelSameProvider = new CircuitBreakerTargetKey("openai", "https://api.openai.com/", "gpt-5.4-mini");
+        var otherModelSameProvider = new CircuitBreakerTargetKey(Provider: "openai", BaseUrl: "https://api.openai.com/",
+            ProviderModelId: "gpt-5.4-mini");
 
         breaker.RecordProviderFailure("openai");
 
@@ -263,14 +266,22 @@ public class CircuitBreakerTests
         Assert.False(breaker.IsProviderOpen("openai"));
     }
 
-    /// <summary>A <see cref="TimeProvider"/> whose clock only moves when <see cref="Advance"/> is called, for deterministic cooldown-expiry assertions.</summary>
+    /// <summary>
+    /// A <see cref="TimeProvider"/> whose clock only moves when <see cref="Advance"/> is called, for deterministic
+    /// cooldown-expiry assertions.
+    /// </summary>
     private sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
     {
         private DateTimeOffset _now = start;
 
-        public override DateTimeOffset GetUtcNow() => _now;
+        public override DateTimeOffset GetUtcNow()
+        {
+            return _now;
+        }
 
-        public void Advance(TimeSpan by) => _now += by;
+        public void Advance(TimeSpan by)
+        {
+            _now += by;
+        }
     }
 }
-

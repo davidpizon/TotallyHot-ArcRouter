@@ -1,4 +1,5 @@
 using Grpc.Core;
+using System.Globalization;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
@@ -11,8 +12,9 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 public sealed class PersistedSessionsClientException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="PersistedSessionsClientException"/> class.</summary>
-    public PersistedSessionsClientException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+    public PersistedSessionsClientException(string message, Exception? innerException = null,
+        bool isUnavailable = false)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -47,14 +49,15 @@ public interface IPersistedSessionsClient
 /// </summary>
 public sealed class PersistedSessionsClient
     : GrpcAdminClientBase<Contract.TelemetryService.TelemetryServiceClient, PersistedSessionsClientException>,
-      IPersistedSessionsClient
+        IPersistedSessionsClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="PersistedSessionsClient"/> class, creating and owning
     /// a channel to <paramref name="serverAddress"/>.
     /// </summary>
     public PersistedSessionsClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.TelemetryService.TelemetryServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker => new Contract.TelemetryService.TelemetryServiceClient(callInvoker))
     {
     }
 
@@ -68,41 +71,54 @@ public sealed class PersistedSessionsClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .ListPersistedSessionsAsync(new Contract.ListPersistedSessionsRequest { Limit = limit }, cancellationToken: cancellationToken)
+                .ListPersistedSessionsAsync(request: new Contract.ListPersistedSessionsRequest { Limit = limit },
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             return new PersistedSessionsResult(
-                response.TranscriptCaptureEnabled,
-                [.. response.Transcripts.Select(ToDto)]);
+                TranscriptCaptureEnabled: response.TranscriptCaptureEnabled,
+                Transcripts: [.. response.Transcripts.Select(ToDto)]);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read persisted sessions");
+            throw Wrap(ex: ex, action: "Could not read persisted sessions");
         }
     }
 
-    /// <summary>Converts a gRPC-contract <see cref="Contract.PersistedTranscript"/> into the plain <see cref="PersistedTranscriptDto"/>.</summary>
-    private static PersistedTranscriptDto ToDto(Contract.PersistedTranscript t) => new(
-        SessionId: t.SessionId,
-        CorrelationId: t.CorrelationId,
-        CreatedAtUtc: t.CreatedAtUtc.ToDateTimeOffset(),
-        RequestedModel: t.RequestedModel,
-        RoutedModel: t.RoutedModel,
-        PromptText: t.HasPromptText ? t.PromptText : null,
-        ResponseText: t.HasResponseText ? t.ResponseText : null,
-        // Decimal-as-string, not double: see "Decimal encoding" in docs/router/grpc-migration.md.
-        CostUsd: t.HasCostUsd ? decimal.Parse(t.CostUsd, System.Globalization.CultureInfo.InvariantCulture) : null,
-        InputTokens: t.HasInputTokens ? t.InputTokens : null,
-        OutputTokens: t.HasOutputTokens ? t.OutputTokens : null,
-        MemoryEntryId: t.HasMemoryEntryId ? t.MemoryEntryId : null);
+    /// <summary>
+    /// Converts a gRPC-contract <see cref="Contract.PersistedTranscript"/> into the plain
+    /// <see cref="PersistedTranscriptDto"/>.
+    /// </summary>
+    private static PersistedTranscriptDto ToDto(Contract.PersistedTranscript t)
+    {
+        return new PersistedTranscriptDto(
+            SessionId: t.SessionId,
+            CorrelationId: t.CorrelationId,
+            CreatedAtUtc: t.CreatedAtUtc.ToDateTimeOffset(),
+            RequestedModel: t.RequestedModel,
+            RoutedModel: t.RoutedModel,
+            PromptText: t.HasPromptText ? t.PromptText : null,
+            ResponseText: t.HasResponseText ? t.ResponseText : null,
+            // Decimal-as-string, not double: see "Decimal encoding" in docs/router/grpc-migration.md.
+            CostUsd: t.HasCostUsd
+                ? decimal.Parse(s: t.CostUsd, provider: CultureInfo.InvariantCulture)
+                : null,
+            InputTokens: t.HasInputTokens ? t.InputTokens : null,
+            OutputTokens: t.HasOutputTokens ? t.OutputTokens : null,
+            MemoryEntryId: t.HasMemoryEntryId ? t.MemoryEntryId : null);
+    }
 
-    /// <inheritdoc />
-    protected override PersistedSessionsClientException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override PersistedSessionsClientException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new PersistedSessionsClientException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }

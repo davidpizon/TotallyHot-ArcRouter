@@ -1,9 +1,9 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Tests.TestSupport;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
@@ -11,7 +11,8 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 /// Covers <see cref="JudgeShadowScoreDrainService.ProcessAsync"/> directly (mirroring
 /// <see cref="TotallyHot.ArcRouter.Transcripts.TranscriptRetentionService.CheckAndPurgeAsync"/>'s
 /// internal-for-test-access convention) - the exit criteria that matter most: the pending response text
-/// is always consumed, and a scored job produces at most one shadow row.
+/// is always consumed, a scored job produces at most one shadow row, and every path settles the quality
+/// join rather than leaving a held verdict to expire.
 /// </summary>
 public class JudgeShadowScoreDrainServiceTests
 {
@@ -19,31 +20,31 @@ public class JudgeShadowScoreDrainServiceTests
     public async Task ProcessAsync_TextPresent_WritesExactlyOneRowAndDrainsTheCache()
     {
         var cache = CreateCache();
-        cache.Set("corr-1", "the agent's response");
-        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, UsedLogprobs: true, "free-judge-model"));
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
         var store = new FakeJudgeShadowScoreStore();
-        var service = CreateService(cache, judgeClient, store);
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: store);
 
-        await service.ProcessAsync(MakeJob("corr-1"), TestContext.Current.CancellationToken);
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
         var record = Assert.Single(store.Inserted);
-        Assert.Equal("corr-1", record.CorrelationId);
-        Assert.Equal(0.8, record.JudgeScore);
+        Assert.Equal(expected: "corr-1", actual: record.CorrelationId);
+        Assert.Equal(0.8, actual: record.JudgeScore);
         Assert.True(record.UsedLogprobs);
         // The row names the model the client reported running, not a configured value.
-        Assert.Equal("free-judge-model", record.JudgeModel);
-        Assert.False(cache.TryTake("corr-1", out _));
+        Assert.Equal(expected: "free-judge-model", actual: record.JudgeModel);
+        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
     }
 
     [Fact]
     public async Task ProcessAsync_NoPendingText_WritesNoRow()
     {
         var cache = CreateCache();
-        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, UsedLogprobs: true, "free-judge-model"));
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
         var store = new FakeJudgeShadowScoreStore();
-        var service = CreateService(cache, judgeClient, store);
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: store);
 
-        await service.ProcessAsync(MakeJob("never-cached"), TestContext.Current.CancellationToken);
+        await service.ProcessAsync(job: MakeJob("never-cached"), stoppingToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(store.Inserted);
         Assert.False(judgeClient.WasCalled);
@@ -53,15 +54,15 @@ public class JudgeShadowScoreDrainServiceTests
     public async Task ProcessAsync_JudgeClientThrows_TextIsStillDrainedAndNoRowWritten()
     {
         var cache = CreateCache();
-        cache.Set("corr-1", "the agent's response");
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
         var judgeClient = new FakeJudgeClient(exception: new InvalidOperationException("backbone unreachable"));
         var store = new FakeJudgeShadowScoreStore();
-        var service = CreateService(cache, judgeClient, store);
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: store);
 
-        await service.ProcessAsync(MakeJob("corr-1"), TestContext.Current.CancellationToken);
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(store.Inserted);
-        Assert.False(cache.TryTake("corr-1", out _));
+        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
     }
 
     /// <summary>
@@ -73,16 +74,16 @@ public class JudgeShadowScoreDrainServiceTests
     public async Task ProcessAsync_NoEligibleJudgeModel_WritesNoRowAndStillDrainsTheCache()
     {
         var cache = CreateCache();
-        cache.Set("corr-1", "the agent's response");
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
         var judgeClient = new FakeJudgeClient(result: null);
         var store = new FakeJudgeShadowScoreStore();
-        var service = CreateService(cache, judgeClient, store);
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: store);
 
-        await service.ProcessAsync(MakeJob("corr-1"), TestContext.Current.CancellationToken);
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
         Assert.True(judgeClient.WasCalled);
         Assert.Empty(store.Inserted);
-        Assert.False(cache.TryTake("corr-1", out _));
+        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
     }
 
     /// <summary>
@@ -93,21 +94,100 @@ public class JudgeShadowScoreDrainServiceTests
     public async Task ProcessAsync_JudgeDisabled_NeverCallsBackboneButStillReleasesTheText()
     {
         var cache = CreateCache();
-        cache.Set("corr-1", "the agent's response");
-        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, UsedLogprobs: true, "free-judge-model"));
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
         var store = new FakeJudgeShadowScoreStore();
         var options = new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = false });
-        var service = CreateService(cache, judgeClient, store, options);
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: store, options: options);
 
-        await service.ProcessAsync(MakeJob("corr-1"), TestContext.Current.CancellationToken);
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
         Assert.False(judgeClient.WasCalled);
         Assert.Empty(store.Inserted);
-        Assert.False(cache.TryTake("corr-1", out _));
+        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
     }
 
-    private static PendingResponseTextCache CreateCache() =>
-        new(Options.Create(new JudgeOptions()));
+    /// <summary>
+    /// The point of shadow scoring: a judge grade must actually reach the aggregator, which is what
+    /// releases the held verdict and lets the score influence routing. Writing the shadow row without
+    /// completing the join would leave the verdict to expire and the grade to be silently discarded.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_TextPresent_CompletesTheQualityJoinWithTheJudgeScore()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            aggregator: aggregator);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        var completed = Assert.Single(aggregator.Completed);
+        Assert.Equal(expected: "corr-1", actual: completed.CorrelationId);
+        Assert.Equal(0.8, actual: completed.Score);
+        Assert.Empty(aggregator.Abandoned);
+    }
+
+    /// <summary>
+    /// Each of the three give-up paths abandons the join with its own reason, so an operator reading the
+    /// aggregator can tell a switched-off judge from an evicted response from a judge that abstained. The
+    /// reason strings are asserted literally because they are the diagnostic - a silent rename would leave
+    /// the three cases indistinguishable.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true, true, "judge-disabled")]
+    [InlineData(true, false, true, "judge-text-evicted")]
+    [InlineData(true, true, false, "judge-abstained")]
+    public async Task ProcessAsync_GiveUpPath_AbandonsTheQualityJoinWithItsOwnReason(
+        bool judgeEnabled, bool textCached, bool judgeReturnsScore, string expectedReason)
+    {
+        var cache = CreateCache();
+        if (textCached) cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(judgeReturnsScore
+            ? new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model")
+            : null);
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = judgeEnabled }),
+            aggregator: aggregator);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        var abandoned = Assert.Single(aggregator.Abandoned);
+        Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: expectedReason, actual: abandoned.Reason);
+        Assert.Empty(aggregator.Completed);
+    }
+
+    /// <summary>
+    /// The one path that deliberately settles nothing. A judge client that throws is caught and logged, and
+    /// the held verdict is left for <see cref="IQualityScoreAggregator.SweepExpiredAsync"/> rather than
+    /// abandoned inline - a backbone blip should not be recorded as the judge having declined to grade.
+    /// This asserts that on purpose, so adding an inline abandon here becomes a deliberate decision rather
+    /// than an accident.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_JudgeClientThrows_LeavesTheQualityJoinToTheExpirySweep()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(exception: new InvalidOperationException("backbone unreachable"));
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            aggregator: aggregator);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(aggregator.Completed);
+        Assert.Empty(aggregator.Abandoned);
+    }
+
+    private static PendingResponseTextCache CreateCache()
+    {
+        return new PendingResponseTextCache(Options.Create(new JudgeOptions()));
+    }
 
     private static JudgeShadowScoreDrainService CreateService(
         PendingResponseTextCache cache,
@@ -118,37 +198,34 @@ public class JudgeShadowScoreDrainServiceTests
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         return new JudgeShadowScoreDrainService(
-            queue,
-            cache,
-            judgeClient,
-            store,
-            options ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true, PromptVersion = "g-eval-v1" }),
-            aggregator ?? new RecordingAggregator(),
-            NullLogger<JudgeShadowScoreDrainService>.Instance);
+            queue: queue,
+            pendingResponseTextCache: cache,
+            judgeClient: judgeClient,
+            store: store,
+            options: options ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions
+            { Enabled = true, PromptVersion = "g-eval-v1" }),
+            aggregator: aggregator ?? new RecordingAggregator(),
+            logger: NullLogger<JudgeShadowScoreDrainService>.Instance);
     }
 
-    private static JudgeShadowScoringJob MakeJob(string correlationId) =>
-        new(correlationId, "algorithm", "claude-opus-4-6", StaticScore: 0.6);
-
-    private sealed class FakeJudgeClient : IJudgeClient
+    private static JudgeShadowScoringJob MakeJob(string correlationId)
     {
-        private readonly JudgeScoreResult? _result;
-        private readonly Exception? _exception;
+        return new JudgeShadowScoringJob(CorrelationId: correlationId, Dimension: "algorithm", Model: "claude-opus-4-6",
+            0.6);
+    }
+
+    private sealed class FakeJudgeClient(JudgeScoreResult? result = null, Exception? exception = null) : IJudgeClient
+    {
 
         public bool WasCalled { get; private set; }
 
-        public FakeJudgeClient(JudgeScoreResult? result = null, Exception? exception = null)
-        {
-            _result = result;
-            _exception = exception;
-        }
-
-        public Task<JudgeScoreResult?> ScoreAsync(JudgeScoreRequest request, CancellationToken cancellationToken = default)
+        public Task<JudgeScoreResult?> ScoreAsync(JudgeScoreRequest request,
+            CancellationToken cancellationToken = default)
         {
             WasCalled = true;
-            return _exception is not null
-                ? Task.FromException<JudgeScoreResult?>(_exception)
-                : Task.FromResult(_result);
+            return exception is not null
+                ? Task.FromException<JudgeScoreResult?>(exception)
+                : Task.FromResult(result);
         }
     }
 
@@ -162,11 +239,20 @@ public class JudgeShadowScoreDrainServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) => Task.FromResult(Inserted.Count);
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Inserted.Count);
+        }
 
-        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(0);
+        }
 
-        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(0);
+        }
     }
 
     /// <summary>
@@ -180,21 +266,28 @@ public class JudgeShadowScoreDrainServiceTests
 
         public List<(string CorrelationId, string Reason)> Abandoned { get; } = [];
 
-        public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+        public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
 
-        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore, CancellationToken cancellationToken = default)
+        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
+            CancellationToken cancellationToken = default)
         {
             Completed.Add((correlationId, judgeScore));
             return Task.FromResult(true);
         }
 
-        public Task<bool> AbandonJudgeAsync(string correlationId, string reason, CancellationToken cancellationToken = default)
+        public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
+            CancellationToken cancellationToken = default)
         {
             Abandoned.Add((correlationId, reason));
             return Task.FromResult(true);
         }
 
-        public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(0);
+        }
     }
 }

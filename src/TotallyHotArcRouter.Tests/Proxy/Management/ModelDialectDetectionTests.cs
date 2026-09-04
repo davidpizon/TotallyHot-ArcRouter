@@ -1,3 +1,4 @@
+using Moq;
 using System.Net;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
@@ -5,8 +6,6 @@ using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using TotallyHot.ArcRouter.Tests.Proxy;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
@@ -14,9 +13,8 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// Covers how <see cref="ManagementFacade"/> drives tier 1-3 dialect detection
 /// (<c>docs/router/tool-call-normalization.md</c> Phase 3): the sweep over a provider's models on an
 /// explicit capability scan, and the single-model classification when a model is added.
-///
 /// <para>
-/// <see cref="ModelDialectResolverTests"/> owns the detection logic itself. What is tested here is the
+/// <see cref="TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling.ModelDialectResolverTests"/> owns the detection logic itself. What is tested here is the
 /// wiring around it, and the guarantee that matters is the same one Phase 2's scan carries: detection is an
 /// optimization over Phase 4's live observation, so a failure must cost one request's worth of scanning and
 /// never the save that triggered it.
@@ -29,89 +27,91 @@ public sealed class ModelDialectDetectionTests : IDisposable
 
     // Condensed from the real Ollama Qwen 2.5 template; the tool-call framing is what detection reads.
     private const string QwenTemplate = """
-        For each function call, return a json object within <tool_call></tool_call> XML tags:
-        <tool_call>
-        {"name": <function-name>, "arguments": <args-json-object>}
-        </tool_call>
-        """;
+                                        For each function call, return a json object within <tool_call></tool_call> XML tags:
+                                        <tool_call>
+                                        {"name": <function-name>, "arguments": <args-json-object>}
+                                        </tool_call>
+                                        """;
 
     private readonly TempDatabase _temp = new();
 
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
+
     /// <summary>An Ollama-shaped provider whose native paths all answer, serving <paramref name="models"/>.</summary>
-    private static InMemoryProviderConfigStore StoreWith(params string[] models) =>
-        new(new ModelRoutingOptions
+    private static InMemoryProviderConfigStore StoreWith(params string[] models)
+    {
+        return new InMemoryProviderConfigStore(new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["ollama"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1" },
+                ["ollama"] = new() { BaseUrl = "http://localhost:11434/v1" }
             },
-            ModelList = [.. models.Select(m => new ModelRouteEntry
-            {
-                ModelName = m,
-                Provider = "ollama",
-                ProviderModelId = m,
-            })],
+            ModelList =
+            [
+                .. models.Select(m => new ModelRouteEntry
+                {
+                    ModelName = m,
+                    Provider = "ollama",
+                    ProviderModelId = m
+                })
+            ]
         });
+    }
 
     /// <summary>Serves the OpenAI list, Ollama's tag list, and a Qwen template from <c>/api/show</c>.</summary>
-    private static HttpMessageHandler OllamaServing(string template) =>
-        new DelegatingHandlerStub(request =>
+    private static HttpMessageHandler OllamaServing(string template)
+    {
+        return new DelegatingHandlerStub(request =>
         {
             var url = request.RequestUri!.ToString();
             string? body = null;
-            if (url.EndsWith("/v1/models", StringComparison.Ordinal))
-            {
+            if (url.EndsWith(value: "/v1/models", comparisonType: StringComparison.Ordinal))
                 body = OpenAiBody;
-            }
-            else if (url.EndsWith("/api/tags", StringComparison.Ordinal))
-            {
+            else if (url.EndsWith(value: "/api/tags", comparisonType: StringComparison.Ordinal))
                 body = OllamaTagsBody;
-            }
-            else if (url.EndsWith("/api/show", StringComparison.Ordinal))
-            {
+            else if (url.EndsWith(value: "/api/show", comparisonType: StringComparison.Ordinal))
                 body = JsonSerializer.Serialize(new { template });
-            }
 
             return Task.FromResult(body is null
                 ? new HttpResponseMessage(HttpStatusCode.NotFound)
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
         });
+    }
 
     /// <summary>
     /// As <see cref="OllamaServing"/>, but the <c>/api/show</c> body also carries the <c>model_info</c>
     /// block a real Ollama returns - the source of the context window recorded alongside the dialect.
     /// </summary>
     private static HttpMessageHandler OllamaServingWithModelInfo(
-        string? template, string architecture, long contextLength) =>
-        new DelegatingHandlerStub(request =>
+        string? template, string architecture, long contextLength)
+    {
+        return new DelegatingHandlerStub(request =>
         {
             var url = request.RequestUri!.ToString();
             string? body = null;
-            if (url.EndsWith("/v1/models", StringComparison.Ordinal))
-            {
+            if (url.EndsWith(value: "/v1/models", comparisonType: StringComparison.Ordinal))
                 body = OpenAiBody;
-            }
-            else if (url.EndsWith("/api/tags", StringComparison.Ordinal))
-            {
+            else if (url.EndsWith(value: "/api/tags", comparisonType: StringComparison.Ordinal))
                 body = OllamaTagsBody;
-            }
-            else if (url.EndsWith("/api/show", StringComparison.Ordinal))
-            {
+            else if (url.EndsWith(value: "/api/show", comparisonType: StringComparison.Ordinal))
                 body = JsonSerializer.Serialize(new Dictionary<string, object?>
                 {
                     ["template"] = template,
                     ["model_info"] = new Dictionary<string, object>
                     {
                         ["general.architecture"] = architecture,
-                        [$"{architecture}.context_length"] = contextLength,
-                    },
+                        [$"{architecture}.context_length"] = contextLength
+                    }
                 });
-            }
 
             return Task.FromResult(body is null
                 ? new HttpResponseMessage(HttpStatusCode.NotFound)
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
         });
+    }
 
     /// <summary>
     /// Builds a facade whose endpoint scanner and management client share <paramref name="handler"/>, so one
@@ -122,17 +122,21 @@ public sealed class ModelDialectDetectionTests : IDisposable
     {
         var environment = Mock.Of<IEnvironmentVariableProvider>();
         return new ManagementFacade(
-            store,
-            environment,
-            new HttpClient(handler),
-            new ManagementFacadeDependencies
+            store: store,
+            environment: environment,
+            httpClient: new HttpClient(handler),
+            dependencies: new ManagementFacadeDependencies
             {
-                EndpointScanner = new ProviderEndpointScanner(new HttpClient(handler), environment),
-                CapabilityStore = capabilityStore,
+                EndpointScanner =
+                    new ProviderEndpointScanner(httpClient: new HttpClient(handler), environment: environment),
+                CapabilityStore = capabilityStore
             });
     }
 
-    private ToolCallCapabilityStore CapabilityStore() => _temp.CreateToolCallCapabilityStore();
+    private ToolCallCapabilityStore CapabilityStore()
+    {
+        return _temp.CreateToolCallCapabilityStore();
+    }
 
     // ----- The sweep on an explicit capability scan -----
 
@@ -140,19 +144,21 @@ public sealed class ModelDialectDetectionTests : IDisposable
     public async Task ScanCapabilities_ClassifiesEveryModelOnTheProvider()
     {
         var capabilities = CapabilityStore();
-        var facade = Facade(StoreWith("qwen2.5-coder:7b", "qwen3:8b"), OllamaServing(QwenTemplate), capabilities);
+        var facade = Facade(store: StoreWith("qwen2.5-coder:7b", "qwen3:8b"), handler: OllamaServing(QwenTemplate),
+            capabilityStore: capabilities);
 
-        var result = await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        var result =
+            await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.True(result.Value!.OllamaNative);
 
         foreach (var model in new[] { "qwen2.5-coder:7b", "qwen3:8b" })
         {
-            var capability = capabilities.GetModelCapability("ollama", model);
+            var capability = capabilities.GetModelCapability(providerKey: "ollama", modelName: model);
             Assert.NotNull(capability);
-            Assert.Equal("hermes", capability.Dialect);
-            Assert.Equal(DetectionConfidence.Template, capability.Confidence);
+            Assert.Equal(expected: "hermes", actual: capability.Dialect);
+            Assert.Equal(expected: DetectionConfidence.Template, actual: capability.Confidence);
         }
     }
 
@@ -169,13 +175,13 @@ public sealed class ModelDialectDetectionTests : IDisposable
         // exercise the other branch.
         var capabilities = CapabilityStore();
         var facade = Facade(
-            StoreWith("some-private-finetune"),
-            OllamaServing("{{- if .Tools }}<|tool calls begin|>{{ .Tools }}<|tool calls end|>{{ end }}"),
-            capabilities);
+            store: StoreWith("some-private-finetune"),
+            handler: OllamaServing("{{- if .Tools }}<|tool calls begin|>{{ .Tools }}<|tool calls end|>{{ end }}"),
+            capabilityStore: capabilities);
 
-        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Null(capabilities.GetModelCapability("ollama", "some-private-finetune"));
+        Assert.Null(capabilities.GetModelCapability(providerKey: "ollama", modelName: "some-private-finetune"));
     }
 
     [Fact]
@@ -186,15 +192,15 @@ public sealed class ModelDialectDetectionTests : IDisposable
         // reach the model - so emulation is the only way it ever calls a tool.
         var capabilities = CapabilityStore();
         var facade = Facade(
-            StoreWith("some-private-finetune"),
-            OllamaServing("{{ .System }}\n{{ .Prompt }}"),
-            capabilities);
+            store: StoreWith("some-private-finetune"),
+            handler: OllamaServing("{{ .System }}\n{{ .Prompt }}"),
+            capabilityStore: capabilities);
 
-        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
-        var capability = capabilities.GetModelCapability("ollama", "some-private-finetune");
-        Assert.Equal("emulated", capability!.Dialect);
-        Assert.Equal(DetectionConfidence.Template, capability.Confidence);
+        var capability = capabilities.GetModelCapability(providerKey: "ollama", modelName: "some-private-finetune");
+        Assert.Equal(expected: "emulated", actual: capability!.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Template, actual: capability.Confidence);
     }
 
     [Fact]
@@ -204,13 +210,15 @@ public sealed class ModelDialectDetectionTests : IDisposable
         // failure in the passenger must not fail the trip.
         var capabilities = CapabilityStore();
         var flavorsOnly = new DelegatingHandlerStub(request =>
-            request.RequestUri!.ToString().EndsWith("/api/show", StringComparison.Ordinal)
+            request.RequestUri!.ToString().EndsWith(value: "/api/show", comparisonType: StringComparison.Ordinal)
                 ? throw new HttpRequestException("connection reset")
-                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(OpenAiBody) }));
+                : Task.FromResult(
+                    new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(OpenAiBody) }));
 
-        var facade = Facade(StoreWith("qwen2.5-coder:7b"), flavorsOnly, capabilities);
+        var facade = Facade(store: StoreWith("qwen2.5-coder:7b"), handler: flavorsOnly, capabilityStore: capabilities);
 
-        var result = await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        var result =
+            await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.True(result.Value!.OpenAiCompatible);
@@ -224,14 +232,16 @@ public sealed class ModelDialectDetectionTests : IDisposable
         // the path that would actually trip it.
         var capabilities = CapabilityStore();
         capabilities.TryRecordModelCapability(new ModelToolCapability(
-            "ollama", "qwen2.5-coder:7b", "mistral", DetectionConfidence.Operator, "pinned by hand"));
+            ProviderKey: "ollama", ModelName: "qwen2.5-coder:7b", Dialect: "mistral",
+            Confidence: DetectionConfidence.Operator, Evidence: "pinned by hand"));
 
-        var facade = Facade(StoreWith("qwen2.5-coder:7b"), OllamaServing(QwenTemplate), capabilities);
-        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        var facade = Facade(store: StoreWith("qwen2.5-coder:7b"), handler: OllamaServing(QwenTemplate),
+            capabilityStore: capabilities);
+        await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
-        var capability = capabilities.GetModelCapability("ollama", "qwen2.5-coder:7b");
-        Assert.Equal("mistral", capability!.Dialect);
-        Assert.Equal(DetectionConfidence.Operator, capability.Confidence);
+        var capability = capabilities.GetModelCapability(providerKey: "ollama", modelName: "qwen2.5-coder:7b");
+        Assert.Equal(expected: "mistral", actual: capability!.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Operator, actual: capability.Confidence);
     }
 
     // ----- Classification when a model is added -----
@@ -241,17 +251,19 @@ public sealed class ModelDialectDetectionTests : IDisposable
     {
         var capabilities = CapabilityStore();
         var store = StoreWith();
-        var facade = Facade(store, OllamaServing(QwenTemplate), capabilities);
+        var facade = Facade(store: store, handler: OllamaServing(QwenTemplate), capabilityStore: capabilities);
 
         // The provider must have been scanned first: adding a model says nothing new about the provider, so
         // no flavor scan is triggered here and detection reads whatever flags are already recorded.
-        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
         var result = await facade.UpsertModelAsync(
-            "ollama", "qwen2.5-coder:7b", new ModelWriteRequest(null), TestContext.Current.CancellationToken);
+            providerKey: "ollama", modelName: "qwen2.5-coder:7b", request: new ModelWriteRequest(null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("hermes", capabilities.GetModelCapability("ollama", "qwen2.5-coder:7b")!.Dialect);
+        Assert.Equal(expected: "hermes",
+            actual: capabilities.GetModelCapability(providerKey: "ollama", modelName: "qwen2.5-coder:7b")!.Dialect);
     }
 
     [Fact]
@@ -260,14 +272,15 @@ public sealed class ModelDialectDetectionTests : IDisposable
         // No endpoint flags means no native probe is attempted at all - so this asserts the tier-3 path
         // reached through the facade, and that a never-scanned provider still gets a usable classification.
         var capabilities = CapabilityStore();
-        var facade = Facade(StoreWith(), OllamaServing(QwenTemplate), capabilities);
+        var facade = Facade(store: StoreWith(), handler: OllamaServing(QwenTemplate), capabilityStore: capabilities);
 
         await facade.UpsertModelAsync(
-            "ollama", "mixtral-8x7b", new ModelWriteRequest(null), TestContext.Current.CancellationToken);
+            providerKey: "ollama", modelName: "mixtral-8x7b", request: new ModelWriteRequest(null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var capability = capabilities.GetModelCapability("ollama", "mixtral-8x7b");
-        Assert.Equal("mistral", capability!.Dialect);
-        Assert.Equal(DetectionConfidence.Heuristic, capability.Confidence);
+        var capability = capabilities.GetModelCapability(providerKey: "ollama", modelName: "mixtral-8x7b");
+        Assert.Equal(expected: "mistral", actual: capability!.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Heuristic, actual: capability.Confidence);
     }
 
     [Fact]
@@ -275,10 +288,11 @@ public sealed class ModelDialectDetectionTests : IDisposable
     {
         var capabilities = CapabilityStore();
         var alwaysThrows = new DelegatingHandlerStub(_ => throw new InvalidOperationException("boom"));
-        var facade = Facade(StoreWith(), alwaysThrows, capabilities);
+        var facade = Facade(store: StoreWith(), handler: alwaysThrows, capabilityStore: capabilities);
 
         var result = await facade.UpsertModelAsync(
-            "ollama", "qwen2.5-coder:7b", new ModelWriteRequest(null), TestContext.Current.CancellationToken);
+            providerKey: "ollama", modelName: "qwen2.5-coder:7b", request: new ModelWriteRequest(null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
     }
@@ -287,25 +301,15 @@ public sealed class ModelDialectDetectionTests : IDisposable
     public async Task UpsertModel_StillSucceeds_WhenNoCapabilityStoreIsConfigured()
     {
         var store = StoreWith();
-        var facade = new ManagementFacade(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient());
+        var facade = new ManagementFacade(store: store, environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient());
 
         var result = await facade.UpsertModelAsync(
-            "ollama", "qwen2.5-coder:7b", new ModelWriteRequest(null), TestContext.Current.CancellationToken);
+            providerKey: "ollama", modelName: "qwen2.5-coder:7b", request: new ModelWriteRequest(null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Contains(store.Snapshot.Options.ModelList, m => m.ModelName == "qwen2.5-coder:7b");
-    }
-
-    public void Dispose() => _temp.Dispose();
-
-    private sealed class DelegatingHandlerStub : HttpMessageHandler
-    {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
-
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
+        Assert.Contains(collection: store.Snapshot.Options.ModelList, filter: m => m.ModelName == "qwen2.5-coder:7b");
     }
 
     // ----- Context windows persisted by the same sweep -----
@@ -318,19 +322,21 @@ public sealed class ModelDialectDetectionTests : IDisposable
     {
         var capabilities = CapabilityStore();
         var facade = Facade(
-            StoreWith("qwen2.5-coder:7b"),
-            OllamaServingWithModelInfo(QwenTemplate, "qwen2", 32768),
-            capabilities);
+            store: StoreWith("qwen2.5-coder:7b"),
+            handler: OllamaServingWithModelInfo(template: QwenTemplate, architecture: "qwen2", 32768),
+            capabilityStore: capabilities);
 
-        var result = await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        var result =
+            await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("hermes", capabilities.GetModelCapability("ollama", "qwen2.5-coder:7b")!.Dialect);
+        Assert.Equal(expected: "hermes",
+            actual: capabilities.GetModelCapability(providerKey: "ollama", modelName: "qwen2.5-coder:7b")!.Dialect);
 
-        var window = capabilities.GetModelContextWindow("ollama", "qwen2.5-coder:7b");
+        var window = capabilities.GetModelContextWindow(providerKey: "ollama", modelName: "qwen2.5-coder:7b");
         Assert.NotNull(window);
-        Assert.Equal(32768, window!.ContextLength);
-        Assert.Equal("qwen2", window.Architecture);
+        Assert.Equal(32768, actual: window.ContextLength);
+        Assert.Equal(expected: "qwen2", actual: window.Architecture);
     }
 
     // The independence guarantee, end to end: a template rendering tools in an unregistered dialect writes
@@ -341,15 +347,18 @@ public sealed class ModelDialectDetectionTests : IDisposable
     {
         var capabilities = CapabilityStore();
         var facade = Facade(
-            StoreWith("some-private-finetune"),
-            OllamaServingWithModelInfo(
-                "{{- if .Tools }}<|tool calls begin|>{{ .Tools }}<|tool calls end|>{{ end }}", "deepseek2", 65536),
-            capabilities);
+            store: StoreWith("some-private-finetune"),
+            handler: OllamaServingWithModelInfo(
+                template: "{{- if .Tools }}<|tool calls begin|>{{ .Tools }}<|tool calls end|>{{ end }}",
+                architecture: "deepseek2", 65536),
+            capabilityStore: capabilities);
 
-        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Null(capabilities.GetModelCapability("ollama", "some-private-finetune"));
-        Assert.Equal(65536, capabilities.GetModelContextWindow("ollama", "some-private-finetune")?.ContextLength);
+        Assert.Null(capabilities.GetModelCapability(providerKey: "ollama", modelName: "some-private-finetune"));
+        Assert.Equal(65536,
+            actual: capabilities.GetModelContextWindow(providerKey: "ollama", modelName: "some-private-finetune")
+                ?.ContextLength);
     }
 
     // A provider that reports no model_info must leave no row, so a later successful probe is the first
@@ -358,11 +367,22 @@ public sealed class ModelDialectDetectionTests : IDisposable
     public async Task ScanCapabilities_WritesNoContextWindow_WhenTheProviderReportsNone()
     {
         var capabilities = CapabilityStore();
-        var facade = Facade(StoreWith("qwen2.5-coder:7b"), OllamaServing(QwenTemplate), capabilities);
+        var facade = Facade(store: StoreWith("qwen2.5-coder:7b"), handler: OllamaServing(QwenTemplate),
+            capabilityStore: capabilities);
 
-        await facade.ScanCapabilitiesAsync("ollama", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "ollama", cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.NotNull(capabilities.GetModelCapability("ollama", "qwen2.5-coder:7b"));
-        Assert.Null(capabilities.GetModelContextWindow("ollama", "qwen2.5-coder:7b"));
+        Assert.NotNull(capabilities.GetModelCapability(providerKey: "ollama", modelName: "qwen2.5-coder:7b"));
+        Assert.Null(capabilities.GetModelContextWindow(providerKey: "ollama", modelName: "qwen2.5-coder:7b"));
+    }
+
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+    {
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return handler(request);
+        }
     }
 }

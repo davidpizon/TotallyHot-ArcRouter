@@ -1,8 +1,7 @@
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
@@ -26,8 +25,12 @@ public sealed record ProviderConfigSnapshot(ModelRoutingOptions Options, int Ver
 /// Config layering (an <c>appsettings.json</c> overlay) can override a key but cannot <em>delete</em>
 /// one, so removal of a provider/model requires a single document that owns the whole configuration -
 /// which is this store. On first run, when no persisted file exists yet, the store seeds itself from
-/// the <c>appsettings.json</c>-bound <see cref="ModelRoutingOptions"/> and holds it <em>in memory
-/// only</em>; nothing is written to disk until the first edit, so a proxy that is never reconfigured
+/// the <c>appsettings.json</c>-bound <see cref="ModelRoutingOptions"/> and holds it
+/// <em>
+/// in memory
+/// only
+/// </em>
+/// ; nothing is written to disk until the first edit, so a proxy that is never reconfigured
 /// behaves exactly as it did before this store existed (and leaves no file behind). Once an edit is
 /// made, the full configuration is persisted and that file becomes the source of truth on subsequent
 /// startups.
@@ -43,7 +46,10 @@ public interface IProviderConfigStore
     /// <summary>
     /// Validates, persists, and atomically publishes a completely new configuration.
     /// </summary>
-    /// <exception cref="OptionsValidationException">The supplied configuration is invalid (see <see cref="ModelRoutingOptions.EnsureValid"/>).</exception>
+    /// <exception cref="OptionsValidationException">
+    /// The supplied configuration is invalid (see
+    /// <see cref="ModelRoutingOptions.EnsureValid"/>).
+    /// </exception>
     Task ReplaceAsync(ModelRoutingOptions next, CancellationToken cancellationToken = default);
 
     /// <summary>Adds or replaces a single provider (by key, case-insensitive), keeping the model list unchanged.</summary>
@@ -56,7 +62,10 @@ public interface IProviderConfigStore
     /// </summary>
     Task RemoveProviderAsync(string key, CancellationToken cancellationToken = default);
 
-    /// <summary>Adds or replaces a single model entry (by <see cref="ModelRouteEntry.ModelName"/>, case-insensitive), preserving position on edit.</summary>
+    /// <summary>
+    /// Adds or replaces a single model entry (by <see cref="ModelRouteEntry.ModelName"/>, case-insensitive),
+    /// preserving position on edit.
+    /// </summary>
     Task UpsertModelAsync(ModelRouteEntry entry, CancellationToken cancellationToken = default);
 
     /// <summary>Removes a single model entry (by <see cref="ModelRouteEntry.ModelName"/>, case-insensitive).</summary>
@@ -78,13 +87,13 @@ public sealed class ProviderConfigStoreOptions
     public string FilePath { get; init; } = "model-routing.json";
 }
 
-/// <inheritdoc cref="IProviderConfigStore" />
+/// <inheritdoc cref="IProviderConfigStore"/>
 public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+    private readonly string _filePath;
 
     private readonly ILogger<ProviderConfigStore> _logger;
-    private readonly string _filePath;
     private readonly ISecretWriter? _secretWriter;
 
     // Serializes edits so two concurrent writes can't interleave their file writes / version bumps.
@@ -124,13 +133,13 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
         var configuredPath = options.Value.FilePath;
         _filePath = Path.IsPathRooted(configuredPath)
             ? configuredPath
-            : Path.Combine(AppContext.BaseDirectory, configuredPath);
+            : Path.Combine(path1: AppContext.BaseDirectory, path2: configuredPath);
 
         ModelRoutingOptions initial;
         if (File.Exists(_filePath))
         {
             initial = LoadFromFile();
-            _logger.LogInformation("Loaded provider configuration from {FilePath}.", _filePath);
+            _logger.LogInformation(message: "Loaded provider configuration from {FilePath}.", _filePath);
             initial = MigrateSecretHeaders(initial);
         }
         else
@@ -138,11 +147,147 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
             initial = Normalize(seed.Value);
             initial.EnsureValid();
             _logger.LogInformation(
+                message:
                 "No provider configuration file at {FilePath}; seeded from appsettings (held in memory, not yet persisted).",
                 _filePath);
         }
 
-        _snapshot = new ProviderConfigSnapshot(initial, 0);
+        _snapshot = new ProviderConfigSnapshot(Options: initial, 0);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _writeMutex.Dispose();
+    }
+
+    /// <inheritdoc/>
+    public ProviderConfigSnapshot Snapshot => _snapshot;
+
+    /// <inheritdoc/>
+    public event Action? Changed;
+
+    /// <inheritdoc/>
+    public async Task ReplaceAsync(ModelRoutingOptions next, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+
+        var normalized = Normalize(next);
+        // Validate before touching disk, so an invalid edit is rejected without persisting anything.
+        normalized.EnsureValid();
+
+        await _writeMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Persist first, then publish: if the write fails the in-memory snapshot stays consistent
+            // with what's on disk (the edit is rejected, not half-applied).
+            await PersistAsync(options: normalized, cancellationToken: cancellationToken).ConfigureAwait(false);
+            _snapshot = new ProviderConfigSnapshot(Options: normalized, Version: _snapshot.Version + 1);
+        }
+        finally
+        {
+            _writeMutex.Release();
+        }
+
+        Changed?.Invoke();
+    }
+
+    /// <inheritdoc/>
+    public Task UpsertProviderAsync(string key, ProviderOptions provider, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(provider);
+
+        var current = _snapshot.Options;
+        var providers =
+            new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+                comparer: StringComparer.OrdinalIgnoreCase)
+            {
+                [key] = provider
+            };
+
+        return ReplaceAsync(
+            next: new ModelRoutingOptions { Providers = providers, ModelList = [.. current.ModelList] },
+            cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task RemoveProviderAsync(string key, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+        var current = _snapshot.Options;
+        var providers = new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+            comparer: StringComparer.OrdinalIgnoreCase);
+        providers.Remove(key);
+
+        // Cascade to this provider's models in the same edit. Leaving them behind would strand every one
+        // of them pointing at a provider that no longer exists, which EnsureValid rejects outright - so
+        // without this the removal could never succeed for a provider that had any models at all. One
+        // ReplaceAsync means the drop is atomic: config is never persisted in the orphaned intermediate
+        // state. Historical metrics (spend, usage, telemetry) are keyed separately and are deliberately
+        // left untouched - removing a provider from the routing config is not a reason to lose its past.
+        var models = current.ModelList
+            .Where(m => !string.Equals(a: m.Provider, b: key, comparisonType: StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return ReplaceAsync(
+            next: new ModelRoutingOptions { Providers = providers, ModelList = models },
+            cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task UpsertModelAsync(ModelRouteEntry entry, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var current = _snapshot.Options;
+        var replaced = false;
+        var models = current.ModelList
+            .Select(m =>
+            {
+                if (string.Equals(a: m.ModelName, b: entry.ModelName,
+                        comparisonType: StringComparison.OrdinalIgnoreCase))
+                {
+                    replaced = true;
+                    return entry;
+                }
+
+                return m;
+            })
+            .ToList();
+
+        if (!replaced) models.Add(entry);
+
+        return ReplaceAsync(
+            next: new ModelRoutingOptions
+            {
+                Providers = new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+                    comparer: StringComparer.OrdinalIgnoreCase),
+                ModelList = models
+            },
+            cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task RemoveModelAsync(string modelName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelName);
+
+        var current = _snapshot.Options;
+        var models = current.ModelList
+            .Where(m => !string.Equals(a: m.ModelName, b: modelName,
+                comparisonType: StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return ReplaceAsync(
+            next: new ModelRoutingOptions
+            {
+                Providers = new Dictionary<string, ProviderOptions>(dictionary: current.Providers,
+                    comparer: StringComparer.OrdinalIgnoreCase),
+                ModelList = models
+            },
+            cancellationToken: cancellationToken);
     }
 
     /// <summary>
@@ -156,12 +301,10 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     /// </summary>
     private ModelRoutingOptions MigrateSecretHeaders(ModelRoutingOptions options)
     {
-        if (_secretWriter is null)
-        {
-            return options;
-        }
+        if (_secretWriter is null) return options;
 
-        var providers = new Dictionary<string, ProviderOptions>(options.Providers, StringComparer.OrdinalIgnoreCase);
+        var providers = new Dictionary<string, ProviderOptions>(dictionary: options.Providers,
+            comparer: StringComparer.OrdinalIgnoreCase);
         var migratedCount = 0;
 
         foreach (var (providerKey, provider) in options.Providers)
@@ -171,19 +314,17 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
             for (var i = 0; i < provider.Headers.Count; i++)
             {
                 var header = provider.Headers[i];
-                if (!header.Locked || string.IsNullOrEmpty(header.Value))
-                {
-                    continue;
-                }
+                if (!header.Locked || string.IsNullOrEmpty(header.Value)) continue;
 
                 var secretRef = $"provider:{providerKey}:header:{header.Name}";
                 try
                 {
-                    _secretWriter.Write(secretRef, header.Value);
+                    _secretWriter.Write(name: secretRef, value: header.Value);
                 }
                 catch (PlatformNotSupportedException)
                 {
                     _logger.LogWarning(
+                        message:
                         "Skipped migrating provider {ProviderKey} header {HeaderName} to the protected secret store: unavailable on this platform.",
                         providerKey, header.Name);
                     continue;
@@ -201,153 +342,19 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
                 migratedCount++;
             }
 
-            if (migratedHeaders is not null)
-            {
-                providers[providerKey] = provider with { Headers = migratedHeaders };
-            }
+            if (migratedHeaders is not null) providers[providerKey] = provider with { Headers = migratedHeaders };
         }
 
-        if (migratedCount == 0)
-        {
-            return options;
-        }
+        if (migratedCount == 0) return options;
 
         var migrated = new ModelRoutingOptions { Providers = providers, ModelList = [.. options.ModelList] };
-        PersistAsync(migrated, CancellationToken.None).GetAwaiter().GetResult();
+        PersistAsync(options: migrated, cancellationToken: CancellationToken.None).GetAwaiter().GetResult();
         _logger.LogInformation(
-            "Migrated {Count} provider header secret(s) from {FilePath} to the protected secret store.",
+            message: "Migrated {Count} provider header secret(s) from {FilePath} to the protected secret store.",
             migratedCount, _filePath);
 
         return migrated;
     }
-
-    /// <inheritdoc />
-    public ProviderConfigSnapshot Snapshot => _snapshot;
-
-    /// <inheritdoc />
-    public event Action? Changed;
-
-    /// <inheritdoc />
-    public async Task ReplaceAsync(ModelRoutingOptions next, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(next);
-
-        var normalized = Normalize(next);
-        // Validate before touching disk, so an invalid edit is rejected without persisting anything.
-        normalized.EnsureValid();
-
-        await _writeMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            // Persist first, then publish: if the write fails the in-memory snapshot stays consistent
-            // with what's on disk (the edit is rejected, not half-applied).
-            await PersistAsync(normalized, cancellationToken).ConfigureAwait(false);
-            _snapshot = new ProviderConfigSnapshot(normalized, _snapshot.Version + 1);
-        }
-        finally
-        {
-            _writeMutex.Release();
-        }
-
-        Changed?.Invoke();
-    }
-
-    /// <inheritdoc />
-    public Task UpsertProviderAsync(string key, ProviderOptions provider, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        ArgumentNullException.ThrowIfNull(provider);
-
-        var current = _snapshot.Options;
-        var providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase)
-        {
-            [key] = provider
-        };
-
-        return ReplaceAsync(
-            new ModelRoutingOptions { Providers = providers, ModelList = [.. current.ModelList] },
-            cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public Task RemoveProviderAsync(string key, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-
-        var current = _snapshot.Options;
-        var providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase);
-        providers.Remove(key);
-
-        // Cascade to this provider's models in the same edit. Leaving them behind would strand every one
-        // of them pointing at a provider that no longer exists, which EnsureValid rejects outright - so
-        // without this the removal could never succeed for a provider that had any models at all. One
-        // ReplaceAsync means the drop is atomic: config is never persisted in the orphaned intermediate
-        // state. Historical metrics (spend, usage, telemetry) are keyed separately and are deliberately
-        // left untouched - removing a provider from the routing config is not a reason to lose its past.
-        var models = current.ModelList
-            .Where(m => !string.Equals(m.Provider, key, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        return ReplaceAsync(
-            new ModelRoutingOptions { Providers = providers, ModelList = models },
-            cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public Task UpsertModelAsync(ModelRouteEntry entry, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-
-        var current = _snapshot.Options;
-        var replaced = false;
-        var models = current.ModelList
-            .Select(m =>
-            {
-                if (string.Equals(m.ModelName, entry.ModelName, StringComparison.OrdinalIgnoreCase))
-                {
-                    replaced = true;
-                    return entry;
-                }
-
-                return m;
-            })
-            .ToList();
-
-        if (!replaced)
-        {
-            models.Add(entry);
-        }
-
-        return ReplaceAsync(
-            new ModelRoutingOptions
-            {
-                Providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase),
-                ModelList = models
-            },
-            cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public Task RemoveModelAsync(string modelName, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(modelName);
-
-        var current = _snapshot.Options;
-        var models = current.ModelList
-            .Where(m => !string.Equals(m.ModelName, modelName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        return ReplaceAsync(
-            new ModelRoutingOptions
-            {
-                Providers = new Dictionary<string, ProviderOptions>(current.Providers, StringComparer.OrdinalIgnoreCase),
-                ModelList = models
-            },
-            cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public void Dispose() => _writeMutex.Dispose();
 
     /// <summary>
     /// Reads and deserializes the configuration file from disk, normalizing the result and validating it
@@ -357,7 +364,8 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     {
         var json = File.ReadAllText(_filePath);
         var loaded = JsonSerializer.Deserialize<ModelRoutingOptions>(json)
-            ?? throw new InvalidOperationException($"Provider configuration file '{_filePath}' deserialized to null.");
+                     ?? throw new InvalidOperationException(
+                         $"Provider configuration file '{_filePath}' deserialized to null.");
 
         var normalized = Normalize(loaded);
         normalized.EnsureValid();
@@ -368,13 +376,11 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     private async Task PersistAsync(ModelRoutingOptions options, CancellationToken cancellationToken)
     {
         var directoryPath = Path.GetDirectoryName(_filePath);
-        if (!string.IsNullOrWhiteSpace(directoryPath))
-        {
-            Directory.CreateDirectory(directoryPath);
-        }
+        if (!string.IsNullOrWhiteSpace(directoryPath)) Directory.CreateDirectory(directoryPath);
 
-        var json = JsonSerializer.Serialize(options, SerializerOptions);
-        await File.WriteAllTextAsync(_filePath, json, cancellationToken).ConfigureAwait(false);
+        var json = JsonSerializer.Serialize(value: options, options: SerializerOptions);
+        await File.WriteAllTextAsync(path: _filePath, contents: json, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -384,12 +390,21 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     /// validation stay case-insensitive after a load. Also defends against null collections from a
     /// hand-edited or partial file.
     /// </summary>
-    private static ModelRoutingOptions Normalize(ModelRoutingOptions options) => new()
+    private static ModelRoutingOptions Normalize(ModelRoutingOptions options)
     {
-        Providers = options.Providers is null
-            ? new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, ProviderOptions>(options.Providers, StringComparer.OrdinalIgnoreCase),
-        ModelList = options.ModelList is null ? [] : [.. options.ModelList]
-    };
+        // ReSharper disable ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - these collections come
+        // straight out of JSON deserialization of a user-editable file, which happily produces null for
+        // a non-nullable-annotated property. That is exactly the "hand-edited or partial file" case the
+        // summary above describes, so the checks are load-bearing.
+        return new ModelRoutingOptions
+        {
+            Providers = options.Providers is null
+                ? new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, ProviderOptions>(dictionary: options.Providers,
+                    comparer: StringComparer.OrdinalIgnoreCase),
+            ModelList = options.ModelList is null ? [] : [.. options.ModelList]
+        };
+        // ReSharper restore ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+    }
 }
-

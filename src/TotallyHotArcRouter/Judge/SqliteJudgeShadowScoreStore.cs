@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+using System.Globalization;
 using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Judge;
@@ -21,7 +21,7 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         _database = database;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task InsertAsync(JudgeShadowScoreRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -30,29 +30,29 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO judge_shadow_scores (
-                correlation_id, created_at_utc, dimension, model, static_score, judge_score,
-                judge_model, judge_prompt_version, judge_latency_ms, used_logprobs)
-            VALUES (
-                $correlationId, $createdAtUtc, $dimension, $model, $staticScore, $judgeScore,
-                $judgeModel, $judgePromptVersion, $judgeLatencyMs, $usedLogprobs);
-            """;
-        command.Parameters.AddWithValue("$correlationId", record.CorrelationId);
-        command.Parameters.AddWithValue("$createdAtUtc", record.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$dimension", record.Dimension);
-        command.Parameters.AddWithValue("$model", record.Model);
-        command.Parameters.AddWithValue("$staticScore", record.StaticScore);
-        command.Parameters.AddWithValue("$judgeScore", record.JudgeScore);
-        command.Parameters.AddWithValue("$judgeModel", record.JudgeModel);
-        command.Parameters.AddWithValue("$judgePromptVersion", record.JudgePromptVersion);
-        command.Parameters.AddWithValue("$judgeLatencyMs", record.JudgeLatencyMs);
-        command.Parameters.AddWithValue("$usedLogprobs", record.UsedLogprobs ? 1 : 0);
+                              INSERT INTO judge_shadow_scores (
+                                  correlation_id, created_at_utc, dimension, model, static_score, judge_score,
+                                  judge_model, judge_prompt_version, judge_latency_ms, used_logprobs)
+                              VALUES (
+                                  $correlationId, $createdAtUtc, $dimension, $model, $staticScore, $judgeScore,
+                                  $judgeModel, $judgePromptVersion, $judgeLatencyMs, $usedLogprobs);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$correlationId", value: record.CorrelationId);
+        command.Parameters.AddWithValue(parameterName: "$createdAtUtc", value: record.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue(parameterName: "$dimension", value: record.Dimension);
+        command.Parameters.AddWithValue(parameterName: "$model", value: record.Model);
+        command.Parameters.AddWithValue(parameterName: "$staticScore", value: record.StaticScore);
+        command.Parameters.AddWithValue(parameterName: "$judgeScore", value: record.JudgeScore);
+        command.Parameters.AddWithValue(parameterName: "$judgeModel", value: record.JudgeModel);
+        command.Parameters.AddWithValue(parameterName: "$judgePromptVersion", value: record.JudgePromptVersion);
+        command.Parameters.AddWithValue(parameterName: "$judgeLatencyMs", value: record.JudgeLatencyMs);
+        command.Parameters.AddWithValue(parameterName: "$usedLogprobs", value: record.UsedLogprobs ? 1 : 0);
 
         command.ExecuteNonQuery();
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -60,30 +60,27 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM judge_shadow_scores;";
-        return Task.FromResult(Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture));
+        return Task.FromResult(Convert.ToInt32(value: command.ExecuteScalar(), provider: CultureInfo.InvariantCulture));
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (count <= 0)
-        {
-            return Task.FromResult(0);
-        }
+        if (count <= 0) return Task.FromResult(0);
 
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            DELETE FROM judge_shadow_scores
-            WHERE id IN (SELECT id FROM judge_shadow_scores ORDER BY id ASC LIMIT $count);
-            """;
-        command.Parameters.AddWithValue("$count", count);
+                              DELETE FROM judge_shadow_scores
+                              WHERE id IN (SELECT id FROM judge_shadow_scores ORDER BY id ASC LIMIT $count);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$count", value: count);
         return Task.FromResult(command.ExecuteNonQuery());
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -91,7 +88,7 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM judge_shadow_scores WHERE created_at_utc < $cutoff;";
-        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O"));
+        command.Parameters.AddWithValue(parameterName: "$cutoff", value: cutoff.ToString("O"));
         return Task.FromResult(command.ExecuteNonQuery());
     }
 }

@@ -31,14 +31,16 @@ public static class LogLevelColorMapper
     /// <see langword="null"/> or empty) fall back to <see cref="UnknownColor"/> rather than throwing,
     /// since a malformed or future level string must never break the log viewport.
     /// </summary>
-    public static string GetColor(string? level) => level?.Trim().ToUpperInvariant() switch
+    public static string GetColor(string? level)
     {
-        "DEBUG" or "VERBOSE" or "TRACE" => DebugColor,
-        "INFO" or "INFORMATION" => InfoColor,
-        "WARN" or "WARNING" => WarnColor,
-        "ERROR" => ErrorColor,
-        "FATAL" or "CRITICAL" => FatalColor,
-        _ => UnknownColor,
-    };
+        return level?.Trim().ToUpperInvariant() switch
+        {
+            "DEBUG" or "VERBOSE" or "TRACE" => DebugColor,
+            "INFO" or "INFORMATION" => InfoColor,
+            "WARN" or "WARNING" => WarnColor,
+            "ERROR" => ErrorColor,
+            "FATAL" or "CRITICAL" => FatalColor,
+            _ => UnknownColor
+        };
+    }
 }
-

@@ -1,14 +1,12 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 /// <summary>
 /// Puts a dialect's tool-calling instructions, and the request's tool schemas, into the system prompt -
 /// the half of tool-call rewriting that tells a model <em>what tools exist and what they do</em>.
-///
 /// <para>
 /// <b>Constrained decoding needs this just as much as emulation does</b>, which is why it is shared rather
 /// than private to <see cref="ToolCallEmulationRewriter"/>. A <c>response_format</c> schema is compiled into
@@ -23,8 +21,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// </summary>
 internal static class ToolCallInstructionInjector
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
     /// <summary>
     /// Caps the serialized tool schemas injected into the system prompt, when no probed context window is
     /// available for the model (<see cref="ComputeBudget"/>).
@@ -103,6 +99,8 @@ internal static class ToolCallInstructionInjector
     /// </remarks>
     private const int MaxToolSchemaCharsCeiling = 128 * 1024;
 
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
     /// <summary>
     /// Adds the dialect's instruction preamble plus the request's tool schemas to the system prompt, and
     /// reports which tools actually fitted.
@@ -130,30 +128,30 @@ internal static class ToolCallInstructionInjector
     /// inserted at the front.
     /// </remarks>
     public static JsonArray Inject(
-        JsonArray messages, JsonArray tools, ToolCallDialect dialect, ILogger logger, ModelContextWindow? contextWindow = null)
+        JsonArray messages, JsonArray tools, ToolCallDialect dialect, ILogger logger,
+        ModelContextWindow? contextWindow = null)
     {
         var prompt = dialect.EmulationPrompt!;
-        var (schemaText, included) = SerializeSchemas(tools, logger, ComputeBudget(contextWindow));
+        var (schemaText, included) =
+            SerializeSchemas(tools: tools, logger: logger, budgetChars: ComputeBudget(contextWindow));
         var instructions = $"{prompt.Preamble}{schemaText}{prompt.Postamble}";
 
-        for (var i = 0; i < messages.Count; i++)
+        foreach (var node in messages)
         {
-            if (messages[i] is not JsonObject message ||
+            if (node is not JsonObject message ||
                 (message["role"] as JsonValue)?.TryGetValue<string>(out var role) != true ||
-                !string.Equals(role, "system", StringComparison.Ordinal))
-            {
+                !string.Equals(a: role, b: "system", comparisonType: StringComparison.Ordinal))
                 continue;
-            }
 
             var existing = (message["content"] as JsonValue)?.TryGetValue<string>(out var text) == true ? text : null;
             message["content"] = string.IsNullOrEmpty(existing) ? instructions : $"{existing}\n\n{instructions}";
             return included;
         }
 
-        messages.Insert(0, new JsonObject
+        messages.Insert(0, item: new JsonObject
         {
             ["role"] = "system",
-            ["content"] = instructions,
+            ["content"] = instructions
         });
 
         return included;
@@ -172,13 +170,10 @@ internal static class ToolCallInstructionInjector
     /// </remarks>
     private static int ComputeBudget(ModelContextWindow? contextWindow)
     {
-        if (contextWindow is not { ContextLength: > 0 })
-        {
-            return MaxToolSchemaChars;
-        }
+        if (contextWindow is not { ContextLength: > 0 }) return MaxToolSchemaChars;
 
         var scaledChars = contextWindow.ContextLength * CharsPerTokenEstimate * ContextWindowBudgetFraction;
-        return (int)Math.Clamp(scaledChars, MinToolSchemaChars, MaxToolSchemaCharsCeiling);
+        return (int)Math.Clamp(value: scaledChars, min: MinToolSchemaChars, max: MaxToolSchemaCharsCeiling);
     }
 
     /// <summary>
@@ -197,7 +192,8 @@ internal static class ToolCallInstructionInjector
     /// wrapper is not information for the model, it is a shape the model recognizes, and those are not the
     /// same thing.
     /// </remarks>
-    private static (string SchemaText, JsonArray Included) SerializeSchemas(JsonArray tools, ILogger logger, int budgetChars)
+    private static (string SchemaText, JsonArray Included) SerializeSchemas(JsonArray tools, ILogger logger,
+        int budgetChars)
     {
         var builder = new StringBuilder();
         var included = new JsonArray();
@@ -205,10 +201,7 @@ internal static class ToolCallInstructionInjector
 
         foreach (var node in tools)
         {
-            if (node is not JsonObject tool)
-            {
-                continue;
-            }
+            if (node is not JsonObject tool) continue;
 
             var line = tool.ToJsonString(SerializerOptions);
 
@@ -226,7 +219,6 @@ internal static class ToolCallInstructionInjector
         }
 
         if (omitted > 0)
-        {
             // States the consequence, not just the arithmetic. An operator reading this needs to know that
             // the omitted tools are not degraded or slower - they are invisible to the model, so a request
             // depending on one cannot succeed, and the reply will look like the model simply chose not to
@@ -234,13 +226,12 @@ internal static class ToolCallInstructionInjector
             // rediscovered. The limit reported is the budget actually applied to this request, which may
             // differ from MaxToolSchemaChars once a probed context window is scaling it.
             logger.LogWarning(
+                message:
                 "Tool-call rewriting: the request offered more tool schemas than the {Limit}-character injection budget allows; {Included} tool(s) were described to the model and {Omitted} were left out, so the model cannot call them.",
                 budgetChars,
                 included.Count,
                 omitted);
-        }
 
         return (builder.ToString(), included);
     }
 }
-

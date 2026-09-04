@@ -1,7 +1,6 @@
-using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
-using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Router.Embeddings;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -15,11 +14,11 @@ namespace TotallyHot.ArcRouter.Router;
 /// </summary>
 public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
 {
+    private readonly ILogger<EmbeddingMemoryScoreObserver> _logger;
     private readonly EmbeddingMemory _memory;
     private readonly PendingTaskEmbeddingCache _pendingCache;
     private readonly PendingRequestCostCache _pendingCostCache;
     private readonly PendingRequestProvenanceCache _pendingProvenanceCache;
-    private readonly ILogger<EmbeddingMemoryScoreObserver> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="EmbeddingMemoryScoreObserver"/> class.</summary>
     /// <param name="memory">The embedding-keyed memory to write into.</param>
@@ -47,7 +46,7 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -55,10 +54,11 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         // TryTake runs first, unconditionally consuming the pending-cache slot, so a result with no model
         // attribution still drains its entry instead of leaving it to age out via TTL/capacity eviction.
         if (string.IsNullOrEmpty(result.RequestCorrelationId) ||
-            !_pendingCache.TryTake(result.RequestCorrelationId, out var embedding) ||
+            !_pendingCache.TryTake(correlationId: result.RequestCorrelationId, embedding: out var embedding) ||
             embedding is null)
         {
             _logger.LogDebug(
+                message:
                 "No pending task embedding for correlation {CorrelationId}; skipping embedding-memory observation.",
                 result.RequestCorrelationId);
             return;
@@ -70,7 +70,7 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
             return;
         }
 
-        var score = Math.Clamp(result.UnifiedScore, 0.0, 1.0);
+        var score = Math.Clamp(value: result.UnifiedScore, 0.0, 1.0);
 
         // docs/router/self-organizing-classification-plan.md Phase T1c: cost, IsExploratory, and
         // Propensity are all known at request-resolution time (ModelRouteResolutionResult) but only
@@ -81,22 +81,22 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         // must not block recording the other two - a cost never recorded is still worth an embedding
         // memory entry.
         var recoveredCost = 0.0;
-        if (!string.IsNullOrEmpty(result.RequestCorrelationId) && _pendingCostCache.TryTake(result.RequestCorrelationId, out var cachedCost))
-        {
+        if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
+            _pendingCostCache.TryTake(correlationId: result.RequestCorrelationId, cost: out var cachedCost))
             recoveredCost = (double)cachedCost;
-        }
         else
-        {
             _logger.LogDebug(
+                message:
                 "No pending cost for correlation {CorrelationId}; recording embedding-memory entry with cost 0.",
                 result.RequestCorrelationId);
-        }
 
         var recoveredIsExploratory = false;
         var recoveredPropensity = 1.0;
         string? recoveredDimension = null;
         if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
-            _pendingProvenanceCache.TryTake(result.RequestCorrelationId, out var cachedIsExploratory, out var cachedPropensity, out var cachedDimension))
+            _pendingProvenanceCache.TryTake(correlationId: result.RequestCorrelationId,
+                isExploratory: out var cachedIsExploratory, propensity: out var cachedPropensity,
+                dimension: out var cachedDimension))
         {
             recoveredIsExploratory = cachedIsExploratory;
             recoveredPropensity = cachedPropensity;
@@ -105,30 +105,30 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         else
         {
             _logger.LogDebug(
+                message:
                 "No pending provenance for correlation {CorrelationId}; recording embedding-memory entry as non-exploratory, propensity 1.0.",
                 result.RequestCorrelationId);
         }
 
         await _memory.AddEntryAsync(
-            embedding,
-            result.Model,
-            score,
+            taskEmbedding: embedding,
+            chosenModel: result.Model,
+            score: score,
             cost: recoveredCost,
-            verifierTrace: null,
-            cancellationToken,
+            null,
+            cancellationToken: cancellationToken,
             isExploratory: recoveredIsExploratory,
             propensity: recoveredPropensity,
             dimension: recoveredDimension).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
-        {
             _logger.LogInformation(
+                message:
                 "Recorded embedding-memory entry for model {Model} (correlation {CorrelationId}) with score {Score:F3}, cost {Cost:F6}, exploratory {IsExploratory}.",
                 result.Model,
                 result.RequestCorrelationId,
                 score,
                 recoveredCost,
                 recoveredIsExploratory);
-        }
     }
 }

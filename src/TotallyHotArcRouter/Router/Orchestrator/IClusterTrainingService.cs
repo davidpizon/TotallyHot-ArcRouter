@@ -14,8 +14,12 @@ public interface IClusterTrainingService
     /// concurrently with itself: a call made while another is already in progress returns immediately with
     /// <see cref="ClusterTrainingResultKind.AlreadyRunning"/> rather than queuing or blocking.
     /// </summary>
-    /// <param name="bootstrapProgress">Reports OOD bootstrap embedding progress (tasks embedded so far), or <see langword="null"/> to skip reporting.</param>
+    /// <param name="bootstrapProgress">
+    /// Reports OOD bootstrap embedding progress (tasks embedded so far), or
+    /// <see langword="null"/> to skip reporting.
+    /// </param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The outcome: what was gathered, and whether an artifact was written.</returns>
-    Task<ClusterTrainingOutcome> RetrainAsync(IProgress<int>? bootstrapProgress = null, CancellationToken cancellationToken = default);
+    Task<ClusterTrainingOutcome> RetrainAsync(IProgress<int>? bootstrapProgress = null,
+        CancellationToken cancellationToken = default);
 }

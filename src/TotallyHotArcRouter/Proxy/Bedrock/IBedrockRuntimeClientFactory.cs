@@ -1,9 +1,8 @@
+using Amazon;
+using Amazon.BedrockRuntime;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
-using Amazon;
-using Amazon.BedrockRuntime;
-using Amazon.Runtime;
 
 namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 
@@ -19,7 +18,7 @@ public interface IBedrockRuntimeClientFactory
     IAmazonBedrockRuntime Create(ResolvedModelRoute route);
 }
 
-/// <inheritdoc cref="IBedrockRuntimeClientFactory" />
+/// <inheritdoc cref="IBedrockRuntimeClientFactory"/>
 /// <remarks>
 /// AWS SDK clients are thread-safe and meant to be long-lived: each one owns an HttpClient and its
 /// connection pool, so building (and disposing) one per request churns connections and risks socket
@@ -35,16 +34,14 @@ public sealed class BedrockRuntimeClientFactory : IBedrockRuntimeClientFactory, 
     private readonly ConcurrentDictionary<string, Lazy<IAmazonBedrockRuntime>> _clients = new(StringComparer.Ordinal);
     private bool _disposed;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public IAmazonBedrockRuntime Create(ResolvedModelRoute route)
     {
         ArgumentNullException.ThrowIfNull(route);
 
         if (string.IsNullOrWhiteSpace(route.AwsRegion))
-        {
             throw new InvalidOperationException(
                 $"Bedrock provider '{route.Provider}' has no AwsRegion configured; set ModelRouting:Providers:{route.Provider}:AwsRegion.");
-        }
 
         // Key by everything that distinguishes one built client from another: region plus a non-reversible
         // fingerprint of the explicit credential triple (or a marker for "use the default chain"). Two routes
@@ -52,10 +49,24 @@ public sealed class BedrockRuntimeClientFactory : IBedrockRuntimeClientFactory, 
         // Fingerprinting (rather than embedding the raw values) keeps this long-lived singleton from holding an
         // extra plaintext copy of the secret access key / session token in its cache keys.
         var key = route.AwsAccessKeyId is not null && route.AwsSecretAccessKey is not null
-            ? $"{route.AwsRegion}\nexplicit:{CredentialFingerprint(route.AwsAccessKeyId, route.AwsSecretAccessKey, route.AwsSessionToken)}"
+            ? $"{route.AwsRegion}\nexplicit:{CredentialFingerprint(accessKeyId: route.AwsAccessKeyId, secretAccessKey: route.AwsSecretAccessKey, sessionToken: route.AwsSessionToken)}"
             : $"{route.AwsRegion}\n<default-chain>";
 
-        return _clients.GetOrAdd(key, _ => new Lazy<IAmazonBedrockRuntime>(() => BuildClient(route))).Value;
+        return _clients.GetOrAdd(key: key, valueFactory: _ => new Lazy<IAmazonBedrockRuntime>(() => BuildClient(route)))
+            .Value;
+    }
+
+    /// <summary>Disposes every cached client. Called by the DI container when the singleton is torn down.</summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+
+        _disposed = true;
+        foreach (var client in _clients.Values)
+            if (client.IsValueCreated)
+                client.Value.Dispose();
+
+        _clients.Clear();
     }
 
     // A non-reversible fingerprint of the credential material, used only to distinguish cache entries - never
@@ -75,9 +86,9 @@ public sealed class BedrockRuntimeClientFactory : IBedrockRuntimeClientFactory, 
         // buffer instead, and a separator byte breaks the field boundary so e.g. ("ab","c") and ("a","bc")
         // can never hash identically.
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendField(hash, accessKeyId);
-        AppendField(hash, secretAccessKey);
-        AppendField(hash, sessionToken);
+        AppendField(hash: hash, value: accessKeyId);
+        AppendField(hash: hash, value: secretAccessKey);
+        AppendField(hash: hash, value: sessionToken);
         return Convert.ToHexString(hash.GetHashAndReset());
 
         static void AppendField(IncrementalHash hash, string? value)
@@ -102,33 +113,13 @@ public sealed class BedrockRuntimeClientFactory : IBedrockRuntimeClientFactory, 
         // both?" question for free, since the SDK's default chain already covers both without this
         // codebase needing to implement either itself.
         if (route.AwsAccessKeyId is not null && route.AwsSecretAccessKey is not null)
-        {
             return route.AwsSessionToken is not null
-                ? new AmazonBedrockRuntimeClient(route.AwsAccessKeyId, route.AwsSecretAccessKey, route.AwsSessionToken, region)
-                : new AmazonBedrockRuntimeClient(route.AwsAccessKeyId, route.AwsSecretAccessKey, region);
-        }
+                ? new AmazonBedrockRuntimeClient(awsAccessKeyId: route.AwsAccessKeyId,
+                    awsSecretAccessKey: route.AwsSecretAccessKey, awsSessionToken: route.AwsSessionToken,
+                    region: region)
+                : new AmazonBedrockRuntimeClient(awsAccessKeyId: route.AwsAccessKeyId,
+                    awsSecretAccessKey: route.AwsSecretAccessKey, region: region);
 
         return new AmazonBedrockRuntimeClient(region);
     }
-
-    /// <summary>Disposes every cached client. Called by the DI container when the singleton is torn down.</summary>
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        foreach (var client in _clients.Values)
-        {
-            if (client.IsValueCreated)
-            {
-                client.Value.Dispose();
-            }
-        }
-
-        _clients.Clear();
-    }
 }
-

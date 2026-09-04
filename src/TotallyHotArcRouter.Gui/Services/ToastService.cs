@@ -18,12 +18,16 @@ public sealed class ToastService
     /// <summary>How long a toast stays visible before auto-dismissing.</summary>
     public static readonly TimeSpan AutoDismissAfter = TimeSpan.FromSeconds(6);
 
-    private readonly List<Toast> _toasts = [];
-    private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _autoDismissAfter;
+    private readonly TimeProvider _timeProvider;
+
+    private readonly List<Toast> _toasts = [];
 
     /// <summary>Initializes a new instance of the <see cref="ToastService"/> class.</summary>
-    /// <param name="timeProvider">Clock used to schedule auto-dismissal; defaults to <see cref="TimeProvider.System"/>. Overridable for deterministic tests.</param>
+    /// <param name="timeProvider">
+    /// Clock used to schedule auto-dismissal; defaults to <see cref="TimeProvider.System"/>.
+    /// Overridable for deterministic tests.
+    /// </param>
     /// <param name="autoDismissAfter">
     /// How long a toast stays visible before auto-dismissing; defaults to <see cref="AutoDismissAfter"/>.
     /// Overridable so a test can assert on the auto-dismiss path without waiting out the real 6 seconds.
@@ -45,7 +49,7 @@ public sealed class ToastService
     /// <param name="message">The failure detail shown under the title.</param>
     public void ShowError(string title, string message)
     {
-        var toast = new Toast(Guid.NewGuid(), title, message);
+        var toast = new Toast(Id: Guid.NewGuid(), Title: title, Message: message);
         _toasts.Add(toast);
         Changed?.Invoke();
 
@@ -56,17 +60,14 @@ public sealed class ToastService
     /// <param name="id">The toast's <see cref="Toast.Id"/>.</param>
     public void Dismiss(Guid id)
     {
-        if (_toasts.RemoveAll(t => t.Id == id) > 0)
-        {
-            Changed?.Invoke();
-        }
+        if (_toasts.RemoveAll(t => t.Id == id) > 0) Changed?.Invoke();
     }
 
     /// <summary>Removes a toast after <see cref="_autoDismissAfter"/>, unless it was already dismissed manually.</summary>
     /// <param name="id">The toast's <see cref="Toast.Id"/>.</param>
     private async Task AutoDismissAsync(Guid id)
     {
-        await Task.Delay(_autoDismissAfter, _timeProvider).ConfigureAwait(false);
+        await Task.Delay(delay: _autoDismissAfter, timeProvider: _timeProvider).ConfigureAwait(false);
         Dismiss(id);
     }
 }

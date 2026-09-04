@@ -59,11 +59,12 @@ public static class AuthValueTemplate
         var trimmed = template?.Trim() ?? string.Empty;
         if (trimmed.Length == 0)
         {
-            error = "Enter an environment variable name (e.g. ANTHROPIC_API_KEY) or a template such as Bearer {env:OPENAI_API_KEY}.";
+            error =
+                "Enter an environment variable name (e.g. ANTHROPIC_API_KEY) or a template such as Bearer {env:OPENAI_API_KEY}.";
             return false;
         }
 
-        var open = trimmed.IndexOf(EnvOpen, StringComparison.Ordinal);
+        var open = trimmed.IndexOf(value: EnvOpen, comparisonType: StringComparison.Ordinal);
         if (open < 0)
         {
             // No braces: the whole string is the variable name. Reject embedded whitespace rather than
@@ -72,7 +73,8 @@ public static class AuthValueTemplate
             // resolving.
             if (trimmed.Any(char.IsWhiteSpace))
             {
-                error = "A bare value must be a single environment variable name. To add a prefix, write it as Bearer {env:VAR_NAME}.";
+                error =
+                    "A bare value must be a single environment variable name. To add a prefix, write it as Bearer {env:VAR_NAME}.";
                 return false;
             }
 
@@ -80,14 +82,14 @@ public static class AuthValueTemplate
             return true;
         }
 
-        var close = trimmed.IndexOf(EnvClose, open);
+        var close = trimmed.IndexOf(value: EnvClose, startIndex: open);
         if (close < 0)
         {
             error = "Unclosed {env:...} reference - add the closing brace.";
             return false;
         }
 
-        if (trimmed.IndexOf(EnvOpen, close, StringComparison.Ordinal) >= 0)
+        if (trimmed.IndexOf(value: EnvOpen, startIndex: close, comparisonType: StringComparison.Ordinal) >= 0)
         {
             error = "Only one {env:...} reference is supported per credential. Add a second credential row instead.";
             return false;
@@ -131,10 +133,7 @@ public static class AuthValueTemplate
     /// </returns>
     public static string Compose(string? scheme, string? envVarName)
     {
-        if (string.IsNullOrWhiteSpace(envVarName))
-        {
-            return string.Empty;
-        }
+        if (string.IsNullOrWhiteSpace(envVarName)) return string.Empty;
 
         var name = envVarName.Trim();
         return string.IsNullOrWhiteSpace(scheme) ? name : $"{scheme.Trim()} {EnvOpen}{name}{EnvClose}";

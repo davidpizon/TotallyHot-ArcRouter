@@ -12,6 +12,6 @@ public sealed class NullUpdateAdminFallbacksTests
         var result = await client.CheckAsync(TestContext.Current.CancellationToken);
 
         Assert.False(result.IsUpdateAvailable);
-        Assert.Equal(ReleaseCheckUnavailableReason.NetworkOrApiFailure, result.UnavailableReason);
+        Assert.Equal(expected: ReleaseCheckUnavailableReason.NetworkOrApiFailure, actual: result.UnavailableReason);
     }
 }

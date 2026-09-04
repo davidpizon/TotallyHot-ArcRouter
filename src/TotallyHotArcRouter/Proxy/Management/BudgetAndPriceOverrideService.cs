@@ -18,18 +18,25 @@ internal sealed class BudgetAndPriceOverrideService
     // the request path and the startup health check already use. Duplicated rather than shared because
     // that constant is private to a request-path type this diagnosis view has no other reason to depend on.
     private static readonly TimeSpan PriceFreshnessFloor = TimeSpan.FromHours(24);
+    private readonly ProviderBudgetStore? _budgetStore;
+    private readonly Func<ProvidersResponse> _buildProvidersResponse;
+    private readonly ModelAliasOverrideStore? _overrideStore;
+    private readonly PriceRepository? _priceRepository;
 
     private readonly IProviderConfigStore _store;
-    private readonly ProviderBudgetStore? _budgetStore;
-    private readonly PriceRepository? _priceRepository;
-    private readonly ModelAliasOverrideStore? _overrideStore;
-    private readonly Func<ProvidersResponse> _buildProvidersResponse;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BudgetAndPriceOverrideService"/> class.
     /// </summary>
-    /// <param name="store">The writable provider/model configuration store, consulted to validate that a budget/override target provider or model actually exists.</param>
-    /// <param name="dependencies">The same optional collaborators bag <see cref="ManagementFacade"/> was constructed with; only <see cref="ManagementFacadeDependencies.BudgetStore"/>, <see cref="ManagementFacadeDependencies.PriceRepository"/>, and <see cref="ManagementFacadeDependencies.OverrideStore"/> are used here.</param>
+    /// <param name="store">
+    /// The writable provider/model configuration store, consulted to validate that a budget/override
+    /// target provider or model actually exists.
+    /// </param>
+    /// <param name="dependencies">
+    /// The same optional collaborators bag <see cref="ManagementFacade"/> was constructed with;
+    /// only <see cref="ManagementFacadeDependencies.BudgetStore"/>, <see cref="ManagementFacadeDependencies.PriceRepository"/>
+    /// , and <see cref="ManagementFacadeDependencies.OverrideStore"/> are used here.
+    /// </param>
     /// <param name="buildProvidersResponse">
     /// Builds the masked, client-facing <see cref="ProvidersResponse"/> from the current store snapshot.
     /// Owned by <see cref="ManagementFacade"/> rather than this service, since it projects fields spanning
@@ -48,47 +55,51 @@ internal sealed class BudgetAndPriceOverrideService
         _buildProvidersResponse = buildProvidersResponse;
     }
 
-    /// <summary>Sets or clears a provider's monthly budget caps. A null cap clears that dimension; both null removes the budget.</summary>
+    /// <summary>
+    /// Sets or clears a provider's monthly budget caps. A null cap clears that dimension; both null removes the
+    /// budget.
+    /// </summary>
     public ManagementResult<ProvidersResponse> SetBudget(string providerKey, ProviderBudgetWriteRequest request)
     {
         if (_budgetStore is null)
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.Unavailable, "Budget storage is not available.");
-        }
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.Unavailable,
+                message: "Budget storage is not available.");
 
         if (!_store.Snapshot.Options.Providers.ContainsKey(providerKey))
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{providerKey}' not found.");
-        }
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Provider '{providerKey}' not found.");
 
         if (request.DollarCap is < 0 || request.TokenCap is < 0)
-        {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.InvalidRequest, "Budget caps must be non-negative.");
-        }
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: "Budget caps must be non-negative.");
 
         BudgetWindow? window;
         try
         {
-            window = ParseBudgetWindow(request.WindowKind, request.WindowHours);
+            window = ParseBudgetWindow(windowKind: request.WindowKind, windowHours: request.WindowHours);
         }
         catch (ArgumentException ex)
         {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.InvalidRequest, ex.Message);
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: ex.Message);
         }
 
         try
         {
-            _budgetStore.SetBudget(providerKey, request.DollarCap, request.TokenCap, window);
+            _budgetStore.SetBudget(providerKey: providerKey, dollarCap: request.DollarCap, tokenCap: request.TokenCap,
+                window: window);
             return ManagementResult<ProvidersResponse>.Ok(_buildProvidersResponse());
         }
         catch (ArgumentException ex)
         {
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.InvalidRequest, ex.Message);
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: ex.Message);
         }
         catch (Exception)
         {
             // A persistence failure (e.g. the SQLite write) shouldn't leak storage detail to the caller.
-            return ManagementResult<ProvidersResponse>.Fail(ManagementErrorType.Internal, "Failed to save the provider budget.");
+            return ManagementResult<ProvidersResponse>.Fail(errorType: ManagementErrorType.Internal,
+                message: "Failed to save the provider budget.");
         }
     }
 
@@ -99,18 +110,17 @@ internal sealed class BudgetAndPriceOverrideService
     /// </summary>
     private static BudgetWindow? ParseBudgetWindow(string? windowKind, int? windowHours)
     {
-        if (windowKind is null)
-        {
-            return null;
-        }
+        if (windowKind is null) return null;
 
         return windowKind switch
         {
             "Monthly" => new BudgetWindow.Monthly(),
             "Weekly" => new BudgetWindow.Weekly(),
             "RollingHours" when windowHours is > 0 => new BudgetWindow.RollingHours(windowHours.Value),
-            "RollingHours" => throw new ArgumentException("windowHours must be a positive number of hours for a RollingHours window."),
-            _ => throw new ArgumentException($"Unknown windowKind '{windowKind}'; expected 'Monthly', 'Weekly', or 'RollingHours'."),
+            "RollingHours" => throw new ArgumentException(
+                "windowHours must be a positive number of hours for a RollingHours window."),
+            _ => throw new ArgumentException(
+                $"Unknown windowKind '{windowKind}'; expected 'Monthly', 'Weekly', or 'RollingHours'.")
         };
     }
 
@@ -124,18 +134,19 @@ internal sealed class BudgetAndPriceOverrideService
     public ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosis()
     {
         if (_priceRepository is null)
-        {
             return ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>>.Fail(
-                ManagementErrorType.Unavailable, "The price catalog is not available.");
-        }
+                errorType: ManagementErrorType.Unavailable, message: "The price catalog is not available.");
 
         var rows = _store.Snapshot.Options.ModelList
             .Select(entry =>
             {
-                var price = _priceRepository.GetFreshPrice(new ModelKey(entry.ModelName, entry.Provider), PriceFreshnessFloor);
-                return new PriceResolutionDiagnosisView(entry.ModelName, entry.Provider, price is not null, price?.IsApproximateMatch ?? false);
+                var price = _priceRepository.GetFreshPrice(
+                    key: new ModelKey(ModelName: entry.ModelName, Provider: entry.Provider),
+                    maxAge: PriceFreshnessFloor);
+                return new PriceResolutionDiagnosisView(ModelName: entry.ModelName, Provider: entry.Provider,
+                    Resolved: price is not null, IsApproximate: price?.IsApproximateMatch ?? false);
             })
-            .OrderBy(r => r.ModelName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(keySelector: r => r.ModelName, comparer: StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>>.Ok(rows);
@@ -148,10 +159,8 @@ internal sealed class BudgetAndPriceOverrideService
     public ManagementResult<IReadOnlyList<ModelAliasOverride>> ListPriceOverrides()
     {
         if (_overrideStore is null)
-        {
             return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
-                ManagementErrorType.Unavailable, "Price overrides are not available.");
-        }
+                errorType: ManagementErrorType.Unavailable, message: "Price overrides are not available.");
 
         return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Ok(_overrideStore.GetAll());
     }
@@ -167,46 +176,43 @@ internal sealed class BudgetAndPriceOverrideService
         ArgumentNullException.ThrowIfNull(request);
 
         if (_overrideStore is null)
-        {
             return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
-                ManagementErrorType.Unavailable, "Price overrides are not available.");
-        }
+                errorType: ManagementErrorType.Unavailable, message: "Price overrides are not available.");
 
         if (string.IsNullOrWhiteSpace(request.SourceName) ||
             string.IsNullOrWhiteSpace(request.AggregatorModelKey) ||
             string.IsNullOrWhiteSpace(request.ModelName))
-        {
             return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
-                ManagementErrorType.InvalidRequest, "SourceName, AggregatorModelKey, and ModelName are all required.");
-        }
+                errorType: ManagementErrorType.InvalidRequest,
+                message: "SourceName, AggregatorModelKey, and ModelName are all required.");
 
-        if (!_store.Snapshot.Options.ModelList.Any(m => string.Equals(m.ModelName, request.ModelName, StringComparison.OrdinalIgnoreCase)))
-        {
+        if (!_store.Snapshot.Options.ModelList.Any(m =>
+                string.Equals(a: m.ModelName, b: request.ModelName,
+                    comparisonType: StringComparison.OrdinalIgnoreCase)))
             return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
-                ManagementErrorType.InvalidRequest, $"Model '{request.ModelName}' is not configured.");
-        }
+                errorType: ManagementErrorType.InvalidRequest,
+                message: $"Model '{request.ModelName}' is not configured.");
 
-        return ManagementResultExecutor.TryExecute(() =>
+        return ManagementResultExecutor.TryExecute(action: () =>
         {
-            _overrideStore.Upsert(request.SourceName, request.AggregatorModelKey, request.ModelName);
+            _overrideStore.Upsert(sourceName: request.SourceName, aggregatorModelKey: request.AggregatorModelKey,
+                modelName: request.ModelName);
             return _overrideStore.GetAll();
-        }, "Failed to save the price override.");
+        }, failureMessage: "Failed to save the price override.");
     }
 
     /// <summary>Removes an operator price override. A no-op mapping (nothing removed) is rejected as 404-shaped.</summary>
-    public ManagementResult<IReadOnlyList<ModelAliasOverride>> RemovePriceOverride(string sourceName, string aggregatorModelKey)
+    public ManagementResult<IReadOnlyList<ModelAliasOverride>> RemovePriceOverride(string sourceName,
+        string aggregatorModelKey)
     {
         if (_overrideStore is null)
-        {
             return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
-                ManagementErrorType.Unavailable, "Price overrides are not available.");
-        }
+                errorType: ManagementErrorType.Unavailable, message: "Price overrides are not available.");
 
-        if (!_overrideStore.Remove(sourceName, aggregatorModelKey))
-        {
+        if (!_overrideStore.Remove(sourceName: sourceName, aggregatorModelKey: aggregatorModelKey))
             return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Fail(
-                ManagementErrorType.NotFound, $"No override found for source '{sourceName}' / key '{aggregatorModelKey}'.");
-        }
+                errorType: ManagementErrorType.NotFound,
+                message: $"No override found for source '{sourceName}' / key '{aggregatorModelKey}'.");
 
         return ManagementResult<IReadOnlyList<ModelAliasOverride>>.Ok(_overrideStore.GetAll());
     }

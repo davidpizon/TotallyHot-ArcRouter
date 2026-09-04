@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using System.Text.Json;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
 
@@ -22,7 +22,8 @@ public static class BenchmarkIdTasksJsonlImporter
     /// <param name="transaction">The transaction the delete and every insert run on.</param>
     /// <returns>The number of rows imported.</returns>
     /// <exception cref="FormatException">A line is not a JSON object, or is missing <c>task_id</c> or <c>dimension</c>.</exception>
-    public static int Import(TextReader reader, string split, SqliteConnection connection, SqliteTransaction transaction)
+    public static int Import(TextReader reader, string split, SqliteConnection connection,
+        SqliteTransaction transaction)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentException.ThrowIfNullOrWhiteSpace(split);
@@ -33,59 +34,52 @@ public static class BenchmarkIdTasksJsonlImporter
         {
             delete.Transaction = transaction;
             delete.CommandText = "DELETE FROM benchmark_id_tasks WHERE split = $split;";
-            delete.Parameters.AddWithValue("$split", split);
+            delete.Parameters.AddWithValue(parameterName: "$split", value: split);
             delete.ExecuteNonQuery();
         }
 
         using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT INTO benchmark_id_tasks (task_id, split, source_split, dimension, raw_json)
-            VALUES ($taskId, $split, $sourceSplit, $dimension, $rawJson)
-            ON CONFLICT(task_id) DO UPDATE SET
-                split         = excluded.split,
-                source_split  = excluded.source_split,
-                dimension     = excluded.dimension,
-                raw_json      = excluded.raw_json;
-            """;
-        var taskIdParam = insert.Parameters.Add("$taskId", SqliteType.Text);
-        insert.Parameters.AddWithValue("$split", split);
-        var sourceSplitParam = insert.Parameters.Add("$sourceSplit", SqliteType.Text);
-        var dimensionParam = insert.Parameters.Add("$dimension", SqliteType.Text);
-        var rawJsonParam = insert.Parameters.Add("$rawJson", SqliteType.Text);
+                             INSERT INTO benchmark_id_tasks (task_id, split, source_split, dimension, raw_json)
+                             VALUES ($taskId, $split, $sourceSplit, $dimension, $rawJson)
+                             ON CONFLICT(task_id) DO UPDATE SET
+                                 split         = excluded.split,
+                                 source_split  = excluded.source_split,
+                                 dimension     = excluded.dimension,
+                                 raw_json      = excluded.raw_json;
+                             """;
+        var taskIdParam = insert.Parameters.Add(parameterName: "$taskId", type: SqliteType.Text);
+        insert.Parameters.AddWithValue(parameterName: "$split", value: split);
+        var sourceSplitParam = insert.Parameters.Add(parameterName: "$sourceSplit", type: SqliteType.Text);
+        var dimensionParam = insert.Parameters.Add(parameterName: "$dimension", type: SqliteType.Text);
+        var rawJsonParam = insert.Parameters.Add(parameterName: "$rawJson", type: SqliteType.Text);
 
         var rowCount = 0;
-        string? line;
         var lineNumber = 0;
-        while ((line = reader.ReadLine()) is not null)
+        while (reader.ReadLine() is { } line)
         {
             lineNumber++;
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(line)) continue;
 
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
-            {
                 throw new FormatException($"Tasks JSONL line {lineNumber} is not a JSON object.");
-            }
 
-            if (!root.TryGetProperty("task_id", out var taskIdElement) || taskIdElement.ValueKind != JsonValueKind.String)
-            {
+            if (!root.TryGetProperty(propertyName: "task_id", value: out var taskIdElement) ||
+                taskIdElement.ValueKind != JsonValueKind.String)
                 throw new FormatException($"Tasks JSONL line {lineNumber} is missing a string 'task_id'.");
-            }
 
-            if (!root.TryGetProperty("dimension", out var dimensionElement) || dimensionElement.ValueKind != JsonValueKind.String)
-            {
+            if (!root.TryGetProperty(propertyName: "dimension", value: out var dimensionElement) ||
+                dimensionElement.ValueKind != JsonValueKind.String)
                 throw new FormatException($"Tasks JSONL line {lineNumber} is missing a string 'dimension'.");
-            }
 
             // Upstream's "source_split" carries the train/val/test distinction this column is documented to
             // hold; "split" is the probing/id_test discriminator already captured by the split column. Only
             // fall back to the split argument when source_split is genuinely absent from the row.
-            var sourceSplit = root.TryGetProperty("source_split", out var sourceSplitElement) && sourceSplitElement.ValueKind == JsonValueKind.String
+            var sourceSplit = root.TryGetProperty(propertyName: "source_split", value: out var sourceSplitElement) &&
+                              sourceSplitElement.ValueKind == JsonValueKind.String
                 ? sourceSplitElement.GetString()!
                 : split;
 

@@ -1,6 +1,3 @@
-using TotallyHot.ArcRouter.Hosting;
-using TotallyHot.ArcRouter.Mcp;
-using TotallyHot.ArcRouter.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -8,6 +5,9 @@ using Microsoft.Extensions.Options;
 using Moq;
 using System.Net;
 using System.Net.Sockets;
+using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Mcp;
+using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp;
 
@@ -16,7 +16,7 @@ namespace TotallyHot.ArcRouter.Tests.Mcp;
 /// than a dependency of core proxying, so a port it cannot bind must leave the router running and must be
 /// reported as one actionable line rather than a Kestrel stack.
 /// </summary>
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public sealed class McpHostedServiceTests
 {
     [Fact]
@@ -24,7 +24,7 @@ public sealed class McpHostedServiceTests
     {
         // Take an ephemeral port and hold it, so the bind is guaranteed to collide without hard-coding a
         // port that might be free or busy on someone else's machine.
-        var occupied = new TcpListener(IPAddress.Loopback, 0);
+        var occupied = new TcpListener(localaddr: IPAddress.Loopback, 0);
         occupied.Start();
         var port = ((IPEndPoint)occupied.LocalEndpoint).Port;
 
@@ -37,11 +37,11 @@ public sealed class McpHostedServiceTests
             services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
             services.AddTotallyHotArcRouter();
 
-            using var provider = services.BuildServiceProvider();
+            await using var provider = services.BuildServiceProvider();
 
             var loggerMock = new Mock<ILogger<McpHostedService>>();
             await using var hostedService = ActivatorUtilities.CreateInstance<McpHostedService>(
-                provider,
+                provider: provider,
                 loggerMock.Object,
                 Options.Create(new McpOptions { Enabled = true, Port = port }));
 
@@ -52,14 +52,14 @@ public sealed class McpHostedServiceTests
             // The null exception argument is the assertion that matters: passing the exception is what
             // makes the logger render the full Kestrel stack.
             loggerMock.Verify(
-                logger => logger.Log(
+                expression: logger => logger.Log(
                     LogLevel.Warning,
                     It.IsAny<EventId>(),
                     It.Is<It.IsAnyType>((state, _) =>
                         state.ToString()!.Contains("The MCP endpoint could not start", StringComparison.Ordinal)),
                     null,
                     It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.Once);
+                times: Times.Once);
         }
         finally
         {

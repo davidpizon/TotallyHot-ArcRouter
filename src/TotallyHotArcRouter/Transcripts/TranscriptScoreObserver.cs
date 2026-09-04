@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
 
@@ -14,8 +13,8 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </summary>
 public sealed class TranscriptScoreObserver : IQualityScoreObserver
 {
-    private readonly ITranscriptStore _store;
     private readonly ILogger<TranscriptScoreObserver> _logger;
+    private readonly ITranscriptStore _store;
 
     /// <summary>Initializes a new instance of the <see cref="TranscriptScoreObserver"/> class.</summary>
     /// <param name="store">The transcript store to backfill into.</param>
@@ -29,7 +28,7 @@ public sealed class TranscriptScoreObserver : IQualityScoreObserver
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -40,15 +39,14 @@ public sealed class TranscriptScoreObserver : IQualityScoreObserver
             return;
         }
 
-        var score = Math.Clamp(result.UnifiedScore, 0.0, 1.0);
-        await _store.UpdateOutcomeAsync(result.RequestCorrelationId, score, cancellationToken).ConfigureAwait(false);
+        var score = Math.Clamp(value: result.UnifiedScore, 0.0, 1.0);
+        await _store.UpdateOutcomeAsync(correlationId: result.RequestCorrelationId, score: score,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Debug))
-        {
             _logger.LogDebug(
-                "Backfilled transcript score for correlation {CorrelationId} with score {Score:F3}.",
+                message: "Backfilled transcript score for correlation {CorrelationId} with score {Score:F3}.",
                 result.RequestCorrelationId,
                 score);
-        }
     }
 }

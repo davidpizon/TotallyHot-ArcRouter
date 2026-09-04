@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
@@ -41,12 +39,12 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </remarks>
 public sealed class QualityRescanService : BackgroundService
 {
-    private readonly ILogger<QualityRescanService> _logger;
-    private readonly ITranscriptStore _transcriptStore;
     private readonly ISignalExtractor _extractor;
     private readonly IQualityGrader _grader;
-    private readonly TranscriptOptions _transcriptOptions;
+    private readonly ILogger<QualityRescanService> _logger;
     private readonly QualityOptions _qualityOptions;
+    private readonly TranscriptOptions _transcriptOptions;
+    private readonly ITranscriptStore _transcriptStore;
 
     /// <summary>Initializes a new instance of the <see cref="QualityRescanService"/> class.</summary>
     /// <param name="logger">The logger.</param>
@@ -78,7 +76,7 @@ public sealed class QualityRescanService : BackgroundService
         _qualityOptions = qualityOptions.Value;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!_transcriptOptions.EnableQualityRescan || !_transcriptOptions.Enabled)
@@ -95,6 +93,7 @@ public sealed class QualityRescanService : BackgroundService
 
         var interval = TimeSpan.FromMinutes(_transcriptOptions.QualityRescanIntervalMinutes);
         _logger.LogInformation(
+            message:
             "Quality rescan starting; sweeping every {IntervalMinutes} minute(s) in batches of {BatchSize} at scorer version {ScorerVersion}.",
             _transcriptOptions.QualityRescanIntervalMinutes,
             _transcriptOptions.QualityRescanBatchSize,
@@ -112,10 +111,10 @@ public sealed class QualityRescanService : BackgroundService
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // One bad sweep must not end the loop - the next tick retries whatever it did not stamp.
-                    _logger.LogWarning(ex, "Quality rescan sweep failed; the next sweep will retry.");
+                    _logger.LogWarning(exception: ex,
+                        message: "Quality rescan sweep failed; the next sweep will retry.");
                 }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -132,19 +131,14 @@ public sealed class QualityRescanService : BackgroundService
     /// <param name="stoppingToken">A cancellation token.</param>
     internal async Task SweepAsync(CancellationToken stoppingToken)
     {
-        if (!_transcriptOptions.EnableQualityRescan || !_transcriptOptions.Enabled || !_qualityOptions.Enabled)
-        {
-            return;
-        }
+        if (!_transcriptOptions.EnableQualityRescan || !_transcriptOptions.Enabled || !_qualityOptions.Enabled) return;
 
         var ids = await _transcriptStore
-            .LoadPendingQualityRescanAsync(_qualityOptions.ScorerVersion, _transcriptOptions.QualityRescanBatchSize, stoppingToken)
+            .LoadPendingQualityRescanAsync(scorerVersion: _qualityOptions.ScorerVersion,
+                limit: _transcriptOptions.QualityRescanBatchSize, cancellationToken: stoppingToken)
             .ConfigureAwait(false);
 
-        if (ids.Count == 0)
-        {
-            return;
-        }
+        if (ids.Count == 0) return;
 
         var graded = 0;
         var skipped = 0;
@@ -152,17 +146,14 @@ public sealed class QualityRescanService : BackgroundService
         {
             stoppingToken.ThrowIfCancellationRequested();
 
-            if (await RescanOneAsync(id, stoppingToken).ConfigureAwait(false))
-            {
+            if (await RescanOneAsync(transcriptId: id, stoppingToken: stoppingToken).ConfigureAwait(false))
                 graded++;
-            }
             else
-            {
                 skipped++;
-            }
         }
 
         _logger.LogInformation(
+            message:
             "Quality rescan swept {Considered} row(s) at scorer version {ScorerVersion}: {Graded} graded, {Skipped} carried no gradable snippet.",
             ids.Count,
             _qualityOptions.ScorerVersion,
@@ -175,7 +166,10 @@ public sealed class QualityRescanService : BackgroundService
     /// </summary>
     /// <param name="transcriptId">The transcript row id.</param>
     /// <param name="stoppingToken">A cancellation token.</param>
-    /// <returns><see langword="true"/> when a score was produced; <see langword="false"/> when the row carried nothing gradable.</returns>
+    /// <returns>
+    /// <see langword="true"/> when a score was produced; <see langword="false"/> when the row carried nothing
+    /// gradable.
+    /// </returns>
     /// <remarks>
     /// A row that yields no snippet is still stamped, with a null score. Leaving it unstamped would put it
     /// back at the head of the very next sweep - and because the sweep is ordered oldest-first and bounded,
@@ -184,13 +178,12 @@ public sealed class QualityRescanService : BackgroundService
     /// </remarks>
     private async Task<bool> RescanOneAsync(long transcriptId, CancellationToken stoppingToken)
     {
-        var record = await _transcriptStore.GetTranscriptAsync(transcriptId, stoppingToken).ConfigureAwait(false);
+        var record = await _transcriptStore.GetTranscriptAsync(id: transcriptId, cancellationToken: stoppingToken)
+            .ConfigureAwait(false);
         if (record?.ResponseText is not { Length: > 0 } responseText)
-        {
             // Selected on `response_text IS NOT NULL`, so this means the row was deleted by retention or
             // emptied between the sweep's select and this read. Nothing to stamp; the row may not exist.
             return false;
-        }
 
         var request = _extractor.Extract(new SignalExtractionContext(
             ResponseText: responseText,
@@ -202,14 +195,16 @@ public sealed class QualityRescanService : BackgroundService
         if (request is null)
         {
             await _transcriptStore
-                .MarkQualityRescannedAsync(transcriptId, _qualityOptions.ScorerVersion, score: null, stoppingToken)
+                .MarkQualityRescannedAsync(transcriptId: transcriptId, scorerVersion: _qualityOptions.ScorerVersion,
+                    null, cancellationToken: stoppingToken)
                 .ConfigureAwait(false);
             return false;
         }
 
-        var result = await _grader.GradeAsync(request, stoppingToken).ConfigureAwait(false);
+        var result = await _grader.GradeAsync(request: request, cancellationToken: stoppingToken).ConfigureAwait(false);
         await _transcriptStore
-            .MarkQualityRescannedAsync(transcriptId, _qualityOptions.ScorerVersion, result.UnifiedScore, stoppingToken)
+            .MarkQualityRescannedAsync(transcriptId: transcriptId, scorerVersion: _qualityOptions.ScorerVersion,
+                score: result.UnifiedScore, cancellationToken: stoppingToken)
             .ConfigureAwait(false);
 
         return true;

@@ -1,5 +1,6 @@
-using System.Diagnostics.CodeAnalysis;
 using Serilog;
+using System.Diagnostics.CodeAnalysis;
+using UnhandledExceptionEventArgs = Microsoft.UI.Xaml.UnhandledExceptionEventArgs;
 
 namespace TotallyHot.ArcRouter.Gui.WinUI;
 
@@ -29,8 +30,11 @@ public partial class App : MauiWinUIApplication
         UnhandledException += OnUnhandledException;
     }
 
-    /// <inheritdoc />
-    protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+    /// <inheritdoc/>
+    protected override MauiApp CreateMauiApp()
+    {
+        return MauiProgram.CreateMauiApp();
+    }
 
     /// <summary>
     /// Logs an exception WinUI caught on the UI thread and flushes immediately, since the process is
@@ -39,10 +43,10 @@ public partial class App : MauiWinUIApplication
     /// </summary>
     /// <param name="sender">The WinUI application raising the event; unused.</param>
     /// <param name="e">Carries the exception and its message.</param>
-    private static void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
-        Log.Fatal(e.Exception, "Unhandled exception on the WinUI thread: {ExceptionMessage}", e.Message);
+        Log.Fatal(exception: e.Exception,
+            messageTemplate: "Unhandled exception on the WinUI thread: {ExceptionMessage}", propertyValue: e.Message);
         Log.CloseAndFlush();
     }
 }
-

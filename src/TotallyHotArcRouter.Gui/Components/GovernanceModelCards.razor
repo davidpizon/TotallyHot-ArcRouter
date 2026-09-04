@@ -19,7 +19,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="20" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20"/> Router unreachable
             </div>
             <div class="text-xs text-slate-400">
                 Could not load model spend - is the proxy running?
@@ -54,7 +54,11 @@
 </div>
 
 @code {
-    /// <summary>One model's card display data: its name, owning provider, resolved provider-side id, and formatted 30-day spend.</summary>
+
+    /// <summary>
+    /// One model's card display data: its name, owning provider, resolved provider-side id, and formatted 30-day
+    /// spend.
+    /// </summary>
     private sealed record ModelCard(string ModelName, string ProviderKey, string ProviderModelId, string SpendDisplay);
 
     /// <summary>The cards currently rendered, rebuilt on every load and provider change.</summary>
@@ -76,17 +80,23 @@
     }
 
     /// <summary>Re-derives the card list and re-renders when the provider list changes.</summary>
-    private void HandleChanged() => InvokeAsync(async () =>
+    private void HandleChanged()
     {
-        // A provider/model edit can add or remove cards; re-derive from whatever rollup data is already
-        // cached (LoadRollupAsync serves the same range from UsageStore's cache) rather than re-fetching.
-        await LoadRollupAndBuildCardsAsync();
-        StateHasChanged();
-    });
+        InvokeAsync(async () =>
+        {
+            // A provider/model edit can add or remove cards; re-derive from whatever rollup data is already
+            // cached (LoadRollupAsync serves the same range from UsageStore's cache) rather than re-fetching.
+            await LoadRollupAndBuildCardsAsync();
+            StateHasChanged();
+        });
+    }
 
     // Shared by the initial load, the provider-changed refresh, and the unreachable-state Retry button -
     // all three need the same "re-fetch the 30-day rollup, then re-derive Cards" sequence.
-    /// <summary>Reloads providers (if unreachable) and rebuilds the card list. Implements the unreachable state's Retry button.</summary>
+    /// <summary>
+    /// Reloads providers (if unreachable) and rebuilds the card list. Implements the unreachable state's Retry
+    /// button.
+    /// </summary>
     private async Task ReloadAsync()
     {
         if (!ProviderStore.IsReachable)
@@ -102,7 +112,7 @@
     {
         var to = BucketAlignedTo();
         var from = to.AddDays(-30);
-        var buckets = await UsageStore.LoadRollupAsync(from, to, "day", "model");
+        var buckets = await UsageStore.LoadRollupAsync(from: from, to: to, width: "day", groupBy: "model");
         BuildCards(buckets);
     }
 
@@ -111,23 +121,29 @@
     // call within the same day (and every ProviderStore.Changed refresh). Buckets more recent than this
     // boundary are still not fully elapsed anyway, so nothing is lost by not asking for them.
     /// <summary>The start of the current UTC day, used as the rollup query's cache-stable upper bound.</summary>
-    private static DateTimeOffset BucketAlignedTo() => new(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
+    private static DateTimeOffset BucketAlignedTo()
+    {
+        return new DateTimeOffset(dateTime: DateTimeOffset.UtcNow.Date, offset: TimeSpan.Zero);
+    }
 
-    /// <summary>Rebuilds <see cref="Cards"/> from the configured providers/models, joined against the given spend rollup buckets.</summary>
+    /// <summary>
+    /// Rebuilds <see cref="Cards"/> from the configured providers/models, joined against the given spend rollup
+    /// buckets.
+    /// </summary>
     private void BuildCards(IReadOnlyList<UsageRollupBucketView> buckets)
     {
         // Spend is keyed by the resolved provider model id (what usage_ledger/usage_rollup record), not
         // the client-facing ModelName - see UsageLedgerEntry.ResolvedModel's remarks.
         var spendByProviderModelId = buckets.ToDictionary(
-            b => b.GroupKey, b => (b.CostUsd, b.UnpricedRequests), StringComparer.OrdinalIgnoreCase);
+            keySelector: b => b.GroupKey, elementSelector: b => (b.CostUsd, b.UnpricedRequests), comparer: StringComparer.OrdinalIgnoreCase);
 
         Cards = ProviderStore.Providers
             .SelectMany(p => p.Models.Select(m => new ModelCard(
-                m.ModelName,
-                p.Key,
-                m.ProviderModelId,
-                FormatSpend(spendByProviderModelId.GetValueOrDefault(m.ProviderModelId)))))
-            .OrderBy(c => c.ModelName, StringComparer.OrdinalIgnoreCase)
+                ModelName: m.ModelName,
+                ProviderKey: p.Key,
+                ProviderModelId: m.ProviderModelId,
+                SpendDisplay: FormatSpend(spendByProviderModelId.GetValueOrDefault(m.ProviderModelId)))))
+            .OrderBy(keySelector: c => c.ModelName, comparer: StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -135,10 +151,13 @@
     // the true total is at least this figure, not exactly it - the same "unknown != zero" discipline
     // ModelPrice/SpendTracker apply elsewhere, surfaced here as a "≥" prefix and the unpriced count rather
     // than a plain dollar amount that would silently understate spend.
-    /// <summary>Formats a card's spend, prefixing with "≥" and disclosing the unpriced-request count whenever the total is a floor rather than a complete sum.</summary>
+    /// <summary>
+    /// Formats a card's spend, prefixing with "≥" and disclosing the unpriced-request count whenever the total is a
+    /// floor rather than a complete sum.
+    /// </summary>
     private static string FormatSpend((decimal CostUsd, long UnpricedRequests) spend)
     {
-        var amount = spend.CostUsd.ToString("$0.00", System.Globalization.CultureInfo.InvariantCulture);
+        var amount = spend.CostUsd.ToString(format: "$0.00", provider: CultureInfo.InvariantCulture);
         return spend.UnpricedRequests > 0
             ? FormattableString.Invariant($"≥{amount} ({spend.UnpricedRequests} unpriced)")
             : amount;
@@ -149,4 +168,5 @@
     {
         ProviderStore.Changed -= HandleChanged;
     }
+
 }

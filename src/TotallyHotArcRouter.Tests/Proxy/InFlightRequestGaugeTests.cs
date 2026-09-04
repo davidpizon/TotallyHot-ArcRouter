@@ -1,9 +1,9 @@
-using System.Net;
-using System.Text;
-using TotallyHot.ArcRouter.Proxy;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Net;
+using System.Text;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -19,16 +19,16 @@ public class InFlightRequestGaugeTests
     public void Track_RaisesTheCountForTheScopeAndReleasesOnDispose()
     {
         var gauge = new InFlightRequestGauge();
-        Assert.Equal(0, gauge.Count);
+        Assert.Equal(0, actual: gauge.Count);
 
         var outer = gauge.Track();
         var inner = gauge.Track();
-        Assert.Equal(2, gauge.Count);
+        Assert.Equal(2, actual: gauge.Count);
 
         inner.Dispose();
-        Assert.Equal(1, gauge.Count);
+        Assert.Equal(1, actual: gauge.Count);
         outer.Dispose();
-        Assert.Equal(0, gauge.Count);
+        Assert.Equal(0, actual: gauge.Count);
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public class InFlightRequestGaugeTests
 
         // A second Dispose must not drive the count negative - a negative count would read as "idle"
         // while requests are actually in flight.
-        Assert.Equal(0, gauge.Count);
+        Assert.Equal(0, actual: gauge.Count);
     }
 
     [Fact]
@@ -57,7 +57,8 @@ public class InFlightRequestGaugeTests
             baseUrl: "http://localhost:9/v1",
             providerName: "test",
             apiKey: null);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ =>
         {
             // Observed at the deepest point of the request - the upstream call - where background work
@@ -65,24 +66,25 @@ public class InFlightRequestGaugeTests
             countDuringUpstreamCall = gauge.Count;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"choices":[]}""", Encoding.UTF8, "application/json"),
+                Content = new StringContent("""{"choices":[]}""", encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             });
         });
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 InFlightGauge = gauge
             }
         );
 
-        await middleware.InvokeAsync(CreateChatContext(), _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: CreateChatContext(), next: _ => Task.CompletedTask);
 
-        Assert.Equal(1, countDuringUpstreamCall);
-        Assert.Equal(0, gauge.Count);
+        Assert.Equal(1, actual: countDuringUpstreamCall);
+        Assert.Equal(0, actual: gauge.Count);
     }
 
     [Fact]
@@ -96,32 +98,26 @@ public class InFlightRequestGaugeTests
             baseUrl: "http://localhost:9/v1",
             providerName: "test",
             apiKey: null);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new HttpRequestException("connection refused"));
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 InFlightGauge = gauge
             }
         );
 
-        await middleware.InvokeAsync(CreateChatContext(), _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: CreateChatContext(), next: _ => Task.CompletedTask);
 
         // Whatever the outcome, the tracking scope's disposal must run - a leaked increment pauses the
         // taxonomy-comparison drain permanently.
-        Assert.Equal(0, gauge.Count);
-    }
-
-    /// <summary>Routes every outgoing upstream request through the given delegate, following the sibling test files' convention.</summary>
-    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            handler(request);
+        Assert.Equal(0, actual: gauge.Count);
     }
 
     /// <summary>Builds a minimal OpenAI-shaped chat-completions request context.</summary>
@@ -132,10 +128,24 @@ public class InFlightRequestGaugeTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var body = Encoding.UTF8.GetBytes("""{"model":"model-a","messages":[{"role":"user","content":"hi"}]}""");
+        var body = """{"model":"model-a","messages":[{"role":"user","content":"hi"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(body);
         context.Request.ContentLength = body.Length;
         context.Response.Body = new MemoryStream();
         return context;
+    }
+
+    /// <summary>
+    /// Routes every outgoing upstream request through the given delegate, following the sibling test files'
+    /// convention.
+    /// </summary>
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return handler(request);
+        }
     }
 }

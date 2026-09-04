@@ -31,8 +31,12 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </param>
 /// <param name="BatchInputPerMillionTokens">
 /// USD per 1,000,000 input tokens at batch/off-peak rates, or <see langword="null"/> when this
-/// (model, provider) cell publishes no batch rate. Null means <em>this provider does not offer batch
-/// pricing for this model</em> - never that batch is free - so a caller that cannot find a batch rate
+/// (model, provider) cell publishes no batch rate. Null means
+/// <em>
+/// this provider does not offer batch
+/// pricing for this model
+/// </em>
+/// - never that batch is free - so a caller that cannot find a batch rate
 /// pays the standard one rather than treating the absence as a discount (D7).
 /// </param>
 /// <param name="BatchOutputPerMillionTokens">
@@ -57,21 +61,24 @@ public sealed record ModelPrice(
     /// ("this provider does not publish this rate"), and a free provider offers every tier at zero.
     /// </summary>
     public static ModelPrice Free { get; } = new(
-        InputPerMillionTokens: 0m,
-        OutputPerMillionTokens: 0m,
-        CacheReadPerMillionTokens: 0m,
-        CacheWritePerMillionTokens: 0m,
-        IsApproximateMatch: false,
-        BatchInputPerMillionTokens: 0m,
-        BatchOutputPerMillionTokens: 0m);
+        0m,
+        0m,
+        0m,
+        0m,
+        false,
+        0m,
+        0m);
 
     /// <summary>
     /// Estimates the USD cost of a request given only its standard prompt and completion tokens. Kept for
     /// callers with no cache-token data; behaviorally identical to calling <see cref="EstimateCost(UsageInfo)"/>
     /// with a <see cref="UsageInfo"/> whose cache fields are 0.
     /// </summary>
-    public decimal EstimateCost(int promptTokens, int completionTokens) =>
-        (promptTokens / 1_000_000m * InputPerMillionTokens) + (completionTokens / 1_000_000m * OutputPerMillionTokens);
+    public decimal EstimateCost(int promptTokens, int completionTokens)
+    {
+        return promptTokens / 1_000_000m * InputPerMillionTokens +
+               completionTokens / 1_000_000m * OutputPerMillionTokens;
+    }
 
     /// <summary>
     /// Estimates the USD cost of a request given its full, cache-aware token usage. Standard prompt and
@@ -84,7 +91,10 @@ public sealed record ModelPrice(
     /// this type's <c>remarks</c> explicitly refuses. Behaviorally identical to
     /// <see cref="EstimateCost(UsageInfo, out bool)"/> for callers that don't need the fallback flag.
     /// </summary>
-    public decimal EstimateCost(UsageInfo usage) => EstimateCost(usage, out _);
+    public decimal EstimateCost(UsageInfo usage)
+    {
+        return EstimateCost(usage: usage, usedCacheRateFallback: out _);
+    }
 
     /// <summary>
     /// Estimates the USD cost of a request given its full, cache-aware token usage, additionally reporting
@@ -108,9 +118,9 @@ public sealed record ModelPrice(
         var cacheReadRate = CacheReadPerMillionTokens ?? InputPerMillionTokens;
         var cacheWriteRate = CacheWritePerMillionTokens ?? InputPerMillionTokens;
 
-        return (usage.PromptTokens / 1_000_000m * InputPerMillionTokens)
-            + (usage.CompletionTokens / 1_000_000m * OutputPerMillionTokens)
-            + (usage.CacheReadTokens / 1_000_000m * cacheReadRate)
-            + (usage.CacheCreationTokens / 1_000_000m * cacheWriteRate);
+        return usage.PromptTokens / 1_000_000m * InputPerMillionTokens
+               + usage.CompletionTokens / 1_000_000m * OutputPerMillionTokens
+               + usage.CacheReadTokens / 1_000_000m * cacheReadRate
+               + usage.CacheCreationTokens / 1_000_000m * cacheWriteRate;
     }
 }

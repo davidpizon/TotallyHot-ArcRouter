@@ -3,300 +3,298 @@
    picker (docs/router/geval-shadow-scoring-plan.md), the transcription-capture toggle and its Clear action
    (docs/router/self-organizing-classification-plan.md Phase T1), destructive actions gated behind a typed
    confirmation word, and a discreet GUI/Router version footer. *@
-@using TotallyHot.ArcRouter.Gui.Telemetry
 @implements IDisposable
 @inject LiveDataStore LiveDataStore
 @inject IGuiSettingsStore SettingsStore
 @inject RouterSettingsAdminStore RouterSettingsStore
-@inject TotallyHot.ArcRouter.Gui.Services.UpdateStore UpdateStore
+@inject UpdateStore UpdateStore
 <DialogShell Title="System Settings" CloseAriaLabel="Close system settings" OnClose="OnClose">
-            @* Connection settings. Unlike the router settings below, this is local-only (no round trip to
+@* Connection settings. Unlike the router settings below, this is local-only (no round trip to
                the router) and needs an app restart to take effect, so it keeps its own explicit Save/Undo
                pair rather than saving on every keystroke. Both buttons stay disabled until the field holds
                an actual pending change. *@
-            <div class="space-y-2">
-                <label for="telemetry-address" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
-                    Telemetry Server Address
-                </label>
-                <div class="flex items-center gap-2">
-                    <input id="telemetry-address"
-                           type="text"
-                           value="@_telemetryAddress"
-                           @oninput="OnTelemetryAddressInput"
-                           class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input" />
-                    <button @onclick="UndoTelemetryAddress" disabled="@(!HasTelemetryAddressChanged)" class="btn btn-ghost">
-                        Undo
-                    </button>
-                    <button @onclick="SaveTelemetryAddress" disabled="@(!CanSaveTelemetryAddress)" class="btn btn-ghost">
-                        Save
-                    </button>
-                </div>
-                @if (_telemetryAddressSaved)
-                {
-                    <p class="text-xs text-emerald-400">Saved. Restart the app to connect to the new address.</p>
-                }
-            </div>
+<div class="space-y-2">
+    <label for="telemetry-address" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Telemetry Server Address
+    </label>
+    <div class="flex items-center gap-2">
+        <input id="telemetry-address"
+               type="text"
+               value="@_telemetryAddress"
+               @oninput="OnTelemetryAddressInput"
+               class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input"/>
+        <button @onclick="UndoTelemetryAddress" disabled="@(!HasTelemetryAddressChanged)" class="btn btn-ghost">
+            Undo
+        </button>
+        <button @onclick="SaveTelemetryAddress" disabled="@(!CanSaveTelemetryAddress)" class="btn btn-ghost">
+            Save
+        </button>
+    </div>
+    @if (_telemetryAddressSaved)
+    {
+        <p class="text-xs text-emerald-400">Saved. Restart the app to connect to the new address.</p>
+    }
+</div>
 
-            @* Adaptive routing (docs/router/self-organizing-classification-plan.md Phase T6). Every control
+@* Adaptive routing (docs/router/self-organizing-classification-plan.md Phase T6). Every control
                here saves the instant it changes - there is no footer Save button for this section - so a
                toggle flipped and then abandoned (modal closed, tab switched) is never silently lost. *@
-            <div class="space-y-2">
-                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
-                    Adaptive Routing
-                </label>
-                <div class="flex items-center gap-3">
-                    <button @onclick="ToggleAdaptiveRouting"
-                            disabled="@_routerSettingsSaving"
-                            aria-label="Toggle adaptive routing"
-                            class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_adaptiveRoutingEnabled ? "toggle-enabled" : "toggle-disabled")">
-                        <span class="w-1.5 h-1.5 rounded-full @(_adaptiveRoutingEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
-                        @(_adaptiveRoutingEnabled ? "On" : "Off")
-                    </button>
-                    <input id="sample-size"
-                           type="number"
-                           min="@MinEmbeddingMemoryCapacity"
-                           max="@MaxEmbeddingMemoryCapacity"
-                           step="1"
-                           value="@_sampleSizeText"
-                           disabled="@_routerSettingsSaving"
-                           @oninput="OnSampleSizeInput"
-                           @onchange="OnSampleSizeChange"
-                           class="w-28 px-3 py-2 text-sm font-mono ds-input" />
-                    <span class="text-xs text-slate-500">Sample Size</span>
-                    @if (ShowSampleSizeWarning)
-                    {
-                        <span class="ls-tip" tabindex="0" aria-describedby="ls-tooltip"
-                              data-tip="a sample size of 20000 is recommended.">
-                            <Icon Name="alert-triangle" Size="16" Class="text-amber-400" />
-                        </span>
-                    }
-                </div>
-            </div>
+<div class="space-y-2">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Adaptive Routing
+    </label>
+    <div class="flex items-center gap-3">
+        <button @onclick="ToggleAdaptiveRouting"
+                disabled="@_routerSettingsSaving"
+                aria-label="Toggle adaptive routing"
+                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_adaptiveRoutingEnabled ? "toggle-enabled" : "toggle-disabled")">
+            <span class="w-1.5 h-1.5 rounded-full @(_adaptiveRoutingEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+            @(_adaptiveRoutingEnabled ? "On" : "Off")
+        </button>
+        <input id="sample-size"
+               type="number"
+               min="@MinEmbeddingMemoryCapacity"
+               max="@MaxEmbeddingMemoryCapacity"
+               step="1"
+               value="@_sampleSizeText"
+               disabled="@_routerSettingsSaving"
+               @oninput="OnSampleSizeInput"
+               @onchange="OnSampleSizeChange"
+               class="w-28 px-3 py-2 text-sm font-mono ds-input"/>
+        <span class="text-xs text-slate-500">Sample Size</span>
+        @if (ShowSampleSizeWarning)
+        {
+            <span class="ls-tip" tabindex="0" aria-describedby="ls-tooltip"
+                  data-tip="a sample size of 20000 is recommended.">
+                <Icon Name="alert-triangle" Size="16" Class="text-amber-400"/>
+            </span>
+        }
+    </div>
+</div>
 
-            @* Shadow judge (docs/router/geval-shadow-scoring-plan.md). The model list offers only free,
+@* Shadow judge (docs/router/geval-shadow-scoring-plan.md). The model list offers only free,
                enabled, OpenAI-compatible models from the Providers screen - the same list the server
                validates a save against. *@
-            <div class="space-y-2">
-                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
-                    Shadow Judge
-                </label>
-                <div class="flex items-center gap-3">
-                    <button @onclick="ToggleJudgeEnabled"
-                            disabled="@_routerSettingsSaving"
-                            aria-label="Toggle shadow judge"
-                            class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_judgeEnabled ? "toggle-enabled" : "toggle-disabled")">
-                        <span class="w-1.5 h-1.5 rounded-full @(_judgeEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
-                        @(_judgeEnabled ? "On" : "Off")
-                    </button>
-                    <select id="judge-model"
-                            value="@_judgeModelName"
-                            @onchange="OnJudgeModelChange"
-                            disabled="@(_eligibleJudgeModels.Count == 0 || _routerSettingsSaving)"
-                            class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input">
-                        <option value="">Automatic</option>
-                        @foreach (var model in _eligibleJudgeModels)
-                        {
-                            <option value="@model">@model</option>
-                        }
-                    </select>
-                </div>
-                @if (_eligibleJudgeModels.Count == 0)
-                {
-                    <p class="text-xs text-amber-400">
-                        No free model is configured. Mark a provider as free in Providers to give the judge a backbone.
-                    </p>
-                }
-                @if (_routerSettingsSaving)
-                {
-                    <p class="text-xs text-slate-500">Saving…</p>
-                }
-                else if (_routerSettingsMessage is not null)
-                {
-                    <p class="text-xs @(_routerSettingsSaveFailed ? "text-red-400" : "text-emerald-400")">@_routerSettingsMessage</p>
-                }
-            </div>
+<div class="space-y-2">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Shadow Judge
+    </label>
+    <div class="flex items-center gap-3">
+        <button @onclick="ToggleJudgeEnabled"
+                disabled="@_routerSettingsSaving"
+                aria-label="Toggle shadow judge"
+                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_judgeEnabled ? "toggle-enabled" : "toggle-disabled")">
+            <span class="w-1.5 h-1.5 rounded-full @(_judgeEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+            @(_judgeEnabled ? "On" : "Off")
+        </button>
+        <select id="judge-model"
+                value="@_judgeModelName"
+                @onchange="OnJudgeModelChange"
+                disabled="@(_eligibleJudgeModels.Count == 0 || _routerSettingsSaving)"
+                class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input">
+            <option value="">Automatic</option>
+            @foreach (var model in _eligibleJudgeModels)
+            {
+                <option value="@model">@model</option>
+            }
+        </select>
+    </div>
+    @if (_eligibleJudgeModels.Count == 0)
+    {
+        <p class="text-xs text-amber-400">
+            No free model is configured. Mark a provider as free in Providers to give the judge a backbone.
+        </p>
+    }
+    @if (_routerSettingsSaving)
+    {
+        <p class="text-xs text-slate-500">Saving…</p>
+    }
+    else if (_routerSettingsMessage is not null)
+    {
+        <p class="text-xs @(_routerSettingsSaveFailed ? "text-red-400" : "text-emerald-400")">@_routerSettingsMessage</p>
+    }
+</div>
 
-            @* Transcription Capture (docs/router/self-organizing-classification-plan.md Phase T1). Saves
+@* Transcription Capture (docs/router/self-organizing-classification-plan.md Phase T1). Saves
                instantly like Adaptive Routing/Shadow Judge above. Clear is a separate, immediate action -
                it deletes real data, so it asks for a plain Yes/No confirmation rather than saving anything. *@
-            <div class="space-y-2">
-                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
-                    Transcription Capture
-                </label>
-                <div class="flex items-center gap-3">
-                    <button @onclick="ToggleTranscriptCapture"
-                            disabled="@_routerSettingsSaving"
-                            aria-label="Toggle transcription capture"
-                            class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_transcriptCaptureEnabled ? "toggle-enabled" : "toggle-disabled")">
-                        <span class="w-1.5 h-1.5 rounded-full @(_transcriptCaptureEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
-                        @(_transcriptCaptureEnabled ? "On" : "Off")
-                    </button>
-                    <button @onclick="StartClearTranscripts"
-                            disabled="@_clearingTranscripts"
-                            class="btn btn-ghost-critical">
-                        Clear
-                    </button>
-                </div>
-                @if (_confirmingClearTranscripts)
-                {
-                    <div class="space-y-2 ds-destructive-box-critical">
-                        <p class="text-xs text-slate-400 leading-5">
-                            This will permanently delete every captured transcript (prompt and response
-                            text). Are you sure you want to do this?
-                        </p>
-                        <div class="flex gap-2">
-                            <button @onclick="@(() => _confirmingClearTranscripts = false)" class="flex-1 btn btn-ghost">
-                                Cancel
-                            </button>
-                            <button @onclick="ClearTranscriptsConfirmed" disabled="@_clearingTranscripts" class="flex-1 btn btn-critical">
-                                @(_clearingTranscripts ? "Clearing…" : "Confirm Clear")
-                            </button>
-                        </div>
-                    </div>
-                }
-                @if (_clearTranscriptsMessage is not null)
-                {
-                    <p class="text-xs @(_clearTranscriptsFailed ? "text-red-400" : "text-emerald-400")">@_clearTranscriptsMessage</p>
-                }
+<div class="space-y-2">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Transcription Capture
+    </label>
+    <div class="flex items-center gap-3">
+        <button @onclick="ToggleTranscriptCapture"
+                disabled="@_routerSettingsSaving"
+                aria-label="Toggle transcription capture"
+                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_transcriptCaptureEnabled ? "toggle-enabled" : "toggle-disabled")">
+            <span class="w-1.5 h-1.5 rounded-full @(_transcriptCaptureEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+            @(_transcriptCaptureEnabled ? "On" : "Off")
+        </button>
+        <button @onclick="StartClearTranscripts"
+                disabled="@_clearingTranscripts"
+                class="btn btn-ghost-critical">
+            Clear
+        </button>
+    </div>
+    @if (_confirmingClearTranscripts)
+    {
+        <div class="space-y-2 ds-destructive-box-critical">
+            <p class="text-xs text-slate-400 leading-5">
+                This will permanently delete every captured transcript (prompt and response
+                text). Are you sure you want to do this?
+            </p>
+            <div class="flex gap-2">
+                <button @onclick="@(() => _confirmingClearTranscripts = false)" class="flex-1 btn btn-ghost">
+                    Cancel
+                </button>
+                <button @onclick="ClearTranscriptsConfirmed" disabled="@_clearingTranscripts" class="flex-1 btn btn-critical">
+                    @(_clearingTranscripts ? "Clearing…" : "Confirm Clear")
+                </button>
             </div>
+        </div>
+    }
+    @if (_clearTranscriptsMessage is not null)
+    {
+        <p class="text-xs @(_clearTranscriptsFailed ? "text-red-400" : "text-emerald-400")">@_clearTranscriptsMessage</p>
+    }
+</div>
 
-            @* Software Update (docs/router/auto-update-plan.md Phase 2). Router self-update only - this
+@* Software Update (docs/router/auto-update-plan.md Phase 2). Router self-update only - this
                GUI does not update itself, it only displays the Router's update status and triggers its
                apply. *@
-            <div class="space-y-2">
-                <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
-                    Software Update
-                </label>
-                @if (UpdateStore.Status is { } status)
-                {
-                    <p class="text-xs text-slate-400">
-                        Running <span class="font-mono text-slate-200">@status.CurrentVersion</span>
-                        @if (status.UpdateAvailable)
-                        {
-                            <span class="text-amber-400"> — update available: <span class="font-mono">@status.LatestVersion</span></span>
-                        }
-                        else if (!string.IsNullOrEmpty(status.LatestVersion))
-                        {
-                            <span> — up to date</span>
-                        }
-                    </p>
-                    @if (status.UnavailableReason != UpdateUnavailableReasonInfo.None)
-                    {
-                        <p class="text-xs text-slate-600">Last check: @status.UnavailableDetail</p>
-                    }
-                }
-                else if (UpdateStore.IsLoaded && !UpdateStore.IsReachable)
-                {
-                    <p class="text-xs text-amber-400">Could not reach the router. Is the proxy running?</p>
-                }
-                <div class="flex gap-2">
-                    <button @onclick="CheckForUpdatesNow" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost">
-                        @(UpdateStore.IsBusy ? "Checking…" : "Check Now")
-                    </button>
-                    @if (UpdateStore.Status?.UpdateAvailable == true)
-                    {
-                        <button @onclick="StartApplyConfirmation" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost-warning">
-                            Apply Update
-                        </button>
-                    }
-                </div>
-                @if (_confirmingApply)
-                {
-                    <div class="space-y-2 ds-destructive-box-warning">
-                        <p class="text-xs text-slate-400 leading-5">
-                            This will download and install the update, which requires administrator approval
-                            and will restart the application. Continue?
-                        </p>
-                        <div class="flex gap-2">
-                            <button @onclick="@(() => _confirmingApply = false)" class="flex-1 btn btn-ghost">
-                                Cancel
-                            </button>
-                            <button @onclick="ApplyUpdateConfirmed" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-critical">
-                                Confirm Apply
-                            </button>
-                        </div>
-                    </div>
-                }
-                @if (UpdateStore.LastApplyOutcome is { } applyOutcome)
-                {
-                    <p class="text-xs @(applyOutcome.Succeeded ? "text-emerald-400" : "text-red-400")">@applyOutcome.Message</p>
-                }
-                @if (_updateErrorMessage is not null)
-                {
-                    <p class="text-xs text-red-400">@_updateErrorMessage</p>
-                }
-            </div>
-
-            @* Destructive zone label *@
-            <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
-                <Icon Name="alert-triangle" Size="20" />
-                <span>Destructive Actions Zone</span>
-            </div>
-
-            @if (_activeAction is null)
+<div class="space-y-2">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Software Update
+    </label>
+    @if (UpdateStore.Status is { } status)
+    {
+        <p class="text-xs text-slate-400">
+            Running <span class="font-mono text-slate-200">@status.CurrentVersion</span>
+            @if (status.UpdateAvailable)
             {
-                <div class="grid grid-cols-2 gap-3">
-                    <button @onclick="@(() => StartAction("reset"))"
-                            class="btn btn-ghost-warning flex items-center justify-center gap-2">
-                        <Icon Name="refresh" Size="20" />
-                        Reset Stats
-                    </button>
-                    <button @onclick="@(() => StartAction("purge"))"
-                            class="btn btn-ghost-critical flex items-center justify-center gap-2">
-                        <Icon Name="trash" Size="20" />
-                        Clear History
-                    </button>
-                </div>
+                <span class="text-amber-400"> — update available: <span class="font-mono">@status.LatestVersion</span></span>
             }
-            else
+            else if (!string.IsNullOrEmpty(status.LatestVersion))
             {
-                @* Confirmation step: the action only enables once the confirmation word is typed exactly. *@
-                <div class="space-y-3 @(_activeAction == "reset" ? "ds-destructive-box-warning" : "ds-destructive-box-critical")">
-                    <p class="text-xs text-slate-400 leading-5">
-                        This action is <span class="text-red-400 font-semibold">irreversible</span>. Type
-                        <span class="font-mono text-slate-200 bg-slate-700 px-1.5 py-0.5 rounded text-xs">@Required</span>
-                        to confirm.
-                    </p>
-                    <input @ref="_confirmInput"
-                           type="text"
-                           value="@_confirmText"
-                           @oninput="e => _confirmText = ((string?)e.Value ?? string.Empty).ToUpperInvariant()"
-                           placeholder="Type @(Required)..."
-                           class="w-full px-3 py-2 text-sm font-mono ds-input" />
-                    <div class="flex gap-2">
-                        <button @onclick="CancelAction"
-                                class="flex-1 btn btn-ghost">
-                            Cancel
-                        </button>
-                        <button @onclick="ExecuteAction"
-                                disabled="@(!IsConfirmed)"
-                                class="flex-1 btn btn-critical">
-                            Confirm @(_activeAction == "reset" ? "Reset" : "Purge")
-                        </button>
-                    </div>
-                </div>
+                <span> — up to date</span>
             }
-
-            <p class="text-xs text-slate-600 pt-1">
-                All system configurations, routing rules, and budget caps are preserved.
+        </p>
+        @if (status.UnavailableReason != UpdateUnavailableReasonInfo.None)
+        {
+            <p class="text-xs text-slate-600">Last check: @status.UnavailableDetail</p>
+        }
+    }
+    else if (UpdateStore.IsLoaded && !UpdateStore.IsReachable)
+    {
+        <p class="text-xs text-amber-400">Could not reach the router. Is the proxy running?</p>
+    }
+    <div class="flex gap-2">
+        <button @onclick="CheckForUpdatesNow" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost">
+            @(UpdateStore.IsBusy ? "Checking…" : "Check Now")
+        </button>
+        @if (UpdateStore.Status?.UpdateAvailable == true)
+        {
+            <button @onclick="StartApplyConfirmation" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost-warning">
+                Apply Update
+            </button>
+        }
+    </div>
+    @if (_confirmingApply)
+    {
+        <div class="space-y-2 ds-destructive-box-warning">
+            <p class="text-xs text-slate-400 leading-5">
+                This will download and install the update, which requires administrator approval
+                and will restart the application. Continue?
             </p>
+            <div class="flex gap-2">
+                <button @onclick="@(() => _confirmingApply = false)" class="flex-1 btn btn-ghost">
+                    Cancel
+                </button>
+                <button @onclick="ApplyUpdateConfirmed" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-critical">
+                    Confirm Apply
+                </button>
+            </div>
+        </div>
+    }
+    @if (UpdateStore.LastApplyOutcome is { } applyOutcome)
+    {
+        <p class="text-xs @(applyOutcome.Succeeded ? "text-emerald-400" : "text-red-400")">@applyOutcome.Message</p>
+    }
+    @if (_updateErrorMessage is not null)
+    {
+        <p class="text-xs text-red-400">@_updateErrorMessage</p>
+    }
+</div>
 
-            @* Build provenance, deliberately the quietest thing in the window: the same dim text-xs
+@* Destructive zone label *@
+<div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
+    <Icon Name="alert-triangle" Size="20"/>
+    <span>Destructive Actions Zone</span>
+</div>
+
+@if (_activeAction is null)
+{
+    <div class="grid grid-cols-2 gap-3">
+        <button @onclick="@(() => StartAction("reset"))"
+                class="btn btn-ghost-warning flex items-center justify-center gap-2">
+            <Icon Name="refresh" Size="20"/>
+            Reset Stats
+        </button>
+        <button @onclick="@(() => StartAction("purge"))"
+                class="btn btn-ghost-critical flex items-center justify-center gap-2">
+            <Icon Name="trash" Size="20"/>
+            Clear History
+        </button>
+    </div>
+}
+else
+{
+    @* Confirmation step: the action only enables once the confirmation word is typed exactly. *@
+    <div class="space-y-3 @(_activeAction == "reset" ? "ds-destructive-box-warning" : "ds-destructive-box-critical")">
+        <p class="text-xs text-slate-400 leading-5">
+            This action is <span class="text-red-400 font-semibold">irreversible</span>. Type
+            <span class="font-mono text-slate-200 bg-slate-700 px-1.5 py-0.5 rounded text-xs">@Required</span>
+            to confirm.
+        </p>
+        <input @ref="_confirmInput"
+               type="text"
+               value="@_confirmText"
+               @oninput="e => _confirmText = ((string?)e.Value ?? string.Empty).ToUpperInvariant()"
+               placeholder="Type @(Required)..."
+               class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+        <div class="flex gap-2">
+            <button @onclick="CancelAction"
+                    class="flex-1 btn btn-ghost">
+                Cancel
+            </button>
+            <button @onclick="ExecuteAction"
+                    disabled="@(!IsConfirmed)"
+                    class="flex-1 btn btn-critical">
+                Confirm @(_activeAction == "reset" ? "Reset" : "Purge")
+            </button>
+        </div>
+    </div>
+}
+
+<p class="text-xs text-slate-600 pt-1">
+    All system configurations, routing rules, and budget caps are preserved.
+</p>
+
+@* Build provenance, deliberately the quietest thing in the window: the same dim text-xs
                slate-600 tier as the note above, under a divider, below everything actionable. The two
                halves are read from two different places on purpose - the GUI's from its own assembly,
                the Router's from whatever Router actually answered the last status poll - because the MSI
                installing both together is exactly the assumption worth being able to disprove here when
                a Router fails to come back after an upgrade. *@
-            @* Spacing is picked from what app.css actually ships: it is a committed, tree-shaken
+@* Spacing is picked from what app.css actually ships: it is a committed, tree-shaken
                Tailwind build, so an unused utility (pt-2, border-slate-800) is simply absent and would
                silently no-op here. mt-3/py-2/border-slate-700 are all present. *@
-            <div class="flex items-center justify-center gap-2 mt-3 py-2 border-t border-slate-700 text-xs text-slate-600">
-                @* Explicit parens are required, not stylistic: Razor treats an "@" that directly follows
+<div class="flex items-center justify-center gap-2 mt-3 py-2 border-t border-slate-700 text-xs text-slate-600">
+    @* Explicit parens are required, not stylistic: Razor treats an "@" that directly follows
                    a non-whitespace character as a literal so email addresses survive markup, so a bare
                    "v@AppVersion.Current" renders as that text verbatim. *@
-                <span>GUI v@(AppVersion.Current)</span>
-                <span aria-hidden="true">·</span>
-                <span>@RouterVersionLabel</span>
-            </div>
+    <span>GUI v@(AppVersion.Current)</span>
+    <span aria-hidden="true">·</span>
+    <span>@RouterVersionLabel</span>
+</div>
 </DialogShell>
-

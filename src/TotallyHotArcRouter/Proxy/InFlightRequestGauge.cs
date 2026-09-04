@@ -26,14 +26,20 @@ public sealed class InFlightRequestGauge
     public int Count => Volatile.Read(ref _count);
 
     /// <summary>Records that one request has started being served.</summary>
-    public void Increment() => Interlocked.Increment(ref _count);
+    public void Increment()
+    {
+        Interlocked.Increment(ref _count);
+    }
 
     /// <summary>
     /// Records that one request has finished (successfully or not). Every <see cref="Increment"/>
     /// must be balanced by exactly one call to this, or the gauge sticks above zero and pauses
     /// background work forever - which is why callers should prefer <see cref="Track"/>.
     /// </summary>
-    public void Decrement() => Interlocked.Decrement(ref _count);
+    public void Decrement()
+    {
+        Interlocked.Decrement(ref _count);
+    }
 
     /// <summary>
     /// Marks a request as in flight for the lifetime of the returned scope - the
@@ -55,13 +61,10 @@ public sealed class InFlightRequestGauge
     {
         private int _disposed;
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-            {
-                owner.Decrement();
-            }
+            if (Interlocked.Exchange(location1: ref _disposed, 1) == 0) owner.Decrement();
         }
     }
 }

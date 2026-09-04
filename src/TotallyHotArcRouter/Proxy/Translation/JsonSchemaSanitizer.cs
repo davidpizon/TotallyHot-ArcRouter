@@ -5,7 +5,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// <summary>
 /// Strips the JSON Schema keywords a particular downstream consumer rejects, recursively, so a schema the
 /// client wrote against OpenAI's dialect can be handed to something with a narrower one.
-///
 /// <para>
 /// Shared rather than per-translator because the recursive walk is the hard part and the keyword lists are
 /// the easy part. Two consumers need it today - Gemini's OpenAPI-subset schema validator and the
@@ -24,7 +23,7 @@ internal static class JsonSchemaSanitizer
     // a single-value `enum` means the same thing, so it is converted rather than dropped.
     private static readonly SanitizerProfile Gemini = new(
         RemovedKeywords: ["additionalProperties", "strict", "$schema", "$comment", "enumDescriptions"],
-        ConvertConstToEnum: true);
+        true);
 
     // Far less aggressive than Gemini's. llama.cpp's GBNF converter (and the MLX/Outlines path) handle
     // `additionalProperties`, `enum`, and `const` natively, so removing them would discard real constraints
@@ -34,7 +33,7 @@ internal static class JsonSchemaSanitizer
     // a hard schema-compile rejection.
     private static readonly SanitizerProfile ConstrainedDecoding = new(
         RemovedKeywords: ["strict", "$schema", "$comment", "enumDescriptions"],
-        ConvertConstToEnum: false);
+        false);
 
     /// <summary>
     /// Strips the keywords Gemini's OpenAPI-subset schema rejects and converts <c>const</c> to a
@@ -45,14 +44,20 @@ internal static class JsonSchemaSanitizer
     /// JSON-Schema types, and the pinned LiteLLM reference does not uppercase them either.
     /// </remarks>
     /// <param name="schema">The schema to sanitize. Mutated in place and returned for chaining.</param>
-    public static JsonObject ForGemini(JsonObject schema) => Sanitize(schema, Gemini);
+    public static JsonObject ForGemini(JsonObject schema)
+    {
+        return Sanitize(schema: schema, profile: Gemini);
+    }
 
     /// <summary>
     /// Strips the keywords a grammar-constrained decoder cannot compile, preserving every keyword that
     /// actually narrows the grammar.
     /// </summary>
     /// <param name="schema">The schema to sanitize. Mutated in place and returned for chaining.</param>
-    public static JsonObject ForConstrainedDecoding(JsonObject schema) => Sanitize(schema, ConstrainedDecoding);
+    public static JsonObject ForConstrainedDecoding(JsonObject schema)
+    {
+        return Sanitize(schema: schema, profile: ConstrainedDecoding);
+    }
 
     /// <summary>
     /// Applies one profile to a schema and every subschema reachable from it.
@@ -65,12 +70,9 @@ internal static class JsonSchemaSanitizer
     /// </remarks>
     private static JsonObject Sanitize(JsonObject schema, SanitizerProfile profile)
     {
-        foreach (var keyword in profile.RemovedKeywords)
-        {
-            schema.Remove(keyword);
-        }
+        foreach (var keyword in profile.RemovedKeywords) schema.Remove(keyword);
 
-        if (profile.ConvertConstToEnum && schema["const"] is JsonNode constValue)
+        if (profile.ConvertConstToEnum && schema["const"] is { } constValue)
         {
             var clonedConst = constValue.DeepClone();
             schema.Remove("const");
@@ -78,34 +80,17 @@ internal static class JsonSchemaSanitizer
         }
 
         if (schema["properties"] is JsonObject properties)
-        {
             foreach (var property in properties.ToArray())
-            {
                 if (property.Value is JsonObject propertySchema)
-                {
-                    Sanitize(propertySchema, profile);
-                }
-            }
-        }
+                    Sanitize(schema: propertySchema, profile: profile);
 
-        if (schema["items"] is JsonObject items)
-        {
-            Sanitize(items, profile);
-        }
+        if (schema["items"] is JsonObject items) Sanitize(schema: items, profile: profile);
 
         foreach (var combinator in new[] { "anyOf", "oneOf", "allOf" })
-        {
             if (schema[combinator] is JsonArray subschemas)
-            {
                 foreach (var subschema in subschemas)
-                {
                     if (subschema is JsonObject subschemaObject)
-                    {
-                        Sanitize(subschemaObject, profile);
-                    }
-                }
-            }
-        }
+                        Sanitize(schema: subschemaObject, profile: profile);
 
         return schema;
     }
@@ -115,4 +100,3 @@ internal static class JsonSchemaSanitizer
     /// <param name="ConvertConstToEnum">Whether <c>const</c> must be rewritten as a single-value <c>enum</c>.</param>
     private sealed record SanitizerProfile(string[] RemovedKeywords, bool ConvertConstToEnum);
 }
-

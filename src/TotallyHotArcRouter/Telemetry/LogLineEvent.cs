@@ -10,4 +10,3 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="Level">Normalized level: DEBUG, INFO, WARN, ERROR, or FATAL.</param>
 /// <param name="Message">The rendered log message, with Serilog's structured properties substituted in.</param>
 public sealed record LogLineEvent(DateTimeOffset TimestampUtc, string Level, string Message);
-

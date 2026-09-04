@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Parsing;
 
 namespace TotallyHot.ArcRouter.Quality.Tests;
@@ -14,7 +13,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_ValidCSharp_IsAuthoritativeAndValid()
     {
-        var verdict = _parser.Check("public class C { public int M() => 1; }", CodeLanguage.CSharp);
+        var verdict = _parser.Check(code: "public class C { public int M() => 1; }", language: CodeLanguage.CSharp);
 
         Assert.True(verdict.IsValid);
         Assert.True(verdict.IsAuthoritative);
@@ -24,7 +23,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_InvalidCSharp_ReportsErrors()
     {
-        var verdict = _parser.Check("public class C { public void M() {", CodeLanguage.CSharp);
+        var verdict = _parser.Check(code: "public class C { public void M() {", language: CodeLanguage.CSharp);
 
         Assert.False(verdict.IsValid);
         Assert.True(verdict.IsAuthoritative);
@@ -34,7 +33,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_BalancedPython_IsValidButNotAuthoritative()
     {
-        var verdict = _parser.Check("def f(x):\n    return [x, (x + 1)]\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "def f(x):\n    return [x, (x + 1)]\n", language: CodeLanguage.Python);
 
         Assert.True(verdict.IsValid);
         Assert.False(verdict.IsAuthoritative);
@@ -43,7 +42,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_UnbalancedPython_IsInvalid()
     {
-        var verdict = _parser.Check("def f(x):\n    return [x, (x + 1]\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "def f(x):\n    return [x, (x + 1]\n", language: CodeLanguage.Python);
 
         Assert.False(verdict.IsValid);
         Assert.NotEmpty(verdict.Errors);
@@ -52,7 +51,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_DelimiterInsideStringOrComment_IsIgnored()
     {
-        var verdict = _parser.Check("x = \"a ) b\"  # trailing ] brace }\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "x = \"a ) b\"  # trailing ] brace }\n", language: CodeLanguage.Python);
 
         Assert.True(verdict.IsValid);
     }
@@ -60,7 +59,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_EmptyHeuristic_IsInvalid()
     {
-        var verdict = _parser.Check("   \n\t", CodeLanguage.Shell);
+        var verdict = _parser.Check(code: "   \n\t", language: CodeLanguage.Shell);
 
         Assert.False(verdict.IsValid);
     }
@@ -68,7 +67,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_NullCode_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => _parser.Check(null!, CodeLanguage.Python));
+        Assert.Throws<ArgumentNullException>(() => _parser.Check(code: null!, language: CodeLanguage.Python));
     }
 
     [Fact]
@@ -76,7 +75,7 @@ public class StructuralParserTests
     {
         // The escaped quote must not end the string early - if it did, the trailing "1)" would be seen as
         // a stray close-paren and this would come back invalid.
-        var verdict = _parser.Check("x = 'it\\'s (fine)' + str(1)\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "x = 'it\\'s (fine)' + str(1)\n", language: CodeLanguage.Python);
 
         Assert.True(verdict.IsValid);
     }
@@ -84,52 +83,52 @@ public class StructuralParserTests
     [Fact]
     public void Check_UnbalancedCloseParen_ReportsSpecificError()
     {
-        var verdict = _parser.Check("x = 1)\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "x = 1)\n", language: CodeLanguage.Python);
 
         Assert.False(verdict.IsValid);
-        Assert.Contains("Unbalanced ')'.", verdict.Errors);
+        Assert.Contains(expected: "Unbalanced ')'.", collection: verdict.Errors);
     }
 
     [Fact]
     public void Check_UnbalancedCloseBracket_ReportsSpecificError()
     {
-        var verdict = _parser.Check("x = 1]\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "x = 1]\n", language: CodeLanguage.Python);
 
         Assert.False(verdict.IsValid);
-        Assert.Contains("Unbalanced ']'.", verdict.Errors);
+        Assert.Contains(expected: "Unbalanced ']'.", collection: verdict.Errors);
     }
 
     [Fact]
     public void Check_UnbalancedCloseBrace_ReportsSpecificError()
     {
-        var verdict = _parser.Check("x = 1}\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "x = 1}\n", language: CodeLanguage.Python);
 
         Assert.False(verdict.IsValid);
-        Assert.Contains("Unbalanced '}'.", verdict.Errors);
+        Assert.Contains(expected: "Unbalanced '}'.", collection: verdict.Errors);
     }
 
     [Fact]
     public void Check_UnterminatedString_ReportsSpecificError()
     {
-        var verdict = _parser.Check("x = 'abc\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "x = 'abc\n", language: CodeLanguage.Python);
 
         Assert.False(verdict.IsValid);
-        Assert.Contains("Unterminated string literal.", verdict.Errors);
+        Assert.Contains(expected: "Unterminated string literal.", collection: verdict.Errors);
     }
 
     [Fact]
     public void Check_UnclosedOpenDelimiter_ReportsWhichOneIsStillOpen()
     {
-        var verdict = _parser.Check("x = (1 + 2\n", CodeLanguage.Python);
+        var verdict = _parser.Check(code: "x = (1 + 2\n", language: CodeLanguage.Python);
 
         Assert.False(verdict.IsValid);
-        Assert.Contains("Unbalanced '('.", verdict.Errors);
+        Assert.Contains(expected: "Unbalanced '('.", collection: verdict.Errors);
     }
 
     [Fact]
     public void Check_UnknownLanguage_UsesHeuristic()
     {
-        var verdict = _parser.Check("(balanced)", CodeLanguage.Unknown);
+        var verdict = _parser.Check(code: "(balanced)", language: CodeLanguage.Unknown);
 
         Assert.True(verdict.IsValid);
         Assert.False(verdict.IsAuthoritative);
@@ -140,7 +139,8 @@ public class StructuralParserTests
     [Fact]
     public void Check_ValidJavaScript_IsAuthoritativeAndValid()
     {
-        var verdict = _parser.Check("const add = (a, b) => a + b;" + Environment.NewLine + "export default add;", CodeLanguage.JavaScript);
+        var verdict = _parser.Check(code: "const add = (a, b) => a + b;" + Environment.NewLine + "export default add;",
+            language: CodeLanguage.JavaScript);
 
         Assert.True(verdict.IsValid);
         Assert.True(verdict.IsAuthoritative);
@@ -150,7 +150,7 @@ public class StructuralParserTests
     [Fact]
     public void Check_InvalidJavaScript_ReportsErrors()
     {
-        var verdict = _parser.Check("function broken( { return 1", CodeLanguage.JavaScript);
+        var verdict = _parser.Check(code: "function broken( { return 1", language: CodeLanguage.JavaScript);
 
         Assert.False(verdict.IsValid);
         Assert.True(verdict.IsAuthoritative);
@@ -166,7 +166,7 @@ public class StructuralParserTests
     [InlineData("const data = await fetch('https://example.com');")]
     public void Check_JavaScript_AcceptsBothScriptAndModuleGrammars(string code)
     {
-        Assert.True(_parser.Check(code, CodeLanguage.JavaScript).IsValid);
+        Assert.True(_parser.Check(code: code, language: CodeLanguage.JavaScript).IsValid);
     }
 
     [Theory]
@@ -175,7 +175,7 @@ public class StructuralParserTests
     [InlineData(CodeLanguage.Unknown)]
     public void Check_LanguagesWithoutAParser_AreNeverReportedAuthoritative(CodeLanguage language)
     {
-        Assert.False(_parser.Check("anything (balanced) here", language).IsAuthoritative);
+        Assert.False(_parser.Check(code: "anything (balanced) here", language: language).IsAuthoritative);
     }
 
     [Theory]
@@ -183,13 +183,13 @@ public class StructuralParserTests
     [InlineData(CodeLanguage.JavaScript)]
     public void Check_LanguagesWithAParser_AreAlwaysReportedAuthoritative(CodeLanguage language)
     {
-        Assert.True(_parser.Check("x", language).IsAuthoritative);
-        Assert.True(_parser.Check("!!! not valid in either language !!!", language).IsAuthoritative);
+        Assert.True(_parser.Check(code: "x", language: language).IsAuthoritative);
+        Assert.True(_parser.Check(code: "!!! not valid in either language !!!", language: language).IsAuthoritative);
     }
 
     [Fact]
     public void Check_RejectsNullCode()
     {
-        Assert.Throws<ArgumentNullException>(() => _parser.Check(null!, CodeLanguage.CSharp));
+        Assert.Throws<ArgumentNullException>(() => _parser.Check(code: null!, language: CodeLanguage.CSharp));
     }
 }

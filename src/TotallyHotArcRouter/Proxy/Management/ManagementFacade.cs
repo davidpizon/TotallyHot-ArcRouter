@@ -29,24 +29,24 @@ public sealed class ManagementFacade
 {
     // Config default (§5.9); overridable via the constructor's rateLimitStalenessThreshold parameter.
     private static readonly TimeSpan DefaultRateLimitStalenessThreshold = TimeSpan.FromMinutes(15);
-    private readonly TimeSpan _rateLimitStalenessThreshold;
 
     // How far back BuildExhaustionProjections looks for an "earlier" observation to pair with the current
     // snapshot. Short deliberately: a burn rate measured over the last half hour reflects current traffic,
     // not a stale average diluted by a quiet period earlier in the retention window.
     private static readonly TimeSpan ProjectionLookback = TimeSpan.FromMinutes(30);
-
-    private readonly IProviderConfigStore _store;
+    private readonly BudgetAndPriceOverrideService _budgetAndPriceOverrideService;
     private readonly ProviderBudgetStore? _budgetStore;
     private readonly ToolCallCapabilityStore? _capabilityStore;
-    private readonly RateLimitRepository? _rateLimitRepository;
-    private readonly ReportedUsageRepository? _reportedUsageRepository;
-    private readonly ISecretReader? _secretReader;
     private readonly IProviderInteractionStatusStore? _interactionStatus;
 
     private readonly ProviderManagementService _providerManagementService;
-    private readonly BudgetAndPriceOverrideService _budgetAndPriceOverrideService;
+    private readonly RateLimitRepository? _rateLimitRepository;
+    private readonly TimeSpan _rateLimitStalenessThreshold;
+    private readonly ReportedUsageRepository? _reportedUsageRepository;
     private readonly SecretManagementService _secretManagementService;
+    private readonly ISecretReader? _secretReader;
+
+    private readonly IProviderConfigStore _store;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ManagementFacade"/> class.
@@ -84,13 +84,18 @@ public sealed class ManagementFacade
         // Constructed last, once every field BuildProvidersResponse reads is assigned - each collaborator
         // captures the method group as its buildProvidersResponse callback, but none of them invoke it
         // until after this constructor has returned.
-        _providerManagementService = new ProviderManagementService(store, environment, httpClient, dependencies, BuildProvidersResponse);
-        _budgetAndPriceOverrideService = new BudgetAndPriceOverrideService(store, dependencies, BuildProvidersResponse);
+        _providerManagementService = new ProviderManagementService(store: store, environment: environment,
+            httpClient: httpClient, dependencies: dependencies, buildProvidersResponse: BuildProvidersResponse);
+        _budgetAndPriceOverrideService = new BudgetAndPriceOverrideService(store: store, dependencies: dependencies,
+            buildProvidersResponse: BuildProvidersResponse);
         _secretManagementService = new SecretManagementService(dependencies);
     }
 
     /// <summary>Lists every configured provider, masked, with its models and (if a budget store is present) its budget.</summary>
-    public ProvidersResponse ListProviders() => BuildProvidersResponse();
+    public ProvidersResponse ListProviders()
+    {
+        return BuildProvidersResponse();
+    }
 
     /// <summary>
     /// Adds or replaces a provider by key, merging over any existing provider. Delegates to
@@ -100,8 +105,11 @@ public sealed class ManagementFacade
     /// <param name="request">The incoming write request.</param>
     /// <param name="cancellationToken">Cancels the underlying store mutation and best-effort capability scan.</param>
     public Task<ManagementResult<ProvidersResponse>> UpsertProviderAsync(
-        string key, ProviderWriteRequest request, CancellationToken cancellationToken = default) =>
-        _providerManagementService.UpsertProviderAsync(key, request, cancellationToken);
+        string key, ProviderWriteRequest request, CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.UpsertProviderAsync(key: key, request: request,
+            cancellationToken: cancellationToken);
+    }
 
     /// <summary>
     /// Re-probes a provider's endpoint flavors on demand and persists the result
@@ -111,8 +119,10 @@ public sealed class ManagementFacade
     /// <param name="key">The provider key to scan.</param>
     /// <param name="cancellationToken">Cancels the probes.</param>
     public Task<ManagementResult<ProviderEndpointCapabilities>> ScanCapabilitiesAsync(
-        string key, CancellationToken cancellationToken = default) =>
-        _providerManagementService.ScanCapabilitiesAsync(key, cancellationToken);
+        string key, CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.ScanCapabilitiesAsync(key: key, cancellationToken: cancellationToken);
+    }
 
     /// <summary>
     /// Pins how one model expresses tool calls, so no automatic scan or live observation can overwrite it
@@ -123,8 +133,10 @@ public sealed class ManagementFacade
     /// <param name="modelName">The client-facing model name.</param>
     /// <param name="request">The dialect to pin, or a null/empty dialect to clear the pin.</param>
     public ManagementResult<ProvidersResponse> SetModelToolDialect(
-        string key, string modelName, ModelToolDialectWriteRequest request) =>
-        _providerManagementService.SetModelToolDialect(key, modelName, request);
+        string key, string modelName, ModelToolDialectWriteRequest request)
+    {
+        return _providerManagementService.SetModelToolDialect(key: key, modelName: modelName, request: request);
+    }
 
     /// <summary>
     /// Removes a provider by key, cascading to every model that routes to it and to every secret this
@@ -133,31 +145,46 @@ public sealed class ManagementFacade
     /// </summary>
     /// <param name="key">The provider key to remove.</param>
     /// <param name="cancellationToken">Cancels the underlying store mutation.</param>
-    public Task<ManagementResult<ProvidersResponse>> RemoveProviderAsync(string key, CancellationToken cancellationToken = default) =>
-        _providerManagementService.RemoveProviderAsync(key, cancellationToken);
+    public Task<ManagementResult<ProvidersResponse>> RemoveProviderAsync(string key,
+        CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.RemoveProviderAsync(key: key, cancellationToken: cancellationToken);
+    }
 
-    /// <summary>Adds or replaces a model route under a provider. Delegates to <see cref="ProviderManagementService.UpsertModelAsync"/>.</summary>
+    /// <summary>
+    /// Adds or replaces a model route under a provider. Delegates to
+    /// <see cref="ProviderManagementService.UpsertModelAsync"/>.
+    /// </summary>
     /// <param name="providerKey">The provider the model routes to.</param>
     /// <param name="modelName">The client-facing model name.</param>
     /// <param name="request">The incoming write request.</param>
     /// <param name="cancellationToken">Cancels the underlying store mutation and best-effort metadata probe.</param>
     public Task<ManagementResult<ProvidersResponse>> UpsertModelAsync(
-        string providerKey, string modelName, ModelWriteRequest request, CancellationToken cancellationToken = default) =>
-        _providerManagementService.UpsertModelAsync(providerKey, modelName, request, cancellationToken);
+        string providerKey, string modelName, ModelWriteRequest request, CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.UpsertModelAsync(providerKey: providerKey, modelName: modelName,
+            request: request, cancellationToken: cancellationToken);
+    }
 
     /// <summary>Removes a model route by name. Delegates to <see cref="ProviderManagementService.RemoveModelAsync"/>.</summary>
     /// <param name="modelName">The model to remove.</param>
     /// <param name="cancellationToken">Cancels the underlying store mutation.</param>
-    public Task<ManagementResult<ProvidersResponse>> RemoveModelAsync(string modelName, CancellationToken cancellationToken = default) =>
-        _providerManagementService.RemoveModelAsync(modelName, cancellationToken);
+    public Task<ManagementResult<ProvidersResponse>> RemoveModelAsync(string modelName,
+        CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.RemoveModelAsync(modelName: modelName, cancellationToken: cancellationToken);
+    }
 
     /// <summary>Switches a model on or off. Delegates to <see cref="ProviderManagementService.SetModelEnabledAsync"/>.</summary>
     /// <param name="modelName">The model to toggle.</param>
     /// <param name="request">The desired enabled state.</param>
     /// <param name="cancellationToken">Cancels the underlying store mutation.</param>
     public Task<ManagementResult<ProvidersResponse>> SetModelEnabledAsync(
-        string modelName, ModelEnabledWriteRequest request, CancellationToken cancellationToken = default) =>
-        _providerManagementService.SetModelEnabledAsync(modelName, request, cancellationToken);
+        string modelName, ModelEnabledWriteRequest request, CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.SetModelEnabledAsync(modelName: modelName, request: request,
+            cancellationToken: cancellationToken);
+    }
 
     /// <summary>
     /// Sets or clears a provider's monthly budget caps. A null cap clears that dimension; both null removes
@@ -165,44 +192,75 @@ public sealed class ManagementFacade
     /// </summary>
     /// <param name="providerKey">The provider key.</param>
     /// <param name="request">The budget caps/window to set.</param>
-    public ManagementResult<ProvidersResponse> SetBudget(string providerKey, ProviderBudgetWriteRequest request) =>
-        _budgetAndPriceOverrideService.SetBudget(providerKey, request);
+    public ManagementResult<ProvidersResponse> SetBudget(string providerKey, ProviderBudgetWriteRequest request)
+    {
+        return _budgetAndPriceOverrideService.SetBudget(providerKey: providerKey, request: request);
+    }
 
     /// <summary>
     /// For every configured model, reports whether the catalog currently resolves a fresh price for it.
     /// Delegates to <see cref="BudgetAndPriceOverrideService.GetPriceResolutionDiagnosis"/>.
     /// </summary>
-    public ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosis() =>
-        _budgetAndPriceOverrideService.GetPriceResolutionDiagnosis();
+    public ManagementResult<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosis()
+    {
+        return _budgetAndPriceOverrideService.GetPriceResolutionDiagnosis();
+    }
 
-    /// <summary>Lists every configured price override. Delegates to <see cref="BudgetAndPriceOverrideService.ListPriceOverrides"/>.</summary>
-    public ManagementResult<IReadOnlyList<ModelAliasOverride>> ListPriceOverrides() =>
-        _budgetAndPriceOverrideService.ListPriceOverrides();
+    /// <summary>
+    /// Lists every configured price override. Delegates to
+    /// <see cref="BudgetAndPriceOverrideService.ListPriceOverrides"/>.
+    /// </summary>
+    public ManagementResult<IReadOnlyList<ModelAliasOverride>> ListPriceOverrides()
+    {
+        return _budgetAndPriceOverrideService.ListPriceOverrides();
+    }
 
-    /// <summary>Adds or replaces an operator price override. Delegates to <see cref="BudgetAndPriceOverrideService.SetPriceOverride"/>.</summary>
+    /// <summary>
+    /// Adds or replaces an operator price override. Delegates to
+    /// <see cref="BudgetAndPriceOverrideService.SetPriceOverride"/>.
+    /// </summary>
     /// <param name="request">The override to add or replace.</param>
-    public ManagementResult<IReadOnlyList<ModelAliasOverride>> SetPriceOverride(PriceOverrideWriteRequest request) =>
-        _budgetAndPriceOverrideService.SetPriceOverride(request);
+    public ManagementResult<IReadOnlyList<ModelAliasOverride>> SetPriceOverride(PriceOverrideWriteRequest request)
+    {
+        return _budgetAndPriceOverrideService.SetPriceOverride(request);
+    }
 
-    /// <summary>Removes an operator price override. Delegates to <see cref="BudgetAndPriceOverrideService.RemovePriceOverride"/>.</summary>
+    /// <summary>
+    /// Removes an operator price override. Delegates to
+    /// <see cref="BudgetAndPriceOverrideService.RemovePriceOverride"/>.
+    /// </summary>
     /// <param name="sourceName">The override's source name.</param>
     /// <param name="aggregatorModelKey">The override's aggregator model key.</param>
-    public ManagementResult<IReadOnlyList<ModelAliasOverride>> RemovePriceOverride(string sourceName, string aggregatorModelKey) =>
-        _budgetAndPriceOverrideService.RemovePriceOverride(sourceName, aggregatorModelKey);
+    public ManagementResult<IReadOnlyList<ModelAliasOverride>> RemovePriceOverride(string sourceName,
+        string aggregatorModelKey)
+    {
+        return _budgetAndPriceOverrideService.RemovePriceOverride(sourceName: sourceName,
+            aggregatorModelKey: aggregatorModelKey);
+    }
 
     /// <summary>Switches a provider on or off. Delegates to <see cref="ProviderManagementService.SetEnabledAsync"/>.</summary>
     /// <param name="key">The provider key.</param>
     /// <param name="request">The desired enabled state.</param>
     /// <param name="cancellationToken">Cancels the underlying store mutation.</param>
     public Task<ManagementResult<ProvidersResponse>> SetEnabledAsync(
-        string key, ProviderEnabledWriteRequest request, CancellationToken cancellationToken = default) =>
-        _providerManagementService.SetEnabledAsync(key, request, cancellationToken);
+        string key, ProviderEnabledWriteRequest request, CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.SetEnabledAsync(key: key, request: request,
+            cancellationToken: cancellationToken);
+    }
 
-    /// <summary>Queries a provider's own OpenAI-shaped model list. Delegates to <see cref="ProviderManagementService.DiscoverModelsAsync"/>.</summary>
+    /// <summary>
+    /// Queries a provider's own OpenAI-shaped model list. Delegates to
+    /// <see cref="ProviderManagementService.DiscoverModelsAsync"/>.
+    /// </summary>
     /// <param name="providerKey">The provider key.</param>
     /// <param name="cancellationToken">Cancels the discovery request.</param>
-    public Task<ManagementResult<DiscoverModelsResponse>> DiscoverModelsAsync(string providerKey, CancellationToken cancellationToken = default) =>
-        _providerManagementService.DiscoverModelsAsync(providerKey, cancellationToken);
+    public Task<ManagementResult<DiscoverModelsResponse>> DiscoverModelsAsync(string providerKey,
+        CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.DiscoverModelsAsync(providerKey: providerKey,
+            cancellationToken: cancellationToken);
+    }
 
     /// <summary>
     /// The consolidated "Refresh from endpoint" operation: discovers a provider's live model list,
@@ -211,8 +269,11 @@ public sealed class ManagementFacade
     /// </summary>
     /// <param name="key">The provider key to refresh.</param>
     /// <param name="cancellationToken">Cancels the discovery/scan/detection probes.</param>
-    public Task<ManagementResult<ProvidersResponse>> RefreshFromEndpointAsync(string key, CancellationToken cancellationToken = default) =>
-        _providerManagementService.RefreshFromEndpointAsync(key, cancellationToken);
+    public Task<ManagementResult<ProvidersResponse>> RefreshFromEndpointAsync(string key,
+        CancellationToken cancellationToken = default)
+    {
+        return _providerManagementService.RefreshFromEndpointAsync(key: key, cancellationToken: cancellationToken);
+    }
 
     /// <summary>
     /// Returns a provider's rate-limit remaining-over-time series for the last <paramref name="hours"/>
@@ -230,23 +291,20 @@ public sealed class ManagementFacade
     public ManagementResult<RateLimitHistoryResponse> GetRateLimitHistory(string providerKey, double hours)
     {
         if (!_store.Snapshot.Options.Providers.ContainsKey(providerKey))
-        {
-            return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.NotFound, $"Provider '{providerKey}' not found.");
-        }
+            return ManagementResult<RateLimitHistoryResponse>.Fail(errorType: ManagementErrorType.NotFound,
+                message: $"Provider '{providerKey}' not found.");
 
         if (_rateLimitRepository is null)
-        {
-            return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.Unavailable, "Rate-limit history is not available.");
-        }
+            return ManagementResult<RateLimitHistoryResponse>.Fail(errorType: ManagementErrorType.Unavailable,
+                message: "Rate-limit history is not available.");
 
         if (!double.IsFinite(hours))
-        {
-            return ManagementResult<RateLimitHistoryResponse>.Fail(ManagementErrorType.InvalidRequest, "hours must be a finite number.");
-        }
+            return ManagementResult<RateLimitHistoryResponse>.Fail(errorType: ManagementErrorType.InvalidRequest,
+                message: "hours must be a finite number.");
 
-        var clampedHours = Math.Clamp(hours, 0.25, 24 * 30);
+        var clampedHours = Math.Clamp(value: hours, 0.25, max: 24 * 30);
         var sinceUtc = DateTimeOffset.UtcNow.AddHours(-clampedHours);
-        var buckets = _rateLimitRepository.GetRateLimitHistory(providerKey, sinceUtc);
+        var buckets = _rateLimitRepository.GetRateLimitHistory(providerKey: providerKey, sinceUtc: sinceUtc);
 
         var series = new Dictionary<string, List<RateLimitHistoryPointView>>(StringComparer.OrdinalIgnoreCase);
         DateTimeOffset? previousBucketUtc = null;
@@ -260,21 +318,20 @@ public sealed class ManagementFacade
             {
                 var gapUtc = prev.AddMinutes(1);
                 foreach (var points in series.Values)
-                {
-                    points.Add(new RateLimitHistoryPointView(gapUtc, null, null));
-                }
+                    points.Add(new RateLimitHistoryPointView(BucketUtc: gapUtc, null, null));
             }
 
-            var bucketSnapshot = RateLimitSnapshotParser.Parse(bucket.Headers, bucket.BucketUtc);
+            var bucketSnapshot = RateLimitSnapshotParser.Parse(rows: bucket.Headers, observedAtUtc: bucket.BucketUtc);
             foreach (var (dimensionName, dimension) in bucketSnapshot.StandardDimensions)
             {
-                if (!series.TryGetValue(dimensionName, out var points))
+                if (!series.TryGetValue(key: dimensionName, value: out var points))
                 {
                     points = [];
                     series[dimensionName] = points;
                 }
 
-                points.Add(new RateLimitHistoryPointView(bucket.BucketUtc, dimension.Remaining, dimension.Limit));
+                points.Add(new RateLimitHistoryPointView(BucketUtc: bucket.BucketUtc, Remaining: dimension.Remaining,
+                    Limit: dimension.Limit));
             }
 
             // A dimension already tracked from an earlier bucket but absent from this one (header not
@@ -282,20 +339,16 @@ public sealed class ManagementFacade
             // at this bucket's timestamp too - otherwise its series simply skips the x-value, and the
             // stepped line visually holds the previous value through what should render as a gap.
             foreach (var (dimensionName, points) in series)
-            {
                 if (!bucketSnapshot.StandardDimensions.ContainsKey(dimensionName))
-                {
-                    points.Add(new RateLimitHistoryPointView(bucket.BucketUtc, null, null));
-                }
-            }
+                    points.Add(new RateLimitHistoryPointView(BucketUtc: bucket.BucketUtc, null, null));
 
             previousBucketUtc = bucket.BucketUtc;
         }
 
         var dimensions = series.ToDictionary(
-            kvp => kvp.Key,
-            kvp => (IReadOnlyList<RateLimitHistoryPointView>)kvp.Value,
-            StringComparer.OrdinalIgnoreCase);
+            keySelector: kvp => kvp.Key,
+            elementSelector: kvp => (IReadOnlyList<RateLimitHistoryPointView>)kvp.Value,
+            comparer: StringComparer.OrdinalIgnoreCase);
         return ManagementResult<RateLimitHistoryResponse>.Ok(new RateLimitHistoryResponse(dimensions));
     }
 
@@ -304,13 +357,17 @@ public sealed class ManagementFacade
     /// </summary>
     /// <param name="name">The secret name, e.g. <c>reconciliation:openai:admin-key</c>.</param>
     /// <param name="value">The secret value to store.</param>
-    public ManagementResult<object?> SetSecret(string name, string value) =>
-        _secretManagementService.SetSecret(name, value);
+    public ManagementResult<object?> SetSecret(string name, string value)
+    {
+        return _secretManagementService.SetSecret(name: name, value: value);
+    }
 
     /// <summary>Clears a stored secret by name. Delegates to <see cref="SecretManagementService.DeleteSecret"/>.</summary>
     /// <param name="name">The secret name to clear.</param>
-    public ManagementResult<object?> DeleteSecret(string name) =>
-        _secretManagementService.DeleteSecret(name);
+    public ManagementResult<object?> DeleteSecret(string name)
+    {
+        return _secretManagementService.DeleteSecret(name);
+    }
 
     /// <summary>Projects the store's current snapshot into the masked, client-facing <see cref="ProvidersResponse"/> shape.</summary>
     private ProvidersResponse BuildProvidersResponse()
@@ -321,16 +378,18 @@ public sealed class ManagementFacade
             .Select(kvp =>
             {
                 var models = options.ModelList
-                    .Where(m => string.Equals(m.Provider, kvp.Key, StringComparison.OrdinalIgnoreCase))
+                    .Where(m => string.Equals(a: m.Provider, b: kvp.Key,
+                        comparisonType: StringComparison.OrdinalIgnoreCase))
                     .Select(m =>
                     {
                         // In-memory snapshot read, not a query - the same lookup Phase 4 makes on every
                         // request that carries tools. Null when the model has never been classified (no
                         // scan has run, and no live response has been observed yet).
-                        var capability = _capabilityStore?.GetModelCapability(kvp.Key, m.ModelName);
+                        var capability =
+                            _capabilityStore?.GetModelCapability(providerKey: kvp.Key, modelName: m.ModelName);
                         return new ModelView(
-                            m.ModelName,
-                            m.ProviderModelId,
+                            ModelName: m.ModelName,
+                            ProviderModelId: m.ProviderModelId,
                             Dialect: capability?.Dialect,
                             Confidence: capability?.Confidence.ToString(),
                             Enabled: m.Enabled,
@@ -348,14 +407,15 @@ public sealed class ManagementFacade
                         // header never carries a value to drop (h.Value is always null once migrated/written
                         // there), but still reports Locked so the GUI's "saved, blank keeps it" placeholder
                         // keeps working identically to a locked literal.
-                        var locked = (source == HeaderValueSource.Literal || source == HeaderValueSource.Protected) && h.Locked;
+                        var locked = (source == HeaderValueSource.Literal || source == HeaderValueSource.Protected) &&
+                                     h.Locked;
                         // ValueEnvVar is only meaningful for an envVar-sourced header; a header with both
                         // fields somehow set (legacy/bad data) classifies as literal, and must not also
                         // surface the env-var name - that would violate HeaderView's documented contract.
                         return new HeaderView(
-                            h.Name,
-                            source,
-                            source == HeaderValueSource.EnvVar ? h.ValueEnvVar : null,
+                            Name: h.Name,
+                            Source: source,
+                            ValueEnvVar: source == HeaderValueSource.EnvVar ? h.ValueEnvVar : null,
                             Value: source == HeaderValueSource.Literal && !locked ? h.Value : null,
                             Locked: locked);
                     })
@@ -384,12 +444,12 @@ public sealed class ManagementFacade
                     RateLimit: BuildRateLimitView(kvp.Key),
                     WindowKind: budget.WindowKind is { Length: > 0 } ? budget.WindowKind : "Monthly",
                     NextResetUtc: budget.NextResetUtc,
-                    HasStoredAdminKey: _secretReader?.TryRead(AdminKeySecretName(kvp.Key), out _) ?? false,
+                    HasStoredAdminKey: _secretReader?.TryRead(name: AdminKeySecretName(kvp.Key), value: out _) ?? false,
                     ReportedUsage: BuildReportedUsageView(kvp.Key),
                     AdminAction: _interactionStatus?.Get(kvp.Key),
                     LiveTraffic: _interactionStatus?.GetLiveTraffic(kvp.Key));
             })
-            .OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(keySelector: p => p.Key, comparer: StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new ProvidersResponse(providers);
@@ -402,21 +462,17 @@ public sealed class ManagementFacade
     /// </summary>
     private ProviderRateLimitView? BuildRateLimitView(string providerKey)
     {
-        if (_rateLimitRepository is null)
-        {
-            return null;
-        }
+        if (_rateLimitRepository is null) return null;
 
         var (headers, observedAtUtc) = _rateLimitRepository.GetRateLimitSnapshot(providerKey);
-        if (headers.Count == 0 || observedAtUtc is not { } observedAt)
-        {
-            return null;
-        }
+        if (headers.Count == 0 || observedAtUtc is not { } observedAt) return null;
 
-        var snapshot = RateLimitSnapshotParser.Parse(headers, observedAt);
+        var snapshot = RateLimitSnapshotParser.Parse(rows: headers, observedAtUtc: observedAt);
         var isStale = DateTimeOffset.UtcNow - observedAt > _rateLimitStalenessThreshold;
-        var projections = BuildExhaustionProjections(providerKey, snapshot, observedAt);
-        return new ProviderRateLimitView(snapshot, observedAt, isStale, projections);
+        var projections =
+            BuildExhaustionProjections(providerKey: providerKey, latest: snapshot, observedAtUtc: observedAt);
+        return new ProviderRateLimitView(Snapshot: snapshot, ObservedAtUtc: observedAt, IsStale: isStale,
+            Projections: projections);
     }
 
     /// <summary>
@@ -427,21 +483,17 @@ public sealed class ManagementFacade
     /// </summary>
     private ProviderReportedUsageView? BuildReportedUsageView(string providerKey)
     {
-        if (_reportedUsageRepository is null)
-        {
-            return null;
-        }
+        if (_reportedUsageRepository is null) return null;
 
         var (rows, fetchedAtUtc) = _reportedUsageRepository.GetReportedUsage(providerKey);
-        if (rows.Count == 0 || fetchedAtUtc is not { } fetchedAt)
-        {
-            return null;
-        }
+        if (rows.Count == 0 || fetchedAtUtc is not { } fetchedAt) return null;
 
         var rowViews = rows
-            .Select(r => new ReportedUsageRowView(r.UsageDay, r.Model, r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens))
+            .Select(r => new ReportedUsageRowView(UsageDay: r.UsageDay, Model: r.Model, InputTokens: r.InputTokens,
+                OutputTokens: r.OutputTokens, CacheCreationTokens: r.CacheCreationTokens,
+                CacheReadTokens: r.CacheReadTokens))
             .ToList();
-        return new ProviderReportedUsageView(rowViews, fetchedAt);
+        return new ProviderReportedUsageView(Rows: rowViews, FetchedAtUtc: fetchedAt);
     }
 
     /// <summary>
@@ -454,59 +506,58 @@ public sealed class ManagementFacade
         string providerKey, RateLimitSnapshotView latest, DateTimeOffset observedAtUtc)
     {
         var projections = new Dictionary<string, RateLimitExhaustionProjection>(StringComparer.OrdinalIgnoreCase);
-        if (latest.StandardDimensions.Count == 0)
-        {
-            return projections;
-        }
+        if (latest.StandardDimensions.Count == 0) return projections;
 
-        var history = _rateLimitRepository!.GetRateLimitHistory(providerKey, observedAtUtc - ProjectionLookback);
+        var history = _rateLimitRepository!.GetRateLimitHistory(providerKey: providerKey,
+            sinceUtc: observedAtUtc - ProjectionLookback);
 
         // Parse each history bucket once and reuse the parsed snapshot across all dimensions below,
         // rather than reparsing the same headers once per dimension.
         var parsedHistory = new List<(DateTimeOffset BucketUtc, RateLimitSnapshotView Snapshot)>(history.Count);
         foreach (var bucket in history)
-        {
-            parsedHistory.Add((bucket.BucketUtc, RateLimitSnapshotParser.Parse(bucket.Headers, bucket.BucketUtc)));
-        }
+            parsedHistory.Add((bucket.BucketUtc,
+                RateLimitSnapshotParser.Parse(rows: bucket.Headers, observedAtUtc: bucket.BucketUtc)));
 
         foreach (var (dimensionName, laterDimension) in latest.StandardDimensions)
         {
             RateLimitObservation? earliest = null;
             foreach (var (bucketUtc, bucketSnapshot) in parsedHistory)
-            {
                 // history is chronologically ascending, so the first bucket that captured this dimension's
                 // remaining value is the earliest usable observation.
-                if (bucketSnapshot.StandardDimensions.TryGetValue(dimensionName, out var bucketDimension)
+                if (bucketSnapshot.StandardDimensions.TryGetValue(key: dimensionName, value: out var bucketDimension)
                     && bucketDimension.Remaining is not null)
                 {
-                    earliest = new RateLimitObservation(bucketUtc, bucketDimension.Remaining, bucketDimension.ResetAt);
+                    earliest = new RateLimitObservation(ObservedAtUtc: bucketUtc, Remaining: bucketDimension.Remaining,
+                        ResetAt: bucketDimension.ResetAt);
                     break;
                 }
-            }
 
-            if (earliest is null)
-            {
-                continue;
-            }
+            if (earliest is null) continue;
 
-            var later = new RateLimitObservation(observedAtUtc, laterDimension.Remaining, laterDimension.ResetAt);
-            var projection = RateLimitProjection.Project(earliest, later);
-            if (projection is not null)
-            {
-                projections[dimensionName] = projection;
-            }
+            var later = new RateLimitObservation(ObservedAtUtc: observedAtUtc, Remaining: laterDimension.Remaining,
+                ResetAt: laterDimension.ResetAt);
+            var projection = RateLimitProjection.Project(earlier: earliest, later: later);
+            if (projection is not null) projections[dimensionName] = projection;
         }
 
         return projections;
     }
 
     /// <summary>Classifies a stored header's <see cref="HeaderValueSource"/> from which of its fields is set.</summary>
-    private static string ClassifyHeaderSource(ProviderHeader header) =>
-        !string.IsNullOrWhiteSpace(header.Value) ? HeaderValueSource.Literal
+    private static string ClassifyHeaderSource(ProviderHeader header)
+    {
+        return !string.IsNullOrWhiteSpace(header.Value) ? HeaderValueSource.Literal
             : !string.IsNullOrWhiteSpace(header.ValueSecretRef) ? HeaderValueSource.Protected
             : !string.IsNullOrWhiteSpace(header.ValueEnvVar) ? HeaderValueSource.EnvVar
             : HeaderValueSource.None;
+    }
 
-    /// <summary>The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md §3's naming convention), matching <c>Hosting.ServiceCollectionExtensions.AdminApiKeySecretName</c>.</summary>
-    private static string AdminKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
+    /// <summary>
+    /// The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md
+    /// §3's naming convention), matching <c>PriceCatalog.PriceCatalogServiceCollectionExtensions.AdminApiKeySecretName</c>.
+    /// </summary>
+    private static string AdminKeySecretName(string provider)
+    {
+        return $"reconciliation:{provider}:admin-key";
+    }
 }

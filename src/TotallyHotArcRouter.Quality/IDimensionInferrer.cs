@@ -12,4 +12,3 @@ public interface IDimensionInferrer
     /// <returns>A dimension key such as <c>code_generation</c> or <c>bug_fixing</c>.</returns>
     string Infer(string prompt, CodeLanguage language);
 }
-

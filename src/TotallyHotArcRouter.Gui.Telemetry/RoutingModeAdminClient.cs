@@ -12,21 +12,30 @@ public sealed class RoutingModeAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="RoutingModeAdminException"/> class.</summary>
     public RoutingModeAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
 
-/// <summary>One voter's participation in the Orchestrator's weighted vote (PLAN.md Phase L), as rendered by the Governance → Routing Mode panel.</summary>
+/// <summary>
+/// One voter's participation in the Orchestrator's weighted vote (PLAN.md Phase L), as rendered by the Governance
+/// → Routing Mode panel.
+/// </summary>
 /// <param name="Name">The voter's name (<c>dim_best</c>, <c>memory_kNN</c>, <c>logreg</c>, or <c>llm_router</c>).</param>
 /// <param name="Enabled">Whether the voter participates in the Orchestrator's vote.</param>
 /// <param name="Weight">The voter's fixed weight in the weighted vote.</param>
 public sealed record VoterMode(string Name, bool Enabled, double Weight);
 
-/// <summary>The routing configuration currently bound into the router's <c>RoutingOptions</c>, as read by the Governance → Routing Mode panel.</summary>
+/// <summary>
+/// The routing configuration currently bound into the router's <c>RoutingOptions</c>, as read by the Governance →
+/// Routing Mode panel.
+/// </summary>
 /// <param name="OrchestratorEnabled">Whether the Orchestrator ensemble is the live routing policy for non-utility traffic.</param>
 /// <param name="ExplorationEnabled">Whether epsilon-greedy exploration is enabled.</param>
-/// <param name="ExplorationRate">The exploration rate used when <paramref name="ExplorationEnabled"/> is <see langword="true"/>.</param>
+/// <param name="ExplorationRate">
+/// The exploration rate used when <paramref name="ExplorationEnabled"/> is
+/// <see langword="true"/>.
+/// </param>
 /// <param name="Voters">Every voter's enablement and weight, in the order the router reported them.</param>
 public sealed record RoutingMode(
     bool OrchestratorEnabled,
@@ -41,14 +50,16 @@ public sealed record RoutingMode(
 /// </summary>
 public sealed class RoutingModeAdminClient
     : GrpcAdminClientBase<Contract.RoutingModeAdminService.RoutingModeAdminServiceClient, RoutingModeAdminException>,
-      IRoutingModeAdminClient
+        IRoutingModeAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="RoutingModeAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public RoutingModeAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.RoutingModeAdminService.RoutingModeAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.RoutingModeAdminService.RoutingModeAdminServiceClient(callInvoker))
     {
     }
 
@@ -62,28 +73,36 @@ public sealed class RoutingModeAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<RoutingMode> GetAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetRoutingModeAsync(new Contract.GetRoutingModeRequest(), cancellationToken: cancellationToken)
+                .GetRoutingModeAsync(request: new Contract.GetRoutingModeRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             return new RoutingMode(
-                response.OrchestratorEnabled,
-                response.ExplorationEnabled,
-                response.ExplorationRate,
-                [.. response.Voters.Select(v => new VoterMode(v.Name, v.Enabled, v.Weight))]);
+                OrchestratorEnabled: response.OrchestratorEnabled,
+                ExplorationEnabled: response.ExplorationEnabled,
+                ExplorationRate: response.ExplorationRate,
+                Voters:
+                [
+                    .. response.Voters.Select(v => new VoterMode(Name: v.Name, Enabled: v.Enabled, Weight: v.Weight))
+                ]);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the routing mode");
+            throw Wrap(ex: ex, action: "Could not read the routing mode");
         }
     }
 
-    /// <inheritdoc />
-    protected override RoutingModeAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override RoutingModeAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new RoutingModeAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }

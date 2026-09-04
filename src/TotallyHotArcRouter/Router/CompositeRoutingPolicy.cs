@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Router.Orchestrator;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -22,10 +23,10 @@ namespace TotallyHot.ArcRouter.Router;
 /// </remarks>
 public sealed class CompositeRoutingPolicy : IRoutingPolicy
 {
-    private readonly UtilityRoutingPolicy _utilityPolicy;
     private readonly AgentRouterPolicy _generalPolicy;
-    private readonly Orchestrator.OrchestratorRoutingPolicy _orchestratorPolicy;
     private readonly RoutingOptions _options;
+    private readonly OrchestratorRoutingPolicy _orchestratorPolicy;
+    private readonly UtilityRoutingPolicy _utilityPolicy;
 
     /// <param name="utilityPolicy">Handles requests classified as utility traffic.</param>
     /// <param name="generalPolicy">
@@ -37,7 +38,7 @@ public sealed class CompositeRoutingPolicy : IRoutingPolicy
     public CompositeRoutingPolicy(
         UtilityRoutingPolicy utilityPolicy,
         AgentRouterPolicy generalPolicy,
-        Orchestrator.OrchestratorRoutingPolicy orchestratorPolicy,
+        OrchestratorRoutingPolicy orchestratorPolicy,
         IOptions<RoutingOptions> options)
     {
         ArgumentNullException.ThrowIfNull(utilityPolicy);
@@ -51,14 +52,16 @@ public sealed class CompositeRoutingPolicy : IRoutingPolicy
         _options = options.Value;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Delegates to the <see cref="RoutingSignals"/> overload of this method with no signals.
     /// </remarks>
-    public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default) =>
-        SelectModelAsync(context, signals: null, cancellationToken);
+    public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
+    {
+        return SelectModelAsync(context: context, null, cancellationToken: cancellationToken);
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Forwards <paramref name="signals"/> to <see cref="Orchestrator.OrchestratorRoutingPolicy"/> when
     /// the general leg is chosen, so <c>memory_kNN</c> and <c>logreg</c> can participate in a live
@@ -66,21 +69,21 @@ public sealed class CompositeRoutingPolicy : IRoutingPolicy
     /// <see cref="UtilityRoutingPolicy"/> nor <see cref="AgentRouterPolicy"/> uses signals - both fall
     /// through to <see cref="IRoutingPolicy"/>'s no-signals default, which simply discards them.
     /// </remarks>
-    public Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
+    public Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         if (context.IsUtility)
-        {
-            return _utilityPolicy.SelectModelAsync(context, cancellationToken);
-        }
+            return _utilityPolicy.SelectModelAsync(context: context, cancellationToken: cancellationToken);
 
         return _options.EnableOrchestratorPolicy
-            ? _orchestratorPolicy.SelectModelAsync(context, signals, cancellationToken)
-            : _generalPolicy.SelectModelAsync(context, cancellationToken);
+            ? _orchestratorPolicy.SelectModelAsync(context: context, signals: signals,
+                cancellationToken: cancellationToken)
+            : _generalPolicy.SelectModelAsync(context: context, cancellationToken: cancellationToken);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Mirrors <see cref="SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>'s
     /// dispatch exactly, but preserves each leg's real provenance instead of collapsing to a model name:
@@ -89,17 +92,19 @@ public sealed class CompositeRoutingPolicy : IRoutingPolicy
     /// Orchestrator leg forwards to its own <see cref="Orchestrator.OrchestratorRoutingPolicy.DecideOutcomeAsync"/>
     /// override, which reports the real epsilon-greedy provenance.
     /// </remarks>
-    public Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
+    public Task<RoutingDecision> DecideOutcomeAsync(RoutingContext context, RoutingSignals? signals,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         if (context.IsUtility)
-        {
-            return ((IRoutingPolicy)_utilityPolicy).DecideOutcomeAsync(context, signals, cancellationToken);
-        }
+            return ((IRoutingPolicy)_utilityPolicy).DecideOutcomeAsync(context: context, signals: signals,
+                cancellationToken: cancellationToken);
 
         return _options.EnableOrchestratorPolicy
-            ? _orchestratorPolicy.DecideOutcomeAsync(context, signals, cancellationToken)
-            : ((IRoutingPolicy)_generalPolicy).DecideOutcomeAsync(context, signals, cancellationToken);
+            ? _orchestratorPolicy.DecideOutcomeAsync(context: context, signals: signals,
+                cancellationToken: cancellationToken)
+            : ((IRoutingPolicy)_generalPolicy).DecideOutcomeAsync(context: context, signals: signals,
+                cancellationToken: cancellationToken);
     }
 }

@@ -32,11 +32,7 @@ public sealed class RoutingGateStore : IRoutingGate
         _isEnabled = Load(_path);
     }
 
-    /// <summary>Gets the default state file path: <c>%ProgramData%\TotallyHotArcRouter\routing-gate.json</c>.</summary>
-    public static string DefaultPath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "TotallyHotArcRouter", FileName);
-
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public bool IsEnabled
     {
         get
@@ -48,14 +44,21 @@ public sealed class RoutingGateStore : IRoutingGate
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void SetEnabled(bool enabled)
     {
         lock (_gate)
         {
             _isEnabled = enabled;
-            Save(_path, enabled);
+            Save(path: _path, enabled: enabled);
         }
+    }
+
+    /// <summary>Gets the default state file path: <c>%ProgramData%\TotallyHotArcRouter\routing-gate.json</c>.</summary>
+    public static string DefaultPath()
+    {
+        return Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            path2: "TotallyHotArcRouter", path3: FileName);
     }
 
     /// <summary>Loads the persisted state, defaulting to enabled when no file exists yet or it can't be read.</summary>
@@ -63,10 +66,7 @@ public sealed class RoutingGateStore : IRoutingGate
     {
         try
         {
-            if (!File.Exists(path))
-            {
-                return true;
-            }
+            if (!File.Exists(path)) return true;
 
             var json = File.ReadAllText(path);
             var state = JsonSerializer.Deserialize<RoutingGateState>(json);
@@ -90,12 +90,9 @@ public sealed class RoutingGateStore : IRoutingGate
     private static void Save(string path, bool enabled)
     {
         var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
-        File.WriteAllText(path, JsonSerializer.Serialize(new RoutingGateState(enabled)));
+        File.WriteAllText(path: path, contents: JsonSerializer.Serialize(new RoutingGateState(enabled)));
     }
 
     /// <summary>The on-disk shape of <see cref="RoutingGateStore"/>'s persisted state.</summary>

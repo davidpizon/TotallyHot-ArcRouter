@@ -10,28 +10,28 @@ public class AnthropicUsageParserTests
     {
         const string json = """{"id":"msg_1","type":"message","usage":{"input_tokens":200,"output_tokens":50}}""";
 
-        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json: json, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(200, usage.PromptTokens);
-        Assert.Equal(50, usage.CompletionTokens);
+        Assert.Equal(200, actual: usage.PromptTokens);
+        Assert.Equal(50, actual: usage.CompletionTokens);
     }
 
     [Fact]
     public void TryExtractFromNonStreamingBody_CacheTokensPresent_PopulatesCacheFieldsAndTotalInputTokens()
     {
         const string json = """
-            {"id":"msg_1","type":"message","usage":{"input_tokens":50,"output_tokens":10,"cache_creation_input_tokens":1000,"cache_read_input_tokens":200000}}
-            """;
+                            {"id":"msg_1","type":"message","usage":{"input_tokens":50,"output_tokens":10,"cache_creation_input_tokens":1000,"cache_read_input_tokens":200000}}
+                            """;
 
-        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json: json, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(50, usage.PromptTokens);
-        Assert.Equal(10, usage.CompletionTokens);
-        Assert.Equal(1000, usage.CacheCreationTokens);
-        Assert.Equal(200000, usage.CacheReadTokens);
-        Assert.Equal(201050, usage.TotalInputTokens);
+        Assert.Equal(50, actual: usage.PromptTokens);
+        Assert.Equal(10, actual: usage.CompletionTokens);
+        Assert.Equal(1000, actual: usage.CacheCreationTokens);
+        Assert.Equal(200000, actual: usage.CacheReadTokens);
+        Assert.Equal(201050, actual: usage.TotalInputTokens);
     }
 
     [Fact]
@@ -39,12 +39,12 @@ public class AnthropicUsageParserTests
     {
         const string json = """{"id":"msg_1","type":"message","usage":{"input_tokens":200,"output_tokens":50}}""";
 
-        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json: json, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(0, usage.CacheCreationTokens);
-        Assert.Equal(0, usage.CacheReadTokens);
-        Assert.Equal(200, usage.TotalInputTokens);
+        Assert.Equal(0, actual: usage.CacheCreationTokens);
+        Assert.Equal(0, actual: usage.CacheReadTokens);
+        Assert.Equal(200, actual: usage.TotalInputTokens);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class AnthropicUsageParserTests
     {
         const string json = """{"id":"msg_1","type":"message"}""";
 
-        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json, out _);
+        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json: json, usage: out _);
 
         Assert.False(result);
     }
@@ -60,7 +60,7 @@ public class AnthropicUsageParserTests
     [Fact]
     public void TryExtractFromNonStreamingBody_MalformedJson_ReturnsFalse()
     {
-        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody("not json", out _);
+        var result = AnthropicUsageParser.TryExtractFromNonStreamingBody(json: "not json", usage: out _);
 
         Assert.False(result);
     }
@@ -78,11 +78,11 @@ public class AnthropicUsageParserTests
             "event: message_stop\n" +
             "data: {\"type\":\"message_stop\"}\n\n";
 
-        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sse, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: sse, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(150, usage.PromptTokens);
-        Assert.Equal(37, usage.CompletionTokens);
+        Assert.Equal(150, actual: usage.PromptTokens);
+        Assert.Equal(37, actual: usage.CompletionTokens);
     }
 
     [Fact]
@@ -92,11 +92,11 @@ public class AnthropicUsageParserTests
             "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":150,\"output_tokens\":1,\"cache_creation_input_tokens\":500,\"cache_read_input_tokens\":9000}}}\n\n" +
             "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":37}}\n\n";
 
-        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sse, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: sse, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(500, usage.CacheCreationTokens);
-        Assert.Equal(9000, usage.CacheReadTokens);
+        Assert.Equal(500, actual: usage.CacheCreationTokens);
+        Assert.Equal(9000, actual: usage.CacheReadTokens);
     }
 
     [Fact]
@@ -108,11 +108,11 @@ public class AnthropicUsageParserTests
             "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":150,\"output_tokens\":1,\"cache_creation_input_tokens\":500,\"cache_read_input_tokens\":9000}}}\n\n" +
             "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":37,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":9500}}\n\n";
 
-        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sse, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: sse, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(0, usage.CacheCreationTokens);
-        Assert.Equal(9500, usage.CacheReadTokens);
+        Assert.Equal(0, actual: usage.CacheCreationTokens);
+        Assert.Equal(9500, actual: usage.CacheReadTokens);
     }
 
     [Fact]
@@ -123,22 +123,23 @@ public class AnthropicUsageParserTests
             "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":10}}\n\n" +
             "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":25}}\n\n";
 
-        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sse, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: sse, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(25, usage.CompletionTokens);
+        Assert.Equal(25, actual: usage.CompletionTokens);
     }
 
     [Fact]
     public void TryExtractFromStreamingBuffer_MessageStartOnly_ReturnsTrueWithInitialOutputTokens()
     {
-        var sse = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":75,\"output_tokens\":0}}}\n\n";
+        var sse =
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":75,\"output_tokens\":0}}}\n\n";
 
-        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sse, out var usage);
+        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: sse, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(75, usage.PromptTokens);
-        Assert.Equal(0, usage.CompletionTokens);
+        Assert.Equal(75, actual: usage.PromptTokens);
+        Assert.Equal(0, actual: usage.CompletionTokens);
     }
 
     [Fact]
@@ -146,7 +147,7 @@ public class AnthropicUsageParserTests
     {
         var sse = "data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"Hi\"}}\n\n";
 
-        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sse, out _);
+        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: sse, usage: out _);
 
         Assert.False(result);
     }
@@ -154,9 +155,8 @@ public class AnthropicUsageParserTests
     [Fact]
     public void TryExtractFromStreamingBuffer_EmptyBuffer_ReturnsFalse()
     {
-        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(string.Empty, out _);
+        var result = AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: string.Empty, usage: out _);
 
         Assert.False(result);
     }
 }
-

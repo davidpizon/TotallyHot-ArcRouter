@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -19,7 +20,7 @@ public static class OpenAiResponseTextParser
         {
             node = JsonNode.Parse(json);
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return false;
         }
@@ -29,15 +30,10 @@ public static class OpenAiResponseTextParser
             choices.Count == 0 ||
             choices[0] is not JsonObject firstChoice ||
             firstChoice["message"] is not JsonObject message)
-        {
             return false;
-        }
 
         var extracted = MessageContentTextExtractor.ExtractText(message["content"]);
-        if (extracted is null)
-        {
-            return false;
-        }
+        if (extracted is null) return false;
 
         text = extracted;
         return true;
@@ -58,24 +54,15 @@ public static class OpenAiResponseTextParser
                 choices.Count == 0 ||
                 choices[0] is not JsonObject firstChoice ||
                 firstChoice["delta"] is not JsonObject delta)
-            {
                 continue;
-            }
 
             var deltaText = MessageContentTextExtractor.ExtractText(delta["content"]);
-            if (deltaText is not null)
-            {
-                builder.Append(deltaText);
-            }
+            if (deltaText is not null) builder.Append(deltaText);
         }
 
-        if (builder.Length == 0)
-        {
-            return false;
-        }
+        if (builder.Length == 0) return false;
 
         text = builder.ToString();
         return true;
     }
 }
-

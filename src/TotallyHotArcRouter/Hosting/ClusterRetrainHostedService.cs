@@ -1,10 +1,9 @@
+using Microsoft.Extensions.Options;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Hosting;
 
@@ -24,24 +23,19 @@ public sealed class ClusterRetrainHostedService : BackgroundService
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<ClusterRetrainHostedService> _logger;
-    private readonly IClusterTrainingService _trainingService;
     private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
     private readonly string _modelPath;
-
-    /// <summary>
-    /// The current routing options, read live on every poll cycle rather than captured once - so
-    /// <see cref="RoutingOptions.EnableAdaptiveRouting"/> and <see cref="RoutingOptions.EnableAutomaticClusterRetrain"/>
-    /// (docs/router/self-organizing-classification-plan.md Phase T6) take effect on the very next tick,
-    /// without a restart.
-    /// </summary>
-    private RoutingOptions Options => _optionsMonitor.CurrentValue;
+    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
+    private readonly IClusterTrainingService _trainingService;
 
     /// <summary>Initializes a new instance of the <see cref="ClusterRetrainHostedService"/> class.</summary>
     /// <param name="logger">The logger.</param>
     /// <param name="trainingService">Runs the guarded retrain sequence when the threshold is crossed.</param>
     /// <param name="memoryEntryStore">Supplies the current live memory entry count.</param>
-    /// <param name="routingOptionsMonitor">Provides the retrain threshold and the automatic-retrain/adaptive-routing enable flags, read live.</param>
+    /// <param name="routingOptionsMonitor">
+    /// Provides the retrain threshold and the automatic-retrain/adaptive-routing enable
+    /// flags, read live.
+    /// </param>
     /// <param name="storageOptions">Supplies the model artifact's file path, to read its last recorded entry count.</param>
     public ClusterRetrainHostedService(
         ILogger<ClusterRetrainHostedService> logger,
@@ -63,13 +57,19 @@ public sealed class ClusterRetrainHostedService : BackgroundService
         _modelPath = storageOptions.Value.ResolveClusterModelPath();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// The current routing options, read live on every poll cycle rather than captured once - so
+    /// <see cref="RoutingOptions.EnableAdaptiveRouting"/> and <see cref="RoutingOptions.EnableAutomaticClusterRetrain"/>
+    /// (docs/router/self-organizing-classification-plan.md Phase T6) take effect on the very next tick,
+    /// without a restart.
+    /// </summary>
+    private RoutingOptions Options => _optionsMonitor.CurrentValue;
+
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!Options.EnableAutomaticClusterRetrain)
-        {
             _logger.LogInformation("Automatic cluster model retrain is disabled; this loop will not fire.");
-        }
 
         using var timer = new PeriodicTimer(CheckInterval);
         try
@@ -82,10 +82,10 @@ public sealed class ClusterRetrainHostedService : BackgroundService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Automatic cluster model retrain check threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "Automatic cluster model retrain check threw unexpectedly; continuing.");
                 }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -105,28 +105,25 @@ public sealed class ClusterRetrainHostedService : BackgroundService
         // docs/router/self-organizing-classification-plan.md Phase T6: automatic cluster retraining now
         // also requires the adaptive-routing master switch, on top of its own EnableAutomaticClusterRetrain
         // flag.
-        if (!Options.EnableAutomaticClusterRetrain || !Options.EnableAdaptiveRouting)
-        {
-            return;
-        }
+        if (!Options.EnableAutomaticClusterRetrain || !Options.EnableAdaptiveRouting) return;
 
         var lastTrainedCount = TryReadLastTrainedMemoryEntryCount();
         var currentCount = (await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false)).Count;
 
-        if (currentCount - lastTrainedCount < Options.ClusterRetrainThreshold)
-        {
-            return;
-        }
+        if (currentCount - lastTrainedCount < Options.ClusterRetrainThreshold) return;
 
         _logger.LogInformation(
+            message:
             "Automatic cluster model retrain threshold crossed ({CurrentCount} entries, {LastTrainedCount} at last train, threshold {Threshold}); retraining.",
             currentCount,
             lastTrainedCount,
             Options.ClusterRetrainThreshold);
 
-        var outcome = await _trainingService.RetrainAsync(bootstrapProgress: null, cancellationToken).ConfigureAwait(false);
+        var outcome = await _trainingService.RetrainAsync(cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         _logger.LogInformation(
-            "Automatic cluster model retrain finished with outcome {Kind}: {Message}", outcome.Kind, outcome.Message);
+            message: "Automatic cluster model retrain finished with outcome {Kind}: {Message}", outcome.Kind,
+            outcome.Message);
     }
 
     /// <summary>
@@ -136,19 +133,19 @@ public sealed class ClusterRetrainHostedService : BackgroundService
     /// </summary>
     private int TryReadLastTrainedMemoryEntryCount()
     {
-        if (!File.Exists(_modelPath))
-        {
-            return 0;
-        }
+        if (!File.Exists(_modelPath)) return 0;
 
         try
         {
             var json = File.ReadAllText(_modelPath);
             return ClusterModelArtifactSerializer.Deserialize(json).MemoryEntryCount;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
         {
-            _logger.LogWarning(ex, "Failed to read the current cluster model artifact's memory entry count from {Path}; assuming 0.", _modelPath);
+            _logger.LogWarning(exception: ex,
+                message:
+                "Failed to read the current cluster model artifact's memory entry count from {Path}; assuming 0.",
+                _modelPath);
             return 0;
         }
     }

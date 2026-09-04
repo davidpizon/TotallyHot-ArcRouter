@@ -1,9 +1,8 @@
-using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Quality.Tests;
 
@@ -13,8 +12,11 @@ public class RouterMemoryScoreObserverTests
     private static RouterMemoryScoreObserver CreateObserver(
         RouterMemory memory,
         QualityOptions? options = null,
-        ITelemetryPublisher? publisher = null) =>
-        new(memory, Options.Create(options ?? new QualityOptions()), NullLogger<RouterMemoryScoreObserver>.Instance, publisher);
+        ITelemetryPublisher? publisher = null)
+    {
+        return new RouterMemoryScoreObserver(memory: memory, options: Options.Create(options ?? new QualityOptions()),
+            logger: NullLogger<RouterMemoryScoreObserver>.Instance, telemetryPublisher: publisher);
+    }
 
     [Fact]
     public async Task ObserveAsync_WritesUnderLivePrefix()
@@ -25,13 +27,13 @@ public class RouterMemoryScoreObserverTests
         {
             Dimension = "code_generation",
             Model = "gpt-5.4",
-            UnifiedScore = 0.75,
+            UnifiedScore = 0.75
         };
 
-        await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(0.75, memory.GetAverageScore("live:code_generation", "gpt-5.4"));
-        Assert.Null(memory.GetAverageScore("code_generation", "gpt-5.4"));
+        Assert.Equal(0.75, actual: memory.GetAverageScore(dimension: "live:code_generation", model: "gpt-5.4"));
+        Assert.Null(memory.GetAverageScore(dimension: "code_generation", model: "gpt-5.4"));
     }
 
     [Fact]
@@ -40,9 +42,10 @@ public class RouterMemoryScoreObserverTests
         var memory = new RouterMemory();
         var observer = CreateObserver(memory);
 
-        await observer.ObserveAsync(new QualityResult { Dimension = "d", Model = "m", UnifiedScore = 1.5 }, TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: new QualityResult { Dimension = "d", Model = "m", UnifiedScore = 1.5 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1.0, memory.GetAverageScore("live:d", "m"));
+        Assert.Equal(1.0, actual: memory.GetAverageScore(dimension: "live:d", model: "m"));
     }
 
     [Fact]
@@ -51,7 +54,9 @@ public class RouterMemoryScoreObserverTests
         var memory = new RouterMemory();
         var observer = CreateObserver(memory);
 
-        await observer.ObserveAsync(new QualityResult { Dimension = "d", Model = string.Empty, UnifiedScore = 0.5 }, TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(
+            result: new QualityResult { Dimension = "d", Model = string.Empty, UnifiedScore = 0.5 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(memory.GetModelsForDimension("live:d"));
     }
@@ -64,21 +69,21 @@ public class RouterMemoryScoreObserverTests
         publisher
             .Setup(p => p.PublishQualitySignalAsync(It.IsAny<QualitySignalEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        var observer = CreateObserver(memory, publisher: publisher.Object);
+        var observer = CreateObserver(memory: memory, publisher: publisher.Object);
 
-        await observer.ObserveAsync(new QualityResult
+        await observer.ObserveAsync(result: new QualityResult
         {
             Dimension = "code_generation",
             Model = "gpt-5.4",
             UnifiedScore = 0.9,
-            RequestCorrelationId = "sess-1:3",
-        }, TestContext.Current.CancellationToken);
+            RequestCorrelationId = "sess-1:3"
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         publisher.Verify(
-            p => p.PublishQualitySignalAsync(
+            expression: p => p.PublishQualitySignalAsync(
                 It.Is<QualitySignalEvent>(s => s.CorrelationId == "sess-1:3" && s.Dimension == "live:code_generation"),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
+            times: Times.Once);
     }
 
     [Fact]
@@ -86,21 +91,20 @@ public class RouterMemoryScoreObserverTests
     {
         var memory = new RouterMemory();
         var publisher = new Mock<ITelemetryPublisher>();
-        var observer = CreateObserver(memory, publisher: publisher.Object);
+        var observer = CreateObserver(memory: memory, publisher: publisher.Object);
 
-        await observer.ObserveAsync(new QualityResult
+        await observer.ObserveAsync(result: new QualityResult
         {
             Dimension = "code_generation",
             Model = "gpt-5.4",
             UnifiedScore = 0.9,
-            RequestCorrelationId = string.Empty,
-        }, TestContext.Current.CancellationToken);
+            RequestCorrelationId = string.Empty
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         // The score is still learned, but an unjoinable signal is not published.
-        Assert.Equal(0.9, memory.GetAverageScore("live:code_generation", "gpt-5.4"));
+        Assert.Equal(0.9, actual: memory.GetAverageScore(dimension: "live:code_generation", model: "gpt-5.4"));
         publisher.Verify(
-            p => p.PublishQualitySignalAsync(It.IsAny<QualitySignalEvent>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            expression: p => p.PublishQualitySignalAsync(It.IsAny<QualitySignalEvent>(), It.IsAny<CancellationToken>()),
+            times: Times.Never);
     }
 }
-

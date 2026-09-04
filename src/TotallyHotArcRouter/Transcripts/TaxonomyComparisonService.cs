@@ -1,13 +1,12 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
-using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Transcripts;
@@ -59,36 +58,38 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </remarks>
 public sealed class TaxonomyComparisonService : BackgroundService
 {
-    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(1);
-
     /// <summary>
     /// The per-fetch batch size a normally-constructed service drains with. Small enough to bound the
     /// window between in-flight checks, large enough that a full drain is a handful of fetches.
     /// </summary>
     private const int DefaultComparisonBatchSize = 200;
 
-    private readonly ILogger<TaxonomyComparisonService> _logger;
-    private readonly ITranscriptStore _transcriptStore;
-    private readonly ITaxonomyComparisonStore _comparisonStore;
-    private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly RouterMemory _routerMemory;
+    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(1);
     private readonly BenchmarkDatabase _benchmarkDatabase;
+    private readonly string _clusterModelPath;
+    private readonly int _comparisonBatchSize;
+    private readonly ITaxonomyComparisonStore _comparisonStore;
+    private readonly InFlightRequestGauge? _inFlightGauge;
+    private readonly string _liveMemoryPrefix;
+
+    private readonly ILogger<TaxonomyComparisonService> _logger;
+    private readonly IMemoryEntryStore _memoryEntryStore;
     private readonly IModelPriceLookup? _priceLookup;
     private readonly IModelRouteResolver _routeResolver;
-    private readonly TranscriptOptions _transcriptOptions;
+    private readonly RouterMemory _routerMemory;
     private readonly RoutingOptions _routingOptions;
-    private readonly string _liveMemoryPrefix;
-    private readonly string _clusterModelPath;
-    private readonly InFlightRequestGauge? _inFlightGauge;
-    private readonly int _comparisonBatchSize;
+    private readonly TranscriptOptions _transcriptOptions;
+    private readonly ITranscriptStore _transcriptStore;
+    private ClusterModelArtifact? _cachedArtifact;
+    private DateTime _cachedArtifactStamp;
+
+    private IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>?
+        _cachedClusterLedger;
 
     // The cross-cycle cache of the drain's heavy inputs (see the class remarks). Touched only from the
     // single BackgroundService loop (or a test driving RunCycleAsync directly), so no locking is needed.
     private IReadOnlyDictionary<long, MemoryEntry> _cachedEntriesById = new Dictionary<long, MemoryEntry>();
-    private ClusterModelArtifact? _cachedArtifact;
-    private IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? _cachedClusterLedger;
     private long _cachedMaxEntryId = -1;
-    private DateTime _cachedArtifactStamp;
     private DimensionModelScoreMatrix? _cachedPriorMatrix;
     private DateTime _cachedPriorStamp;
     private bool _priorLoaded;
@@ -126,9 +127,11 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IModelPriceLookup? priceLookup = null,
         InFlightRequestGauge? inFlightGauge = null)
         : this(
-            logger, transcriptStore, comparisonStore, memoryEntryStore, routerMemory, benchmarkDatabase,
-            routeResolver, transcriptOptions, routingOptions, storageOptions, qualityOptions, priceLookup,
-            inFlightGauge, DefaultComparisonBatchSize)
+            logger: logger, transcriptStore: transcriptStore, comparisonStore: comparisonStore,
+            memoryEntryStore: memoryEntryStore, routerMemory: routerMemory, benchmarkDatabase: benchmarkDatabase,
+            routeResolver: routeResolver, transcriptOptions: transcriptOptions, routingOptions: routingOptions,
+            storageOptions: storageOptions, qualityOptions: qualityOptions, priceLookup: priceLookup,
+            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize)
     {
     }
 
@@ -198,12 +201,13 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _comparisonBatchSize = comparisonBatchSize;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!_transcriptOptions.Enabled)
         {
-            _logger.LogInformation("[TAXONOMY-COMPARE] Transcript capture is disabled; the comparison loop will not fire.");
+            _logger.LogInformation(
+                "[TAXONOMY-COMPARE] Transcript capture is disabled; the comparison loop will not fire.");
             return;
         }
 
@@ -218,10 +222,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "[TAXONOMY-COMPARE] Comparison cycle threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "[TAXONOMY-COMPARE] Comparison cycle threw unexpectedly; continuing.");
                 }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -240,10 +244,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="cancellationToken">A cancellation token.</param>
     internal async Task RunCycleAsync(CancellationToken cancellationToken)
     {
-        if (!_transcriptOptions.Enabled)
-        {
-            return;
-        }
+        if (!_transcriptOptions.Enabled) return;
 
         if (IsTrafficInFlight())
         {
@@ -253,7 +254,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
         var totalCompared = 0;
         var inputsLoaded = false;
-        IReadOnlyDictionary<long, MemoryEntry> entriesById = _cachedEntriesById;
+        var entriesById = _cachedEntriesById;
         ClusterModelArtifact? artifact = null;
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? clusterLedger = null;
         DimensionLedger? dimensionLedger = null;
@@ -261,12 +262,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
         while (true)
         {
-            var pending = await _comparisonStore.LoadPendingComparisonsAsync(_comparisonBatchSize, cancellationToken)
+            var pending = await _comparisonStore
+                .LoadPendingComparisonsAsync(limit: _comparisonBatchSize, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            if (pending.Count == 0)
-            {
-                break;
-            }
+            if (pending.Count == 0) break;
 
             if (!inputsLoaded)
             {
@@ -275,9 +274,12 @@ public sealed class TaxonomyComparisonService : BackgroundService
                 // rebuilding them inside the drain would make it quadratic for no gain. Rows compared late
                 // in a long drain score against this cycle-start snapshot - the same per-cycle semantics
                 // the one-batch version had.
-                (entriesById, artifact, clusterLedger) = await GetClusteringInputsAsync(cancellationToken).ConfigureAwait(false);
-                dimensionLedger = new DimensionLedger(_routerMemory, LoadPriorMatrix(), _liveMemoryPrefix);
-                tokenAverages = await _transcriptStore.LoadObservedTokenAveragesAsync(cancellationToken).ConfigureAwait(false);
+                (entriesById, artifact, clusterLedger) =
+                    await GetClusteringInputsAsync(cancellationToken).ConfigureAwait(false);
+                dimensionLedger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: LoadPriorMatrix(),
+                    liveMemoryPrefix: _liveMemoryPrefix);
+                tokenAverages = await _transcriptStore.LoadObservedTokenAveragesAsync(cancellationToken)
+                    .ConfigureAwait(false);
                 inputsLoaded = true;
             }
 
@@ -289,24 +291,28 @@ public sealed class TaxonomyComparisonService : BackgroundService
                 if (IsTrafficInFlight())
                 {
                     _logger.LogInformation(
+                        message:
                         "[TAXONOMY-COMPARE] Pausing the drain after {Compared} row(s): a proxy request arrived; resuming next cycle.",
                         totalCompared + comparedThisBatch);
                     return;
                 }
 
-                var transcript = await _transcriptStore.GetTranscriptAsync(transcriptId, cancellationToken).ConfigureAwait(false);
+                var transcript = await _transcriptStore
+                    .GetTranscriptAsync(id: transcriptId, cancellationToken: cancellationToken).ConfigureAwait(false);
                 if (transcript?.Score is not { } observedScore || transcript.Dimension is not { } dimension)
-                {
                     // The queue predicate already requires a score and a dimension, so this is a row that
                     // vanished or changed between the id fetch and this read - nothing to compare.
                     continue;
-                }
 
-                var record = Compare(transcript, observedScore, dimension, entriesById, artifact, clusterLedger, dimensionLedger!, tokenAverages);
-                await _comparisonStore.UpsertAsync(record, cancellationToken).ConfigureAwait(false);
+                var record = Compare(transcript: transcript, observedScore: observedScore, dimension: dimension,
+                    entriesById: entriesById, artifact: artifact, clusterLedger: clusterLedger,
+                    dimensionLedger: dimensionLedger!, tokenAverages: tokenAverages);
+                await _comparisonStore.UpsertAsync(record: record, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
                 comparedThisBatch++;
 
                 _logger.LogInformation(
+                    message:
                     "[TAXONOMY-COMPARE] Transcript {TranscriptId} ({Model}): observed {Observed:F3}, dimension error {DimensionError}, cluster error {ClusterError}, better {Better}, clustered {IsClustered}, exploratory {IsExploratory}, estimated net savings {Savings}, estimated regret {Regret} (estimates).",
                     record.TranscriptId,
                     record.RoutedModel,
@@ -329,6 +335,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
                 // makes this unreachable except for rows deleted (e.g. by retention) between the id fetch
                 // and the row read, which the next cycle's fresh fetch no longer returns.
                 _logger.LogWarning(
+                    message:
                     "[TAXONOMY-COMPARE] A batch of {BatchSize} pending row(s) produced no comparisons; ending the drain to avoid spinning.",
                     pending.Count);
                 break;
@@ -336,9 +343,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
         }
 
         if (totalCompared > 0)
-        {
-            _logger.LogInformation("[TAXONOMY-COMPARE] Cycle complete: drained {Compared} pending row(s).", totalCompared);
-        }
+            _logger.LogInformation(message: "[TAXONOMY-COMPARE] Cycle complete: drained {Compared} pending row(s).",
+                totalCompared);
     }
 
     /// <summary>
@@ -346,7 +352,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <see langword="false"/> when no gauge was supplied, preserving the never-pause behavior of direct
     /// constructions.
     /// </summary>
-    private bool IsTrafficInFlight() => _inFlightGauge is { Count: > 0 };
+    private bool IsTrafficInFlight()
+    {
+        return _inFlightGauge is { Count: > 0 };
+    }
 
     /// <summary>
     /// Returns the memory-entry snapshot, cluster artifact, and cluster ledger for this cycle, rebuilding
@@ -358,20 +367,24 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The (possibly cached) entries-by-id snapshot, artifact, and ledger.</returns>
     private async Task<(IReadOnlyDictionary<long, MemoryEntry> EntriesById, ClusterModelArtifact? Artifact,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? ClusterLedger)>
+            IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? ClusterLedger)>
         GetClusteringInputsAsync(CancellationToken cancellationToken)
     {
         var maxEntryId = await _memoryEntryStore.GetMaxIdAsync(cancellationToken).ConfigureAwait(false);
-        var artifactStamp = File.Exists(_clusterModelPath) ? File.GetLastWriteTimeUtc(_clusterModelPath) : DateTime.MinValue;
+        var artifactStamp = File.Exists(_clusterModelPath)
+            ? File.GetLastWriteTimeUtc(_clusterModelPath)
+            : DateTime.MinValue;
 
         if (maxEntryId != _cachedMaxEntryId || artifactStamp != _cachedArtifactStamp)
         {
             var entries = await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
             _cachedEntriesById = entries.ToDictionary(e => e.Id);
-            _cachedArtifact = ClusterModelArtifactLoader.TryLoad(_clusterModelPath, _logger, "taxonomy comparison");
+            _cachedArtifact = ClusterModelArtifactLoader.TryLoad(path: _clusterModelPath, logger: _logger,
+                consumer: "taxonomy comparison");
             _cachedClusterLedger = _cachedArtifact is null
                 ? null
-                : ClusterLedger.Build(_cachedArtifact, entries, _routingOptions.ClusterAssignmentThreshold);
+                : ClusterLedger.Build(artifact: _cachedArtifact, entries: entries,
+                    assignmentThreshold: _routingOptions.ClusterAssignmentThreshold);
             _cachedMaxEntryId = maxEntryId;
             _cachedArtifactStamp = artifactStamp;
         }
@@ -399,32 +412,37 @@ public sealed class TaxonomyComparisonService : BackgroundService
         DimensionLedger dimensionLedger,
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages)
     {
-        var liveKey = RouterDimension.ToLiveKey(_liveMemoryPrefix, dimension);
-        var dimensionPredicted = dimensionLedger.PredictLeaveOneOut(liveKey, transcript.RoutedModel, observedScore);
+        var liveKey = RouterDimension.ToLiveKey(liveMemoryPrefix: _liveMemoryPrefix, dimension: dimension);
+        var dimensionPredicted = dimensionLedger.PredictLeaveOneOut(dimension: liveKey, model: transcript.RoutedModel,
+            observedScore: observedScore);
 
         double? clusterPredicted = null;
         var isClustered = false;
         if (artifact is not null
             && clusterLedger is not null
             && transcript.MemoryEntryId is { } memoryEntryId
-            && entriesById.TryGetValue(memoryEntryId, out var entry)
+            && entriesById.TryGetValue(key: memoryEntryId, value: out var entry)
             && entry.TaskEmbedding.Length == artifact.EmbeddingDimension)
         {
-            var (clusterIndex, similarity) = ClusterLedger.AssignNearestCluster(artifact, entry.TaskEmbedding);
+            var (clusterIndex, similarity) =
+                ClusterLedger.AssignNearestCluster(artifact: artifact, embedding: entry.TaskEmbedding);
             if (similarity >= _routingOptions.ClusterAssignmentThreshold)
             {
                 isClustered = true;
                 var key = ModelNameCanonicalizer.Canonicalize(transcript.RoutedModel);
-                var cell = clusterLedger.TryGetValue(clusterIndex, out var scores) && scores.TryGetValue(key, out var found)
+                var cell = clusterLedger.TryGetValue(key: clusterIndex, value: out var scores) &&
+                           scores.TryGetValue(key: key, value: out var found)
                     ? found
                     : null;
-                clusterPredicted = ClusterLedger.PredictLeaveOneOut(cell, observedScore);
+                clusterPredicted = ClusterLedger.PredictLeaveOneOut(cell: cell, observedScore: observedScore);
             }
         }
 
-        var (baselineCost, netSavings) = EstimateCounterfactual(transcript, tokenAverages);
-        var baselinePredicted = PredictBaselineScore(transcript, liveKey, observedScore, dimensionLedger);
-        var regret = EstimateRegret(observedScore, transcript.Cost, baselinePredicted, baselineCost);
+        var (baselineCost, netSavings) = EstimateCounterfactual(transcript: transcript, tokenAverages: tokenAverages);
+        var baselinePredicted = PredictBaselineScore(transcript: transcript, liveKey: liveKey,
+            observedScore: observedScore, dimensionLedger: dimensionLedger);
+        var regret = EstimateRegret(observedScore: observedScore, actualCost: transcript.Cost,
+            baselinePredictedScore: baselinePredicted, baselineCost: baselineCost);
 
         return new TaxonomyComparisonRecord(
             TranscriptId: transcript.Id,
@@ -455,7 +473,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="liveKey">The row's dimension as a live-memory key.</param>
     /// <param name="observedScore">The verifier's score for the model that actually served the request.</param>
     /// <param name="dimensionLedger">The frozen taxonomy's ledger.</param>
-    /// <returns>The predicted baseline score, or <see langword="null"/> when the baseline abstained or neither ledger source has the cell.</returns>
+    /// <returns>
+    /// The predicted baseline score, or <see langword="null"/> when the baseline abstained or neither ledger source
+    /// has the cell.
+    /// </returns>
     /// <remarks>
     /// When the routed model <em>is</em> the baseline's pick, the observation being compared has already
     /// been folded into that very cell, so it is queried leave-one-out - the same self-contamination
@@ -468,19 +489,16 @@ public sealed class TaxonomyComparisonService : BackgroundService
         double observedScore,
         DimensionLedger dimensionLedger)
     {
-        if (transcript.DimBestModel is not { } baselineModel)
-        {
-            return null;
-        }
+        if (transcript.DimBestModel is not { } baselineModel) return null;
 
         var routedIsBaseline = string.Equals(
-            ModelNameCanonicalizer.Canonicalize(transcript.RoutedModel),
-            ModelNameCanonicalizer.Canonicalize(baselineModel),
-            StringComparison.Ordinal);
+            a: ModelNameCanonicalizer.Canonicalize(transcript.RoutedModel),
+            b: ModelNameCanonicalizer.Canonicalize(baselineModel),
+            comparisonType: StringComparison.Ordinal);
 
         return routedIsBaseline
-            ? dimensionLedger.PredictLeaveOneOut(liveKey, baselineModel, observedScore)
-            : dimensionLedger.Predict(liveKey, baselineModel);
+            ? dimensionLedger.PredictLeaveOneOut(dimension: liveKey, model: baselineModel, observedScore: observedScore)
+            : dimensionLedger.Predict(dimension: liveKey, model: baselineModel);
     }
 
     /// <summary>
@@ -510,12 +528,11 @@ public sealed class TaxonomyComparisonService : BackgroundService
         if (actualCost is not { } routedCost
             || baselinePredictedScore is not { } baselineScore
             || baselineCost is not { } counterfactualCost)
-        {
             return null;
-        }
 
-        var routedReward = (_routingOptions.Epsilon1 * observedScore) + (_routingOptions.Epsilon2 * (double)routedCost);
-        var baselineReward = (_routingOptions.Epsilon1 * baselineScore) + (_routingOptions.Epsilon2 * (double)counterfactualCost);
+        var routedReward = _routingOptions.Epsilon1 * observedScore + _routingOptions.Epsilon2 * (double)routedCost;
+        var baselineReward = _routingOptions.Epsilon1 * baselineScore +
+                             _routingOptions.Epsilon2 * (double)counterfactualCost;
         return baselineReward - routedReward;
     }
 
@@ -536,30 +553,21 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages)
     {
         if (transcript.DimBestModel is not { } baselineModel || transcript.Cost is not { } actualCost)
-        {
             return (null, null);
-        }
 
-        if (!TryFindAverage(tokenAverages, baselineModel, out var average))
-        {
+        if (!TryFindAverage(tokenAverages: tokenAverages, model: baselineModel, average: out var average))
             return (null, null);
-        }
 
-        if (!_routeResolver.TryResolve(baselineModel, out var route))
-        {
-            return (null, null);
-        }
+        if (!_routeResolver.TryResolve(modelName: baselineModel, route: out var route)) return (null, null);
 
         var price = route.IsFree
             ? ModelPrice.Free
             : _priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider));
-        if (price is null)
-        {
-            return (null, null);
-        }
+        if (price is null) return (null, null);
 
         var baselineCost = price.EstimateCost(
-            (int)Math.Round(average.InputTokens), (int)Math.Round(average.OutputTokens));
+            promptTokens: (int)Math.Round(average.InputTokens),
+            completionTokens: (int)Math.Round(average.OutputTokens));
         return (baselineCost, baselineCost - actualCost);
     }
 
@@ -577,7 +585,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         string model,
         out ModelTokenAverage average)
     {
-        if (tokenAverages.TryGetValue(model, out var exact))
+        if (tokenAverages.TryGetValue(key: model, value: out var exact))
         {
             average = exact;
             return true;
@@ -585,13 +593,12 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
         var canonical = ModelNameCanonicalizer.Canonicalize(model);
         foreach (var (key, value) in tokenAverages)
-        {
-            if (string.Equals(ModelNameCanonicalizer.Canonicalize(key), canonical, StringComparison.Ordinal))
+            if (string.Equals(a: ModelNameCanonicalizer.Canonicalize(key), b: canonical,
+                    comparisonType: StringComparison.Ordinal))
             {
                 average = value;
                 return true;
             }
-        }
 
         average = null!;
         return false;
@@ -600,14 +607,16 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <summary>Names which taxonomy predicted this observation better, for the per-row log line.</summary>
     /// <param name="record">The comparison just computed.</param>
     /// <returns>A short label naming the better taxonomy, or that the comparison was not possible.</returns>
-    private static string DescribeWinner(TaxonomyComparisonRecord record) =>
-        (record.DimensionAbsoluteError, record.ClusterAbsoluteError) switch
+    private static string DescribeWinner(TaxonomyComparisonRecord record)
+    {
+        return (record.DimensionAbsoluteError, record.ClusterAbsoluteError) switch
         {
             ({ } dimension, { } cluster) when cluster < dimension => "cluster",
             ({ } dimension, { } cluster) when dimension < cluster => "dimension",
-            ({ }, { }) => "tie",
-            _ => "incomparable",
+            (not null, not null) => "tie",
+            _ => "incomparable"
         };
+    }
 
     /// <summary>
     /// Reads the probing-split prior, returning <see langword="null"/> when the CodeRouterBench corpus is
@@ -620,10 +629,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     {
         var databasePath = _benchmarkDatabase.DatabasePath;
         var stamp = File.Exists(databasePath) ? File.GetLastWriteTimeUtc(databasePath) : DateTime.MinValue;
-        if (_priorLoaded && stamp == _cachedPriorStamp)
-        {
-            return _cachedPriorMatrix;
-        }
+        if (_priorLoaded && stamp == _cachedPriorStamp) return _cachedPriorMatrix;
 
         _cachedPriorStamp = stamp;
         _priorLoaded = true;
@@ -636,11 +642,13 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
         try
         {
-            _cachedPriorMatrix = DimensionModelScoreMatrix.FromDatabase(_benchmarkDatabase, "probing");
+            _cachedPriorMatrix = DimensionModelScoreMatrix.FromDatabase(database: _benchmarkDatabase, split: "probing");
         }
-        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        catch (SqliteException ex)
         {
-            _logger.LogWarning(ex, "[TAXONOMY-COMPARE] Could not read the CodeRouterBench corpus; comparing against live memory only.");
+            _logger.LogWarning(exception: ex,
+                message:
+                "[TAXONOMY-COMPARE] Could not read the CodeRouterBench corpus; comparing against live memory only.");
             _cachedPriorMatrix = null;
         }
 

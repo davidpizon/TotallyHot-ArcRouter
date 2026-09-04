@@ -51,3 +51,4 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0005](0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-trip.md) | Protect explicit provider selections from silent substitution on any circuit trip | proposed |
 | [0006](0006-split-managementfacade-along-crud-aggregate-boundaries.md) | Split ManagementFacade along CRUD-aggregate boundaries, not its public surface | accepted |
 | [0007](0007-provider-admin-client-stays-on-http.md) | ProviderAdminClient stays on HTTP; document the split instead of migrating it | accepted |
+| [0008](0008-codegraph-serena-dual-engine-code-smell-pipeline.md) | Adopt CodeGraph + Serena as the standing dual-engine code-smell pipeline | proposed |

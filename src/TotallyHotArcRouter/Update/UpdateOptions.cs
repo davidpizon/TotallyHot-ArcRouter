@@ -1,5 +1,5 @@
-using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Options;
+using System.ComponentModel.DataAnnotations;
 
 namespace TotallyHot.ArcRouter.Update;
 
@@ -26,7 +26,7 @@ public sealed class UpdateOptions
     /// 6 hours - frequent enough that an operator sees a fresh release within a work day, infrequent
     /// enough to stay well clear of GitHub's unauthenticated rate limit (60 requests/hour/IP).
     /// </summary>
-    [Range(typeof(TimeSpan), "00:01:00", "24:00:00")]
+    [Range(type: typeof(TimeSpan), minimum: "00:01:00", maximum: "24:00:00")]
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromHours(6);
 
     /// <summary>
@@ -45,19 +45,13 @@ public sealed class UpdateOptions
     {
         var errors = new List<string>();
 
-        if (!Uri.TryCreate(GitHubApiBaseUrl, UriKind.Absolute, out _))
-        {
+        if (!Uri.TryCreate(uriString: GitHubApiBaseUrl, uriKind: UriKind.Absolute, result: out _))
             errors.Add($"GitHubApiBaseUrl '{GitHubApiBaseUrl}' must be an absolute URI.");
-        }
 
-        if (PollInterval <= TimeSpan.Zero)
-        {
-            errors.Add("PollInterval must be a positive duration.");
-        }
+        if (PollInterval <= TimeSpan.Zero) errors.Add("PollInterval must be a positive duration.");
 
         if (errors.Count > 0)
-        {
-            throw new OptionsValidationException(nameof(UpdateOptions), typeof(UpdateOptions), errors);
-        }
+            throw new OptionsValidationException(optionsName: nameof(UpdateOptions), optionsType: typeof(UpdateOptions),
+                failureMessages: errors);
     }
 }

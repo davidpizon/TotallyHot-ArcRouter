@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
@@ -10,7 +9,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// capability lookup rather than a provider-wide flag, because a model's tool-call syntax comes from its
 /// chat template, not from the server hosting it - one LM Studio process serves both a Qwen that needs
 /// rewriting and a natively tool-calling model that must never be scanned.
-///
 /// <para>
 /// Returning <see langword="null"/> is the common and desirable outcome: it restores true byte-for-byte
 /// forwarding. Two of the four performance rules are enforced here rather than inside the scanner,
@@ -21,8 +19,8 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 public sealed class ToolCallNormalizerFactory
 {
     private readonly IToolCallCapabilityStore? _capabilityStore;
-    private readonly ILogger<ToolCallNormalizerFactory> _logger;
     private readonly IModelContextWindowStore? _contextWindowStore;
+    private readonly ILogger<ToolCallNormalizerFactory> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="ToolCallNormalizerFactory"/> class.</summary>
     /// <param name="capabilityStore">
@@ -87,7 +85,7 @@ public sealed class ToolCallNormalizerFactory
     {
         ArgumentNullException.ThrowIfNull(route);
 
-        var capability = _capabilityStore?.GetModelCapability(route.Provider, route.ModelName);
+        var capability = _capabilityStore?.GetModelCapability(providerKey: route.Provider, modelName: route.ModelName);
 
         // Constrained decoding is checked first, ahead of both emulation and rule 1, and the order is
         // load-bearing in two directions. It must precede the emulation branch because the constrained
@@ -96,26 +94,25 @@ public sealed class ToolCallNormalizerFactory
         // and hand it to ToolCallEmulatingTranslator, which throws on a dialect with no delimiters. And it
         // must precede rule 1 for the same reason emulation does: a follow-up turn carrying tool history but
         // no re-offered tools still needs that history flattened.
-        if (ShouldConstrain(route, capability, requestCarriesResponseFormat))
+        if (ShouldConstrain(route: route, capability: capability,
+                requestCarriesResponseFormat: requestCarriesResponseFormat))
         {
-            if (!requestCarriesTools && !requestCarriesToolHistory)
-            {
-                return null;
-            }
+            if (!requestCarriesTools && !requestCarriesToolHistory) return null;
 
             var constrainedPlan = new ToolCallNormalizationPlan(
-                route.Provider,
-                route.ModelName,
-                [ToolCallDialectRegistry.Constrained],
+                ProviderKey: route.Provider,
+                ModelName: route.ModelName,
+                Candidates: [ToolCallDialectRegistry.Constrained],
                 // Still observing: a native tool_calls response is the one piece of evidence a constrained
                 // request cannot manufacture, and it is exactly the signal that this model never needed
                 // constraining. IsEmulating suppresses the *dialect* write for the same reason it does under
                 // emulation - the envelope came back because we demanded it.
-                IsObserving: true,
-                IsEmulating: true);
+                true,
+                true);
 
             return new ConstrainedToolCallTranslator(
-                constrainedPlan, ToolCallDialectRegistry.Constrained, _capabilityStore, _logger, _contextWindowStore);
+                plan: constrainedPlan, dialect: ToolCallDialectRegistry.Constrained, capabilityStore: _capabilityStore,
+                logger: _logger, contextWindowStore: _contextWindowStore);
         }
 
         // Emulation is checked before rule 1, because its gate is a different question. Rule 1 asks whether
@@ -137,34 +134,30 @@ public sealed class ToolCallNormalizerFactory
         // out of ToolCallEmulatingTranslator's constructor on a live request. Testing the property that
         // actually matters closes that path and every future one like it.
         if (capability is not null &&
-            ToolCallDialectRegistry.TryGet(capability.Dialect, out var known) &&
+            ToolCallDialectRegistry.TryGet(name: capability.Dialect, dialect: out var known) &&
             known.EmulationPrompt is not null &&
             known.IsScannable)
         {
-            if (!requestCarriesTools && !requestCarriesToolHistory)
-            {
-                return null;
-            }
+            if (!requestCarriesTools && !requestCarriesToolHistory) return null;
 
             var emulatedPlan = new ToolCallNormalizationPlan(
-                route.Provider,
-                route.ModelName,
-                [known],
+                ProviderKey: route.Provider,
+                ModelName: route.ModelName,
+                Candidates: [known],
                 // Still observing: a native tool_calls response is the one piece of evidence an emulated
                 // request cannot manufacture, and it is exactly the signal that this classification was
                 // wrong. The recorder suppresses the *dialect* write instead - see IsEmulating.
-                IsObserving: true,
-                IsEmulating: true);
+                true,
+                true);
 
-            return new ToolCallEmulatingTranslator(emulatedPlan, known, _capabilityStore, _logger, _contextWindowStore);
+            return new ToolCallEmulatingTranslator(plan: emulatedPlan, dialect: known,
+                capabilityStore: _capabilityStore, logger: _logger, contextWindowStore: _contextWindowStore);
         }
 
         if (!requestCarriesTools)
-        {
             // Rule 1. The shipping guard scanned every response on a guarded route regardless of whether
             // tools were ever offered, which is most of them.
             return null;
-        }
 
         IReadOnlyList<ToolCallDialect> candidates;
 
@@ -175,12 +168,13 @@ public sealed class ToolCallNormalizerFactory
             // so the request still works and pays no probe latency.
             candidates = ToolCallDialectRegistry.ScannableDialects;
         }
-        else if (!ToolCallDialectRegistry.TryGet(capability.Dialect, out var dialect))
+        else if (!ToolCallDialectRegistry.TryGet(name: capability.Dialect, dialect: out var dialect))
         {
             // A row naming a dialect this build has never heard of was written by a newer build (or by
             // hand). Degrading to no scanning is the documented contract on ModelToolCapability.Dialect:
             // guessing would mean scanning with delimiters the newer build already decided were wrong.
             _logger.LogDebug(
+                message:
                 "Model {Provider}/{Model} is classified as dialect {Dialect}, which this build does not know; forwarding without normalization.",
                 SanitizeForLog(route.Provider),
                 SanitizeForLog(route.ModelName),
@@ -209,12 +203,12 @@ public sealed class ToolCallNormalizerFactory
         }
 
         var plan = new ToolCallNormalizationPlan(
-            route.Provider,
-            route.ModelName,
-            candidates,
+            ProviderKey: route.Provider,
+            ModelName: route.ModelName,
+            Candidates: candidates,
             IsObserving: capability is null || capability.Confidence < DetectionConfidence.Observed);
 
-        return new ToolCallNormalizingTranslator(plan, _capabilityStore, _logger);
+        return new ToolCallNormalizingTranslator(plan: plan, capabilityStore: _capabilityStore, logger: _logger);
     }
 
     /// <summary>
@@ -248,24 +242,18 @@ public sealed class ToolCallNormalizerFactory
         bool requestCarriesResponseFormat)
     {
         // The client owns response_format. Constrained mode is the one path that would overwrite it.
-        if (requestCarriesResponseFormat)
-        {
-            return false;
-        }
+        if (requestCarriesResponseFormat) return false;
 
         if (capability?.Confidence == DetectionConfidence.Operator)
-        {
-            return string.Equals(capability.Dialect, ToolCallDialectRegistry.Constrained.Name, StringComparison.OrdinalIgnoreCase);
-        }
+            return string.Equals(a: capability.Dialect, b: ToolCallDialectRegistry.Constrained.Name,
+                comparisonType: StringComparison.OrdinalIgnoreCase);
 
         // A model that already emits real tool_calls needs nothing done to it, and constraining it would
         // replace a working native path with a rewritten one - performance rule 2's concern, applied here.
         if (capability is not null &&
-            ToolCallDialectRegistry.TryGet(capability.Dialect, out var known) &&
+            ToolCallDialectRegistry.TryGet(name: capability.Dialect, dialect: out var known) &&
             known == ToolCallDialectRegistry.OpenAiNative)
-        {
             return false;
-        }
 
         return _capabilityStore?.GetProviderCapabilities(route.Provider)?.JsonSchemaResponseFormat == true;
     }
@@ -276,6 +264,8 @@ public sealed class ToolCallNormalizerFactory
     /// the tainted value directly is the sanitizer shape the analysis recognizes - mirrors
     /// <c>ProxyMiddleware</c>'s own <c>SanitizeForLog</c>.
     /// </summary>
-    private static string SanitizeForLog(string value) => value.Replace("\r", " ").Replace("\n", " ");
+    private static string SanitizeForLog(string value)
+    {
+        return value.Replace(oldValue: "\r", newValue: " ").Replace(oldValue: "\n", newValue: " ");
+    }
 }
-

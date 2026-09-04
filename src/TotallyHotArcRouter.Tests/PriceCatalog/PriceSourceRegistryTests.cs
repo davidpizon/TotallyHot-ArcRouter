@@ -1,6 +1,6 @@
-using TotallyHot.ArcRouter.PriceCatalog;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
@@ -15,12 +15,12 @@ public class PriceSourceRegistryTests
     {
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(new PriceCatalogOptions(), toggleStore);
+        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
         var names = registry.EnabledClients.Select(c => c.Name).ToList();
-        Assert.Equal(2, names.Count);
-        Assert.Contains(PriceCatalogOptions.LiteLlmSourceName, names);
-        Assert.Contains(PriceCatalogOptions.OpenRouterSourceName, names);
+        Assert.Equal(2, actual: names.Count);
+        Assert.Contains(expected: PriceCatalogOptions.LiteLlmSourceName, collection: names);
+        Assert.Contains(expected: PriceCatalogOptions.OpenRouterSourceName, collection: names);
     }
 
     [Fact]
@@ -28,13 +28,13 @@ public class PriceSourceRegistryTests
     {
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(new PriceCatalogOptions(), toggleStore);
+        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
-        toggleStore.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
+        toggleStore.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
 
         // A disabled source is absent from the loop, not a skipped rung (D6) - the survivor must still poll.
         var client = Assert.Single(registry.EnabledClients);
-        Assert.Equal(PriceCatalogOptions.OpenRouterSourceName, client.Name);
+        Assert.Equal(expected: PriceCatalogOptions.OpenRouterSourceName, actual: client.Name);
     }
 
     [Fact]
@@ -42,10 +42,10 @@ public class PriceSourceRegistryTests
     {
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(new PriceCatalogOptions(), toggleStore);
+        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
-        toggleStore.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
-        toggleStore.SetEnabled(PriceCatalogOptions.OpenRouterSourceName, enabled: false);
+        toggleStore.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
+        toggleStore.SetEnabled(sourceName: PriceCatalogOptions.OpenRouterSourceName, false);
 
         Assert.Empty(registry.EnabledClients);
     }
@@ -57,15 +57,15 @@ public class PriceSourceRegistryTests
         // change needed a restart. It must now be evaluated per read.
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(new PriceCatalogOptions(), toggleStore);
+        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
-        Assert.Equal(2, registry.EnabledClients.Count);
+        Assert.Equal(2, actual: registry.EnabledClients.Count);
 
-        toggleStore.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
+        toggleStore.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
         Assert.Single(registry.EnabledClients);
 
-        toggleStore.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: true);
-        Assert.Equal(2, registry.EnabledClients.Count);
+        toggleStore.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, true);
+        Assert.Equal(2, actual: registry.EnabledClients.Count);
     }
 
     [Fact]
@@ -75,8 +75,9 @@ public class PriceSourceRegistryTests
         // disabled. Nothing should poll in that window - erring toward "don't fetch" is the safe direction.
         using var temp = new TempDatabase();
         var repository = temp.CreateSourceRepository();
-        using var toggleStore = new PriceSourceToggleStore(repository, NullLogger<PriceSourceToggleStore>.Instance);
-        using var registry = Build(new PriceCatalogOptions(), toggleStore);
+        using var toggleStore =
+            new PriceSourceToggleStore(repository: repository, logger: NullLogger<PriceSourceToggleStore>.Instance);
+        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
         Assert.Empty(registry.EnabledClients);
     }
@@ -90,17 +91,19 @@ public class PriceSourceRegistryTests
         // openpipe, not openrouter: openrouter is now a known, recognized source (it has a client), so it
         // no longer exercises this path - see PriceCatalogOptionsTests for that coverage.
         Assert.Throws<OptionsValidationException>(() => Build(
-            new PriceCatalogOptions
+            options: new PriceCatalogOptions
             {
                 Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["openpipe"] = new PriceSourceOptions(),
-                },
+                    ["openpipe"] = new()
+                }
             },
-            toggleStore));
+            toggleStore: toggleStore));
     }
 
-    private static PriceSourceRegistry Build(PriceCatalogOptions options, PriceSourceToggleStore toggleStore) =>
-        new(Options.Create(options), toggleStore, NullLoggerFactory.Instance);
+    private static PriceSourceRegistry Build(PriceCatalogOptions options, PriceSourceToggleStore toggleStore)
+    {
+        return new PriceSourceRegistry(options: Options.Create(options), toggleStore: toggleStore,
+            loggerFactory: NullLoggerFactory.Instance);
+    }
 }
-

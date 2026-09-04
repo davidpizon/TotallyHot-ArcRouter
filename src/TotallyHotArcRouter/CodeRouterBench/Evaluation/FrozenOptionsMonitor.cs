@@ -22,15 +22,21 @@ public sealed class FrozenOptionsMonitor<TOptions> : IOptionsMonitor<TOptions>
         CurrentValue = value;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public TOptions CurrentValue { get; }
 
-    /// <inheritdoc />
-    public TOptions Get(string? name) => CurrentValue;
+    /// <inheritdoc/>
+    public TOptions Get(string? name)
+    {
+        return CurrentValue;
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <returns>A disposable that does nothing - this monitor's value never changes, so no listener is ever invoked.</returns>
-    public IDisposable OnChange(Action<TOptions, string?> listener) => NoopDisposable.Instance;
+    public IDisposable OnChange(Action<TOptions, string?> listener)
+    {
+        return NoopDisposable.Instance;
+    }
 
     /// <summary>A shared no-op <see cref="IDisposable"/>, since <see cref="OnChange"/> never needs to unsubscribe anything.</summary>
     private sealed class NoopDisposable : IDisposable
@@ -38,7 +44,7 @@ public sealed class FrozenOptionsMonitor<TOptions> : IOptionsMonitor<TOptions>
         /// <summary>The single shared instance.</summary>
         public static readonly NoopDisposable Instance = new();
 
-        /// <inheritdoc />
+        /// <inheritdoc/>
         public void Dispose()
         {
         }

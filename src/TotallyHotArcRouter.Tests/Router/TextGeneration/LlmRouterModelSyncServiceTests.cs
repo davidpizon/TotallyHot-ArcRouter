@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Text;
-using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
@@ -22,7 +22,7 @@ public sealed class LlmRouterModelSyncServiceTests
     private const string TreeApiUrl = $"https://huggingface.co/api/models/{Owner}/{Repo}/tree/main/{PathPrefix}";
 
     private static readonly Dictionary<string, string> Fixtures =
-        LlmRouterModelFiles.All.ToDictionary(f => f, f => $"content-of-{f}");
+        LlmRouterModelFiles.All.ToDictionary(keySelector: f => f, elementSelector: f => $"content-of-{f}");
 
     [Fact]
     public async Task SyncAsync_NoProbeResult_FailsRequiredFilesAndSkipsOptionalFile_WithoutDownloadingAnything()
@@ -32,18 +32,15 @@ public sealed class LlmRouterModelSyncServiceTests
         // happens to serve.
         using var scope = new TempOverrideScope();
         var downloadedFileNames = new List<string>();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
         {
-            if (request.RequestUri!.ToString() == TreeApiUrl)
-            {
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            }
+            if (request.RequestUri!.ToString() == TreeApiUrl) return new HttpResponseMessage(HttpStatusCode.NotFound);
 
             downloadedFileNames.Add(request.RequestUri.Segments[^1]);
             return ServeFixture(request);
         });
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(downloadedFileNames);
         foreach (var fileName in LlmRouterModelFiles.All)
@@ -62,20 +59,23 @@ public sealed class LlmRouterModelSyncServiceTests
         }
 
         var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
-        Assert.All(LlmRouterModelFiles.All, fileName => Assert.False(File.Exists(Path.Combine(cacheDirectory, fileName))));
+        Assert.All(collection: LlmRouterModelFiles.All,
+            action: fileName => Assert.False(File.Exists(Path.Combine(path1: cacheDirectory, path2: fileName))));
     }
 
     [Fact]
     public async Task SyncAsync_ChecksumAvailableAndMatching_CompletesVerified()
     {
         using var scope = new TempOverrideScope();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request));
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.All(result.Files, outcome => Assert.True(outcome.Succeeded, $"{outcome.FileName}: {outcome.ErrorMessage}"));
-        Assert.All(result.Files, outcome => Assert.True(outcome.ChecksumVerified));
+        Assert.All(collection: result.Files,
+            action: outcome => Assert.True(condition: outcome.Succeeded,
+                userMessage: $"{outcome.FileName}: {outcome.ErrorMessage}"));
+        Assert.All(collection: result.Files, action: outcome => Assert.True(outcome.ChecksumVerified));
     }
 
     [Fact]
@@ -85,19 +85,22 @@ public sealed class LlmRouterModelSyncServiceTests
         // The tree API publishes the real fixture's checksum, but the server serves different bytes for
         // model.onnx - exactly what a file tampered with (or truncated) after publication would look like.
         var servedFixtures = new Dictionary<string, string>(Fixtures) { ["model.onnx"] = "tampered-bytes" };
-        var service = CreateService(scope.OverrideStore, request =>
-            request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request, servedFixtures));
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
+            request.RequestUri!.ToString() == TreeApiUrl
+                ? ServeTree()
+                : ServeFixture(request: request, fixtures: servedFixtures));
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
         var mismatched = result.Files.Single(f => f.FileName == "model.onnx");
         Assert.False(mismatched.Succeeded);
-        Assert.Contains("checksum", mismatched.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(LlmRouterModelFiles.All.Count - 1, result.Files.Count(f => f.Succeeded));
+        Assert.Contains(expectedSubstring: "checksum", actualString: mismatched.ErrorMessage,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(expected: LlmRouterModelFiles.All.Count - 1, actual: result.Files.Count(f => f.Succeeded));
 
         var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
-        Assert.False(File.Exists(Path.Combine(cacheDirectory, "model.onnx")));
-        Assert.Empty(Directory.EnumerateFiles(cacheDirectory, "*.download"));
+        Assert.False(File.Exists(Path.Combine(path1: cacheDirectory, path2: "model.onnx")));
+        Assert.Empty(Directory.EnumerateFiles(path: cacheDirectory, searchPattern: "*.download"));
     }
 
     [Fact]
@@ -108,15 +111,15 @@ public sealed class LlmRouterModelSyncServiceTests
         // ServeTree's lfsFileNames option serves a deliberately-wrong top-level oid for this file, so this
         // only passes if the sync actually verifies against lfs.oid (a SHA-256) instead.
         using var scope = new TempOverrideScope();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl
                 ? ServeTree(lfsFileNames: new HashSet<string> { "model.onnx" })
                 : ServeFixture(request));
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
         var outcome = result.Files.Single(f => f.FileName == "model.onnx");
-        Assert.True(outcome.Succeeded, outcome.ErrorMessage);
+        Assert.True(condition: outcome.Succeeded, userMessage: outcome.ErrorMessage);
         Assert.True(outcome.ChecksumVerified);
     }
 
@@ -125,26 +128,26 @@ public sealed class LlmRouterModelSyncServiceTests
     {
         using var scope = new TempOverrideScope();
         Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
-        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "model.onnx");
-        await File.WriteAllTextAsync(existingPath, Fixtures["model.onnx"], TestContext.Current.CancellationToken);
+        var existingPath = Path.Combine(path1: scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(),
+            path2: "model.onnx");
+        await File.WriteAllTextAsync(path: existingPath, contents: Fixtures["model.onnx"],
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var downloadedFileNames = new List<string>();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
         {
             if (request.RequestUri!.ToString() == TreeApiUrl)
-            {
                 return ServeTree(lfsFileNames: new HashSet<string> { "model.onnx" });
-            }
 
             downloadedFileNames.Add(request.RequestUri.Segments[^1]);
             return ServeFixture(request);
         });
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain("model.onnx", downloadedFileNames);
+        Assert.DoesNotContain(expected: "model.onnx", collection: downloadedFileNames);
         var outcome = result.Files.Single(f => f.FileName == "model.onnx");
-        Assert.True(outcome.Succeeded, outcome.ErrorMessage);
+        Assert.True(condition: outcome.Succeeded, userMessage: outcome.ErrorMessage);
         Assert.True(outcome.ChecksumVerified);
     }
 
@@ -152,24 +155,26 @@ public sealed class LlmRouterModelSyncServiceTests
     public async Task SyncAsync_ReportsDownloadingThenCompletedPerFile_WithConstantTotalBytes()
     {
         using var scope = new TempOverrideScope();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request));
         var progress = new RecordingProgress();
 
-        await service.SyncAsync(progress, TestContext.Current.CancellationToken);
+        await service.SyncAsync(progress: progress, cancellationToken: TestContext.Current.CancellationToken);
 
         var genAiConfigEvents = progress.Events.Where(e => e.FileName == "genai_config.json").ToList();
         Assert.Equal(
+            expected:
             [
                 LlmRouterModelSyncStage.Downloading,
                 LlmRouterModelSyncStage.Downloading,
                 LlmRouterModelSyncStage.Verifying,
-                LlmRouterModelSyncStage.Completed,
+                LlmRouterModelSyncStage.Completed
             ],
-            genAiConfigEvents.Select(e => e.Stage));
+            actual: genAiConfigEvents.Select(e => e.Stage));
 
         var expectedSize = Encoding.UTF8.GetByteCount(Fixtures["genai_config.json"]);
-        Assert.All(genAiConfigEvents, e => Assert.Equal(expectedSize, e.TotalBytes));
+        Assert.All(collection: genAiConfigEvents,
+            action: e => Assert.Equal(expected: expectedSize, actual: e.TotalBytes));
 
         // BytesTransferred is monotonically non-decreasing across the Downloading events specifically
         // (the fixtures are small enough to land in a single throttled report, so equal is expected, not
@@ -178,7 +183,7 @@ public sealed class LlmRouterModelSyncServiceTests
             .Where(e => e.Stage == LlmRouterModelSyncStage.Downloading)
             .Select(e => e.BytesTransferred ?? 0)
             .ToList();
-        Assert.Equal(downloadedBytes.OrderBy(v => v), downloadedBytes);
+        Assert.Equal(expected: downloadedBytes.OrderBy(v => v), actual: downloadedBytes);
     }
 
     [Fact]
@@ -186,24 +191,23 @@ public sealed class LlmRouterModelSyncServiceTests
     {
         using var scope = new TempOverrideScope();
         Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
-        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
-        await File.WriteAllTextAsync(existingPath, Fixtures["genai_config.json"], TestContext.Current.CancellationToken);
+        var existingPath = Path.Combine(path1: scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(),
+            path2: "genai_config.json");
+        await File.WriteAllTextAsync(path: existingPath, contents: Fixtures["genai_config.json"],
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var downloadedFileNames = new List<string>();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
         {
-            if (request.RequestUri!.ToString() == TreeApiUrl)
-            {
-                return ServeTree();
-            }
+            if (request.RequestUri!.ToString() == TreeApiUrl) return ServeTree();
 
             downloadedFileNames.Add(request.RequestUri.Segments[^1]);
             return ServeFixture(request);
         });
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain("genai_config.json", downloadedFileNames);
+        Assert.DoesNotContain(expected: "genai_config.json", collection: downloadedFileNames);
         var outcome = result.Files.Single(f => f.FileName == "genai_config.json");
         Assert.True(outcome.Succeeded);
         Assert.True(outcome.ChecksumVerified);
@@ -214,26 +218,32 @@ public sealed class LlmRouterModelSyncServiceTests
     {
         using var scope = new TempOverrideScope();
         Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
-        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
+        var existingPath = Path.Combine(path1: scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(),
+            path2: "genai_config.json");
         // A different length than the published size (29 bytes for "content-of-genai_config.json")
         // - the size pre-filter must catch this and requeue the file for download without ever hashing
         // the multi-hundred-MB-scale file this stands in for.
-        await File.WriteAllTextAsync(existingPath, "short", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(path: existingPath, contents: "short",
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request));
         var progress = new RecordingProgress();
 
-        var result = await service.SyncAsync(progress, TestContext.Current.CancellationToken);
+        var result =
+            await service.SyncAsync(progress: progress, cancellationToken: TestContext.Current.CancellationToken);
 
         var outcome = result.Files.Single(f => f.FileName == "genai_config.json");
-        Assert.True(outcome.Succeeded, outcome.ErrorMessage);
+        Assert.True(condition: outcome.Succeeded, userMessage: outcome.ErrorMessage);
         Assert.True(outcome.ChecksumVerified);
-        Assert.Equal(Fixtures["genai_config.json"], await File.ReadAllTextAsync(existingPath, TestContext.Current.CancellationToken));
+        Assert.Equal(expected: Fixtures["genai_config.json"],
+            actual: await File.ReadAllTextAsync(path: existingPath,
+                cancellationToken: TestContext.Current.CancellationToken));
 
         // Exactly one Verifying event - from the re-download's own verification - confirms the
         // size-mismatched cached file was never hashed.
-        Assert.Single(progress.Events, e => e.FileName == "genai_config.json" && e.Stage == LlmRouterModelSyncStage.Verifying);
+        Assert.Single(collection: progress.Events,
+            predicate: e => e.FileName == "genai_config.json" && e.Stage == LlmRouterModelSyncStage.Verifying);
     }
 
     [Fact]
@@ -241,26 +251,34 @@ public sealed class LlmRouterModelSyncServiceTests
     {
         using var scope = new TempOverrideScope();
         Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
-        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
+        var existingPath = Path.Combine(path1: scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(),
+            path2: "genai_config.json");
         // Same byte length as the published fixture (so the size pre-filter alone cannot catch this) but
         // different content - only a hash comparison can detect this corruption/tampering.
-        var sameLengthCorruptedContent = new string('x', Encoding.UTF8.GetByteCount(Fixtures["genai_config.json"]));
-        await File.WriteAllTextAsync(existingPath, sameLengthCorruptedContent, TestContext.Current.CancellationToken);
+        var sameLengthCorruptedContent =
+            new string('x', count: Encoding.UTF8.GetByteCount(Fixtures["genai_config.json"]));
+        await File.WriteAllTextAsync(path: existingPath, contents: sameLengthCorruptedContent,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request));
         var progress = new RecordingProgress();
 
-        var result = await service.SyncAsync(progress, TestContext.Current.CancellationToken);
+        var result =
+            await service.SyncAsync(progress: progress, cancellationToken: TestContext.Current.CancellationToken);
 
         var outcome = result.Files.Single(f => f.FileName == "genai_config.json");
-        Assert.True(outcome.Succeeded, outcome.ErrorMessage);
+        Assert.True(condition: outcome.Succeeded, userMessage: outcome.ErrorMessage);
         Assert.True(outcome.ChecksumVerified);
-        Assert.Equal(Fixtures["genai_config.json"], await File.ReadAllTextAsync(existingPath, TestContext.Current.CancellationToken));
+        Assert.Equal(expected: Fixtures["genai_config.json"],
+            actual: await File.ReadAllTextAsync(path: existingPath,
+                cancellationToken: TestContext.Current.CancellationToken));
 
         // Two Verifying events: the initial (same-size) hash attempt that found the mismatch, and the
         // re-download's own verification.
-        Assert.Equal(2, progress.Events.Count(e => e.FileName == "genai_config.json" && e.Stage == LlmRouterModelSyncStage.Verifying));
+        Assert.Equal(2,
+            actual: progress.Events.Count(e =>
+                e.FileName == "genai_config.json" && e.Stage == LlmRouterModelSyncStage.Verifying));
     }
 
     [Fact]
@@ -268,28 +286,30 @@ public sealed class LlmRouterModelSyncServiceTests
     {
         using var scope = new TempOverrideScope();
         Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
-        var existingPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
+        var existingPath = Path.Combine(path1: scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(),
+            path2: "genai_config.json");
         // The cached file's bytes don't match what the tree API publishes, and the re-download that the
         // mismatch triggers also fails - the known-bad cached bytes must not be left in place, or a status
         // check (and OnnxTextGenerationClient's lazy loader) would keep treating this file as synced
         // because they only check File.Exists.
-        await File.WriteAllTextAsync(existingPath, "corrupted-cached-bytes", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(path: existingPath, contents: "corrupted-cached-bytes",
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl
                 ? ServeTree()
                 : request.RequestUri.Segments[^1] == "genai_config.json"
                     ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
                     : ServeFixture(request));
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
         var outcome = result.Files.Single(f => f.FileName == "genai_config.json");
         Assert.False(outcome.Succeeded);
         Assert.False(File.Exists(existingPath));
 
         var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
-        Assert.Empty(Directory.EnumerateFiles(cacheDirectory, "*.download"));
+        Assert.Empty(Directory.EnumerateFiles(path: cacheDirectory, searchPattern: "*.download"));
     }
 
     [Fact]
@@ -300,23 +320,24 @@ public sealed class LlmRouterModelSyncServiceTests
         // any of the other four files, and no download of it is even attempted.
         using var scope = new TempOverrideScope();
         var downloadedFileNames = new List<string>();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
         {
             if (request.RequestUri!.ToString() == TreeApiUrl)
-            {
                 return ServeTree(excludeFileName: LlmRouterModelFiles.ModelOnnxDataFileName);
-            }
 
             downloadedFileNames.Add(request.RequestUri.Segments[^1]);
             return ServeFixture(request);
         });
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.All(result.Files, outcome => Assert.True(outcome.Succeeded, $"{outcome.FileName}: {outcome.ErrorMessage}"));
-        Assert.DoesNotContain(LlmRouterModelFiles.ModelOnnxDataFileName, downloadedFileNames);
+        Assert.All(collection: result.Files,
+            action: outcome => Assert.True(condition: outcome.Succeeded,
+                userMessage: $"{outcome.FileName}: {outcome.ErrorMessage}"));
+        Assert.DoesNotContain(expected: LlmRouterModelFiles.ModelOnnxDataFileName, collection: downloadedFileNames);
         var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
-        Assert.False(File.Exists(Path.Combine(cacheDirectory, LlmRouterModelFiles.ModelOnnxDataFileName)));
+        Assert.False(File.Exists(Path.Combine(path1: cacheDirectory,
+            path2: LlmRouterModelFiles.ModelOnnxDataFileName)));
     }
 
     [Fact]
@@ -324,36 +345,34 @@ public sealed class LlmRouterModelSyncServiceTests
     {
         using var scope = new TempOverrideScope();
         var downloadedFileNames = new List<string>();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
         {
-            if (request.RequestUri!.ToString() == TreeApiUrl)
-            {
-                return ServeTree(excludeFileName: "model.onnx");
-            }
+            if (request.RequestUri!.ToString() == TreeApiUrl) return ServeTree(excludeFileName: "model.onnx");
 
             downloadedFileNames.Add(request.RequestUri.Segments[^1]);
             return ServeFixture(request);
         });
 
-        var result = await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        var result = await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
         var failed = result.Files.Single(f => f.FileName == "model.onnx");
         Assert.False(failed.Succeeded);
-        Assert.DoesNotContain("model.onnx", downloadedFileNames);
+        Assert.DoesNotContain(expected: "model.onnx", collection: downloadedFileNames);
     }
 
     [Fact]
     public async Task SyncAsync_WritesFilesIntoTheOverrideOwnCacheDirectory()
     {
         using var scope = new TempOverrideScope();
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request));
 
-        await service.SyncAsync(progress: null, TestContext.Current.CancellationToken);
+        await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken);
 
         var cacheDirectory = scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory();
-        Assert.All(LlmRouterModelFiles.All, fileName => Assert.True(File.Exists(Path.Combine(cacheDirectory, fileName))));
-        Assert.Empty(Directory.EnumerateFiles(cacheDirectory, "*.download"));
+        Assert.All(collection: LlmRouterModelFiles.All,
+            action: fileName => Assert.True(File.Exists(Path.Combine(path1: cacheDirectory, path2: fileName))));
+        Assert.Empty(Directory.EnumerateFiles(path: cacheDirectory, searchPattern: "*.download"));
     }
 
     [Fact]
@@ -362,35 +381,39 @@ public sealed class LlmRouterModelSyncServiceTests
         using var scope = new TempOverrideScope();
         Directory.CreateDirectory(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory());
         // genai_config.json is already current; the plan must omit it and its size from the total.
-        var currentPath = Path.Combine(scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(), "genai_config.json");
-        await File.WriteAllTextAsync(currentPath, Fixtures["genai_config.json"], TestContext.Current.CancellationToken);
+        var currentPath = Path.Combine(path1: scope.OverrideStore.Snapshot.Override.ResolveCacheDirectory(),
+            path2: "genai_config.json");
+        await File.WriteAllTextAsync(path: currentPath, contents: Fixtures["genai_config.json"],
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        var service = CreateService(scope.OverrideStore, request =>
+        var service = CreateService(overrideStore: scope.OverrideStore, respond: request =>
             request.RequestUri!.ToString() == TreeApiUrl ? ServeTree() : ServeFixture(request));
         var planProgress = new RecordingPlanProgress();
 
-        await service.SyncAsync(progress: null, TestContext.Current.CancellationToken, planProgress);
+        await service.SyncAsync(null, cancellationToken: TestContext.Current.CancellationToken,
+            planProgress: planProgress);
 
         Assert.NotNull(planProgress.Plan);
         var expectedStaleFiles = LlmRouterModelFiles.All.Where(f => f != "genai_config.json").ToList();
-        Assert.Equal(expectedStaleFiles.Count, planProgress.Plan!.Files.Count);
-        Assert.DoesNotContain(planProgress.Plan.Files, f => f.FileName == "genai_config.json");
+        Assert.Equal(expected: expectedStaleFiles.Count, actual: planProgress.Plan!.Files.Count);
+        Assert.DoesNotContain(collection: planProgress.Plan.Files, filter: f => f.FileName == "genai_config.json");
         foreach (var planFile in planProgress.Plan.Files)
-        {
-            Assert.Equal(Encoding.UTF8.GetByteCount(Fixtures[planFile.FileName]), planFile.SizeBytes);
-        }
+            Assert.Equal(expected: Encoding.UTF8.GetByteCount(Fixtures[planFile.FileName]), actual: planFile.SizeBytes);
 
-        Assert.Equal(planProgress.Plan.Files.Sum(f => f.SizeBytes), planProgress.Plan.TotalBytes);
+        Assert.Equal(expected: planProgress.Plan.Files.Sum(f => f.SizeBytes), actual: planProgress.Plan.TotalBytes);
     }
 
-    private static HttpResponseMessage ServeFixture(HttpRequestMessage request, Dictionary<string, string>? fixtures = null)
+    private static HttpResponseMessage ServeFixture(HttpRequestMessage request,
+        Dictionary<string, string>? fixtures = null)
     {
         var fileName = request.RequestUri!.Segments[^1];
         var content = (fixtures ?? Fixtures)[fileName];
-        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content, Encoding.UTF8) };
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(content: content, encoding: Encoding.UTF8) };
     }
 
-    private static HttpResponseMessage ServeTree(string? excludeFileName = null, IReadOnlySet<string>? lfsFileNames = null)
+    private static HttpResponseMessage ServeTree(string? excludeFileName = null,
+        IReadOnlySet<string>? lfsFileNames = null)
     {
         var entries = Fixtures
             .Where(kvp => kvp.Key != excludeFileName)
@@ -402,14 +425,17 @@ public sealed class LlmRouterModelSyncServiceTests
                     // A deliberately-wrong top-level oid (not the real git blob hash of the served bytes)
                     // proves the sync verifies against lfs.oid, not this one.
                     var lfsOid = ContentSha256Hash.Compute(Encoding.UTF8.GetBytes(kvp.Value));
-                    return $$"""{ "type": "file", "path": "{{PathPrefix}}/{{kvp.Key}}", "oid": "0000000000000000000000000000000000wrong", "size": 1, "lfs": { "oid": "{{lfsOid}}", "size": {{size}} } }""";
+                    return
+                        $$"""{ "type": "file", "path": "{{PathPrefix}}/{{kvp.Key}}", "oid": "0000000000000000000000000000000000wrong", "size": 1, "lfs": { "oid": "{{lfsOid}}", "size": {{size}} } }""";
                 }
 
                 var oid = GitBlobHash.Compute(Encoding.UTF8.GetBytes(kvp.Value));
-                return $$"""{ "type": "file", "path": "{{PathPrefix}}/{{kvp.Key}}", "oid": "{{oid}}", "size": {{size}} }""";
+                return
+                    $$"""{ "type": "file", "path": "{{PathPrefix}}/{{kvp.Key}}", "oid": "{{oid}}", "size": {{size}} }""";
             });
-        var json = $"[{string.Join(",", entries)}]";
-        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        var json = $"[{string.Join(separator: ",", values: entries)}]";
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json") };
     }
 
     private static LlmRouterModelSyncService CreateService(
@@ -417,22 +443,30 @@ public sealed class LlmRouterModelSyncServiceTests
         Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
         var factory = new FakeHttpClientFactory(new FakeHttpMessageHandler(respond));
-        var probe = new LlmRouterModelChecksumProbe(factory, NullLogger<LlmRouterModelChecksumProbe>.Instance);
-        return new LlmRouterModelSyncService(factory, probe, overrideStore, NullLogger<LlmRouterModelSyncService>.Instance);
+        var probe = new LlmRouterModelChecksumProbe(httpClientFactory: factory,
+            logger: NullLogger<LlmRouterModelChecksumProbe>.Instance);
+        return new LlmRouterModelSyncService(httpClientFactory: factory, probe: probe, overrideStore: overrideStore,
+            logger: NullLogger<LlmRouterModelSyncService>.Instance);
     }
 
     private sealed class RecordingProgress : IProgress<LlmRouterModelSyncProgress>
     {
         public List<LlmRouterModelSyncProgress> Events { get; } = [];
 
-        public void Report(LlmRouterModelSyncProgress value) => Events.Add(value);
+        public void Report(LlmRouterModelSyncProgress value)
+        {
+            Events.Add(value);
+        }
     }
 
     private sealed class RecordingPlanProgress : IProgress<LlmRouterModelSyncPlan>
     {
         public LlmRouterModelSyncPlan? Plan { get; private set; }
 
-        public void Report(LlmRouterModelSyncPlan value) => Plan = value;
+        public void Report(LlmRouterModelSyncPlan value)
+        {
+            Plan = value;
+        }
     }
 
     /// <summary>
@@ -442,21 +476,19 @@ public sealed class LlmRouterModelSyncServiceTests
     /// </summary>
     private sealed class TempOverrideScope : IDisposable
     {
-        public FakeLlmRouterModelOverrideStore OverrideStore { get; }
-
         public TempOverrideScope(string baseUrl = BaseUrl)
         {
-            var overrideValue = new LlmRouterModelOverride(baseUrl, $"test-{Guid.NewGuid():N}");
+            var overrideValue =
+                new LlmRouterModelOverride(BaseUrl: baseUrl, CacheDirectorySlug: $"test-{Guid.NewGuid():N}");
             OverrideStore = new FakeLlmRouterModelOverrideStore(overrideValue);
         }
+
+        public FakeLlmRouterModelOverrideStore OverrideStore { get; }
 
         public void Dispose()
         {
             var cacheDirectory = OverrideStore.Snapshot.Override.ResolveCacheDirectory();
-            if (Directory.Exists(cacheDirectory))
-            {
-                Directory.Delete(cacheDirectory, recursive: true);
-            }
+            if (Directory.Exists(cacheDirectory)) Directory.Delete(path: cacheDirectory, true);
         }
     }
 }

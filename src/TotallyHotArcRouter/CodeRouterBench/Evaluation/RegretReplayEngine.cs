@@ -17,7 +17,8 @@ public static class RegretReplayEngine
     /// </param>
     /// <param name="router">The baseline or Orchestrator arm under test.</param>
     /// <param name="weights">The reward weights, the same instance every router in a comparison should use.</param>
-    public static RegretReplayResult Replay(IEnumerable<RegretTaskOutcome> tasks, IRegretBaselineRouter router, RewardWeights weights)
+    public static RegretReplayResult Replay(IEnumerable<RegretTaskOutcome> tasks, IRegretBaselineRouter router,
+        RewardWeights weights)
     {
         ArgumentNullException.ThrowIfNull(tasks);
         ArgumentNullException.ThrowIfNull(router);
@@ -30,18 +31,18 @@ public static class RegretReplayEngine
             // The router sees only dimension + candidate ids + (when published) task text - never
             // task.Cells - enforcing "no leakage" at the call boundary rather than trusting each
             // IRegretBaselineRouter implementation to police itself.
-            var context = new RegretReplayContext(task.TaskId, task.Dimension, [.. task.Cells.Keys], task.TaskText);
+            var context = new RegretReplayContext(TaskId: task.TaskId, Dimension: task.Dimension,
+                CandidateModelIds: [.. task.Cells.Keys], TaskText: task.TaskText);
             var selectedModelId = router.Route(context);
 
             // Online baselines (LinUCB/LinTS) get fed back exactly the reward of the arm they picked -
             // never another candidate's cell - so the same no-leakage property holds for the update path.
             if (selectedModelId is not null && router is IOnlineRegretBaselineRouter online
-                && task.Cells.TryGetValue(selectedModelId, out var selectedCell))
-            {
-                online.Update(context, selectedModelId, weights.Reward(selectedCell));
-            }
+                                            && task.Cells.TryGetValue(key: selectedModelId,
+                                                value: out var selectedCell))
+                online.Update(context: context, selectedModelId: selectedModelId, reward: weights.Reward(selectedCell));
 
-            result.Record(task, selectedModelId, weights);
+            result.Record(outcome: task, selectedModelId: selectedModelId, weights: weights);
         }
 
         return result;

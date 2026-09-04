@@ -7,6 +7,9 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// </summary>
 public interface IQualityQueue
 {
+    /// <summary>The number of requests dropped because the queue was full.</summary>
+    long DroppedCount { get; }
+
     /// <summary>Attempts to enqueue a request without blocking.</summary>
     /// <param name="request">The request to enqueue.</param>
     /// <returns><see langword="true"/> if enqueued; <see langword="false"/> if the queue was full (dropped).</returns>
@@ -16,8 +19,4 @@ public interface IQualityQueue
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>An async stream of queued requests.</returns>
     IAsyncEnumerable<QualityRequest> DequeueAllAsync(CancellationToken cancellationToken);
-
-    /// <summary>The number of requests dropped because the queue was full.</summary>
-    long DroppedCount { get; }
 }
-

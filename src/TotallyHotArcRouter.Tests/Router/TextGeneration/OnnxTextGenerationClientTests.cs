@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Net;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 
@@ -14,7 +15,7 @@ namespace TotallyHot.ArcRouter.Tests.Router.TextGeneration;
 /// contributors' machines - a multi-hundred-megabyte model download has no place running unattended in
 /// a unit test suite.
 /// </summary>
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class OnnxTextGenerationClientTests
 {
     private const string SkipReason =
@@ -22,7 +23,10 @@ public class OnnxTextGenerationClientTests
         "access to let OnnxTextGenerationClient download them, or place them manually at " +
         "LlmRouterOptions.ModelCacheDirectory.";
 
-    private static LlmRouterOptions CreateOptions() => new();
+    private static LlmRouterOptions CreateOptions()
+    {
+        return new LlmRouterOptions();
+    }
 
     /// <summary>
     /// Builds an override store seeded from <paramref name="options"/>, backed by a temp file path that
@@ -30,13 +34,17 @@ public class OnnxTextGenerationClientTests
     /// in these tests), so each test seeds fresh from <paramref name="options"/> rather than picking up a
     /// leftover override from a previous run.
     /// </summary>
-    private static LlmRouterModelOverrideStore CreateOverrideStore(LlmRouterOptions options) => new(
-        NullLogger<LlmRouterModelOverrideStore>.Instance,
-        Options.Create(options),
-        Options.Create(new LlmRouterModelOverrideStoreOptions
-        {
-            FilePath = Path.Combine(Path.GetTempPath(), $"llm-router-override-test-{Guid.NewGuid():N}.json"),
-        }));
+    private static LlmRouterModelOverrideStore CreateOverrideStore(LlmRouterOptions options)
+    {
+        return new LlmRouterModelOverrideStore(
+            logger: NullLogger<LlmRouterModelOverrideStore>.Instance,
+            seed: Options.Create(options),
+            options: Options.Create(new LlmRouterModelOverrideStoreOptions
+            {
+                FilePath = Path.Combine(path1: Path.GetTempPath(),
+                    path2: $"llm-router-override-test-{Guid.NewGuid():N}.json")
+            }));
+    }
 
     /// <summary>
     /// Reports whether every required artifact <see cref="OnnxTextGenerationClient"/> needs is already on
@@ -49,7 +57,8 @@ public class OnnxTextGenerationClientTests
     {
         var cacheDirectory = overrideStore.Snapshot.Override.ResolveCacheDirectory();
         return LlmRouterModelFiles.All.All(fileName =>
-            File.Exists(Path.Combine(cacheDirectory, fileName)) || LlmRouterModelFiles.IsOptional(fileName));
+            File.Exists(Path.Combine(path1: cacheDirectory, path2: fileName)) ||
+            LlmRouterModelFiles.IsOptional(fileName));
     }
 
     /// <summary>
@@ -63,13 +72,13 @@ public class OnnxTextGenerationClientTests
     {
         var options = CreateOptions();
         using var overrideStore = CreateOverrideStore(options);
-        Assert.SkipUnless(ModelIsCached(overrideStore), SkipReason);
+        Assert.SkipUnless(condition: ModelIsCached(overrideStore), reason: SkipReason);
 
         await using var client = new OnnxTextGenerationClient(
-            Options.Create(options),
-            overrideStore,
-            new ThrowingHttpClientFactory(),
-            NullLogger<OnnxTextGenerationClient>.Instance);
+            options: Options.Create(options),
+            overrideStore: overrideStore,
+            httpClientFactory: new ThrowingHttpClientFactory(),
+            logger: NullLogger<OnnxTextGenerationClient>.Instance);
 
         var prompt =
             "<|im_start|>system\nYou are a coding task router. Candidate models: model-a, model-b. " +
@@ -77,7 +86,8 @@ public class OnnxTextGenerationClientTests
             "<|im_start|>user\nDimension: bug_fixing\nTask: Fix the null reference exception in Foo.cs.<|im_end|>\n" +
             "<|im_start|>assistant\n";
 
-        var response = await client.GenerateAsync(prompt, TestContext.Current.CancellationToken);
+        var response =
+            await client.GenerateAsync(prompt: prompt, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(string.IsNullOrWhiteSpace(response));
     }
@@ -110,14 +120,16 @@ public class OnnxTextGenerationClientTests
 
         Assert.NotNull(options.ModelOnnxDataUrl);
         Assert.All(
+            collection:
             [
                 options.GenAiConfigUrl,
                 options.TokenizerJsonUrl,
                 options.TokenizerConfigJsonUrl,
                 options.ModelOnnxUrl,
-                options.ModelOnnxDataUrl,
+                options.ModelOnnxDataUrl
             ],
-            url => Assert.StartsWith(variantPrefix, url, StringComparison.Ordinal));
+            action: url => Assert.StartsWith(expectedStartString: variantPrefix, actualString: url,
+                comparisonType: StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -134,29 +146,29 @@ public class OnnxTextGenerationClientTests
         var options = CreateOptions();
         const string overrideBaseUrl = "https://example.invalid/custom-model";
         var slug = $"test-{Guid.NewGuid():N}";
-        var fakeStore = new FakeLlmRouterModelOverrideStore(new LlmRouterModelOverride(overrideBaseUrl, slug));
+        var fakeStore =
+            new FakeLlmRouterModelOverrideStore(new LlmRouterModelOverride(BaseUrl: overrideBaseUrl,
+                CacheDirectorySlug: slug));
         var capturingFactory = new CapturingHttpClientFactory();
 
         try
         {
             await using var client = new OnnxTextGenerationClient(
-                Options.Create(options),
-                fakeStore,
-                capturingFactory,
-                NullLogger<OnnxTextGenerationClient>.Instance);
+                options: Options.Create(options),
+                overrideStore: fakeStore,
+                httpClientFactory: capturingFactory,
+                logger: NullLogger<OnnxTextGenerationClient>.Instance);
 
-            await Assert.ThrowsAsync<HttpRequestException>(
-                () => client.GenerateAsync("prompt", TestContext.Current.CancellationToken));
+            await Assert.ThrowsAsync<HttpRequestException>(() =>
+                client.GenerateAsync(prompt: "prompt", cancellationToken: TestContext.Current.CancellationToken));
 
-            Assert.Equal($"{overrideBaseUrl}/genai_config.json", capturingFactory.RequestedUrls.Single());
+            Assert.Equal(expected: $"{overrideBaseUrl}/genai_config.json",
+                actual: capturingFactory.RequestedUrls.Single());
         }
         finally
         {
             var cacheDirectory = fakeStore.Snapshot.Override.ResolveCacheDirectory();
-            if (Directory.Exists(cacheDirectory))
-            {
-                Directory.Delete(cacheDirectory, recursive: true);
-            }
+            if (Directory.Exists(cacheDirectory)) Directory.Delete(path: cacheDirectory, true);
         }
     }
 
@@ -167,8 +179,11 @@ public class OnnxTextGenerationClientTests
     /// </summary>
     private sealed class ThrowingHttpClientFactory : IHttpClientFactory
     {
-        public HttpClient CreateClient(string name) =>
-            throw new InvalidOperationException("Unexpected network access: llm_router model artifacts should already be cached.");
+        public HttpClient CreateClient(string name)
+        {
+            throw new InvalidOperationException(
+                "Unexpected network access: llm_router model artifacts should already be cached.");
+        }
     }
 
     /// <summary>Records every requested URL and answers 404, so a caller sees a real HTTP failure without a real network call.</summary>
@@ -176,14 +191,18 @@ public class OnnxTextGenerationClientTests
     {
         public List<string> RequestedUrls { get; } = [];
 
-        public HttpClient CreateClient(string name) => new(new CapturingHandler(RequestedUrls));
+        public HttpClient CreateClient(string name)
+        {
+            return new HttpClient(new CapturingHandler(RequestedUrls));
+        }
 
         private sealed class CapturingHandler(List<string> requestedUrls) : HttpMessageHandler
         {
-            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+                CancellationToken cancellationToken)
             {
                 requestedUrls.Add(request.RequestUri!.ToString());
-                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             }
         }
     }

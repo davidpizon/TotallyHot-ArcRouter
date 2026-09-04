@@ -3,8 +3,35 @@
 ####################################################################################################################
 
 version: "1.0"
-linter: qodana-cdnet
+image: jetbrains/qodana-cdnet:2026.2
+
+# WHERE THE INSPECTION DECISIONS LIVE: not here.
+#
+# Per JetBrains' own documentation, "the Qodana Community for .NET linter does not support profiles
+# and their configuration options". It reads ReSharper `.DotSettings` files instead, so that is where
+# every "this inspection is wrong for this codebase" decision is recorded, each with its reason:
+#
+#   src/TotallyHotArcRouter.Qodana.slnx.DotSettings
+#       - solution-wide severities
+#   src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj.DotSettings
+#       - scoped to the test project, so the same finding in production code is still reported
+#
+# Do not re-express those decisions here. Two earlier revisions of this file tried, and both were
+# accepted without complaint and silently ignored - which is the trap worth naming: a qodana.yaml
+# that looks like it disables an inspection produces exactly the same report as one that says
+# nothing at all, so the mistake stays invisible until you count the findings.
+#
+#   - a top-level `exclude:` list keyed by `name:` (run on 98a3c95) - still reported all 366.
+#   - a `profile.base` + `inspections` block (run on 6660580) - still reported all 366. `base` is
+#     not in the schema either way; the documented keys are `profile.name` and `profile.path`.
+#
+# Nothing is turned off to make a number go down. A finding that is merely tedious to fix is fixed in
+# the code instead.
 profile:
   name: qodana.recommended
+
 include:
   - name: CheckDependencyLicenses
+
+dotnet:
+  solution: src/TotallyHotArcRouter.Qodana.slnx

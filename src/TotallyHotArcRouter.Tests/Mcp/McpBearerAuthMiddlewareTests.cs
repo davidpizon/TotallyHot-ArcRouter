@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Mcp;
 using Microsoft.AspNetCore.Http;
+using TotallyHot.ArcRouter.Mcp;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp;
 
@@ -12,40 +12,48 @@ public sealed class McpBearerAuthMiddlewareTests
     public async Task InvokeAsync_MissingAuthorizationHeader_Returns401AndDoesNotCallNext()
     {
         var nextCalled = false;
-        var middleware = new McpBearerAuthMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, Token);
+        var middleware = new McpBearerAuthMiddleware(next: _ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        }, expectedToken: Token);
         var context = new DefaultHttpContext();
 
         await middleware.InvokeAsync(context);
 
         Assert.False(nextCalled);
-        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status401Unauthorized, actual: context.Response.StatusCode);
     }
 
     [Fact]
     public async Task InvokeAsync_WrongToken_Returns401AndDoesNotCallNext()
     {
         var nextCalled = false;
-        var middleware = new McpBearerAuthMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, Token);
+        var middleware = new McpBearerAuthMiddleware(next: _ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        }, expectedToken: Token);
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = "Bearer wrong-token";
 
         await middleware.InvokeAsync(context);
 
         Assert.False(nextCalled);
-        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status401Unauthorized, actual: context.Response.StatusCode);
     }
 
     [Fact]
     public async Task InvokeAsync_MissingBearerPrefix_Returns401()
     {
-        var middleware = new McpBearerAuthMiddleware(_ => Task.CompletedTask, Token);
+        var middleware = new McpBearerAuthMiddleware(next: _ => Task.CompletedTask, expectedToken: Token);
         var context = new DefaultHttpContext();
         // The raw token without the "Bearer " scheme prefix must not be accepted.
         context.Request.Headers.Authorization = Token;
 
         await middleware.InvokeAsync(context);
 
-        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status401Unauthorized, actual: context.Response.StatusCode);
     }
 
     [Fact]
@@ -53,42 +61,53 @@ public sealed class McpBearerAuthMiddlewareTests
     {
         // The "Bearer" scheme name is case-insensitive per RFC 6750/9110.
         var nextCalled = false;
-        var middleware = new McpBearerAuthMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, Token);
+        var middleware = new McpBearerAuthMiddleware(next: _ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        }, expectedToken: Token);
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = $"bearer {Token}";
 
         await middleware.InvokeAsync(context);
 
         Assert.True(nextCalled);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
     public async Task InvokeAsync_TokenWithTrailingWhitespace_IsTrimmedAndAccepted()
     {
         var nextCalled = false;
-        var middleware = new McpBearerAuthMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, Token);
+        var middleware = new McpBearerAuthMiddleware(next: _ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        }, expectedToken: Token);
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = $"Bearer {Token}  ";
 
         await middleware.InvokeAsync(context);
 
         Assert.True(nextCalled);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
     public async Task InvokeAsync_CorrectToken_CallsNextAndLeavesResponseUntouched()
     {
         var nextCalled = false;
-        var middleware = new McpBearerAuthMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, Token);
+        var middleware = new McpBearerAuthMiddleware(next: _ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        }, expectedToken: Token);
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = $"Bearer {Token}";
 
         await middleware.InvokeAsync(context);
 
         Assert.True(nextCalled);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 }
-

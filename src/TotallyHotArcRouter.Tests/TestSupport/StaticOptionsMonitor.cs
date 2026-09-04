@@ -23,37 +23,45 @@ public sealed class StaticOptionsMonitor<TOptions> : IOptionsMonitor<TOptions>
         CurrentValue = initialValue;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public TOptions CurrentValue { get; private set; }
 
-    /// <inheritdoc />
-    public TOptions Get(string? name) => CurrentValue;
+    /// <inheritdoc/>
+    public TOptions Get(string? name)
+    {
+        return CurrentValue;
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public IDisposable OnChange(Action<TOptions, string?> listener)
     {
         _listeners.Add(listener);
         return new Unsubscriber(() => _listeners.Remove(listener));
     }
 
-    /// <summary>Sets a new <see cref="CurrentValue"/> and notifies every registered <see cref="OnChange"/> listener, mirroring a live options reload.</summary>
+    /// <summary>
+    /// Sets a new <see cref="CurrentValue"/> and notifies every registered <see cref="OnChange"/> listener, mirroring
+    /// a live options reload.
+    /// </summary>
     /// <param name="value">The new value.</param>
     public void Set(TOptions value)
     {
         ArgumentNullException.ThrowIfNull(value);
         CurrentValue = value;
 
-        foreach (var listener in _listeners.ToArray())
-        {
-            listener(value, null);
-        }
+        foreach (var listener in _listeners.ToArray()) listener(arg1: value, null);
     }
 
-    /// <summary>Removes its owning listener from <see cref="_listeners"/> on disposal, mirroring the real <see cref="IOptionsMonitor{TOptions}.OnChange"/> subscription contract.</summary>
-    private sealed class Unsubscriber : IDisposable
+    /// <summary>
+    /// Removes its owning listener from <see cref="_listeners"/> on disposal, mirroring the real
+    /// <see cref="IOptionsMonitor{TOptions}.OnChange"/> subscription contract.
+    /// </summary>
+    private sealed class Unsubscriber(Action unsubscribe) : IDisposable
     {
-        private readonly Action _unsubscribe;
-        public Unsubscriber(Action unsubscribe) => _unsubscribe = unsubscribe;
-        public void Dispose() => _unsubscribe();
+
+        public void Dispose()
+        {
+            unsubscribe();
+        }
     }
 }

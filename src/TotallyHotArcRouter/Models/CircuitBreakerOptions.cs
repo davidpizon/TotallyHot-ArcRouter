@@ -40,25 +40,14 @@ public sealed class CircuitBreakerOptions
     {
         var errors = new List<string>();
 
-        if (FailureThreshold < 1)
-        {
-            errors.Add("FailureThreshold must be at least 1.");
-        }
+        if (FailureThreshold < 1) errors.Add("FailureThreshold must be at least 1.");
 
-        if (BaseCooldown <= TimeSpan.Zero)
-        {
-            errors.Add("BaseCooldown must be a positive duration.");
-        }
+        if (BaseCooldown <= TimeSpan.Zero) errors.Add("BaseCooldown must be a positive duration.");
 
-        if (MaxCooldown < BaseCooldown)
-        {
-            errors.Add("MaxCooldown must be greater than or equal to BaseCooldown.");
-        }
+        if (MaxCooldown < BaseCooldown) errors.Add("MaxCooldown must be greater than or equal to BaseCooldown.");
 
         if (errors.Count > 0)
-        {
-            throw new OptionsValidationException(nameof(CircuitBreakerOptions), typeof(CircuitBreakerOptions), errors);
-        }
+            throw new OptionsValidationException(optionsName: nameof(CircuitBreakerOptions),
+                optionsType: typeof(CircuitBreakerOptions), failureMessages: errors);
     }
 }
-

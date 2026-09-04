@@ -1,7 +1,7 @@
+using AwesomeAssertions;
+using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
-using Bunit;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -14,7 +14,7 @@ public sealed class ToastHostTests
     [Fact]
     public void Renders_nothing_when_there_are_no_toasts()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         ctx.Services.AddSingleton(new ToastService());
 
         var cut = ctx.Render<ToastHost>();
@@ -25,12 +25,12 @@ public sealed class ToastHostTests
     [Fact]
     public void A_shown_toast_renders_its_title_and_message()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         var toasts = new ToastService();
         ctx.Services.AddSingleton(toasts);
         var cut = ctx.Render<ToastHost>();
 
-        toasts.ShowError("Providers unreachable", "connection refused");
+        toasts.ShowError(title: "Providers unreachable", message: "connection refused");
 
         cut.WaitForAssertion(() => cut.FindAll(".ls-toast").Should().ContainSingle());
         cut.Markup.Should().Contain("Providers unreachable");
@@ -40,10 +40,10 @@ public sealed class ToastHostTests
     [Fact]
     public void Clicking_the_close_glyph_dismisses_the_toast()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         var toasts = new ToastService();
         ctx.Services.AddSingleton(toasts);
-        toasts.ShowError("title", "message");
+        toasts.ShowError(title: "title", message: "message");
         var cut = ctx.Render<ToastHost>();
         cut.WaitForAssertion(() => cut.FindAll(".ls-toast").Should().ContainSingle());
 
@@ -56,13 +56,13 @@ public sealed class ToastHostTests
     [Fact]
     public void Multiple_toasts_stack()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         var toasts = new ToastService();
         ctx.Services.AddSingleton(toasts);
         var cut = ctx.Render<ToastHost>();
 
-        toasts.ShowError("First", "a");
-        toasts.ShowError("Second", "b");
+        toasts.ShowError(title: "First", message: "a");
+        toasts.ShowError(title: "Second", message: "b");
 
         cut.WaitForAssertion(() => cut.FindAll(".ls-toast").Should().HaveCount(2));
     }

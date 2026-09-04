@@ -17,7 +17,10 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 /// </summary>
 internal static class PayloadTranslationHelpers
 {
-    /// <summary>Extracts plain text from an OpenAI message <c>content</c> field (a string, or an array of content blocks - only <c>text</c> blocks contribute).</summary>
+    /// <summary>
+    /// Extracts plain text from an OpenAI message <c>content</c> field (a string, or an array of content blocks -
+    /// only <c>text</c> blocks contribute).
+    /// </summary>
     internal static string? ExtractText(JsonNode? content)
     {
         switch (content)
@@ -29,14 +32,10 @@ internal static class PayloadTranslationHelpers
             case JsonArray array:
                 var builder = new StringBuilder();
                 foreach (var element in array)
-                {
                     if (element is JsonObject obj &&
                         obj["type"]?.GetValue<string>() == "text" &&
                         obj["text"]?.GetValue<string>() is { } partText)
-                    {
                         builder.Append(partText);
-                    }
-                }
 
                 return builder.ToString();
             default:
@@ -44,30 +43,28 @@ internal static class PayloadTranslationHelpers
         }
     }
 
-    /// <summary>Parses an OpenAI tool-call <c>arguments</c> string (JSON text) into a provider-native tool-input object; falls back to an empty object.</summary>
+    /// <summary>
+    /// Parses an OpenAI tool-call <c>arguments</c> string (JSON text) into a provider-native tool-input object; falls
+    /// back to an empty object.
+    /// </summary>
     internal static JsonNode ParseArgumentsObject(JsonNode? arguments)
     {
-        if (arguments is JsonObject alreadyObject)
-        {
-            return alreadyObject.DeepClone();
-        }
+        if (arguments is JsonObject alreadyObject) return alreadyObject.DeepClone();
 
         if (arguments is JsonValue value && value.TryGetValue<string>(out var text) &&
             TryParseJsonObject(text) is { } parsed)
-        {
             return parsed;
-        }
 
         return new JsonObject();
     }
 
-    /// <summary>Attempts to parse <paramref name="text"/> as a JSON object, returning null for blank input or a JSON value that isn't an object (e.g. malformed JSON or a non-object arguments payload) instead of throwing.</summary>
+    /// <summary>
+    /// Attempts to parse <paramref name="text"/> as a JSON object, returning null for blank input or a JSON value
+    /// that isn't an object (e.g. malformed JSON or a non-object arguments payload) instead of throwing.
+    /// </summary>
     internal static JsonObject? TryParseJsonObject(string? text)
     {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(text)) return null;
 
         try
         {
@@ -79,7 +76,12 @@ internal static class PayloadTranslationHelpers
         }
     }
 
-    /// <summary>Generates a unique OpenAI-style completion id (<c>chatcmpl-&lt;guid&gt;</c>) for use when the upstream response omits one.</summary>
-    internal static string GenerateCompletionId() =>
-        "chatcmpl-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Generates a unique OpenAI-style completion id (<c>chatcmpl-&lt;guid&gt;</c>) for use when the upstream
+    /// response omits one.
+    /// </summary>
+    internal static string GenerateCompletionId()
+    {
+        return "chatcmpl-" + Guid.NewGuid().ToString(format: "N", provider: CultureInfo.InvariantCulture);
+    }
 }

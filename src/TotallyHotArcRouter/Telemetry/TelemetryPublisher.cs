@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging;
-
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
@@ -26,8 +24,10 @@ public interface ITelemetryPublisher
     /// Publishes an optional quality signal for the dashboard's live verification tile.
     /// Existing implementers may ignore it.
     /// </summary>
-    Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
 }
 
 /// <summary>
@@ -52,7 +52,10 @@ public sealed class TelemetryPublisher : ITelemetryPublisher
     /// Initializes a new instance of the <see cref="TelemetryPublisher"/> class.
     /// </summary>
     /// <param name="broadcaster">The fan-out registry to publish through.</param>
-    /// <param name="logger">Optional logger. Publish failures are logged at Debug level, not surfaced, since they must never affect request handling.</param>
+    /// <param name="logger">
+    /// Optional logger. Publish failures are logged at Debug level, not surfaced, since they must never
+    /// affect request handling.
+    /// </param>
     public TelemetryPublisher(TelemetryBroadcaster broadcaster, ILogger<TelemetryPublisher>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(broadcaster);
@@ -60,7 +63,7 @@ public sealed class TelemetryPublisher : ITelemetryPublisher
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task PublishAsync(RoutingTelemetryEvent telemetryEvent, CancellationToken cancellationToken = default)
     {
         try
@@ -71,13 +74,14 @@ public sealed class TelemetryPublisher : ITelemetryPublisher
         {
             // Telemetry is best-effort observability, never a request-handling dependency: any
             // broadcast failure must never surface here.
-            _logger?.LogDebug(ex, "Failed to publish routing telemetry event; continuing without it.");
+            _logger?.LogDebug(exception: ex,
+                message: "Failed to publish routing telemetry event; continuing without it.");
         }
 
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
     {
         try
@@ -88,13 +92,13 @@ public sealed class TelemetryPublisher : ITelemetryPublisher
         {
             // Same fault-isolation contract as PublishAsync: a log-line publish failure must never
             // surface to (or block) the Serilog pipeline that triggered it.
-            _logger?.LogDebug(ex, "Failed to publish log line; continuing without it.");
+            _logger?.LogDebug(exception: ex, message: "Failed to publish log line; continuing without it.");
         }
 
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default)
     {
         try
@@ -105,10 +109,9 @@ public sealed class TelemetryPublisher : ITelemetryPublisher
         {
             // Same fault-isolation contract as PublishAsync: a quality-signal publish failure must
             // never surface to (or block) RouterMemoryScoreObserver's observation path.
-            _logger?.LogDebug(ex, "Failed to publish quality signal; continuing without it.");
+            _logger?.LogDebug(exception: ex, message: "Failed to publish quality signal; continuing without it.");
         }
 
         return Task.CompletedTask;
     }
 }
-

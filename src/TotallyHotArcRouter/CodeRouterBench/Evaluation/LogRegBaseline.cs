@@ -34,10 +34,10 @@ public sealed class LogRegBaseline : IRegretBaselineRouter
         _vocabularyIndex = LogRegTrainer.BuildVocabularyIndex(artifact.Vocabulary);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "logreg";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Ties are broken by ordinal model-id order, matching every other baseline's tie-break convention.
     /// Returns <see langword="null"/> when <see cref="RegretReplayContext.TaskText"/> is unpublished (see
@@ -47,18 +47,16 @@ public sealed class LogRegBaseline : IRegretBaselineRouter
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.TaskText is null)
-        {
-            return null;
-        }
+        if (context.TaskText is null) return null;
 
-        var features = LogRegTrainer.ComputeTfIdf(context.TaskText, _vocabularyIndex, _artifact.InverseDocumentFrequency);
+        var features = LogRegTrainer.ComputeTfIdf(text: context.TaskText, vocabularyIndex: _vocabularyIndex,
+            idf: _artifact.InverseDocumentFrequency);
 
         return context.CandidateModelIds
-            .Where(id => _artifact.ClassWeights.ContainsKey(id))
-            .Select(id => (Model: id, Score: ScoreClass(_artifact.ClassWeights[id], features)))
+            .Where(_artifact.ClassWeights.ContainsKey)
+            .Select(id => (Model: id, Score: ScoreClass(weights: _artifact.ClassWeights[id], features: features)))
             .OrderByDescending(entry => entry.Score)
-            .ThenBy(entry => entry.Model, StringComparer.Ordinal)
+            .ThenBy(keySelector: entry => entry.Model, comparer: StringComparer.Ordinal)
             .Select(entry => (string?)entry.Model)
             .FirstOrDefault();
     }
@@ -69,10 +67,7 @@ public sealed class LogRegBaseline : IRegretBaselineRouter
     private static double ScoreClass(double[] weights, (int Index, double Value)[] features)
     {
         var z = weights[0];
-        foreach (var (index, value) in features)
-        {
-            z += weights[index + 1] * value;
-        }
+        foreach (var (index, value) in features) z += weights[index + 1] * value;
 
         return z;
     }

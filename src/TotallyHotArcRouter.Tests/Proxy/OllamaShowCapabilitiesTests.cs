@@ -1,20 +1,18 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Moq;
+using System.Text;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Moq;
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
 /// <summary>
 /// Covers what <c>POST /api/show</c> declares about a model: its <c>capabilities</c> array and its
 /// <c>model_info</c> context window (<c>docs/router/ollama-show-capabilities-plan.md</c>).
-///
 /// <para>
 /// The behavior under test is what makes router models selectable in a capability-filtering client's model
 /// picker - Visual Studio's Copilot chat drops any model that declares no <c>tools</c> support - so these
@@ -28,10 +26,10 @@ public class OllamaShowCapabilitiesTests
     [Fact]
     public async Task PostOllamaShow_KnownModel_DeclaresCompletionAndTools()
     {
-        var root = await ShowAsync("gpt-5.4", ModelList(("gpt-5.4", "openai")));
+        var root = await ShowAsync(modelName: "gpt-5.4", resolver: ModelList(("gpt-5.4", "openai")));
 
         var capabilities = Capabilities(root);
-        Assert.Equal(["completion", "tools"], capabilities);
+        Assert.Equal(expectedSpan: ["completion", "tools"], actualArray: capabilities);
     }
 
     // The judgment call recorded in ADR-0003: an `emulated` model cannot call tools natively - that row is
@@ -42,11 +40,12 @@ public class OllamaShowCapabilitiesTests
     public async Task PostOllamaShow_EmulatedModel_StillDeclaresTools()
     {
         var store = new FakeToolCallCapabilityStore().Seed(new ModelToolCapability(
-            "local", "qwen-local", ToolCallDialectRegistry.Emulated.Name, DetectionConfidence.Template));
+            ProviderKey: "local", ModelName: "qwen-local", Dialect: ToolCallDialectRegistry.Emulated.Name,
+            Confidence: DetectionConfidence.Template));
 
-        var root = await ShowAsync("qwen-local", ModelList(("qwen-local", "local")), store);
+        var root = await ShowAsync(modelName: "qwen-local", resolver: ModelList(("qwen-local", "local")), store: store);
 
-        Assert.Contains("tools", Capabilities(root));
+        Assert.Contains(expected: "tools", collection: Capabilities(root));
     }
 
     // The dominant state, and the one that decides whether the fix works at all: a fresh install has run no
@@ -55,21 +54,23 @@ public class OllamaShowCapabilitiesTests
     [Fact]
     public async Task PostOllamaShow_UnclassifiedModel_StillDeclaresTools()
     {
-        var root = await ShowAsync("gpt-5.4", ModelList(("gpt-5.4", "openai")), new FakeToolCallCapabilityStore());
+        var root = await ShowAsync(modelName: "gpt-5.4", resolver: ModelList(("gpt-5.4", "openai")),
+            store: new FakeToolCallCapabilityStore());
 
-        Assert.Contains("tools", Capabilities(root));
+        Assert.Contains(expected: "tools", collection: Capabilities(root));
     }
 
     [Fact]
     public async Task PostOllamaShow_KnownContextLength_IsKeyedByTheProbedArchitecture()
     {
-        var store = new FakeToolCallCapabilityStore().SeedContextWindow("local", "qwen-local", 32768, "qwen2");
+        var store = new FakeToolCallCapabilityStore().SeedContextWindow(providerKey: "local", modelName: "qwen-local",
+            32768, architecture: "qwen2");
 
-        var root = await ShowAsync("qwen-local", ModelList(("qwen-local", "local")), store);
+        var root = await ShowAsync(modelName: "qwen-local", resolver: ModelList(("qwen-local", "local")), store: store);
 
         var modelInfo = root.GetProperty("model_info");
-        Assert.Equal("qwen2", modelInfo.GetProperty("general.architecture").GetString());
-        Assert.Equal(32768, modelInfo.GetProperty("qwen2.context_length").GetInt32());
+        Assert.Equal(expected: "qwen2", actual: modelInfo.GetProperty("general.architecture").GetString());
+        Assert.Equal(32768, actual: modelInfo.GetProperty("qwen2.context_length").GetInt32());
     }
 
     // Absent, not null. This endpoint serializes without options, so default handling would emit
@@ -81,11 +82,12 @@ public class OllamaShowCapabilitiesTests
         // A store that is present but has never probed this model - the state of every hosted provider,
         // which publishes no context length at all. Distinct from the no-store case below, which is what an
         // un-wired middleware sees.
-        var store = new FakeToolCallCapabilityStore().SeedContextWindow("openai", "some-other-model", 128000, "gpt");
+        var store = new FakeToolCallCapabilityStore().SeedContextWindow(providerKey: "openai",
+            modelName: "some-other-model", 128000, architecture: "gpt");
 
-        var root = await ShowAsync("gpt-5.4", ModelList(("gpt-5.4", "openai")), store);
+        var root = await ShowAsync(modelName: "gpt-5.4", resolver: ModelList(("gpt-5.4", "openai")), store: store);
 
-        Assert.False(root.TryGetProperty("model_info", out _));
+        Assert.False(root.TryGetProperty(propertyName: "model_info", value: out _));
     }
 
     // The default-constructed middleware every existing test builds: both stores null. Behaviorally inert
@@ -93,29 +95,29 @@ public class OllamaShowCapabilitiesTests
     [Fact]
     public async Task PostOllamaShow_WithNoStoresWired_OmitsModelInfo_ButStillDeclaresTools()
     {
-        var root = await ShowAsync("gpt-5.4", ModelList(("gpt-5.4", "openai")));
+        var root = await ShowAsync(modelName: "gpt-5.4", resolver: ModelList(("gpt-5.4", "openai")));
 
-        Assert.False(root.TryGetProperty("model_info", out _));
-        Assert.Equal(["completion", "tools"], Capabilities(root));
+        Assert.False(root.TryGetProperty(propertyName: "model_info", value: out _));
+        Assert.Equal(expectedSpan: ["completion", "tools"], actualArray: Capabilities(root));
     }
 
     [Fact]
     public async Task PostOllamaShow_RouterModel_UnionsCapabilities_AndTakesTheMaximumContextLength()
     {
         var store = new FakeToolCallCapabilityStore()
-            .SeedContextWindow("local", "small-local", 8192, "qwen2")
-            .SeedContextWindow("openai", "gpt-5.4", 128000, "gpt");
+            .SeedContextWindow(providerKey: "local", modelName: "small-local", 8192, architecture: "qwen2")
+            .SeedContextWindow(providerKey: "openai", modelName: "gpt-5.4", 128000, architecture: "gpt");
 
         var root = await ShowAsync(
-            RouterModel,
-            ModelList(("small-local", "local"), ("gpt-5.4", "openai")),
-            store);
+            modelName: RouterModel,
+            resolver: ModelList(("small-local", "local"), ("gpt-5.4", "openai")),
+            store: store);
 
-        Assert.Equal(["completion", "tools"], Capabilities(root));
+        Assert.Equal(expectedSpan: ["completion", "tools"], actualArray: Capabilities(root));
 
         var modelInfo = root.GetProperty("model_info");
-        Assert.Equal("arcrouter", modelInfo.GetProperty("general.architecture").GetString());
-        Assert.Equal(128000, modelInfo.GetProperty("arcrouter.context_length").GetInt32());
+        Assert.Equal(expected: "arcrouter", actual: modelInfo.GetProperty("general.architecture").GetString());
+        Assert.Equal(128000, actual: modelInfo.GetProperty("arcrouter.context_length").GetInt32());
     }
 
     // The per-model governance gate (Enabled && PresentUpstream). A stopped model must not contribute its
@@ -124,17 +126,18 @@ public class OllamaShowCapabilitiesTests
     public async Task PostOllamaShow_RouterModel_IgnoresADisabledModel()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelEntries(
-            disabledProviders: null,
+            null,
             new ModelRouteEntry { ModelName = "small-local", Provider = "local", ProviderModelId = "small-local" },
-            new ModelRouteEntry { ModelName = "big-local", Provider = "local", ProviderModelId = "big-local", Enabled = false });
+            new ModelRouteEntry
+            { ModelName = "big-local", Provider = "local", ProviderModelId = "big-local", Enabled = false });
 
         var store = new FakeToolCallCapabilityStore()
-            .SeedContextWindow("local", "small-local", 8192, "qwen2")
-            .SeedContextWindow("local", "big-local", 200000, "qwen2");
+            .SeedContextWindow(providerKey: "local", modelName: "small-local", 8192, architecture: "qwen2")
+            .SeedContextWindow(providerKey: "local", modelName: "big-local", 200000, architecture: "qwen2");
 
-        var root = await ShowAsync(RouterModel, resolver, store);
+        var root = await ShowAsync(modelName: RouterModel, resolver: resolver, store: store);
 
-        Assert.Equal(8192, root.GetProperty("model_info").GetProperty("arcrouter.context_length").GetInt32());
+        Assert.Equal(8192, actual: root.GetProperty("model_info").GetProperty("arcrouter.context_length").GetInt32());
     }
 
     // The provider gate, asserted separately from the model gate: they are distinct config surfaces and a
@@ -148,12 +151,12 @@ public class OllamaShowCapabilitiesTests
             new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" });
 
         var store = new FakeToolCallCapabilityStore()
-            .SeedContextWindow("local", "small-local", 8192, "qwen2")
-            .SeedContextWindow("openai", "gpt-5.4", 128000, "gpt");
+            .SeedContextWindow(providerKey: "local", modelName: "small-local", 8192, architecture: "qwen2")
+            .SeedContextWindow(providerKey: "openai", modelName: "gpt-5.4", 128000, architecture: "gpt");
 
-        var root = await ShowAsync(RouterModel, resolver, store);
+        var root = await ShowAsync(modelName: RouterModel, resolver: resolver, store: store);
 
-        Assert.Equal(8192, root.GetProperty("model_info").GetProperty("arcrouter.context_length").GetInt32());
+        Assert.Equal(8192, actual: root.GetProperty("model_info").GetProperty("arcrouter.context_length").GetInt32());
     }
 
     // Honest rather than convenient: an alias backed by nothing routable can still complete, but cannot
@@ -162,13 +165,20 @@ public class OllamaShowCapabilitiesTests
     public async Task PostOllamaShow_RouterModel_WithNoEligibleModels_DeclaresCompletionOnly()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelEntries(
-            disabledProviders: null,
-            new ModelRouteEntry { ModelName = "only-local", Provider = "local", ProviderModelId = "only-local", PresentUpstream = false });
+            null,
+            new ModelRouteEntry
+            {
+                ModelName = "only-local",
+                Provider = "local",
+                ProviderModelId = "only-local",
+                PresentUpstream = false
+            });
 
-        var root = await ShowAsync(RouterModel, resolver, new FakeToolCallCapabilityStore());
+        var root = await ShowAsync(modelName: RouterModel, resolver: resolver,
+            store: new FakeToolCallCapabilityStore());
 
-        Assert.Equal(["completion"], Capabilities(root));
-        Assert.False(root.TryGetProperty("model_info", out _));
+        Assert.Equal(expectedSpan: ["completion"], actualArray: Capabilities(root));
+        Assert.False(root.TryGetProperty(propertyName: "model_info", value: out _));
     }
 
     // Pins the decision NOT to emit capabilities on /api/tags. Real Ollama publishes them only on
@@ -176,36 +186,40 @@ public class OllamaShowCapabilitiesTests
     [Fact]
     public async Task GetOllamaTags_DoesNotDeclareCapabilities()
     {
-        var middleware = Middleware(ModelList(("gpt-5.4", "openai")), new FakeToolCallCapabilityStore());
+        var middleware = Middleware(resolver: ModelList(("gpt-5.4", "openai")),
+            store: new FakeToolCallCapabilityStore());
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/api/tags";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         var root = ReadBody(context);
         foreach (var entry in root.GetProperty("models").EnumerateArray())
         {
-            Assert.False(entry.TryGetProperty("capabilities", out _));
-            Assert.False(entry.TryGetProperty("model_info", out _));
+            Assert.False(entry.TryGetProperty(propertyName: "capabilities", value: out _));
+            Assert.False(entry.TryGetProperty(propertyName: "model_info", value: out _));
         }
     }
 
-    private static IModelRouteResolver ModelList(params (string ModelName, string Provider)[] models) =>
-        ModelRouteResolverTestFactory.CreateWithModelList(
+    private static IModelRouteResolver ModelList(params (string ModelName, string Provider)[] models)
+    {
+        return ModelRouteResolverTestFactory.CreateWithModelList(
             [.. models.Select(m => (m.ModelName, m.Provider, m.ModelName))]);
+    }
 
     private static ProxyMiddleware Middleware(IModelRouteResolver resolver, FakeToolCallCapabilityStore? store)
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new ThrowingHandler();
 
         return new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CapabilityStore = store,
@@ -217,7 +231,7 @@ public class OllamaShowCapabilitiesTests
     private static async Task<JsonElement> ShowAsync(
         string modelName, IModelRouteResolver resolver, FakeToolCallCapabilityStore? store = null)
     {
-        var middleware = Middleware(resolver, store);
+        var middleware = Middleware(resolver: resolver, store: store);
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -227,26 +241,32 @@ public class OllamaShowCapabilitiesTests
         context.Request.ContentLength = body.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         return ReadBody(context);
     }
 
-    private static string[] Capabilities(JsonElement root) =>
-        [.. root.GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()!)];
+    private static string[] Capabilities(JsonElement root)
+    {
+        return [.. root.GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()!)];
+    }
 
     private static JsonElement ReadBody(HttpContext context)
     {
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         return JsonDocument.Parse(reader.ReadToEnd()).RootElement.Clone();
     }
 
     /// <summary>Fails the test if the proxy forwards upstream; every path here must be answered locally.</summary>
     private sealed class ThrowingHandler : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Upstream must never be called for a locally-answered Ollama endpoint.");
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException(
+                "Upstream must never be called for a locally-answered Ollama endpoint.");
+        }
     }
 }

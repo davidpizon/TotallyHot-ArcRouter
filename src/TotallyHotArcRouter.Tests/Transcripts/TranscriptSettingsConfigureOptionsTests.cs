@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Tests.Transcripts;
 
 /// <summary>
 /// Covers <see cref="TranscriptSettingsConfigureOptions"/>'s precedence contract, mirroring
-/// <see cref="RouterSettingsConfigureOptionsTests"/> for <see cref="RoutingOptions"/>: a stored override
+/// <see cref="TotallyHot.ArcRouter.Tests.Router.RouterSettingsConfigureOptionsTests"/> for <see cref="RoutingOptions"/>: a stored override
 /// beats whatever <c>appsettings.json</c>/the coded default already produced, and an absent stored value
 /// leaves that prior value untouched rather than re-asserting the coded default a second time.
 /// </summary>
@@ -30,7 +30,7 @@ public sealed class TranscriptSettingsConfigureOptionsTests
     public void Configure_StoredEnabledOverride_BeatsWhateverWasAlreadyBound()
     {
         var store = CreateStore();
-        store.SetBool(RouterSettingsStore.TranscriptCaptureEnabledKey, false);
+        store.SetBool(key: RouterSettingsStore.TranscriptCaptureEnabledKey, false);
         var configure = new TranscriptSettingsConfigureOptions(store);
         // Simulates the appsettings.json-bound value the preceding Configure<IConfiguration> step already
         // produced - true, the coded default - which this step must overwrite.
@@ -57,9 +57,11 @@ public sealed class TranscriptSettingsConfigureOptionsTests
 
     private static RouterSettingsStore CreateStore()
     {
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        var dbPath = Path.Combine(tempDirectory, "router_embedding_memory.db");
-        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
-        return new RouterSettingsStore(database, NullLogger<RouterSettingsStore>.Instance);
+        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        var dbPath = Path.Combine(path1: tempDirectory, path2: "router_embedding_memory.db");
+        var database =
+            new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
+        return new RouterSettingsStore(database: database, logger: NullLogger<RouterSettingsStore>.Instance);
     }
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -20,17 +21,14 @@ public static class AnthropicUsageParser
         {
             node = JsonNode.Parse(json);
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return false;
         }
 
-        if (node is not JsonObject obj || obj["usage"] is not JsonObject usageObj)
-        {
-            return false;
-        }
+        if (node is not JsonObject obj || obj["usage"] is not JsonObject usageObj) return false;
 
-        return TryReadTopLevelUsage(usageObj, out usage);
+        return TryReadTopLevelUsage(usageObj: usageObj, usage: out usage);
     }
 
     /// <summary>
@@ -61,49 +59,37 @@ public static class AnthropicUsageParser
 
             switch (type)
             {
-                case "message_start" when evt["message"] is JsonObject message && message["usage"] is JsonObject startUsage:
-                    if (TryGetInt(startUsage, "input_tokens", out var inputTokens))
+                case "message_start"
+                    when evt["message"] is JsonObject message && message["usage"] is JsonObject startUsage:
+                    if (TryGetInt(obj: startUsage, propertyName: "input_tokens", value: out var inputTokens))
                     {
                         promptTokens = inputTokens;
                         haveInput = true;
                     }
-                    if (TryGetInt(startUsage, "output_tokens", out var initialOutputTokens))
-                    {
+
+                    if (TryGetInt(obj: startUsage, propertyName: "output_tokens", value: out var initialOutputTokens))
                         completionTokens = initialOutputTokens;
-                    }
-                    if (TryGetInt(startUsage, "cache_creation_input_tokens", out var startCacheCreation))
-                    {
-                        cacheCreationTokens = startCacheCreation;
-                    }
-                    if (TryGetInt(startUsage, "cache_read_input_tokens", out var startCacheRead))
-                    {
-                        cacheReadTokens = startCacheRead;
-                    }
+                    if (TryGetInt(obj: startUsage, propertyName: "cache_creation_input_tokens",
+                            value: out var startCacheCreation)) cacheCreationTokens = startCacheCreation;
+                    if (TryGetInt(obj: startUsage, propertyName: "cache_read_input_tokens",
+                            value: out var startCacheRead)) cacheReadTokens = startCacheRead;
                     break;
 
                 case "message_delta" when evt["usage"] is JsonObject deltaUsage:
-                    if (TryGetInt(deltaUsage, "output_tokens", out var outputTokens))
-                    {
+                    if (TryGetInt(obj: deltaUsage, propertyName: "output_tokens", value: out var outputTokens))
                         completionTokens = outputTokens;
-                    }
-                    if (TryGetInt(deltaUsage, "cache_creation_input_tokens", out var deltaCacheCreation))
-                    {
-                        cacheCreationTokens = deltaCacheCreation;
-                    }
-                    if (TryGetInt(deltaUsage, "cache_read_input_tokens", out var deltaCacheRead))
-                    {
-                        cacheReadTokens = deltaCacheRead;
-                    }
+                    if (TryGetInt(obj: deltaUsage, propertyName: "cache_creation_input_tokens",
+                            value: out var deltaCacheCreation)) cacheCreationTokens = deltaCacheCreation;
+                    if (TryGetInt(obj: deltaUsage, propertyName: "cache_read_input_tokens",
+                            value: out var deltaCacheRead)) cacheReadTokens = deltaCacheRead;
                     break;
             }
         }
 
-        if (!haveInput)
-        {
-            return false;
-        }
+        if (!haveInput) return false;
 
-        usage = new UsageInfo(promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens);
+        usage = new UsageInfo(PromptTokens: promptTokens, CompletionTokens: completionTokens,
+            CacheCreationTokens: cacheCreationTokens, CacheReadTokens: cacheReadTokens);
         return true;
     }
 
@@ -116,16 +102,15 @@ public static class AnthropicUsageParser
     {
         usage = default;
 
-        if (!TryGetInt(usageObj, "input_tokens", out var inputTokens) ||
-            !TryGetInt(usageObj, "output_tokens", out var outputTokens))
-        {
+        if (!TryGetInt(obj: usageObj, propertyName: "input_tokens", value: out var inputTokens) ||
+            !TryGetInt(obj: usageObj, propertyName: "output_tokens", value: out var outputTokens))
             return false;
-        }
 
-        TryGetInt(usageObj, "cache_creation_input_tokens", out var cacheCreationTokens);
-        TryGetInt(usageObj, "cache_read_input_tokens", out var cacheReadTokens);
+        TryGetInt(obj: usageObj, propertyName: "cache_creation_input_tokens", value: out var cacheCreationTokens);
+        TryGetInt(obj: usageObj, propertyName: "cache_read_input_tokens", value: out var cacheReadTokens);
 
-        usage = new UsageInfo(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens);
+        usage = new UsageInfo(PromptTokens: inputTokens, CompletionTokens: outputTokens,
+            CacheCreationTokens: cacheCreationTokens, CacheReadTokens: cacheReadTokens);
         return true;
     }
 
@@ -138,4 +123,3 @@ public static class AnthropicUsageParser
         return obj[propertyName] is JsonValue jsonValue && jsonValue.TryGetValue(out value);
     }
 }
-

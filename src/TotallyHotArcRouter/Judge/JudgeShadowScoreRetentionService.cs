@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Judge;
@@ -16,8 +14,8 @@ public sealed class JudgeShadowScoreRetentionService : BackgroundService
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<JudgeShadowScoreRetentionService> _logger;
-    private readonly IJudgeShadowScoreStore _store;
     private readonly IOptionsMonitor<JudgeOptions> _options;
+    private readonly IJudgeShadowScoreStore _store;
 
     /// <summary>Initializes a new instance of the <see cref="JudgeShadowScoreRetentionService"/> class.</summary>
     /// <param name="logger">The logger.</param>
@@ -37,7 +35,7 @@ public sealed class JudgeShadowScoreRetentionService : BackgroundService
         _options = options;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // The loop always runs and each cycle re-checks Enabled (see CheckAndPurgeAsync). Exiting here when
@@ -54,10 +52,10 @@ public sealed class JudgeShadowScoreRetentionService : BackgroundService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Shadow judge retention check threw unexpectedly; continuing.");
+                    _logger.LogError(exception: ex,
+                        message: "Shadow judge retention check threw unexpectedly; continuing.");
                 }
-            }
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException)
         {
@@ -73,32 +71,29 @@ public sealed class JudgeShadowScoreRetentionService : BackgroundService
     /// <param name="cancellationToken">A cancellation token.</param>
     internal async Task CheckAndPurgeAsync(CancellationToken cancellationToken)
     {
-        if (!_options.CurrentValue.Enabled)
-        {
-            return;
-        }
+        if (!_options.CurrentValue.Enabled) return;
 
         var rowCount = await _store.GetRowCountAsync(cancellationToken).ConfigureAwait(false);
         var deletedByOverage = 0;
-        var deletedByAge = 0;
 
         // First, enforce the max-rows bound by deleting oldest-first if over the limit.
         if (rowCount > _options.CurrentValue.MaxRows)
         {
             var overageCount = rowCount - _options.CurrentValue.MaxRows;
-            deletedByOverage = await _store.DeleteOldestAsync(overageCount, cancellationToken).ConfigureAwait(false);
+            deletedByOverage = await _store.DeleteOldestAsync(count: overageCount, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // Then, delete rows past the retention age.
         var cutoffTime = DateTimeOffset.UtcNow - TimeSpan.FromDays(_options.CurrentValue.RetentionDays);
-        deletedByAge = await _store.DeleteBeforeAsync(cutoffTime, cancellationToken).ConfigureAwait(false);
+        var deletedByAge = await _store.DeleteBeforeAsync(cutoff: cutoffTime, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
 
         if (deletedByOverage > 0 || deletedByAge > 0)
-        {
             _logger.LogInformation(
+                message:
                 "Shadow judge retention purge complete: {DeletedByOverage} rows deleted by overage, {DeletedByAge} rows deleted by age.",
                 deletedByOverage,
                 deletedByAge);
-        }
     }
 }

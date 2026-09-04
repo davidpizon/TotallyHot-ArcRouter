@@ -1,5 +1,3 @@
-using System;
-
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>
@@ -9,7 +7,10 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// </summary>
 internal static class LogRedaction
 {
-    /// <summary>Caps the length of a full request/response body before it is placed in a Debug-level log message, so an unbounded payload never floods a text log sink. Applied on top of <see cref="Sanitize"/>, never in place of it.</summary>
+    /// <summary>
+    /// Caps the length of a full request/response body before it is placed in a Debug-level log message, so an
+    /// unbounded payload never floods a text log sink. Applied on top of <see cref="Sanitize"/>, never in place of it.
+    /// </summary>
     private const int MaxLoggedBodyLength = 4000;
 
     /// <summary>
@@ -21,12 +22,16 @@ internal static class LogRedaction
     /// - rather than e.g. a hand-rolled character loop - is the sanitizer shape CodeQL's data-flow
     /// analysis recognizes as breaking the taint path from source to sink.
     /// </summary>
-    public static string Sanitize(string? value) =>
-        value?.Replace("\r", " ").Replace("\n", " ") ?? string.Empty;
+    public static string Sanitize(string? value)
+    {
+        return value?.Replace(oldValue: "\r", newValue: " ").Replace(oldValue: "\n", newValue: " ") ?? string.Empty;
+    }
 
     /// <summary>Truncates an already-sanitized value to <see cref="MaxLoggedBodyLength"/>, appending a marker when it was cut.</summary>
-    public static string Truncate(string value) =>
-        value.Length <= MaxLoggedBodyLength
+    public static string Truncate(string value)
+    {
+        return value.Length <= MaxLoggedBodyLength
             ? value
-            : string.Concat(value.AsSpan(0, MaxLoggedBodyLength), "...[truncated]");
+            : string.Concat(str0: value.AsSpan(0, length: MaxLoggedBodyLength), str1: "...[truncated]");
+    }
 }

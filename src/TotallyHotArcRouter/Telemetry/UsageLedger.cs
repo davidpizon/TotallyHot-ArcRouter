@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -53,7 +52,7 @@ public interface IUsageLedger
     decimal SumEstimatedCostUsd(string provider, DateTimeOffset fromUtc, DateTimeOffset toUtc);
 }
 
-/// <inheritdoc cref="IUsageLedger" />
+/// <inheritdoc cref="IUsageLedger"/>
 public sealed class UsageLedger : IUsageLedger
 {
     // Same round-trip UTC ISO 8601 layout as PriceCatalogRepositoryBase.TimestampFormat, so lexicographic TEXT
@@ -72,8 +71,8 @@ public sealed class UsageLedger : IUsageLedger
     private static readonly TimeSpan FutureClockTolerance = TimeSpan.FromMinutes(5);
 
     private readonly PriceCatalogDatabase _database;
-    private readonly IUsageRollupStore? _rollupStore;
     private readonly ILogger<UsageLedger>? _logger;
+    private readonly IUsageRollupStore? _rollupStore;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="UsageLedger"/> class.
@@ -86,7 +85,8 @@ public sealed class UsageLedger : IUsageLedger
     /// still durably recorded but rollups only catch up on the next startup backfill.
     /// </param>
     /// <param name="logger">Optional logger.</param>
-    public UsageLedger(PriceCatalogDatabase database, IUsageRollupStore? rollupStore = null, ILogger<UsageLedger>? logger = null)
+    public UsageLedger(PriceCatalogDatabase database, IUsageRollupStore? rollupStore = null,
+        ILogger<UsageLedger>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         _database = database;
@@ -94,64 +94,70 @@ public sealed class UsageLedger : IUsageLedger
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task RecordAsync(UsageLedgerEntry entry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
         if (cancellationToken.IsCancellationRequested)
-        {
             // The request was aborted (ProxyMiddleware passes the request token to callers that choose to
             // observe it). Recording is a best-effort post-response side-effect, so a cancellation here is
             // expected, not an error - mirrors ProviderBudgetStore.RecordUsageAsync's OperationCanceledException
             // handling.
             return;
-        }
 
-        if (!TryValidate(entry, out var rejectionReason))
+        if (!TryValidate(entry: entry, reason: out var rejectionReason))
         {
             _logger?.LogWarning(
-                "Dropped usage-ledger entry for session {SessionId} turn {TurnNumber}: {Reason}.",
+                message: "Dropped usage-ledger entry for session {SessionId} turn {TurnNumber}: {Reason}.",
                 SanitizeForLog(entry.SessionId),
                 entry.TurnNumber,
                 rejectionReason);
             return;
         }
 
-        var inserted = false;
+        // Not initialized: every path that reaches the `if (inserted ...)` below has run the
+        // ExecuteNonQuery assignment at the end of the try, because the catch returns.
+        bool inserted;
         try
         {
             var dedupKey = BuildDedupKey(entry);
-            var occurredAt = entry.OccurredAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+            var occurredAt =
+                entry.OccurredAtUtc.UtcDateTime.ToString(format: TimestampFormat,
+                    provider: CultureInfo.InvariantCulture);
 
-            using var connection = _database.OpenConnection();
-            using var command = connection.CreateCommand();
+            await using var connection = _database.OpenConnection();
+            await using var command = connection.CreateCommand();
             command.CommandText = """
-                INSERT INTO usage_ledger (
-                    dedup_key, session_id, turn_number, provider, requested_model, resolved_model,
-                    prompt_tokens, completion_tokens, cache_creation_tokens, cache_read_tokens,
-                    estimated_cost_usd, cost_confidence, occurred_at_utc)
-                VALUES (
-                    $dedupKey, $sessionId, $turnNumber, $provider, $requestedModel, $resolvedModel,
-                    $promptTokens, $completionTokens, $cacheCreationTokens, $cacheReadTokens,
-                    $estimatedCostUsd, $costConfidence, $occurredAt)
-                ON CONFLICT(dedup_key) DO NOTHING;
-                """;
-            command.Parameters.AddWithValue("$dedupKey", dedupKey);
-            command.Parameters.AddWithValue("$sessionId", entry.SessionId);
-            command.Parameters.AddWithValue("$turnNumber", entry.TurnNumber);
-            command.Parameters.AddWithValue("$provider", entry.Provider);
-            command.Parameters.AddWithValue("$requestedModel", entry.RequestedModel);
-            command.Parameters.AddWithValue("$resolvedModel", entry.ResolvedModel);
-            command.Parameters.AddWithValue("$promptTokens", (object?)entry.PromptTokens ?? DBNull.Value);
-            command.Parameters.AddWithValue("$completionTokens", (object?)entry.CompletionTokens ?? DBNull.Value);
-            command.Parameters.AddWithValue("$cacheCreationTokens", (object?)entry.CacheCreationTokens ?? DBNull.Value);
-            command.Parameters.AddWithValue("$cacheReadTokens", (object?)entry.CacheReadTokens ?? DBNull.Value);
+                                  INSERT INTO usage_ledger (
+                                      dedup_key, session_id, turn_number, provider, requested_model, resolved_model,
+                                      prompt_tokens, completion_tokens, cache_creation_tokens, cache_read_tokens,
+                                      estimated_cost_usd, cost_confidence, occurred_at_utc)
+                                  VALUES (
+                                      $dedupKey, $sessionId, $turnNumber, $provider, $requestedModel, $resolvedModel,
+                                      $promptTokens, $completionTokens, $cacheCreationTokens, $cacheReadTokens,
+                                      $estimatedCostUsd, $costConfidence, $occurredAt)
+                                  ON CONFLICT(dedup_key) DO NOTHING;
+                                  """;
+            command.Parameters.AddWithValue(parameterName: "$dedupKey", value: dedupKey);
+            command.Parameters.AddWithValue(parameterName: "$sessionId", value: entry.SessionId);
+            command.Parameters.AddWithValue(parameterName: "$turnNumber", value: entry.TurnNumber);
+            command.Parameters.AddWithValue(parameterName: "$provider", value: entry.Provider);
+            command.Parameters.AddWithValue(parameterName: "$requestedModel", value: entry.RequestedModel);
+            command.Parameters.AddWithValue(parameterName: "$resolvedModel", value: entry.ResolvedModel);
+            command.Parameters.AddWithValue(parameterName: "$promptTokens",
+                value: (object?)entry.PromptTokens ?? DBNull.Value);
+            command.Parameters.AddWithValue(parameterName: "$completionTokens",
+                value: (object?)entry.CompletionTokens ?? DBNull.Value);
+            command.Parameters.AddWithValue(parameterName: "$cacheCreationTokens",
+                value: (object?)entry.CacheCreationTokens ?? DBNull.Value);
+            command.Parameters.AddWithValue(parameterName: "$cacheReadTokens",
+                value: (object?)entry.CacheReadTokens ?? DBNull.Value);
             command.Parameters.AddWithValue(
-                "$estimatedCostUsd",
-                entry.EstimatedCostUsd is { } cost ? cost.ToString(CultureInfo.InvariantCulture) : (object)DBNull.Value);
-            command.Parameters.AddWithValue("$costConfidence", entry.CostConfidence.ToString());
-            command.Parameters.AddWithValue("$occurredAt", occurredAt);
+                parameterName: "$estimatedCostUsd",
+                value: entry.EstimatedCostUsd is { } cost ? cost.ToString(CultureInfo.InvariantCulture) : DBNull.Value);
+            command.Parameters.AddWithValue(parameterName: "$costConfidence", value: entry.CostConfidence.ToString());
+            command.Parameters.AddWithValue(parameterName: "$occurredAt", value: occurredAt);
 
             // A DO NOTHING conflict returns 0 rows affected, distinguishing a fresh row (roll it into
             // usage_rollup) from a replay of an already-recorded request (already rolled up the first time).
@@ -160,22 +166,20 @@ public sealed class UsageLedger : IUsageLedger
         catch (Exception ex)
         {
             _logger?.LogWarning(
-                ex,
-                "Failed to record usage-ledger entry for session {SessionId} turn {TurnNumber}.",
+                exception: ex,
+                message: "Failed to record usage-ledger entry for session {SessionId} turn {TurnNumber}.",
                 SanitizeForLog(entry.SessionId),
                 entry.TurnNumber);
             return;
         }
 
         if (inserted && _rollupStore is not null)
-        {
             // Best-effort and self-contained: RollForwardAsync already logs and swallows its own failures,
             // so a rollup hiccup never turns a successful ledger write into a warning about the write itself.
             await _rollupStore.RollForwardAsync(CancellationToken.None).ConfigureAwait(false);
-        }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public int GetMaxTurnNumber(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -183,25 +187,25 @@ public sealed class UsageLedger : IUsageLedger
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT MAX(turn_number) FROM usage_ledger WHERE session_id = $sessionId;";
-        command.Parameters.AddWithValue("$sessionId", sessionId);
+        command.Parameters.AddWithValue(parameterName: "$sessionId", value: sessionId);
 
         var result = command.ExecuteScalar();
-        return result is null or DBNull ? 0 : Convert.ToInt32(result, CultureInfo.InvariantCulture);
+        return result is null or DBNull ? 0 : Convert.ToInt32(value: result, provider: CultureInfo.InvariantCulture);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public int DeleteOlderThan(DateTimeOffset cutoffUtc)
     {
-        var cutoff = cutoffUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+        var cutoff = cutoffUtc.UtcDateTime.ToString(format: TimestampFormat, provider: CultureInfo.InvariantCulture);
 
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM usage_ledger WHERE occurred_at_utc < $cutoff;";
-        command.Parameters.AddWithValue("$cutoff", cutoff);
+        command.Parameters.AddWithValue(parameterName: "$cutoff", value: cutoff);
         return command.ExecuteNonQuery();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public decimal SumEstimatedCostUsd(string provider, DateTimeOffset fromUtc, DateTimeOffset toUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(provider);
@@ -209,23 +213,22 @@ public sealed class UsageLedger : IUsageLedger
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT estimated_cost_usd FROM usage_ledger
-            WHERE provider = $provider AND occurred_at_utc >= $from AND occurred_at_utc < $to
-              AND estimated_cost_usd IS NOT NULL;
-            """;
-        command.Parameters.AddWithValue("$provider", provider);
-        command.Parameters.AddWithValue("$from", fromUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture));
-        command.Parameters.AddWithValue("$to", toUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture));
+                              SELECT estimated_cost_usd FROM usage_ledger
+                              WHERE provider = $provider AND occurred_at_utc >= $from AND occurred_at_utc < $to
+                                AND estimated_cost_usd IS NOT NULL;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$provider", value: provider);
+        command.Parameters.AddWithValue(parameterName: "$from",
+            value: fromUtc.UtcDateTime.ToString(format: TimestampFormat, provider: CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue(parameterName: "$to",
+            value: toUtc.UtcDateTime.ToString(format: TimestampFormat, provider: CultureInfo.InvariantCulture));
 
         // Summed in .NET rather than SQLite's own SUM(): estimated_cost_usd is stored as TEXT (decimal
         // precision would be lost round-tripping through SQLite's REAL), matching every other money column
         // in this database - see the class remarks on estimated_cost_usd's storage.
         var total = 0m;
         using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            total += decimal.Parse(reader.GetString(0), CultureInfo.InvariantCulture);
-        }
+        while (reader.Read()) total += decimal.Parse(s: reader.GetString(0), provider: CultureInfo.InvariantCulture);
 
         return total;
     }
@@ -274,21 +277,22 @@ public sealed class UsageLedger : IUsageLedger
     private static string BuildDedupKey(UsageLedgerEntry entry)
     {
         if (!string.IsNullOrWhiteSpace(entry.RequestId))
-        {
             return FormattableString.Invariant($"req:{entry.Provider}:{entry.RequestId}");
-        }
 
-        var secondTruncated = entry.OccurredAtUtc.UtcDateTime.ToString(CompositeTimestampFormat, CultureInfo.InvariantCulture);
+        var secondTruncated = entry.OccurredAtUtc.UtcDateTime.ToString(format: CompositeTimestampFormat,
+            provider: CultureInfo.InvariantCulture);
         var composite = FormattableString.Invariant($"""
-            {entry.SessionId}|{entry.TurnNumber}|{entry.Provider}|{entry.RequestedModel}|
-            {entry.PromptTokens}|{entry.CompletionTokens}|{entry.CacheCreationTokens}|{entry.CacheReadTokens}|
-            {secondTruncated}
-            """);
+                                                     {entry.SessionId}|{entry.TurnNumber}|{entry.Provider}|{entry.RequestedModel}|
+                                                     {entry.PromptTokens}|{entry.CompletionTokens}|{entry.CacheCreationTokens}|{entry.CacheReadTokens}|
+                                                     {secondTruncated}
+                                                     """);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(composite));
         return FormattableString.Invariant($"composite:{Convert.ToHexString(hash)}");
     }
 
     /// <summary>Strips CR/LF from a client-controlled session id so it cannot forge additional log lines.</summary>
-    private static string SanitizeForLog(string value) =>
-        value.Replace("\r", " ").Replace("\n", " ");
+    private static string SanitizeForLog(string value)
+    {
+        return value.Replace(oldValue: "\r", newValue: " ").Replace(oldValue: "\n", newValue: " ");
+    }
 }

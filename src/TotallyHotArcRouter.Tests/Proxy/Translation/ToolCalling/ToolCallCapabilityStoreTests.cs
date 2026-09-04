@@ -1,4 +1,4 @@
-using TotallyHot.ArcRouter.PriceCatalog;
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 
@@ -8,7 +8,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// Coverage for the tool-call capability store (<c>docs/router/tool-call-normalization.md</c> Phase 1):
 /// round-trip persistence, the confidence gate that decides which classification wins, and the cache
 /// invalidation that keeps the request path from serving a stale dialect.
-///
 /// <para>
 /// The confidence cases are the ones that carry real weight. If a cheap startup heuristic could overwrite
 /// something learned from a live response, detection would oscillate; if any automatic tier could overwrite
@@ -27,7 +26,7 @@ public class ToolCallCapabilityStoreTests
 
         // Null is the signal Phase 4 uses to mean "forward natively and arm the union scanner", so an
         // unknown model must read as null rather than as some default dialect.
-        Assert.Null(store.GetModelCapability("lmstudio", "qwen2.5.1-coder-7b-instruct"));
+        Assert.Null(store.GetModelCapability(providerKey: "lmstudio", modelName: "qwen2.5.1-coder-7b-instruct"));
     }
 
     [Fact]
@@ -35,25 +34,25 @@ public class ToolCallCapabilityStoreTests
     {
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
-        var detectedAt = new DateTimeOffset(2026, 7, 30, 12, 0, 0, TimeSpan.Zero);
+        var detectedAt = new DateTimeOffset(2026, 7, 30, 12, 0, 0, offset: TimeSpan.Zero);
 
         Assert.True(store.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio",
-            "qwen2.5.1-coder-7b-instruct",
-            "hermes",
-            DetectionConfidence.Observed,
+            ProviderKey: "lmstudio",
+            ModelName: "qwen2.5.1-coder-7b-instruct",
+            Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed,
             Evidence: "matched <tool_call>",
-            ObservationCount: 3,
+            3,
             DetectedAtUtc: detectedAt)));
 
-        var stored = store.GetModelCapability("lmstudio", "qwen2.5.1-coder-7b-instruct");
+        var stored = store.GetModelCapability(providerKey: "lmstudio", modelName: "qwen2.5.1-coder-7b-instruct");
 
         Assert.NotNull(stored);
-        Assert.Equal("hermes", stored!.Dialect);
-        Assert.Equal(DetectionConfidence.Observed, stored.Confidence);
-        Assert.Equal("matched <tool_call>", stored.Evidence);
-        Assert.Equal(3, stored.ObservationCount);
-        Assert.Equal(detectedAt, stored.DetectedAtUtc);
+        Assert.Equal(expected: "hermes", actual: stored.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Observed, actual: stored.Confidence);
+        Assert.Equal(expected: "matched <tool_call>", actual: stored.Evidence);
+        Assert.Equal(3, actual: stored.ObservationCount);
+        Assert.Equal(expected: detectedAt, actual: stored.DetectedAtUtc);
     }
 
     [Fact]
@@ -66,10 +65,11 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.TryRecordModelCapability(new ModelToolCapability(
-            "LMStudio", "Qwen2.5-Coder", "hermes", DetectionConfidence.Template));
+            ProviderKey: "LMStudio", ModelName: "Qwen2.5-Coder", Dialect: "hermes",
+            Confidence: DetectionConfidence.Template));
 
-        Assert.NotNull(store.GetModelCapability("lmstudio", "qwen2.5-coder"));
-        Assert.NotNull(store.GetModelCapability("LMSTUDIO", "QWEN2.5-CODER"));
+        Assert.NotNull(store.GetModelCapability(providerKey: "lmstudio", modelName: "qwen2.5-coder"));
+        Assert.NotNull(store.GetModelCapability(providerKey: "LMSTUDIO", modelName: "QWEN2.5-CODER"));
     }
 
     [Fact]
@@ -81,12 +81,16 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "shared-model", "hermes", DetectionConfidence.Observed));
+            ProviderKey: "lmstudio", ModelName: "shared-model", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed));
         store.TryRecordModelCapability(new ModelToolCapability(
-            "ollama", "shared-model", "mistral", DetectionConfidence.Observed));
+            ProviderKey: "ollama", ModelName: "shared-model", Dialect: "mistral",
+            Confidence: DetectionConfidence.Observed));
 
-        Assert.Equal("hermes", store.GetModelCapability("lmstudio", "shared-model")!.Dialect);
-        Assert.Equal("mistral", store.GetModelCapability("ollama", "shared-model")!.Dialect);
+        Assert.Equal(expected: "hermes",
+            actual: store.GetModelCapability(providerKey: "lmstudio", modelName: "shared-model")!.Dialect);
+        Assert.Equal(expected: "mistral",
+            actual: store.GetModelCapability(providerKey: "ollama", modelName: "shared-model")!.Dialect);
     }
 
     // ----- The confidence gate -----
@@ -101,11 +105,14 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", existing));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: existing));
 
-        Assert.True(store.TryRecordModelCapability(new ModelToolCapability("p", "m", "mistral", incoming)));
-        Assert.Equal("mistral", store.GetModelCapability("p", "m")!.Dialect);
-        Assert.Equal(incoming, store.GetModelCapability("p", "m")!.Confidence);
+        Assert.True(store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m",
+            Dialect: "mistral", Confidence: incoming)));
+        Assert.Equal(expected: "mistral", actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Dialect);
+        Assert.Equal(expected: incoming,
+            actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Confidence);
     }
 
     [Theory]
@@ -119,11 +126,14 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", existing));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: existing));
 
-        Assert.False(store.TryRecordModelCapability(new ModelToolCapability("p", "m", "mistral", incoming)));
-        Assert.Equal("hermes", store.GetModelCapability("p", "m")!.Dialect);
-        Assert.Equal(existing, store.GetModelCapability("p", "m")!.Confidence);
+        Assert.False(store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m",
+            Dialect: "mistral", Confidence: incoming)));
+        Assert.Equal(expected: "hermes", actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Dialect);
+        Assert.Equal(expected: existing,
+            actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Confidence);
     }
 
     [Theory]
@@ -138,10 +148,12 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.TryRecordModelCapability(new ModelToolCapability(
-            "p", "m", "openai-native", DetectionConfidence.Operator));
+            ProviderKey: "p", ModelName: "m", Dialect: "openai-native", Confidence: DetectionConfidence.Operator));
 
-        Assert.False(store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", automatic)));
-        Assert.Equal("openai-native", store.GetModelCapability("p", "m")!.Dialect);
+        Assert.False(store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m",
+            Dialect: "hermes", Confidence: automatic)));
+        Assert.Equal(expected: "openai-native",
+            actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Dialect);
     }
 
     [Fact]
@@ -152,11 +164,12 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Operator));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: DetectionConfidence.Operator));
 
         Assert.True(store.TryRecordModelCapability(new ModelToolCapability(
-            "p", "m", "mistral", DetectionConfidence.Operator)));
-        Assert.Equal("mistral", store.GetModelCapability("p", "m")!.Dialect);
+            ProviderKey: "p", ModelName: "m", Dialect: "mistral", Confidence: DetectionConfidence.Operator)));
+        Assert.Equal(expected: "mistral", actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Dialect);
     }
 
     [Fact]
@@ -165,11 +178,12 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Observed));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed));
 
         Assert.True(store.TryRecordModelCapability(new ModelToolCapability(
-            "p", "m", "mistral", DetectionConfidence.Observed)));
-        Assert.Equal("mistral", store.GetModelCapability("p", "m")!.Dialect);
+            ProviderKey: "p", ModelName: "m", Dialect: "mistral", Confidence: DetectionConfidence.Observed)));
+        Assert.Equal(expected: "mistral", actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Dialect);
     }
 
     // ----- Cache behavior -----
@@ -181,16 +195,17 @@ public class ToolCallCapabilityStoreTests
         // empty on purpose. "Unknown" is the safe direction - it means forward natively and observe.
         using var temp = new TempDatabase();
         var seeded = temp.CreateToolCallCapabilityStore();
-        seeded.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Observed));
+        seeded.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed));
 
         var fresh = new ToolCallCapabilityStore(
-            new ToolCallCapabilityRepository(temp.Database),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ToolCallCapabilityStore>.Instance);
+            repository: new ToolCallCapabilityRepository(temp.Database),
+            logger: NullLogger<ToolCallCapabilityStore>.Instance);
 
-        Assert.Null(fresh.GetModelCapability("p", "m"));
+        Assert.Null(fresh.GetModelCapability(providerKey: "p", modelName: "m"));
 
         fresh.Reload();
-        Assert.NotNull(fresh.GetModelCapability("p", "m"));
+        Assert.NotNull(fresh.GetModelCapability(providerKey: "p", modelName: "m"));
     }
 
     [Fact]
@@ -201,10 +216,12 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Operator));
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "mistral", DetectionConfidence.Heuristic));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: DetectionConfidence.Operator));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "mistral",
+            Confidence: DetectionConfidence.Heuristic));
 
-        Assert.Equal("hermes", store.GetModelCapability("p", "m")!.Dialect);
+        Assert.Equal(expected: "hermes", actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Dialect);
     }
 
     [Fact]
@@ -220,25 +237,27 @@ public class ToolCallCapabilityStoreTests
         // Pin written through one store, standing in for an out-of-band edit.
         var operatorSession = temp.CreateToolCallCapabilityStore();
         operatorSession.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "qwen2.5-coder", "openai-native", DetectionConfidence.Operator));
+            ProviderKey: "lmstudio", ModelName: "qwen2.5-coder", Dialect: "openai-native",
+            Confidence: DetectionConfidence.Operator));
 
         // A second store that has never seen that write - its snapshot is empty, exactly like a running
         // process whose cache predates the edit.
         var running = new ToolCallCapabilityStore(
-            new ToolCallCapabilityRepository(temp.Database),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ToolCallCapabilityStore>.Instance);
+            repository: new ToolCallCapabilityRepository(temp.Database),
+            logger: NullLogger<ToolCallCapabilityStore>.Instance);
 
-        Assert.Null(running.GetModelCapability("lmstudio", "qwen2.5-coder"));
+        Assert.Null(running.GetModelCapability(providerKey: "lmstudio", modelName: "qwen2.5-coder"));
 
         // The request path observes the model and tries to record it; the gate rejects the write.
         Assert.False(running.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "qwen2.5-coder", "hermes", DetectionConfidence.Observed)));
+            ProviderKey: "lmstudio", ModelName: "qwen2.5-coder", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed)));
 
         // The rejection must have taught the cache about the pin, so the caller stops re-recording.
-        var visible = running.GetModelCapability("lmstudio", "qwen2.5-coder");
+        var visible = running.GetModelCapability(providerKey: "lmstudio", modelName: "qwen2.5-coder");
         Assert.NotNull(visible);
-        Assert.Equal("openai-native", visible!.Dialect);
-        Assert.Equal(DetectionConfidence.Operator, visible.Confidence);
+        Assert.Equal(expected: "openai-native", actual: visible.Dialect);
+        Assert.Equal(expected: DetectionConfidence.Operator, actual: visible.Confidence);
     }
 
     [Fact]
@@ -249,11 +268,13 @@ public class ToolCallCapabilityStoreTests
         var raised = 0;
         store.Changed += () => raised++;
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Operator));
-        Assert.Equal(1, raised);
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: DetectionConfidence.Operator));
+        Assert.Equal(1, actual: raised);
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "mistral", DetectionConfidence.Heuristic));
-        Assert.Equal(1, raised);
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "mistral",
+            Confidence: DetectionConfidence.Heuristic));
+        Assert.Equal(1, actual: raised);
     }
 
     // ----- Evidence handling -----
@@ -268,9 +289,10 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.TryRecordModelCapability(new ModelToolCapability(
-            "p", "m", "hermes", DetectionConfidence.Observed, Evidence: new string('x', 5_000)));
+            ProviderKey: "p", ModelName: "m", Dialect: "hermes", Confidence: DetectionConfidence.Observed,
+            Evidence: new string('x', 5_000)));
 
-        Assert.Equal(200, store.GetModelCapability("p", "m")!.Evidence!.Length);
+        Assert.Equal(200, actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.Evidence!.Length);
     }
 
     [Fact]
@@ -280,9 +302,10 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
         var before = DateTimeOffset.UtcNow.AddSeconds(-1);
 
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Observed));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed));
 
-        Assert.True(store.GetModelCapability("p", "m")!.DetectedAtUtc >= before);
+        Assert.True(store.GetModelCapability(providerKey: "p", modelName: "m")!.DetectedAtUtc >= before);
     }
 
     // ----- Provider endpoint capabilities -----
@@ -303,18 +326,18 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.SetProviderCapabilities(new ProviderEndpointCapabilities(
-            "lmstudio",
-            OpenAiCompatible: true,
-            LmStudioNative: true,
-            OllamaNative: false,
-            AnthropicCompatible: false,
-            JsonSchemaResponseFormat: true,
+            ProviderKey: "lmstudio",
+            true,
+            true,
+            false,
+            false,
+            true,
             ScannedAtUtc: DateTimeOffset.UtcNow));
 
         var stored = store.GetProviderCapabilities("LMSTUDIO");
 
         Assert.NotNull(stored);
-        Assert.True(stored!.OpenAiCompatible);
+        Assert.True(stored.OpenAiCompatible);
         Assert.True(stored.LmStudioNative);
         Assert.False(stored.OllamaNative);
         Assert.False(stored.AnthropicCompatible);
@@ -331,14 +354,15 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.SetProviderCapabilities(new ProviderEndpointCapabilities(
-            "p", true, true, true, true, true, DateTimeOffset.UtcNow));
+            ProviderKey: "p", true, true, true, true, true, ScannedAtUtc: DateTimeOffset.UtcNow));
         store.SetProviderCapabilities(new ProviderEndpointCapabilities(
-            "p", false, false, false, false, false, DateTimeOffset.UtcNow, ScanError: "connection refused"));
+            ProviderKey: "p", false, false, false, false, false, ScannedAtUtc: DateTimeOffset.UtcNow,
+            ScanError: "connection refused"));
 
         var stored = store.GetProviderCapabilities("p");
         Assert.False(stored!.OpenAiCompatible);
         Assert.False(stored.JsonSchemaResponseFormat);
-        Assert.Equal("connection refused", stored.ScanError);
+        Assert.Equal(expected: "connection refused", actual: stored.ScanError);
     }
 
     // ----- ObservationCount is the database's to increment, not the caller's -----
@@ -353,12 +377,11 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         for (var i = 0; i < 3; i++)
-        {
             Assert.True(store.TryRecordModelCapability(new ModelToolCapability(
-                "lmstudio", "qwen", "hermes", DetectionConfidence.Observed, ObservationCount: 1)));
-        }
+                ProviderKey: "lmstudio", ModelName: "qwen", Dialect: "hermes", Confidence: DetectionConfidence.Observed,
+                ObservationCount: 1)));
 
-        Assert.Equal(3, store.GetModelCapability("lmstudio", "qwen")!.ObservationCount);
+        Assert.Equal(3, actual: store.GetModelCapability(providerKey: "lmstudio", modelName: "qwen")!.ObservationCount);
     }
 
     [Fact]
@@ -370,13 +393,15 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "qwen", "hermes", DetectionConfidence.Heuristic, ObservationCount: 5));
+            ProviderKey: "lmstudio", ModelName: "qwen", Dialect: "hermes", Confidence: DetectionConfidence.Heuristic,
+            ObservationCount: 5));
         store.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "qwen", "mistral", DetectionConfidence.Heuristic, ObservationCount: 0));
+            ProviderKey: "lmstudio", ModelName: "qwen", Dialect: "mistral", Confidence: DetectionConfidence.Heuristic,
+            ObservationCount: 0));
 
-        var stored = store.GetModelCapability("lmstudio", "qwen")!;
-        Assert.Equal("mistral", stored.Dialect);
-        Assert.Equal(5, stored.ObservationCount);
+        var stored = store.GetModelCapability(providerKey: "lmstudio", modelName: "qwen")!;
+        Assert.Equal(expected: "mistral", actual: stored.Dialect);
+        Assert.Equal(5, actual: stored.ObservationCount);
     }
 
     // ----- ObservationCount at both trust boundaries -----
@@ -390,33 +415,36 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => store.TryRecordModelCapability(
-            new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Observed, ObservationCount: -1)));
+            new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+                Confidence: DetectionConfidence.Observed, ObservationCount: -1)));
     }
 
     [Theory]
-    [InlineData(-5L, 0)]                    // corrupted negative
+    [InlineData(-5L, 0)] // corrupted negative
     [InlineData(3_000_000_000L, int.MaxValue)] // beyond int range; an unchecked cast would wrap negative
-    [InlineData(7L, 7)]                     // ordinary value passes through
+    [InlineData(7L, 7)] // ordinary value passes through
     public void AnOutOfRangeObservationCountOnDisk_IsClampedRatherThanWrapped(long stored, int expected)
     {
         // SQLite INTEGER is 64-bit, so a hand-edited row can hold what no int can represent. Degrading here
         // matches how ParseTimestamp and ParseConfidence already treat unparseable stored values.
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
-        store.TryRecordModelCapability(new ModelToolCapability("p", "m", "hermes", DetectionConfidence.Observed));
+        store.TryRecordModelCapability(new ModelToolCapability(ProviderKey: "p", ModelName: "m", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed));
 
         using (var connection = temp.Database.OpenConnection())
         using (var command = connection.CreateCommand())
         {
             command.CommandText =
                 "UPDATE model_tool_capabilities SET observation_count = $count WHERE provider_key = 'p';";
-            command.Parameters.AddWithValue("$count", stored);
+            command.Parameters.AddWithValue(parameterName: "$count", value: stored);
             command.ExecuteNonQuery();
         }
 
         store.Reload();
 
-        Assert.Equal(expected, store.GetModelCapability("p", "m")!.ObservationCount);
+        Assert.Equal(expected: expected,
+            actual: store.GetModelCapability(providerKey: "p", modelName: "m")!.ObservationCount);
     }
 
     // ----- The composite key -----
@@ -435,19 +463,19 @@ public class ToolCallCapabilityStoreTests
 
         var map = new Dictionary<ModelCapabilityKey, string> { [key] = "value" };
 
-        Assert.Equal("value", map[default]);
+        Assert.Equal(expected: "value", actual: map[default]);
         Assert.True(key.Equals(default));
-        Assert.Equal(key.GetHashCode(), default(ModelCapabilityKey).GetHashCode());
+        Assert.Equal(expected: key.GetHashCode(), actual: default(ModelCapabilityKey).GetHashCode());
     }
 
     [Fact]
     public void ModelCapabilityKey_EqualityAndHashing_AreCaseInsensitiveOnBothHalves()
     {
-        var lower = new ModelCapabilityKey("lmstudio", "qwen");
-        var upper = new ModelCapabilityKey("LMStudio", "QWEN");
+        var lower = new ModelCapabilityKey(providerKey: "lmstudio", modelName: "qwen");
+        var upper = new ModelCapabilityKey(providerKey: "LMStudio", modelName: "QWEN");
 
-        Assert.Equal(lower, upper);
-        Assert.Equal(lower.GetHashCode(), upper.GetHashCode());
+        Assert.Equal(expected: lower, actual: upper);
+        Assert.Equal(expected: lower.GetHashCode(), actual: upper.GetHashCode());
     }
 
     [Fact]
@@ -455,7 +483,8 @@ public class ToolCallCapabilityStoreTests
     {
         // The two halves are not interchangeable; a key that hashed them symmetrically would collapse
         // provider "a"/model "b" into provider "b"/model "a".
-        Assert.NotEqual(new ModelCapabilityKey("a", "b"), new ModelCapabilityKey("b", "a"));
+        Assert.NotEqual(expected: new ModelCapabilityKey(providerKey: "a", modelName: "b"),
+            actual: new ModelCapabilityKey(providerKey: "b", modelName: "a"));
     }
 
     // ----- Cross-check against the Phase 0 registry -----
@@ -470,11 +499,12 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         store.TryRecordModelCapability(new ModelToolCapability(
-            "p", "m", "dialect-from-the-future", DetectionConfidence.Observed));
+            ProviderKey: "p", ModelName: "m", Dialect: "dialect-from-the-future",
+            Confidence: DetectionConfidence.Observed));
 
-        var stored = store.GetModelCapability("p", "m");
-        Assert.Equal("dialect-from-the-future", stored!.Dialect);
-        Assert.False(ToolCallDialectRegistry.TryGet(stored.Dialect, out var resolved));
+        var stored = store.GetModelCapability(providerKey: "p", modelName: "m");
+        Assert.Equal(expected: "dialect-from-the-future", actual: stored!.Dialect);
+        Assert.False(ToolCallDialectRegistry.TryGet(name: stored.Dialect, dialect: out var resolved));
         Assert.False(resolved.IsScannable);
     }
 
@@ -487,12 +517,13 @@ public class ToolCallCapabilityStoreTests
         foreach (var dialect in ToolCallDialectRegistry.All)
         {
             store.TryRecordModelCapability(new ModelToolCapability(
-                "p", dialect.Name, dialect.Name, DetectionConfidence.Operator));
+                ProviderKey: "p", ModelName: dialect.Name, Dialect: dialect.Name,
+                Confidence: DetectionConfidence.Operator));
 
-            var stored = store.GetModelCapability("p", dialect.Name);
+            var stored = store.GetModelCapability(providerKey: "p", modelName: dialect.Name);
             Assert.NotNull(stored);
-            Assert.True(ToolCallDialectRegistry.TryGet(stored!.Dialect, out var resolved));
-            Assert.Equal(dialect.Name, resolved.Name);
+            Assert.True(ToolCallDialectRegistry.TryGet(name: stored.Dialect, dialect: out var resolved));
+            Assert.Equal(expected: dialect.Name, actual: resolved.Name);
         }
     }
 
@@ -504,7 +535,7 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        Assert.Null(store.GetModelContextWindow("lmstudio", "qwen2.5.1-coder-7b-instruct"));
+        Assert.Null(store.GetModelContextWindow(providerKey: "lmstudio", modelName: "qwen2.5.1-coder-7b-instruct"));
     }
 
     [Fact]
@@ -512,18 +543,19 @@ public class ToolCallCapabilityStoreTests
     {
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
-        var detectedAt = new DateTimeOffset(2026, 7, 30, 12, 0, 0, TimeSpan.Zero);
+        var detectedAt = new DateTimeOffset(2026, 7, 30, 12, 0, 0, offset: TimeSpan.Zero);
 
         store.SetModelContextWindow(new ModelContextWindow(
-            "lmstudio", "qwen-local", 32768, "qwen2", "LM Studio /api/v0/models.", detectedAt));
+            ProviderKey: "lmstudio", ModelName: "qwen-local", 32768, Architecture: "qwen2",
+            Evidence: "LM Studio /api/v0/models.", DetectedAtUtc: detectedAt));
 
-        var stored = store.GetModelContextWindow("lmstudio", "qwen-local");
+        var stored = store.GetModelContextWindow(providerKey: "lmstudio", modelName: "qwen-local");
 
         Assert.NotNull(stored);
-        Assert.Equal(32768, stored!.ContextLength);
-        Assert.Equal("qwen2", stored.Architecture);
-        Assert.Equal("LM Studio /api/v0/models.", stored.Evidence);
-        Assert.Equal(detectedAt, stored.DetectedAtUtc);
+        Assert.Equal(32768, actual: stored.ContextLength);
+        Assert.Equal(expected: "qwen2", actual: stored.Architecture);
+        Assert.Equal(expected: "LM Studio /api/v0/models.", actual: stored.Evidence);
+        Assert.Equal(expected: detectedAt, actual: stored.DetectedAtUtc);
     }
 
     // Proves the COLLATE NOCASE key columns and ModelCapabilityKey's comparer carried over to the new
@@ -534,9 +566,9 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.SetModelContextWindow(new ModelContextWindow("LMStudio", "Qwen-Local", 8192));
+        store.SetModelContextWindow(new ModelContextWindow(ProviderKey: "LMStudio", ModelName: "Qwen-Local", 8192));
 
-        Assert.NotNull(store.GetModelContextWindow("lmstudio", "qwen-local"));
+        Assert.NotNull(store.GetModelContextWindow(providerKey: "lmstudio", modelName: "qwen-local"));
     }
 
     // The first corruption path ADR-0002 exists to prevent: ToolCallObservationRecorder builds a fresh
@@ -548,11 +580,14 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 32768, "qwen2"));
+        store.SetModelContextWindow(new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "qwen-local", 32768,
+            Architecture: "qwen2"));
         store.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "qwen-local", "hermes", DetectionConfidence.Observed, ObservationCount: 1));
+            ProviderKey: "lmstudio", ModelName: "qwen-local", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed, ObservationCount: 1));
 
-        Assert.Equal(32768, store.GetModelContextWindow("lmstudio", "qwen-local")?.ContextLength);
+        Assert.Equal(32768,
+            actual: store.GetModelContextWindow(providerKey: "lmstudio", modelName: "qwen-local")?.ContextLength);
     }
 
     // The second: ClearModelCapability DELETEs the dialect row. An operator resetting a dialect override
@@ -563,14 +598,17 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 32768, "qwen2"));
+        store.SetModelContextWindow(new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "qwen-local", 32768,
+            Architecture: "qwen2"));
         store.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "qwen-local", "hermes", DetectionConfidence.Template));
+            ProviderKey: "lmstudio", ModelName: "qwen-local", Dialect: "hermes",
+            Confidence: DetectionConfidence.Template));
 
-        store.ClearModelCapability("lmstudio", "qwen-local");
+        store.ClearModelCapability(providerKey: "lmstudio", modelName: "qwen-local");
 
-        Assert.Null(store.GetModelCapability("lmstudio", "qwen-local"));
-        Assert.Equal(32768, store.GetModelContextWindow("lmstudio", "qwen-local")?.ContextLength);
+        Assert.Null(store.GetModelCapability(providerKey: "lmstudio", modelName: "qwen-local"));
+        Assert.Equal(32768,
+            actual: store.GetModelContextWindow(providerKey: "lmstudio", modelName: "qwen-local")?.ContextLength);
     }
 
     // No confidence ladder applies to a context length - a model reloaded under a different num_ctx
@@ -581,10 +619,13 @@ public class ToolCallCapabilityStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
 
-        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 32768, "qwen2"));
-        store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", 8192, "qwen2"));
+        store.SetModelContextWindow(new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "qwen-local", 32768,
+            Architecture: "qwen2"));
+        store.SetModelContextWindow(new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "qwen-local", 8192,
+            Architecture: "qwen2"));
 
-        Assert.Equal(8192, store.GetModelContextWindow("lmstudio", "qwen-local")?.ContextLength);
+        Assert.Equal(8192,
+            actual: store.GetModelContextWindow(providerKey: "lmstudio", modelName: "qwen-local")?.ContextLength);
     }
 
     // Rejected at the caller boundary rather than coerced, mirroring TryRecordModelCapability's treatment
@@ -598,6 +639,7 @@ public class ToolCallCapabilityStoreTests
         var store = temp.CreateToolCallCapabilityStore();
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            store.SetModelContextWindow(new ModelContextWindow("lmstudio", "qwen-local", contextLength)));
+            store.SetModelContextWindow(new ModelContextWindow(ProviderKey: "lmstudio", ModelName: "qwen-local",
+                ContextLength: contextLength)));
     }
 }

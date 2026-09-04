@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -20,12 +21,12 @@ public static class OpenAiUsageParser
         {
             node = JsonNode.Parse(json);
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return false;
         }
 
-        return node is JsonObject obj && TryExtractFromUsageContainer(obj, out usage);
+        return node is JsonObject obj && TryExtractFromUsageContainer(container: obj, usage: out usage);
     }
 
     /// <summary>
@@ -42,13 +43,11 @@ public static class OpenAiUsageParser
         var found = false;
 
         foreach (var evt in SseEventReader.ReadDataEvents(sseText))
-        {
-            if (TryExtractFromUsageContainer(evt, out var candidate))
+            if (TryExtractFromUsageContainer(container: evt, usage: out var candidate))
             {
                 usage = candidate;
                 found = true;
             }
-        }
 
         return found;
     }
@@ -65,47 +64,40 @@ public static class OpenAiUsageParser
     {
         usage = default;
 
-        if (container["usage"] is not JsonObject usageObj)
-        {
-            return false;
-        }
+        if (container["usage"] is not JsonObject usageObj) return false;
 
-        if (!TryGetInt(usageObj, "prompt_tokens", out var promptTokens) ||
-            !TryGetInt(usageObj, "completion_tokens", out var completionTokens))
-        {
+        if (!TryGetInt(obj: usageObj, propertyName: "prompt_tokens", value: out var promptTokens) ||
+            !TryGetInt(obj: usageObj, propertyName: "completion_tokens", value: out var completionTokens))
             return false;
-        }
 
         var cacheReadTokens = 0;
         if (usageObj["prompt_tokens_details"] is JsonObject promptTokensDetails)
-        {
-            TryGetInt(promptTokensDetails, "cached_tokens", out cacheReadTokens);
-        }
+            TryGetInt(obj: promptTokensDetails, propertyName: "cached_tokens", value: out cacheReadTokens);
 
         // Only an enriched translated-Anthropic body (AnthropicPayloadTranslator.BuildEnrichedUsage) carries
         // this extension field; absent for a real OpenAI response, which has no cache-write concept.
-        TryGetInt(usageObj, "cache_creation_input_tokens", out var cacheCreationTokens);
+        TryGetInt(obj: usageObj, propertyName: "cache_creation_input_tokens", value: out var cacheCreationTokens);
 
         // Math.Max guards malformed input (cached_tokens exceeding prompt_tokens) rather than producing a
         // negative additive prompt count.
-        var additivePromptTokens = Math.Max(0, promptTokens - cacheReadTokens - cacheCreationTokens);
+        var additivePromptTokens = Math.Max(0, val2: promptTokens - cacheReadTokens - cacheCreationTokens);
 
         // A subset of completion_tokens (see UsageInfo.ReasoningTokens), not a fifth additive dimension -
         // absent for models with no extended-thinking concept, which is also the correct default (0).
         var reasoningTokens = 0;
         if (usageObj["completion_tokens_details"] is JsonObject completionTokensDetails)
-        {
-            TryGetInt(completionTokensDetails, "reasoning_tokens", out reasoningTokens);
-        }
+            TryGetInt(obj: completionTokensDetails, propertyName: "reasoning_tokens", value: out reasoningTokens);
 
         // Math.Clamp guards a malformed/changed upstream payload (a negative value, or one exceeding
         // completion_tokens) from violating UsageInfo.ReasoningTokens' documented "subset of
         // CompletionTokens, never negative" contract and skewing downstream attribution. The upper bound
         // is floored at 0 too - Math.Clamp requires min <= max, and completion_tokens itself is unvalidated
         // upstream input that could theoretically arrive negative.
-        reasoningTokens = Math.Clamp(reasoningTokens, 0, Math.Max(0, completionTokens));
+        reasoningTokens = Math.Clamp(value: reasoningTokens, 0, max: Math.Max(0, val2: completionTokens));
 
-        usage = new UsageInfo(additivePromptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, reasoningTokens);
+        usage = new UsageInfo(PromptTokens: additivePromptTokens, CompletionTokens: completionTokens,
+            CacheCreationTokens: cacheCreationTokens, CacheReadTokens: cacheReadTokens,
+            ReasoningTokens: reasoningTokens);
         return true;
     }
 
@@ -118,4 +110,3 @@ public static class OpenAiUsageParser
         return obj[propertyName] is JsonValue jsonValue && jsonValue.TryGetValue(out value);
     }
 }
-

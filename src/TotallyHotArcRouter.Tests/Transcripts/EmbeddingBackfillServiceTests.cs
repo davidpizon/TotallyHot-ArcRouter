@@ -1,9 +1,8 @@
-using TotallyHot.ArcRouter.Models;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Transcripts;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
 
@@ -20,19 +19,20 @@ public class EmbeddingBackfillServiceTests
         var store = new FakeTranscriptStore(unembeddedIds: []);
         var embeddingClient = new FakeEmbeddingClient();
         var memoryStore = new FakeMemoryEntryStore();
-        var service = CreateService(store, embeddingClient, memoryStore, backfillEnabled: true, captureEnabled: true);
+        var service = CreateService(store: store, embeddingClient: embeddingClient, memoryStore: memoryStore, true,
+            true);
 
         await service.CheckAndBackfillAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, embeddingClient.EmbedCallCount);
-        Assert.Equal(0, memoryStore.AppendCallCount);
+        Assert.Equal(0, actual: embeddingClient.EmbedCallCount);
+        Assert.Equal(0, actual: memoryStore.AppendCallCount);
     }
 
     [Fact]
     public async Task CheckAndBackfillAsync_SuccessfulBackfill_CreatesMemoryEntryAndLinksTranscript()
     {
         var transcriptId = 42L;
-        var embedding = new float[] { 0.1f, 0.2f, 0.3f };
+        var embedding = new[] { 0.1f, 0.2f, 0.3f };
         var transcript = new TranscriptRecord(
             Id: transcriptId,
             CorrelationId: "test-correlation-123",
@@ -42,33 +42,34 @@ public class EmbeddingBackfillServiceTests
             Dimension: "code_quality",
             Difficulty: "medium",
             Language: "en",
-            IsUtility: false,
+            false,
             PromptText: "Test prompt",
             ResponseText: "Test response",
-            Score: 0.85,
-            Cost: 0.01m,
-            IsExploratory: false,
-            Propensity: 0.95,
-            InputTokens: 100,
-            OutputTokens: 200,
-            MemoryEntryId: null);
+            0.85,
+            0.01m,
+            false,
+            0.95,
+            100,
+            200,
+            null);
 
         var store = new FakeTranscriptStore(
             unembeddedIds: [transcriptId],
             getTranscriptResult: transcript);
         var embeddingClient = new FakeEmbeddingClient(embedding);
         var memoryStore = new FakeMemoryEntryStore();
-        var service = CreateService(store, embeddingClient, memoryStore, backfillEnabled: true, captureEnabled: true);
+        var service = CreateService(store: store, embeddingClient: embeddingClient, memoryStore: memoryStore, true,
+            true);
 
         await service.CheckAndBackfillAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, embeddingClient.EmbedCallCount);
-        Assert.Equal("Test prompt", embeddingClient.LastEmbeddedText);
-        Assert.Equal(1, memoryStore.AppendCallCount);
+        Assert.Equal(1, actual: embeddingClient.EmbedCallCount);
+        Assert.Equal(expected: "Test prompt", actual: embeddingClient.LastEmbeddedText);
+        Assert.Equal(1, actual: memoryStore.AppendCallCount);
         Assert.Single(store.LinkedEntries);
-        Assert.True(store.LinkedEntries.TryGetValue(transcriptId, out var linkedMemoryId));
+        Assert.True(store.LinkedEntries.TryGetValue(key: transcriptId, value: out var linkedMemoryId));
         Assert.NotNull(memoryStore.LastPersistedEntry);
-        Assert.Equal(memoryStore.LastPersistedEntry.Id, linkedMemoryId);
+        Assert.Equal(expected: memoryStore.LastPersistedEntry.Id, actual: linkedMemoryId);
     }
 
     [Fact]
@@ -77,12 +78,13 @@ public class EmbeddingBackfillServiceTests
         var store = new FakeTranscriptStore(unembeddedIds: [1, 2, 3]);
         var embeddingClient = new FakeEmbeddingClient();
         var memoryStore = new FakeMemoryEntryStore();
-        var service = CreateService(store, embeddingClient, memoryStore, backfillEnabled: false, captureEnabled: true);
+        var service = CreateService(store: store, embeddingClient: embeddingClient, memoryStore: memoryStore, false,
+            true);
 
         await service.CheckAndBackfillAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, embeddingClient.EmbedCallCount);
-        Assert.Equal(0, memoryStore.AppendCallCount);
+        Assert.Equal(0, actual: embeddingClient.EmbedCallCount);
+        Assert.Equal(0, actual: memoryStore.AppendCallCount);
     }
 
     private static EmbeddingBackfillService CreateService(
@@ -93,87 +95,105 @@ public class EmbeddingBackfillServiceTests
         bool captureEnabled)
     {
         return new EmbeddingBackfillService(
-            NullLogger<EmbeddingBackfillService>.Instance,
-            store,
-            embeddingClient,
-            memoryStore,
-            Options.Create(new TranscriptOptions { EnableEmbeddingBackfill = backfillEnabled, Enabled = captureEnabled }),
-            Options.Create(new RoutingOptions { EmbeddingBudgetMs = 250 }));
+            logger: NullLogger<EmbeddingBackfillService>.Instance,
+            transcriptStore: store,
+            embeddingClient: embeddingClient,
+            memoryEntryStore: memoryStore,
+            transcriptOptions: Options.Create(new TranscriptOptions
+            { EnableEmbeddingBackfill = backfillEnabled, Enabled = captureEnabled }));
     }
 
-    private sealed class FakeTranscriptStore : ITranscriptStore
+    private sealed class FakeTranscriptStore(IReadOnlyList<long> unembeddedIds, TranscriptRecord? getTranscriptResult = null) : ITranscriptStore
     {
-        private readonly IReadOnlyList<long> _unembeddedIds;
-        private readonly TranscriptRecord? _getTranscriptResult;
 
-        public Dictionary<long, long> LinkedEntries { get; } = new();
+        public Dictionary<long, long> LinkedEntries { get; } = [];
 
-        public FakeTranscriptStore(IReadOnlyList<long> unembeddedIds, TranscriptRecord? getTranscriptResult = null)
+        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
         {
-            _unembeddedIds = unembeddedIds;
-            _getTranscriptResult = getTranscriptResult;
+            throw new NotSupportedException();
         }
 
-        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default) =>
+        public Task UpdateOutcomeAsync(string correlationId, double? score,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(unembeddedIds);
+        }
 
-        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_unembeddedIds);
+        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(getTranscriptResult);
+        }
 
-        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_getTranscriptResult);
-
-        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId, CancellationToken cancellationToken = default)
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId,
+            CancellationToken cancellationToken = default)
         {
             LinkedEntries[transcriptId] = memoryEntryId;
             return Task.CompletedTask;
         }
 
-        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) =>
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) =>
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
-        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score, CancellationToken cancellationToken = default) =>
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score,
+            CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
     }
 
-    private sealed class FakeEmbeddingClient : IEmbeddingClient
+    private sealed class FakeEmbeddingClient(float[]? embedding = null) : IEmbeddingClient
     {
-        private readonly float[] _defaultEmbedding;
+        private readonly float[] _defaultEmbedding = embedding ?? [0.1f, 0.2f, 0.3f];
 
         public int EmbedCallCount { get; private set; }
         public string? LastEmbeddedText { get; private set; }
-
-        public FakeEmbeddingClient(float[]? embedding = null)
-        {
-            _defaultEmbedding = embedding ?? [0.1f, 0.2f, 0.3f];
-        }
 
         public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
         {
             EmbedCallCount++;
             LastEmbeddedText = text;
-            return Task.FromResult(new EmbeddingResult(_defaultEmbedding, TokenCount: 10));
+            return Task.FromResult(new EmbeddingResult(Vector: _defaultEmbedding, 10));
         }
     }
 
@@ -182,8 +202,10 @@ public class EmbeddingBackfillServiceTests
         public int AppendCallCount { get; private set; }
         public MemoryEntry? LastPersistedEntry { get; private set; }
 
-        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<MemoryEntry>> LoadAllAsync(CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
 
         public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
@@ -202,7 +224,9 @@ public class EmbeddingBackfillServiceTests
             return Task.FromResult(persisted);
         }
 
-        public Task DeleteAsync(long id, CancellationToken cancellationToken = default) =>
+        public Task DeleteAsync(long id, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException();
+        }
     }
 }

@@ -9,6 +9,146 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 public static class ProviderTemplates
 {
     /// <summary>
+    /// A read-only dictionary of provider type to template mappings, used to look up pre-fill values when a
+    /// user selects a provider type. Every <see cref="ProviderType"/> member has an entry, so a lookup
+    /// never needs a fallback.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<ProviderType, ProviderTemplate> Templates =
+        new Dictionary<ProviderType, ProviderTemplate>
+        {
+            [ProviderType.Anthropic] = new()
+            {
+                DisplayName = "Anthropic",
+                BaseUrl = "https://api.anthropic.com",
+                RequiresAuth = true,
+                AuthHeaderName = "x-api-key",
+                SuggestedEnvValue = "ANTHROPIC_API_KEY",
+                DefaultsToFree = false,
+                DefaultHeaders = [new ProviderTemplateHeader(Name: "anthropic-version", Value: "2023-06-01")]
+            },
+
+            [ProviderType.OpenAI] = new()
+            {
+                DisplayName = "OpenAI / Groq / DeepSeek",
+                BaseUrl = "https://api.openai.com/v1",
+                RequiresAuth = true,
+                AuthHeaderName = "Authorization",
+                SuggestedEnvValue = "Bearer {env:OPENAI_API_KEY}",
+                DefaultsToFree = false,
+                DefaultHeaders = []
+            },
+
+            [ProviderType.GoogleGemini] = new()
+            {
+                DisplayName = "Google Gemini",
+                BaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
+                RequiresAuth = true,
+                AuthHeaderName = "Authorization",
+                SuggestedEnvValue = "Bearer {env:GEMINI_API_KEY}",
+                DefaultsToFree = false,
+                DefaultHeaders = []
+            },
+
+            [ProviderType.AzureOpenAI] = new()
+            {
+                DisplayName = "Azure OpenAI",
+                // Per-resource (https://<resource>.openai.azure.com/openai/v1), so there is no default to
+                // suggest - a wrong one is worse than an empty box the operator must fill.
+                BaseUrl = string.Empty,
+                RequiresAuth = true,
+                AuthHeaderName = "api-key",
+                SuggestedEnvValue = "AZURE_OPENAI_API_KEY",
+                DefaultsToFree = false,
+                DefaultHeaders = []
+            },
+
+            [ProviderType.Cohere] = new()
+            {
+                DisplayName = "Cohere",
+                BaseUrl = "https://api.cohere.ai/compatibility/v1",
+                RequiresAuth = true,
+                AuthHeaderName = "Authorization",
+                SuggestedEnvValue = "Bearer {env:COHERE_API_KEY}",
+                DefaultsToFree = false,
+                DefaultHeaders = []
+            },
+
+            [ProviderType.LocalRuntime] = new()
+            {
+                DisplayName = "Ollama / LM Studio / llama.cpp",
+                // Ollama's OpenAI-compatible mount. LM Studio (1234) and llama.cpp (8080) differ only in
+                // port, which is a one-token edit.
+                BaseUrl = "http://localhost:11434/v1",
+                RequiresAuth = false,
+                AuthHeaderName = string.Empty,
+                SuggestedEnvValue = string.Empty,
+                DefaultsToFree = true,
+                DefaultHeaders = [],
+                AuthHint =
+                    "Local runtimes accept unauthenticated requests by default. Tick this only if you have put the runtime behind a proxy that requires a token."
+            },
+
+            [ProviderType.Bedrock] = new()
+            {
+                DisplayName = "AWS Bedrock",
+                // Informational only: the AWS SDK computes the real endpoint and signs each request itself.
+                // Present because provider validation requires an absolute BaseUrl.
+                BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
+                RequiresAuth = false,
+                AuthHeaderName = string.Empty,
+                SuggestedEnvValue = string.Empty,
+                DefaultsToFree = false,
+                DefaultHeaders = [],
+                AuthHint =
+                    "Bedrock requests are signed by the AWS SDK (SigV4) using the provider's AWS region and credential environment variables, not an HTTP header."
+            },
+
+            [ProviderType.Other] = new()
+            {
+                DisplayName = "Other",
+                BaseUrl = string.Empty,
+                // "Other" now means an unknown *remote* API: every unauthenticated case (local runtimes,
+                // Bedrock) has its own type, so requiring a credential is the better default here.
+                RequiresAuth = true,
+                AuthHeaderName = "Authorization",
+                SuggestedEnvValue = string.Empty,
+                DefaultsToFree = false,
+                DefaultHeaders = []
+            }
+        };
+
+    /// <summary>
+    /// Every provider type in the order the editor's dropdown lists them: the named vendors first, then the
+    /// local/self-signed types, with <see cref="ProviderType.Other"/> last as the fallback. Rendering from
+    /// this list rather than hardcoded markup keeps the option list and the templates from drifting apart.
+    /// </summary>
+    public static IReadOnlyList<ProviderType> Ordered { get; } =
+    [
+        ProviderType.Anthropic,
+        ProviderType.OpenAI,
+        ProviderType.GoogleGemini,
+        ProviderType.AzureOpenAI,
+        ProviderType.Cohere,
+        ProviderType.LocalRuntime,
+        ProviderType.Bedrock,
+        ProviderType.Other
+    ];
+
+    /// <summary>
+    /// The dropdown label for a provider type, falling back to the member's own name for a type with no
+    /// registered template (which <see cref="Templates"/>' full coverage makes unreachable today, but keeps
+    /// this total rather than throwing if a member is ever added without one).
+    /// </summary>
+    /// <param name="providerType">The type to label.</param>
+    /// <returns>The human-readable label, e.g. <c>OpenAI / Groq / DeepSeek</c>.</returns>
+    public static string DisplayName(ProviderType providerType)
+    {
+        return Templates.TryGetValue(key: providerType, value: out var template)
+            ? template.DisplayName
+            : providerType.ToString();
+    }
+
+    /// <summary>
     /// A static HTTP header a provider's API requires regardless of credentials, seeded into the editor's
     /// custom-header rows when its template is applied.
     /// </summary>
@@ -27,6 +167,10 @@ public static class ProviderTemplates
         /// "OpenAI / Groq / DeepSeek" so operators recognize their own provider in the list, while the
         /// persisted value stays the member name.
         /// </summary>
+        // Deliberately the same name as the outer ProviderTemplates.DisplayName(ProviderType) lookup,
+        // which exists to return exactly this property. Renaming either half would break that pairing,
+        // and this one is required public API the provider editor binds to.
+        // ReSharper disable once MemberHidesStaticFromOuterClass
         public required string DisplayName { get; init; }
 
         /// <summary>
@@ -77,138 +221,4 @@ public static class ProviderTemplates
         /// </summary>
         public string? AuthHint { get; init; }
     }
-
-    /// <summary>
-    /// A read-only dictionary of provider type to template mappings, used to look up pre-fill values when a
-    /// user selects a provider type. Every <see cref="ProviderType"/> member has an entry, so a lookup
-    /// never needs a fallback.
-    /// </summary>
-    public static readonly IReadOnlyDictionary<ProviderType, ProviderTemplate> Templates =
-        new Dictionary<ProviderType, ProviderTemplate>
-        {
-            [ProviderType.Anthropic] = new ProviderTemplate
-            {
-                DisplayName = "Anthropic",
-                BaseUrl = "https://api.anthropic.com",
-                RequiresAuth = true,
-                AuthHeaderName = "x-api-key",
-                SuggestedEnvValue = "ANTHROPIC_API_KEY",
-                DefaultsToFree = false,
-                DefaultHeaders = [new ProviderTemplateHeader("anthropic-version", "2023-06-01")]
-            },
-
-            [ProviderType.OpenAI] = new ProviderTemplate
-            {
-                DisplayName = "OpenAI / Groq / DeepSeek",
-                BaseUrl = "https://api.openai.com/v1",
-                RequiresAuth = true,
-                AuthHeaderName = "Authorization",
-                SuggestedEnvValue = "Bearer {env:OPENAI_API_KEY}",
-                DefaultsToFree = false,
-                DefaultHeaders = []
-            },
-
-            [ProviderType.GoogleGemini] = new ProviderTemplate
-            {
-                DisplayName = "Google Gemini",
-                BaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
-                RequiresAuth = true,
-                AuthHeaderName = "Authorization",
-                SuggestedEnvValue = "Bearer {env:GEMINI_API_KEY}",
-                DefaultsToFree = false,
-                DefaultHeaders = []
-            },
-
-            [ProviderType.AzureOpenAI] = new ProviderTemplate
-            {
-                DisplayName = "Azure OpenAI",
-                // Per-resource (https://<resource>.openai.azure.com/openai/v1), so there is no default to
-                // suggest - a wrong one is worse than an empty box the operator must fill.
-                BaseUrl = string.Empty,
-                RequiresAuth = true,
-                AuthHeaderName = "api-key",
-                SuggestedEnvValue = "AZURE_OPENAI_API_KEY",
-                DefaultsToFree = false,
-                DefaultHeaders = []
-            },
-
-            [ProviderType.Cohere] = new ProviderTemplate
-            {
-                DisplayName = "Cohere",
-                BaseUrl = "https://api.cohere.ai/compatibility/v1",
-                RequiresAuth = true,
-                AuthHeaderName = "Authorization",
-                SuggestedEnvValue = "Bearer {env:COHERE_API_KEY}",
-                DefaultsToFree = false,
-                DefaultHeaders = []
-            },
-
-            [ProviderType.LocalRuntime] = new ProviderTemplate
-            {
-                DisplayName = "Ollama / LM Studio / llama.cpp",
-                // Ollama's OpenAI-compatible mount. LM Studio (1234) and llama.cpp (8080) differ only in
-                // port, which is a one-token edit.
-                BaseUrl = "http://localhost:11434/v1",
-                RequiresAuth = false,
-                AuthHeaderName = string.Empty,
-                SuggestedEnvValue = string.Empty,
-                DefaultsToFree = true,
-                DefaultHeaders = [],
-                AuthHint = "Local runtimes accept unauthenticated requests by default. Tick this only if you have put the runtime behind a proxy that requires a token."
-            },
-
-            [ProviderType.Bedrock] = new ProviderTemplate
-            {
-                DisplayName = "AWS Bedrock",
-                // Informational only: the AWS SDK computes the real endpoint and signs each request itself.
-                // Present because provider validation requires an absolute BaseUrl.
-                BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
-                RequiresAuth = false,
-                AuthHeaderName = string.Empty,
-                SuggestedEnvValue = string.Empty,
-                DefaultsToFree = false,
-                DefaultHeaders = [],
-                AuthHint = "Bedrock requests are signed by the AWS SDK (SigV4) using the provider's AWS region and credential environment variables, not an HTTP header."
-            },
-
-            [ProviderType.Other] = new ProviderTemplate
-            {
-                DisplayName = "Other",
-                BaseUrl = string.Empty,
-                // "Other" now means an unknown *remote* API: every unauthenticated case (local runtimes,
-                // Bedrock) has its own type, so requiring a credential is the better default here.
-                RequiresAuth = true,
-                AuthHeaderName = "Authorization",
-                SuggestedEnvValue = string.Empty,
-                DefaultsToFree = false,
-                DefaultHeaders = []
-            }
-        };
-
-    /// <summary>
-    /// Every provider type in the order the editor's dropdown lists them: the named vendors first, then the
-    /// local/self-signed types, with <see cref="ProviderType.Other"/> last as the fallback. Rendering from
-    /// this list rather than hardcoded markup keeps the option list and the templates from drifting apart.
-    /// </summary>
-    public static IReadOnlyList<ProviderType> Ordered { get; } =
-    [
-        ProviderType.Anthropic,
-        ProviderType.OpenAI,
-        ProviderType.GoogleGemini,
-        ProviderType.AzureOpenAI,
-        ProviderType.Cohere,
-        ProviderType.LocalRuntime,
-        ProviderType.Bedrock,
-        ProviderType.Other
-    ];
-
-    /// <summary>
-    /// The dropdown label for a provider type, falling back to the member's own name for a type with no
-    /// registered template (which <see cref="Templates"/>' full coverage makes unreachable today, but keeps
-    /// this total rather than throwing if a member is ever added without one).
-    /// </summary>
-    /// <param name="providerType">The type to label.</param>
-    /// <returns>The human-readable label, e.g. <c>OpenAI / Groq / DeepSeek</c>.</returns>
-    public static string DisplayName(ProviderType providerType) =>
-        Templates.TryGetValue(providerType, out var template) ? template.DisplayName : providerType.ToString();
 }

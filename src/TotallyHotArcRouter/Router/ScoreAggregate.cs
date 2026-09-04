@@ -48,5 +48,8 @@ public sealed record ScoreAggregate(double Sum, int Count)
     /// <summary>Returns a new aggregate including <paramref name="score"/>, leaving this instance unchanged.</summary>
     /// <param name="score">The newly observed score to fold in.</param>
     /// <returns>The updated aggregate.</returns>
-    public ScoreAggregate Add(double score) => new(Sum + score, Count + 1);
+    public ScoreAggregate Add(double score)
+    {
+        return new ScoreAggregate(Sum: Sum + score, Count: Count + 1);
+    }
 }

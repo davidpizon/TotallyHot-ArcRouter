@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 
@@ -7,7 +7,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Resolves how one model expresses a tool call, using only free metadata sources - detection tiers 1
 /// through 3 of <c>docs/router/tool-call-normalization.md</c> §3.2.
-///
 /// <para>
 /// Tier 1 reads the model's literal chat template from Ollama's <c>/api/show</c>; tier 2 reads the model's
 /// architecture from LM Studio's native model list; tier 3 guesses from the model id. Each tier is tried
@@ -15,14 +14,12 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// says how it was learned - so tier 4's live observation (Phase 4) can correct any of them, and an
 /// operator pin can never be overwritten by any of them.
 /// </para>
-///
 /// <para>
 /// <b>A model whose dialect is unresolved writes no dialect row at all.</b> That is the deliberate design,
 /// not a gap: a missing row means "forward natively and classify from the first real response", which is
 /// both correct and free, whereas a wrong row means arming the wrong scanner against every response the
 /// model produces. Silence is strictly better than a guess here.
 /// </para>
-///
 /// <para>
 /// The same two probes also yield each model's <b>context window</b>, which is reported to Ollama-shaped
 /// clients through <c>POST /api/show</c> (<c>docs/router/ollama-show-capabilities-plan.md</c>). It rides
@@ -48,8 +45,32 @@ public sealed class ModelDialectResolver
     // license blocks that dominate the payload.
     private const int MaxShowResponseBytes = 512 * 1024;
 
-    private readonly HttpClient _httpClient;
+    /// <summary>
+    /// The tier-3 model-id table, in match order.
+    /// </summary>
+    /// <remarks>
+    /// Order is load-bearing. <c>hermes</c> precedes <c>llama-3</c> because a Hermes release is normally
+    /// named for the base it fine-tuned - <c>hermes-3-llama-3.1-8b</c> matches both tokens, and the Hermes
+    /// template is the one it actually ships with. Matching on the base would get the well-known case
+    /// exactly backwards.
+    /// </remarks>
+    private static readonly (string Token, ToolCallDialect Dialect)[] ModelIdHeuristics =
+    [
+        ("hermes", ToolCallDialectRegistry.Hermes),
+        ("qwen", ToolCallDialectRegistry.Hermes),
+        ("mixtral", ToolCallDialectRegistry.Mistral),
+        ("mistral", ToolCallDialectRegistry.Mistral),
+
+        // Both spellings, because the two are used interchangeably in published model ids
+        // (meta-llama/Llama-3.1-8B-Instruct vs. llama3.1:8b). Llama 2 is absent: it has no tool-call
+        // template, so a match would arm a scanner against a model that can never satisfy it.
+        ("llama-3", ToolCallDialectRegistry.Llama3Json),
+        ("llama3", ToolCallDialectRegistry.Llama3Json)
+    ];
+
     private readonly IEnvironmentVariableProvider _environment;
+
+    private readonly HttpClient _httpClient;
 
     /// <summary>Initializes a new instance of the <see cref="ModelDialectResolver"/> class.</summary>
     /// <param name="httpClient">Client used to issue the metadata probes.</param>
@@ -89,7 +110,10 @@ public sealed class ModelDialectResolver
     /// probe reported a usable context length - which is the norm for every provider that answers neither
     /// Ollama nor LM Studio natively.
     /// </returns>
-    /// <exception cref="ArgumentException"><paramref name="providerKey"/> or <paramref name="modelName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="providerKey"/> or <paramref name="modelName"/> is null, empty, or
+    /// whitespace.
+    /// </exception>
     /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
     public async Task<ModelMetadataProbeResult> ResolveAsync(
         string providerKey,
@@ -115,9 +139,11 @@ public sealed class ModelDialectResolver
         // it is the thing that decides it, which is why nothing short of a live observation outranks it.
         if (endpointCapabilities?.OllamaNative == true)
         {
-            var show = await TryReadOllamaShowAsync(provider, upstreamId, cancellationToken).ConfigureAwait(false);
-            window ??= BuildWindow(providerKey, modelName, show.Architecture, show.ContextLength,
-                "Ollama /api/show model_info.");
+            var show = await TryReadOllamaShowAsync(provider: provider, modelId: upstreamId,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            window ??= BuildWindow(providerKey: providerKey, modelName: modelName, architecture: show.Architecture,
+                contextLength: show.ContextLength,
+                evidence: "Ollama /api/show model_info.");
 
             if (show.Template is not null)
             {
@@ -128,10 +154,11 @@ public sealed class ModelDialectResolver
                 // the ground truth we just read has already contradicted every dialect they could propose -
                 // preferring a filename guess over that would be strictly worse than recording nothing.
                 if (matched is not null)
-                {
-                    return new(Capability(providerKey, modelName, matched.Value.Dialect, DetectionConfidence.Template,
-                        $"Ollama /api/show template contains '{matched.Value.Delimiter}'."), window);
-                }
+                    return new ModelMetadataProbeResult(Capability: Capability(providerKey: providerKey,
+                            modelName: modelName, dialect: matched.Value.Dialect,
+                            confidence: DetectionConfidence.Template,
+                            evidence: $"Ollama /api/show template contains '{matched.Value.Delimiter}'."),
+                        ContextWindow: window);
 
                 // Matched nothing *and* renders no tools at all: this model cannot express a tool call in
                 // any syntax, so emulation is the only way it ever calls one (Phase 5). Recording it here
@@ -145,24 +172,29 @@ public sealed class ModelDialectResolver
                 // in a dialect this build does not know is exactly the one whose window is most reliably
                 // readable, so throwing it away was pure loss.
                 return RendersTools(show.Template)
-                    ? new(null, window)
-                    : new(Capability(providerKey, modelName, ToolCallDialectRegistry.Emulated, DetectionConfidence.Template,
-                        "Ollama /api/show template renders no tools."), window);
+                    ? new ModelMetadataProbeResult(null, ContextWindow: window)
+                    : new ModelMetadataProbeResult(Capability: Capability(providerKey: providerKey,
+                        modelName: modelName, dialect: ToolCallDialectRegistry.Emulated,
+                        confidence: DetectionConfidence.Template,
+                        evidence: "Ollama /api/show template renders no tools."), ContextWindow: window);
             }
         }
 
         // Tier 2 - the architecture recorded in the model file's own metadata.
         if (endpointCapabilities?.LmStudioNative == true)
         {
-            var lmStudio = await TryReadLmStudioModelAsync(provider, upstreamId, cancellationToken).ConfigureAwait(false);
-            window ??= BuildWindow(providerKey, modelName, lmStudio.Architecture, lmStudio.ContextLength,
-                "LM Studio /api/v0/models.");
+            var lmStudio =
+                await TryReadLmStudioModelAsync(provider: provider, modelId: upstreamId,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            window ??= BuildWindow(providerKey: providerKey, modelName: modelName, architecture: lmStudio.Architecture,
+                contextLength: lmStudio.ContextLength,
+                evidence: "LM Studio /api/v0/models.");
 
-            if (lmStudio.Architecture is not null && TryMapArchitecture(lmStudio.Architecture, out var archDialect))
-            {
-                return new(Capability(providerKey, modelName, archDialect, DetectionConfidence.Template,
-                    $"LM Studio reports architecture '{lmStudio.Architecture}'."), window);
-            }
+            if (lmStudio.Architecture is not null &&
+                TryMapArchitecture(architecture: lmStudio.Architecture, dialect: out var archDialect))
+                return new ModelMetadataProbeResult(Capability: Capability(providerKey: providerKey,
+                    modelName: modelName, dialect: archDialect, confidence: DetectionConfidence.Template,
+                    evidence: $"LM Studio reports architecture '{lmStudio.Architecture}'."), ContextWindow: window);
 
             // An architecture that mapped to nothing falls through rather than returning, unlike tier 1's
             // miss. The two are not comparable: tier 1 read the template itself, while an unmapped
@@ -173,12 +205,13 @@ public sealed class ModelDialectResolver
 
         // Tier 3 - the model id. Free, instant, and defeated by any rename, hence Heuristic.
         var heuristic = MatchModelId(upstreamId) ?? MatchModelId(modelName);
-        return new(
-            heuristic is null
+        return new ModelMetadataProbeResult(
+            Capability: heuristic is null
                 ? null
-                : Capability(providerKey, modelName, heuristic.Value.Dialect, DetectionConfidence.Heuristic,
-                    $"Model id contains '{heuristic.Value.Token}'."),
-            window);
+                : Capability(providerKey: providerKey, modelName: modelName, dialect: heuristic.Value.Dialect,
+                    confidence: DetectionConfidence.Heuristic,
+                    evidence: $"Model id contains '{heuristic.Value.Token}'."),
+            ContextWindow: window);
     }
 
     /// <summary>
@@ -191,15 +224,22 @@ public sealed class ModelDialectResolver
     /// <c>/api/show</c> would then advertise a limit of nothing.
     /// </remarks>
     private static ModelContextWindow? BuildWindow(
-        string providerKey, string modelName, string? architecture, int? contextLength, string evidence) =>
-        contextLength is > 0
-            ? new ModelContextWindow(providerKey, modelName, contextLength.Value, architecture, evidence, DateTimeOffset.UtcNow)
+        string providerKey, string modelName, string? architecture, int? contextLength, string evidence)
+    {
+        return contextLength is > 0
+            ? new ModelContextWindow(ProviderKey: providerKey, ModelName: modelName, ContextLength: contextLength.Value,
+                Architecture: architecture, Evidence: evidence, DetectedAtUtc: DateTimeOffset.UtcNow)
             : null;
+    }
 
     /// <summary>Builds a capability row, stamped now and carrying the dialect's persisted name.</summary>
     private static ModelToolCapability Capability(
-        string providerKey, string modelName, ToolCallDialect dialect, DetectionConfidence confidence, string evidence) =>
-        new(providerKey, modelName, dialect.Name, confidence, evidence, ObservationCount: 0, DateTimeOffset.UtcNow);
+        string providerKey, string modelName, ToolCallDialect dialect, DetectionConfidence confidence, string evidence)
+    {
+        return new ModelToolCapability(ProviderKey: providerKey, ModelName: modelName, Dialect: dialect.Name,
+            Confidence: confidence,
+            Evidence: evidence, DetectedAtUtc: DateTimeOffset.UtcNow);
+    }
 
     /// <summary>
     /// Finds the first registered dialect whose opening delimiter appears in a chat template.
@@ -214,15 +254,9 @@ public sealed class ModelDialectResolver
     private static (ToolCallDialect Dialect, string Delimiter)? MatchTemplate(string template)
     {
         foreach (var dialect in ToolCallDialectRegistry.ScannableDialects)
-        {
             foreach (var delimiter in dialect.Delimiters)
-            {
-                if (template.Contains(delimiter.Open, StringComparison.OrdinalIgnoreCase))
-                {
+                if (template.Contains(value: delimiter.Open, comparisonType: StringComparison.OrdinalIgnoreCase))
                     return (dialect, delimiter.Open);
-                }
-            }
-        }
 
         return null;
     }
@@ -246,9 +280,11 @@ public sealed class ModelDialectResolver
     /// and a Go template parser to answer a yes/no would be a large dependency for no extra accuracy.
     /// </para>
     /// </remarks>
-    private static bool RendersTools(string template) =>
-        template.Contains(".Tools", StringComparison.OrdinalIgnoreCase)
-        || template.Contains(".ToolCalls", StringComparison.OrdinalIgnoreCase);
+    private static bool RendersTools(string template)
+    {
+        return template.Contains(value: ".Tools", comparisonType: StringComparison.OrdinalIgnoreCase)
+               || template.Contains(value: ".ToolCalls", comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Maps an LM Studio architecture to the dialect its family's chat template uses, for the
@@ -266,14 +302,14 @@ public sealed class ModelDialectResolver
     {
         // Prefix-matched because the architecture carries a generation (qwen2, qwen3, ...) and every
         // generation of these two families has kept its template's tool-call framing.
-        if (architecture.StartsWith("qwen", StringComparison.OrdinalIgnoreCase))
+        if (architecture.StartsWith(value: "qwen", comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             dialect = ToolCallDialectRegistry.Hermes;
             return true;
         }
 
-        if (architecture.StartsWith("mistral", StringComparison.OrdinalIgnoreCase)
-            || architecture.StartsWith("mixtral", StringComparison.OrdinalIgnoreCase))
+        if (architecture.StartsWith(value: "mistral", comparisonType: StringComparison.OrdinalIgnoreCase)
+            || architecture.StartsWith(value: "mixtral", comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             dialect = ToolCallDialectRegistry.Mistral;
             return true;
@@ -283,44 +319,14 @@ public sealed class ModelDialectResolver
         return false;
     }
 
-    /// <summary>
-    /// The tier-3 model-id table, in match order.
-    /// </summary>
-    /// <remarks>
-    /// Order is load-bearing. <c>hermes</c> precedes <c>llama-3</c> because a Hermes release is normally
-    /// named for the base it fine-tuned - <c>hermes-3-llama-3.1-8b</c> matches both tokens, and the Hermes
-    /// template is the one it actually ships with. Matching on the base would get the well-known case
-    /// exactly backwards.
-    /// </remarks>
-    private static readonly (string Token, ToolCallDialect Dialect)[] ModelIdHeuristics =
-    [
-        ("hermes", ToolCallDialectRegistry.Hermes),
-        ("qwen", ToolCallDialectRegistry.Hermes),
-        ("mixtral", ToolCallDialectRegistry.Mistral),
-        ("mistral", ToolCallDialectRegistry.Mistral),
-
-        // Both spellings, because the two are used interchangeably in published model ids
-        // (meta-llama/Llama-3.1-8B-Instruct vs. llama3.1:8b). Llama 2 is absent: it has no tool-call
-        // template, so a match would arm a scanner against a model that can never satisfy it.
-        ("llama-3", ToolCallDialectRegistry.Llama3Json),
-        ("llama3", ToolCallDialectRegistry.Llama3Json),
-    ];
-
     /// <summary>Finds the first heuristic token present in a model id.</summary>
     private static (string Token, ToolCallDialect Dialect)? MatchModelId(string modelId)
     {
-        if (string.IsNullOrWhiteSpace(modelId))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(modelId)) return null;
 
         foreach (var (token, dialect) in ModelIdHeuristics)
-        {
-            if (modelId.Contains(token, StringComparison.OrdinalIgnoreCase))
-            {
+            if (modelId.Contains(value: token, comparisonType: StringComparison.OrdinalIgnoreCase))
                 return (token, dialect);
-            }
-        }
 
         return null;
     }
@@ -338,41 +344,30 @@ public sealed class ModelDialectResolver
         ProviderOptions provider, string modelId, CancellationToken cancellationToken)
     {
         var root = ProviderUrlBuilder.StripVersionSuffix(provider.BaseUrl);
-        if (!Uri.TryCreate($"{root}/api/show", UriKind.Absolute, out var target))
-        {
+        if (!Uri.TryCreate(uriString: $"{root}/api/show", uriKind: UriKind.Absolute, result: out var target))
             return default;
-        }
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, target)
-            {
-                Content = JsonContent.Create(new { model = modelId }),
-            };
-            ProviderCredentialResolver.ApplyToRequest(request, provider, _environment);
+            using var request = new HttpRequestMessage(method: HttpMethod.Post, requestUri: target);
+            request.Content = JsonContent.Create(new { model = modelId });
+            ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);
 
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return default;
-            }
+            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return default;
 
             // Ollama answers 404 for a model it does not have, so reaching here means this model exists and
             // the body is its metadata.
-            var body = await ReadCappedAsync(response.Content, cancellationToken).ConfigureAwait(false);
-            if (body is null)
-            {
-                return default;
-            }
+            var body = await ReadCappedAsync(content: response.Content, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (body is null) return default;
 
             using var document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return default;
-            }
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return default;
 
-            var template = document.RootElement.TryGetProperty("template", out var templateElement)
-                && templateElement.ValueKind == JsonValueKind.String
+            var template = document.RootElement.TryGetProperty(propertyName: "template", value: out var templateElement)
+                           && templateElement.ValueKind == JsonValueKind.String
                 ? templateElement.GetString()
                 : null;
 
@@ -381,9 +376,10 @@ public sealed class ModelDialectResolver
             // returning early on the missing template used to throw away the whole parsed document.
             var (architecture, contextLength) = ReadOllamaModelInfo(document.RootElement);
 
-            return new OllamaShowMetadata(template, architecture, contextLength);
+            return new OllamaShowMetadata(Template: template, Architecture: architecture, ContextLength: contextLength);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException
+                                       or JsonException)
         {
             return default;
         }
@@ -407,47 +403,32 @@ public sealed class ModelDialectResolver
     /// </remarks>
     private static (string? Architecture, int? ContextLength) ReadOllamaModelInfo(JsonElement root)
     {
-        if (!root.TryGetProperty("model_info", out var modelInfo) || modelInfo.ValueKind != JsonValueKind.Object)
-        {
-            return (null, null);
-        }
+        if (!root.TryGetProperty(propertyName: "model_info", value: out var modelInfo) ||
+            modelInfo.ValueKind != JsonValueKind.Object) return (null, null);
 
-        var architecture = modelInfo.TryGetProperty("general.architecture", out var archElement)
-            && archElement.ValueKind == JsonValueKind.String
+        var architecture = modelInfo.TryGetProperty(propertyName: "general.architecture", value: out var archElement)
+                           && archElement.ValueKind == JsonValueKind.String
             ? archElement.GetString()
             : null;
 
         if (!string.IsNullOrWhiteSpace(architecture)
-            && modelInfo.TryGetProperty($"{architecture}.context_length", out var keyed)
+            && modelInfo.TryGetProperty(propertyName: $"{architecture}.context_length", value: out var keyed)
             && keyed.ValueKind == JsonValueKind.Number
             && keyed.TryGetInt32(out var keyedLength))
-        {
             return (architecture, keyedLength);
-        }
 
         foreach (var property in modelInfo.EnumerateObject())
-        {
             if (!property.NameEquals("general.context_length")
-                && property.Name.EndsWith(".context_length", StringComparison.OrdinalIgnoreCase)
+                && property.Name.EndsWith(value: ".context_length", comparisonType: StringComparison.OrdinalIgnoreCase)
                 && property.Value.ValueKind == JsonValueKind.Number
                 && property.Value.TryGetInt32(out var scannedLength))
             {
                 var prefix = property.Name[..^".context_length".Length];
                 return (architecture ?? prefix, scannedLength);
             }
-        }
 
         return (architecture, null);
     }
-
-    /// <summary>
-    /// What one Ollama <c>/api/show</c> probe recovered. Every member is independently nullable: a body can
-    /// carry a template with no <c>model_info</c>, or the reverse.
-    /// </summary>
-    /// <param name="Template">The literal chat template, or <see langword="null"/> when the body named none.</param>
-    /// <param name="Architecture">The reported architecture, or <see langword="null"/>.</param>
-    /// <param name="ContextLength">The reported context window in tokens, or <see langword="null"/>.</param>
-    private readonly record struct OllamaShowMetadata(string? Template, string? Architecture, int? ContextLength);
 
     /// <summary>
     /// Reads a response body as UTF-8, or returns <see langword="null"/> if it exceeds
@@ -467,16 +448,14 @@ public sealed class ModelDialectResolver
         var total = 0;
         while (total < buffer.Length)
         {
-            var read = await stream.ReadAsync(buffer.AsMemory(total), cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
+            var read = await stream.ReadAsync(buffer: buffer.AsMemory(total), cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (read == 0) break;
 
             total += read;
         }
 
-        return total > MaxShowResponseBytes ? null : System.Text.Encoding.UTF8.GetString(buffer, 0, total);
+        return total > MaxShowResponseBytes ? null : Encoding.UTF8.GetString(bytes: buffer, 0, count: total);
     }
 
     /// <summary>
@@ -487,51 +466,47 @@ public sealed class ModelDialectResolver
         ProviderOptions provider, string modelId, CancellationToken cancellationToken)
     {
         var root = ProviderUrlBuilder.StripVersionSuffix(provider.BaseUrl);
-        if (!Uri.TryCreate($"{root}/api/v0/models", UriKind.Absolute, out var target))
-        {
+        if (!Uri.TryCreate(uriString: $"{root}/api/v0/models", uriKind: UriKind.Absolute, result: out var target))
             return default;
-        }
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, target);
-            ProviderCredentialResolver.ApplyToRequest(request, provider, _environment);
+            using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: target);
+            ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);
 
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return default;
-            }
+            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return default;
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             using var document = JsonDocument.Parse(body);
             if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty("data", out var data)
+                || !document.RootElement.TryGetProperty(propertyName: "data", value: out var data)
                 || data.ValueKind != JsonValueKind.Array)
-            {
                 return default;
-            }
 
             foreach (var entry in data.EnumerateArray())
             {
                 if (entry.ValueKind != JsonValueKind.Object
-                    || !entry.TryGetProperty("id", out var id)
+                    || !entry.TryGetProperty(propertyName: "id", value: out var id)
                     || id.ValueKind != JsonValueKind.String
-                    || !string.Equals(id.GetString(), modelId, StringComparison.OrdinalIgnoreCase))
-                {
+                    || !string.Equals(a: id.GetString(), b: modelId,
+                        comparisonType: StringComparison.OrdinalIgnoreCase))
                     continue;
-                }
 
-                var architecture = entry.TryGetProperty("arch", out var arch) && arch.ValueKind == JsonValueKind.String
+                var architecture = entry.TryGetProperty(propertyName: "arch", value: out var arch) &&
+                                   arch.ValueKind == JsonValueKind.String
                     ? arch.GetString()
                     : null;
 
-                return new LmStudioModelMetadata(architecture, ReadLmStudioContextLength(entry));
+                return new LmStudioModelMetadata(Architecture: architecture,
+                    ContextLength: ReadLmStudioContextLength(entry));
             }
 
             return default;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException
+                                       or JsonException)
         {
             return default;
         }
@@ -551,21 +526,28 @@ public sealed class ModelDialectResolver
     /// </remarks>
     private static int? ReadLmStudioContextLength(JsonElement entry)
     {
-        if (entry.TryGetProperty("loaded_context_length", out var loaded)
+        if (entry.TryGetProperty(propertyName: "loaded_context_length", value: out var loaded)
             && loaded.ValueKind == JsonValueKind.Number
             && loaded.TryGetInt32(out var loadedLength)
             && loadedLength > 0)
-        {
             return loadedLength;
-        }
 
-        return entry.TryGetProperty("max_context_length", out var max)
-            && max.ValueKind == JsonValueKind.Number
-            && max.TryGetInt32(out var maxLength)
-            && maxLength > 0
+        return entry.TryGetProperty(propertyName: "max_context_length", value: out var max)
+               && max.ValueKind == JsonValueKind.Number
+               && max.TryGetInt32(out var maxLength)
+               && maxLength > 0
             ? maxLength
             : null;
     }
+
+    /// <summary>
+    /// What one Ollama <c>/api/show</c> probe recovered. Every member is independently nullable: a body can
+    /// carry a template with no <c>model_info</c>, or the reverse.
+    /// </summary>
+    /// <param name="Template">The literal chat template, or <see langword="null"/> when the body named none.</param>
+    /// <param name="Architecture">The reported architecture, or <see langword="null"/>.</param>
+    /// <param name="ContextLength">The reported context window in tokens, or <see langword="null"/>.</param>
+    private readonly record struct OllamaShowMetadata(string? Template, string? Architecture, int? ContextLength);
 
     /// <summary>
     /// What one LM Studio model-list probe recovered for a single model.
@@ -591,4 +573,3 @@ public sealed class ModelDialectResolver
 public sealed record ModelMetadataProbeResult(
     ModelToolCapability? Capability,
     ModelContextWindow? ContextWindow);
-

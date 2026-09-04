@@ -34,4 +34,3 @@ public static class RouterConstants
         "gemini-2.5-flash"
     ]);
 }
-

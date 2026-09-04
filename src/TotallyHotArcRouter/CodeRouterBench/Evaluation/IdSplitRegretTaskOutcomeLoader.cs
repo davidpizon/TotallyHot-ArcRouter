@@ -36,10 +36,8 @@ public static class IdSplitRegretTaskOutcomeLoader
         ArgumentException.ThrowIfNullOrWhiteSpace(split);
 
         if (!File.Exists(database.DatabasePath))
-        {
             throw new InvalidOperationException(
                 $"The CodeRouterBench corpus database was not found at '{database.DatabasePath}' - is the corpus synced?");
-        }
 
         using var connection = database.OpenConnection();
 
@@ -52,7 +50,7 @@ public static class IdSplitRegretTaskOutcomeLoader
             command.CommandText =
                 "SELECT task_id, dimension, model, score, cost_usd, input_tokens, output_tokens, total_tokens " +
                 "FROM benchmark_id_results WHERE split = $split;";
-            command.Parameters.AddWithValue("$split", split);
+            command.Parameters.AddWithValue(parameterName: "$split", value: split);
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -65,36 +63,32 @@ public static class IdSplitRegretTaskOutcomeLoader
                 long? outTok = reader.IsDBNull(6) ? null : reader.GetInt64(6);
                 long? totalTokens = reader.IsDBNull(7) ? null : reader.GetInt64(7);
                 var costUsd = reader.IsDBNull(4)
-                    ? BenchmarkModelPricingLookup.ResolveFallbackCostUsd(model, inTok, outTok, modelPricing)
+                    ? BenchmarkModelPricingLookup.ResolveFallbackCostUsd(model: model, inputTokens: inTok,
+                        outputTokens: outTok, pricing: modelPricing)
                     : reader.GetDouble(4);
 
                 if (costUsd is null)
-                {
                     // Neither the row's own cost_usd nor benchmark_models pricing over its token counts
                     // resolved a cost - RegretOutcomeCell.CostUsd is never a raw-null passthrough, so this
                     // cell is excluded rather than assigned a misleading zero.
                     continue;
-                }
 
-                if (!cellsByTask.TryGetValue(taskId, out var cells))
+                if (!cellsByTask.TryGetValue(key: taskId, value: out var cells))
                 {
                     cells = new Dictionary<string, RegretOutcomeCell>(StringComparer.Ordinal);
                     cellsByTask[taskId] = cells;
                 }
 
-                cells[model] = new RegretOutcomeCell(score, costUsd.Value, totalTokens);
+                cells[model] = new RegretOutcomeCell(Score: score, CostUsd: costUsd.Value, TotalTokens: totalTokens);
             }
         }
 
         var outcomes = new List<RegretTaskOutcome>(cellsByTask.Count);
         foreach (var (taskId, cells) in cellsByTask)
         {
-            if (cells.Count == 0)
-            {
-                continue;
-            }
+            if (cells.Count == 0) continue;
 
-            outcomes.Add(new RegretTaskOutcome(taskId, taskDimension[taskId], cells, TaskText: null));
+            outcomes.Add(new RegretTaskOutcome(TaskId: taskId, Dimension: taskDimension[taskId], Cells: cells));
         }
 
         return outcomes;

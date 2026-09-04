@@ -1,15 +1,14 @@
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.PriceCatalog;
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -29,28 +28,32 @@ public class ProxyMiddlewareTests
             authHeaderName: "Authorization",
             authHeaderScheme: "Bearer",
             apiKey: "secret-key");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(async request =>
         {
-            Assert.Equal(HttpMethod.Post, request.Method);
-            Assert.Equal("https://example.com/chat?x=1", request.RequestUri!.ToString());
+            Assert.Equal(expected: HttpMethod.Post, actual: request.Method);
+            Assert.Equal(expected: "https://example.com/chat?x=1", actual: request.RequestUri!.ToString());
             Assert.True(request.Headers.Contains("X-Trace"));
-            Assert.Equal("Bearer secret-key", request.Headers.GetValues("Authorization").Single());
+            Assert.Equal(expected: "Bearer secret-key", actual: request.Headers.GetValues("Authorization").Single());
 
-            var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             using var document = JsonDocument.Parse(body);
-            Assert.Equal("gpt-5.4-2026-01", document.RootElement.GetProperty("model").GetString());
+            Assert.Equal(expected: "gpt-5.4-2026-01", actual: document.RootElement.GetProperty("model").GetString());
 
             var response = new HttpResponseMessage(HttpStatusCode.Accepted)
             {
-                Content = new StringContent("forwarded", Encoding.UTF8, "text/plain")
+                Content = new StringContent(content: "forwarded", encoding: Encoding.UTF8, mediaType: "text/plain")
             };
-            response.Headers.Add("X-From-Upstream", "true");
+            response.Headers.Add(name: "X-From-Upstream", value: "true");
             return response;
         });
 
-        var middleware = new ProxyMiddleware(loggerMock.Object, interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: loggerMock.Object, interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -59,36 +62,38 @@ public class ProxyMiddlewareTests
         context.Request.Path = "/chat";
         context.Request.QueryString = new QueryString("?x=1");
         context.Request.Headers["X-Trace"] = "abc";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status202Accepted, context.Response.StatusCode);
-        Assert.Equal("true", context.Response.Headers["X-From-Upstream"].ToString());
-        Assert.Equal(1, interceptor.InterceptedRequestCount);
+        Assert.Equal(expected: StatusCodes.Status202Accepted, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "true", actual: context.Response.Headers["X-From-Upstream"].ToString());
+        Assert.Equal(1, actual: interceptor.InterceptedRequestCount);
 
         // A named, servable model with no substitution: requested equals routed, reason is None
         // (docs/router/orchestrator-live-path-plan.md §M2.2).
-        Assert.Equal("gpt-5.4", context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
-        Assert.Equal("gpt-5.4", context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
-        Assert.Equal(RoutingSubstitutionReason.None.ToString(), context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
+        Assert.Equal(expected: "gpt-5.4", actual: context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal(expected: "gpt-5.4", actual: context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.None),
+            actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         var responseBody = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
-        Assert.Equal("forwarded", responseBody);
+        Assert.Equal(expected: "forwarded", actual: responseBody);
 
         loggerMock.Verify(
-            logger => logger.Log(
+            expression: logger => logger.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("Proxy middleware caught request to", StringComparison.Ordinal)),
+                It.Is<It.IsAnyType>((state, _) =>
+                    state.ToString()!.Contains("Proxy middleware caught request to", StringComparison.Ordinal)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+            times: Times.Once);
     }
 
     [Fact]
@@ -108,20 +113,22 @@ public class ProxyMiddlewareTests
             authHeaderName: "x-api-key",
             authHeaderScheme: "",
             apiKey: "real-anthropic-key");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
             Assert.False(request.Headers.Contains("Authorization"));
-            Assert.Equal("real-anthropic-key", request.Headers.GetValues("x-api-key").Single());
+            Assert.Equal(expected: "real-anthropic-key", actual: request.Headers.GetValues("x-api-key").Single());
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+                Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json")
             });
         });
 
-        var middleware = new ProxyMiddleware(loggerMock.Object, interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: loggerMock.Object, interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -129,14 +136,14 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/messages";
         context.Request.Headers["Authorization"] = "Bearer client-placeholder-token";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"claude-sonnet-5"}""");
+        var requestBody = """{"model":"claude-sonnet-5"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
@@ -158,18 +165,20 @@ public class ProxyMiddlewareTests
             authHeaderName: "x-api-key",
             apiKey: null,
             headers: [new ProviderHeader { Name = "x-api-key", ValueEnvVar = "PROXY_MIDDLEWARE_TESTS_UNSET_VAR" }]);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
             Assert.False(request.Headers.Contains("x-api-key"));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+                Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json")
             });
         });
 
-        var middleware = new ProxyMiddleware(loggerMock.Object, interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: loggerMock.Object, interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -177,14 +186,14 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/messages";
         context.Request.Headers["x-api-key"] = "client-supplied-token";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"claude-sonnet-5"}""");
+        var requestBody = """{"model":"claude-sonnet-5"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
@@ -200,18 +209,20 @@ public class ProxyMiddlewareTests
             baseUrl: "http://localhost:11434",
             authHeaderName: "x-api-key",
             apiKey: null);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
-            Assert.Equal("client-supplied-token", request.Headers.GetValues("x-api-key").Single());
+            Assert.Equal(expected: "client-supplied-token", actual: request.Headers.GetValues("x-api-key").Single());
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+                Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json")
             });
         });
 
-        var middleware = new ProxyMiddleware(loggerMock.Object, interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: loggerMock.Object, interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -219,14 +230,14 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-api-key"] = "client-supplied-token";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"local-model"}""");
+        var requestBody = """{"model":"local-model"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
@@ -234,30 +245,33 @@ public class ProxyMiddlewareTests
     {
         // Regression test: the forwarding target must come from the resolved upstream route, never from
         // context.Request.Host, otherwise the proxy would forward a request back to itself indefinitely.
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
-            Assert.Equal("api.openai.com", request.RequestUri!.Host);
+            Assert.Equal(expected: "api.openai.com", actual: request.RequestUri!.Host);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
@@ -277,7 +291,8 @@ public class ProxyMiddlewareTests
             baseUrl: "http://127.0.0.1:1234/v1",
             providerName: "lmstudio",
             apiKey: null);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         Uri? forwardedUri = null;
         var handler = new DelegatingHandlerStub(request =>
@@ -285,26 +300,27 @@ public class ProxyMiddlewareTests
             forwardedUri = request.RequestUri;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+                Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json")
             });
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"qwen3-coder"}""");
+        var requestBody = """{"model":"qwen3-coder"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("http://127.0.0.1:1234/v1/chat/completions", forwardedUri!.ToString());
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "http://127.0.0.1:1234/v1/chat/completions", actual: forwardedUri!.ToString());
     }
 
     [Fact]
@@ -312,32 +328,37 @@ public class ProxyMiddlewareTests
     {
         // The agentic fallback (below) has nothing to fall back to when the allowlist itself is empty, so
         // this is the one case where an unresolved model still 400s before ever reaching the upstream call.
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
 
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for an unknown model."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for an unknown model."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"totally-unknown-model"}""");
+        var requestBody = """{"model":"totally-unknown-model"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
-        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.Equal(expected: StatusCodes.Status400BadRequest, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "application/json", actual: context.Response.ContentType);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         var responseBody = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
         using var document = JsonDocument.Parse(responseBody);
-        Assert.Equal("invalid_request_error", document.RootElement.GetProperty("error").GetProperty("type").GetString());
-        Assert.Contains("totally-unknown-model", document.RootElement.GetProperty("error").GetProperty("message").GetString());
+        Assert.Equal(expected: "invalid_request_error",
+            actual: document.RootElement.GetProperty("error").GetProperty("type").GetString());
+        Assert.Contains(expectedSubstring: "totally-unknown-model",
+            actualString: document.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     // docs/router/utility-model-routing.md's generalized fallback: outside single-model serving, an
@@ -350,80 +371,88 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4",
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(async request =>
         {
-            var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             using var document = JsonDocument.Parse(body);
-            Assert.Equal("gpt-5.4-2026-01", document.RootElement.GetProperty("model").GetString());
+            Assert.Equal(expected: "gpt-5.4-2026-01", actual: document.RootElement.GetProperty("model").GetString());
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("forwarded", Encoding.UTF8, "text/plain")
+                Content = new StringContent(content: "forwarded", encoding: Encoding.UTF8, mediaType: "text/plain")
             };
         });
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"agentic-router"}""");
+        var requestBody = """{"model":"agentic-router"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
     public async Task InvokeAsync_AddsConfiguredCustomHeader_WhenClientDidNotSendIt()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
-            "gpt-5.4", "gpt-5.4", "https://example.com",
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4", baseUrl: "https://example.com",
             headers: [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }]);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
-            Assert.Equal("2023-06-01", Assert.Single(request.Headers.GetValues("anthropic-version")));
+            Assert.Equal(expected: "2023-06-01", actual: Assert.Single(request.Headers.GetValues("anthropic-version")));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = BuildForwardableContext();
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
     public async Task InvokeAsync_DoesNotClobberCustomHeader_WhenClientAlreadySentIt()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
-            "gpt-5.4", "gpt-5.4", "https://example.com",
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4", baseUrl: "https://example.com",
             headers: [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }]);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
             // The client's own value wins; the provider default is not added on top or in place of it.
-            Assert.Equal("2099-01-01", Assert.Single(request.Headers.GetValues("anthropic-version")));
+            Assert.Equal(expected: "2099-01-01", actual: Assert.Single(request.Headers.GetValues("anthropic-version")));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = BuildForwardableContext();
         context.Request.Headers["anthropic-version"] = "2099-01-01";
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     private static DefaultHttpContext BuildForwardableContext()
@@ -433,7 +462,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -443,8 +472,10 @@ public class ProxyMiddlewareTests
     [Fact]
     public async Task InvokeAsync_StripsHeadersNominatedByRequestConnectionHeader()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://example.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://example.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -453,7 +484,8 @@ public class ProxyMiddlewareTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
@@ -463,48 +495,51 @@ public class ProxyMiddlewareTests
         context.Request.Headers["Connection"] = "X-Nominated";
         context.Request.Headers["X-Nominated"] = "should-be-stripped";
         context.Request.Headers["X-Kept"] = "should-be-forwarded";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     [Fact]
     public async Task InvokeAsync_StripsHeadersNominatedByResponseConnectionHeader()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://example.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://example.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ =>
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") };
-            response.Headers.Add("Connection", "X-Custom");
-            response.Headers.Add("X-Custom", "should-be-stripped");
-            response.Headers.Add("X-Kept", "should-be-forwarded");
+            response.Headers.Add(name: "Connection", value: "X-Custom");
+            response.Headers.Add(name: "X-Custom", value: "should-be-stripped");
+            response.Headers.Add(name: "X-Kept", value: "should-be-forwarded");
             return Task.FromResult(response);
         });
 
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         Assert.False(context.Response.Headers.ContainsKey("X-Custom"));
         Assert.False(context.Response.Headers.ContainsKey("Connection"));
-        Assert.Equal("should-be-forwarded", context.Response.Headers["X-Kept"].ToString());
+        Assert.Equal(expected: "should-be-forwarded", actual: context.Response.Headers["X-Kept"].ToString());
     }
 
     [Fact]
@@ -514,24 +549,27 @@ public class ProxyMiddlewareTests
         // 502 envelope - the same upstream-outage response the Bedrock SDK path already produces - rather
         // than letting the HttpRequestException escape as an unhandled 500. (Previously this threw; the
         // failover cascade unified transport-outage handling on the exhausted-candidates 502 path.)
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ => throw new HttpRequestException("upstream unavailable"));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/fail";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status502BadGateway, actual: context.Response.StatusCode);
     }
 
     // Verifies that GET /v1/models is answered locally from the configured ModelList, in OpenAI's model
@@ -543,9 +581,12 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             ("gpt-5.4", "openai", "gpt-5.4-2026-01"),
             ("claude-opus-4.6", "anthropic", "claude-opus-4-6"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /v1/models."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /v1/models."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
@@ -554,29 +595,29 @@ public class ProxyMiddlewareTests
         context.Request.Path = "/v1/models";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "application/json", actual: context.Response.ContentType);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
-        Assert.Equal("list", document.RootElement.GetProperty("object").GetString());
+        Assert.Equal(expected: "list", actual: document.RootElement.GetProperty("object").GetString());
         var data = document.RootElement.GetProperty("data").EnumerateArray().ToList();
-        Assert.Equal(3, data.Count);
+        Assert.Equal(3, actual: data.Count);
 
         // The synthetic "let the router choose" entry leads the list - see the dedicated test below.
-        Assert.Equal("totallyhot-arcrouter", data[0].GetProperty("id").GetString());
+        Assert.Equal(expected: "totallyhot-arcrouter", actual: data[0].GetProperty("id").GetString());
 
-        Assert.Equal("gpt-5.4", data[1].GetProperty("id").GetString());
-        Assert.Equal("model", data[1].GetProperty("object").GetString());
-        Assert.Equal(0, data[1].GetProperty("created").GetInt64());
-        Assert.Equal("openai", data[1].GetProperty("owned_by").GetString());
+        Assert.Equal(expected: "gpt-5.4", actual: data[1].GetProperty("id").GetString());
+        Assert.Equal(expected: "model", actual: data[1].GetProperty("object").GetString());
+        Assert.Equal(0, actual: data[1].GetProperty("created").GetInt64());
+        Assert.Equal(expected: "openai", actual: data[1].GetProperty("owned_by").GetString());
 
-        Assert.Equal("claude-opus-4.6", data[2].GetProperty("id").GetString());
-        Assert.Equal("anthropic", data[2].GetProperty("owned_by").GetString());
+        Assert.Equal(expected: "claude-opus-4.6", actual: data[2].GetProperty("id").GetString());
+        Assert.Equal(expected: "anthropic", actual: data[2].GetProperty("owned_by").GetString());
     }
 
     // VS Code / Copilot attaches to this proxy as an OpenAI-compatible provider and discovers models here
@@ -587,24 +628,27 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_GetModelsList_ListsTheRouterEntryFirst()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /v1/models."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /v1/models."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/v1/models";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
         var data = document.RootElement.GetProperty("data").EnumerateArray().ToList();
-        Assert.Equal("totallyhot-arcrouter", data[0].GetProperty("id").GetString());
-        Assert.Equal("totallyhot", data[0].GetProperty("owned_by").GetString());
+        Assert.Equal(expected: "totallyhot-arcrouter", actual: data[0].GetProperty("id").GetString());
+        Assert.Equal(expected: "totallyhot", actual: data[0].GetProperty("owned_by").GetString());
     }
 
     // Verifies that an empty ModelList still yields a valid, empty OpenAI-shaped response rather than an
@@ -612,21 +656,24 @@ public class ProxyMiddlewareTests
     [Fact]
     public async Task InvokeAsync_GetModelsList_EmptyModelList_ReturnsEmptyDataArray()
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), ModelRouteResolverTestFactory.Empty());
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /v1/models."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /v1/models."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/v1/models";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
         Assert.Empty(document.RootElement.GetProperty("data").EnumerateArray());
@@ -637,18 +684,21 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_GetModelsList_IsCaseInsensitiveOnPath()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /v1/models."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /v1/models."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/V1/MODELS";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     // Verifies that a trailing slash on the path is tolerated, since some clients/proxies normalize
@@ -657,18 +707,21 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_GetModelsList_TrailingSlashIsTolerated()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /v1/models."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /v1/models."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/v1/models/";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     // Verifies that a non-GET request to the /v1/models path is not treated as a model-discovery request:
@@ -676,29 +729,32 @@ public class ProxyMiddlewareTests
     [Fact]
     public async Task InvokeAsync_PostToModelsPath_IsNotTreatedAsModelsListRequest_AndIsForwardedNormally()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4-2026-01", "https://api.openai.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
+            baseUrl: "https://api.openai.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
-            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(expected: HttpMethod.Post, actual: request.Method);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
         });
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/models";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     // Verifies that GET /api/tags is answered locally from the configured ModelList, in Ollama's native
@@ -711,9 +767,12 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             ("gpt-5.4", "openai", "gpt-5.4-2026-01"),
             ("claude-opus-4.6", "anthropic", "claude-opus-4-6"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/tags."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /api/tags."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
@@ -722,26 +781,26 @@ public class ProxyMiddlewareTests
         context.Request.Path = "/api/tags";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "application/json", actual: context.Response.ContentType);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
         var models = document.RootElement.GetProperty("models").EnumerateArray().ToList();
-        Assert.Equal(3, models.Count);
+        Assert.Equal(3, actual: models.Count);
 
         // The synthetic "let the router choose" entry leads the list - see the dedicated test below.
-        Assert.Equal("totallyhot-arcrouter", models[0].GetProperty("name").GetString());
+        Assert.Equal(expected: "totallyhot-arcrouter", actual: models[0].GetProperty("name").GetString());
 
-        Assert.Equal("gpt-5.4", models[1].GetProperty("name").GetString());
-        Assert.Equal("gpt-5.4", models[1].GetProperty("model").GetString());
+        Assert.Equal(expected: "gpt-5.4", actual: models[1].GetProperty("name").GetString());
+        Assert.Equal(expected: "gpt-5.4", actual: models[1].GetProperty("model").GetString());
 
-        Assert.Equal("claude-opus-4.6", models[2].GetProperty("name").GetString());
-        Assert.Equal("claude-opus-4.6", models[2].GetProperty("model").GetString());
+        Assert.Equal(expected: "claude-opus-4.6", actual: models[2].GetProperty("name").GetString());
+        Assert.Equal(expected: "claude-opus-4.6", actual: models[2].GetProperty("model").GetString());
     }
 
     // Visual Studio's Ollama model picker only lets the user choose a name this endpoint returned, so the
@@ -751,24 +810,27 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_GetOllamaTags_ListsTheRouterEntryFirst()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/tags."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /api/tags."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/api/tags";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
         var models = document.RootElement.GetProperty("models").EnumerateArray().ToList();
-        Assert.Equal("totallyhot-arcrouter", models[0].GetProperty("name").GetString());
-        Assert.Equal("totallyhot-arcrouter", models[0].GetProperty("model").GetString());
+        Assert.Equal(expected: "totallyhot-arcrouter", actual: models[0].GetProperty("name").GetString());
+        Assert.Equal(expected: "totallyhot-arcrouter", actual: models[0].GetProperty("model").GetString());
     }
 
     // The step that would silently break the picker: Visual Studio POSTs /api/show for the model the user
@@ -778,21 +840,24 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_PostOllamaShow_RouterModel_Returns200()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/show."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /api/show."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/show";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"totallyhot-arcrouter"}""");
+        var requestBody = """{"model":"totallyhot-arcrouter"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     // Verifies that a trailing slash on the path is tolerated, mirroring /v1/models' tolerance.
@@ -800,18 +865,21 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_GetOllamaTags_TrailingSlashIsTolerated()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/tags."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /api/tags."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/api/tags/";
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
     }
 
     // Verifies that POST /api/show is answered locally for a configured model - the follow-up request an
@@ -822,29 +890,32 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_PostOllamaShow_KnownModel_ReturnsOllamaShapedDetails_WithoutCallingUpstream()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/show."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /api/show."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/show";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "application/json", actual: context.Response.ContentType);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         using var document = JsonDocument.Parse(await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
-        Assert.True(document.RootElement.TryGetProperty("template", out _));
-        Assert.True(document.RootElement.TryGetProperty("details", out _));
+        Assert.True(document.RootElement.TryGetProperty(propertyName: "template", value: out _));
+        Assert.True(document.RootElement.TryGetProperty(propertyName: "details", value: out _));
     }
 
     // Verifies that POST /api/show for a model this proxy does not have configured answers 404 with an
@@ -854,21 +925,24 @@ public class ProxyMiddlewareTests
     public async Task InvokeAsync_PostOllamaShow_UnknownModel_Returns404_WithoutCallingUpstream()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => throw new InvalidOperationException("Upstream should never be called for /api/show."));
-        var middleware = new ProxyMiddleware(Mock.Of<ILogger<ProxyMiddleware>>(), interceptor, new HttpClient(handler));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            throw new InvalidOperationException("Upstream should never be called for /api/show."));
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/show";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"deepseek-coder-6.7b-instruct"}""");
+        var requestBody = """{"model":"deepseek-coder-6.7b-instruct"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status404NotFound, actual: context.Response.StatusCode);
     }
 
     // Covers the telemetry integration added to ProxyMiddleware: session resolution from a request
@@ -883,21 +957,22 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
-                Encoding.UTF8,
-                "application/json"),
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
         }));
 
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -910,15 +985,15 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-claude-code-session-id"] = "sess-42";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(
+            expression: p => p.PublishAsync(
                 It.Is<RoutingTelemetryEvent>(e =>
                     e.SessionId == "sess-42" &&
                     e.TurnNumber == 1 &&
@@ -931,7 +1006,7 @@ public class ProxyMiddlewareTests
                     !e.IsStreaming &&
                     e.StatusCode == 200),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
+            times: Times.Once);
     }
 
     // Every completed request - not just ones with a known cost - must reach the spend tracker so
@@ -944,24 +1019,26 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
-                Encoding.UTF8,
-                "application/json"),
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
         }));
 
         var spendTrackerMock = new Mock<ISpendTracker>();
         spendTrackerMock
-            .Setup(t => t.RecordAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<decimal?>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.RecordAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<decimal?>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpendSummary(1, 42, 7, 0m));
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 SpendTracker = spendTrackerMock.Object
@@ -973,20 +1050,20 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         // "gpt-5.4" routes to a paid provider and no price lookup is wired into this middleware (the
         // default), so cost is unknown (null) even though usage was extracted - the spend tracker still
         // gets the real token counts. Unknown is the honest answer here; it must not be reported as a zero.
         // The catalog-priced counterpart is InvokeAsync_PaidProviderWithCatalogPrice_RecordsEstimatedCostFromCatalog.
         spendTrackerMock.Verify(
-            t => t.RecordAsync("gpt-5.4", 42, 7, null, It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: t => t.RecordAsync("gpt-5.4", 42, 7, null, It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     // The counterpart to the test above, and the distinction the whole IsFree flag exists to draw: a
@@ -1002,24 +1079,26 @@ public class ProxyMiddlewareTests
             baseUrl: "http://localhost:11434/v1",
             providerName: "ollama",
             isFree: true);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
-                Encoding.UTF8,
-                "application/json"),
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
         }));
 
         var spendTrackerMock = new Mock<ISpendTracker>();
         spendTrackerMock
-            .Setup(t => t.RecordAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<decimal?>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.RecordAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<decimal?>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpendSummary(1, 42, 7, 0m));
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 SpendTracker = spendTrackerMock.Object
@@ -1031,16 +1110,16 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"llama3"}""");
+        var requestBody = """{"model":"llama3"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         spendTrackerMock.Verify(
-            t => t.RecordAsync("llama3", 42, 7, 0m, It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: t => t.RecordAsync("llama3", 42, 7, 0m, It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     // The cost half of the pillar, now that the price catalog is wired into the request path: a paid model
@@ -1055,14 +1134,15 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
-                Encoding.UTF8,
-                "application/json"),
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
         }));
 
         // $2 / M input, $6 / M output. Expected cost for 42 prompt + 7 completion tokens:
@@ -1074,12 +1154,13 @@ public class ProxyMiddlewareTests
 
         var spendTrackerMock = new Mock<ISpendTracker>();
         spendTrackerMock
-            .Setup(t => t.RecordAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<decimal?>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.RecordAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<decimal?>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpendSummary(1, 42, 7, 0.000126m));
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 SpendTracker = spendTrackerMock.Object,
@@ -1092,16 +1173,16 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         spendTrackerMock.Verify(
-            t => t.RecordAsync("gpt-5.4", 42, 7, 0.000126m, It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: t => t.RecordAsync("gpt-5.4", 42, 7, 0.000126m, It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     // §5.6: the published telemetry event's CostConfidence must match how the cost was actually arrived
@@ -1112,18 +1193,19 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "llama3", providerModelId: "llama3", baseUrl: "http://localhost:11434/v1",
             providerName: "ollama", isFree: true);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"c1","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""",
-                Encoding.UTF8, "application/json"),
+                encoding: Encoding.UTF8, mediaType: "application/json")
         }));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1131,32 +1213,35 @@ public class ProxyMiddlewareTests
         );
 
         var context = NewJsonPostContext("""{"model":"llama3"}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Exact), It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Exact),
+                It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     [Fact]
     public async Task InvokeAsync_PaidProviderWithFullCatalogPrice_ReportsCatalogCostConfidence()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
+            providerName: "openai");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"c1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
-                Encoding.UTF8, "application/json"),
+                encoding: Encoding.UTF8, mediaType: "application/json")
         }));
         var priceLookup = new Mock<IModelPriceLookup>();
         priceLookup.Setup(l => l.TryGetPrice(new ModelKey("gpt-5.4", "openai"))).Returns(new ModelPrice(2m, 6m));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object,
@@ -1165,24 +1250,28 @@ public class ProxyMiddlewareTests
         );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Catalog), It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: p =>
+                p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Catalog),
+                    It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     [Fact]
     public async Task InvokeAsync_PaidProviderWithUnpublishedCacheRate_ReportsCatalogApproximateCostConfidence()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
+            providerName: "openai");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"c1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49,"prompt_tokens_details":{"cached_tokens":10}}}""",
-                Encoding.UTF8, "application/json"),
+                encoding: Encoding.UTF8, mediaType: "application/json")
         }));
         // No cache rates published, but the response carries cached tokens - EstimateCost falls back to
         // the standard input rate for them, which must be reported as an approximate, not exact, cost.
@@ -1190,9 +1279,9 @@ public class ProxyMiddlewareTests
         priceLookup.Setup(l => l.TryGetPrice(new ModelKey("gpt-5.4", "openai"))).Returns(new ModelPrice(2m, 6m));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object,
@@ -1201,30 +1290,34 @@ public class ProxyMiddlewareTests
         );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.CatalogApproximate), It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: p =>
+                p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.CatalogApproximate),
+                    It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     [Fact]
     public async Task InvokeAsync_PaidProviderWithNoCatalogPrice_ReportsUnknownCostConfidence()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
+            providerName: "openai");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"c1","choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}""",
-                Encoding.UTF8, "application/json"),
+                encoding: Encoding.UTF8, mediaType: "application/json")
         }));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1232,28 +1325,33 @@ public class ProxyMiddlewareTests
         );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Unknown), It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: p =>
+                p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.Unknown),
+                    It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     [Fact]
     public async Task InvokeAsync_NoUsageExtracted_ReportsNoUsageCostConfidence()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
-            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com", providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
+            providerName: "openai");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"id":"c1","choices":[]}""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""{"id":"c1","choices":[]}""", encoding: Encoding.UTF8,
+                mediaType: "application/json")
         }));
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1261,11 +1359,13 @@ public class ProxyMiddlewareTests
         );
 
         var context = NewJsonPostContext("""{"model":"gpt-5.4"}""");
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.NoUsage), It.IsAny<CancellationToken>()),
-            Times.Once);
+            expression: p =>
+                p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.CostConfidence == CostConfidence.NoUsage),
+                    It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     /// <summary>Builds a minimal POST context with the given JSON request body, for the CostConfidence tests above.</summary>
@@ -1296,15 +1396,17 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
 
         var loggerMock = new Mock<ILogger<ProxyMiddleware>>();
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            loggerMock.Object,
-            interceptor,
-            new HttpClient(handler),
+            logger: loggerMock.Object,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1319,21 +1421,21 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-claude-code-session-id"] = maliciousSessionId;
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(
+            expression: p => p.PublishAsync(
                 It.Is<RoutingTelemetryEvent>(e => e.SessionId == maliciousSessionId),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
+            times: Times.Once);
 
         loggerMock.Verify(
-            logger => logger.Log(
+            expression: logger => logger.Log(
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
@@ -1342,7 +1444,7 @@ public class ProxyMiddlewareTests
                     !state.ToString()!.Contains('\n')),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+            times: Times.Once);
     }
 
     // The newest user message and the assistant's reply text must both reach the published event,
@@ -1355,21 +1457,22 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """{"id":"chatcmpl-1","choices":[{"message":{"role":"assistant","content":"The capital of France is Paris."}}]}""",
-                Encoding.UTF8,
-                "application/json"),
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
         }));
 
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1382,21 +1485,20 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-claude-code-session-id"] = "sess-text";
-        var requestBody = Encoding.UTF8.GetBytes(
-            """{"model":"gpt-5.4","messages":[{"role":"system","content":"You are helpful."},{"role":"user","content":"What is the capital of France?"}]}""");
+        var requestBody = """{"model":"gpt-5.4","messages":[{"role":"system","content":"You are helpful."},{"role":"user","content":"What is the capital of France?"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(
+            expression: p => p.PublishAsync(
                 It.Is<RoutingTelemetryEvent>(e =>
                     e.RequestSummary == "What is the capital of France?" &&
                     e.ResponseSummary == "The capital of France is Paris."),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
+            times: Times.Once);
     }
 
     // A second request in the same session must be turn 2, not a fresh turn 1 - confirms the turn
@@ -1410,14 +1512,16 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
 
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1432,19 +1536,25 @@ public class ProxyMiddlewareTests
             context.Request.Host = new HostString("127.0.0.1:5001");
             context.Request.Path = "/chat";
             context.Request.Headers["x-claude-code-session-id"] = "sess-repeat";
-            var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+            var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
             context.Request.Body = new MemoryStream(requestBody);
             context.Request.ContentLength = requestBody.Length;
             context.Response.Body = new MemoryStream();
 
-            await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+            await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
         }
 
         await SendOnceAsync();
         await SendOnceAsync();
 
-        telemetryPublisherMock.Verify(p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.TurnNumber == 1), It.IsAny<CancellationToken>()), Times.Once);
-        telemetryPublisherMock.Verify(p => p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.TurnNumber == 2), It.IsAny<CancellationToken>()), Times.Once);
+        telemetryPublisherMock.Verify(
+            expression: p =>
+                p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.TurnNumber == 1), It.IsAny<CancellationToken>()),
+            times: Times.Once);
+        telemetryPublisherMock.Verify(
+            expression: p =>
+                p.PublishAsync(It.Is<RoutingTelemetryEvent>(e => e.TurnNumber == 2), It.IsAny<CancellationToken>()),
+            times: Times.Once);
     }
 
     // No session id anywhere in the request: the middleware must still publish (a synthesized,
@@ -1457,14 +1567,16 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
 
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1476,18 +1588,19 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         telemetryPublisherMock.Verify(
-            p => p.PublishAsync(
-                It.Is<RoutingTelemetryEvent>(e => e.IsSessionSynthesized && e.TurnNumber == 1 && !string.IsNullOrEmpty(e.SessionId)),
+            expression: p => p.PublishAsync(
+                It.Is<RoutingTelemetryEvent>(e =>
+                    e.IsSessionSynthesized && e.TurnNumber == 1 && !string.IsNullOrEmpty(e.SessionId)),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
+            times: Times.Once);
     }
 
     // A publisher failure must never surface as a proxy error: the client-facing response is
@@ -1500,8 +1613,10 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com",
             providerName: "openai");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
-        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted) { Content = new StringContent("forwarded") }));
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+        var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted)
+        { Content = new StringContent("forwarded") }));
 
         var telemetryPublisherMock = new Mock<ITelemetryPublisher>();
         telemetryPublisherMock
@@ -1509,9 +1624,9 @@ public class ProxyMiddlewareTests
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisherMock.Object
@@ -1523,21 +1638,22 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(StatusCodes.Status202Accepted, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status202Accepted, actual: context.Response.StatusCode);
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
-        Assert.Equal("forwarded", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
+        Assert.Equal(expected: "forwarded", actual: await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task InvokeAsync_UpstreamReadAbortedMidStream_FailsOpen_WritesWhatArrivedAndLogsWarning_WithoutThrowing()
+    public async Task
+        InvokeAsync_UpstreamReadAbortedMidStream_FailsOpen_WritesWhatArrivedAndLogsWarning_WithoutThrowing()
     {
         // Reproduces the "aborted because of either a thread exit or an application request" IOException/
         // SocketException a live upstream read can throw mid-stream (e.g. a dotnet watch hot reload or
@@ -1549,88 +1665,112 @@ public class ProxyMiddlewareTests
             providerModelId: "llama3",
             baseUrl: "http://localhost:11434/v1",
             providerName: "ollama");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StreamContent(new AbortsAfterFirstReadStream(Encoding.UTF8.GetBytes("partial-chunk"))),
+            Content = new StreamContent(new AbortsAfterFirstReadStream("partial-chunk"u8.ToArray()))
         }));
 
         var loggerMock = new Mock<ILogger<ProxyMiddleware>>();
-        var middleware = new ProxyMiddleware(loggerMock.Object, interceptor, new HttpClient(handler));
+        var middleware = new ProxyMiddleware(logger: loggerMock.Object, interceptor: interceptor,
+            httpClient: new HttpClient(handler));
 
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"llama3"}""");
+        var requestBody = """{"model":"llama3"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
-        Assert.Equal("partial-chunk", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
+        Assert.Equal(expected: "partial-chunk",
+            actual: await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 
         loggerMock.Verify(
-            l => l.Log(
+            expression: l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
                 It.IsAny<It.IsAnyType>(),
                 It.Is<Exception>(e => e is IOException),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+            times: Times.Once);
     }
 
-    /// <summary>Yields one chunk of bytes on its first read, then throws the exact IOException(SocketException) shape a mid-stream connection abort produces on every subsequent read.</summary>
-    private sealed class AbortsAfterFirstReadStream : Stream
+    /// <summary>
+    /// Yields one chunk of bytes on its first read, then throws the exact IOException(SocketException) shape a
+    /// mid-stream connection abort produces on every subsequent read.
+    /// </summary>
+    private sealed class AbortsAfterFirstReadStream(byte[] firstChunk) : Stream
     {
-        private readonly byte[] _firstChunk;
         private bool _served;
-
-        public AbortsAfterFirstReadStream(byte[] firstChunk) => _firstChunk = firstChunk;
 
         public override bool CanRead => true;
         public override bool CanSeek => false;
         public override bool CanWrite => false;
         public override long Length => throw new NotSupportedException();
-        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
 
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             if (!_served)
             {
                 _served = true;
-                _firstChunk.CopyTo(buffer);
-                return ValueTask.FromResult(_firstChunk.Length);
+                firstChunk.CopyTo(buffer);
+                return ValueTask.FromResult(firstChunk.Length);
             }
 
             throw new IOException(
+                message:
                 "Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request.",
-                new SocketException((int)SocketError.OperationAborted));
+                innerException: new SocketException((int)SocketError.OperationAborted));
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        public override void Flush() => throw new NotSupportedException();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+            throw new NotSupportedException();
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            throw new NotSupportedException();
+        }
     }
 
-    private sealed class DelegatingHandlerStub : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
 
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
-            _handler = handler;
+            return handler(request);
         }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
     }
 }
-

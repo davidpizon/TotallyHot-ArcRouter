@@ -1,12 +1,12 @@
-using TotallyHot.ArcRouter.Hosting;
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Tests.Proxy;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Net;
 using System.Net.Sockets;
+using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Tests.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 
@@ -14,7 +14,7 @@ namespace TotallyHot.ArcRouter.Tests.Hosting;
 /// Covers hosted service lifecycle behavior for <see cref="ProxyHostedService"/>.
 /// </summary>
 [Collection("ProxyLifecycle")]
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class ProxyHostedServiceTests
 {
     [Fact]
@@ -24,15 +24,17 @@ public class ProxyHostedServiceTests
 
         // grpcPort: 0 too - see ProxyServerTests.cs's matching comment for why (avoids fixed-port
         // flakiness and generating/persisting a real self-signed certificate during unit test runs).
-        var hostedService = CreateService(loggerMock, Mock.Of<IHostApplicationLifetime>(), port: 0);
+        var hostedService = CreateService(loggerMock: loggerMock, lifetime: Mock.Of<IHostApplicationLifetime>(), 0);
 
         await hostedService.StartAsync(TestContext.Current.CancellationToken);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await hostedService.StopAsync(cts.Token);
 
-        VerifyLogContains(loggerMock, LogLevel.Information, "Proxy Hosted Service is starting.");
-        VerifyLogContains(loggerMock, LogLevel.Information, "Proxy Hosted Service is stopping.");
+        VerifyLogContains(loggerMock: loggerMock, level: LogLevel.Information,
+            expectedText: "Proxy Hosted Service is starting.");
+        VerifyLogContains(loggerMock: loggerMock, level: LogLevel.Information,
+            expectedText: "Proxy Hosted Service is stopping.");
     }
 
     [Fact]
@@ -40,7 +42,7 @@ public class ProxyHostedServiceTests
     {
         // Take an ephemeral port and hold it, so the proxy's bind is guaranteed to collide without
         // hard-coding a port that might be free or busy on someone else's machine.
-        var occupied = new TcpListener(IPAddress.Loopback, 0);
+        var occupied = new TcpListener(localaddr: IPAddress.Loopback, 0);
         occupied.Start();
         var port = ((IPEndPoint)occupied.LocalEndpoint).Port;
 
@@ -50,7 +52,7 @@ public class ProxyHostedServiceTests
 
         try
         {
-            var hostedService = CreateService(loggerMock, lifetimeMock.Object, port);
+            var hostedService = CreateService(loggerMock: loggerMock, lifetime: lifetimeMock.Object, port: port);
 
             // The whole point: a taken port is an operator condition, so StartAsync must not throw.
             await hostedService.StartAsync(TestContext.Current.CancellationToken);
@@ -59,9 +61,9 @@ public class ProxyHostedServiceTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             await hostedService.StopAsync(cts.Token);
 
-            VerifyLogContains(loggerMock, LogLevel.Error, "The proxy could not start");
-            lifetimeMock.Verify(lifetime => lifetime.StopApplication(), Times.Once);
-            Assert.Equal(1, Environment.ExitCode);
+            VerifyLogContains(loggerMock: loggerMock, level: LogLevel.Error, expectedText: "The proxy could not start");
+            lifetimeMock.Verify(expression: lifetime => lifetime.StopApplication(), times: Times.Once);
+            Assert.Equal(1, actual: Environment.ExitCode);
         }
         finally
         {
@@ -76,27 +78,30 @@ public class ProxyHostedServiceTests
         IHostApplicationLifetime lifetime,
         int port)
     {
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, ModelRouteResolverTestFactory.Empty());
-        var proxyMiddleware = new ProxyMiddleware(NullLogger<ProxyMiddleware>.Instance, interceptor);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
+        var proxyMiddleware =
+            new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance, interceptor: interceptor);
 
         return new ProxyHostedService(
-            loggerMock.Object,
-            NullLogger<ProxyServer>.Instance,
-            proxyMiddleware,
-            lifetime,
+            logger: loggerMock.Object,
+            proxyLogger: NullLogger<ProxyServer>.Instance,
+            proxyMiddleware: proxyMiddleware,
+            hostLifetime: lifetime,
             port: port,
-            grpcPort: 0);
+            0);
     }
 
-    private static void VerifyLogContains(Mock<ILogger<ProxyHostedService>> loggerMock, LogLevel level, string expectedText)
+    private static void VerifyLogContains(Mock<ILogger<ProxyHostedService>> loggerMock, LogLevel level,
+        string expectedText)
     {
         loggerMock.Verify(
-            logger => logger.Log(
+            expression: logger => logger.Log(
                 level,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(expectedText, StringComparison.Ordinal)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+            times: Times.Once);
     }
 }

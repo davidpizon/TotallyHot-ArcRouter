@@ -22,9 +22,9 @@ public class ProviderCostReconciliationStoreTests
         var store = temp.CreateCostReconciliationStore();
         var day = new DateOnly(2026, 1, 15);
 
-        store.SetLastReconciledDay("openai", day);
+        store.SetLastReconciledDay(provider: "openai", day: day);
 
-        Assert.Equal(day, store.GetLastReconciledDay("openai"));
+        Assert.Equal(expected: day, actual: store.GetLastReconciledDay("openai"));
     }
 
     [Fact]
@@ -33,10 +33,10 @@ public class ProviderCostReconciliationStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateCostReconciliationStore();
 
-        store.SetLastReconciledDay("openai", new DateOnly(2026, 1, 15));
-        store.SetLastReconciledDay("openai", new DateOnly(2026, 1, 16));
+        store.SetLastReconciledDay(provider: "openai", day: new DateOnly(2026, 1, 15));
+        store.SetLastReconciledDay(provider: "openai", day: new DateOnly(2026, 1, 16));
 
-        Assert.Equal(new DateOnly(2026, 1, 16), store.GetLastReconciledDay("openai"));
+        Assert.Equal(expected: new DateOnly(2026, 1, 16), actual: store.GetLastReconciledDay("openai"));
     }
 
     [Fact]
@@ -45,11 +45,11 @@ public class ProviderCostReconciliationStoreTests
         using var temp = new TempDatabase();
         var store = temp.CreateCostReconciliationStore();
 
-        store.SetLastReconciledDay("openai", new DateOnly(2026, 1, 15));
-        store.SetLastReconciledDay("anthropic", new DateOnly(2026, 1, 10));
+        store.SetLastReconciledDay(provider: "openai", day: new DateOnly(2026, 1, 15));
+        store.SetLastReconciledDay(provider: "anthropic", day: new DateOnly(2026, 1, 10));
 
-        Assert.Equal(new DateOnly(2026, 1, 15), store.GetLastReconciledDay("openai"));
-        Assert.Equal(new DateOnly(2026, 1, 10), store.GetLastReconciledDay("anthropic"));
+        Assert.Equal(expected: new DateOnly(2026, 1, 15), actual: store.GetLastReconciledDay("openai"));
+        Assert.Equal(expected: new DateOnly(2026, 1, 10), actual: store.GetLastReconciledDay("anthropic"));
     }
 
     [Fact]
@@ -57,16 +57,18 @@ public class ProviderCostReconciliationStoreTests
     {
         using var temp = new TempDatabase();
         var store = temp.CreateCostReconciliationStore();
-        var windowStart = new DateTimeOffset(2026, 1, 15, 0, 0, 0, TimeSpan.Zero);
+        var windowStart = new DateTimeOffset(2026, 1, 15, 0, 0, 0, offset: TimeSpan.Zero);
 
         store.InsertReconciliation(new ProviderCostReconciliationEntry(
-            "openai", windowStart, windowStart.AddDays(1), 10.50m, 10.00m, "scope note", DateTimeOffset.UtcNow));
+            Provider: "openai", WindowStartUtc: windowStart, WindowEndUtc: windowStart.AddDays(1), 10.50m, 10.00m,
+            ScopeNote: "scope note", FetchedAtUtc: DateTimeOffset.UtcNow));
         store.InsertReconciliation(new ProviderCostReconciliationEntry(
-            "openai", windowStart.AddDays(1), windowStart.AddDays(2), 5.00m, 5.00m, "scope note", DateTimeOffset.UtcNow));
+            Provider: "openai", WindowStartUtc: windowStart.AddDays(1), WindowEndUtc: windowStart.AddDays(2), 5.00m,
+            5.00m, ScopeNote: "scope note", FetchedAtUtc: DateTimeOffset.UtcNow));
 
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM provider_cost_reconciliation WHERE provider = 'openai';";
-        Assert.Equal(2L, (long)command.ExecuteScalar()!);
+        Assert.Equal(2L, actual: (long)command.ExecuteScalar()!);
     }
 }

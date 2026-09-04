@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -9,7 +8,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// Rewrites an OpenAI-shaped chat request so the server's own sampler enforces the tool-call format: the
 /// <c>tools</c> array becomes a <c>response_format</c> JSON schema, and any tool-calling history becomes
 /// plain text.
-///
 /// <para>
 /// The counterpart to <see cref="ToolCallEmulationRewriter"/>, and the reason it exists: emulation
 /// <em>asks</em> a model to reply in a syntax, which a model is free to ignore. Measured live against
@@ -19,7 +17,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// third shape has no framing to register. Constrained decoding removes the choice: the same three runs
 /// under a schema produced three structurally identical, parseable replies.
 /// </para>
-///
 /// <para>
 /// Pure and static by design, exactly like the emulation rewriter - no I/O, no per-request state - so every
 /// branch here is testable against a JSON string with no proxy, no HTTP, and no capability store.
@@ -41,7 +38,8 @@ internal static class ConstrainedToolCallRewriter
     /// so the schema budget scales to it instead of the fixed fallback.
     /// </param>
     /// <returns>The rewritten body, or the original bytes when no rewrite was safe.</returns>
-    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger, ModelContextWindow? contextWindow = null)
+    public static byte[] Rewrite(byte[] openAiShapedBody, ToolCallDialect dialect, ILogger logger,
+        ModelContextWindow? contextWindow = null)
     {
         ArgumentNullException.ThrowIfNull(openAiShapedBody);
         ArgumentNullException.ThrowIfNull(dialect);
@@ -50,7 +48,8 @@ internal static class ConstrainedToolCallRewriter
         JsonObject root;
         try
         {
-            root = JsonNode.Parse(openAiShapedBody) as JsonObject ?? throw new JsonException("Request body was not a JSON object.");
+            root = JsonNode.Parse(openAiShapedBody) as JsonObject ??
+                   throw new JsonException("Request body was not a JSON object.");
         }
         catch (JsonException)
         {
@@ -60,39 +59,36 @@ internal static class ConstrainedToolCallRewriter
         }
 
         if (root["messages"] is not JsonArray messages)
-        {
             // Not a chat-completions body. Checked before anything is removed, for the same reason emulation
             // checks it: stripping tools without putting a constraint in their place would remove tool
             // calling and give nothing back.
             return openAiShapedBody;
-        }
 
         // The client's own response_format wins, and this is the one case where the caller may not have
         // caught it (ToolCallNormalizerFactory declines to select this path when it sees one, but the guard
         // is repeated here because this type is public to its assembly and independently testable). Two
         // response_format values cannot coexist, and silently overwriting a client's structured-output
         // request would be a worse bug than the unreliable tool calling being fixed.
-        if (root["response_format"] is not null)
-        {
-            return openAiShapedBody;
-        }
+        if (root["response_format"] is not null) return openAiShapedBody;
 
         // Swapped in wholesale rather than emptied and refilled: a JsonNode has exactly one parent, so
         // replacing the array moves the whole list for free instead of re-cloning every element.
-        var rendered = ToolCallHistoryRenderer.Render(messages, dialect, ToolCallHistoryStyle.JsonEnvelope);
+        var rendered = ToolCallHistoryRenderer.Render(messages: messages, dialect: dialect,
+            style: ToolCallHistoryStyle.JsonEnvelope);
         root["messages"] = rendered;
 
         // A follow-up turn carrying history but no re-offered tools still needs its history re-rendered
         // above - the model must be able to read its own prior turn - but there is nothing to describe or
         // constrain, and a schema naming no tools would forbid every reply it could give.
-        if (root["tools"] is JsonArray tools && tools.Count > 0)
+        if (root["tools"] is JsonArray { Count: > 0 } tools)
         {
             // Instructions first, then a grammar over exactly what the instructions covered. Both halves are
             // load-bearing and neither substitutes for the other: the schema makes a malformed call
             // impossible, while the prompt is the only thing that tells the model the tools exist at all.
             // Constraining to `tools` rather than to what Inject returned would re-introduce the mismatch
             // the budget can create.
-            var described = ToolCallInstructionInjector.Inject(rendered, tools, dialect, logger, contextWindow);
+            var described = ToolCallInstructionInjector.Inject(messages: rendered, tools: tools, dialect: dialect,
+                logger: logger, contextWindow: contextWindow);
             var schema = ToolCallEnvelopeSchema.TryBuild(described);
 
             if (schema is not null)
@@ -107,4 +103,3 @@ internal static class ConstrainedToolCallRewriter
         return Encoding.UTF8.GetBytes(root.ToJsonString(SerializerOptions));
     }
 }
-

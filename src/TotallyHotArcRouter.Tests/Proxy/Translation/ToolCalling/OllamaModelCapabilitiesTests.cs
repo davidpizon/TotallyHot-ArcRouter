@@ -5,7 +5,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Covers the dialect-to-<c>capabilities</c> mapping <c>POST /api/show</c> publishes
 /// (<c>docs/adr/0003-declare-tool-support-for-emulated-and-unclassified-models.md</c>).
-///
 /// <para>
 /// Every dialect currently maps to the same pair, so most of these assertions look redundant. They are not:
 /// the mapping is the seam where a future dialect meaning "cannot express a tool call at all" would land,
@@ -18,10 +17,7 @@ public class OllamaModelCapabilitiesTests
     public static TheoryData<string> EveryRegisteredDialect()
     {
         var data = new TheoryData<string>();
-        foreach (var dialect in ToolCallDialectRegistry.All)
-        {
-            data.Add(dialect.Name);
-        }
+        foreach (var dialect in ToolCallDialectRegistry.All) data.Add(dialect.Name);
 
         return data;
     }
@@ -30,7 +26,7 @@ public class OllamaModelCapabilitiesTests
     [MemberData(nameof(EveryRegisteredDialect))]
     public void ForDialect_EveryRegisteredDialect_DeclaresCompletionAndTools(string dialectName)
     {
-        Assert.Equal(["completion", "tools"], OllamaModelCapabilities.ForDialect(dialectName));
+        Assert.Equal(expected: ["completion", "tools"], actual: OllamaModelCapabilities.ForDialect(dialectName));
     }
 
     // Null is the dominant state - no scan has run, or the provider cannot be probed at all - and is the
@@ -38,7 +34,7 @@ public class OllamaModelCapabilitiesTests
     [Fact]
     public void ForDialect_Unclassified_DeclaresTools()
     {
-        Assert.Contains("tools", OllamaModelCapabilities.ForDialect(null));
+        Assert.Contains(expected: "tools", collection: OllamaModelCapabilities.ForDialect(null));
     }
 
     // A row written by a newer build naming a dialect this one has never heard of. Treated as unclassified,
@@ -46,7 +42,7 @@ public class OllamaModelCapabilitiesTests
     [Fact]
     public void ForDialect_UnknownDialectName_DeclaresTools()
     {
-        Assert.Contains("tools", OllamaModelCapabilities.ForDialect("a-dialect-from-the-future"));
+        Assert.Contains(expected: "tools", collection: OllamaModelCapabilities.ForDialect("a-dialect-from-the-future"));
     }
 
     /// <summary>
@@ -62,7 +58,7 @@ public class OllamaModelCapabilitiesTests
             var capabilities = OllamaModelCapabilities.ForDialect(dialect.Name);
 
             Assert.NotEmpty(capabilities);
-            Assert.Contains("completion", capabilities);
+            Assert.Contains(expected: "completion", collection: capabilities);
         }
     }
 
@@ -71,14 +67,14 @@ public class OllamaModelCapabilitiesTests
     {
         var union = OllamaModelCapabilities.Union([["completion"], ["completion", "tools"]]);
 
-        Assert.Equal(["completion", "tools"], union);
+        Assert.Equal(expected: ["completion", "tools"], actual: union);
     }
 
     // An alias backed by nothing routable can still complete; it just cannot promise tools.
     [Fact]
     public void Union_OfNothing_IsCompletionOnly()
     {
-        Assert.Equal(["completion"], OllamaModelCapabilities.Union([]));
+        Assert.Equal(expected: ["completion"], actual: OllamaModelCapabilities.Union([]));
     }
 
     // Order is fixed rather than derived from set enumeration, so the serialized JSON is byte-stable across
@@ -88,6 +84,6 @@ public class OllamaModelCapabilitiesTests
     {
         var union = OllamaModelCapabilities.Union([["tools", "completion"], ["tools"]]);
 
-        Assert.Equal(["completion", "tools"], union);
+        Assert.Equal(expected: ["completion", "tools"], actual: union);
     }
 }

@@ -1,7 +1,7 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
@@ -15,15 +15,17 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var registry = new FakeRegistry(new StubSource("litellm", new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null)));
-        var service = Build(registry, repository, sourceRepository, toggleStore);
+        var registry = new FakeRegistry(new StubSource(name: "litellm",
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null)));
+        var service = Build(registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
 
         var summary = await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, summary.FreshPriceCount);
+        Assert.Equal(1, actual: summary.FreshPriceCount);
         var outcome = Assert.Single(summary.Outcomes);
         Assert.True(outcome.Succeeded);
-        Assert.Equal(1, outcome.PriceCount);
+        Assert.Equal(1, actual: outcome.PriceCount);
     }
 
     [Fact]
@@ -35,11 +37,13 @@ public class PriceCatalogIngestionServiceTests
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
         var before = DateTimeOffset.UtcNow;
 
-        var service = Build(new FakeRegistry(), repository, sourceRepository, toggleStore);
+        var service = Build(registry: new FakeRegistry(), repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
 
         // "Never ran" must not read as "overdue": a router with every source disabled skips the startup cycle
         // entirely, and an unseeded anchor would make the poll loop fire the instant it started.
-        Assert.InRange(service.ScheduleAnchorUtc, before.AddSeconds(-1), DateTimeOffset.UtcNow.AddSeconds(1));
+        Assert.InRange(actual: service.ScheduleAnchorUtc, low: before.AddSeconds(-1),
+            high: DateTimeOffset.UtcNow.AddSeconds(1));
     }
 
     [Fact]
@@ -49,10 +53,12 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var registry = new FakeRegistry(new StubSource("litellm", new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null)));
-        var service = Build(registry, repository, sourceRepository, toggleStore);
+        var registry = new FakeRegistry(new StubSource(name: "litellm",
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null)));
+        var service = Build(registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
         var seeded = service.ScheduleAnchorUtc;
-        await Task.Delay(10, TestContext.Current.CancellationToken);
+        await Task.Delay(10, cancellationToken: TestContext.Current.CancellationToken);
 
         await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
@@ -68,9 +74,10 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var service = Build(new FakeRegistry(new ThrowingSource("litellm")), repository, sourceRepository, toggleStore);
+        var service = Build(registry: new FakeRegistry(new ThrowingSource("litellm")), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
         var seeded = service.ScheduleAnchorUtc;
-        await Task.Delay(10, TestContext.Current.CancellationToken);
+        await Task.Delay(10, cancellationToken: TestContext.Current.CancellationToken);
 
         var summary = await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
@@ -78,7 +85,7 @@ public class PriceCatalogIngestionServiceTests
         // successful write would retry a persistently failing feed in a tight loop - and would leave the
         // panel's countdown running negative for the whole of an outage, since no source's last_updated_utc
         // moves here either.
-        Assert.Equal(0, summary.FreshPriceCount);
+        Assert.Equal(0, actual: summary.FreshPriceCount);
         Assert.True(service.ScheduleAnchorUtc > seeded);
     }
 
@@ -90,12 +97,13 @@ public class PriceCatalogIngestionServiceTests
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
         var registry = new FakeRegistry(new ThrowingSource("litellm"));
-        var service = Build(registry, repository, sourceRepository, toggleStore);
+        var service = Build(registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
 
         var summary = await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
         // A failed cycle leaves nothing fresh - the condition the startup check's Error (D4) fires on.
-        Assert.Equal(0, summary.FreshPriceCount);
+        Assert.Equal(0, actual: summary.FreshPriceCount);
         var outcome = Assert.Single(summary.Outcomes);
         Assert.False(outcome.Succeeded);
         Assert.NotNull(outcome.Error);
@@ -108,12 +116,13 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var service = Build(new FakeRegistry(), repository, sourceRepository, toggleStore);
+        var service = Build(registry: new FakeRegistry(), repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
 
         var summary = await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(summary.Outcomes);
-        Assert.Equal(0, summary.FreshPriceCount);
+        Assert.Equal(0, actual: summary.FreshPriceCount);
     }
 
     [Fact]
@@ -125,22 +134,24 @@ public class PriceCatalogIngestionServiceTests
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
 
         // Disable the source from "the panel" once its fetch is genuinely in flight.
-        var source = new BlockingSource("litellm", observeCancellation: true, new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null));
-        var service = Build(new FakeRegistry(source), repository, sourceRepository, toggleStore);
+        var source = new BlockingSource(name: "litellm", true,
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null));
+        var service = Build(registry: new FakeRegistry(source), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
 
         var cycle = service.RunCycleAsync(TestContext.Current.CancellationToken);
         await source.FetchStarted.Task;
-        toggleStore.SetEnabled("litellm", enabled: false);
+        toggleStore.SetEnabled(sourceName: "litellm", false);
 
         var summary = await cycle;
 
         var outcome = Assert.Single(summary.Outcomes);
         Assert.False(outcome.Succeeded);
-        Assert.Equal(PriceCatalogIngestionService.DisabledDuringFetch, outcome.Error);
+        Assert.Equal(expected: PriceCatalogIngestionService.DisabledDuringFetch, actual: outcome.Error);
 
         // Nothing lands: a source switched off must stop influencing the catalog immediately, not from the
         // next cycle (D6).
-        Assert.Equal(0, sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
+        Assert.Equal(0, actual: sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
     }
 
     [Fact]
@@ -154,20 +165,22 @@ public class PriceCatalogIngestionServiceTests
         // This source ignores its cancellation token, so it wins the race and returns prices anyway - which
         // is what the re-check before the upsert exists to catch. Without that guard, a source the operator
         // just switched off would get a fresh last_updated_utc written for it.
-        var source = new BlockingSource("litellm", observeCancellation: false, new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null));
-        var service = Build(new FakeRegistry(source), repository, sourceRepository, toggleStore);
+        var source = new BlockingSource(name: "litellm", false,
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null));
+        var service = Build(registry: new FakeRegistry(source), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
 
         var cycle = service.RunCycleAsync(TestContext.Current.CancellationToken);
         await source.FetchStarted.Task;
-        toggleStore.SetEnabled("litellm", enabled: false);
+        toggleStore.SetEnabled(sourceName: "litellm", false);
         source.ReleaseFetch();
 
         var summary = await cycle;
 
         var outcome = Assert.Single(summary.Outcomes);
         Assert.False(outcome.Succeeded);
-        Assert.Equal(PriceCatalogIngestionService.DisabledDuringFetch, outcome.Error);
-        Assert.Equal(0, sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
+        Assert.Equal(expected: PriceCatalogIngestionService.DisabledDuringFetch, actual: outcome.Error);
+        Assert.Equal(0, actual: sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
     }
 
     [Fact]
@@ -179,22 +192,25 @@ public class PriceCatalogIngestionServiceTests
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
 
-        var blocking = new BlockingSource("blocked", observeCancellation: true, new NormalizedPrice("m1", "p1", 1m, 2m, null, null, null));
-        var healthy = new StubSource("litellm", new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null));
-        var service = Build(new FakeRegistry(blocking, healthy), repository, sourceRepository, toggleStore);
+        var blocking = new BlockingSource(name: "blocked", true,
+            new NormalizedPrice(ModelIdentifier: "m1", Provider: "p1", 1m, 2m, null, null, null));
+        var healthy = new StubSource(name: "litellm",
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null));
+        var service = Build(registry: new FakeRegistry(blocking, healthy), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
 
         var cycle = service.RunCycleAsync(TestContext.Current.CancellationToken);
         await blocking.FetchStarted.Task;
-        toggleStore.SetEnabled("blocked", enabled: false);
+        toggleStore.SetEnabled(sourceName: "blocked", false);
 
         var summary = await cycle;
 
         // A toggle-cancel must not tear down the whole cycle and take every other source's refresh with it -
         // which is exactly what would happen if the catch didn't distinguish it from a host shutdown.
-        Assert.Equal(2, summary.Outcomes.Count);
-        Assert.Contains(summary.Outcomes, o => o.Source == "blocked" && !o.Succeeded);
-        Assert.Contains(summary.Outcomes, o => o.Source == "litellm" && o.Succeeded);
-        Assert.Equal(1, summary.FreshPriceCount);
+        Assert.Equal(2, actual: summary.Outcomes.Count);
+        Assert.Contains(collection: summary.Outcomes, filter: o => o.Source == "blocked" && !o.Succeeded);
+        Assert.Contains(collection: summary.Outcomes, filter: o => o.Source == "litellm" && o.Succeeded);
+        Assert.Equal(1, actual: summary.FreshPriceCount);
     }
 
     [Fact]
@@ -204,8 +220,10 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var source = new BlockingSource("litellm", observeCancellation: true, new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null));
-        var service = Build(new FakeRegistry(source), repository, sourceRepository, toggleStore);
+        var source = new BlockingSource(name: "litellm", true,
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null));
+        var service = Build(registry: new FakeRegistry(source), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
 
         using var hostShutdown = new CancellationTokenSource();
         var cycle = service.RunCycleAsync(hostShutdown.Token);
@@ -227,17 +245,21 @@ public class PriceCatalogIngestionServiceTests
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
         var registry = new FakeRegistry(
-            new StubSource(PriceCatalogOptions.LiteLlmSourceName, new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null)),
+            new StubSource(name: PriceCatalogOptions.LiteLlmSourceName,
+                new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null)),
             new ThrowingSource(PriceCatalogOptions.OpenRouterSourceName));
-        var service = Build(registry, repository, sourceRepository, toggleStore);
+        var service = Build(registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
 
         var summary = await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
         // Not zero: litellm's row is fresh, so the cycle-level Error condition (outcomes.Count > 0 &&
         // freshPriceCount == 0) does not fire - only openrouter's own per-source Warning does.
-        Assert.Equal(1, summary.FreshPriceCount);
-        Assert.Contains(summary.Outcomes, o => o.Source == PriceCatalogOptions.LiteLlmSourceName && o.Succeeded);
-        Assert.Contains(summary.Outcomes, o => o.Source == PriceCatalogOptions.OpenRouterSourceName && !o.Succeeded);
+        Assert.Equal(1, actual: summary.FreshPriceCount);
+        Assert.Contains(collection: summary.Outcomes,
+            filter: o => o.Source == PriceCatalogOptions.LiteLlmSourceName && o.Succeeded);
+        Assert.Contains(collection: summary.Outcomes,
+            filter: o => o.Source == PriceCatalogOptions.OpenRouterSourceName && !o.Succeeded);
     }
 
     [Fact]
@@ -250,14 +272,18 @@ public class PriceCatalogIngestionServiceTests
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
         var registry = new FakeRegistry(
-            new StubSource(PriceCatalogOptions.OpenRouterSourceName, new NormalizedPrice("gpt-4o", "openai", 999m, 999m, null, null, null)),
-            new StubSource(PriceCatalogOptions.LiteLlmSourceName, new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null)));
-        var service = Build(registry, repository, sourceRepository, toggleStore);
+            new StubSource(name: PriceCatalogOptions.OpenRouterSourceName,
+                new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 999m, 999m, null, null, null)),
+            new StubSource(name: PriceCatalogOptions.LiteLlmSourceName,
+                new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null)));
+        var service = Build(registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
 
         await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
-        var price = repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24));
-        Assert.Equal(2.5m, price!.InputPerMillionTokens);
+        var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
+            maxAge: TimeSpan.FromHours(24));
+        Assert.Equal(2.5m, actual: price!.InputPerMillionTokens);
     }
 
     [Fact]
@@ -269,7 +295,8 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var service = Build(new FakeRegistry(new ExplodingSource("litellm")), repository, sourceRepository, toggleStore);
+        var service = Build(registry: new FakeRegistry(new ExplodingSource("litellm")), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
 
         await service.RecomputeWinnersAsync(TestContext.Current.CancellationToken);
     }
@@ -278,21 +305,34 @@ public class PriceCatalogIngestionServiceTests
     public async Task RecomputeWinnersAsync_FlipsContestedCellFromStorage_WithNoFetch()
     {
         using var temp = new TempDatabase();
-        temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
+        temp.SeedExtraSource(name: "high", true, 10);
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        repository.UpsertPrices("high", 10, [new NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
-        repository.UpsertPrices(PriceCatalogOptions.LiteLlmSourceName, 0, [new NormalizedPrice("gpt-4o", "openai", 999m, 999m, null, null, null)], DateTimeOffset.UtcNow);
-        Assert.Equal(2.50m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+        repository.UpsertPrices(sourceName: "high", 10,
+            prices:
+            [
+                new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.50m, 10.00m, null, null, null)
+            ], asOfUtc: DateTimeOffset.UtcNow);
+        repository.UpsertPrices(sourceName: PriceCatalogOptions.LiteLlmSourceName, 0,
+            prices: [new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 999m, 999m, null, null, null)],
+            asOfUtc: DateTimeOffset.UtcNow);
+        Assert.Equal(2.50m,
+            actual: repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
+                maxAge: TimeSpan.FromHours(24))!.InputPerMillionTokens);
 
-        Assert.True(toggleStore.Reorder([PriceCatalogOptions.LiteLlmSourceName, "high", PriceCatalogOptions.OpenRouterSourceName]));
-        var service = Build(new FakeRegistry(new ExplodingSource("litellm")), repository, sourceRepository, toggleStore);
+        Assert.True(toggleStore.Reorder([
+            PriceCatalogOptions.LiteLlmSourceName, "high", PriceCatalogOptions.OpenRouterSourceName
+        ]));
+        var service = Build(registry: new FakeRegistry(new ExplodingSource("litellm")), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
 
         var summary = await service.RecomputeWinnersAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(summary.Outcomes); // no fetch occurred, so there is nothing to report per-source
-        Assert.Equal(999m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+        Assert.Equal(999m,
+            actual: repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
+                maxAge: TimeSpan.FromHours(24))!.InputPerMillionTokens);
     }
 
     [Fact]
@@ -304,13 +344,14 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var service = Build(new FakeRegistry(), repository, sourceRepository, toggleStore);
+        var service = Build(registry: new FakeRegistry(), repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore);
         var seeded = service.ScheduleAnchorUtc;
-        await Task.Delay(10, TestContext.Current.CancellationToken);
+        await Task.Delay(10, cancellationToken: TestContext.Current.CancellationToken);
 
         await service.RecomputeWinnersAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(seeded, service.ScheduleAnchorUtc);
+        Assert.Equal(expected: seeded, actual: service.ScheduleAnchorUtc);
     }
 
     [Fact]
@@ -323,21 +364,23 @@ public class PriceCatalogIngestionServiceTests
 
         // The background poll loop and the panel's Pull Now both land here; two cycles at once would
         // double-fetch every source and race their upserts.
-        var source = new BlockingSource("litellm", observeCancellation: true, new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null));
-        var service = Build(new FakeRegistry(source), repository, sourceRepository, toggleStore);
+        var source = new BlockingSource(name: "litellm", true,
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null));
+        var service = Build(registry: new FakeRegistry(source), repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore);
 
         var first = service.RunCycleAsync(TestContext.Current.CancellationToken);
         await source.FetchStarted.Task;
 
         var second = service.RunCycleAsync(TestContext.Current.CancellationToken);
         Assert.False(second.IsCompleted);
-        Assert.Equal(1, source.FetchCount);
+        Assert.Equal(1, actual: source.FetchCount);
 
         source.ReleaseFetch();
         await first;
         await second;
 
-        Assert.Equal(2, source.FetchCount);
+        Assert.Equal(2, actual: source.FetchCount);
     }
 
     [Fact]
@@ -347,13 +390,15 @@ public class PriceCatalogIngestionServiceTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
-        var registry = new FakeRegistry(new StubSource("litellm", new NormalizedPrice("gpt-4o", "openai", 2.5m, 10.0m, null, null, null)));
+        var registry = new FakeRegistry(new StubSource(name: "litellm",
+            new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10.0m, null, null, null)));
         var catalog = new RecordingModelPriceCatalog();
-        var service = Build(registry, repository, sourceRepository, toggleStore, catalog);
+        var service = Build(registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore, priceCatalog: catalog);
 
         await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, catalog.InvalidateCallCount);
+        Assert.Equal(1, actual: catalog.InvalidateCallCount);
     }
 
     [Fact]
@@ -365,14 +410,15 @@ public class PriceCatalogIngestionServiceTests
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
         var registry = new FakeRegistry(new ThrowingSource("litellm"));
         var catalog = new RecordingModelPriceCatalog();
-        var service = Build(registry, repository, sourceRepository, toggleStore, catalog);
+        var service = Build(registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore, priceCatalog: catalog);
 
         await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
         // A failed cycle wrote nothing, so the cache serving the last known-good prices must be left alone -
         // see IModelPriceCatalog.Invalidate's own remarks on why eviction is keyed on "a source wrote
         // something" rather than "a cycle ran".
-        Assert.Equal(0, catalog.InvalidateCallCount);
+        Assert.Equal(0, actual: catalog.InvalidateCallCount);
     }
 
     [Fact]
@@ -383,11 +429,12 @@ public class PriceCatalogIngestionServiceTests
         var sourceRepository = temp.CreateSourceRepository();
         using var toggleStore = temp.CreateToggleStore(sourceRepository);
         var catalog = new RecordingModelPriceCatalog();
-        var service = Build(new FakeRegistry(), repository, sourceRepository, toggleStore, catalog);
+        var service = Build(registry: new FakeRegistry(), repository: repository, sourceRepository: sourceRepository,
+            toggleStore: toggleStore, priceCatalog: catalog);
 
         await service.RunCycleAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, catalog.InvalidateCallCount);
+        Assert.Equal(0, actual: catalog.InvalidateCallCount);
     }
 
     private static PriceCatalogIngestionService Build(
@@ -395,8 +442,13 @@ public class PriceCatalogIngestionServiceTests
         PriceRepository repository,
         PriceSourceRepository sourceRepository,
         PriceSourceToggleStore toggleStore,
-        IModelPriceCatalog? priceCatalog = null) =>
-        new(registry, repository, sourceRepository, toggleStore, NullLogger<PriceCatalogIngestionService>.Instance, priceCatalog);
+        IModelPriceCatalog? priceCatalog = null)
+    {
+        return new PriceCatalogIngestionService(registry: registry, repository: repository,
+            sourceRepository: sourceRepository,
+            toggleStore: toggleStore, logger: NullLogger<PriceCatalogIngestionService>.Instance,
+            priceCatalog: priceCatalog);
+    }
 
     private sealed class FakeRegistry(params IPriceSourceClient[] clients) : IPriceSourceRegistry
     {
@@ -408,29 +460,40 @@ public class PriceCatalogIngestionServiceTests
     {
         public int InvalidateCallCount { get; private set; }
 
-        public void Invalidate() => InvalidateCallCount++;
+        public void Invalidate()
+        {
+            InvalidateCallCount++;
+        }
 
-        public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context) =>
+        public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context)
+        {
             throw new NotSupportedException("Not exercised by these tests.");
+        }
 
-        public ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge) =>
+        public ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge)
+        {
             throw new NotSupportedException("Not exercised by these tests.");
+        }
     }
 
     private sealed class StubSource(string name, params NormalizedPrice[] prices) : IPriceSourceClient
     {
         public string Name => name;
 
-        public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<NormalizedPrice>>(prices);
+        public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<NormalizedPrice>>(prices);
+        }
     }
 
     private sealed class ThrowingSource(string name) : IPriceSourceClient
     {
         public string Name => name;
 
-        public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken)
+        {
             throw new HttpRequestException("simulated source outage");
+        }
     }
 
     /// <summary>
@@ -442,8 +505,11 @@ public class PriceCatalogIngestionServiceTests
     {
         public string Name => name;
 
-        public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken) =>
-            throw new InvalidOperationException($"{name}.FetchAsync was called - this path must never make a live pull.");
+        public Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException(
+                $"{name}.FetchAsync was called - this path must never make a live pull.");
+        }
     }
 
     /// <summary>
@@ -460,13 +526,11 @@ public class PriceCatalogIngestionServiceTests
     {
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public string Name => name;
-
         public TaskCompletionSource FetchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int FetchCount { get; private set; }
 
-        public void ReleaseFetch() => _release.TrySetResult();
+        public string Name => name;
 
         public async Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken)
         {
@@ -474,16 +538,16 @@ public class PriceCatalogIngestionServiceTests
             FetchStarted.TrySetResult();
 
             if (observeCancellation)
-            {
                 await _release.Task.WaitAsync(cancellationToken);
-            }
             else
-            {
                 await _release.Task;
-            }
 
             return prices;
         }
+
+        public void ReleaseFetch()
+        {
+            _release.TrySetResult();
+        }
     }
 }
-

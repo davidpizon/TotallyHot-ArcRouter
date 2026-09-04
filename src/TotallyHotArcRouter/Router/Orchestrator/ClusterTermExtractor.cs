@@ -22,13 +22,11 @@ public static class ClusterTermExtractor
         IReadOnlyList<IReadOnlyList<string>> clusterDocuments, int topTermsPerCluster = 5)
     {
         ArgumentNullException.ThrowIfNull(clusterDocuments);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(topTermsPerCluster, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: topTermsPerCluster, 0);
 
         var totalDocumentCount = clusterDocuments.Sum(docs => docs.Count);
         if (totalDocumentCount == 0)
-        {
-            return clusterDocuments.Select(_ => (IReadOnlyList<string>)Array.Empty<string>()).ToList();
-        }
+            return [.. clusterDocuments.Select(_ => (IReadOnlyList<string>)[])];
 
         // Document frequency across every cluster, needed for the inverse-document-frequency weight below.
         var documentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -44,9 +42,7 @@ public static class ClusterTermExtractor
                 {
                     termFrequency[token] = termFrequency.GetValueOrDefault(token) + 1;
                     if (seenInThisDocument.Add(token))
-                    {
                         documentFrequency[token] = documentFrequency.GetValueOrDefault(token) + 1;
-                    }
                 }
             }
 
@@ -57,9 +53,10 @@ public static class ClusterTermExtractor
         foreach (var termFrequency in perClusterTermFrequency)
         {
             var scored = termFrequency
-                .Select(kvp => (Term: kvp.Key, Score: kvp.Value * Math.Log((double)totalDocumentCount / (1 + documentFrequency[kvp.Key]))))
+                .Select(kvp => (Term: kvp.Key,
+                    Score: kvp.Value * Math.Log((double)totalDocumentCount / (1 + documentFrequency[kvp.Key]))))
                 .OrderByDescending(pair => pair.Score)
-                .ThenBy(pair => pair.Term, StringComparer.Ordinal)
+                .ThenBy(keySelector: pair => pair.Term, comparer: StringComparer.Ordinal)
                 .Take(topTermsPerCluster)
                 .Select(pair => pair.Term)
                 .ToList();

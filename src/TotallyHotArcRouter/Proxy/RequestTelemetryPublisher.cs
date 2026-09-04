@@ -1,13 +1,15 @@
+using Microsoft.Extensions.Options;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Quality.Ingress;
+using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
-using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
@@ -21,26 +23,26 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// </summary>
 internal sealed class RequestTelemetryPublisher
 {
-    private readonly ILogger _logger;
-    private readonly ISessionIdResolver _sessionIdResolver;
-    private readonly IConversationContinuityMatcher _continuityMatcher;
-    private readonly IConversationTurnTracker _turnTracker;
-    private readonly IUsageExtractor _usageExtractor;
-    private readonly IResponseTextExtractor _responseTextExtractor;
-    private readonly ITelemetryPublisher _telemetryPublisher;
-    private readonly IQualityIngress? _qualityIngress;
-    private readonly ISpendTracker _spendTracker;
-    private readonly IModelPriceLookup? _priceLookup;
     private readonly IBudgetEnforcer? _budgetStore;
-    private readonly IUsageLedger? _usageLedger;
-    private readonly PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
+    private readonly IConversationContinuityMatcher _continuityMatcher;
+    private readonly IOptionsMonitor<JudgeOptions>? _judgeOptionsMonitor;
+    private readonly ILogger _logger;
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
     private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
     private readonly PendingResponseTextCache? _pendingResponseTextCache;
-    private readonly ITranscriptStore? _transcriptStore;
-    private readonly IOptionsMonitor<Models.RoutingOptions>? _routingOptionsMonitor;
-    private readonly IOptionsMonitor<Judge.JudgeOptions>? _judgeOptionsMonitor;
+    private readonly PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
+    private readonly IModelPriceLookup? _priceLookup;
+    private readonly IQualityIngress? _qualityIngress;
+    private readonly IResponseTextExtractor _responseTextExtractor;
+    private readonly IOptionsMonitor<RoutingOptions>? _routingOptionsMonitor;
     private readonly decimal _selfHostedRouterPricePerMillionTokens;
+    private readonly ISessionIdResolver _sessionIdResolver;
+    private readonly ISpendTracker _spendTracker;
+    private readonly ITelemetryPublisher _telemetryPublisher;
+    private readonly ITranscriptStore? _transcriptStore;
+    private readonly IConversationTurnTracker _turnTracker;
+    private readonly IUsageExtractor _usageExtractor;
+    private readonly IUsageLedger? _usageLedger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RequestTelemetryPublisher"/> class, taking exactly the
@@ -66,8 +68,8 @@ internal sealed class RequestTelemetryPublisher
         PendingRequestProvenanceCache? pendingRequestProvenanceCache,
         PendingResponseTextCache? pendingResponseTextCache,
         ITranscriptStore? transcriptStore,
-        IOptionsMonitor<Models.RoutingOptions>? routingOptionsMonitor,
-        IOptionsMonitor<Judge.JudgeOptions>? judgeOptionsMonitor,
+        IOptionsMonitor<RoutingOptions>? routingOptionsMonitor,
+        IOptionsMonitor<JudgeOptions>? judgeOptionsMonitor,
         decimal selfHostedRouterPricePerMillionTokens)
     {
         _logger = logger;
@@ -101,8 +103,11 @@ internal sealed class RequestTelemetryPublisher
     /// <see cref="ProxyMiddleware"/> also needs it to set the substitution-reason response header before
     /// this publisher is ever invoked, not just from within <see cref="PublishAsync"/>.
     /// </summary>
-    public static RoutingSubstitutionReason ResolveSubstitutionReason(bool isFallback, RoutingSubstitutionReason resolutionReason) =>
-        isFallback ? RoutingSubstitutionReason.Failover : resolutionReason;
+    public static RoutingSubstitutionReason ResolveSubstitutionReason(bool isFallback,
+        RoutingSubstitutionReason resolutionReason)
+    {
+        return isFallback ? RoutingSubstitutionReason.Failover : resolutionReason;
+    }
 
     /// <summary>
     /// Resolves session/turn identity, extracts usage and cost, and publishes the resulting
@@ -125,18 +130,19 @@ internal sealed class RequestTelemetryPublisher
         long totalDurationMs,
         int statusCode,
         CancellationToken cancellationToken,
-        System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders = null,
+        HttpResponseHeaders? upstreamHeaders = null,
         IncrementalUsageScanner? tailScanner = null,
         float[]? taskEmbedding = null,
         int routerTokens = 0,
         RoutingSubstitutionReason resolutionReason = RoutingSubstitutionReason.None,
         bool isExploratory = false,
         double propensity = 1.0,
-        Router.Classification.RequestClassification? classification = null,
+        RequestClassification? classification = null,
         string? taskText = null,
         string? dimBestModel = null)
     {
-        var (requestBody, sessionId, turnNumber, isSynthesized) = ResolveSessionAndTurn(context, rewrittenRequestBody);
+        var (requestBody, sessionId, turnNumber, isSynthesized) =
+            ResolveSessionAndTurn(context: context, rewrittenRequestBody: rewrittenRequestBody);
 
         var (
             requestedModel,
@@ -150,82 +156,83 @@ internal sealed class RequestTelemetryPublisher
             usageExtracted,
             usageShapeProvider,
             usageShapeBytes) = ExtractUsageAndCost(
-                route,
-                requestedModelName,
-                isFallback,
-                resolutionReason,
-                telemetryShapeProvider,
-                capturedResponseBytes,
-                nativeResponseBytes,
-                isStreaming,
-                tailScanner);
+            route: route,
+            requestedModelName: requestedModelName,
+            isFallback: isFallback,
+            resolutionReason: resolutionReason,
+            telemetryShapeProvider: telemetryShapeProvider,
+            capturedResponseBytes: capturedResponseBytes,
+            nativeResponseBytes: nativeResponseBytes,
+            isStreaming: isStreaming,
+            tailScanner: tailScanner);
 
         await RecordSpendAndBudgetAsync(
-            route,
-            requestedModel,
-            promptTokens,
-            completionTokens,
-            cacheCreationTokens,
-            cacheReadTokens,
-            estimatedCostUsd,
-            costConfidence,
-            usageExtracted,
-            sessionId,
-            turnNumber,
-            upstreamHeaders).ConfigureAwait(false);
+            route: route,
+            requestedModel: requestedModel,
+            promptTokens: promptTokens,
+            completionTokens: completionTokens,
+            cacheCreationTokens: cacheCreationTokens,
+            cacheReadTokens: cacheReadTokens,
+            estimatedCostUsd: estimatedCostUsd,
+            costConfidence: costConfidence,
+            usageExtracted: usageExtracted,
+            sessionId: sessionId,
+            turnNumber: turnNumber,
+            upstreamHeaders: upstreamHeaders).ConfigureAwait(false);
 
-        var (newestUserMessage, requestSummary, responseSummary, responseText, correlationId) = ExtractResponseTextAndCachePending(
-            requestBody,
-            usageShapeProvider,
-            usageShapeBytes,
-            isStreaming,
-            sessionId,
-            turnNumber,
-            taskEmbedding,
-            estimatedCostUsd,
-            isExploratory,
-            propensity,
-            classification);
+        var (newestUserMessage, requestSummary, responseSummary, responseText, correlationId) =
+            ExtractResponseTextAndCachePending(
+                requestBody: requestBody,
+                usageShapeProvider: usageShapeProvider,
+                usageShapeBytes: usageShapeBytes,
+                isStreaming: isStreaming,
+                sessionId: sessionId,
+                turnNumber: turnNumber,
+                taskEmbedding: taskEmbedding,
+                estimatedCostUsd: estimatedCostUsd,
+                isExploratory: isExploratory,
+                propensity: propensity,
+                classification: classification);
 
         await PersistTranscriptAsync(
-            correlationId,
-            requestedModelName,
-            route,
-            classification,
-            taskText,
-            responseText,
-            estimatedCostUsd,
-            isExploratory,
-            propensity,
-            promptTokens,
-            completionTokens,
-            dimBestModel).ConfigureAwait(false);
+            correlationId: correlationId,
+            requestedModelName: requestedModelName,
+            route: route,
+            classification: classification,
+            taskText: taskText,
+            responseText: responseText,
+            estimatedCostUsd: estimatedCostUsd,
+            isExploratory: isExploratory,
+            propensity: propensity,
+            promptTokens: promptTokens,
+            completionTokens: completionTokens,
+            dimBestModel: dimBestModel).ConfigureAwait(false);
 
         await PublishTelemetryEventAsync(
-            sessionId,
-            turnNumber,
-            isSynthesized,
-            requestedModel,
-            route,
-            isFallback,
-            promptTokens,
-            completionTokens,
-            estimatedCostUsd,
-            isStreaming,
-            latencyToHeadersMs,
-            totalDurationMs,
-            statusCode,
-            cacheCreationTokens,
-            cacheReadTokens,
-            costConfidence,
-            requestSummary,
-            responseSummary,
-            correlationId,
-            routerTokens,
-            substitutionReason,
-            cancellationToken,
-            responseText,
-            newestUserMessage).ConfigureAwait(false);
+            sessionId: sessionId,
+            turnNumber: turnNumber,
+            isSynthesized: isSynthesized,
+            requestedModel: requestedModel,
+            route: route,
+            isFallback: isFallback,
+            promptTokens: promptTokens,
+            completionTokens: completionTokens,
+            estimatedCostUsd: estimatedCostUsd,
+            isStreaming: isStreaming,
+            latencyToHeadersMs: latencyToHeadersMs,
+            totalDurationMs: totalDurationMs,
+            statusCode: statusCode,
+            cacheCreationTokens: cacheCreationTokens,
+            cacheReadTokens: cacheReadTokens,
+            costConfidence: costConfidence,
+            requestSummary: requestSummary,
+            responseSummary: responseSummary,
+            correlationId: correlationId,
+            routerTokens: routerTokens,
+            substitutionReason: substitutionReason,
+            cancellationToken: cancellationToken,
+            responseText: responseText,
+            newestUserMessage: newestUserMessage).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -239,7 +246,7 @@ internal sealed class RequestTelemetryPublisher
         HttpContext context, byte[] rewrittenRequestBody)
     {
         var requestBody = TryParseJsonObject(rewrittenRequestBody);
-        var resolvedSessionId = _sessionIdResolver.Resolve(context.Request.Headers, requestBody);
+        var resolvedSessionId = _sessionIdResolver.Resolve(headers: context.Request.Headers, body: requestBody);
 
         var isSynthesized = resolvedSessionId is null;
         // No explicit session id found: fall back to matching this request's "messages" array against
@@ -252,7 +259,6 @@ internal sealed class RequestTelemetryPublisher
         if (isSynthesized)
         {
             if (turnNumber == 1)
-            {
                 // No known session-id convention (see SessionIdResolver) matched anything on this
                 // request, and no tracked conversation's message history was a prefix of this request's
                 // messages either, so this is a brand-new tracked session. Logs header *names* (never
@@ -260,27 +266,31 @@ internal sealed class RequestTelemetryPublisher
                 // so an unrecognized client's actual conventions can be spotted and, if there's a stable
                 // per-conversation field under a different name, added to SessionIdResolver.
                 _logger.LogDebug(
-                    "No session id found on request to {Path}, and no tracked conversation's message " +
-                    "history matched; started tracking new session {SessionId}. Request header names: " +
-                    "[{HeaderNames}]. Top-level body keys: [{BodyKeys}].",
+                    message: "No session id found on request to {Path}, and no tracked conversation's message " +
+                             "history matched; started tracking new session {SessionId}. Request header names: " +
+                             "[{HeaderNames}]. Top-level body keys: [{BodyKeys}].",
                     LogRedaction.Sanitize(context.Request.Path.ToString()),
                     LogRedaction.Sanitize(sessionId),
-                    string.Join(", ", context.Request.Headers.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).Select(LogRedaction.Sanitize)),
-                    requestBody is null ? "(not a JSON object)" : string.Join(", ", requestBody.Select(kv => LogRedaction.Sanitize(kv.Key))));
-            }
+                    string.Join(separator: ", ",
+                        values: context.Request.Headers.Keys
+                            .OrderBy(keySelector: k => k, comparer: StringComparer.OrdinalIgnoreCase)
+                            .Select(LogRedaction.Sanitize)),
+                    requestBody is null
+                        ? "(not a JSON object)"
+                        : string.Join(separator: ", ",
+                            values: requestBody.Select(kv => LogRedaction.Sanitize(kv.Key))));
             else
-            {
                 _logger.LogDebug(
-                    "No session id found on request to {Path}, but its message history matched tracked " +
-                    "session {SessionId}; treating as turn {TurnNumber}.",
+                    message: "No session id found on request to {Path}, but its message history matched tracked " +
+                             "session {SessionId}; treating as turn {TurnNumber}.",
                     LogRedaction.Sanitize(context.Request.Path.ToString()),
                     LogRedaction.Sanitize(sessionId),
                     turnNumber);
-            }
         }
         else
         {
-            _logger.LogDebug("Resolved session {SessionId}, turn {TurnNumber}.", LogRedaction.Sanitize(sessionId), turnNumber);
+            _logger.LogDebug(message: "Resolved session {SessionId}, turn {TurnNumber}.",
+                LogRedaction.Sanitize(sessionId), turnNumber);
         }
 
         return (requestBody, sessionId, turnNumber, isSynthesized);
@@ -327,7 +337,7 @@ internal sealed class RequestTelemetryPublisher
         // whatever RequestInterceptor knew at resolution time: if isFallback is true, the primary that
         // resolutionReason describes was never actually served, so Failover is the more accurate account
         // of why route differs from requestedModel.
-        var substitutionReason = ResolveSubstitutionReason(isFallback, resolutionReason);
+        var substitutionReason = ResolveSubstitutionReason(isFallback: isFallback, resolutionReason: resolutionReason);
 
         int? promptTokens = null;
         int? completionTokens = null;
@@ -361,18 +371,20 @@ internal sealed class RequestTelemetryPublisher
             usageShapeBytes = capturedResponseBytes;
         }
 
-        var usageExtracted = _usageExtractor.TryExtractUsage(usageShapeProvider, isStreaming, usageShapeBytes, out var usage);
+        var usageExtracted = _usageExtractor.TryExtractUsage(provider: usageShapeProvider, isStreaming: isStreaming,
+            bufferedResponseBody: usageShapeBytes, usage: out var usage);
         if (!usageExtracted && usedNativeBytes)
         {
             // The native capture and the translated/client-shape capture are independently truncated at
-            // MaxCapturedResponseBytes (see CopyAndCaptureAsync), so a large response can cut the native
+            // MaxCapturedResponseBytes (see UpstreamResponseWriter.CopyAndCaptureAsync), so a large response can cut the native
             // bytes off before the usage block - often the last thing to arrive in a streamed response -
             // while the other capture still has it. Falling back recovers usage/cost for budget enforcement
             // and the spend ledger instead of recording nothing purely because the preferred capture was
             // the one that got cut off. usageShapeProvider/usageShapeBytes are reassigned too (not just the
             // local usage result), so the response-text extraction below - which reuses the same pair -
             // benefits from the same fallback instead of independently failing against the truncated bytes.
-            usageExtracted = _usageExtractor.TryExtractUsage(telemetryShapeProvider, isStreaming, capturedResponseBytes, out usage);
+            usageExtracted = _usageExtractor.TryExtractUsage(provider: telemetryShapeProvider, isStreaming: isStreaming,
+                bufferedResponseBody: capturedResponseBytes, usage: out usage);
             if (usageExtracted)
             {
                 usageShapeProvider = telemetryShapeProvider;
@@ -389,9 +401,8 @@ internal sealed class RequestTelemetryPublisher
         // ResponseSummary a worse (truncated-from-the-front) result than what the head-capped bytes already
         // gave it - the tail is only trustworthy for recovering the trailing usage numbers, not the text.
         if (!usageExtracted && tailScanner is not null)
-        {
-            usageExtracted = tailScanner.TryExtractUsage(telemetryShapeProvider, isStreaming, _usageExtractor, out usage);
-        }
+            usageExtracted = tailScanner.TryExtractUsage(provider: telemetryShapeProvider, isStreaming: isStreaming,
+                extractor: _usageExtractor, usage: out usage);
 
         if (!usageExtracted)
         {
@@ -400,8 +411,10 @@ internal sealed class RequestTelemetryPublisher
             // shape the extractor parses, not who actually served the request), and the metric's own doc
             // comment promises per-provider attribution so a regression in one translator's output is
             // distinguishable from another's.
-            UsageMetrics.ExtractionFailedTotal.Add(1, new KeyValuePair<string, object?>("provider", route.Provider));
+            UsageMetrics.ExtractionFailedTotal.Add(1,
+                tag: new KeyValuePair<string, object?>(key: "provider", value: route.Provider));
             _logger.LogDebug(
+                message:
                 "Could not extract usage for provider {Provider} (telemetry shape {TelemetryShapeProvider}, streaming: {IsStreaming}); no cost/token telemetry will be recorded for this request.",
                 LogRedaction.Sanitize(route.Provider),
                 LogRedaction.Sanitize(telemetryShapeProvider),
@@ -432,9 +445,11 @@ internal sealed class RequestTelemetryPublisher
                 estimatedCostUsd = ModelPrice.Free.EstimateCost(usage);
                 costConfidence = CostConfidence.Exact;
             }
-            else if (_priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider)) is { } price)
+            else if (_priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider)) is
+            { } price)
             {
-                estimatedCostUsd = price.EstimateCost(usage, out var usedCacheRateFallback);
+                estimatedCostUsd =
+                    price.EstimateCost(usage: usage, usedCacheRateFallback: out var usedCacheRateFallback);
                 costConfidence = price.IsApproximateMatch || usedCacheRateFallback
                     ? CostConfidence.CatalogApproximate
                     : CostConfidence.Catalog;
@@ -477,7 +492,7 @@ internal sealed class RequestTelemetryPublisher
         bool usageExtracted,
         string sessionId,
         int turnNumber,
-        System.Net.Http.Headers.HttpResponseHeaders? upstreamHeaders)
+        HttpResponseHeaders? upstreamHeaders)
     {
         // Best-effort, like every other telemetry side-effect on this path - see SpendTracker's own
         // internal try/catch around its file write. Recorded even when usage/cost couldn't be
@@ -489,7 +504,9 @@ internal sealed class RequestTelemetryPublisher
         // Attributed to route.ModelName - the model that actually served (M2.3, decided: a value fix, not
         // a schema change) - not requestedModel, which on an auto-majority deployment would otherwise file
         // nearly all spend under the literal string "auto".
-        await _spendTracker.RecordAsync(route.ModelName, promptTokens, completionTokens, estimatedCostUsd, CancellationToken.None).ConfigureAwait(false);
+        await _spendTracker.RecordAsync(model: route.ModelName, promptTokens: promptTokens,
+            completionTokens: completionTokens, estimatedCostUsd: estimatedCostUsd,
+            cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
         // Attribute this request's usage to the provider that actually served it (route.Provider is the
         // post-failover, post-budget-skip winner), so per-provider monthly spend and the Governance budget
@@ -498,17 +515,15 @@ internal sealed class RequestTelemetryPublisher
         // above): a zero-usage row here would advance LastUsageAtUtc and make the admin UI report a
         // misleading "last recorded" time for a provider whose response simply carried no usage block.
         if (_budgetStore is not null && usageExtracted)
-        {
             await _budgetStore.RecordUsageAsync(
-                route.Provider,
-                estimatedCostUsd,
-                promptTokens,
-                completionTokens,
-                cacheCreationTokens,
-                cacheReadTokens,
-                DateTimeOffset.UtcNow,
-                CancellationToken.None).ConfigureAwait(false);
-        }
+                providerKey: route.Provider,
+                costUsd: estimatedCostUsd,
+                promptTokens: promptTokens,
+                completionTokens: completionTokens,
+                cacheCreationTokens: cacheCreationTokens,
+                cacheReadTokens: cacheReadTokens,
+                usageAtUtc: DateTimeOffset.UtcNow,
+                cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
         // The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2): recorded
         // immediately after the budget store, under the same best-effort/CancellationToken.None reasoning,
@@ -535,7 +550,8 @@ internal sealed class RequestTelemetryPublisher
                 CostConfidence: costConfidence,
                 OccurredAtUtc: DateTimeOffset.UtcNow,
                 RequestId: ExtractUpstreamRequestId(upstreamHeaders));
-            await _usageLedger.RecordAsync(ledgerEntry, CancellationToken.None).ConfigureAwait(false);
+            await _usageLedger.RecordAsync(entry: ledgerEntry, cancellationToken: CancellationToken.None)
+                .ConfigureAwait(false);
         }
 
         // §5.12: published unconditionally (not gated on _usageLedger being configured) so an operator who
@@ -543,9 +559,9 @@ internal sealed class RequestTelemetryPublisher
         // and calling Add on it is cheap with no listener attached - only an actually-configured OTLP
         // exporter (a hosting-level decision, not this class's) turns these into real exported metrics.
         if (usageExtracted)
-        {
-            EmitUsageMetrics(route.Provider, requestedModel, promptTokens, completionTokens, cacheCreationTokens, cacheReadTokens, estimatedCostUsd);
-        }
+            EmitUsageMetrics(provider: route.Provider, model: requestedModel, promptTokens: promptTokens,
+                completionTokens: completionTokens, cacheCreationTokens: cacheCreationTokens,
+                cacheReadTokens: cacheReadTokens, estimatedCostUsd: estimatedCostUsd);
     }
 
     /// <summary>
@@ -554,25 +570,27 @@ internal sealed class RequestTelemetryPublisher
     /// request's correlation id, and seeds every pending-cache lookup a later-arriving background job
     /// (embedding memory scoring, the judge shadow-scorer) keys off that same correlation id.
     /// </summary>
-    private (string? NewestUserMessage, string? RequestSummary, string? ResponseSummary, string? ResponseText, string CorrelationId) ExtractResponseTextAndCachePending(
-        JsonObject? requestBody,
-        string usageShapeProvider,
-        byte[] usageShapeBytes,
-        bool isStreaming,
-        string sessionId,
-        int turnNumber,
-        float[]? taskEmbedding,
-        decimal? estimatedCostUsd,
-        bool isExploratory,
-        double propensity,
-        Router.Classification.RequestClassification? classification)
+    private (string? NewestUserMessage, string? RequestSummary, string? ResponseSummary, string? ResponseText, string
+        CorrelationId) ExtractResponseTextAndCachePending(
+            JsonObject? requestBody,
+            string usageShapeProvider,
+            byte[] usageShapeBytes,
+            bool isStreaming,
+            string sessionId,
+            int turnNumber,
+            float[]? taskEmbedding,
+            decimal? estimatedCostUsd,
+            bool isExploratory,
+            double propensity,
+            RequestClassification? classification)
     {
         // Extracted once and reused below for the quality-ingress prompt - both read the same newest-user-
         // message text off the same already-parsed requestBody, so a second walk of its messages array
         // would just repeat the first.
         var newestUserMessage = RequestTextExtractor.ExtractNewestUserMessage(requestBody);
         var requestSummary = TextTruncator.Truncate(newestUserMessage);
-        var responseSummary = _responseTextExtractor.TryExtractText(usageShapeProvider, isStreaming, usageShapeBytes, out var responseText)
+        var responseSummary = _responseTextExtractor.TryExtractText(provider: usageShapeProvider,
+            isStreaming: isStreaming, bufferedResponseBody: usageShapeBytes, text: out var responseText)
             ? TextTruncator.Truncate(responseText)
             : null;
 
@@ -583,7 +601,7 @@ internal sealed class RequestTelemetryPublisher
         // " The", " application", "'s", " name", ... tokens). Logging the assembled text extracted above
         // for telemetry gives the actual answer as one readable, searchable line.
         _logger.LogDebug(
-            "[INTERCEPTOR] Assembled LLM response text: {ResponseText}",
+            message: "[INTERCEPTOR] Assembled LLM response text: {ResponseText}",
             responseSummary is null ? "(none found)" : LogRedaction.Truncate(LogRedaction.Sanitize(responseText)));
 
         // A stable id shared by this telemetry event and any off-path quality signal derived from the same
@@ -595,17 +613,16 @@ internal sealed class RequestTelemetryPublisher
         // computed taskEmbedding well before session/turn resolution ran, so it could not key this itself.
         // Recorded here, immediately once both halves exist, rather than passed to RequestInterceptor.
         if (taskEmbedding is not null)
-        {
-            _pendingTaskEmbeddingCache?.Set(correlationId, taskEmbedding);
-        }
+            _pendingTaskEmbeddingCache?.Set(correlationId: correlationId, embedding: taskEmbedding);
 
         // docs/router/self-organizing-classification-plan.md Phase T1c: mirrors the embedding cache
         // Set above exactly - same correlation id, same "this is the earliest point the value is known
         // alongside the correlation id" reasoning - so EmbeddingMemoryScoreObserver can recover the real
         // cost and provenance once the verifier score arrives instead of writing cost 0.0 / certain
         // non-exploratory provenance unconditionally.
-        _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
-        _pendingRequestProvenanceCache?.Set(correlationId, isExploratory, propensity, classification?.Dimension);
+        _pendingRequestCostCache?.Set(correlationId: correlationId, cost: estimatedCostUsd ?? 0m);
+        _pendingRequestProvenanceCache?.Set(correlationId: correlationId, isExploratory: isExploratory,
+            propensity: propensity, dimension: classification?.Dimension);
 
         // docs/router/geval-shadow-scoring-plan.md §Raw-text preservation: the response text is already in
         // hand from the TryExtractText call above (responseSummary's source) - this adds retention only,
@@ -616,9 +633,7 @@ internal sealed class RequestTelemetryPublisher
         // judge toggle is what authorizes retaining raw response text in memory at all, so switching it off
         // has to stop retention immediately rather than at the next restart.
         if (responseSummary is not null && (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false))
-        {
-            _pendingResponseTextCache?.Set(correlationId, responseText);
-        }
+            _pendingResponseTextCache?.Set(correlationId: correlationId, text: responseText);
 
         return (newestUserMessage, requestSummary, responseSummary, responseText, correlationId);
     }
@@ -634,7 +649,7 @@ internal sealed class RequestTelemetryPublisher
         string correlationId,
         string requestedModelName,
         ResolvedModelRoute route,
-        Router.Classification.RequestClassification? classification,
+        RequestClassification? classification,
         string? taskText,
         string? responseText,
         decimal? estimatedCostUsd,
@@ -652,12 +667,11 @@ internal sealed class RequestTelemetryPublisher
         // Phase T6 adds RoutingOptions.EnableAdaptiveRouting as a second, live gate - read from the
         // monitor (not captured once) so toggling it stops or resumes writes without a restart.
         if (_transcriptStore is not null && (_routingOptionsMonitor?.CurrentValue.EnableAdaptiveRouting ?? false))
-        {
             try
             {
                 await _transcriptStore.InsertAsync(
-                    new TranscriptRecord(
-                        Id: 0,
+                    record: new TranscriptRecord(
+                        0,
                         CorrelationId: correlationId,
                         CreatedAtUtc: DateTimeOffset.UtcNow,
                         RequestedModel: requestedModelName,
@@ -668,21 +682,22 @@ internal sealed class RequestTelemetryPublisher
                         IsUtility: classification?.IsUtility ?? false,
                         PromptText: taskText,
                         ResponseText: responseText,
-                        Score: null,
+                        null,
                         Cost: estimatedCostUsd,
                         IsExploratory: isExploratory,
                         Propensity: propensity,
                         InputTokens: promptTokens,
                         OutputTokens: completionTokens,
-                        MemoryEntryId: null,
+                        null,
                         DimBestModel: dimBestModel),
-                    CancellationToken.None).ConfigureAwait(false);
+                    cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "Failed to write a transcript row for correlation {CorrelationId}; continuing without it.", correlationId);
+                _logger.LogWarning(exception: ex,
+                    message: "Failed to write a transcript row for correlation {CorrelationId}; continuing without it.",
+                    correlationId);
             }
-        }
     }
 
     /// <summary>
@@ -750,20 +765,18 @@ internal sealed class RequestTelemetryPublisher
             RouterCostUsd: routerCostUsd,
             SubstitutionReason: substitutionReason);
 
-        await _telemetryPublisher.PublishAsync(telemetryEvent, cancellationToken);
+        await _telemetryPublisher.PublishAsync(telemetryEvent: telemetryEvent, cancellationToken: cancellationToken);
 
         // Off-path, best-effort: hand the completed response to the quality verifier for static and
         // scoring. The ingress samples, extracts, and enqueues without blocking; it never throws. Reuses
         // the already-extracted (untruncated) response text so no second copy of the body is made.
         if (_qualityIngress is not null && !string.IsNullOrEmpty(responseText))
-        {
             _qualityIngress.TryIngest(new QualityIngestContext(
                 ResponseText: responseText,
                 Prompt: newestUserMessage ?? string.Empty,
                 Model: requestedModel,
                 CorrelationId: correlationId,
                 SessionId: sessionId));
-        }
     }
 
     /// <summary>
@@ -772,36 +785,32 @@ internal sealed class RequestTelemetryPublisher
     /// mirroring the ledger's own "unknown is not zero" distinction rather than defaulting a missing cost
     /// to 0.0 in the exported metric.
     /// </summary>
-    private static void EmitUsageMetrics(string provider, string model, int? promptTokens, int? completionTokens, int? cacheCreationTokens, int? cacheReadTokens, decimal? estimatedCostUsd)
+    private static void EmitUsageMetrics(string provider, string model, int? promptTokens, int? completionTokens,
+        int? cacheCreationTokens, int? cacheReadTokens, decimal? estimatedCostUsd)
     {
         void AddTokens(int? value, string kind)
         {
             if (value is > 0)
-            {
                 UsageMetrics.TokensTotal.Add(
-                    value.Value,
-                    new KeyValuePair<string, object?>("provider", provider),
-                    new KeyValuePair<string, object?>("model", model),
-                    new KeyValuePair<string, object?>("kind", kind));
-            }
+                    delta: value.Value,
+                    tag1: new KeyValuePair<string, object?>(key: "provider", value: provider),
+                    tag2: new KeyValuePair<string, object?>(key: "model", value: model),
+                    tag3: new KeyValuePair<string, object?>(key: "kind", value: kind));
         }
 
-        AddTokens(promptTokens, "prompt");
-        AddTokens(completionTokens, "completion");
-        AddTokens(cacheCreationTokens, "cache_creation");
-        AddTokens(cacheReadTokens, "cache_read");
+        AddTokens(value: promptTokens, kind: "prompt");
+        AddTokens(value: completionTokens, kind: "completion");
+        AddTokens(value: cacheCreationTokens, kind: "cache_creation");
+        AddTokens(value: cacheReadTokens, kind: "cache_read");
 
-        if (estimatedCostUsd is decimal cost)
-        {
+        if (estimatedCostUsd is { } cost)
             UsageMetrics.CostUsdTotal.Add(
-                (double)cost,
-                new KeyValuePair<string, object?>("provider", provider),
-                new KeyValuePair<string, object?>("model", model));
-        }
+                delta: (double)cost,
+                tag1: new KeyValuePair<string, object?>(key: "provider", value: provider),
+                tag2: new KeyValuePair<string, object?>(key: "model", value: model));
         else
-        {
-            UsageMetrics.UnpricedRequestsTotal.Add(1, new KeyValuePair<string, object?>("provider", provider));
-        }
+            UsageMetrics.UnpricedRequestsTotal.Add(1,
+                tag: new KeyValuePair<string, object?>(key: "provider", value: provider));
     }
 
     /// <summary>
@@ -812,34 +821,30 @@ internal sealed class RequestTelemetryPublisher
     /// read) or neither header was sent, in which case <see cref="Telemetry.UsageLedger"/> falls back to
     /// its composite dedup key.
     /// </summary>
-    private static string? ExtractUpstreamRequestId(System.Net.Http.Headers.HttpResponseHeaders? headers)
+    private static string? ExtractUpstreamRequestId(HttpResponseHeaders? headers)
     {
-        if (headers is null)
-        {
-            return null;
-        }
+        if (headers is null) return null;
 
-        if (headers.TryGetValues("request-id", out var requestIdValues))
-        {
+        if (headers.TryGetValues(name: "request-id", values: out var requestIdValues))
             return requestIdValues.FirstOrDefault();
-        }
 
-        if (headers.TryGetValues("x-request-id", out var xRequestIdValues))
-        {
+        if (headers.TryGetValues(name: "x-request-id", values: out var xRequestIdValues))
             return xRequestIdValues.FirstOrDefault();
-        }
 
         return null;
     }
 
-    /// <summary>Attempts to parse the given bytes as a JSON object, returning null if they are not valid JSON or not an object.</summary>
+    /// <summary>
+    /// Attempts to parse the given bytes as a JSON object, returning null if they are not valid JSON or not an
+    /// object.
+    /// </summary>
     private static JsonObject? TryParseJsonObject(byte[] bytes)
     {
         try
         {
             return JsonNode.Parse(bytes) as JsonObject;
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return null;
         }

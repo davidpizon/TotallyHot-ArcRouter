@@ -1,9 +1,11 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
-using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Telemetry;
@@ -11,9 +13,6 @@ using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 
@@ -35,41 +34,45 @@ public class StartupHealthCheckHostedServiceTests
 
         var retentionDays = 30;
         var now = DateTimeOffset.UtcNow;
-        await ledger.RecordAsync(MakeEntry("old", now.AddDays(-(retentionDays + 10))), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry("recent", now.AddDays(-1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "old", occurredAtUtc: now.AddDays(-(retentionDays + 10))),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "recent", occurredAtUtc: now.AddDays(-1)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
         var ingestionService = new PriceCatalogIngestionService(
-            registry, repository, sourceRepository, temp.CreateToggleStore(sourceRepository), NullLogger<PriceCatalogIngestionService>.Instance);
+            registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
-            transcriptDb, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
+            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
-            NullLogger<StartupHealthCheckHostedService>.Instance,
-            temp.Database,
-            sourceRepository,
-            ingestionService,
-            temp.CreateToggleStore(sourceRepository),
-            temp.CreateBudgetStore(),
-            temp.CreateToolCallCapabilityStore(),
-            ledger,
-            temp.CreateRollupStore(),
-            Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
-            CreateRouterMemoryDatabase(temp),
-            new RouterMemory(),
-            CreateEmbeddingMemory(temp),
-            CreateBenchmarkDatabase(temp),
-            CreateBenchmarkStatusService(temp),
-            transcriptDb,
-            transcriptStore,
-            Options.Create(new TranscriptOptions()));
+            logger: NullLogger<StartupHealthCheckHostedService>.Instance,
+            database: temp.Database,
+            repository: sourceRepository,
+            ingestionService: ingestionService,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            budgetStore: temp.CreateBudgetStore(),
+            toolCallCapabilityStore: temp.CreateToolCallCapabilityStore(),
+            usageLedger: ledger,
+            rollupStore: temp.CreateRollupStore(),
+            storageOptions: Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
+            routerMemoryDatabase: CreateRouterMemoryDatabase(temp),
+            routerMemory: new RouterMemory(),
+            embeddingMemory: CreateEmbeddingMemory(temp),
+            benchmarkDatabase: CreateBenchmarkDatabase(temp),
+            benchmarkStatusService: CreateBenchmarkStatusService(temp),
+            transcriptDatabase: transcriptDb,
+            transcriptStore: transcriptStore,
+            transcriptOptions: Options.Create(new TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, ledger.GetMaxTurnNumber("does-not-exist")); // sanity: ledger still usable
-        Assert.Equal(0, CountRows(temp, "old"));
-        Assert.Equal(1, CountRows(temp, "recent"));
+        Assert.Equal(0, actual: ledger.GetMaxTurnNumber("does-not-exist")); // sanity: ledger still usable
+        Assert.Equal(0, actual: CountRows(temp: temp, sessionSuffix: "old"));
+        Assert.Equal(1, actual: CountRows(temp: temp, sessionSuffix: "recent"));
     }
 
     [Theory]
@@ -83,47 +86,51 @@ public class StartupHealthCheckHostedServiceTests
         var ledger = temp.CreateUsageLedger();
 
         var now = DateTimeOffset.UtcNow;
-        await ledger.RecordAsync(MakeEntry("recent", now.AddDays(-1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "recent", occurredAtUtc: now.AddDays(-1)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
         var ingestionService = new PriceCatalogIngestionService(
-            registry, repository, sourceRepository, temp.CreateToggleStore(sourceRepository), NullLogger<PriceCatalogIngestionService>.Instance);
+            registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
-            transcriptDb, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
+            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
-            NullLogger<StartupHealthCheckHostedService>.Instance,
-            temp.Database,
-            sourceRepository,
-            ingestionService,
-            temp.CreateToggleStore(sourceRepository),
-            temp.CreateBudgetStore(),
-            temp.CreateToolCallCapabilityStore(),
-            ledger,
-            temp.CreateRollupStore(),
-            Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
-            CreateRouterMemoryDatabase(temp),
-            new RouterMemory(),
-            CreateEmbeddingMemory(temp),
-            CreateBenchmarkDatabase(temp),
-            CreateBenchmarkStatusService(temp),
-            transcriptDb,
-            transcriptStore,
-            Options.Create(new TranscriptOptions()));
+            logger: NullLogger<StartupHealthCheckHostedService>.Instance,
+            database: temp.Database,
+            repository: sourceRepository,
+            ingestionService: ingestionService,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            budgetStore: temp.CreateBudgetStore(),
+            toolCallCapabilityStore: temp.CreateToolCallCapabilityStore(),
+            usageLedger: ledger,
+            rollupStore: temp.CreateRollupStore(),
+            storageOptions: Options.Create(new StorageOptions { UsageLedgerRetentionDays = retentionDays }),
+            routerMemoryDatabase: CreateRouterMemoryDatabase(temp),
+            routerMemory: new RouterMemory(),
+            embeddingMemory: CreateEmbeddingMemory(temp),
+            benchmarkDatabase: CreateBenchmarkDatabase(temp),
+            benchmarkStatusService: CreateBenchmarkStatusService(temp),
+            transcriptDatabase: transcriptDb,
+            transcriptStore: transcriptStore,
+            transcriptOptions: Options.Create(new TranscriptOptions()));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
         // A 0/negative retention window must never be treated as "cutoff = now", which would wipe out
         // every row instead of leaving the ledger untouched.
-        Assert.Equal(1, CountRows(temp, "recent"));
+        Assert.Equal(1, actual: CountRows(temp: temp, sessionSuffix: "recent"));
     }
 
     [Fact]
     public async Task StartAsync_EmbeddingClientConfigured_WarmsUpAndMarksStateWarm()
     {
         using var temp = new TempDatabase();
-        var service = CreateMinimalService(temp, out _, embeddingClient: new FakeEmbeddingClient(succeed: true), out var warmupState);
+        var service = CreateMinimalService(temp: temp, repository: out _,
+            embeddingClient: new FakeEmbeddingClient(succeed: true), warmupState: out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
         await service.EmbeddingWarmupTask!;
@@ -135,7 +142,8 @@ public class StartupHealthCheckHostedServiceTests
     public async Task StartAsync_EmbeddingClientThrows_LeavesStateNotWarm_AndDoesNotThrow()
     {
         using var temp = new TempDatabase();
-        var service = CreateMinimalService(temp, out _, embeddingClient: new FakeEmbeddingClient(succeed: false), out var warmupState);
+        var service = CreateMinimalService(temp: temp, repository: out _,
+            embeddingClient: new FakeEmbeddingClient(succeed: false), warmupState: out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
         await service.EmbeddingWarmupTask!;
@@ -147,7 +155,7 @@ public class StartupHealthCheckHostedServiceTests
     public async Task StartAsync_NoEmbeddingClientConfigured_DoesNotThrow()
     {
         using var temp = new TempDatabase();
-        var service = CreateMinimalService(temp, out _, embeddingClient: null, out var warmupState);
+        var service = CreateMinimalService(temp: temp, repository: out _, null, warmupState: out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -170,62 +178,60 @@ public class StartupHealthCheckHostedServiceTests
         var ledger = temp.CreateUsageLedger();
         var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
         var ingestionService = new PriceCatalogIngestionService(
-            registry, repository, sourceRepository, temp.CreateToggleStore(sourceRepository), NullLogger<PriceCatalogIngestionService>.Instance);
+            registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
         warmupState = embeddingClient is null ? null : new EmbeddingWarmupState();
 
         var transcriptDb = CreateTranscriptDatabase(temp);
         var transcriptStore = new SqliteTranscriptStore(
-            transcriptDb, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
+            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
 
         return new StartupHealthCheckHostedService(
-            NullLogger<StartupHealthCheckHostedService>.Instance,
-            temp.Database,
-            sourceRepository,
-            ingestionService,
-            temp.CreateToggleStore(sourceRepository),
-            temp.CreateBudgetStore(),
-            temp.CreateToolCallCapabilityStore(),
-            ledger,
-            temp.CreateRollupStore(),
-            Options.Create(new StorageOptions()),
-            CreateRouterMemoryDatabase(temp),
-            new RouterMemory(),
-            CreateEmbeddingMemory(temp),
-            CreateBenchmarkDatabase(temp),
-            CreateBenchmarkStatusService(temp),
-            transcriptDb,
-            transcriptStore,
-            Options.Create(new TranscriptOptions()),
-            embeddingClient,
-            warmupState);
+            logger: NullLogger<StartupHealthCheckHostedService>.Instance,
+            database: temp.Database,
+            repository: sourceRepository,
+            ingestionService: ingestionService,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            budgetStore: temp.CreateBudgetStore(),
+            toolCallCapabilityStore: temp.CreateToolCallCapabilityStore(),
+            usageLedger: ledger,
+            rollupStore: temp.CreateRollupStore(),
+            storageOptions: Options.Create(new StorageOptions()),
+            routerMemoryDatabase: CreateRouterMemoryDatabase(temp),
+            routerMemory: new RouterMemory(),
+            embeddingMemory: CreateEmbeddingMemory(temp),
+            benchmarkDatabase: CreateBenchmarkDatabase(temp),
+            benchmarkStatusService: CreateBenchmarkStatusService(temp),
+            transcriptDatabase: transcriptDb,
+            transcriptStore: transcriptStore,
+            transcriptOptions: Options.Create(new TranscriptOptions()),
+            embeddingClient: embeddingClient,
+            embeddingWarmupState: warmupState);
     }
 
-    private sealed class FakeEmbeddingClient(bool succeed) : IEmbeddingClient
+    private static UsageLedgerEntry MakeEntry(string requestId, DateTimeOffset occurredAtUtc)
     {
-        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
-            succeed ? Task.FromResult(new EmbeddingResult([1f], TokenCount: 1)) : throw new InvalidOperationException("embedding backend unavailable");
-    }
-
-    private static UsageLedgerEntry MakeEntry(string requestId, DateTimeOffset occurredAtUtc) =>
-        new(
+        return new UsageLedgerEntry(
             SessionId: "sess-" + requestId,
-            TurnNumber: 1,
+            1,
             Provider: "openai",
             RequestedModel: "gpt-4o",
             ResolvedModel: "gpt-4o",
-            PromptTokens: 10,
-            CompletionTokens: 5,
-            CacheCreationTokens: null,
-            CacheReadTokens: null,
-            EstimatedCostUsd: 0.01m,
+            10,
+            5,
+            null,
+            null,
+            0.01m,
             CostConfidence: CostConfidence.Unknown,
             OccurredAtUtc: occurredAtUtc,
             RequestId: requestId);
+    }
 
     private static RouterMemoryDatabase CreateRouterMemoryDatabase(TempDatabase temp)
     {
-        var directory = Path.GetDirectoryName(temp.Path_)!;
-        var dbPath = Path.Combine(directory, "router_embedding_memory.db");
+        var directory = Path.GetDirectoryName(temp.DatabasePath)!;
+        var dbPath = Path.Combine(path1: directory, path2: "router_embedding_memory.db");
         return new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
     }
 
@@ -233,21 +239,23 @@ public class StartupHealthCheckHostedServiceTests
     {
         var database = CreateRouterMemoryDatabase(temp);
         var store = new SqliteMemoryEntryStore(database);
-        return new EmbeddingMemory(store, new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()), new StubEmbeddingClient(), NullLogger<EmbeddingMemory>.Instance);
+        return new EmbeddingMemory(store: store,
+            optionsMonitor: new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions()),
+            embeddingClient: new StubEmbeddingClient(), logger: NullLogger<EmbeddingMemory>.Instance);
     }
 
     private static BenchmarkDatabase CreateBenchmarkDatabase(TempDatabase temp)
     {
-        var directory = Path.GetDirectoryName(temp.Path_)!;
-        var dbPath = Path.Combine(directory, "coderouterbench.db");
+        var directory = Path.GetDirectoryName(temp.DatabasePath)!;
+        var dbPath = Path.Combine(path1: directory, path2: "coderouterbench.db");
         return new BenchmarkDatabase(Options.Create(new StorageOptions { BenchmarkDatabasePath = dbPath }));
     }
 
-    private static TotallyHot.ArcRouter.Transcripts.TranscriptDatabase CreateTranscriptDatabase(TempDatabase temp)
+    private static TranscriptDatabase CreateTranscriptDatabase(TempDatabase temp)
     {
-        var directory = Path.GetDirectoryName(temp.Path_)!;
-        var dbPath = Path.Combine(directory, "transcripts.db");
-        return new TotallyHot.ArcRouter.Transcripts.TranscriptDatabase(Options.Create(new StorageOptions { TranscriptDatabasePath = dbPath }));
+        var directory = Path.GetDirectoryName(temp.DatabasePath)!;
+        var dbPath = Path.Combine(path1: directory, path2: "transcripts.db");
+        return new TranscriptDatabase(Options.Create(new StorageOptions { TranscriptDatabasePath = dbPath }));
     }
 
     // The probe's HttpClient always fails fast (no real network I/O), so RecheckAsync resolves to
@@ -255,10 +263,12 @@ public class StartupHealthCheckHostedServiceTests
     private static BenchmarkDataStatusService CreateBenchmarkStatusService(TempDatabase temp)
     {
         var probe = new BenchmarkChecksumProbe(
-            new FakeHttpClientFactory(FakeHttpMessageHandler.AlwaysFails()), NullLogger<BenchmarkChecksumProbe>.Instance);
+            httpClientFactory: new FakeHttpClientFactory(FakeHttpMessageHandler.AlwaysFails()),
+            logger: NullLogger<BenchmarkChecksumProbe>.Instance);
         var ledger = new BenchmarkFileLedger(CreateBenchmarkDatabase(temp));
         return new BenchmarkDataStatusService(
-            probe, ledger, Options.Create(new BenchmarkSyncOptions()), NullLogger<BenchmarkDataStatusService>.Instance);
+            probe: probe, ledger: ledger, options: Options.Create(new BenchmarkSyncOptions()),
+            logger: NullLogger<BenchmarkDataStatusService>.Instance);
     }
 
     private static int CountRows(TempDatabase temp, string sessionSuffix)
@@ -266,7 +276,17 @@ public class StartupHealthCheckHostedServiceTests
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM usage_ledger WHERE session_id = $sessionId;";
-        command.Parameters.AddWithValue("$sessionId", "sess-" + sessionSuffix);
+        command.Parameters.AddWithValue(parameterName: "$sessionId", value: "sess-" + sessionSuffix);
         return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    private sealed class FakeEmbeddingClient(bool succeed) : IEmbeddingClient
+    {
+        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
+        {
+            return succeed
+                ? Task.FromResult(new EmbeddingResult(Vector: [1f], 1))
+                : throw new InvalidOperationException("embedding backend unavailable");
+        }
     }
 }

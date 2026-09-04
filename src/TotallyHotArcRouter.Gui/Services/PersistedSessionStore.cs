@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 
@@ -29,12 +29,15 @@ public sealed class PersistedSessionStore : IDisposable
     private const int RequestLimit = 500;
 
     private readonly IPersistedSessionsClient _client;
-    private readonly IDisposable? _ownedClient;
     private readonly ILogger<PersistedSessionStore>? _logger;
+    private readonly IDisposable? _ownedClient;
 
     /// <summary>Initializes a new instance of the <see cref="PersistedSessionStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
     public PersistedSessionStore(
         ILogger<PersistedSessionStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
@@ -74,6 +77,12 @@ public sealed class PersistedSessionStore : IDisposable
     /// <summary>Whether the last load reached the proxy.</summary>
     public bool IsReachable { get; private set; }
 
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+    }
+
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
 
@@ -86,17 +95,16 @@ public sealed class PersistedSessionStore : IDisposable
     {
         try
         {
-            var result = await _client.ListAsync(RequestLimit, cancellationToken).ConfigureAwait(false);
+            var result = await _client.ListAsync(limit: RequestLimit, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             TranscriptCaptureEnabled = result.TranscriptCaptureEnabled;
-            Sessions = PersistedSessionAggregator.Aggregate(result.Transcripts)
-                .Select(PersistedSessionMapper.ToModel)
-                .ToList();
+            Sessions = [.. PersistedSessionAggregator.Aggregate(result.Transcripts).Select(PersistedSessionMapper.ToModel)];
             IsReachable = true;
         }
         catch (PersistedSessionsClientException ex)
         {
             IsReachable = false;
-            _logger?.LogWarning(ex, "Failed to load persisted sessions from the router.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load persisted sessions from the router.");
         }
         finally
         {
@@ -104,7 +112,4 @@ public sealed class PersistedSessionStore : IDisposable
             Changed?.Invoke();
         }
     }
-
-    /// <inheritdoc />
-    public void Dispose() => _ownedClient?.Dispose();
 }

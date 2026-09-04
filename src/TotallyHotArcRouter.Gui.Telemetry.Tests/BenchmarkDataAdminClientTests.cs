@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using AwesomeAssertions;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -20,15 +19,15 @@ public class BenchmarkDataAdminClientTests
     [Fact]
     public async Task GetStatusAsync_maps_state_reason_and_checked_at()
     {
-        var checkedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var checkedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
         var stub = new StubClient
         {
             StatusResponse = new Contract.BenchmarkStatusResponse
             {
                 State = Contract.BenchmarkDataState.CheckFailed,
                 Reason = "failed to connect",
-                CheckedAtUtc = Timestamp.FromDateTimeOffset(checkedAt),
-            },
+                CheckedAtUtc = Timestamp.FromDateTimeOffset(checkedAt)
+            }
         };
         using var client = new BenchmarkDataAdminClient(stub);
 
@@ -42,7 +41,7 @@ public class BenchmarkDataAdminClientTests
     [Fact]
     public async Task GetStatusAsync_maps_every_file_including_unsynced_ones()
     {
-        var syncedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var syncedAt = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
         var stub = new StubClient
         {
             StatusResponse = new Contract.BenchmarkStatusResponse
@@ -50,10 +49,14 @@ public class BenchmarkDataAdminClientTests
                 State = Contract.BenchmarkDataState.Update,
                 Files =
                 {
-                    new Contract.BenchmarkFile { FileName = "models.json", Synced = true, SizeBytes = 42, RowCount = 3, SyncedAtUtc = Timestamp.FromDateTimeOffset(syncedAt) },
-                    new Contract.BenchmarkFile { FileName = "summary.json", Synced = false },
-                },
-            },
+                    new Contract.BenchmarkFile
+                    {
+                        FileName = "models.json", Synced = true, SizeBytes = 42, RowCount = 3,
+                        SyncedAtUtc = Timestamp.FromDateTimeOffset(syncedAt)
+                    },
+                    new Contract.BenchmarkFile { FileName = "summary.json", Synced = false }
+                }
+            }
         };
         using var client = new BenchmarkDataAdminClient(stub);
 
@@ -94,7 +97,8 @@ public class BenchmarkDataAdminClientTests
     [Fact]
     public async Task GetStatusAsync_with_no_reason_maps_to_null()
     {
-        var stub = new StubClient { StatusResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
+        var stub = new StubClient
+        { StatusResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
@@ -105,7 +109,8 @@ public class BenchmarkDataAdminClientTests
     [Fact]
     public async Task RecheckAsync_maps_the_recomputed_status()
     {
-        var stub = new StubClient { RecheckResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
+        var stub = new StubClient
+        { RecheckResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.RecheckAsync(TestContext.Current.CancellationToken);
@@ -126,8 +131,8 @@ public class BenchmarkDataAdminClientTests
                     {
                         FileName = "models.json",
                         Stage = Contract.BenchmarkSyncStage.Downloading,
-                        BytesTransferred = 100,
-                    },
+                        BytesTransferred = 100
+                    }
                 },
                 new Contract.BenchmarkSyncStreamEvent
                 {
@@ -135,22 +140,19 @@ public class BenchmarkDataAdminClientTests
                     {
                         FileName = "models.json",
                         Stage = Contract.BenchmarkSyncStage.Completed,
-                        RowsImported = 3,
-                    },
+                        RowsImported = 3
+                    }
                 },
                 new Contract.BenchmarkSyncStreamEvent
                 {
-                    FinalStatus = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current },
-                },
-            ],
+                    FinalStatus = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current }
+                }
+            ]
         };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Should().HaveCount(3);
         events[0].Progress!.Stage.Should().Be(BenchmarkSyncStageInfo.Downloading);
@@ -178,24 +180,21 @@ public class BenchmarkDataAdminClientTests
                         Files =
                         {
                             new Contract.BenchmarkSyncPlanFile { FileName = "models.json", SizeBytes = 42 },
-                            new Contract.BenchmarkSyncPlanFile { FileName = "summary.json", SizeBytes = 8 },
+                            new Contract.BenchmarkSyncPlanFile { FileName = "summary.json", SizeBytes = 8 }
                         },
-                        TotalBytes = 50,
-                    },
-                },
-            ],
+                        TotalBytes = 50
+                    }
+                }
+            ]
         };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         var plan = events.Single().Plan;
         plan.Should().NotBeNull();
-        plan!.TotalBytes.Should().Be(50);
+        plan.TotalBytes.Should().Be(50);
         plan.Files.Should().HaveCount(2);
         plan.Files[0].FileName.Should().Be("models.json");
         plan.Files[0].SizeBytes.Should().Be(42);
@@ -215,18 +214,15 @@ public class BenchmarkDataAdminClientTests
                         FileName = "models.json",
                         Stage = Contract.BenchmarkSyncStage.Downloading,
                         BytesTransferred = 10,
-                        TotalBytes = 42,
-                    },
-                },
-            ],
+                        TotalBytes = 42
+                    }
+                }
+            ]
         };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Single().Progress!.TotalBytes.Should().Be(42);
     }
@@ -238,10 +234,7 @@ public class BenchmarkDataAdminClientTests
         using var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         var single = events.Single();
         single.Plan.Should().BeNull();
@@ -262,18 +255,15 @@ public class BenchmarkDataAdminClientTests
                     {
                         FileName = "models.json",
                         Stage = Contract.BenchmarkSyncStage.Failed,
-                        Error = "checksum mismatch",
-                    },
-                },
-            ],
+                        Error = "checksum mismatch"
+                    }
+                }
+            ]
         };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
-        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken))
-        {
-            events.Add(e);
-        }
+        await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
 
         events.Single().Progress!.Error.Should().Be("checksum mismatch");
     }
@@ -281,7 +271,8 @@ public class BenchmarkDataAdminClientTests
     [Fact]
     public async Task SyncAsync_wraps_a_mid_stream_failure()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(async () =>
@@ -298,10 +289,12 @@ public class BenchmarkDataAdminClientTests
     [Fact]
     public async Task Unavailable_becomes_a_plain_language_message()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() => client.GetStatusAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() =>
+            client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the benchmark data status: the router is not reachable.");
         ex.IsUnavailable.Should().BeTrue();
@@ -310,10 +303,12 @@ public class BenchmarkDataAdminClientTests
     [Fact]
     public async Task A_server_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() => client.RecheckAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() =>
+            client.RecheckAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not recheck the benchmark data: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -353,10 +348,7 @@ public class BenchmarkDataAdminClientTests
         public Task<bool> MoveNext(CancellationToken cancellationToken)
         {
             _index++;
-            if (_index >= messages.Count)
-            {
-                return Task.FromResult(false);
-            }
+            if (_index >= messages.Count) return Task.FromResult(false);
 
             Current = messages[_index];
             return Task.FromResult(true);
@@ -379,13 +371,17 @@ public class BenchmarkDataAdminClientTests
 
         public override AsyncUnaryCall<Contract.BenchmarkStatusResponse> GetBenchmarkStatusAsync(
             Contract.GetBenchmarkStatusRequest request,
-            CallOptions options) =>
-            Call(StatusResponse);
+            CallOptions options)
+        {
+            return Call(StatusResponse);
+        }
 
         public override AsyncUnaryCall<Contract.BenchmarkStatusResponse> RecheckBenchmarkDataAsync(
             Contract.RecheckBenchmarkDataRequest request,
-            CallOptions options) =>
-            Call(RecheckResponse);
+            CallOptions options)
+        {
+            return Call(RecheckResponse);
+        }
 
         public override AsyncServerStreamingCall<Contract.BenchmarkSyncStreamEvent> SyncBenchmarkData(
             Contract.SyncBenchmarkDataRequest request,
@@ -396,26 +392,32 @@ public class BenchmarkDataAdminClientTests
                 : new ThrowingStreamReader(Failure);
 
             return new AsyncServerStreamingCall<Contract.BenchmarkSyncStreamEvent>(
-                reader,
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+                responseStream: reader,
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
 
-        private AsyncUnaryCall<T> Call<T>(T response) =>
-            new(
-                Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
 
-        private sealed class ThrowingStreamReader(RpcException failure) : IAsyncStreamReader<Contract.BenchmarkSyncStreamEvent>
+        private sealed class ThrowingStreamReader(RpcException failure)
+            : IAsyncStreamReader<Contract.BenchmarkSyncStreamEvent>
         {
             public Contract.BenchmarkSyncStreamEvent Current => throw failure;
 
-            public Task<bool> MoveNext(CancellationToken cancellationToken) => Task.FromException<bool>(failure);
+            public Task<bool> MoveNext(CancellationToken cancellationToken)
+            {
+                return Task.FromException<bool>(failure);
+            }
         }
     }
 }

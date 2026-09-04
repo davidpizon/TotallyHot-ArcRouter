@@ -12,7 +12,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// </param>
 /// <param name="ContentDeltas">
 /// Every <c>choices[0].delta.content</c> value the server sent, in order and unmerged.
-///
 /// <para>
 /// The split points are the payload, not an artifact of how this was recorded. A delimiter arriving as
 /// <c>"```"</c>, <c>"json"</c>, <c>"\n"</c>, <c>"{\""</c> across four chunks is the situation the stream
@@ -35,7 +34,6 @@ internal sealed record RecordedStreamTranscript(
 
 /// <summary>
 /// Streamed replies recorded alongside the buffered ones, because the two paths are not the same evidence.
-///
 /// <para>
 /// <b>Why these are stored as content deltas rather than raw SSE.</b> The raw capture is 1.9 MB, almost
 /// all of it this model's <c>reasoning_content</c> deltas - 1,584 of them on one scenario, each carrying a
@@ -47,7 +45,6 @@ internal sealed record RecordedStreamTranscript(
 /// the token-by-token fragment sequence in <see cref="ToolCallNormalizingTranslatorTests"/> rather than
 /// introducing a fixture-file pattern this project has never used.
 /// </para>
-///
 /// <para>
 /// <b>The finding worth reading first</b> is <see cref="RecordedStreamTranscript.ToolCallDeltaCount"/>
 /// being zero on all ten. LM Studio puts <c>"tool_calls": []</c> on every buffered response - the quirk
@@ -65,7 +62,7 @@ internal static class RecordedStreamTranscripts
     /// </summary>
     public static IReadOnlyList<RecordedStreamTranscript> All { get; } =
     [
-        new(Model, "single", Emulated: true, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "single", true, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "To", " determine", " the", " current", " time",
             " in", " Tokyo", ",", " you", " can", " use",
@@ -74,18 +71,18 @@ internal static class RecordedStreamTranscripts
             "```", "json", "\n", "{\"", "name", "\":\"",
             "get", "_time", "\",\"", "arguments", "\":{\"", "timezone",
             "\":\"", "Asia", "/T", "ok", "yo", "\"}}\n",
-            "```",
+            "```"
         ]),
 
-        new(Model, "arguments", Emulated: true, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "arguments", true, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "{\"", "name", "\":", " \"", "get",
             "_weather", "\",", " \"", "arguments", "\":", " \"",
             "city", "='", "Paris", "',", " units", "='",
-            "metric", "'", "\"}",
+            "metric", "'", "\"}"
         ]),
 
-        new(Model, "pick-one-of-three", Emulated: true, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "pick-one-of-three", true, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "To", " accomplish", " this", " task", ",",
             " we", " will", " use", " the", " `", "read",
@@ -115,20 +112,20 @@ internal static class RecordedStreamTranscripts
             " add", " error", " handling", " logic", ",", " but",
             " that", " would", " be", " beyond", " the", " current",
             " scope", " of", " just", " using", " the", " provided",
-            " function", ".",
+            " function", "."
         ]),
 
-        new(Model, "no-tool-needed", Emulated: true, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "no-tool-needed", true, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "{\"", "name", "\":", " \"", "R",
             "ust", "ling", " waves", " crash", ".\",", " \"",
             "arguments", "\":", " {\"", "type", "\":", " \"",
             "string", "\",", " \"", "value", "\":", " \"",
             "R", "ust", "ling", " waves", " crash", ".\"",
-            "}}",
+            "}}"
         ]),
 
-        new(Model, "two-at-once", Emulated: true, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "two-at-once", true, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "To", " obtain", " the", " current", " time",
             " in", " Tokyo", " and", " the", " weather", " in",
@@ -156,19 +153,19 @@ internal static class RecordedStreamTranscripts
             " ", " \"", "arguments", "\":", " {\n", "   ",
             " \"", "city", "\":", " \"", "Paris", "\",\n",
             "   ", " \"", "units", "\":", " \"", "metric",
-            "\"\n", " ", " }\n", "}\n", "```",
+            "\"\n", " ", " }\n", "}\n", "```"
         ]),
 
-        new(Model, "single", Emulated: false, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "single", false, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "Hi", " there", "!", " I", " suggest",
             " getting", " online", " to", " get", " real", "-time",
             " information", ".", " If", " you", " have", " any",
             " other", " questions", ",", " please", " don", "'t",
-            " hesitate", " to", " let", " me", " know", "!",
+            " hesitate", " to", " let", " me", " know", "!"
         ]),
 
-        new(Model, "arguments", Emulated: false, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "arguments", false, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "The", " weather", " in", " Paris", " can",
             " vary", " significantly", " depending", " on", " the", " time",
@@ -200,10 +197,10 @@ internal static class RecordedStreamTranscripts
             "),", " but", " this", " can", " fluct", "uate",
             " based", " on", " current", " conditions", ".", " Always",
             " check", " multiple", " sources", " for", " the", " most",
-            " accurate", " information", ".",
+            " accurate", " information", "."
         ]),
 
-        new(Model, "pick-one-of-three", Emulated: false, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "pick-one-of-three", false, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "To", " retrieve", " the", " content", " of",
             " the", " /", "etc", "/", "hosts", " file",
@@ -227,10 +224,10 @@ internal static class RecordedStreamTranscripts
             " localhost", " followed", " by", " other", " host", "names",
             " mapped", " to", " their", " IPv", "4", " addresses",
             ".", " Always", " handle", " such", " files", " with",
-            " appropriate", " permissions", " to", " maintain", " security", ".",
+            " appropriate", " permissions", " to", " maintain", " security", "."
         ]),
 
-        new(Model, "no-tool-needed", Emulated: false, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "no-tool-needed", false, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "**", "Cr", "ab", " Cl", "aws",
             " Catch", " At", " Shore", ",**", "  \n", "**",
@@ -240,10 +237,10 @@ internal static class RecordedStreamTranscripts
             "This", " ha", "iku", " captures", " the", " rhythm",
             " of", " the", " sea", " with", " imagery", " of",
             " movement", " and", " still", "ness", ",", " reflecting",
-            " both", " activity", " and", " tranqu", "ility", ".",
+            " both", " activity", " and", " tranqu", "ility", "."
         ]),
 
-        new(Model, "two-at-once", Emulated: false, ToolCallDeltaCount: 0, ContentDeltas:
+        new(ModelName: Model, ScenarioName: "two-at-once", false, ToolCallDeltaCount: 0, ContentDeltas:
         [
             "\n\n", "To", " obtain", " both", " the", " current",
             " time", " in", " Tokyo", " and", " the", " weather",
@@ -270,8 +267,7 @@ internal static class RecordedStreamTranscripts
             ".\n\n", "By", " using", " these", " methods", ",",
             " you", " can", " efficiently", " retrieve", " both", " the",
             " current", " time", " in", " Tokyo", " and", " the",
-            " latest", " weather", " information", " for", " Paris", ".",
-        ]),
+            " latest", " weather", " information", " for", " Paris", "."
+        ])
     ];
 }
-

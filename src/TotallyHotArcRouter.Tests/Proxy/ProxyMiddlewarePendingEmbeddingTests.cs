@@ -1,19 +1,19 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Moq;
 using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
 /// <summary>
 /// Covers docs/router/live-feedback-learning-plan.md Phase 2c's request-path half: once
 /// <see cref="RequestInterceptor"/> has computed a task embedding, a completed request must populate
-/// <see cref="PendingTaskEmbeddingCache"/> so <see cref="Router.EmbeddingMemoryScoreObserver"/> can later
+/// <see cref="PendingTaskEmbeddingCache"/> so <see cref="TotallyHot.ArcRouter.Router.EmbeddingMemoryScoreObserver"/> can later
 /// claim it by correlation id.
 /// </summary>
 public class ProxyMiddlewarePendingEmbeddingTests
@@ -26,21 +26,22 @@ public class ProxyMiddlewarePendingEmbeddingTests
         var warmupState = new EmbeddingWarmupState();
         warmupState.MarkWarm();
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             embeddingClient: new FakeEmbeddingClient([1f, 2f, 3f]),
             embeddingWarmupState: warmupState);
         var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions()));
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"hi"}}]}""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"hi"}}]}""",
+                encoding: Encoding.UTF8, mediaType: "application/json")
         }));
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 PendingTaskEmbeddingCache = pendingCache
@@ -52,14 +53,15 @@ public class ProxyMiddlewarePendingEmbeddingTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}""");
+        var requestBody =
+            """{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(1, pendingCache.Count);
+        Assert.Equal(1, actual: pendingCache.Count);
     }
 
     [Fact]
@@ -68,18 +70,20 @@ public class ProxyMiddlewarePendingEmbeddingTests
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com");
         // No embedding client configured at all - the pre-Phase-2 default.
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions()));
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"hi"}}]}""", Encoding.UTF8, "application/json"),
+            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"hi"}}]}""",
+                encoding: Encoding.UTF8, mediaType: "application/json")
         }));
 
         var middleware = new ProxyMiddleware(
-            Mock.Of<ILogger<ProxyMiddleware>>(),
-            interceptor,
-            new HttpClient(handler),
+            logger: Mock.Of<ILogger<ProxyMiddleware>>(),
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 PendingTaskEmbeddingCache = pendingCache
@@ -91,25 +95,32 @@ public class ProxyMiddlewarePendingEmbeddingTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}""");
+        var requestBody =
+            """{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(0, pendingCache.Count);
+        Assert.Equal(0, actual: pendingCache.Count);
     }
 
     private sealed class FakeEmbeddingClient(float[] embedding, int tokenCount = 0) : IEmbeddingClient
     {
-        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new EmbeddingResult(embedding, tokenCount));
+        public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new EmbeddingResult(Vector: embedding, TokenCount: tokenCount));
+        }
     }
 
-    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return handler(request);
+        }
     }
 }

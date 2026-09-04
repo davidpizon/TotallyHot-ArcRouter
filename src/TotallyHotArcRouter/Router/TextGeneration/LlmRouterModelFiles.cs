@@ -18,7 +18,7 @@ public static class LlmRouterModelFiles
         "tokenizer.json",
         "tokenizer_config.json",
         "model.onnx",
-        ModelOnnxDataFileName,
+        ModelOnnxDataFileName
     ];
 
     /// <summary>
@@ -29,6 +29,8 @@ public static class LlmRouterModelFiles
     /// nullability for the options-configured, non-override path).
     /// </summary>
     /// <param name="fileName">One of the entries in <see cref="All"/>.</param>
-    public static bool IsOptional(string fileName) =>
-        string.Equals(fileName, ModelOnnxDataFileName, StringComparison.Ordinal);
+    public static bool IsOptional(string fileName)
+    {
+        return string.Equals(a: fileName, b: ModelOnnxDataFileName, comparisonType: StringComparison.Ordinal);
+    }
 }

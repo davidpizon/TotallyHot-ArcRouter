@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
@@ -17,15 +17,15 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 public sealed class ClusterTrainingService : IClusterTrainingService
 {
     private readonly OodClusterBootstrapSampleSource _bootstrapSource;
+    private readonly IEmbeddingClient _embeddingClient;
+    private readonly EmbeddingOptions _embeddingOptions;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ILogger<ClusterTrainingService> _logger;
     private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly Embeddings.IEmbeddingClient _embeddingClient;
+    private readonly string _modelPath;
+    private readonly RoutingOptions _routingOptions;
     private readonly ITranscriptStore _transcriptStore;
     private readonly ClusterBestVoter _voter;
-    private readonly RoutingOptions _routingOptions;
-    private readonly EmbeddingOptions _embeddingOptions;
-    private readonly string _modelPath;
-    private readonly ILogger<ClusterTrainingService> _logger;
-    private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ClusterTrainingService"/> class.
@@ -46,7 +46,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     public ClusterTrainingService(
         OodClusterBootstrapSampleSource bootstrapSource,
         IMemoryEntryStore memoryEntryStore,
-        Embeddings.IEmbeddingClient embeddingClient,
+        IEmbeddingClient embeddingClient,
         ITranscriptStore transcriptStore,
         ClusterBestVoter voter,
         IOptions<RoutingOptions> routingOptions,
@@ -75,21 +75,23 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<ClusterTrainingOutcome> RetrainAsync(
         IProgress<int>? bootstrapProgress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        if (!await _gate.WaitAsync(0, cancellationToken: cancellationToken).ConfigureAwait(false))
         {
-            _logger.LogInformation("Cluster model retrain requested while another retrain is already in progress; skipping.");
-            return new ClusterTrainingOutcome(ClusterTrainingResultKind.AlreadyRunning,
-                "A retrain was already in progress.", 0, 0, 0, 0);
+            _logger.LogInformation(
+                "Cluster model retrain requested while another retrain is already in progress; skipping.");
+            return new ClusterTrainingOutcome(Kind: ClusterTrainingResultKind.AlreadyRunning,
+                Message: "A retrain was already in progress.", 0, 0, 0, 0);
         }
 
         try
         {
-            return await RetrainCoreAsync(bootstrapProgress, cancellationToken).ConfigureAwait(false);
+            return await RetrainCoreAsync(bootstrapProgress: bootstrapProgress, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -107,14 +109,16 @@ public sealed class ClusterTrainingService : IClusterTrainingService
 
         try
         {
-            bootstrapSamples.AddRange(await _bootstrapSource.LoadAsync(bootstrapProgress, cancellationToken).ConfigureAwait(false));
+            bootstrapSamples.AddRange(await _bootstrapSource
+                .LoadAsync(progress: bootstrapProgress, cancellationToken: cancellationToken).ConfigureAwait(false));
             bootstrapTaskCount = bootstrapSamples.Count;
         }
         catch (InvalidOperationException ex)
         {
             // Unsynced corpus is an expected, non-broken state (data/README.md) - degrade to live-only
             // training rather than failing the whole retrain.
-            _logger.LogInformation(ex, "Cluster model retrain proceeding without an OOD bootstrap.");
+            _logger.LogInformation(exception: ex,
+                message: "Cluster model retrain proceeding without an OOD bootstrap.");
         }
 
         var modelIdentity = _embeddingClient.ModelIdentity;
@@ -131,6 +135,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
                 // invalidates older entries for training purposes - skip rather than let the trainer
                 // choke on a ragged embedding length, mirroring EmbeddingLogRegTrainingService's guard.
                 _logger.LogWarning(
+                    message:
                     "Skipping a memory entry with a {ActualDimension}-dimensional embedding; expected {ExpectedDimension}.",
                     entry.TaskEmbedding.Length,
                     dimension);
@@ -147,18 +152,18 @@ public sealed class ClusterTrainingService : IClusterTrainingService
                 continue;
             }
 
-            liveSamples.Add(new ClusterTrainingSample(entry.TaskEmbedding, entry.Dimension, _routingOptions.ClusterLiveSampleWeight));
+            liveSamples.Add(new ClusterTrainingSample(Embedding: entry.TaskEmbedding, Dimension: entry.Dimension,
+                Weight: _routingOptions.ClusterLiveSampleWeight));
             liveEntriesById.Add(entry);
             memoryEntryCount++;
         }
 
         if (skippedForModelMismatch > 0)
-        {
             _logger.LogWarning(
+                message:
                 "Skipped {SkippedCount} memory entry/entries produced by a different embedding model than the current {ModelIdentity}; they are retained in the store but cannot be clustered.",
                 skippedForModelMismatch,
                 modelIdentity);
-        }
 
         var samples = new List<ClusterTrainingSample>(bootstrapSamples.Count + liveSamples.Count);
         samples.AddRange(bootstrapSamples);
@@ -168,23 +173,22 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         {
             var message =
                 $"Declined: {samples.Count} sample(s) - below the configured minimum ({_routingOptions.ClusterMinTrainingRows} rows).";
-            _logger.LogWarning("Cluster model retrain {Message}", message);
+            _logger.LogWarning(message: "Cluster model retrain {Message}", message);
             return new ClusterTrainingOutcome(
-                ClusterTrainingResultKind.Declined, message, bootstrapTaskCount, memoryEntryCount, samples.Count, 0);
+                Kind: ClusterTrainingResultKind.Declined, Message: message, BootstrapTaskCount: bootstrapTaskCount,
+                MemoryEntryCount: memoryEntryCount, SampleCount: samples.Count, 0);
         }
 
         var trainResult = SphericalKMeansTrainer.Train(
-            [.. samples.Select(s => s.Embedding)],
-            [.. samples.Select(s => s.Weight)],
-            _routingOptions.ClusterCountMin,
-            _routingOptions.ClusterCountMax);
+            embeddings: [.. samples.Select(s => s.Embedding)],
+            weights: [.. samples.Select(s => s.Weight)],
+            minK: _routingOptions.ClusterCountMin,
+            maxK: _routingOptions.ClusterCountMax);
 
         var clusterSizes = new int[trainResult.ChosenK];
         var histograms = new Dictionary<string, int>[trainResult.ChosenK];
         for (var c = 0; c < trainResult.ChosenK; c++)
-        {
             histograms[c] = new Dictionary<string, int>(StringComparer.Ordinal);
-        }
 
         for (var i = 0; i < samples.Count; i++)
         {
@@ -193,12 +197,12 @@ public sealed class ClusterTrainingService : IClusterTrainingService
 
             var sampleDimension = samples[i].Dimension;
             if (sampleDimension is not null)
-            {
                 histograms[cluster][sampleDimension] = histograms[cluster].GetValueOrDefault(sampleDimension) + 1;
-            }
         }
 
-        var topTerms = await ComputeTopTermsAsync(liveEntriesById, trainResult.Assignments, bootstrapSamples.Count, trainResult.ChosenK, cancellationToken)
+        var topTerms = await ComputeTopTermsAsync(liveEntriesById: liveEntriesById,
+                assignments: trainResult.Assignments, bootstrapSampleCount: bootstrapSamples.Count,
+                chosenK: trainResult.ChosenK, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         var trainedFrom =
@@ -207,30 +211,32 @@ public sealed class ClusterTrainingService : IClusterTrainingService
             $"trained {DateTimeOffset.UtcNow:O}. {trainResult.KSelectionProvenance}";
 
         var artifact = new ClusterModelArtifact(
-            dimension,
-            trainResult.Centroids,
-            trainResult.ChosenK,
-            DateTimeOffset.UtcNow,
-            clusterSizes,
-            [.. histograms.Select(h => (IReadOnlyDictionary<string, int>)h)],
-            topTerms,
-            trainedFrom,
-            bootstrapTaskCount,
-            memoryEntryCount,
-            modelIdentity);
+            EmbeddingDimension: dimension,
+            Centroids: trainResult.Centroids,
+            ChosenK: trainResult.ChosenK,
+            TrainedAtUtc: DateTimeOffset.UtcNow,
+            ClusterSizes: clusterSizes,
+            ClusterDimensionHistograms: [.. histograms.Select(h => (IReadOnlyDictionary<string, int>)h)],
+            ClusterTopTerms: topTerms,
+            TrainedFrom: trainedFrom,
+            BootstrapTaskCount: bootstrapTaskCount,
+            MemoryEntryCount: memoryEntryCount,
+            EmbeddingModel: modelIdentity);
         ClusterModelArtifactSerializer.Validate(artifact);
 
-        await WriteArtifactAtomicallyAsync(artifact, cancellationToken).ConfigureAwait(false);
+        await WriteArtifactAtomicallyAsync(artifact: artifact, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         _voter.Reload();
 
         var trainedMessage =
             $"Trained {trainResult.ChosenK} cluster(s) from {bootstrapTaskCount} bootstrap task(s) and " +
             $"{memoryEntryCount} live memory entry/entries ({samples.Count} sample(s)).";
         _logger.LogInformation(
-            "Cluster model retrain wrote a new artifact to {Path}: {Message}", _modelPath, trainedMessage);
+            message: "Cluster model retrain wrote a new artifact to {Path}: {Message}", _modelPath, trainedMessage);
 
         return new ClusterTrainingOutcome(
-            ClusterTrainingResultKind.Trained, trainedMessage, bootstrapTaskCount, memoryEntryCount, samples.Count, trainResult.ChosenK);
+            Kind: ClusterTrainingResultKind.Trained, Message: trainedMessage, BootstrapTaskCount: bootstrapTaskCount,
+            MemoryEntryCount: memoryEntryCount, SampleCount: samples.Count, ChosenK: trainResult.ChosenK);
     }
 
     /// <summary>
@@ -240,24 +246,21 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     /// (<see cref="ClusterModelArtifact.DescribeCluster"/>), per Phase T2e's documented fallback.
     /// </summary>
     private async Task<IReadOnlyList<IReadOnlyList<string>>> ComputeTopTermsAsync(
-        IReadOnlyList<MemoryEntry> liveEntriesById, IReadOnlyList<int> assignments, int bootstrapSampleCount, int chosenK, CancellationToken cancellationToken)
+        IReadOnlyList<MemoryEntry> liveEntriesById, IReadOnlyList<int> assignments, int bootstrapSampleCount,
+        int chosenK, CancellationToken cancellationToken)
     {
-        var promptTextByMemoryEntryId = await _transcriptStore.LoadPromptTextByMemoryEntryIdAsync(cancellationToken).ConfigureAwait(false);
+        var promptTextByMemoryEntryId = await _transcriptStore.LoadPromptTextByMemoryEntryIdAsync(cancellationToken)
+            .ConfigureAwait(false);
         if (promptTextByMemoryEntryId.Count == 0)
-        {
-            return [.. Enumerable.Repeat((IReadOnlyList<string>)Array.Empty<string>(), chosenK)];
-        }
+            return [.. Enumerable.Repeat(element: (IReadOnlyList<string>)[], count: chosenK)];
 
         var clusterDocuments = new List<string>[chosenK];
-        for (var c = 0; c < chosenK; c++)
-        {
-            clusterDocuments[c] = [];
-        }
+        for (var c = 0; c < chosenK; c++) clusterDocuments[c] = [];
 
         for (var i = 0; i < liveEntriesById.Count; i++)
         {
             var entry = liveEntriesById[i];
-            if (promptTextByMemoryEntryId.TryGetValue(entry.Id, out var promptText))
+            if (promptTextByMemoryEntryId.TryGetValue(key: entry.Id, value: out var promptText))
             {
                 var cluster = assignments[bootstrapSampleCount + i];
                 clusterDocuments[cluster].Add(promptText);
@@ -275,14 +278,12 @@ public sealed class ClusterTrainingService : IClusterTrainingService
     private async Task WriteArtifactAtomicallyAsync(ClusterModelArtifact artifact, CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(_modelPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
         var json = ClusterModelArtifactSerializer.Serialize(artifact);
         var tempPath = $"{_modelPath}.{Guid.NewGuid():N}.tmp";
-        await File.WriteAllTextAsync(tempPath, json, cancellationToken).ConfigureAwait(false);
-        File.Move(tempPath, _modelPath, overwrite: true);
+        await File.WriteAllTextAsync(path: tempPath, contents: json, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        File.Move(sourceFileName: tempPath, destFileName: _modelPath, true);
     }
 }

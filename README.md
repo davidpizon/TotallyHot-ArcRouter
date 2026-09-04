@@ -94,6 +94,20 @@ docs/                           Design docs and handbook
 %ProgramData%\TotallyHotArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand
 ```
 
+## Architecture and code quality
+
+Architecture decisions are recorded under [`docs/adr/`](docs/adr/README.md) (template, numbering,
+and the index of accepted vs proposed records).
+
+Code-quality work uses a **dual-engine pipeline**: CodeGraph MCP maps structure (call paths, type
+hierarchies, blast radius) and Serena MCP classifies smells and proposes phased refactors. The
+standing method, severity matrix, and a dated production-`src/` catalog are
+[ADR-0008](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md). Mechanical extracts
+and the validation gate (zero-warning build, tests, coverage floor, hot-path smoke) stay in
+[`docs/router/code-smell-refactoring-plan.md`](docs/router/code-smell-refactoring-plan.md) — ADR-0008
+complements that plan rather than replacing it. Agent instructions for keeping the two engines
+paired are in [`AGENTS.md`](AGENTS.md).
+
 ## License
 
 TotallyHot Arc Router is licensed under the

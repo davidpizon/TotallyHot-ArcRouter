@@ -13,7 +13,8 @@ public static class LogLineFormatter
     {
         ArgumentNullException.ThrowIfNull(line);
 
-        return $"[{line.TimestampUtc.ToLocalTime().ToString(TimestampFormat)}] [{line.Level.PadRight(5)}]  {line.Message}";
+        return
+            $"[{line.TimestampUtc.ToLocalTime().ToString(TimestampFormat)}] [{line.Level.PadRight(5)}]  {line.Message}";
     }
 
     /// <summary>Formats every line, oldest first, one per line, joined with <see cref="Environment.NewLine"/>.</summary>
@@ -21,7 +22,6 @@ public static class LogLineFormatter
     {
         ArgumentNullException.ThrowIfNull(lines);
 
-        return string.Join(Environment.NewLine, lines.Select(Format));
+        return string.Join(separator: Environment.NewLine, values: lines.Select(Format));
     }
 }
-

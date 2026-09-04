@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -19,21 +20,15 @@ public static class AnthropicResponseTextParser
         {
             node = JsonNode.Parse(json);
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             return false;
         }
 
-        if (node is not JsonObject obj)
-        {
-            return false;
-        }
+        if (node is not JsonObject obj) return false;
 
         var extracted = MessageContentTextExtractor.ExtractText(obj["content"]);
-        if (extracted is null)
-        {
-            return false;
-        }
+        if (extracted is null) return false;
 
         text = extracted;
         return true;
@@ -56,34 +51,24 @@ public static class AnthropicResponseTextParser
                 ? typeString
                 : null;
 
-            if (!string.Equals(type, "content_block_delta", StringComparison.Ordinal) ||
+            if (!string.Equals(a: type, b: "content_block_delta", comparisonType: StringComparison.Ordinal) ||
                 evt["delta"] is not JsonObject delta)
-            {
                 continue;
-            }
 
-            var deltaType = delta["type"] is JsonValue deltaTypeValue && deltaTypeValue.TryGetValue<string>(out var deltaTypeString)
+            var deltaType = delta["type"] is JsonValue deltaTypeValue &&
+                            deltaTypeValue.TryGetValue<string>(out var deltaTypeString)
                 ? deltaTypeString
                 : null;
 
-            if (!string.Equals(deltaType, "text_delta", StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!string.Equals(a: deltaType, b: "text_delta", comparisonType: StringComparison.Ordinal)) continue;
 
             if (delta["text"] is JsonValue textValue && textValue.TryGetValue<string>(out var deltaText))
-            {
                 builder.Append(deltaText);
-            }
         }
 
-        if (builder.Length == 0)
-        {
-            return false;
-        }
+        if (builder.Length == 0) return false;
 
         text = builder.ToString();
         return true;
     }
 }
-

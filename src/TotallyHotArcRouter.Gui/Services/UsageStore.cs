@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 
@@ -11,10 +11,14 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// switches and degrades gracefully (falling back to demo data) when the proxy isn't running or has no
 /// rollup store wired up. Registered in <c>MauiProgram</c>.
 /// </summary>
-public sealed class UsageStore
+public sealed class UsageStore : IDisposable
 {
     private readonly UsageQueryClient _client;
     private readonly ILogger<UsageStore>? _logger;
+
+    // This store always builds its own HttpClient (even over a caller-supplied transport), so it always
+    // owns that client's lifetime - see Dispose. Mirrors UpdateStore's _ownedHttpClient.
+    private readonly HttpClient _ownedHttpClient;
 
     // Keyed per distinct range/width/groupBy so repeated filter-bar clicks over an already-seen range don't
     // re-fetch. Small and unbounded by design: a session's worth of distinct filter selections is a handful
@@ -25,7 +29,10 @@ public sealed class UsageStore
 
     /// <summary>Initializes a new instance of the <see cref="UsageStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="managementAddress">The proxy management origin; defaults to <see cref="ProviderAdminStore.DefaultManagementAddress"/>.</param>
+    /// <param name="managementAddress">
+    /// The proxy management origin; defaults to
+    /// <see cref="ProviderAdminStore.DefaultManagementAddress"/>.
+    /// </param>
     /// <param name="adminToken">
     /// Optional management token override; when null (the default), the token is read from the shared
     /// management-token file the proxy generates (see <see cref="ManagementTokenReader"/>).
@@ -43,12 +50,19 @@ public sealed class UsageStore
     {
         _logger = logger;
         var normalized = managementAddress.EndsWith('/') ? managementAddress : managementAddress + "/";
-        var httpClient = transport is null ? new HttpClient() : new HttpClient(transport);
+
+        // disposeHandler: false for a caller-supplied transport - see ProviderAdminStore's identical note.
+        var httpClient = transport is null ? new HttpClient() : new HttpClient(handler: transport, false);
         httpClient.BaseAddress = new Uri(normalized);
-        _client = new UsageQueryClient(httpClient, adminToken ?? ManagementTokenReader.TryRead());
+        _ownedHttpClient = httpClient;
+        _client = new UsageQueryClient(httpClient: httpClient,
+            adminToken: adminToken ?? ManagementTokenReader.TryRead());
     }
 
-    /// <summary>The most recently loaded summary totals, or <see langword="null"/> until <see cref="LoadSummaryAsync"/> succeeds at least once.</summary>
+    /// <summary>
+    /// The most recently loaded summary totals, or <see langword="null"/> until <see cref="LoadSummaryAsync"/>
+    /// succeeds at least once.
+    /// </summary>
     public UsageSummaryView? Summary { get; private set; }
 
     /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
@@ -59,6 +73,16 @@ public sealed class UsageStore
 
     /// <summary>The last load error message, if the management API was unreachable or rollups are unavailable.</summary>
     public string? LastError { get; private set; }
+
+    /// <summary>
+    /// Disposes the <see cref="HttpClient"/> this store built for itself, leaving any caller-supplied
+    /// transport alone. Registered as a DI singleton in <c>MauiProgram</c>, so the container invokes this
+    /// at shutdown.
+    /// </summary>
+    public void Dispose()
+    {
+        _ownedHttpClient.Dispose();
+    }
 
     /// <summary>Raised after <see cref="Summary"/>, <see cref="IsReachable"/>, or <see cref="LastError"/> change.</summary>
     public event Action? Changed;
@@ -72,7 +96,8 @@ public sealed class UsageStore
     {
         try
         {
-            Summary = await _client.GetSummaryAsync(window, cancellationToken).ConfigureAwait(false);
+            Summary = await _client.GetSummaryAsync(window: window, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             IsReachable = true;
             LastError = null;
         }
@@ -80,7 +105,7 @@ public sealed class UsageStore
         {
             IsReachable = false;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load the usage summary from the management API.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load the usage summary from the management API.");
         }
         finally
         {
@@ -95,17 +120,17 @@ public sealed class UsageStore
     /// when the proxy is unreachable or rollups are unavailable; the caller falls back to demo data.
     /// </summary>
     public async Task<IReadOnlyList<UsageRollupBucketView>> LoadRollupAsync(
-        DateTimeOffset from, DateTimeOffset to, string width, string groupBy, CancellationToken cancellationToken = default)
+        DateTimeOffset from, DateTimeOffset to, string width, string groupBy,
+        CancellationToken cancellationToken = default)
     {
-        var key = new RollupCacheKey(from, to, width, groupBy);
-        if (_rollupCache.TryGetValue(key, out var cached))
-        {
-            return cached;
-        }
+        var key = new RollupCacheKey(From: from, To: to, Width: width, GroupBy: groupBy);
+        if (_rollupCache.TryGetValue(key: key, value: out var cached)) return cached;
 
         try
         {
-            var result = await _client.GetRollupAsync(from, to, width, groupBy, cancellationToken).ConfigureAwait(false);
+            var result = await _client
+                .GetRollupAsync(from: from, to: to, width: width, groupBy: groupBy,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
             _rollupCache[key] = result;
             IsReachable = true;
             LastError = null;
@@ -115,7 +140,7 @@ public sealed class UsageStore
         {
             IsReachable = false;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load usage rollups from the management API.");
+            _logger?.LogWarning(exception: ex, message: "Failed to load usage rollups from the management API.");
             return [];
         }
         finally
@@ -149,7 +174,9 @@ public sealed class UsageStore
     {
         try
         {
-            var result = await _client.GetRoutingRoiAsync(from, to, sessionId, cancellationToken).ConfigureAwait(false);
+            var result = await _client
+                .GetRoutingRoiAsync(from: from, to: to, sessionId: sessionId, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             IsReachable = true;
             return result;
         }
@@ -157,7 +184,8 @@ public sealed class UsageStore
         {
             IsReachable = false;
             LastError = ex.Message;
-            _logger?.LogWarning(ex, "Failed to load routing ROI comparisons from the management API.");
+            _logger?.LogWarning(exception: ex,
+                message: "Failed to load routing ROI comparisons from the management API.");
             return [];
         }
         finally
@@ -166,6 +194,9 @@ public sealed class UsageStore
         }
     }
 
-    /// <summary>Cache key for <see cref="_rollupCache"/>: a rollup's full request shape, so distinct filter selections never collide.</summary>
+    /// <summary>
+    /// Cache key for <see cref="_rollupCache"/>: a rollup's full request shape, so distinct filter selections never
+    /// collide.
+    /// </summary>
     private readonly record struct RollupCacheKey(DateTimeOffset From, DateTimeOffset To, string Width, string GroupBy);
 }

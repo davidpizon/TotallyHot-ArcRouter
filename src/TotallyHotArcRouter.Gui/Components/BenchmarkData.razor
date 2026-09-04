@@ -17,7 +17,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="20" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20"/> Router unreachable
             </div>
             @* The store's own endpoint, not the default constant: naming an address the client was never
                pointed at is worse than naming none while diagnosing a connectivity failure. *@
@@ -55,7 +55,7 @@
             <button @onclick="RunResync"
                     disabled="@(Store.IsSyncing || VoterStore.IsSyncing)"
                     class="ml-auto btn btn-secondary flex items-center gap-1.5">
-                <Icon Name="refresh" Size="20" />
+                <Icon Name="refresh" Size="20"/>
                 @ResyncLabel()
             </button>
         </div>
@@ -80,7 +80,7 @@
                             disabled="@(Store.IsSyncing || status.State != BenchmarkDataAdminState.Update)"
                             title="@(status.Reason)"
                             class="btn btn-secondary flex items-center gap-1.5">
-                        <Icon Name="refresh" Size="20" />
+                        <Icon Name="refresh" Size="20"/>
                         @ActionLabel()
                     </button>
                 </div>
@@ -116,7 +116,7 @@
                 <button @onclick="() => _filesExpanded = !_filesExpanded"
                         aria-expanded="@(_filesExpanded ? "true" : "false")"
                         class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-                    <Icon Name="@(_filesExpanded ? "chevron-up" : "chevron-down")" Size="20" />
+                    <Icon Name="@(_filesExpanded ? "chevron-up" : "chevron-down")" Size="20"/>
                     @(_filesExpanded ? "Hide files" : $"Show {status.Files.Count} files")
                 </button>
 
@@ -135,17 +135,19 @@
                                         <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
                                             @file.FileName
                                         </span>
-                                        <span class="text-xs @StageClass(progress)">@StageLabel(file, progress)</span>
+                                        <span class="text-xs @StageClass(progress)">@StageLabel(file: file, progress: progress)</span>
                                     </div>
                                     <div class="flex items-center justify-between text-xs text-slate-500">
-                                        <span>@DescribeSize(file, progress)</span>
+                                        <span>@DescribeSize(file: file, progress: progress)</span>
                                         <span>@DescribeSyncedAt(file)</span>
                                     </div>
                                     @if (progress is { Stage: BenchmarkSyncStageInfo.Failed, Error: { } error })
                                     {
                                         <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
                                             <span class="flex items-center gap-1.5 text-red-300">
-                                                <span aria-hidden="true"><Icon Name="alert-triangle" Size="20" /></span> @error
+                                                <span aria-hidden="true">
+                                                    <Icon Name="alert-triangle" Size="20"/>
+                                                </span> @error
                                             </span>
                                         </div>
                                     }
@@ -170,7 +172,7 @@
             {
                 <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
                     <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                        <Icon Name="alert-triangle" Size="20" /> Router unreachable
+                        <Icon Name="alert-triangle" Size="20"/> Router unreachable
                     </div>
                     <div class="text-xs text-slate-400">
                         @if (VoterStore.ServerAddress is { Length: > 0 } voterServerAddress)
@@ -210,9 +212,9 @@
                                 Local Voter Model
                             </span>
                             <button @onclick="RunVoterAction"
-                                    disabled="@(VoterStore.IsSyncing || voterStatus.Current != false)"
+                                    disabled="@(VoterStore.IsSyncing || voterStatus.Current)"
                                     class="btn btn-secondary flex items-center gap-1.5">
-                                <Icon Name="refresh" Size="20" />
+                                <Icon Name="refresh" Size="20"/>
                                 @VoterActionLabel()
                             </button>
                         </div>
@@ -251,7 +253,7 @@
                         <button @onclick="() => _voterFilesExpanded = !_voterFilesExpanded"
                                 aria-expanded="@(_voterFilesExpanded ? "true" : "false")"
                                 class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-                            <Icon Name="@(_voterFilesExpanded ? "chevron-up" : "chevron-down")" Size="20" />
+                            <Icon Name="@(_voterFilesExpanded ? "chevron-up" : "chevron-down")" Size="20"/>
                             @(_voterFilesExpanded ? "Hide files" : $"Show {voterStatus.Files.Count} files")
                         </button>
 
@@ -268,10 +270,10 @@
                                                 <span class="text-xs font-mono @(file.Synced ? "state-enabled" : "state-disabled")">
                                                     @file.FileName
                                                 </span>
-                                                <span class="text-xs @VoterStageClass(progress)">@VoterStageLabel(file, progress)</span>
+                                                <span class="text-xs @VoterStageClass(progress)">@VoterStageLabel(file: file, progress: progress)</span>
                                             </div>
                                             <div class="flex items-center justify-between text-xs text-slate-500">
-                                                <span>@VoterDescribeSize(file, progress)</span>
+                                                <span>@VoterDescribeSize(file: file, progress: progress)</span>
                                                 <span>@VoterDescribeSyncedAt(file)</span>
                                             </div>
                                             @if (file.Synced)
@@ -284,7 +286,9 @@
                                             {
                                                 <div class="rounded px-2 py-1.5 text-xs ds-outcome-critical">
                                                     <span class="flex items-center gap-1.5 text-red-300">
-                                                        <span aria-hidden="true"><Icon Name="alert-triangle" Size="20" /></span> @voterError
+                                                        <span aria-hidden="true">
+                                                            <Icon Name="alert-triangle" Size="20"/>
+                                                        </span> @voterError
                                                     </span>
                                                 </div>
                                             }
@@ -299,4 +303,3 @@
         </div>
     }
 </div>
-

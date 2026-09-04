@@ -1,10 +1,10 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Tests.Proxy;
 using TotallyHot.ArcRouter.Tests.TestSupport;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
@@ -19,22 +19,22 @@ public class JudgeModelSelectorTests
     [Fact]
     public void Resolve_NoConfiguredPick_TakesFirstEligibleFreeModel()
     {
-        var selector = CreateSelector(TwoFreeModels(), chosenModel: string.Empty);
+        var selector = CreateSelector(resolver: TwoFreeModels(), chosenModel: string.Empty);
 
         var route = selector.Resolve();
 
         Assert.NotNull(route);
-        Assert.Equal("free-a", route.ModelName);
+        Assert.Equal(expected: "free-a", actual: route.ModelName);
     }
 
     [Fact]
     public void Resolve_ConfiguredPickIsEligible_UsesIt()
     {
-        var selector = CreateSelector(TwoFreeModels(), chosenModel: "free-b");
+        var selector = CreateSelector(resolver: TwoFreeModels(), chosenModel: "free-b");
 
         var route = selector.Resolve();
 
-        Assert.Equal("free-b", route!.ModelName);
+        Assert.Equal(expected: "free-b", actual: route!.ModelName);
     }
 
     /// <summary>
@@ -48,29 +48,29 @@ public class JudgeModelSelectorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["free-on"] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1", IsFree = true },
-                ["free-off"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1", IsFree = true, Enabled = false },
+                ["free-on"] = new() { BaseUrl = "http://localhost:1234/v1", IsFree = true },
+                ["free-off"] = new() { BaseUrl = "http://localhost:11434/v1", IsFree = true, Enabled = false }
             },
             ModelList =
             [
                 new ModelRouteEntry { ModelName = "still-on", Provider = "free-on", ProviderModelId = "m1" },
-                new ModelRouteEntry { ModelName = "switched-off", Provider = "free-off", ProviderModelId = "m2" },
-            ],
+                new ModelRouteEntry { ModelName = "switched-off", Provider = "free-off", ProviderModelId = "m2" }
+            ]
         };
 
-        var selector = CreateSelector(Resolver(options), chosenModel: "switched-off");
+        var selector = CreateSelector(resolver: Resolver(options), chosenModel: "switched-off");
 
         var route = selector.Resolve();
 
-        Assert.Equal("still-on", route!.ModelName);
-        Assert.Equal(["still-on"], selector.ListEligibleModels());
+        Assert.Equal(expected: "still-on", actual: route!.ModelName);
+        Assert.Equal(expected: ["still-on"], actual: selector.ListEligibleModels());
     }
 
     [Fact]
     public void Resolve_OnlyPaidProvidersConfigured_ReturnsNull()
     {
         var selector = CreateSelector(
-            ModelRouteResolverTestFactory.Create(
+            resolver: ModelRouteResolverTestFactory.Create(
                 modelName: "gpt-5.4",
                 providerModelId: "gpt-5.4-2026-01",
                 baseUrl: "https://api.openai.com",
@@ -89,7 +89,7 @@ public class JudgeModelSelectorTests
     public void Resolve_FreeBedrockRoute_IsNotEligible()
     {
         var selector = CreateSelector(
-            ModelRouteResolverTestFactory.Create(
+            resolver: ModelRouteResolverTestFactory.Create(
                 modelName: "bedrock-claude",
                 providerModelId: "anthropic.claude-v2",
                 baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
@@ -112,50 +112,62 @@ public class JudgeModelSelectorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["free"] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1", IsFree = true },
+                ["free"] = new() { BaseUrl = "http://localhost:1234/v1", IsFree = true }
             },
             ModelList =
             [
                 new ModelRouteEntry { ModelName = "running", Provider = "free", ProviderModelId = "m1" },
-                new ModelRouteEntry { ModelName = "stopped", Provider = "free", ProviderModelId = "m2", Enabled = false },
-            ],
+                new ModelRouteEntry
+                    { ModelName = "stopped", Provider = "free", ProviderModelId = "m2", Enabled = false }
+            ]
         };
 
-        var selector = CreateSelector(Resolver(options), chosenModel: string.Empty);
+        var selector = CreateSelector(resolver: Resolver(options), chosenModel: string.Empty);
 
-        Assert.Equal(["running"], selector.ListEligibleModels());
+        Assert.Equal(expected: ["running"], actual: selector.ListEligibleModels());
     }
 
-    /// <summary>The eligible list and the resolved route must come from one rule, so the dropdown can never offer a model the selector would refuse.</summary>
+    /// <summary>
+    /// The eligible list and the resolved route must come from one rule, so the dropdown can never offer a model the
+    /// selector would refuse.
+    /// </summary>
     [Fact]
     public void ListEligibleModels_MatchesWhatResolveWouldPick()
     {
-        var selector = CreateSelector(TwoFreeModels(), chosenModel: string.Empty);
+        var selector = CreateSelector(resolver: TwoFreeModels(), chosenModel: string.Empty);
 
-        Assert.Equal(selector.ListEligibleModels()[0], selector.Resolve()!.ModelName);
+        Assert.Equal(expected: selector.ListEligibleModels()[0], actual: selector.Resolve()!.ModelName);
     }
 
-    private static JudgeModelSelector CreateSelector(IModelRouteResolver resolver, string chosenModel) =>
-        new(resolver,
-            new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true, ModelName = chosenModel }),
-            NullLogger<JudgeModelSelector>.Instance);
+    private static JudgeModelSelector CreateSelector(IModelRouteResolver resolver, string chosenModel)
+    {
+        return new JudgeModelSelector(routeResolver: resolver,
+            options: new StaticOptionsMonitor<JudgeOptions>(
+                new JudgeOptions { Enabled = true, ModelName = chosenModel }),
+            logger: NullLogger<JudgeModelSelector>.Instance);
+    }
 
-    private static IModelRouteResolver Resolver(ModelRoutingOptions options) =>
-        new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+    private static IModelRouteResolver Resolver(ModelRoutingOptions options)
+    {
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+    }
 
     /// <summary>Two free models on distinct providers, in configuration order - so "first eligible" is observable.</summary>
-    private static IModelRouteResolver TwoFreeModels() =>
-        Resolver(new ModelRoutingOptions
+    private static IModelRouteResolver TwoFreeModels()
+    {
+        return Resolver(new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["lmstudio"] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1", IsFree = true },
-                ["ollama"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1", IsFree = true },
+                ["lmstudio"] = new() { BaseUrl = "http://localhost:1234/v1", IsFree = true },
+                ["ollama"] = new() { BaseUrl = "http://localhost:11434/v1", IsFree = true }
             },
             ModelList =
             [
                 new ModelRouteEntry { ModelName = "free-a", Provider = "lmstudio", ProviderModelId = "a" },
-                new ModelRouteEntry { ModelName = "free-b", Provider = "ollama", ProviderModelId = "b" },
-            ],
+                new ModelRouteEntry { ModelName = "free-b", Provider = "ollama", ProviderModelId = "b" }
+            ]
         });
+    }
 }

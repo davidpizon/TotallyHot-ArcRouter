@@ -1,177 +1,184 @@
+@using System.Diagnostics.CodeAnalysis
 @* Add/edit-provider modal for the Governance tab's provider manager. Captures the endpoint, the provider
    family, and any custom headers (including authentication, expressed as an ordinary header such as
    Authorization). Mirrors SettingsModal's overlay/stop-propagation/EventCallback pattern. *@
-@using TotallyHot.ArcRouter.Gui.Admin
 
 <DialogShell Title="@(Model.IsNew ? "Add Provider" : "Edit Provider")"
              CloseAriaLabel="@(Model.IsNew ? "Close add provider dialog" : $"Close edit dialog for provider {Model.Key}")"
              OnClose="OnCancel"
              ContentClass="overlay-content p-5 space-y-3">
-            <div>
-                <div class="text-xs text-slate-500 mb-1">Provider Name</div>
-                <input type="text" data-testid="provider-name" value="@_providerName" @oninput="e => _providerName = AsString(e.Value)"
-                       placeholder="e.g. My Anthropic Instance"
-                       class="w-full px-3 py-2 text-sm ds-input" />
-            </div>
+    <div>
+        <div class="text-xs text-slate-500 mb-1">Provider Name</div>
+        <input type="text" data-testid="provider-name" value="@_providerName" @oninput="e => _providerName = AsString(e.Value)"
+               placeholder="e.g. My Anthropic Instance"
+               class="w-full px-3 py-2 text-sm ds-input"/>
+    </div>
 
-            <div>
-                <div class="text-xs text-slate-500 mb-1">Provider Type</div>
-                @* Rendered from ProviderTemplates.Ordered rather than hardcoded options: the label is a
+    <div>
+        <div class="text-xs text-slate-500 mb-1">Provider Type</div>
+        @* Rendered from ProviderTemplates.Ordered rather than hardcoded options: the label is a
                    family ("OpenAI / Groq / DeepSeek") while the value stays the enum member name that
                    round-trips through storage, and the two cannot drift apart. *@
-                <select data-testid="provider-type" value="@_selectedProviderType.ToString()" @onchange="OnProviderTypeChanged"
-                        class="w-full px-2 py-2 text-sm ds-input">
-                    @foreach (var providerType in ProviderTemplates.Ordered)
-                    {
-                        <option value="@providerType.ToString()">@ProviderTemplates.DisplayName(providerType)</option>
-                    }
-                </select>
-            </div>
+        <select data-testid="provider-type" value="@_selectedProviderType.ToString()" @onchange="OnProviderTypeChanged"
+                class="w-full px-2 py-2 text-sm ds-input">
+            @foreach (var providerType in ProviderTemplates.Ordered)
+            {
+                <option value="@providerType.ToString()">@ProviderTemplates.DisplayName(providerType)</option>
+            }
+        </select>
+    </div>
 
-            <div>
-                <div class="text-xs text-slate-500 mb-1">Base URL</div>
-                <input type="text" data-testid="base-url" value="@_baseUrl" @oninput="e => _baseUrl = AsString(e.Value)"
-                       placeholder="https://api.example.com"
-                       class="w-full px-3 py-2 text-sm font-mono ds-input" />
-            </div>
+    <div>
+        <div class="text-xs text-slate-500 mb-1">Base URL</div>
+        <input type="text" data-testid="base-url" value="@_baseUrl" @oninput="e => _baseUrl = AsString(e.Value)"
+               placeholder="https://api.example.com"
+               class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+    </div>
 
-            <div>
-                <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-200">
-                    <input type="checkbox" data-testid="is-free" checked="@_isFree" @onchange="e => _isFree = e.Value is true" />
-                    <span>Free provider</span>
-                </label>
-                <div class="text-xs text-slate-500 mt-1">
-                    A local runtime or no-cost endpoint. Its requests report a cost of $0.00 rather than an
-                    unknown cost.
-                </div>
-            </div>
+    <div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer text-slate-200">
+            <input type="checkbox" data-testid="is-free" checked="@_isFree" @onchange="e => _isFree = e.Value is true"/>
+            <span>Free provider</span>
+        </label>
+        <div class="text-xs text-slate-500 mt-1">
+            A local runtime or no-cost endpoint. Its requests report a cost of $0.00 rather than an
+            unknown cost.
+        </div>
+    </div>
 
-            @* Custom headers: every header the provider needs, including authentication (e.g. add an
+    @* Custom headers: every header the provider needs, including authentication (e.g. add an
                "Authorization" header here with a literal or env-var-sourced key). This replaces the old
                dedicated Credentials fieldset - a header is a header, whether or not it happens to carry a
                secret. *@
-            <div class="border-t border-slate-700/60 pt-3">
-                <div class="flex items-center justify-between mb-1.5">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Custom Headers</div>
-                    <button type="button" data-testid="add-header" @onclick="AddHeader"
-                            class="btn-small-action">
-                        <Icon Name="plus" Size="20" /> Add header
-                    </button>
-                </div>
-                <div class="text-xs text-slate-600 mb-1.5">
-                    Add this provider's authentication header here (e.g. <span class="font-mono">@AuthHeaderHint</span>) if it needs a key.
-                </div>
-                @if (_headers.Count == 0)
+    <div class="border-t border-slate-700/60 pt-3">
+        <div class="flex items-center justify-between mb-1.5">
+            <div class="text-xs text-slate-500 uppercase tracking-wider">Custom Headers</div>
+            <button type="button" data-testid="add-header" @onclick="AddHeader"
+                    class="btn-small-action">
+                <Icon Name="plus" Size="20"/> Add header
+            </button>
+        </div>
+        <div class="text-xs text-slate-600 mb-1.5">
+            Add this provider's authentication header here (e.g. <span class="font-mono">@AuthHeaderHint</span>) if it needs a key.
+        </div>
+        @if (_headers.Count == 0)
+        {
+            <div class="text-xs text-slate-600">No custom headers.</div>
+        }
+        else
+        {
+            var duplicateNameCounts = BuildHeaderNameCounts();
+            <div class="space-y-2">
+                @foreach (var (header, index) in _headers.Select((h, i) => (h, i)))
                 {
-                    <div class="text-xs text-slate-600">No custom headers.</div>
-                }
-                else
-                {
-                    var duplicateNameCounts = BuildHeaderNameCounts();
-                    <div class="space-y-2">
-                        @foreach (var (header, index) in _headers.Select((h, i) => (h, i)))
+                    var isDuplicate = IsDuplicateHeaderName(header: header, nameCounts: duplicateNameCounts);
+                    var duplicateId = $"header-duplicate-{index}";
+                    <div class="border border-slate-700/50 rounded p-2 space-y-1.5">
+                        <div class="flex items-center gap-1.5">
+                            <input type="text" data-testid="@($"header-name-{index}")"
+                                   value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
+                                   placeholder="Header-Name"
+                                   aria-invalid="@(isDuplicate ? "true" : "false")"
+                                   aria-describedby="@(isDuplicate ? duplicateId : null)"
+                                   class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input @(isDuplicate ? "border-red-500 text-red-400" : "")"/>
+                            <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
+                                    class="text-red-400 hover:text-red-300 transition-colors shrink-0 p-1">
+                                <Icon Name="x" Size="20"/>
+                            </button>
+                        </div>
+                        @if (isDuplicate)
                         {
-                            var isDuplicate = IsDuplicateHeaderName(header, duplicateNameCounts);
-                            var duplicateId = $"header-duplicate-{index}";
-                            <div class="border border-slate-700/50 rounded p-2 space-y-1.5">
-                                <div class="flex items-center gap-1.5">
-                                    <input type="text" data-testid="@($"header-name-{index}")"
-                                           value="@header.Name" @oninput="e => header.Name = AsString(e.Value)"
-                                           placeholder="Header-Name"
-                                           aria-invalid="@(isDuplicate ? "true" : "false")"
-                                           aria-describedby="@(isDuplicate ? duplicateId : null)"
-                                           class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input @(isDuplicate ? "border-red-500 text-red-400" : "")" />
-                                    <button type="button" title="Remove header" @onclick="() => RemoveHeader(header)"
-                                            class="text-red-400 hover:text-red-300 transition-colors shrink-0 p-1">
-                                        <Icon Name="x" Size="20" />
-                                    </button>
-                                </div>
-                                @if (isDuplicate)
-                                {
-                                    <div id="@duplicateId" class="text-xs text-red-400" data-testid="@($"header-duplicate-{index}")">Duplicate header name: @header.Name.Trim()</div>
-                                }
-                                <div class="flex items-center gap-1.5">
-                                    <select data-testid="@($"header-source-{index}")"
-                                            value="@(header.UseEnvVar ? "env" : "literal")"
-                                            @onchange="e => SetHeaderSource(header, e)"
-                                            class="px-1 py-1 text-xs shrink-0 ds-input">
-                                        <option value="literal">Value</option>
-                                        <option value="env">Env var</option>
-                                    </select>
-                                    @if (header.UseEnvVar)
-                                    {
-                                        @* An env-var header holds only a variable *name* - there is nothing
+                            <div id="@duplicateId" class="text-xs text-red-400" data-testid="@($"header-duplicate-{index}")">Duplicate header name: @header.Name.Trim()</div>
+                        }
+                        <div class="flex items-center gap-1.5">
+                            <select data-testid="@($"header-source-{index}")"
+                                    value="@(header.UseEnvVar ? "env" : "literal")"
+                                    @onchange="e => SetHeaderSource(header: header, e: e)"
+                                    class="px-1 py-1 text-xs shrink-0 ds-input">
+                                <option value="literal">Value</option>
+                                <option value="env">Env var</option>
+                            </select>
+                            @if (header.UseEnvVar)
+                            {
+                                @* An env-var header holds only a variable *name* - there is nothing
                                            secret in the configuration to hide, so no padlock. *@
-                                        <input type="text" data-testid="@($"header-value-{index}")"
-                                               value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
-                                               placeholder="ENV_VAR_NAME"
-                                               class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input" />
-                                    }
-                                    else
-                                    {
-                                        @* A literal header value is a secret field: readable by default so
+                                <input type="text" data-testid="@($"header-value-{index}")"
+                                       value="@header.Value" @oninput="e => header.Value = AsString(e.Value)"
+                                       placeholder="ENV_VAR_NAME"
+                                       class="px-2 py-1 text-xs font-mono flex-1 min-w-0 ds-input"/>
+                            }
+                            else
+                            {
+                                @* A literal header value is a secret field: readable by default so
                                            public configuration (anthropic-version, X-Title) can simply be
                                            edited, lockable per header for the ones that carry a secret. *@
-                                        <SecretField Value="@header.Value"
-                                                     ValueChanged="value => header.Value = value"
-                                                     Locked="@header.Locked"
-                                                     LockedChanged="locked => SetHeaderLocked(header, locked)"
-                                                     Placeholder="@(header.Locked && header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value")"
-                                                     TestId="@($"header-value-{index}")"
-                                                     Class="flex-1 min-w-0" />
-                                    }
-                                </div>
-                            </div>
-                        }
+                                <SecretField Value="@header.Value"
+                                             ValueChanged="value => header.Value = value"
+                                             Locked="@header.Locked"
+                                             LockedChanged="locked => SetHeaderLocked(header: header, locked: locked)"
+                                             Placeholder="@(header.Locked && header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value")"
+                                             TestId="@($"header-value-{index}")"
+                                             Class="flex-1 min-w-0"/>
+                            }
+                        </div>
                     </div>
                 }
             </div>
+        }
+    </div>
 
-            @if (DisplayedError is { Length: > 0 } displayedError)
-            {
-                <div class="rounded px-3 py-2 text-xs ds-step-critical" data-testid="dialog-error">
-                    @displayedError
-                </div>
-            }
+    @if (DisplayedError is { Length: > 0 } displayedError)
+    {
+        <div class="rounded px-3 py-2 text-xs ds-step-critical" data-testid="dialog-error">
+            @displayedError
+        </div>
+    }
 
-            <div class="flex gap-2 pt-1">
-                <button @onclick="OnCancel"
-                        class="flex-1 btn btn-ghost">
-                    Cancel
-                </button>
-                <button @onclick="Save"
-                        disabled="@(!CanSave)"
-                        class="flex-1 btn btn-primary">
-                    Save
-                </button>
-            </div>
+    <div class="flex gap-2 pt-1">
+        <button @onclick="OnCancel"
+                class="flex-1 btn btn-ghost">
+            Cancel
+        </button>
+        <button @onclick="Save"
+                disabled="@(!CanSave)"
+                class="flex-1 btn btn-primary">
+            Save
+        </button>
+    </div>
 </DialogShell>
 
 @code {
-    /// <summary>The provider's current field values, seeded once into the editable form on
+
+    /// <summary>
+    /// The provider's current field values, seeded once into the editable form on
     /// <see cref="OnInitialized"/>. Bundled into one parameter (rather than eight flat ones) because every
     /// field here is part of the same provider snapshot the caller (<c>ProvidersAdmin</c>) reads and writes
     /// together; <see cref="Error"/> stays a separate parameter because it is transient dialog UI state, not
-    /// part of the provider being edited.</summary>
-    [Parameter, EditorRequired]
+    /// part of the provider being edited.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
     public ProviderEditModel Model { get; set; } = new(
         Key: string.Empty,
-        IsNew: false,
+        false,
         BaseUrl: string.Empty,
         AuthHeaderName: "Authorization",
         Headers: [],
-        IsFree: false,
+        false,
         ProviderType: string.Empty,
         ProviderName: string.Empty);
 
     /// <summary>An error message to display (e.g. a validation failure returned by the proxy).</summary>
-    [Parameter] public string? Error { get; set; }
+    [Parameter]
+    public string? Error { get; set; }
 
     /// <summary>Raised with the edited values when the user saves.</summary>
-    [Parameter] public EventCallback<ProviderEditResult> OnSave { get; set; }
+    [Parameter]
+    public EventCallback<ProviderEditResult> OnSave { get; set; }
 
     /// <summary>Raised when the user cancels or dismisses the dialog.</summary>
-    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
 
     private string _key = string.Empty;
     private string _baseUrl = string.Empty;
@@ -183,7 +190,10 @@
     /// <summary>The proxy-reported error, or the local validation reason when the form is not yet valid.</summary>
     private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError : Error;
 
-    /// <summary>Whether the form has enough to submit: a base URL, a display name when adding a new provider, and no duplicate header names.</summary>
+    /// <summary>
+    /// Whether the form has enough to submit: a base URL, a display name when adding a new provider, and no duplicate
+    /// header names.
+    /// </summary>
     private bool CanSave =>
         !string.IsNullOrWhiteSpace(_baseUrl)
         && (!Model.IsNew || !string.IsNullOrWhiteSpace(_providerName))
@@ -200,10 +210,10 @@
         _baseUrl = Model.BaseUrl;
         _isFree = Model.IsFree;
         _providerName = Model.ProviderName;
-        _selectedProviderType = Enum.TryParse<TotallyHot.ArcRouter.Gui.Admin.ProviderType>(Model.ProviderType, out var providerType)
-            && ProviderTemplates.Templates.ContainsKey(providerType)
-                ? providerType
-                : TotallyHot.ArcRouter.Gui.Admin.ProviderType.Other;
+        _selectedProviderType = Enum.TryParse<ProviderType>(value: Model.ProviderType, result: out var providerType)
+                                && ProviderTemplates.Templates.ContainsKey(providerType)
+            ? providerType
+            : ProviderType.Other;
 
         foreach (var header in Model.Headers)
         {
@@ -221,7 +231,7 @@
                 // one is never returned, so its row starts blank - HasStoredLiteralValue drives the
                 // "saved" placeholder below, and leaving the field blank on save preserves the stored
                 // value (mirrors the API key field's blank-keeps-existing behavior).
-                Value = useEnvVar ? (header.ValueEnvVar ?? string.Empty) : (header.Value ?? string.Empty),
+                Value = useEnvVar ? header.ValueEnvVar ?? string.Empty : header.Value ?? string.Empty,
                 HasStoredLiteralValue = hasStoredSecret && header.Locked
             });
         }
@@ -230,7 +240,7 @@
     /// <summary>Applies the newly selected provider type's template when the dropdown changes.</summary>
     private void OnProviderTypeChanged(ChangeEventArgs e)
     {
-        if (Enum.TryParse<ProviderType>(AsString(e.Value), out var providerType)
+        if (Enum.TryParse<ProviderType>(value: AsString(e.Value), result: out var providerType)
             && ProviderTemplates.Templates.ContainsKey(providerType))
         {
             _selectedProviderType = providerType;
@@ -238,9 +248,11 @@
         }
     }
 
-    /// <summary>Overwrites the endpoint shape with the selected family's defaults, and merges in any headers
+    /// <summary>
+    /// Overwrites the endpoint shape with the selected family's defaults, and merges in any headers
     /// that family's API requires. Deliberately clobbers rather than merges the endpoint fields: picking a
-    /// type is a statement about what this provider *is*.</summary>
+    /// type is a statement about what this provider *is*.
+    /// </summary>
     private void ApplyProviderTemplate(ProviderType providerType)
     {
         var template = ProviderTemplates.Templates[providerType];
@@ -252,7 +264,7 @@
         // switching type twice doesn't reset a hand-tuned anthropic-version.
         foreach (var templateHeader in template.DefaultHeaders)
         {
-            if (!_headers.Any(h => string.Equals(h.Name, templateHeader.Name, StringComparison.OrdinalIgnoreCase)))
+            if (!_headers.Any(h => string.Equals(a: h.Name, b: templateHeader.Name, comparisonType: StringComparison.OrdinalIgnoreCase)))
             {
                 _headers.Add(new HeaderRow { Name = templateHeader.Name, Value = templateHeader.Value });
             }
@@ -260,26 +272,36 @@
     }
 
     /// <summary>Appends a blank custom-header row.</summary>
-    private void AddHeader() => _headers.Add(new HeaderRow());
+    private void AddHeader()
+    {
+        _headers.Add(new HeaderRow());
+    }
 
     /// <summary>Removes one custom-header row.</summary>
-    private void RemoveHeader(HeaderRow header) => _headers.Remove(header);
+    private void RemoveHeader(HeaderRow header)
+    {
+        _headers.Remove(header);
+    }
 
-    /// <summary>Switches a header between a literal value and an environment-variable reference. An env-var
+    /// <summary>
+    /// Switches a header between a literal value and an environment-variable reference. An env-var
     /// header names a variable rather than holding a secret, so it can never be locked - switching to it
-    /// drops the lock rather than leaving a padlock the markup no longer renders.</summary>
+    /// drops the lock rather than leaving a padlock the markup no longer renders.
+    /// </summary>
     private static void SetHeaderSource(HeaderRow header, ChangeEventArgs e)
     {
-        header.UseEnvVar = string.Equals(AsString(e.Value), "env", StringComparison.Ordinal);
+        header.UseEnvVar = string.Equals(a: AsString(e.Value), b: "env", comparisonType: StringComparison.Ordinal);
         if (header.UseEnvVar)
         {
             header.Locked = false;
         }
     }
 
-    /// <summary>Records a padlock toggle from the row's <see cref="SecretField"/>. Unlocking has already
+    /// <summary>
+    /// Records a padlock toggle from the row's <see cref="SecretField"/>. Unlocking has already
     /// cleared the value there, so the row also forgets that a stored value exists: after this save there
-    /// is nothing left for a blank field to preserve.</summary>
+    /// is nothing left for a blank field to preserve.
+    /// </summary>
     private static void SetHeaderLocked(HeaderRow header, bool locked)
     {
         header.Locked = locked;
@@ -289,23 +311,29 @@
         }
     }
 
-    /// <summary>Counts how many rows share each trimmed, case-insensitively-normalized, non-blank name.
+    /// <summary>
+    /// Counts how many rows share each trimmed, case-insensitively-normalized, non-blank name.
     /// Computed once per check rather than per row, so duplicate detection across all rows is O(n) instead
-    /// of the O(n^2) that repeated per-row scans would cost.</summary>
-    private Dictionary<string, int> BuildHeaderNameCounts() =>
-        _headers
+    /// of the O(n^2) that repeated per-row scans would cost.
+    /// </summary>
+    private Dictionary<string, int> BuildHeaderNameCounts()
+    {
+        return _headers
             .Select(h => h.Name.Trim())
             .Where(name => name.Length > 0)
-            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+            .GroupBy(keySelector: name => name, comparer: StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(keySelector: g => g.Key, elementSelector: g => g.Count(), comparer: StringComparer.OrdinalIgnoreCase);
+    }
 
-    /// <summary>Whether <paramref name="header"/>'s trimmed name case-insensitively collides with another
+    /// <summary>
+    /// Whether <paramref name="header"/>'s trimmed name case-insensitively collides with another
     /// row's trimmed, non-blank name, per the counts from <see cref="BuildHeaderNameCounts"/>. Blank names
-    /// never collide - they are dropped on save (see <see cref="BuildHeaders"/>), not compared.</summary>
+    /// never collide - they are dropped on save (see <see cref="BuildHeaders"/>), not compared.
+    /// </summary>
     private static bool IsDuplicateHeaderName(HeaderRow header, IReadOnlyDictionary<string, int> nameCounts)
     {
         var name = header.Name.Trim();
-        return name.Length > 0 && nameCounts.TryGetValue(name, out var count) && count > 1;
+        return name.Length > 0 && nameCounts.TryGetValue(key: name, value: out var count) && count > 1;
     }
 
     /// <summary>
@@ -323,17 +351,19 @@
         }
     }
 
-    /// <summary>Looks up the selected provider type's documented auth header (e.g. Anthropic's
+    /// <summary>
+    /// Looks up the selected provider type's documented auth header (e.g. Anthropic's
     /// <c>x-api-key</c>), the source both <see cref="AuthHeaderHint"/> and
     /// <see cref="ResolveSavedAuthHeaderName"/> defer to when it's authoritative. <see cref="ProviderType.Other"/>
     /// is deliberately excluded even though it has a template entry: it's the type every provider configured
     /// before this field existed falls back to, so treating its "Authorization" as authoritative would
     /// silently overwrite an already-working non-default header name (e.g. "x-api-key") the moment such a
-    /// provider is saved through this dialog without the operator touching provider type at all.</summary>
-    private bool TryGetTemplateAuthHeaderName([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? authHeaderName)
+    /// provider is saved through this dialog without the operator touching provider type at all.
+    /// </summary>
+    private bool TryGetTemplateAuthHeaderName([NotNullWhen(true)] out string? authHeaderName)
     {
-        if (_selectedProviderType != TotallyHot.ArcRouter.Gui.Admin.ProviderType.Other
-            && ProviderTemplates.Templates.TryGetValue(_selectedProviderType, out var template)
+        if (_selectedProviderType != ProviderType.Other
+            && ProviderTemplates.Templates.TryGetValue(key: _selectedProviderType, value: out var template)
             && !string.IsNullOrWhiteSpace(template.AuthHeaderName))
         {
             authHeaderName = template.AuthHeaderName;
@@ -344,27 +374,37 @@
         return false;
     }
 
-    /// <summary>The auth header name to show in the "add a header" hint: the selected provider type's
+    /// <summary>
+    /// The auth header name to show in the "add a header" hint: the selected provider type's
     /// documented auth header when known, falling back to the provider's existing
     /// <see cref="ProviderEditModel.AuthHeaderName"/> (and then <c>Authorization</c>) otherwise. Keeps the
     /// hint from steering an operator toward the wrong header name for providers that don't use
-    /// <c>Authorization</c>.</summary>
+    /// <c>Authorization</c>.
+    /// </summary>
     private string AuthHeaderHint =>
         TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
             ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(Model.AuthHeaderName) ? "Authorization" : Model.AuthHeaderName.Trim();
+            : string.IsNullOrWhiteSpace(Model.AuthHeaderName)
+                ? "Authorization"
+                : Model.AuthHeaderName.Trim();
 
-    /// <summary>The <see cref="ProviderEditResult.AuthHeaderName"/> to save. It must track the header the
+    /// <summary>
+    /// The <see cref="ProviderEditResult.AuthHeaderName"/> to save. It must track the header the
     /// operator actually authenticates with rather than a stale value from before this dialog stopped
     /// letting them edit it directly: prefers the selected provider type's documented auth header (the same
     /// lookup as <see cref="AuthHeaderHint"/>), falling back to the existing
     /// <see cref="ProviderEditModel.AuthHeaderName"/> for types with no authoritative template entry - which
     /// keeps an already-configured provider's non-default header (e.g. "x-api-key") intact across saves that
-    /// don't change its type.</summary>
-    private string ResolveSavedAuthHeaderName() =>
-        TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
+    /// don't change its type.
+    /// </summary>
+    private string ResolveSavedAuthHeaderName()
+    {
+        return TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
             ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(Model.AuthHeaderName) ? "Authorization" : Model.AuthHeaderName.Trim();
+            : string.IsNullOrWhiteSpace(Model.AuthHeaderName)
+                ? "Authorization"
+                : Model.AuthHeaderName.Trim();
+    }
 
     /// <summary>Builds a <see cref="ProviderEditResult"/> from the form's current fields and raises <see cref="OnSave"/>.</summary>
     private async Task Save()
@@ -388,7 +428,8 @@
         await OnSave.InvokeAsync(result);
     }
 
-    /// <summary>Projects the custom-header rows into wire models. Rows with a blank name are dropped and
+    /// <summary>
+    /// Projects the custom-header rows into wire models. Rows with a blank name are dropped and
     /// each value maps to a literal or env-var reference per its selected source. A blank literal value is
     /// sent as-is (not resolved locally): under a locked row the management API preserves whatever is
     /// already stored under that header's name, and under an unlocked one it clears it - which is what
@@ -396,34 +437,50 @@
     /// <paramref name="authHeaderName"/> is always saved locked, regardless of the row's padlock state: it's
     /// the provider's credential, and an operator forgetting to lock that one specific row (the row an
     /// unrelated "Add header" click starts unlocked) must not leave the secret readable back through the
-    /// management API on every future load of this dialog.</summary>
-    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders(string authHeaderName) =>
-        _headers
+    /// management API on every future load of this dialog.
+    /// </summary>
+    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders(string authHeaderName)
+    {
+        return _headers
             .Where(h => !string.IsNullOrWhiteSpace(h.Name))
             .Select(h => h.UseEnvVar
-                ? new ProviderHeaderWriteModel(h.Name.Trim(), null, h.Value.Trim(), Locked: false)
+                ? new ProviderHeaderWriteModel(Name: h.Name.Trim(), null, ValueEnvVar: h.Value.Trim(), false)
                 : new ProviderHeaderWriteModel(
-                    h.Name.Trim(),
-                    h.Value,
+                    Name: h.Name.Trim(),
+                    Value: h.Value,
                     null,
-                    Locked: h.Locked || string.Equals(h.Name.Trim(), authHeaderName, StringComparison.OrdinalIgnoreCase)))
+                    Locked: h.Locked || string.Equals(a: h.Name.Trim(), b: authHeaderName, comparisonType: StringComparison.OrdinalIgnoreCase)))
             .ToList();
+    }
 
     /// <summary>Coerces a Blazor event value to a non-null string.</summary>
-    private static string AsString(object? value) => (string?)value ?? string.Empty;
+    private static string AsString(object? value)
+    {
+        return (string?)value ?? string.Empty;
+    }
 
-    /// <summary>The values captured by the dialog when the user saves. Authentication is expressed purely
-    /// as a custom header (see <see cref="Headers"/>).</summary>
+    /// <summary>
+    /// The values captured by the dialog when the user saves. Authentication is expressed purely
+    /// as a custom header (see <see cref="Headers"/>).
+    /// </summary>
     /// <param name="Key">The provider key (auto-generated as a GUID when adding a new provider).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
-    /// <param name="AuthHeaderName">The auth header name, resolved by <see cref="ResolveSavedAuthHeaderName"/>
+    /// <param name="AuthHeaderName">
+    /// The auth header name, resolved by <see cref="ResolveSavedAuthHeaderName"/>
     /// from the selected provider type's template (falling back to the provider's existing configuration for
     /// types with no template entry). The proxy uses it to identify which forwarded header is "the" credential
-    /// header, e.g. to avoid double-sending it.</param>
+    /// header, e.g. to avoid double-sending it.
+    /// </param>
     /// <param name="Headers">The custom headers as edited, including any header used for authentication.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
-    /// <param name="ProviderType">The selected provider family (a <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/> member name).</param>
-    /// <param name="ProviderName">A user-friendly display name for the provider; distinct from the unique <paramref name="Key"/>.</param>
+    /// <param name="ProviderType">
+    /// The selected provider family (a <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/>
+    /// member name).
+    /// </param>
+    /// <param name="ProviderName">
+    /// A user-friendly display name for the provider; distinct from the unique
+    /// <paramref name="Key"/>.
+    /// </param>
     public sealed record ProviderEditResult(
         string Key,
         string BaseUrl,
@@ -433,23 +490,34 @@
         string ProviderName,
         bool IsFree = false);
 
-    /// <summary>The provider snapshot the dialog is seeded from: everything <see cref="OnInitialized"/>
+    /// <summary>
+    /// The provider snapshot the dialog is seeded from: everything <see cref="OnInitialized"/>
     /// copies into the editable form. Bundles the eight data fields the dialog previously took as flat
     /// <c>[Parameter]</c>s into one object, since the caller (<c>ProvidersAdmin</c>) always reads and
-    /// writes them together as a single provider's state.</summary>
-    /// <param name="Key">The provider key. Read when editing an existing provider; ignored when adding a
-    /// new one (auto-generated as a GUID on save).</param>
+    /// writes them together as a single provider's state.
+    /// </summary>
+    /// <param name="Key">
+    /// The provider key. Read when editing an existing provider; ignored when adding a
+    /// new one (auto-generated as a GUID on save).
+    /// </param>
     /// <param name="IsNew">Whether the dialog is adding a new provider (vs. editing an existing one).</param>
     /// <param name="BaseUrl">The initial base URL.</param>
-    /// <param name="AuthHeaderName">The provider's existing auth header name. The dialog no longer edits
+    /// <param name="AuthHeaderName">
+    /// The provider's existing auth header name. The dialog no longer edits
     /// it directly; on save it is only used as a fallback for provider types with no
     /// <see cref="ProviderTemplates"/> entry (see <see cref="ResolveSavedAuthHeaderName"/>) - otherwise the
-    /// selected type's documented auth header wins.</param>
+    /// selected type's documented auth header wins.
+    /// </param>
     /// <param name="Headers">The provider's existing custom headers, seeded into the editable rows.</param>
     /// <param name="IsFree">Whether the existing provider is flagged as costing nothing.</param>
-    /// <param name="ProviderType">The name of the provider's <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/>
-    /// member, or empty/unrecognized for a provider stored before the field existed (falls back to <c>Other</c>).</param>
-    /// <param name="ProviderName">A user-friendly display name for the provider, distinct from the unique <paramref name="Key"/>.</param>
+    /// <param name="ProviderType">
+    /// The name of the provider's <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/>
+    /// member, or empty/unrecognized for a provider stored before the field existed (falls back to <c>Other</c>).
+    /// </param>
+    /// <param name="ProviderName">
+    /// A user-friendly display name for the provider, distinct from the unique
+    /// <paramref name="Key"/>.
+    /// </param>
     public sealed record ProviderEditModel(
         string Key,
         bool IsNew,
@@ -460,8 +528,10 @@
         string ProviderType,
         string ProviderName);
 
-    /// <summary>A mutable editor row for one custom header. <see cref="Value"/> holds the literal value or,
-    /// when <see cref="UseEnvVar"/> is set, the environment-variable name.</summary>
+    /// <summary>
+    /// A mutable editor row for one custom header. <see cref="Value"/> holds the literal value or,
+    /// when <see cref="UseEnvVar"/> is set, the environment-variable name.
+    /// </summary>
     private sealed class HeaderRow
     {
         /// <summary>The header's name as typed.</summary>
@@ -473,13 +543,18 @@
         /// <summary>The literal value, or the environment-variable name when <see cref="UseEnvVar"/> is set.</summary>
         public string Value { get; set; } = string.Empty;
 
-        /// <summary>Whether this literal value is a secret: masked here and withheld by the router on the
+        /// <summary>
+        /// Whether this literal value is a secret: masked here and withheld by the router on the
         /// next read. Defaults to false so a header added in this dialog starts as ordinary, readable
-        /// configuration; the operator locks the ones that turn out to carry a secret.</summary>
+        /// configuration; the operator locks the ones that turn out to carry a secret.
+        /// </summary>
         public bool Locked { get; set; }
 
-        /// <summary>Whether this header already has a stored literal value that was withheld from this
-        /// dialog (i.e. it arrived locked), which is what makes leaving the box blank mean "keep it".</summary>
+        /// <summary>
+        /// Whether this header already has a stored literal value that was withheld from this
+        /// dialog (i.e. it arrived locked), which is what makes leaving the box blank mean "keep it".
+        /// </summary>
         public bool HasStoredLiteralValue { get; set; }
     }
+
 }

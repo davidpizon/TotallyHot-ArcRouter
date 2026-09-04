@@ -1,6 +1,6 @@
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using TotallyHot.ArcRouter.Gui.Services;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -13,28 +13,29 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class GuiLoggingTests : IDisposable
 {
-    private readonly string _directory = Path.Combine(Path.GetTempPath(), "gui-logging-tests-" + Guid.NewGuid().ToString("N"));
+    private readonly string _directory = Path.Combine(path1: Path.GetTempPath(),
+        path2: "gui-logging-tests-" + Guid.NewGuid().ToString("N"));
 
     /// <summary>Creates the per-test temp directory used for configuration files and log output.</summary>
-    public GuiLoggingTests() => Directory.CreateDirectory(_directory);
+    public GuiLoggingTests()
+    {
+        Directory.CreateDirectory(_directory);
+    }
 
     /// <summary>Removes the temp directory and everything the tests wrote into it.</summary>
     public void Dispose()
     {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
+        if (Directory.Exists(_directory)) Directory.Delete(path: _directory, true);
     }
 
     [Fact]
     public void FallbackLogPath_LivesUnderThePerUserApplicationDataRoot()
     {
         var expected = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "TotallyHotArcRouter",
-            "logs",
-            "arcrouter-gui-.log");
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: "logs",
+            path4: "arcrouter-gui-.log");
 
         GuiLogging.FallbackLogPath().Should().Be(expected);
     }
@@ -43,8 +44,10 @@ public sealed class GuiLoggingTests : IDisposable
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void ExpandLogPath_WithNoConfiguredPath_UsesTheFallback(string? blank) =>
+    public void ExpandLogPath_WithNoConfiguredPath_UsesTheFallback(string? blank)
+    {
         GuiLogging.ExpandLogPath(blank).Should().Be(GuiLogging.FallbackLogPath());
+    }
 
     [Fact]
     public void ExpandLogPath_ExpandsEnvironmentVariables()
@@ -66,8 +69,10 @@ public sealed class GuiLoggingTests : IDisposable
     }
 
     [Fact]
-    public void ExpandLogPath_MakesARelativePathAbsolute() =>
+    public void ExpandLogPath_MakesARelativePathAbsolute()
+    {
         Path.IsPathRooted(GuiLogging.ExpandLogPath(@"logs\arcrouter-gui-.log")).Should().BeTrue();
+    }
 
     [Fact]
     public void ResolveFileSinkPaths_KeysEachOverrideByItsOwnConfigurationPath()
@@ -77,7 +82,7 @@ public sealed class GuiLoggingTests : IDisposable
             {
                 ["Serilog:WriteTo:0:Name"] = "Console",
                 ["Serilog:WriteTo:1:Name"] = "File",
-                ["Serilog:WriteTo:1:Args:path"] = @"%LOCALAPPDATA%\TotallyHotArcRouter\logs\arcrouter-gui-.log",
+                ["Serilog:WriteTo:1:Args:path"] = @"%LOCALAPPDATA%\TotallyHotArcRouter\logs\arcrouter-gui-.log"
             })
             .Build();
 
@@ -85,7 +90,8 @@ public sealed class GuiLoggingTests : IDisposable
 
         // Keyed off the discovered section, not a hardcoded index: the file sink is second here.
         overrides.Should().ContainSingle()
-            .Which.Should().Be(new KeyValuePair<string, string?>("Serilog:WriteTo:1:Args:path", GuiLogging.FallbackLogPath()));
+            .Which.Should().Be(new KeyValuePair<string, string?>(key: "Serilog:WriteTo:1:Args:path",
+                value: GuiLogging.FallbackLogPath()));
     }
 
     [Fact]
@@ -101,12 +107,14 @@ public sealed class GuiLoggingTests : IDisposable
     [Fact]
     public void BuildConfiguration_ReplacesTheConfiguredPathWithTheExpandedOne()
     {
-        WriteConfiguration(@"{ ""Serilog"": { ""WriteTo"": [ { ""Name"": ""File"", ""Args"": { ""path"": ""%LOCALAPPDATA%\\logs\\gui-.log"" } } ] } }");
+        WriteConfiguration(
+            @"{ ""Serilog"": { ""WriteTo"": [ { ""Name"": ""File"", ""Args"": { ""path"": ""%LOCALAPPDATA%\\logs\\gui-.log"" } } ] } }");
 
         var configuration = GuiLogging.BuildConfiguration(_directory);
 
         configuration["Serilog:WriteTo:0:Args:path"].Should().Be(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "logs", "gui-.log"));
+            Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                path2: "logs", path3: "gui-.log"));
     }
 
     [Fact]
@@ -119,10 +127,12 @@ public sealed class GuiLoggingTests : IDisposable
     [Fact]
     public void CreateLogger_WithAConfiguredSink_WritesWhereConfigurationSaid()
     {
-        var logPath = Path.Combine(_directory, "configured-.log");
-        WriteConfiguration($@"{{ ""Serilog"": {{ ""MinimumLevel"": ""Information"", ""WriteTo"": [ {{ ""Name"": ""File"", ""Args"": {{ ""path"": ""{logPath.Replace(@"\", @"\\", StringComparison.Ordinal)}"" }} }} ] }} }}");
+        var logPath = Path.Combine(path1: _directory, path2: "configured-.log");
+        WriteConfiguration(
+            $@"{{ ""Serilog"": {{ ""MinimumLevel"": ""Information"", ""WriteTo"": [ {{ ""Name"": ""File"", ""Args"": {{ ""path"": ""{logPath.Replace(oldValue: @"\", newValue: @"\\", comparisonType: StringComparison.Ordinal)}"" }} }} ] }} }}");
 
-        using (var logger = GuiLogging.CreateLogger(GuiLogging.BuildConfiguration(_directory), UnusedFallbackPath()))
+        using (var logger = GuiLogging.CreateLogger(configuration: GuiLogging.BuildConfiguration(_directory),
+                   fallbackPath: UnusedFallbackPath()))
         {
             logger.Information("Configured sink reached.");
         }
@@ -133,11 +143,12 @@ public sealed class GuiLoggingTests : IDisposable
     [Fact]
     public void CreateLogger_WithNoSinkConfigured_FallsBackAndSaysWhy()
     {
-        var fallbackPath = Path.Combine(_directory, "fallback-.log");
+        var fallbackPath = Path.Combine(path1: _directory, path2: "fallback-.log");
 
         // No appsettings.json at all - the case that used to leave a sink-less logger behind, which is
         // indistinguishable from having no logging at the moment you need it.
-        using (var logger = GuiLogging.CreateLogger(GuiLogging.BuildConfiguration(_directory), fallbackPath))
+        using (var logger = GuiLogging.CreateLogger(configuration: GuiLogging.BuildConfiguration(_directory),
+                   fallbackPath: fallbackPath))
         {
             logger.Information("Fallback sink reached.");
         }
@@ -154,11 +165,14 @@ public sealed class GuiLoggingTests : IDisposable
         // catch rather than the no-sink branch above. The sink's own path stays inside the test directory
         // so that if this configuration ever stops throwing, the resulting file shows up as a failed
         // single-file assertion below rather than as litter in the working directory.
-        var unreachableSinkPath = Path.Combine(_directory, "unreachable-").Replace(@"\", @"\\", StringComparison.Ordinal);
-        WriteConfiguration($@"{{ ""Serilog"": {{ ""MinimumLevel"": ""NotALogLevel"", ""WriteTo"": [ {{ ""Name"": ""File"", ""Args"": {{ ""path"": ""{unreachableSinkPath}.log"" }} }} ] }} }}");
-        var fallbackPath = Path.Combine(_directory, "fallback-.log");
+        var unreachableSinkPath = Path.Combine(path1: _directory, path2: "unreachable-")
+            .Replace(oldValue: @"\", newValue: @"\\", comparisonType: StringComparison.Ordinal);
+        WriteConfiguration(
+            $@"{{ ""Serilog"": {{ ""MinimumLevel"": ""NotALogLevel"", ""WriteTo"": [ {{ ""Name"": ""File"", ""Args"": {{ ""path"": ""{unreachableSinkPath}.log"" }} }} ] }} }}");
+        var fallbackPath = Path.Combine(path1: _directory, path2: "fallback-.log");
 
-        using (var logger = GuiLogging.CreateLogger(GuiLogging.BuildConfiguration(_directory), fallbackPath))
+        using (var logger = GuiLogging.CreateLogger(configuration: GuiLogging.BuildConfiguration(_directory),
+                   fallbackPath: fallbackPath))
         {
             logger.Information("Fallback sink reached after a configuration failure.");
         }
@@ -189,13 +203,13 @@ public sealed class GuiLoggingTests : IDisposable
         // directory so this exercises Serilog actually building the configured sink - a wrong argument
         // name or level would send it down the fallback branch instead - without writing into the real
         // per-user log folder.
-        var logPath = Path.Combine(_directory, "shipped-.log");
+        var logPath = Path.Combine(path1: _directory, path2: "shipped-.log");
         var configuration = new ConfigurationBuilder()
             .AddConfiguration(GuiLogging.BuildConfiguration(AppContext.BaseDirectory))
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Serilog:WriteTo:0:Args:path"] = logPath })
             .Build();
 
-        using (var logger = GuiLogging.CreateLogger(configuration, UnusedFallbackPath()))
+        using (var logger = GuiLogging.CreateLogger(configuration: configuration, fallbackPath: UnusedFallbackPath()))
         {
             logger.Information("Shipped configuration reached.");
         }
@@ -207,8 +221,11 @@ public sealed class GuiLoggingTests : IDisposable
 
     /// <summary>Writes <paramref name="json"/> as the test directory's <c>appsettings.json</c>.</summary>
     /// <param name="json">The configuration file contents.</param>
-    private void WriteConfiguration(string json) =>
-        File.WriteAllText(Path.Combine(_directory, GuiLogging.ConfigurationFileName), json);
+    private void WriteConfiguration(string json)
+    {
+        File.WriteAllText(path: Path.Combine(path1: _directory, path2: GuiLogging.ConfigurationFileName),
+            contents: json);
+    }
 
     /// <summary>
     /// Reads the single rolling log file the test produced. Serilog appends a date to the configured
@@ -218,12 +235,13 @@ public sealed class GuiLoggingTests : IDisposable
     /// <returns>The log file's contents.</returns>
     private static string ReadOnlyLogFile(string directory)
     {
-        var file = Directory.GetFiles(directory, "*.log").Should().ContainSingle().Subject;
+        var file = Directory.GetFiles(path: directory, searchPattern: "*.log").Should().ContainSingle().Subject;
 
         // Serilog holds the file open with FileShare.Read until the logger is disposed, and the callers
         // above have disposed theirs - but open it shared anyway so a lingering handle cannot fail the
         // assertion for the wrong reason.
-        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var stream = new FileStream(path: file, mode: FileMode.Open, access: FileAccess.Read,
+            share: FileShare.ReadWrite);
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }
@@ -233,5 +251,8 @@ public sealed class GuiLoggingTests : IDisposable
     /// unexpected fallback shows up as an extra file rather than polluting the real per-user log folder.
     /// </summary>
     /// <returns>An absolute path inside the per-test temp directory.</returns>
-    private string UnusedFallbackPath() => Path.Combine(_directory, "unexpected-fallback-.log");
+    private string UnusedFallbackPath()
+    {
+        return Path.Combine(path1: _directory, path2: "unexpected-fallback-.log");
+    }
 }

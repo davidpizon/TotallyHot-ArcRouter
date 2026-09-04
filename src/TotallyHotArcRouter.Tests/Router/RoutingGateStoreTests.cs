@@ -10,7 +10,10 @@ namespace TotallyHot.ArcRouter.Tests.Router;
 /// </summary>
 public sealed class RoutingGateStoreTests
 {
-    private static string TempPath() => Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".json");
+    private static string TempPath()
+    {
+        return Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".json");
+    }
 
     [Fact]
     public void IsEnabled_WithNoFile_DefaultsToTrue()
@@ -63,7 +66,7 @@ public sealed class RoutingGateStoreTests
         var path = TempPath();
         try
         {
-            File.WriteAllText(path, "not json");
+            File.WriteAllText(path: path, contents: "not json");
             var store = new RoutingGateStore(path);
 
             store.IsEnabled.Should().BeTrue();
@@ -77,8 +80,8 @@ public sealed class RoutingGateStoreTests
     [Fact]
     public void SetEnabled_CreatesTheDirectoryIfMissing()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-        var path = Path.Combine(directory, "routing-gate.json");
+        var directory = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid().ToString());
+        var path = Path.Combine(path1: directory, path2: "routing-gate.json");
         try
         {
             var store = new RoutingGateStore(path);
@@ -89,7 +92,7 @@ public sealed class RoutingGateStoreTests
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(path: directory, true);
         }
     }
 }

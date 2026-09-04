@@ -55,7 +55,7 @@ public static class QualityServiceCollectionExtensions
             ServiceDescriptor.Singleton<IStaticAnalyzer, DiagnosticSeverityAnalyzer>(),
             ServiceDescriptor.Singleton<IStaticAnalyzer, PlaceholderAnalyzer>(),
             ServiceDescriptor.Singleton<IStaticAnalyzer, TruncationAnalyzer>(),
-            ServiceDescriptor.Singleton<IStaticAnalyzer, ComplexityAnalyzer>(),
+            ServiceDescriptor.Singleton<IStaticAnalyzer, ComplexityAnalyzer>()
         ]);
         services.TryAddSingleton<CompositeStaticAnalyzer>();
 

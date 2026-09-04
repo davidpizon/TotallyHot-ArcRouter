@@ -21,15 +21,19 @@ public sealed record SyntaxVerdict(
     /// <param name="language">The language that was checked.</param>
     /// <param name="isAuthoritative">Whether a real parser produced this verdict.</param>
     /// <returns>A valid <see cref="SyntaxVerdict"/>.</returns>
-    public static SyntaxVerdict Valid(CodeLanguage language, bool isAuthoritative) =>
-        new(language, true, isAuthoritative, Array.Empty<string>());
+    public static SyntaxVerdict Valid(CodeLanguage language, bool isAuthoritative)
+    {
+        return new SyntaxVerdict(Language: language, true, IsAuthoritative: isAuthoritative,
+            Errors: []);
+    }
 
     /// <summary>Creates an invalid verdict carrying the supplied diagnostics.</summary>
     /// <param name="language">The language that was checked.</param>
     /// <param name="isAuthoritative">Whether a real parser produced this verdict.</param>
     /// <param name="errors">The diagnostics explaining why the snippet is invalid.</param>
     /// <returns>An invalid <see cref="SyntaxVerdict"/>.</returns>
-    public static SyntaxVerdict Invalid(CodeLanguage language, bool isAuthoritative, IReadOnlyList<string> errors) =>
-        new(language, false, isAuthoritative, errors);
+    public static SyntaxVerdict Invalid(CodeLanguage language, bool isAuthoritative, IReadOnlyList<string> errors)
+    {
+        return new SyntaxVerdict(Language: language, false, IsAuthoritative: isAuthoritative, Errors: errors);
+    }
 }
-

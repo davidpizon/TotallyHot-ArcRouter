@@ -9,50 +9,21 @@ namespace TotallyHot.ArcRouter.Quality.Tests;
 /// </summary>
 public class QualityJoinSweepServiceTests
 {
-    /// <summary>Counts sweeps and can be told to throw, so the loop's fault isolation is observable.</summary>
-    private sealed class CountingAggregator(bool throwOnSweep = false) : IQualityScoreAggregator
-    {
-        private readonly TaskCompletionSource _swept = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _sweeps;
-
-        public int Sweeps => Volatile.Read(ref _sweeps);
-
-        public Task Swept => _swept.Task;
-
-        public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore, CancellationToken cancellationToken = default) =>
-            Task.FromResult(false);
-
-        public Task<bool> AbandonJudgeAsync(string correlationId, string reason, CancellationToken cancellationToken = default) =>
-            Task.FromResult(false);
-
-        public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)
-        {
-            Interlocked.Increment(ref _sweeps);
-            _swept.TrySetResult();
-
-            return throwOnSweep
-                ? throw new InvalidOperationException("sweep is down")
-                : Task.FromResult(1);
-        }
-    }
-
     [Fact]
     public void Constructor_RejectsNullArguments()
     {
-        Assert.Throws<ArgumentNullException>(
-            () => new QualityJoinSweepService(null!, NullLogger<QualityJoinSweepService>.Instance));
-        Assert.Throws<ArgumentNullException>(
-            () => new QualityJoinSweepService(new CountingAggregator(), null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new QualityJoinSweepService(aggregator: null!, logger: NullLogger<QualityJoinSweepService>.Instance));
+        Assert.Throws<ArgumentNullException>(() =>
+            new QualityJoinSweepService(aggregator: new CountingAggregator(), logger: null!));
     }
 
     [Fact]
     public async Task StopAsync_BeforeTheFirstTick_ShutsDownCleanly()
     {
         var aggregator = new CountingAggregator();
-        var service = new QualityJoinSweepService(aggregator, NullLogger<QualityJoinSweepService>.Instance);
+        var service = new QualityJoinSweepService(aggregator: aggregator,
+            logger: NullLogger<QualityJoinSweepService>.Instance);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
         await service.StopAsync(TestContext.Current.CancellationToken);
@@ -61,7 +32,7 @@ public class QualityJoinSweepServiceTests
         // does not surface as a *fault* to the host - whether the task lands Canceled or RanToCompletion
         // is an implementation detail of where the token was observed, and asserting either specifically
         // would pin behaviour the service does not actually promise.
-        Assert.Equal(0, aggregator.Sweeps);
+        Assert.Equal(0, actual: aggregator.Sweeps);
         Assert.True(service.ExecuteTask is null || !service.ExecuteTask.IsFaulted);
     }
 
@@ -72,14 +43,15 @@ public class QualityJoinSweepServiceTests
     {
         var aggregator = new CountingAggregator(throwOnSweep: true);
         var service = new QualityJoinSweepService(
-            aggregator,
-            NullLogger<QualityJoinSweepService>.Instance,
-            TimeSpan.FromMilliseconds(10));
+            aggregator: aggregator,
+            logger: NullLogger<QualityJoinSweepService>.Instance,
+            sweepInterval: TimeSpan.FromMilliseconds(10));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
         try
         {
-            await aggregator.Swept.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            await aggregator.Swept.WaitAsync(timeout: TimeSpan.FromSeconds(2),
+                cancellationToken: TestContext.Current.CancellationToken);
         }
         finally
         {
@@ -95,14 +67,15 @@ public class QualityJoinSweepServiceTests
     {
         var aggregator = new CountingAggregator();
         var service = new QualityJoinSweepService(
-            aggregator,
-            NullLogger<QualityJoinSweepService>.Instance,
-            TimeSpan.FromMilliseconds(10));
+            aggregator: aggregator,
+            logger: NullLogger<QualityJoinSweepService>.Instance,
+            sweepInterval: TimeSpan.FromMilliseconds(10));
 
         await service.StartAsync(TestContext.Current.CancellationToken);
         try
         {
-            await aggregator.Swept.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            await aggregator.Swept.WaitAsync(timeout: TimeSpan.FromSeconds(2),
+                cancellationToken: TestContext.Current.CancellationToken);
         }
         finally
         {
@@ -121,5 +94,43 @@ public class QualityJoinSweepServiceTests
 
         Assert.False(availability.WillJudge(new QualityResult()));
         Assert.False(availability.WillJudge(new QualityResult { RequestCorrelationId = "corr-1", SyntaxValid = true }));
+    }
+
+    /// <summary>Counts sweeps and can be told to throw, so the loop's fault isolation is observable.</summary>
+    private sealed class CountingAggregator(bool throwOnSweep = false) : IQualityScoreAggregator
+    {
+        private readonly TaskCompletionSource _swept = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _sweeps;
+
+        public int Sweeps => Volatile.Read(ref _sweeps);
+
+        public Task Swept => _swept.Task;
+
+        public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _sweeps);
+            _swept.TrySetResult();
+
+            return throwOnSweep
+                ? throw new InvalidOperationException("sweep is down")
+                : Task.FromResult(1);
+        }
     }
 }

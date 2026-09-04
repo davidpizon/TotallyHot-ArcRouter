@@ -13,37 +13,30 @@ namespace TotallyHot.ArcRouter.Tests.Update;
 /// </summary>
 public sealed class UpdateCheckHostedServiceTests
 {
-    private sealed class FakeReleaseCheckClient : IReleaseCheckClient
-    {
-        public int CallCount { get; private set; }
-        public Func<ReleaseCheckResult> ResultFactory { get; set; } = () => ReleaseCheckResult.Resolved("1.0.0", "1.0.0", false, null, null);
-
-        public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default)
-        {
-            CallCount++;
-            return Task.FromResult(ResultFactory());
-        }
-    }
-
     private static UpdateCheckHostedService CreateService(
         FakeReleaseCheckClient client,
         IUpdateStateStore stateStore,
-        UpdateOptions? options = null) =>
-        new(client, stateStore, Options.Create(options ?? new UpdateOptions()), NullLogger<UpdateCheckHostedService>.Instance);
+        UpdateOptions? options = null)
+    {
+        return new UpdateCheckHostedService(releaseCheckClient: client, stateStore: stateStore,
+            options: Options.Create(options ?? new UpdateOptions()),
+            logger: NullLogger<UpdateCheckHostedService>.Instance);
+    }
 
     [Fact]
     public async Task RunOneCheckAsync_RecordsResultIntoStateStore()
     {
         var client = new FakeReleaseCheckClient
         {
-            ResultFactory = () => ReleaseCheckResult.Resolved("1.0.0", "2.0.0", true, "https://example.test/a.zip", "abc123"),
+            ResultFactory = () => ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "2.0.0", true,
+                assetDownloadUrl: "https://example.test/a.zip", assetSha256: "abc123")
         };
         var stateStore = new UpdateStateStore();
-        var service = CreateService(client, stateStore);
+        var service = CreateService(client: client, stateStore: stateStore);
 
         await service.RunOneCheckAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, client.CallCount);
+        Assert.Equal(1, actual: client.CallCount);
         Assert.NotNull(stateStore.Current.Result);
         Assert.True(stateStore.Current.Result!.IsUpdateAvailable);
         Assert.NotNull(stateStore.Current.CheckedAtUtc);
@@ -54,7 +47,7 @@ public sealed class UpdateCheckHostedServiceTests
     {
         var client = new FakeReleaseCheckClient { ResultFactory = () => throw new InvalidOperationException("boom") };
         var stateStore = new UpdateStateStore();
-        var service = CreateService(client, stateStore);
+        var service = CreateService(client: client, stateStore: stateStore);
 
         await service.RunOneCheckAsync(TestContext.Current.CancellationToken);
 
@@ -68,14 +61,15 @@ public sealed class UpdateCheckHostedServiceTests
     {
         var client = new FakeReleaseCheckClient();
         var stateStore = new UpdateStateStore();
-        var service = CreateService(client, stateStore, new UpdateOptions { Enabled = false });
+        var service = CreateService(client: client, stateStore: stateStore,
+            options: new UpdateOptions { Enabled = false });
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await service.StartAsync(cts.Token);
-        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await Task.Delay(50, cancellationToken: TestContext.Current.CancellationToken);
         await service.StopAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, client.CallCount);
+        Assert.Equal(0, actual: client.CallCount);
     }
 
     [Fact]
@@ -84,12 +78,12 @@ public sealed class UpdateCheckHostedServiceTests
         var client = new FakeReleaseCheckClient();
         var stateStore = new UpdateStateStore();
         var service = new UpdateCheckHostedService(
-            client,
-            stateStore,
-            Options.Create(new UpdateOptions { Enabled = true, PollInterval = TimeSpan.FromHours(6) }),
-            NullLogger<UpdateCheckHostedService>.Instance)
+            releaseCheckClient: client,
+            stateStore: stateStore,
+            options: Options.Create(new UpdateOptions { Enabled = true, PollInterval = TimeSpan.FromHours(6) }),
+            logger: NullLogger<UpdateCheckHostedService>.Instance)
         {
-            InitialDelayOverride = TimeSpan.FromMilliseconds(10),
+            InitialDelayOverride = TimeSpan.FromMilliseconds(10)
         };
 
         using var cts = new CancellationTokenSource();
@@ -100,9 +94,7 @@ public sealed class UpdateCheckHostedServiceTests
             // wait is the initial-delay path, not the timer tick.
             var deadline = DateTime.UtcNow.AddSeconds(3);
             while (client.CallCount == 0 && DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(20, TestContext.Current.CancellationToken);
-            }
+                await Task.Delay(20, cancellationToken: TestContext.Current.CancellationToken);
         }
         finally
         {
@@ -110,6 +102,20 @@ public sealed class UpdateCheckHostedServiceTests
             await service.StopAsync(TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal(1, client.CallCount);
+        Assert.Equal(1, actual: client.CallCount);
+    }
+
+    private sealed class FakeReleaseCheckClient : IReleaseCheckClient
+    {
+        public int CallCount { get; private set; }
+
+        public Func<ReleaseCheckResult> ResultFactory { get; init; } = () =>
+            ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "1.0.0", false, null, null);
+
+        public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(ResultFactory());
+        }
     }
 }

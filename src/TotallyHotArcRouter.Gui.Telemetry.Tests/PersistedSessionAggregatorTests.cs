@@ -1,11 +1,12 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
-
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 
-/// <summary>Covers <see cref="PersistedSessionAggregator.Aggregate"/>: grouping, turn-number parsing, ordering, and totals.</summary>
+/// <summary>
+/// Covers <see cref="PersistedSessionAggregator.Aggregate"/>: grouping, turn-number parsing, ordering, and
+/// totals.
+/// </summary>
 public class PersistedSessionAggregatorTests
 {
-    private static readonly DateTimeOffset BaseTime = new(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset BaseTime = new(2026, 7, 8, 12, 0, 0, offset: TimeSpan.Zero);
 
     private static PersistedTranscriptDto CreateTranscript(
         string sessionId = "sess-1",
@@ -18,8 +19,9 @@ public class PersistedSessionAggregatorTests
         int? inputTokens = 100,
         int? outputTokens = 50,
         DateTimeOffset? createdAtUtc = null,
-        long? memoryEntryId = null) =>
-        new(
+        long? memoryEntryId = null)
+    {
+        return new PersistedTranscriptDto(
             SessionId: sessionId,
             CorrelationId: $"{sessionId}:{turnNumber}",
             CreatedAtUtc: createdAtUtc ?? BaseTime.AddMinutes(turnNumber),
@@ -31,6 +33,7 @@ public class PersistedSessionAggregatorTests
             InputTokens: inputTokens,
             OutputTokens: outputTokens,
             MemoryEntryId: memoryEntryId);
+    }
 
     [Fact]
     public void Aggregate_NullTranscripts_Throws()
@@ -43,16 +46,16 @@ public class PersistedSessionAggregatorTests
     {
         var rows = new[]
         {
-            CreateTranscript(sessionId: "sess-1", turnNumber: 1),
-            CreateTranscript(sessionId: "sess-2", turnNumber: 1),
-            CreateTranscript(sessionId: "sess-1", turnNumber: 2),
+            CreateTranscript(sessionId: "sess-1"),
+            CreateTranscript(sessionId: "sess-2"),
+            CreateTranscript(sessionId: "sess-1", 2)
         };
 
         var result = PersistedSessionAggregator.Aggregate(rows);
 
-        Assert.Equal(2, result.Count);
-        var sessOne = Assert.Single(result, c => c.SessionId == "sess-1");
-        Assert.Equal(2, sessOne.Turns.Count);
+        Assert.Equal(2, actual: result.Count);
+        var sessOne = Assert.Single(collection: result, predicate: c => c.SessionId == "sess-1");
+        Assert.Equal(2, actual: sessOne.Turns.Count);
     }
 
     [Fact]
@@ -60,15 +63,15 @@ public class PersistedSessionAggregatorTests
     {
         var rows = new[]
         {
-            CreateTranscript(sessionId: "sess-1", turnNumber: 3),
-            CreateTranscript(sessionId: "sess-1", turnNumber: 1),
-            CreateTranscript(sessionId: "sess-1", turnNumber: 2),
+            CreateTranscript(sessionId: "sess-1", 3),
+            CreateTranscript(sessionId: "sess-1"),
+            CreateTranscript(sessionId: "sess-1", 2)
         };
 
         var result = PersistedSessionAggregator.Aggregate(rows);
 
         var session = Assert.Single(result);
-        Assert.Equal([1, 2, 3], session.Turns.Select(t => t.TurnNumber));
+        Assert.Equal(expected: [1, 2, 3], actual: session.Turns.Select(t => t.TurnNumber));
     }
 
     [Fact]
@@ -76,23 +79,23 @@ public class PersistedSessionAggregatorTests
     {
         var rows = new[]
         {
-            CreateTranscript(sessionId: "old", turnNumber: 1, createdAtUtc: BaseTime),
-            CreateTranscript(sessionId: "new", turnNumber: 1, createdAtUtc: BaseTime.AddHours(2)),
+            CreateTranscript(sessionId: "old", createdAtUtc: BaseTime),
+            CreateTranscript(sessionId: "new", createdAtUtc: BaseTime.AddHours(2))
         };
 
         var result = PersistedSessionAggregator.Aggregate(rows);
 
-        Assert.Equal(["new", "old"], result.Select(c => c.SessionId));
+        Assert.Equal(expected: ["new", "old"], actual: result.Select(c => c.SessionId));
     }
 
     [Fact]
     public void Aggregate_CorrelationIdWithNoNumericSuffix_TurnNumberDefaultsToOne()
     {
-        var row = CreateTranscript(sessionId: "sess-1", turnNumber: 1) with { CorrelationId = "not-numeric-suffix:abc" };
+        var row = CreateTranscript(sessionId: "sess-1") with { CorrelationId = "not-numeric-suffix:abc" };
 
         var session = Assert.Single(PersistedSessionAggregator.Aggregate([row]));
 
-        Assert.Equal(1, session.Turns[0].TurnNumber);
+        Assert.Equal(1, actual: session.Turns[0].TurnNumber);
     }
 
     [Fact]
@@ -100,15 +103,15 @@ public class PersistedSessionAggregatorTests
     {
         var rows = new[]
         {
-            CreateTranscript(sessionId: "sess-1", turnNumber: 1, costUsd: 0.02m, inputTokens: 10, outputTokens: 5),
-            CreateTranscript(sessionId: "sess-1", turnNumber: 2, costUsd: null, inputTokens: null, outputTokens: null),
+            CreateTranscript(sessionId: "sess-1", costUsd: 0.02m, inputTokens: 10, outputTokens: 5),
+            CreateTranscript(sessionId: "sess-1", 2, costUsd: null, inputTokens: null, outputTokens: null)
         };
 
         var session = Assert.Single(PersistedSessionAggregator.Aggregate(rows));
 
-        Assert.Equal(0.02m, session.TotalCostUsd);
-        Assert.Equal(10, session.TotalInputTokens);
-        Assert.Equal(5, session.TotalOutputTokens);
+        Assert.Equal(0.02m, actual: session.TotalCostUsd);
+        Assert.Equal(10, actual: session.TotalInputTokens);
+        Assert.Equal(5, actual: session.TotalOutputTokens);
     }
 
     [Fact]
@@ -116,8 +119,8 @@ public class PersistedSessionAggregatorTests
     {
         var rows = new[]
         {
-            CreateTranscript(sessionId: "sess-1", turnNumber: 1, memoryEntryId: null),
-            CreateTranscript(sessionId: "sess-1", turnNumber: 2, memoryEntryId: 42),
+            CreateTranscript(sessionId: "sess-1"),
+            CreateTranscript(sessionId: "sess-1", 2, memoryEntryId: 42)
         };
 
         var session = Assert.Single(PersistedSessionAggregator.Aggregate(rows));
@@ -128,7 +131,7 @@ public class PersistedSessionAggregatorTests
     [Fact]
     public void Aggregate_NoTurnLinkedToMemoryEntry_SessionNotUsedForTraining()
     {
-        var rows = new[] { CreateTranscript(sessionId: "sess-1", turnNumber: 1, memoryEntryId: null) };
+        var rows = new[] { CreateTranscript(sessionId: "sess-1") };
 
         var session = Assert.Single(PersistedSessionAggregator.Aggregate(rows));
 

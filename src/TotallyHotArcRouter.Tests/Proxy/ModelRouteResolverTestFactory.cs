@@ -1,6 +1,6 @@
+using Moq;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -35,16 +35,13 @@ internal static class ModelRouteResolverTestFactory
             allHeaders.Add(new ProviderHeader { Name = authHeaderName, Value = value });
         }
 
-        if (headers is not null)
-        {
-            allHeaders.AddRange(headers);
-        }
+        if (headers is not null) allHeaders.AddRange(headers);
 
         var options = new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [providerName] = new ProviderOptions
+                [providerName] = new()
                 {
                     BaseUrl = baseUrl,
                     AuthHeaderName = authHeaderName,
@@ -55,11 +52,13 @@ internal static class ModelRouteResolverTestFactory
             },
             ModelList =
             [
-                new ModelRouteEntry { ModelName = modelName, Provider = providerName, ProviderModelId = providerModelId }
+                new ModelRouteEntry
+                    { ModelName = modelName, Provider = providerName, ProviderModelId = providerModelId }
             ]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), environment ?? Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: environment ?? Mock.Of<IEnvironmentVariableProvider>());
     }
 
     /// <summary>
@@ -74,56 +73,55 @@ internal static class ModelRouteResolverTestFactory
     {
         var providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase);
         foreach (var model in models)
-        {
             if (!providers.ContainsKey(model.Provider))
-            {
                 providers[model.Provider] = new ProviderOptions
                 {
                     BaseUrl = model.BaseUrl
                 };
-            }
-        }
 
         var options = new ModelRoutingOptions
         {
             Providers = providers,
-            ModelList = models
+            ModelList = [.. models
                 .Select(m => new ModelRouteEntry
                 {
                     ModelName = m.ModelName,
                     Provider = m.Provider,
                     ProviderModelId = m.ProviderModelId
-                })
-                .ToList()
+                })]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 
-    public static IModelRouteResolver Empty() =>
-        new ModelRouteResolver(new InMemoryProviderConfigStore(new ModelRoutingOptions()), Mock.Of<IEnvironmentVariableProvider>());
+    public static IModelRouteResolver Empty()
+    {
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(new ModelRoutingOptions()),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+    }
 
     /// <summary>
     /// Builds a resolver configured with several models across one or more providers, for tests that need
     /// to observe ordering or multi-provider behavior (e.g. <see cref="IModelRouteResolver.ListModels"/>).
     /// </summary>
-    public static IModelRouteResolver CreateWithModelList(params (string ModelName, string Provider, string ProviderModelId)[] models)
+    public static IModelRouteResolver CreateWithModelList(
+        params (string ModelName, string Provider, string ProviderModelId)[] models)
     {
         var providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase);
         foreach (var providerName in models.Select(m => m.Provider).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
             providers[providerName] = new ProviderOptions { BaseUrl = "https://example.com" };
-        }
 
         var options = new ModelRoutingOptions
         {
             Providers = providers,
-            ModelList = models
-                .Select(m => new ModelRouteEntry { ModelName = m.ModelName, Provider = m.Provider, ProviderModelId = m.ProviderModelId })
-                .ToList()
+            ModelList = [.. models
+                .Select(m => new ModelRouteEntry
+                { ModelName = m.ModelName, Provider = m.Provider, ProviderModelId = m.ProviderModelId })]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 
     /// <summary>
@@ -141,24 +139,23 @@ internal static class ModelRouteResolverTestFactory
         IReadOnlyCollection<string>? disabledProviders,
         params ModelRouteEntry[] models)
     {
-        var disabled = new HashSet<string>(disabledProviders ?? [], StringComparer.OrdinalIgnoreCase);
+        var disabled = new HashSet<string>(collection: disabledProviders ?? [],
+            comparer: StringComparer.OrdinalIgnoreCase);
         var providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase);
         foreach (var providerName in models.Select(m => m.Provider).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
             providers[providerName] = new ProviderOptions
             {
                 BaseUrl = "https://example.com",
-                Enabled = !disabled.Contains(providerName),
+                Enabled = !disabled.Contains(providerName)
             };
-        }
 
         var options = new ModelRoutingOptions
         {
             Providers = providers,
-            ModelList = [.. models],
+            ModelList = [.. models]
         };
 
-        return new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 }
-

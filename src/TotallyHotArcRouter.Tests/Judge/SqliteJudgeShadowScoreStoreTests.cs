@@ -1,7 +1,8 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
@@ -11,15 +12,39 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 /// </summary>
 public class SqliteJudgeShadowScoreStoreTests : IDisposable
 {
-    private readonly string _tempDirectory;
     private readonly RouterMemoryDatabase _database;
+    private readonly string _tempDirectory;
 
     public SqliteJudgeShadowScoreStoreTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
-        var dbPath = Path.Combine(_tempDirectory, "router_embedding_memory.db");
-        _database = new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
+        _tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
+        var dbPath = Path.Combine(path1: _tempDirectory, path2: "router_embedding_memory.db");
+        _database = new RouterMemoryDatabase(
+            Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));
         _database.EnsureCreated();
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            using var connection = _database.OpenConnection();
+            SqliteConnection.ClearPool(connection);
+        }
+        catch (SqliteException)
+        {
+            // Best-effort cleanup; a database mid-teardown on a busy CI box is not a test failure.
+        }
+
+        try
+        {
+            if (Directory.Exists(_tempDirectory)) Directory.Delete(path: _tempDirectory, true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
+        }
     }
 
     [Fact]
@@ -27,9 +52,9 @@ public class SqliteJudgeShadowScoreStoreTests : IDisposable
     {
         var store = new SqliteJudgeShadowScoreStore(_database);
 
-        await store.InsertAsync(MakeRecord("corr-1"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-1"), cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, await store.GetRowCountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, actual: await store.GetRowCountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -39,23 +64,23 @@ public class SqliteJudgeShadowScoreStoreTests : IDisposable
         _database.EnsureCreated();
 
         var store = new SqliteJudgeShadowScoreStore(_database);
-        await store.InsertAsync(MakeRecord("corr-1"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-1"), cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, await store.GetRowCountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, actual: await store.GetRowCountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task DeleteOldestAsync_RemovesOldestRowsFirst()
     {
         var store = new SqliteJudgeShadowScoreStore(_database);
-        await store.InsertAsync(MakeRecord("corr-1"), TestContext.Current.CancellationToken);
-        await store.InsertAsync(MakeRecord("corr-2"), TestContext.Current.CancellationToken);
-        await store.InsertAsync(MakeRecord("corr-3"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-1"), cancellationToken: TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-2"), cancellationToken: TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("corr-3"), cancellationToken: TestContext.Current.CancellationToken);
 
-        var deleted = await store.DeleteOldestAsync(2, TestContext.Current.CancellationToken);
+        var deleted = await store.DeleteOldestAsync(2, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, deleted);
-        Assert.Equal(1, await store.GetRowCountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(2, actual: deleted);
+        Assert.Equal(1, actual: await store.GetRowCountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -64,50 +89,29 @@ public class SqliteJudgeShadowScoreStoreTests : IDisposable
         var store = new SqliteJudgeShadowScoreStore(_database);
         var old = MakeRecord("corr-old") with { CreatedAtUtc = DateTimeOffset.UtcNow.AddDays(-40) };
         var recent = MakeRecord("corr-recent") with { CreatedAtUtc = DateTimeOffset.UtcNow };
-        await store.InsertAsync(old, TestContext.Current.CancellationToken);
-        await store.InsertAsync(recent, TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: old, cancellationToken: TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: recent, cancellationToken: TestContext.Current.CancellationToken);
 
-        var deleted = await store.DeleteBeforeAsync(DateTimeOffset.UtcNow.AddDays(-30), TestContext.Current.CancellationToken);
+        var deleted = await store.DeleteBeforeAsync(cutoff: DateTimeOffset.UtcNow.AddDays(-30),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, deleted);
-        Assert.Equal(1, await store.GetRowCountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, actual: deleted);
+        Assert.Equal(1, actual: await store.GetRowCountAsync(TestContext.Current.CancellationToken));
     }
 
-    private static JudgeShadowScoreRecord MakeRecord(string correlationId) => new(
-        Id: 0,
-        CorrelationId: correlationId,
-        CreatedAtUtc: DateTimeOffset.UtcNow,
-        Dimension: "algorithm",
-        Model: "claude-opus-4-6",
-        StaticScore: 0.6,
-        JudgeScore: 0.7,
-        JudgeModel: "local-judge-model",
-        JudgePromptVersion: "g-eval-v1",
-        JudgeLatencyMs: 42,
-        UsedLogprobs: true);
-
-    public void Dispose()
+    private static JudgeShadowScoreRecord MakeRecord(string correlationId)
     {
-        try
-        {
-            using var connection = _database.OpenConnection();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException)
-        {
-            // Best-effort cleanup; a database mid-teardown on a busy CI box is not a test failure.
-        }
-
-        try
-        {
-            if (Directory.Exists(_tempDirectory))
-            {
-                Directory.Delete(_tempDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
-        }
+        return new JudgeShadowScoreRecord(
+            0,
+            CorrelationId: correlationId,
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            Dimension: "algorithm",
+            Model: "claude-opus-4-6",
+            0.6,
+            0.7,
+            JudgeModel: "local-judge-model",
+            JudgePromptVersion: "g-eval-v1",
+            42,
+            true);
     }
 }

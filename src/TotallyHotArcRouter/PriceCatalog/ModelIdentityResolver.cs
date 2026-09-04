@@ -33,7 +33,7 @@ public enum ResolutionRung
     VersionNormalized,
 
     /// <summary>Matched on model id alone, ignoring a provider-name mismatch (e.g. azure-openai vs openai).</summary>
-    ProviderAlias,
+    ProviderAlias
 }
 
 /// <summary>
@@ -80,7 +80,8 @@ public interface IModelIdentityResolver
 /// <summary>
 /// <see cref="IModelIdentityResolver"/> backed by the live <see cref="IProviderConfigStore"/> and an optional
 /// <see cref="ModelAliasOverrideStore"/>. Tries each <see cref="ResolutionRung"/> in order and returns the
-/// first that matches; see the ladder's own remarks for why no fuzzy rung follows <see cref="ResolutionRung.ProviderAlias"/>.
+/// first that matches; see the ladder's own remarks for why no fuzzy rung follows
+/// <see cref="ResolutionRung.ProviderAlias"/>.
 /// </summary>
 public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
 {
@@ -97,7 +98,9 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
     // (which calls Resolve) and a runtime config edit (which bumps the version) run on different threads.
     private readonly object _sync = new();
     private int _cachedVersion = -1;
-    private ResolvedIndex _index = new([], [], [], [], []);
+
+    private ResolvedIndex _index = new(ByModelName: [], ByProviderAndModelId: [], ByProviderAndStrippedModelId: [],
+        ByProviderAndVersionNormalizedModelId: [], ByModelIdAnyProvider: []);
 
     /// <param name="configStore">The live routing-configuration source the alias index is derived from.</param>
     /// <param name="overrideStore">
@@ -111,54 +114,47 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
         _overrideStore = overrideStore;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public IdentityResolution? Resolve(string sourceName, string aggregatorModelId, string aggregatorProvider)
     {
-        if (string.IsNullOrWhiteSpace(aggregatorModelId) || string.IsNullOrWhiteSpace(aggregatorProvider))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(aggregatorModelId) || string.IsNullOrWhiteSpace(aggregatorProvider)) return null;
 
         var index = GetIndex();
 
         if (!string.IsNullOrWhiteSpace(sourceName) && _overrideStore is not null)
         {
-            var overriddenModelName = _overrideStore.TryGetModelName(sourceName, aggregatorModelId);
-            if (overriddenModelName is not null && index.ByModelName.TryGetValue(overriddenModelName, out var overriddenIdentity))
-            {
-                return new IdentityResolution(overriddenIdentity, ResolutionRung.OperatorOverride);
-            }
+            var overriddenModelName =
+                _overrideStore.TryGetModelName(sourceName: sourceName, aggregatorModelKey: aggregatorModelId);
+            if (overriddenModelName is not null &&
+                index.ByModelName.TryGetValue(key: overriddenModelName, value: out var overriddenIdentity))
+                return new IdentityResolution(Identity: overriddenIdentity, Rung: ResolutionRung.OperatorOverride);
         }
 
         var provider = ModelNameCanonicalizer.NormalizeProvider(aggregatorProvider);
-        var modelId = ModelNameCanonicalizer.NormalizeBase(aggregatorModelId, aggregatorProvider);
+        var modelId = ModelNameCanonicalizer.NormalizeBase(modelId: aggregatorModelId, provider: aggregatorProvider);
 
-        if (index.ByProviderAndModelId.TryGetValue((provider, modelId), out var exact))
-        {
-            return new IdentityResolution(exact, ResolutionRung.Exact);
-        }
+        if (index.ByProviderAndModelId.TryGetValue(key: (provider, modelId), value: out var exact))
+            return new IdentityResolution(Identity: exact, Rung: ResolutionRung.Exact);
 
         var snapshotStripped = ModelNameCanonicalizer.StripSnapshotSuffix(modelId);
-        if (snapshotStripped != modelId && index.ByProviderAndStrippedModelId.TryGetValue((provider, snapshotStripped), out var snapshotMatch))
-        {
-            return new IdentityResolution(snapshotMatch, ResolutionRung.SnapshotSuffixStripped);
-        }
+        if (snapshotStripped != modelId &&
+            index.ByProviderAndStrippedModelId.TryGetValue(key: (provider, snapshotStripped),
+                value: out var snapshotMatch))
+            return new IdentityResolution(Identity: snapshotMatch, Rung: ResolutionRung.SnapshotSuffixStripped);
 
         var versionNormalized = ModelNameCanonicalizer.StripVersionSuffix(snapshotStripped);
-        if (versionNormalized != modelId && index.ByProviderAndVersionNormalizedModelId.TryGetValue((provider, versionNormalized), out var versionMatch))
-        {
-            return new IdentityResolution(versionMatch, ResolutionRung.VersionNormalized);
-        }
+        if (versionNormalized != modelId &&
+            index.ByProviderAndVersionNormalizedModelId.TryGetValue(key: (provider, versionNormalized),
+                value: out var versionMatch))
+            return new IdentityResolution(Identity: versionMatch, Rung: ResolutionRung.VersionNormalized);
 
         // Provider-alias rung: match on model id alone, across every configured provider, ignoring the
         // aggregator's stated provider entirely - the resolved identity still carries the *configured*
         // provider (never the aggregator's), so a genuine cross-provider naming collision (rare, since
         // ProviderModelId values are host-specific) resolves to whichever configured entry matched first.
-        if (index.ByModelIdAnyProvider.TryGetValue(versionNormalized, out var aliasMatch) ||
-            index.ByModelIdAnyProvider.TryGetValue(modelId, out aliasMatch))
-        {
-            return new IdentityResolution(aliasMatch, ResolutionRung.ProviderAlias);
-        }
+        if (index.ByModelIdAnyProvider.TryGetValue(key: versionNormalized, value: out var aliasMatch) ||
+            index.ByModelIdAnyProvider.TryGetValue(key: modelId, value: out aliasMatch))
+            return new IdentityResolution(Identity: aliasMatch, Rung: ResolutionRung.ProviderAlias);
 
         return null;
     }
@@ -200,33 +196,37 @@ public sealed class ConfigModelIdentityResolver : IModelIdentityResolver
 
         foreach (var entry in options.ModelList)
         {
-            if (string.IsNullOrWhiteSpace(entry.Provider) || string.IsNullOrWhiteSpace(entry.ProviderModelId))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(entry.Provider) || string.IsNullOrWhiteSpace(entry.ProviderModelId)) continue;
 
-            var identity = new ResolvedModelIdentity(entry.ModelName, entry.Provider);
+            var identity = new ResolvedModelIdentity(ModelName: entry.ModelName, Provider: entry.Provider);
             var provider = ModelNameCanonicalizer.NormalizeProvider(entry.Provider);
-            var modelId = ModelNameCanonicalizer.NormalizeBase(entry.ProviderModelId, entry.Provider);
+            var modelId =
+                ModelNameCanonicalizer.NormalizeBase(modelId: entry.ProviderModelId, provider: entry.Provider);
 
             // First entry wins on a duplicate key: two ModelNames mapping to one ambiguous cell should not
             // let the later one silently overwrite. ModelName itself is already unique (ModelRoutingOptions.EnsureValid).
-            byModelName.TryAdd(entry.ModelName, identity);
-            byProviderAndModelId.TryAdd((provider, modelId), identity);
+            byModelName.TryAdd(key: entry.ModelName, value: identity);
+            byProviderAndModelId.TryAdd(key: (provider, modelId), value: identity);
 
             var stripped = ModelNameCanonicalizer.StripSnapshotSuffix(modelId);
-            byProviderAndStripped.TryAdd((provider, stripped), identity);
+            byProviderAndStripped.TryAdd(key: (provider, stripped), value: identity);
 
             var versionNormalized = ModelNameCanonicalizer.StripVersionSuffix(stripped);
-            byProviderAndVersionNormalized.TryAdd((provider, versionNormalized), identity);
-            byModelIdAnyProvider.TryAdd(versionNormalized, identity);
-            byModelIdAnyProvider.TryAdd(modelId, identity);
+            byProviderAndVersionNormalized.TryAdd(key: (provider, versionNormalized), value: identity);
+            byModelIdAnyProvider.TryAdd(key: versionNormalized, value: identity);
+            byModelIdAnyProvider.TryAdd(key: modelId, value: identity);
         }
 
-        return new ResolvedIndex(byModelName, byProviderAndModelId, byProviderAndStripped, byProviderAndVersionNormalized, byModelIdAnyProvider);
+        return new ResolvedIndex(ByModelName: byModelName, ByProviderAndModelId: byProviderAndModelId,
+            ByProviderAndStrippedModelId: byProviderAndStripped,
+            ByProviderAndVersionNormalizedModelId: byProviderAndVersionNormalized,
+            ByModelIdAnyProvider: byModelIdAnyProvider);
     }
 
-    /// <summary>The rebuildable indexes <see cref="Build"/> derives from <see cref="ModelRoutingOptions"/>, one per resolution rung.</summary>
+    /// <summary>
+    /// The rebuildable indexes <see cref="Build"/> derives from <see cref="ModelRoutingOptions"/>, one per resolution
+    /// rung.
+    /// </summary>
     private sealed record ResolvedIndex(
         Dictionary<string, ResolvedModelIdentity> ByModelName,
         Dictionary<(string Provider, string ModelId), ResolvedModelIdentity> ByProviderAndModelId,

@@ -1,11 +1,11 @@
-using System.Net;
-using System.Text;
-using TotallyHot.ArcRouter.Checksums;
-using TotallyHot.ArcRouter.CodeRouterBench;
 using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Net;
+using System.Text;
+using TotallyHot.ArcRouter.Checksums;
+using TotallyHot.ArcRouter.CodeRouterBench;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
@@ -19,29 +19,16 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 /// </summary>
 public class BenchmarkDataAdminGrpcServiceTests
 {
-    private sealed class FakeServerStreamWriter<T> : IServerStreamWriter<T>
-    {
-        public List<T> Written { get; } = [];
-
-        public WriteOptions? WriteOptions { get; set; }
-
-        public Task WriteAsync(T message)
-        {
-            Written.Add(message);
-            return Task.CompletedTask;
-        }
-    }
-
     private static readonly IReadOnlyList<BenchmarkFileSpec> TestFileSpecs =
     [
-        new("id_probing_results_long.csv", BenchmarkFileKind.IdResultsCsv, "probing", 1),
-        new("id_test_results_long.csv", BenchmarkFileKind.IdResultsCsv, "id_test", 1),
-        new("ood176_results_long.csv", BenchmarkFileKind.OodResultsCsv, null, 1),
-        new("id_probing_tasks.jsonl", BenchmarkFileKind.IdTasksJsonl, "probing", 1),
-        new("id_test_tasks.jsonl", BenchmarkFileKind.IdTasksJsonl, "id_test", 1),
-        new("ood176_tasks.jsonl", BenchmarkFileKind.OodTasksJsonl, null, 1),
-        new("models.json", BenchmarkFileKind.ModelsJson, null, null),
-        new("summary.json", BenchmarkFileKind.SummaryJson, null, null),
+        new(FileName: "id_probing_results_long.csv", Kind: BenchmarkFileKind.IdResultsCsv, Split: "probing", 1),
+        new(FileName: "id_test_results_long.csv", Kind: BenchmarkFileKind.IdResultsCsv, Split: "id_test", 1),
+        new(FileName: "ood176_results_long.csv", Kind: BenchmarkFileKind.OodResultsCsv, null, 1),
+        new(FileName: "id_probing_tasks.jsonl", Kind: BenchmarkFileKind.IdTasksJsonl, Split: "probing", 1),
+        new(FileName: "id_test_tasks.jsonl", Kind: BenchmarkFileKind.IdTasksJsonl, Split: "id_test", 1),
+        new(FileName: "ood176_tasks.jsonl", Kind: BenchmarkFileKind.OodTasksJsonl, null, 1),
+        new(FileName: "models.json", Kind: BenchmarkFileKind.ModelsJson, null, null),
+        new(FileName: "summary.json", Kind: BenchmarkFileKind.SummaryJson, null, null)
     ];
 
     private static readonly Dictionary<string, string> Fixtures = new()
@@ -54,11 +41,12 @@ public class BenchmarkDataAdminGrpcServiceTests
         ["id_test_tasks.jsonl"] = """{"task_id":"t3","dimension":"code_generation"}""" + "\n",
         ["ood176_tasks.jsonl"] = """{"task_id":"t4","bench":"swebench","dimension":"code_generation"}""" + "\n",
         ["models.json"] = """{ "claude-opus-4-6": { "provider": "anthropic" } }""",
-        ["summary.json"] = """{ "total_tasks": 4 }""",
+        ["summary.json"] = """{ "total_tasks": 4 }"""
     };
 
-    private static ServerCallContext CreateContext(CancellationToken cancellationToken) =>
-        TestServerCallContext.Create(
+    private static ServerCallContext CreateContext(CancellationToken cancellationToken)
+    {
+        return TestServerCallContext.Create(
             method: "Test",
             host: "localhost",
             deadline: DateTime.UtcNow.AddMinutes(1),
@@ -66,24 +54,26 @@ public class BenchmarkDataAdminGrpcServiceTests
             cancellationToken: cancellationToken,
             peer: "test-peer",
             authContext: null!,
-            contextPropagationToken: null,
+            null,
             writeHeadersFunc: _ => Task.CompletedTask,
             writeOptionsGetter: () => null,
             writeOptionsSetter: _ => { });
+    }
 
     [Fact]
     public async Task GetBenchmarkStatus_BeforeAnyRecheck_RunsOneAndReturnsEveryFile()
     {
         using var temp = new TempBenchmarkDatabase();
         temp.CreateLedger(); // schema only, no rows synced yet
-        var (service, _) = CreateService(temp, FakeHttpMessageHandler.AlwaysFails());
+        var service = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
 
-        var response = await service.GetBenchmarkStatus(new Contract.GetBenchmarkStatusRequest(), CreateContext(TestContext.Current.CancellationToken));
+        var response = await service.GetBenchmarkStatus(request: new Contract.GetBenchmarkStatusRequest(),
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        Assert.Equal(Contract.BenchmarkDataState.CheckFailed, response.State);
+        Assert.Equal(expected: Contract.BenchmarkDataState.CheckFailed, actual: response.State);
         Assert.True(response.HasReason);
-        Assert.Equal(BenchmarkFileSpec.All.Count, response.Files.Count);
-        Assert.All(response.Files, f => Assert.False(f.Synced));
+        Assert.Equal(expected: BenchmarkFileSpec.All.Count, actual: response.Files.Count);
+        Assert.All(collection: response.Files, action: f => Assert.False(f.Synced));
     }
 
     [Fact]
@@ -92,45 +82,49 @@ public class BenchmarkDataAdminGrpcServiceTests
         using var temp = new TempBenchmarkDatabase();
         var ledger = temp.CreateLedger();
         var syncedAt = DateTimeOffset.UtcNow;
-        ledger.Upsert(new BenchmarkFileLedgerEntry("models.json", "oid-models", 42, 3, "commit1", syncedAt));
+        ledger.Upsert(new BenchmarkFileLedgerEntry(FileName: "models.json", PublishedOid: "oid-models", 42, 3,
+            RepoCommit: "commit1", SyncedAtUtc: syncedAt));
 
-        var (service, _) = CreateService(temp, FakeHttpMessageHandler.AlwaysFails());
+        var service = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
 
-        var response = await service.RecheckBenchmarkData(new Contract.RecheckBenchmarkDataRequest(), CreateContext(TestContext.Current.CancellationToken));
+        var response = await service.RecheckBenchmarkData(request: new Contract.RecheckBenchmarkDataRequest(),
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        Assert.Equal(Contract.BenchmarkDataState.CheckFailed, response.State);
-        var modelsFile = Assert.Single(response.Files, f => f.FileName == "models.json");
+        Assert.Equal(expected: Contract.BenchmarkDataState.CheckFailed, actual: response.State);
+        var modelsFile = Assert.Single(collection: response.Files, predicate: f => f.FileName == "models.json");
         Assert.True(modelsFile.Synced);
-        Assert.Equal(42, modelsFile.SizeBytes);
-        Assert.Equal(3, modelsFile.RowCount);
+        Assert.Equal(42, actual: modelsFile.SizeBytes);
+        Assert.Equal(3, actual: modelsFile.RowCount);
 
-        var neverSynced = Assert.Single(response.Files, f => f.FileName == "summary.json");
+        var neverSynced = Assert.Single(collection: response.Files, predicate: f => f.FileName == "summary.json");
         Assert.False(neverSynced.Synced);
-        Assert.Equal(0, neverSynced.RowCount);
+        Assert.Equal(0, actual: neverSynced.RowCount);
     }
 
     [Fact]
     public async Task SyncBenchmarkData_AllFilesValid_StreamsCompletedProgressThenCurrentFinalStatus()
     {
         using var temp = new TempBenchmarkDatabase();
-        var (service, _) = CreateService(temp, Fixtures, repoCommit: "commit123");
+        var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
-        await service.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+        await service.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(), responseStream: writer,
+            context: CreateContext(TestContext.Current.CancellationToken));
 
         var completedEvents = writer.Written
             .Where(e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress)
             .Select(e => e.Progress)
             .Where(p => p.Stage == Contract.BenchmarkSyncStage.Completed)
             .ToList();
-        Assert.Equal(TestFileSpecs.Count, completedEvents.Count);
+        Assert.Equal(expected: TestFileSpecs.Count, actual: completedEvents.Count);
 
-        var finalEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus);
-        Assert.Equal(Contract.BenchmarkDataState.Current, finalEvent.FinalStatus.State);
-        Assert.All(finalEvent.FinalStatus.Files, f => Assert.True(f.Synced));
+        var finalEvent = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus);
+        Assert.Equal(expected: Contract.BenchmarkDataState.Current, actual: finalEvent.FinalStatus.State);
+        Assert.All(collection: finalEvent.FinalStatus.Files, action: f => Assert.True(f.Synced));
 
         var ledger = temp.CreateLedger();
-        Assert.Equal(TestFileSpecs.Count, ledger.GetAll().Count);
+        Assert.Equal(expected: TestFileSpecs.Count, actual: ledger.GetAll().Count);
     }
 
     [Fact]
@@ -139,36 +133,42 @@ public class BenchmarkDataAdminGrpcServiceTests
         using var temp = new TempBenchmarkDatabase();
         var servedBodies = new Dictionary<string, string>(Fixtures)
         {
-            ["models.json"] = """{ "tampered-after-checksum-was-published": {} }""",
+            ["models.json"] = """{ "tampered-after-checksum-was-published": {} }"""
         };
-        var (service, _) = CreateService(temp, servedBodies, repoCommit: "commit123", publishedFixtures: Fixtures);
+        var service = CreateService(temp: temp, servedBodies: servedBodies, repoCommit: "commit123",
+            publishedFixtures: Fixtures);
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
-        await service.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+        await service.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(), responseStream: writer,
+            context: CreateContext(TestContext.Current.CancellationToken));
 
         var failedWithError = writer.Written
             .Where(e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress)
             .Select(e => e.Progress)
             .Single(p => p.FileName == "models.json" && p.Stage == Contract.BenchmarkSyncStage.Failed && p.HasError);
-        Assert.Contains("checksum", failedWithError.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedSubstring: "checksum", actualString: failedWithError.Error,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
 
-        var finalEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus);
-        Assert.Equal(Contract.BenchmarkDataState.Update, finalEvent.FinalStatus.State);
+        var finalEvent = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus);
+        Assert.Equal(expected: Contract.BenchmarkDataState.Update, actual: finalEvent.FinalStatus.State);
     }
 
     [Fact]
     public async Task SyncBenchmarkData_AllFilesStale_StreamsThePlanFirstListingEveryStaleFile()
     {
         using var temp = new TempBenchmarkDatabase();
-        var (service, _) = CreateService(temp, Fixtures, repoCommit: "commit123");
+        var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
-        await service.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+        await service.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(), responseStream: writer,
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        var firstEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan);
-        Assert.Same(writer.Written[0], firstEvent);
-        Assert.Equal(TestFileSpecs.Count, firstEvent.Plan.Files.Count);
-        Assert.Equal(firstEvent.Plan.Files.Sum(f => f.SizeBytes), firstEvent.Plan.TotalBytes);
+        var firstEvent = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan);
+        Assert.Same(expected: writer.Written[0], actual: firstEvent);
+        Assert.Equal(expected: TestFileSpecs.Count, actual: firstEvent.Plan.Files.Count);
+        Assert.Equal(expected: firstEvent.Plan.Files.Sum(f => f.SizeBytes), actual: firstEvent.Plan.TotalBytes);
         Assert.True(firstEvent.Plan.TotalBytes > 0);
     }
 
@@ -178,41 +178,49 @@ public class BenchmarkDataAdminGrpcServiceTests
         using var temp = new TempBenchmarkDatabase();
         var ledger = temp.CreateLedger();
         var publishedOid = GitBlobHash.Compute(Encoding.UTF8.GetBytes(Fixtures["models.json"]));
-        ledger.Upsert(new BenchmarkFileLedgerEntry("models.json", publishedOid, 42, 1, "old-commit", DateTimeOffset.UtcNow));
-        var (service, _) = CreateService(temp, Fixtures, repoCommit: "commit123");
+        ledger.Upsert(new BenchmarkFileLedgerEntry(FileName: "models.json", PublishedOid: publishedOid, 42, 1,
+            RepoCommit: "old-commit", SyncedAtUtc: DateTimeOffset.UtcNow));
+        var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
-        await service.SyncBenchmarkData(new Contract.SyncBenchmarkDataRequest(), writer, CreateContext(TestContext.Current.CancellationToken));
+        await service.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(), responseStream: writer,
+            context: CreateContext(TestContext.Current.CancellationToken));
 
-        var plan = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan).Plan;
-        Assert.DoesNotContain(plan.Files, f => f.FileName == "models.json");
-        Assert.Equal(TestFileSpecs.Count - 1, plan.Files.Count);
+        var plan = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Plan).Plan;
+        Assert.DoesNotContain(collection: plan.Files, filter: f => f.FileName == "models.json");
+        Assert.Equal(expected: TestFileSpecs.Count - 1, actual: plan.Files.Count);
 
         Assert.DoesNotContain(
-            writer.Written,
-            e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress &&
-                 e.Progress.FileName == "models.json" &&
-                 e.Progress.Stage == Contract.BenchmarkSyncStage.Failed);
+            collection: writer.Written,
+            filter: e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.Progress &&
+                         e.Progress.FileName == "models.json" &&
+                         e.Progress.Stage == Contract.BenchmarkSyncStage.Failed);
 
-        var finalEvent = Assert.Single(writer.Written, e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus);
-        Assert.Equal(Contract.BenchmarkDataState.Current, finalEvent.FinalStatus.State);
+        var finalEvent = Assert.Single(collection: writer.Written,
+            predicate: e => e.EventCase == Contract.BenchmarkSyncStreamEvent.EventOneofCase.FinalStatus);
+        Assert.Equal(expected: Contract.BenchmarkDataState.Current, actual: finalEvent.FinalStatus.State);
     }
 
-    private static (BenchmarkDataAdminGrpcService Service, BenchmarkSyncService SyncService) CreateService(
+    private static BenchmarkDataAdminGrpcService CreateService(
         TempBenchmarkDatabase temp,
         HttpMessageHandler handler)
     {
-        var probe = new BenchmarkChecksumProbe(new FakeHttpClientFactory(handler), NullLogger<BenchmarkChecksumProbe>.Instance);
+        var probe = new BenchmarkChecksumProbe(httpClientFactory: new FakeHttpClientFactory(handler),
+            logger: NullLogger<BenchmarkChecksumProbe>.Instance);
         var ledger = new BenchmarkFileLedger(temp.Database);
         var statusService = new BenchmarkDataStatusService(
-            probe, ledger, Options.Create(new BenchmarkSyncOptions()), NullLogger<BenchmarkDataStatusService>.Instance);
+            probe: probe, ledger: ledger, options: Options.Create(new BenchmarkSyncOptions()),
+            logger: NullLogger<BenchmarkDataStatusService>.Instance);
         var syncService = new BenchmarkSyncService(
-            new FakeHttpClientFactory(handler), probe, temp.Database, ledger, NullLogger<BenchmarkSyncService>.Instance, TestFileSpecs);
+            httpClientFactory: new FakeHttpClientFactory(handler), probe: probe, database: temp.Database,
+            ledger: ledger, logger: NullLogger<BenchmarkSyncService>.Instance, fileSpecs: TestFileSpecs);
 
-        return (new BenchmarkDataAdminGrpcService(statusService, ledger, syncService, Options.Create(new BenchmarkSyncOptions())), syncService);
+        return new BenchmarkDataAdminGrpcService(statusService: statusService, ledger: ledger,
+            syncService: syncService, options: Options.Create(new BenchmarkSyncOptions()));
     }
 
-    private static (BenchmarkDataAdminGrpcService Service, BenchmarkSyncService SyncService) CreateService(
+    private static BenchmarkDataAdminGrpcService CreateService(
         TempBenchmarkDatabase temp,
         IReadOnlyDictionary<string, string> servedBodies,
         string repoCommit,
@@ -220,31 +228,46 @@ public class BenchmarkDataAdminGrpcServiceTests
     {
         var oidSourceBodies = publishedFixtures ?? servedBodies;
         var publishedOids = oidSourceBodies.ToDictionary(
-            kvp => kvp.Key,
-            kvp => GitBlobHash.Compute(Encoding.UTF8.GetBytes(kvp.Value)));
+            keySelector: kvp => kvp.Key,
+            elementSelector: kvp => GitBlobHash.Compute(Encoding.UTF8.GetBytes(kvp.Value)));
 
         var handler = new FakeHttpMessageHandler(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
 
-            if (path.Contains("/api/datasets/", StringComparison.Ordinal))
+            if (path.Contains(value: "/api/datasets/", comparisonType: StringComparison.Ordinal))
             {
                 var treeEntries = publishedOids.Select(kvp =>
                     $$"""{ "type": "file", "path": "{{kvp.Key}}", "oid": "{{kvp.Value}}", "size": {{Encoding.UTF8.GetByteCount(oidSourceBodies[kvp.Key])}} }""");
                 var response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent($"[{string.Join(',', treeEntries)}]", Encoding.UTF8, "application/json"),
+                    Content = new StringContent(content: $"[{string.Join(',', values: treeEntries)}]",
+                        encoding: Encoding.UTF8, mediaType: "application/json")
                 };
-                response.Headers.Add("X-Repo-Commit", repoCommit);
+                response.Headers.Add(name: "X-Repo-Commit", value: repoCommit);
                 return response;
             }
 
             var fileName = path[(path.LastIndexOf('/') + 1)..];
-            return servedBodies.TryGetValue(fileName, out var body)
-                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8) }
+            return servedBodies.TryGetValue(key: fileName, value: out var body)
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = new StringContent(content: body, encoding: Encoding.UTF8) }
                 : new HttpResponseMessage(HttpStatusCode.NotFound);
         });
 
-        return CreateService(temp, handler);
+        return CreateService(temp: temp, handler: handler);
+    }
+
+    private sealed class FakeServerStreamWriter<T> : IServerStreamWriter<T>
+    {
+        public List<T> Written { get; } = [];
+
+        public WriteOptions? WriteOptions { get; set; }
+
+        public Task WriteAsync(T message)
+        {
+            Written.Add(message);
+            return Task.CompletedTask;
+        }
     }
 }

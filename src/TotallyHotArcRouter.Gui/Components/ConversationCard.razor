@@ -16,12 +16,16 @@
             @if (Conversation.IsUsedForTraining)
             {
                 <span class="rounded px-1.5 py-0.5 text-xs font-semibold ls-tip ds-badge-success"
-                      data-tip="One or more turns in this session were folded into the router's live-learning corpus">🎓</span>
+                      data-tip="One or more turns in this session were folded into the router's live-learning corpus">
+                    🎓
+                </span>
             }
             @if (Conversation.HasFallbackTurns)
             {
                 <span class="rounded px-1.5 py-0.5 text-xs font-semibold ls-tip ds-badge-warning"
-                      data-tip="One or more turns in this conversation used fallback routing">⚠</span>
+                      data-tip="One or more turns in this conversation used fallback routing">
+                    ⚠
+                </span>
             }
         </span>
     </div>
@@ -35,7 +39,7 @@
     @* Cost · tokens · turns *@
     <div class="flex items-center gap-2 text-xs font-mono">
         <span class="ls-tip metric-positive" data-tip="Total LLM API cost across all turns in this conversation">
-            $@Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)
+            $@Conversation.TotalCost.ToString(format: "F6", provider: CultureInfo.InvariantCulture)
         </span>
         <span class="text-slate-600">·</span>
         <span class="text-slate-300 ls-tip" data-tip="Total prompt + completion tokens across all turns">
@@ -64,8 +68,10 @@
 </button>
 
 @code {
+
     /// <summary>The conversation this card summarizes.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public Conversation Conversation { get; set; } = null!;
 
     /// <summary>Whether this card is the currently selected conversation in the Sessions tab.</summary>
@@ -76,7 +82,10 @@
     [Parameter]
     public EventCallback<string> OnSelect { get; set; }
 
-    /// <summary>Invoked with <see cref="Conversation"/>'s id when the card is double-clicked, opening the split-view session details and conversation history.</summary>
+    /// <summary>
+    /// Invoked with <see cref="Conversation"/>'s id when the card is double-clicked, opening the split-view session
+    /// details and conversation history.
+    /// </summary>
     [Parameter]
     public EventCallback<string> OnDoubleClick { get; set; }
 
@@ -95,22 +104,29 @@
     // the markup above for why those spans aren't independently focusable). The label also announces
     // that double-clicking opens the session details view, so keyboard/screen-reader users know the
     // gesture is available without needing to discover it visually.
-    /// <summary>The card button's accessible label, restating every stat the visible data-tip spans convey and announcing the double-click action.</summary>
+    /// <summary>
+    /// The card button's accessible label, restating every stat the visible data-tip spans convey and announcing the
+    /// double-click action.
+    /// </summary>
     private string AriaLabel =>
         $"{Conversation.Title}" +
         (Conversation.IsUsedForTraining ? ", used for live training" : string.Empty) +
         (Conversation.HasFallbackTurns ? ", fallback routing used" : string.Empty) +
         $". {Conversation.FirstTimestamp} to {Conversation.LastTimestamp}. " +
-        $"Cost ${Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)}, " +
+        $"Cost ${Conversation.TotalCost.ToString(format: "F6", provider: CultureInfo.InvariantCulture)}, " +
         $"{FormatTokens(Conversation.TotalPromptTokens + Conversation.TotalCompletionTokens)} tokens, " +
         $"{Conversation.Turns.Count} {(Conversation.Turns.Count == 1 ? "turn" : "turns")}. " +
         "Double-click to open session details and conversation history.";
 
     /// <summary>Abbreviates a token count for compact display: "1.2M", "830.0K", or the bare number under 1,000.</summary>
-    private static string FormatTokens(int tokens) => tokens switch
+    private static string FormatTokens(int tokens)
     {
-        >= 1_000_000 => (tokens / 1_000_000.0).ToString("F1", CultureInfo.InvariantCulture) + "M",
-        >= 1_000 => (tokens / 1_000.0).ToString("F1", CultureInfo.InvariantCulture) + "K",
-        _ => tokens.ToString(CultureInfo.InvariantCulture),
-    };
+        return tokens switch
+        {
+            >= 1_000_000 => (tokens / 1_000_000.0).ToString(format: "F1", provider: CultureInfo.InvariantCulture) + "M",
+            >= 1_000 => (tokens / 1_000.0).ToString(format: "F1", provider: CultureInfo.InvariantCulture) + "K",
+            _ => tokens.ToString(CultureInfo.InvariantCulture)
+        };
+    }
+
 }

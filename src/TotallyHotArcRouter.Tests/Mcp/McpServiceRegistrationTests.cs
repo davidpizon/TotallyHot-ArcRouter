@@ -1,12 +1,11 @@
-using TotallyHot.ArcRouter.Hosting;
-using TotallyHot.ArcRouter.Mcp;
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Router;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Mcp;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp;
 
@@ -28,7 +27,8 @@ public sealed class McpServiceRegistrationTests
 
         services.AddTotallyHotArcRouter();
 
-        Assert.Contains(services, d => d.ServiceType == typeof(ManagementFacade) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(ManagementFacade) && d.Lifetime == ServiceLifetime.Singleton);
     }
 
     [Fact]
@@ -38,7 +38,8 @@ public sealed class McpServiceRegistrationTests
 
         services.AddTotallyHotArcRouter();
 
-        Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(McpHostedService));
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(McpHostedService));
     }
 
     [Fact]
@@ -56,7 +57,7 @@ public sealed class McpServiceRegistrationTests
         var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
 
         Assert.True(options.Enabled);
-        Assert.Equal(5003, options.Port);
+        Assert.Equal(5003, actual: options.Port);
     }
 
     [Fact]
@@ -75,4 +76,3 @@ public sealed class McpServiceRegistrationTests
         Assert.NotNull(provider.GetRequiredService<ManagementFacade>());
     }
 }
-

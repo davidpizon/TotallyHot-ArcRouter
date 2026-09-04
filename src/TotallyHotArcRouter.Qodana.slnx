@@ -1,0 +1,30 @@
+<!--
+  Analysis-only solution for the Qodana Community .NET linter (qodana-cdnet). That linter is a
+  third-party linter, so it runs exclusively in a Linux Docker container and has no native or
+  Windows mode. TotallyHotArcRouter.Gui and TotallyHotArcRouter.Gui.Tests target
+  net10.0-windows10.0.19041.0 and need the Windows-only WinUI XAML compiler, so building them
+  inside that container fails with "XamlCompiler output file was not created".
+
+  The dotnet section of qodana.yaml offers no project-exclusion or framework-filter option, so the
+  only way to scope the scan is a solution that omits those two projects. Nothing outside the pair
+  references TotallyHotArcRouter.Gui, so the remaining projects build standalone.
+
+  Keep in sync with TotallyHotArcRouter.slnx: every new project that builds cross-platform belongs
+  here too, or it is silently excluded from static analysis.
+-->
+<Solution>
+  <Folder Name="/Tests/">
+    <Project Path="TotallyHotArcRouter.Gui.Admin.Tests/TotallyHotArcRouter.Gui.Admin.Tests.csproj" />
+    <Project Path="TotallyHotArcRouter.Gui.Charts.Tests/TotallyHotArcRouter.Gui.Charts.Tests.csproj" />
+    <Project Path="TotallyHotArcRouter.Gui.Console.Tests/TotallyHotArcRouter.Gui.Console.Tests.csproj" />
+    <Project Path="TotallyHotArcRouter.Gui.Telemetry.Tests/TotallyHotArcRouter.Gui.Telemetry.Tests.csproj" />
+    <Project Path="TotallyHotArcRouter.Quality.Tests/TotallyHotArcRouter.Quality.Tests.csproj" />
+    <Project Path="TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj" />
+  </Folder>
+  <Project Path="TotallyHotArcRouter.Gui.Admin/TotallyHotArcRouter.Gui.Admin.csproj" />
+  <Project Path="TotallyHotArcRouter.Gui.Charts/TotallyHotArcRouter.Gui.Charts.csproj" />
+  <Project Path="TotallyHotArcRouter.Gui.Console/TotallyHotArcRouter.Gui.Console.csproj" />
+  <Project Path="TotallyHotArcRouter.Gui.Telemetry/TotallyHotArcRouter.Gui.Telemetry.csproj" />
+  <Project Path="TotallyHotArcRouter.Quality/TotallyHotArcRouter.Quality.csproj" />
+  <Project Path="TotallyHotArcRouter/TotallyHotArcRouter.csproj" />
+</Solution>

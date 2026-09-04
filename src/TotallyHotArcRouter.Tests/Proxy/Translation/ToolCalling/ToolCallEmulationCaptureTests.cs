@@ -4,7 +4,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 
 /// <summary>
 /// The evidence behind the emulation prompt's wording, as replies captured verbatim from a live model.
-///
 /// <para>
 /// Every string below was emitted by a real model served by LM Studio at temperature 0 - the first two
 /// sections by <c>qwen2.5.1-coder-7b-instruct</c> while tuning
@@ -15,14 +14,12 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// encodes what its author already believed, which is exactly what let the empty <c>tool_calls</c> array
 /// survive a green suite and two reviews.
 /// </para>
-///
 /// <para>
 /// These run offline and always, as does <see cref="ToolCallEmulationReplayTests"/> - the other half,
 /// which replays each recorded model's full transcript through the shipped rewriter and translator. The
 /// two divide the evidence: that one asks whether a model can be emulated at all, while this one pins the
 /// individual replies behind each wording choice, using the bytes that produced them.
 /// </para>
-///
 /// <para>
 /// The failing captures are deliberately asserted to yield <b>nothing</b>. They are not bugs awaiting a
 /// fix; they are the reason the prompt reads the way it does. Anyone who later teaches the scanner to
@@ -32,8 +29,10 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 public class ToolCallEmulationCaptureTests
 {
     /// <summary>Runs a captured reply through exactly the path an emulated response takes.</summary>
-    private static DialectMatchResult? Match(string capturedContent) =>
-        DialectMatcher.MatchAny(capturedContent, [ToolCallDialectRegistry.Emulated]);
+    private static DialectMatchResult? Match(string capturedContent)
+    {
+        return DialectMatcher.MatchAny(content: capturedContent, candidates: [ToolCallDialectRegistry.Emulated]);
+    }
 
     // ----- The shipped prompt: what it actually produces -----
 
@@ -57,8 +56,9 @@ public class ToolCallEmulationCaptureTests
             """);
 
         var call = Assert.Single(match!.ToolCalls);
-        Assert.Equal("get_time", call.Name);
-        Assert.Contains("Asia/Tokyo", call.ArgumentsJson, StringComparison.Ordinal);
+        Assert.Equal(expected: "get_time", actual: call.Name);
+        Assert.Contains(expectedSubstring: "Asia/Tokyo", actualString: call.ArgumentsJson,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -75,8 +75,8 @@ public class ToolCallEmulationCaptureTests
             </tools>
             """);
 
-        Assert.Equal(2, match!.ToolCalls.Count);
-        Assert.Equal(["get_time", "get_weather"], match.ToolCalls.Select(c => c.Name));
+        Assert.Equal(2, actual: match!.ToolCalls.Count);
+        Assert.Equal(expected: ["get_time", "get_weather"], actual: match.ToolCalls.Select(c => c.Name));
     }
 
     [Fact]
@@ -243,7 +243,8 @@ public class ToolCallEmulationCaptureTests
         // The false-positive scenario, and the one result in this whole exercise that should make a reader
         // uncomfortable. Asked for a haiku and explicitly told not to use tools, the model emitted a tool
         // call named after the first line of the haiku it never wrote.
-        var undelimited = """{"name": "Rustling waves crash.", "arguments": {"type": "string", "value": "Rustling waves crash."}}""";
+        var undelimited =
+            """{"name": "Rustling waves crash.", "arguments": {"type": "string", "value": "Rustling waves crash."}}""";
 
         // It yields nothing, so the shipped pipeline is safe today.
         Assert.Null(Match(undelimited));
@@ -252,7 +253,7 @@ public class ToolCallEmulationCaptureTests
         // prompt asked for extracts a call to a "tool" that is a line of poetry - proving the guard here is
         // the model's failure to follow instructions, not a check that the name matches an offered tool.
         var framed = Match($"<tool_call>{undelimited}</tool_call>");
-        Assert.Equal("Rustling waves crash.", Assert.Single(framed!.ToolCalls).Name);
+        Assert.Equal(expected: "Rustling waves crash.", actual: Assert.Single(framed!.ToolCalls).Name);
     }
 
     // ----- The server envelope, captured from the same session -----
@@ -266,4 +267,3 @@ public class ToolCallEmulationCaptureTests
         Assert.Null(Match("""<tools>{"type":"function","function":{"name":"get_time"}}</tools>"""));
     }
 }
-

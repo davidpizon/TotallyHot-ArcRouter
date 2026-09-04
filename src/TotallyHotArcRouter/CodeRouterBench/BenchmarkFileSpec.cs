@@ -29,13 +29,13 @@ public sealed record BenchmarkFileSpec(string FileName, BenchmarkFileKind Kind, 
     /// </summary>
     public static readonly IReadOnlyList<BenchmarkFileSpec> All =
     [
-        new("id_probing_results_long.csv", BenchmarkFileKind.IdResultsCsv, "probing", 56_640),
-        new("id_test_results_long.csv", BenchmarkFileKind.IdResultsCsv, "id_test", 23_352),
-        new("ood176_results_long.csv", BenchmarkFileKind.OodResultsCsv, null, 1_408),
-        new("id_probing_tasks.jsonl", BenchmarkFileKind.IdTasksJsonl, "probing", 7_080),
-        new("id_test_tasks.jsonl", BenchmarkFileKind.IdTasksJsonl, "id_test", 2_919),
-        new("ood176_tasks.jsonl", BenchmarkFileKind.OodTasksJsonl, null, 176),
-        new("models.json", BenchmarkFileKind.ModelsJson, null, 8),
-        new("summary.json", BenchmarkFileKind.SummaryJson, null, 5),
+        new(FileName: "id_probing_results_long.csv", Kind: BenchmarkFileKind.IdResultsCsv, Split: "probing", 56_640),
+        new(FileName: "id_test_results_long.csv", Kind: BenchmarkFileKind.IdResultsCsv, Split: "id_test", 23_352),
+        new(FileName: "ood176_results_long.csv", Kind: BenchmarkFileKind.OodResultsCsv, null, 1_408),
+        new(FileName: "id_probing_tasks.jsonl", Kind: BenchmarkFileKind.IdTasksJsonl, Split: "probing", 7_080),
+        new(FileName: "id_test_tasks.jsonl", Kind: BenchmarkFileKind.IdTasksJsonl, Split: "id_test", 2_919),
+        new(FileName: "ood176_tasks.jsonl", Kind: BenchmarkFileKind.OodTasksJsonl, null, 176),
+        new(FileName: "models.json", Kind: BenchmarkFileKind.ModelsJson, null, 8),
+        new(FileName: "summary.json", Kind: BenchmarkFileKind.SummaryJson, null, 5)
     ];
 }

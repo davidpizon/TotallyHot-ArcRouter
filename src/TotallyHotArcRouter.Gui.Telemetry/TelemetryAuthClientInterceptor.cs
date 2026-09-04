@@ -38,34 +38,44 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
     public override TResponse BlockingUnaryCall<TRequest, TResponse>(
         TRequest request,
         ClientInterceptorContext<TRequest, TResponse> context,
-        BlockingUnaryCallContinuation<TRequest, TResponse> continuation) =>
-        continuation(request, WithToken(context));
+        BlockingUnaryCallContinuation<TRequest, TResponse> continuation)
+    {
+        return continuation(request: request, context: WithToken(context));
+    }
 
     /// <inheritdoc/>
     public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(
         TRequest request,
         ClientInterceptorContext<TRequest, TResponse> context,
-        AsyncUnaryCallContinuation<TRequest, TResponse> continuation) =>
-        continuation(request, WithToken(context));
+        AsyncUnaryCallContinuation<TRequest, TResponse> continuation)
+    {
+        return continuation(request: request, context: WithToken(context));
+    }
 
     /// <inheritdoc/>
     public override AsyncServerStreamingCall<TResponse> AsyncServerStreamingCall<TRequest, TResponse>(
         TRequest request,
         ClientInterceptorContext<TRequest, TResponse> context,
-        AsyncServerStreamingCallContinuation<TRequest, TResponse> continuation) =>
-        continuation(request, WithToken(context));
+        AsyncServerStreamingCallContinuation<TRequest, TResponse> continuation)
+    {
+        return continuation(request: request, context: WithToken(context));
+    }
 
     /// <inheritdoc/>
     public override AsyncClientStreamingCall<TRequest, TResponse> AsyncClientStreamingCall<TRequest, TResponse>(
         ClientInterceptorContext<TRequest, TResponse> context,
-        AsyncClientStreamingCallContinuation<TRequest, TResponse> continuation) =>
-        continuation(WithToken(context));
+        AsyncClientStreamingCallContinuation<TRequest, TResponse> continuation)
+    {
+        return continuation(WithToken(context));
+    }
 
     /// <inheritdoc/>
     public override AsyncDuplexStreamingCall<TRequest, TResponse> AsyncDuplexStreamingCall<TRequest, TResponse>(
         ClientInterceptorContext<TRequest, TResponse> context,
-        AsyncDuplexStreamingCallContinuation<TRequest, TResponse> continuation) =>
-        continuation(WithToken(context));
+        AsyncDuplexStreamingCallContinuation<TRequest, TResponse> continuation)
+    {
+        return continuation(WithToken(context));
+    }
 
     /// <summary>
     /// Returns <paramref name="context"/> unchanged when no token is available (the call proceeds and the
@@ -81,26 +91,19 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
         where TResponse : class
     {
         var token = _explicitToken ?? TryReadToken(_tokenPath);
-        if (string.IsNullOrEmpty(token))
-        {
-            return context;
-        }
+        if (string.IsNullOrEmpty(token)) return context;
 
         var headers = new Metadata();
         if (context.Options.Headers is { } existing)
-        {
             foreach (var entry in existing)
-            {
-                if (!string.Equals(entry.Key, TokenHeaderName, StringComparison.OrdinalIgnoreCase))
-                {
+                if (!string.Equals(a: entry.Key, b: TokenHeaderName,
+                        comparisonType: StringComparison.OrdinalIgnoreCase))
                     headers.Add(entry);
-                }
-            }
-        }
 
-        headers.Add(TokenHeaderName, token);
+        headers.Add(key: TokenHeaderName, value: token);
         var options = context.Options.WithHeaders(headers);
-        return new ClientInterceptorContext<TRequest, TResponse>(context.Method, context.Host, options);
+        return new ClientInterceptorContext<TRequest, TResponse>(method: context.Method, host: context.Host,
+            options: options);
     }
 
     /// <summary>
@@ -114,10 +117,7 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
         {
             var tokenPath = path ?? DefaultTokenPath();
 
-            if (!File.Exists(tokenPath))
-            {
-                return null;
-            }
+            if (!File.Exists(tokenPath)) return null;
 
             var token = File.ReadAllText(tokenPath).Trim();
             return string.IsNullOrEmpty(token) ? null : token;
@@ -138,9 +138,11 @@ public sealed class TelemetryAuthClientInterceptor : Interceptor
     /// interactive user, so the per-user <c>%LOCALAPPDATA%</c> this used to read resolved to a different file
     /// than the one the router wrote. Must stay in step with <c>ManagementAccessToken.DefaultPath</c>.
     /// </summary>
-    private static string DefaultTokenPath() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "TotallyHotArcRouter",
-            TokenFileName);
+    private static string DefaultTokenPath()
+    {
+        return Path.Combine(
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: TokenFileName);
+    }
 }

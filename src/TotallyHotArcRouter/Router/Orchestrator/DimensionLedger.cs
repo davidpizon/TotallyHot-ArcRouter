@@ -19,8 +19,12 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// forbids retuning it here.
 /// </para>
 /// <para>
-/// <b>Dimension keys.</b> Every method takes the <see cref="RouterMemory"/> key <em>as the caller holds
-/// it</em> and queries live memory with exactly that spelling; only the probing-prior lookup strips
+/// <b>Dimension keys.</b> Every method takes the <see cref="RouterMemory"/> key
+/// <em>
+/// as the caller holds
+/// it
+/// </em>
+/// and queries live memory with exactly that spelling; only the probing-prior lookup strips
 /// <see cref="Quality.QualityOptions.LiveMemoryPrefix"/> back off, because the prior was built from
 /// unprefixed CodeRouterBench rows. Prepending the prefix here instead would silently miss live scores
 /// recorded under an unprefixed key, so the two sources are each queried under their own convention
@@ -32,9 +36,9 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </remarks>
 public sealed class DimensionLedger
 {
-    private readonly RouterMemory _routerMemory;
-    private readonly DimensionModelScoreMatrix? _priorMatrix;
     private readonly string _liveMemoryPrefix;
+    private readonly DimensionModelScoreMatrix? _priorMatrix;
+    private readonly RouterMemory _routerMemory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DimensionLedger"/> class.
@@ -45,7 +49,10 @@ public sealed class DimensionLedger
     /// this machine - in which case this ledger scores from live memory only, exactly as
     /// <see cref="DimBestVoter"/> already degrades.
     /// </param>
-    /// <param name="liveMemoryPrefix">The <see cref="Quality.QualityOptions.LiveMemoryPrefix"/> applied to reach live-memory keys.</param>
+    /// <param name="liveMemoryPrefix">
+    /// The <see cref="Quality.QualityOptions.LiveMemoryPrefix"/> applied to reach live-memory
+    /// keys.
+    /// </param>
     public DimensionLedger(RouterMemory routerMemory, DimensionModelScoreMatrix? priorMatrix, string liveMemoryPrefix)
     {
         ArgumentNullException.ThrowIfNull(routerMemory);
@@ -61,15 +68,18 @@ public sealed class DimensionLedger
     /// <paramref name="dimension"/>, or <see langword="null"/> when neither the live average nor the prior
     /// has a value for that cell.
     /// </summary>
-    /// <param name="dimension">The live-memory dimension key, used verbatim; the prior lookup strips the live prefix if present.</param>
+    /// <param name="dimension">
+    /// The live-memory dimension key, used verbatim; the prior lookup strips the live prefix if
+    /// present.
+    /// </param>
     /// <param name="model">Any spelling of a model id; matched through <c>ModelNameCanonicalizer</c> by both sources.</param>
     public double? Predict(string dimension, string model)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dimension);
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
 
-        return _routerMemory.GetAverageScore(dimension, model)
-            ?? _priorMatrix?.AverageScore(BareDimension(dimension), model);
+        return _routerMemory.GetAverageScore(dimension: dimension, model: model)
+               ?? _priorMatrix?.AverageScore(dimension: BareDimension(dimension), model: model);
     }
 
     /// <summary>
@@ -77,7 +87,10 @@ public sealed class DimensionLedger
     /// <paramref name="dimension"/> with <paramref name="observedScore"/> removed from the live average
     /// first - the held-out prediction Phase T4's mean-absolute-error comparison scores against.
     /// </summary>
-    /// <param name="dimension">The live-memory dimension key, used verbatim; the prior lookup strips the live prefix if present.</param>
+    /// <param name="dimension">
+    /// The live-memory dimension key, used verbatim; the prior lookup strips the live prefix if
+    /// present.
+    /// </param>
     /// <param name="model">The model whose cell the observation landed in.</param>
     /// <param name="observedScore">The observation to exclude, already folded into the live average by the time this runs.</param>
     /// <returns>
@@ -99,16 +112,13 @@ public sealed class DimensionLedger
         ArgumentException.ThrowIfNullOrWhiteSpace(dimension);
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
 
-        var prior = _priorMatrix?.AverageScore(BareDimension(dimension), model);
+        var prior = _priorMatrix?.AverageScore(dimension: BareDimension(dimension), model: model);
 
-        var mean = _routerMemory.GetAverageScore(dimension, model);
-        if (mean is null)
-        {
-            return prior;
-        }
+        var mean = _routerMemory.GetAverageScore(dimension: dimension, model: model);
+        if (mean is null) return prior;
 
-        var count = _routerMemory.GetObservationCount(dimension, model);
-        return LeaveOneOutMean(mean.Value, count, observedScore) ?? prior;
+        var count = _routerMemory.GetObservationCount(dimension: dimension, model: model);
+        return LeaveOneOutMean(mean: mean.Value, count: count, observedScore: observedScore) ?? prior;
     }
 
     /// <summary>
@@ -117,10 +127,12 @@ public sealed class DimensionLedger
     /// </summary>
     /// <param name="dimension">The dimension key as the caller holds it.</param>
     /// <returns>The key without the live-memory prefix.</returns>
-    private string BareDimension(string dimension) =>
-        dimension.StartsWith(_liveMemoryPrefix, StringComparison.Ordinal)
+    private string BareDimension(string dimension)
+    {
+        return dimension.StartsWith(value: _liveMemoryPrefix, comparisonType: StringComparison.Ordinal)
             ? dimension[_liveMemoryPrefix.Length..]
             : dimension;
+    }
 
     /// <summary>
     /// Removes one observation from a mean, returning the mean of the remaining observations - the shared
@@ -128,12 +140,17 @@ public sealed class DimensionLedger
     /// <see cref="ClusterLedger.PredictLeaveOneOut"/>).
     /// </summary>
     /// <param name="mean">The mean including <paramref name="observedScore"/>.</param>
-    /// <param name="count">The number of observations behind <paramref name="mean"/>, including <paramref name="observedScore"/>.</param>
+    /// <param name="count">
+    /// The number of observations behind <paramref name="mean"/>, including
+    /// <paramref name="observedScore"/>.
+    /// </param>
     /// <param name="observedScore">The observation to remove.</param>
     /// <returns>
     /// The mean of the other observations, or <see langword="null"/> when <paramref name="count"/> is 1 or
     /// less and removing this observation would leave nothing to average.
     /// </returns>
-    internal static double? LeaveOneOutMean(double mean, int count, double observedScore) =>
-        count <= 1 ? null : ((mean * count) - observedScore) / (count - 1);
+    internal static double? LeaveOneOutMean(double mean, int count, double observedScore)
+    {
+        return count <= 1 ? null : (mean * count - observedScore) / (count - 1);
+    }
 }

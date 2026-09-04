@@ -1,6 +1,6 @@
+using AwesomeAssertions;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -20,9 +20,9 @@ public sealed class RoutingGateStoreTests
     public async Task PollLoop_SuccessfulPoll_SetsReachableAndEnabled()
     {
         var client = new FakeRoutingGateAdminClient { EnabledResult = false };
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
 
-        await WaitUntilAsync(() => store.IsReachable, WaitTimeout);
+        await WaitUntilAsync(condition: () => store.IsReachable, timeout: WaitTimeout);
 
         store.IsEnabled.Should().BeFalse();
     }
@@ -31,17 +31,17 @@ public sealed class RoutingGateStoreTests
     public async Task PollLoop_UnavailableFailure_SetsUnreachable_AndRaisesBecameUnusableExactlyOnce()
     {
         var client = new FakeRoutingGateAdminClient();
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
-        await WaitUntilAsync(() => store.IsReachable, WaitTimeout);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
+        await WaitUntilAsync(condition: () => store.IsReachable, timeout: WaitTimeout);
 
         var becameUnusableCount = 0;
         store.BecameUnusable += () => Interlocked.Increment(ref becameUnusableCount);
-        client.GetFailure = new RoutingGateAdminException("router is gone", isUnavailable: true);
+        client.GetFailure = new RoutingGateAdminException(message: "router is gone", isUnavailable: true);
 
-        await WaitUntilAsync(() => !store.IsReachable, WaitTimeout);
+        await WaitUntilAsync(condition: () => !store.IsReachable, timeout: WaitTimeout);
         // Give several more poll ticks a chance to run, to prove BecameUnusable doesn't fire again
         // while the router stays down.
-        await Task.Delay(FastPoll * 10, TestContext.Current.CancellationToken);
+        await Task.Delay(delay: FastPoll * 10, cancellationToken: TestContext.Current.CancellationToken);
 
         becameUnusableCount.Should().Be(1);
     }
@@ -51,11 +51,12 @@ public sealed class RoutingGateStoreTests
     {
         var client = new FakeRoutingGateAdminClient
         {
-            GetFailure = new RoutingGateAdminException("router is gone", isUnavailable: true),
+            GetFailure = new RoutingGateAdminException(message: "router is gone", isUnavailable: true)
         };
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
 
-        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Unreachable, WaitTimeout);
+        await WaitUntilAsync(condition: () => store.ConnectionState == RouterConnectionState.Unreachable,
+            timeout: WaitTimeout);
 
         store.IsReachable.Should().BeFalse();
         store.IsUsable.Should().BeFalse();
@@ -69,11 +70,12 @@ public sealed class RoutingGateStoreTests
     {
         var client = new FakeRoutingGateAdminClient
         {
-            GetFailure = new RoutingGateAdminException("Could not update the routing gate: bad token"),
+            GetFailure = new RoutingGateAdminException("Could not update the routing gate: bad token")
         };
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
 
-        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Rejected, WaitTimeout);
+        await WaitUntilAsync(condition: () => store.ConnectionState == RouterConnectionState.Rejected,
+            timeout: WaitTimeout);
 
         store.IsReachable.Should().BeTrue("a router that answers with an error is still reachable");
         store.IsUsable.Should().BeFalse("the routing toggle still has nothing it can act on");
@@ -85,14 +87,15 @@ public sealed class RoutingGateStoreTests
     {
         var client = new FakeRoutingGateAdminClient
         {
-            GetFailure = new RoutingGateAdminException("bad token"),
+            GetFailure = new RoutingGateAdminException("bad token")
         };
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
-        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Rejected, WaitTimeout);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
+        await WaitUntilAsync(condition: () => store.ConnectionState == RouterConnectionState.Rejected,
+            timeout: WaitTimeout);
 
         client.GetFailure = null;
 
-        await WaitUntilAsync(() => store.IsUsable, WaitTimeout);
+        await WaitUntilAsync(condition: () => store.IsUsable, timeout: WaitTimeout);
         store.LastFailureMessage.Should().BeNull();
     }
 
@@ -100,15 +103,16 @@ public sealed class RoutingGateStoreTests
     public async Task PollLoop_RejectedFailure_RaisesBecameUnusableExactlyOnce()
     {
         var client = new FakeRoutingGateAdminClient();
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
-        await WaitUntilAsync(() => store.IsUsable, WaitTimeout);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
+        await WaitUntilAsync(condition: () => store.IsUsable, timeout: WaitTimeout);
 
         var becameUnusableCount = 0;
         store.BecameUnusable += () => Interlocked.Increment(ref becameUnusableCount);
         client.GetFailure = new RoutingGateAdminException("bad token");
 
-        await WaitUntilAsync(() => store.ConnectionState == RouterConnectionState.Rejected, WaitTimeout);
-        await Task.Delay(FastPoll * 10, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(condition: () => store.ConnectionState == RouterConnectionState.Rejected,
+            timeout: WaitTimeout);
+        await Task.Delay(delay: FastPoll * 10, cancellationToken: TestContext.Current.CancellationToken);
 
         becameUnusableCount.Should().Be(1);
     }
@@ -119,7 +123,7 @@ public sealed class RoutingGateStoreTests
         // Matches the poll's own answer so a concurrent poll tick can't race this assertion to a different
         // value - only RoutingGateStore.SetAsync's own update is asserted here, not poll timing.
         var client = new FakeRoutingGateAdminClient { EnabledResult = true };
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
 
         var confirmed = await store.EnableAsync(TestContext.Current.CancellationToken);
 
@@ -133,7 +137,7 @@ public sealed class RoutingGateStoreTests
     public async Task DisableAsync_SetsDisabled_AndReturnsTheConfirmedState()
     {
         var client = new FakeRoutingGateAdminClient { EnabledResult = false };
-        await using var store = new RoutingGateStore(client, pollInterval: FastPoll);
+        await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
 
         var confirmed = await store.DisableAsync(TestContext.Current.CancellationToken);
 
@@ -147,12 +151,9 @@ public sealed class RoutingGateStoreTests
         var deadline = DateTime.UtcNow + timeout;
         while (!condition())
         {
-            if (DateTime.UtcNow > deadline)
-            {
-                throw new TimeoutException("Condition was not met in time.");
-            }
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("Condition was not met in time.");
 
-            await Task.Delay(10, TestContext.Current.CancellationToken);
+            await Task.Delay(10, cancellationToken: TestContext.Current.CancellationToken);
         }
     }
 
@@ -164,8 +165,10 @@ public sealed class RoutingGateStoreTests
 
         public bool? LastSetValue { get; private set; }
 
-        public Task<bool> GetAsync(CancellationToken cancellationToken = default) =>
-            GetFailure is not null ? Task.FromException<bool>(GetFailure) : Task.FromResult(EnabledResult);
+        public Task<bool> GetAsync(CancellationToken cancellationToken = default)
+        {
+            return GetFailure is not null ? Task.FromException<bool>(GetFailure) : Task.FromResult(EnabledResult);
+        }
 
         public Task<bool> SetAsync(bool enabled, CancellationToken cancellationToken = default)
         {

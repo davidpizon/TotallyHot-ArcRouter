@@ -14,7 +14,7 @@ public class TextTruncatorTests
     [Fact]
     public void Truncate_ShorterThanMax_ReturnsUnchanged()
     {
-        Assert.Equal("hello", TextTruncator.Truncate("hello", maxLength: 10));
+        Assert.Equal(expected: "hello", actual: TextTruncator.Truncate(text: "hello", 10));
     }
 
     [Fact]
@@ -22,7 +22,7 @@ public class TextTruncatorTests
     {
         var text = new string('a', 10);
 
-        Assert.Equal(text, TextTruncator.Truncate(text, maxLength: 10));
+        Assert.Equal(expected: text, actual: TextTruncator.Truncate(text: text, 10));
     }
 
     [Fact]
@@ -30,9 +30,9 @@ public class TextTruncatorTests
     {
         var text = new string('a', 15);
 
-        var result = TextTruncator.Truncate(text, maxLength: 10);
+        var result = TextTruncator.Truncate(text: text, 10);
 
-        Assert.Equal(new string('a', 10) + "…", result);
+        Assert.Equal(expected: new string('a', 10) + "…", actual: result);
     }
 
     [Theory]
@@ -40,13 +40,12 @@ public class TextTruncatorTests
     [InlineData(-1)]
     public void Truncate_NonPositiveMaxLength_Throws(int maxLength)
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => TextTruncator.Truncate("hello", maxLength));
+        Assert.Throws<ArgumentOutOfRangeException>(() => TextTruncator.Truncate(text: "hello", maxLength: maxLength));
     }
 
     [Fact]
     public void Truncate_DefaultMaxLength_Is2000()
     {
-        Assert.Equal(2000, TextTruncator.DefaultMaxLength);
+        Assert.Equal(2000, actual: TextTruncator.DefaultMaxLength);
     }
 }
-

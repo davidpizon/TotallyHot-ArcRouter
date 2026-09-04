@@ -1,9 +1,8 @@
+using AwesomeAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using AwesomeAssertions;
-using Microsoft.Extensions.Logging.Abstractions;
-using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 
@@ -16,49 +15,32 @@ public sealed class MsiUpdateApplierTests
 {
     private const string MsiContent = "fake-msi-bytes";
 
-    private static string Sha256Of(string content) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-
-    private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    private static string Sha256Of(string content)
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(respond(request));
-    }
-
-    private sealed class FakeLauncher : IElevatedProcessLauncher
-    {
-        public (string FileName, IReadOnlyList<string> Arguments)? LastCall { get; private set; }
-        public Exception? ThrowOnLaunch { get; set; }
-
-        public void Launch(string fileName, IReadOnlyList<string> arguments)
-        {
-            if (ThrowOnLaunch is not null)
-            {
-                throw ThrowOnLaunch;
-            }
-
-            LastCall = (fileName, arguments);
-        }
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
     }
 
     private static MsiUpdateApplier CreateApplier(
         Func<HttpRequestMessage, HttpResponseMessage> respond,
-        FakeLauncher launcher) =>
-        new(new HttpClient(new FakeHandler(respond)), NullLogger<MsiUpdateApplier>.Instance, launcher);
+        FakeLauncher launcher)
+    {
+        return new MsiUpdateApplier(httpClient: new HttpClient(new FakeHandler(respond)),
+            logger: NullLogger<MsiUpdateApplier>.Instance, launcher: launcher);
+    }
 
     [Fact]
     public async Task ApplyAsync_ValidChecksum_LaunchesMsiexecElevated()
     {
         var launcher = new FakeLauncher();
         var applier = CreateApplier(
-            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MsiContent) },
-            launcher);
+            respond: _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MsiContent) },
+            launcher: launcher);
 
         var result = await applier.ApplyAsync(
-            "https://example.test/a.msi",
-            Sha256Of(MsiContent),
-            "2.0.0",
-            TestContext.Current.CancellationToken);
+            assetDownloadUrl: "https://example.test/a.msi",
+            assetSha256: Sha256Of(MsiContent),
+            latestVersion: "2.0.0",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         result.Succeeded.Should().BeTrue();
         launcher.LastCall.Should().NotBeNull();
@@ -72,14 +54,14 @@ public sealed class MsiUpdateApplierTests
     {
         var launcher = new FakeLauncher();
         var applier = CreateApplier(
-            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MsiContent) },
-            launcher);
+            respond: _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MsiContent) },
+            launcher: launcher);
 
         var result = await applier.ApplyAsync(
-            "https://example.test/a.msi",
-            "0000000000000000000000000000000000000000000000000000000000000",
-            "2.0.0",
-            TestContext.Current.CancellationToken);
+            assetDownloadUrl: "https://example.test/a.msi",
+            assetSha256: "0000000000000000000000000000000000000000000000000000000000000",
+            latestVersion: "2.0.0",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         result.Succeeded.Should().BeFalse();
         launcher.LastCall.Should().BeNull();
@@ -89,13 +71,14 @@ public sealed class MsiUpdateApplierTests
     public async Task ApplyAsync_DownloadFails_ReportsFailure()
     {
         var launcher = new FakeLauncher();
-        var applier = CreateApplier(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError), launcher);
+        var applier = CreateApplier(respond: _ => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+            launcher: launcher);
 
         var result = await applier.ApplyAsync(
-            "https://example.test/a.msi",
-            Sha256Of(MsiContent),
-            "2.0.0",
-            TestContext.Current.CancellationToken);
+            assetDownloadUrl: "https://example.test/a.msi",
+            assetSha256: Sha256Of(MsiContent),
+            latestVersion: "2.0.0",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         result.Succeeded.Should().BeFalse();
         launcher.LastCall.Should().BeNull();
@@ -106,14 +89,14 @@ public sealed class MsiUpdateApplierTests
     {
         var launcher = new FakeLauncher { ThrowOnLaunch = new InvalidOperationException("no elevation") };
         var applier = CreateApplier(
-            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MsiContent) },
-            launcher);
+            respond: _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MsiContent) },
+            launcher: launcher);
 
         var result = await applier.ApplyAsync(
-            "https://example.test/a.msi",
-            Sha256Of(MsiContent),
-            "2.0.0",
-            TestContext.Current.CancellationToken);
+            assetDownloadUrl: "https://example.test/a.msi",
+            assetSha256: Sha256Of(MsiContent),
+            latestVersion: "2.0.0",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         result.Succeeded.Should().BeFalse();
         result.Message.Should().Contain("no elevation");
@@ -122,8 +105,8 @@ public sealed class MsiUpdateApplierTests
     [Fact]
     public void Constructor_ThrowsOnNullDependencies()
     {
-        var act1 = () => new MsiUpdateApplier(null!, NullLogger<MsiUpdateApplier>.Instance);
-        var act2 = () => new MsiUpdateApplier(new HttpClient(), null!);
+        var act1 = () => new MsiUpdateApplier(httpClient: null!, logger: NullLogger<MsiUpdateApplier>.Instance);
+        var act2 = () => new MsiUpdateApplier(httpClient: new HttpClient(), logger: null!);
 
         act1.Should().Throw<ArgumentNullException>();
         act2.Should().Throw<ArgumentNullException>();
@@ -135,5 +118,27 @@ public sealed class MsiUpdateApplierTests
         var launcher = new ElevatedProcessLauncher();
 
         launcher.Should().NotBeNull();
+    }
+
+    private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(respond(request));
+        }
+    }
+
+    private sealed class FakeLauncher : IElevatedProcessLauncher
+    {
+        public (string FileName, IReadOnlyList<string> Arguments)? LastCall { get; private set; }
+        public Exception? ThrowOnLaunch { get; init; }
+
+        public void Launch(string fileName, IReadOnlyList<string> arguments)
+        {
+            if (ThrowOnLaunch is not null) throw ThrowOnLaunch;
+
+            LastCall = (fileName, arguments);
+        }
     }
 }

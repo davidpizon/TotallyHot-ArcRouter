@@ -1,0 +1,166 @@
+<wpf:ResourceDictionary xml:space="preserve"
+                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                        xmlns:s="clr-namespace:System;assembly=mscorlib"
+                        xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml"
+                        xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+
+  <!--
+    ReSharper inspection severities for the Qodana Community for .NET scan (see qodana.yaml).
+
+    This file exists because that linter reads settings from here and nowhere else: per JetBrains'
+    own documentation, "the Qodana Community for .NET linter does not support profiles and their
+    configuration options", and it picks up ".DotSettings" files instead. Two earlier attempts to
+    express these decisions in qodana.yaml - a top-level `exclude:` list, then the documented
+    `profile.base` + `inspections` form - were both accepted without complaint and silently ignored:
+    the runs on 98a3c95 and 6660580 still reported every finding they were meant to drop.
+
+    Every entry below is an inspection whose finding is wrong for this codebase, with the reason
+    recorded. Nothing is turned off to make a number go down; a finding that is merely tedious to fix
+    is fixed in the code instead. Inspection ids encode "." as "_002E".
+  -->
+
+  <!--
+    Record positional properties that only a serializer ever reads.
+
+    These fire on the JSON wire contracts: ProviderAdminModels.cs alone is 37 records behind the
+    proxy's /admin/* API, and LocalEndpointResponder's records are the /v1/models, /api/tags and
+    /api/show payloads. Their properties are constructed in C# and then read by System.Text.Json
+    through reflection, which the inspection cannot see, so it reports every wire field as unused.
+    Acting on it would delete the fields and silently break the API.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=NotAccessedPositionalProperty_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=NotAccessedPositionalProperty_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This property needs no setter."
+
+    All 13 sites are places where the writer is not C# code the analyzer can follow:
+      - 11 are options classes bound with configuration.GetSection(...).Bind(options). The binder
+        assigns through the property setter by reflection, so removing the setter does not fail the
+        build - it makes the option silently keep its default and ignore appsettings.json, which no
+        test would catch.
+      - 2 are DialectDelimiter's validating overrides of a positional record's properties. That
+        file's own comment records why "init" is load-bearing there: "with" copies set "init"
+        properties directly, bypassing the field initializer that performs the validation.
+
+    PropertyCanBeMadeInitOnly stays enabled and has been applied - "init" keeps a setter, so binding
+    and System.Text.Json both still work; only removing the setter breaks them.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=AutoPropertyCanBeMadeGetOnly_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This public member/type is unused" - the whole family.
+
+    The scan cannot see two of this codebase's largest callers, so "unused" is not a claim it is in a
+    position to make about public API:
+
+      1. TotallyHotArcRouter.Gui and .Gui.Tests are deliberately absent from
+         TotallyHotArcRouter.Qodana.slnx - they target net10.0-windows and cannot build in the Linux
+         container this linter runs in (see that file's own header). 68 of the 132 production
+         findings in this family name an identifier that appears in those two projects.
+      2. The rest are constructed or written by a framework through reflection: System.Text.Json
+         (HuggingFaceTreeEntry and friends exist only as ReadFromJsonAsync<T> targets), ASP.NET Core
+         model binding (SecretWriteRequest, ModelEnabledWriteRequest are minimal-API handler
+         parameters), and the configuration binder.
+
+    Acting on these would delete or restrict API the GUI actually calls, and nothing would catch it:
+    the Windows GUI build/test job in dotnet-ci.yml is "if: false", so no CI job compiles that code.
+    Re-enabling that job, or bringing the GUI into a scan that can build it, is what would make this
+    family trustworthy again - at which point these entries should be removed and the findings
+    re-read.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBePrivate_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMemberInSuper_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ClassNeverInstantiated_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMethodReturnValue_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMember_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedAutoPropertyAccessor_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedType_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=EventNeverSubscribedTo_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    Abbreviations. "AI" is load-bearing, not cosmetic: ProviderType.OpenAI and ProviderType.AzureOpenAI
+    are persisted by member name - ProviderTemplate.DisplayName's remarks record that the display label
+    is deliberately separate from the stored value - so taking the rename to OpenAi/AzureOpenAi would
+    silently invalidate every provider configuration already on disk. "BE" is big-endian, in
+    BedrockProviderTests' WriteUInt32BE helper.
+  -->
+  <s:Boolean x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=AI/@EntryIndexedValue">True</s:Boolean>
+  <s:Boolean x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=BE/@EntryIndexedValue">True</s:Boolean>
+
+  <!--
+    "This method has an async overload with cancellation support."
+
+    All three are SqliteCommand.ExecuteReader inside OodBootstrapSampleSource and
+    OodClusterBootstrapSampleSource. Microsoft.Data.Sqlite's async surface is synchronous underneath
+    - SQLite has no async I/O, so ExecuteReaderAsync forwards to ExecuteReader and returns a
+    completed Task. Adopting it here would add a state machine and a Task per row-set to a
+    corpus-loading loop while releasing no thread and honouring no cancellation the synchronous call
+    does not already honour, since it never yields.
+
+    These are solution-wide rather than test-scoped because the sites are production.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MethodHasAsyncOverloadWithCancellation/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This if/else can be a ?: inside one call."
+
+    StartupHealthCheckHostedService's only site logs one of two messages depending on whether the
+    pricing database already existed. Taking the advice means selecting the message template with a
+    ternary inside the LogInformation call - and AGENTS.md requires the template to stay a static
+    string literal, never interpolated or computed, so structured-logging tools can group on it. The
+    inspection is asking for exactly what that rule forbids.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConvertIfStatementToConditionalTernaryExpression/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This private field is always assigned before use and can be a local."
+
+    All three are readonly fields on RequestInterceptor, assigned once in its constructor. AGENTS.md
+    names RequestInterceptor as one of three hubs whose edits need a CodeGraph blast-radius pass
+    first, and there is nothing here to buy with that: converting a constructor-injected readonly
+    dependency into a local would mean constructing it per call instead.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=PrivateFieldCanBeConvertedToLocalVariable/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This parameter is unused / its return value is never used / this switch arm is redundant."
+
+    Three families that are each right about the code and wrong about what to do:
+
+      - UnusedParameter: ProviderAdminEndpoints' `key` parameters are bound from the route template
+        by ASP.NET and must keep their names; ProxyMiddleware.InvokeCoreAsync's `next` is the
+        middleware shape; TelemetryPublisher's and SpendTracker's `cancellationToken` and
+        IDimensionInferrer's `language` are interface contracts, and "no current implementation uses
+        it" is not a statement about the API.
+      - UnusedMethodReturnValue: AddUpdate, AddQualityAndObservability and AddBackgroundServices
+        return IServiceCollection because that is the fluent DI convention, whether or not today's
+        caller chains from it.
+      - RedundantSwitchExpressionArms: an explicit `MetricRange.AllTime => DateTimeOffset.MinValue`
+        alongside the default documents that AllTime is deliberately unbounded rather than falling
+        through by accident.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedParameter_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedParameter_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMethodReturnValue_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=RedundantSwitchExpressionArms/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "Replace this backing field with the `field` keyword."
+
+    DeferredTelemetryPublisher's _resolved cache. Declined for the same reason the `with` element was
+    reverted on this branch: `field` is brand-new syntax whose payoff is a saved declaration line,
+    and the cost is a reader who has to know it. Revisit when it is unremarkable.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ReplaceWithFieldKeyword/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "Simplify this string interpolation."
+
+    LogLineFormatter's only site would inline the named TimestampFormat constant as a literal format
+    specifier, because a specifier cannot reference a constant. Trading a named constant for a magic
+    string inside an interpolation is not a simplification.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=SimplifyStringInterpolation/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+</wpf:ResourceDictionary>

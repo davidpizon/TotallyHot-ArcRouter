@@ -1,727 +1,752 @@
+using Microsoft.Extensions.Options;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Quality.Extraction;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Quality.Extraction;
+using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
-namespace TotallyHot.ArcRouter.Proxy
+namespace TotallyHot.ArcRouter.Proxy;
+
+/// <summary>
+/// Sits between the proxy's inbound HTTP pipeline and the upstream forward: resolves each request's
+/// requested model against the known-model allowlist, rewrites it to the upstream provider's model
+/// id, and answers the client-facing model discovery endpoint.
+/// </summary>
+public class RequestInterceptor
 {
     /// <summary>
-    /// Sits between the proxy's inbound HTTP pipeline and the upstream forward: resolves each request's
-    /// requested model against the known-model allowlist, rewrites it to the upstream provider's model
-    /// id, and answers the client-facing model discovery endpoint.
+    /// The reserved, client-facing model name that explicitly asks the router to choose the model
+    /// itself instead of naming one - the same auto-select the generalized fallback performs for an
+    /// unresolved name, but requested deliberately rather than as a recovery. Matched
+    /// case-insensitively, and it wins over a configured model of the same name so the meaning of
+    /// <c>"model": "auto"</c> never depends on the operator's model list. Unlike
+    /// <see cref="RouterModelName"/> this name is never advertised by
+    /// <see cref="ListAvailableModels"/>; it remains accepted for callers that already send it.
     /// </summary>
-    public class RequestInterceptor
+    internal const string AutoSelectModelName = "auto";
+
+    /// <summary>
+    /// The advertised alias for <see cref="AutoSelectModelName"/>, and the only one of the two that
+    /// <see cref="ListAvailableModels"/> surfaces as a selectable entry. It exists because editors
+    /// that attach to this proxy as a provider (Visual Studio's Ollama picker, VS Code/Copilot's
+    /// OpenAI-compatible provider) force the user to pick one name from the discovery response, and
+    /// so offer no other way to express "you choose". Spelled as an Ollama-safe slug - no spaces, no
+    /// tag separator - so it round-trips unmodified through both clients.
+    /// </summary>
+    internal const string RouterModelName = "totallyhot-arcrouter";
+
+    /// <summary>
+    /// The <c>owned_by</c> value reported for <see cref="RouterModelName"/> on the OpenAI-shaped
+    /// discovery endpoint. Deliberately not a real provider key: the entry is a request for a routing
+    /// decision rather than a route, so no configured provider owns it.
+    /// </summary>
+    /// <remarks>
+    /// Internal rather than private so <see cref="ProxyMiddleware"/> can recognize the synthetic entry
+    /// by provider when describing it on <c>/api/show</c>. Matching on this rather than on
+    /// <see cref="RouterModelName"/> matters: an operator may legitimately configure a real model named
+    /// <c>totallyhot-arcrouter</c>, but nothing can configure a provider under a key that is documented
+    /// never to be one.
+    /// </remarks>
+    internal const string RouterModelProvider = "totallyhot";
+
+    /// <summary>
+    /// Caps the length of a full request/response body before it is placed in a Debug-level log message,
+    /// so an unbounded payload never floods a text log sink. Applied on top of <see cref="SanitizeForLog"/>,
+    /// never in place of it.
+    /// </summary>
+    private const int MaxLoggedBodyLength = 4000;
+
+    private readonly ICircuitBreaker _circuitBreaker;
+    private readonly IDimensionInferrer _dimensionInferrer;
+    private readonly int _embeddingBudgetMs;
+    private readonly IEmbeddingClient? _embeddingClient;
+    private readonly EmbeddingWarmupState? _embeddingWarmupState;
+    private readonly string? _forcedModelName;
+    private readonly IProviderInteractionStatusStore? _interactionStatusStore;
+    private readonly string _liveMemoryPrefix;
+
+    private readonly ILogger<RequestInterceptor> _logger;
+    private readonly IModelRouteResolver _modelRouteResolver;
+    private readonly IRequestClassifier _requestClassifier;
+    private readonly RouterMemory? _routerMemory;
+
+    /// <summary>
+    /// Owns circuit-breaker-eligible candidate building/ranking (see <see cref="RoutingCandidateBuilder"/>),
+    /// constructed from this class's own collaborators rather than taken as a separate constructor
+    /// parameter - every input it needs (<see cref="_circuitBreaker"/>, <see cref="_modelRouteResolver"/>,
+    /// <see cref="_routerMemory"/>, <see cref="_interactionStatusStore"/>, <see cref="_logger"/>) is
+    /// already required or optional here, so adding a fourteenth constructor parameter would only
+    /// duplicate what this class already holds.
+    /// </summary>
+    private readonly RoutingCandidateBuilder _routingCandidateBuilder;
+
+    private readonly IRoutingPolicy? _routingPolicy;
+
+    /// <param name="logger">The logger.</param>
+    /// <param name="modelRouteResolver">The known-model allowlist/resolver.</param>
+    /// <param name="singleModelServingOptions">
+    /// Optional Local Proxy CLI single-model override (see <see cref="SingleModelServingOptions"/>).
+    /// When its <see cref="SingleModelServingOptions.ForcedModelName"/> is set, it must already be one of
+    /// <paramref name="modelRouteResolver"/>'s configured models - checked eagerly here so an invalid
+    /// <c>--model</c> CLI value fails at startup, not on the first request.
+    /// </param>
+    /// <param name="routerMemory">
+    /// Optional score memory consulted whenever a substitute/fallback candidate must be ranked (an
+    /// unresolved <c>model</c> - see <see cref="ResolveModelRouteAsync"/> - or a circuit-open primary,
+    /// see <c>docs/router/agent-resilience-strategies.md</c>). <see langword="null"/> disables
+    /// score-based ranking (every candidate is treated as cold-start).
+    /// </param>
+    /// <param name="circuitBreaker">
+    /// Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>).
+    /// Defaults to a fresh, always-CLOSED <see cref="TotallyHot.ArcRouter.Proxy.CircuitBreaker"/> instance when
+    /// omitted - behaviorally inert until something records a failure against it. In the real app this
+    /// must be the <em>same</em> DI singleton instance also given to <see cref="ProxyMiddleware"/> (see
+    /// <c>ServiceCollectionExtensions</c>), since <see cref="ProxyMiddleware"/> is what records
+    /// successes/failures this class reads back when ranking candidates.
+    /// </param>
+    /// <param name="dimensionInferrer">
+    /// Infers the live dimension of the request in flight from its newest user message. Defaults to a
+    /// fresh <see cref="KeywordDimensionInferrer"/> when omitted - the same heuristic the verifier's
+    /// post-response path uses, so a request and its own later-observed score are classified
+    /// identically. Also the default <paramref name="requestClassifier"/>'s dimension source when
+    /// that parameter itself is omitted.
+    /// </param>
+    /// <param name="qualityOptions">
+    /// Optional source of <see cref="QualityOptions.LiveMemoryPrefix"/>, which must match what
+    /// <see cref="Router.RouterMemoryScoreObserver"/> writes under for <paramref name="routerMemory"/>
+    /// lookups to ever hit. Defaults to <see cref="QualityOptions"/>'s own default prefix when omitted.
+    /// </param>
+    /// <param name="requestClassifier">
+    /// PLAN.md Phase H's Context-leg classifier, run ahead of routing on every request. Defaults to a
+    /// <see cref="HeuristicRequestClassifier"/> built over <paramref name="dimensionInferrer"/> when
+    /// omitted, so its dimension output matches <see cref="ResolveModelRouteAsync"/>'s classification by construction.
+    /// </param>
+    /// <param name="routingPolicy">
+    /// PLAN.md Phase I's Action leg (<c>docs/router/utility-model-routing.md</c> §B4): consulted, when
+    /// supplied, to pick the model for the router alias and the unresolved-model fallback instead of
+    /// the memory-only ranking <see cref="RoutingCandidateBuilder.RankEligibleModels"/> otherwise falls
+    /// back to. <see langword="null"/>
+    /// (the default) preserves the pre-Phase-I memory-only behavior exactly.
+    /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="singleModelServingOptions"/> names a model that isn't configured.
+    /// </exception>
+    /// <param name="embeddingClient">
+    /// Computes the request's task embedding for embedding-dependent voters (Phase 2b). Optional; when
+    /// absent, or before <paramref name="embeddingWarmupState"/> reports warm, requests route with no
+    /// embedding exactly as before this parameter existed.
+    /// </param>
+    /// <param name="embeddingWarmupState">
+    /// Reports whether <paramref name="embeddingClient"/> has completed its one-time model download and
+    /// load. Embedding is skipped (not awaited) until this is warm, so a request never triggers the
+    /// cold ~1.3 GB download inline.
+    /// </param>
+    /// <param name="routingOptions">Supplies <see cref="RoutingOptions.EmbeddingBudgetMs"/>.</param>
+    /// <param name="interactionStatusStore">
+    /// Optional per-provider admin-action/live-traffic status store
+    /// (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md,
+    /// docs/adr/0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-
+    /// trip.md), consulted when an explicit selection's target or provider is already circuit-open to
+    /// synthesize a truthful client-facing message instead of silently substituting. Defaults to
+    /// <see langword="null"/> - behaviorally inert (falls back to a generic message) when omitted. In
+    /// the real app this must be the <em>same</em> DI singleton instance also given to
+    /// <see cref="ProxyMiddleware"/> and <c>ManagementFacade</c> (see <c>ServiceCollectionExtensions</c>),
+    /// the same sharing requirement <paramref name="circuitBreaker"/> already has.
+    /// </param>
+    public RequestInterceptor(
+        ILogger<RequestInterceptor> logger,
+        IModelRouteResolver modelRouteResolver,
+        SingleModelServingOptions? singleModelServingOptions = null,
+        RouterMemory? routerMemory = null,
+        ICircuitBreaker? circuitBreaker = null,
+        IDimensionInferrer? dimensionInferrer = null,
+        IOptions<QualityOptions>? qualityOptions = null,
+        IRequestClassifier? requestClassifier = null,
+        IRoutingPolicy? routingPolicy = null,
+        IEmbeddingClient? embeddingClient = null,
+        EmbeddingWarmupState? embeddingWarmupState = null,
+        IOptions<RoutingOptions>? routingOptions = null,
+        IProviderInteractionStatusStore? interactionStatusStore = null)
     {
-        /// <summary>
-        /// The reserved, client-facing model name that explicitly asks the router to choose the model
-        /// itself instead of naming one - the same auto-select the generalized fallback performs for an
-        /// unresolved name, but requested deliberately rather than as a recovery. Matched
-        /// case-insensitively, and it wins over a configured model of the same name so the meaning of
-        /// <c>"model": "auto"</c> never depends on the operator's model list. Unlike
-        /// <see cref="RouterModelName"/> this name is never advertised by
-        /// <see cref="ListAvailableModels"/>; it remains accepted for callers that already send it.
-        /// </summary>
-        internal const string AutoSelectModelName = "auto";
+        _logger = logger;
+        _modelRouteResolver = modelRouteResolver;
+        _forcedModelName = singleModelServingOptions?.ForcedModelName;
+        _routerMemory = routerMemory;
+        _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
+        _dimensionInferrer = dimensionInferrer ?? new KeywordDimensionInferrer();
+        _liveMemoryPrefix = qualityOptions?.Value.LiveMemoryPrefix ?? new QualityOptions().LiveMemoryPrefix;
+        _requestClassifier = requestClassifier ?? new HeuristicRequestClassifier(_dimensionInferrer);
+        _routingPolicy = routingPolicy;
+        _embeddingClient = embeddingClient;
+        _embeddingWarmupState = embeddingWarmupState;
+        _embeddingBudgetMs = routingOptions?.Value.EmbeddingBudgetMs ?? new RoutingOptions().EmbeddingBudgetMs;
+        _interactionStatusStore = interactionStatusStore;
+        _routingCandidateBuilder = new RoutingCandidateBuilder(
+            circuitBreaker: _circuitBreaker, modelRouteResolver: _modelRouteResolver, routerMemory: _routerMemory,
+            interactionStatusStore: _interactionStatusStore, logger: _logger);
 
-        /// <summary>
-        /// The advertised alias for <see cref="AutoSelectModelName"/>, and the only one of the two that
-        /// <see cref="ListAvailableModels"/> surfaces as a selectable entry. It exists because editors
-        /// that attach to this proxy as a provider (Visual Studio's Ollama picker, VS Code/Copilot's
-        /// OpenAI-compatible provider) force the user to pick one name from the discovery response, and
-        /// so offer no other way to express "you choose". Spelled as an Ollama-safe slug - no spaces, no
-        /// tag separator - so it round-trips unmodified through both clients.
-        /// </summary>
-        internal const string RouterModelName = "totallyhot-arcrouter";
-
-        /// <summary>
-        /// The <c>owned_by</c> value reported for <see cref="RouterModelName"/> on the OpenAI-shaped
-        /// discovery endpoint. Deliberately not a real provider key: the entry is a request for a routing
-        /// decision rather than a route, so no configured provider owns it.
-        /// </summary>
-        /// <remarks>
-        /// Internal rather than private so <see cref="ProxyMiddleware"/> can recognize the synthetic entry
-        /// by provider when describing it on <c>/api/show</c>. Matching on this rather than on
-        /// <see cref="RouterModelName"/> matters: an operator may legitimately configure a real model named
-        /// <c>totallyhot-arcrouter</c>, but nothing can configure a provider under a key that is documented
-        /// never to be one.
-        /// </remarks>
-        internal const string RouterModelProvider = "totallyhot";
-
-        private readonly ILogger<RequestInterceptor> _logger;
-        private readonly IModelRouteResolver _modelRouteResolver;
-        private readonly string? _forcedModelName;
-        private readonly RouterMemory? _routerMemory;
-        private readonly ICircuitBreaker _circuitBreaker;
-        private readonly IDimensionInferrer _dimensionInferrer;
-        private readonly IRequestClassifier _requestClassifier;
-        private readonly string _liveMemoryPrefix;
-        private readonly IRoutingPolicy? _routingPolicy;
-        private readonly IEmbeddingClient? _embeddingClient;
-        private readonly EmbeddingWarmupState? _embeddingWarmupState;
-        private readonly int _embeddingBudgetMs;
-        private readonly IProviderInteractionStatusStore? _interactionStatusStore;
-
-        /// <summary>
-        /// Owns circuit-breaker-eligible candidate building/ranking (see <see cref="RoutingCandidateBuilder"/>),
-        /// constructed from this class's own collaborators rather than taken as a separate constructor
-        /// parameter - every input it needs (<see cref="_circuitBreaker"/>, <see cref="_modelRouteResolver"/>,
-        /// <see cref="_routerMemory"/>, <see cref="_interactionStatusStore"/>, <see cref="_logger"/>) is
-        /// already required or optional here, so adding a fourteenth constructor parameter would only
-        /// duplicate what this class already holds.
-        /// </summary>
-        private readonly RoutingCandidateBuilder _routingCandidateBuilder;
-
-        /// <summary>Number of requests seen by <see cref="InterceptRequestAsync"/> so far.</summary>
-        public int InterceptedRequestCount { get; private set; }
-
-        /// <param name="logger">The logger.</param>
-        /// <param name="modelRouteResolver">The known-model allowlist/resolver.</param>
-        /// <param name="singleModelServingOptions">
-        /// Optional Local Proxy CLI single-model override (see <see cref="SingleModelServingOptions"/>).
-        /// When its <see cref="SingleModelServingOptions.ForcedModelName"/> is set, it must already be one of
-        /// <paramref name="modelRouteResolver"/>'s configured models - checked eagerly here so an invalid
-        /// <c>--model</c> CLI value fails at startup, not on the first request.
-        /// </param>
-        /// <param name="routerMemory">
-        /// Optional score memory consulted whenever a substitute/fallback candidate must be ranked (an
-        /// unresolved <c>model</c> - see <see cref="ResolveModelRouteAsync"/> - or a circuit-open primary,
-        /// see <c>docs/router/agent-resilience-strategies.md</c>). <see langword="null"/> disables
-        /// score-based ranking (every candidate is treated as cold-start).
-        /// </param>
-        /// <param name="circuitBreaker">
-        /// Optional per-upstream-target circuit breaker (<c>docs/router/agent-resilience-strategies.md</c>).
-        /// Defaults to a fresh, always-CLOSED <see cref="TotallyHot.ArcRouter.Proxy.CircuitBreaker"/> instance when
-        /// omitted - behaviorally inert until something records a failure against it. In the real app this
-        /// must be the <em>same</em> DI singleton instance also given to <see cref="ProxyMiddleware"/> (see
-        /// <c>ServiceCollectionExtensions</c>), since <see cref="ProxyMiddleware"/> is what records
-        /// successes/failures this class reads back when ranking candidates.
-        /// </param>
-        /// <param name="dimensionInferrer">
-        /// Infers the live dimension of the request in flight from its newest user message. Defaults to a
-        /// fresh <see cref="KeywordDimensionInferrer"/> when omitted - the same heuristic the verifier's
-        /// post-response path uses, so a request and its own later-observed score are classified
-        /// identically. Also the default <paramref name="requestClassifier"/>'s dimension source when
-        /// that parameter itself is omitted.
-        /// </param>
-        /// <param name="qualityOptions">
-        /// Optional source of <see cref="QualityOptions.LiveMemoryPrefix"/>, which must match what
-        /// <see cref="Router.RouterMemoryScoreObserver"/> writes under for <paramref name="routerMemory"/>
-        /// lookups to ever hit. Defaults to <see cref="QualityOptions"/>'s own default prefix when omitted.
-        /// </param>
-        /// <param name="requestClassifier">
-        /// PLAN.md Phase H's Context-leg classifier, run ahead of routing on every request. Defaults to a
-        /// <see cref="HeuristicRequestClassifier"/> built over <paramref name="dimensionInferrer"/> when
-        /// omitted, so its dimension output matches <see cref="ResolveModelRouteAsync"/>'s classification by construction.
-        /// </param>
-        /// <param name="routingPolicy">
-        /// PLAN.md Phase I's Action leg (<c>docs/router/utility-model-routing.md</c> §B4): consulted, when
-        /// supplied, to pick the model for the router alias and the unresolved-model fallback instead of
-        /// the memory-only ranking <see cref="RoutingCandidateBuilder.RankEligibleModels"/> otherwise falls
-        /// back to. <see langword="null"/>
-        /// (the default) preserves the pre-Phase-I memory-only behavior exactly.
-        /// </param>
-        /// <exception cref="InvalidOperationException">
-        /// <paramref name="singleModelServingOptions"/> names a model that isn't configured.
-        /// </exception>
-        /// <param name="embeddingClient">
-        /// Computes the request's task embedding for embedding-dependent voters (Phase 2b). Optional; when
-        /// absent, or before <paramref name="embeddingWarmupState"/> reports warm, requests route with no
-        /// embedding exactly as before this parameter existed.
-        /// </param>
-        /// <param name="embeddingWarmupState">
-        /// Reports whether <paramref name="embeddingClient"/> has completed its one-time model download and
-        /// load. Embedding is skipped (not awaited) until this is warm, so a request never triggers the
-        /// cold ~1.3 GB download inline.
-        /// </param>
-        /// <param name="routingOptions">Supplies <see cref="RoutingOptions.EmbeddingBudgetMs"/>.</param>
-        /// <param name="interactionStatusStore">
-        /// Optional per-provider admin-action/live-traffic status store
-        /// (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md,
-        /// docs/adr/0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-
-        /// trip.md), consulted when an explicit selection's target or provider is already circuit-open to
-        /// synthesize a truthful client-facing message instead of silently substituting. Defaults to
-        /// <see langword="null"/> - behaviorally inert (falls back to a generic message) when omitted. In
-        /// the real app this must be the <em>same</em> DI singleton instance also given to
-        /// <see cref="ProxyMiddleware"/> and <c>ManagementFacade</c> (see <c>ServiceCollectionExtensions</c>),
-        /// the same sharing requirement <paramref name="circuitBreaker"/> already has.
-        /// </param>
-        public RequestInterceptor(
-            ILogger<RequestInterceptor> logger,
-            IModelRouteResolver modelRouteResolver,
-            SingleModelServingOptions? singleModelServingOptions = null,
-            RouterMemory? routerMemory = null,
-            ICircuitBreaker? circuitBreaker = null,
-            IDimensionInferrer? dimensionInferrer = null,
-            IOptions<QualityOptions>? qualityOptions = null,
-            IRequestClassifier? requestClassifier = null,
-            IRoutingPolicy? routingPolicy = null,
-            IEmbeddingClient? embeddingClient = null,
-            EmbeddingWarmupState? embeddingWarmupState = null,
-            IOptions<RoutingOptions>? routingOptions = null,
-            IProviderInteractionStatusStore? interactionStatusStore = null)
+        if (_forcedModelName is not null &&
+            !modelRouteResolver.ListModels().Any(m => string.Equals(a: m.ModelName, b: _forcedModelName,
+                comparisonType: StringComparison.OrdinalIgnoreCase)))
         {
-            _logger = logger;
-            _modelRouteResolver = modelRouteResolver;
-            _forcedModelName = singleModelServingOptions?.ForcedModelName;
-            _routerMemory = routerMemory;
-            _circuitBreaker = circuitBreaker ?? new CircuitBreaker();
-            _dimensionInferrer = dimensionInferrer ?? new KeywordDimensionInferrer();
-            _liveMemoryPrefix = qualityOptions?.Value.LiveMemoryPrefix ?? new QualityOptions().LiveMemoryPrefix;
-            _requestClassifier = requestClassifier ?? new HeuristicRequestClassifier(_dimensionInferrer);
-            _routingPolicy = routingPolicy;
-            _embeddingClient = embeddingClient;
-            _embeddingWarmupState = embeddingWarmupState;
-            _embeddingBudgetMs = routingOptions?.Value.EmbeddingBudgetMs ?? new RoutingOptions().EmbeddingBudgetMs;
-            _interactionStatusStore = interactionStatusStore;
-            _routingCandidateBuilder = new RoutingCandidateBuilder(
-                _circuitBreaker, _modelRouteResolver, _routerMemory, _interactionStatusStore, _logger);
+            var configuredNames = string.Join(separator: ", ",
+                values: modelRouteResolver.ListModels().Select(m => m.ModelName));
+            throw new InvalidOperationException(
+                $"--model '{_forcedModelName}' is not a configured model. Configured models: {configuredNames}");
+        }
+    }
 
-            if (_forcedModelName is not null &&
-                !modelRouteResolver.ListModels().Any(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase)))
-            {
-                var configuredNames = string.Join(", ", modelRouteResolver.ListModels().Select(m => m.ModelName));
-                throw new InvalidOperationException(
-                    $"--model '{_forcedModelName}' is not a configured model. Configured models: {configuredNames}");
-            }
+    /// <summary>Number of requests seen by <see cref="InterceptRequestAsync"/> so far.</summary>
+    public int InterceptedRequestCount { get; private set; }
+
+    /// <summary>
+    /// Intercepts an incoming HTTP request before it is forwarded.
+    /// </summary>
+    /// <param name="context">The HTTP context.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public Task InterceptRequestAsync(HttpContext context)
+    {
+        _logger.LogInformation(
+            message: "[INTERCEPTOR] Intercepting request for {Method} {Scheme}://{Host}{Path}",
+            SanitizeForLog(context.Request.Method),
+            SanitizeForLog(context.Request.Scheme),
+            SanitizeForLog(context.Request.Host.ToString()),
+            SanitizeForLog(context.Request.Path.ToString()));
+        InterceptedRequestCount++;
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Intercepts the response from the target server before it is sent to the client.
+    /// </summary>
+    /// <param name="context">The HTTP context.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public Task InterceptResponseAsync(HttpContext context)
+    {
+        _logger.LogInformation(message: "[INTERCEPTOR] Intercepting response for {Path} with status {StatusCode}",
+            SanitizeForLog(context.Request.Path.ToString()), context.Response.StatusCode);
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Reports whether <paramref name="provider"/> is currently switched on (Governance &gt; Providers'
+    /// Stop/Play toggle). Exposed so <see cref="ProxyMiddleware"/> - which holds only this interceptor,
+    /// not the resolver itself - can apply the same gate immediately before attempting a candidate.
+    /// </summary>
+    public bool IsProviderEnabled(string provider)
+    {
+        return _modelRouteResolver.IsProviderEnabled(provider);
+    }
+
+    /// <summary>
+    /// Reports whether <paramref name="modelName"/> is currently routable (Governance &gt; Providers'
+    /// per-model Start/Stop toggle, and the last "Refresh from endpoint" scan's presence result).
+    /// Exposed so <see cref="ProxyMiddleware"/> can apply the same gate immediately before attempting a
+    /// candidate, mirroring <see cref="IsProviderEnabled"/>.
+    /// </summary>
+    public bool IsModelEnabled(string modelName)
+    {
+        return _modelRouteResolver.IsModelEnabled(modelName);
+    }
+
+    /// <summary>
+    /// Lists the client-facing models this proxy is configured to route. Used to answer the
+    /// OpenAI-compatible model discovery endpoint (<c>GET /v1/models</c>) and Ollama's native
+    /// equivalents (<c>GET /api/tags</c>, <c>POST /api/show</c>). When single-model serving
+    /// is forced (see the constructor's <c>singleModelServingOptions</c> parameter), only that one
+    /// model is listed, so a connecting tool sees exactly what it can actually get.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RouterModelName"/> is prepended as a synthetic entry so a client whose picker only
+    /// offers names from this list can still ask the router to choose. It is synthesized here rather
+    /// than configured as a <c>ModelList</c> entry because it resolves to no provider and no upstream
+    /// model id - it is a request for a decision, not a route - and a real entry would additionally
+    /// have to be excluded from every ranking and governance surface.
+    /// It is omitted in the two cases where selecting it could not work: single-model serving forces
+    /// its one model and bypasses auto-select entirely, and with no configured models there is
+    /// nothing for auto-select to choose between.
+    /// </remarks>
+    public IReadOnlyList<AvailableModel> ListAvailableModels()
+    {
+        var models = _modelRouteResolver.ListModels();
+
+        if (_forcedModelName is not null)
+            return [.. models
+                .Where(m => string.Equals(a: m.ModelName, b: _forcedModelName,
+                    comparisonType: StringComparison.OrdinalIgnoreCase))];
+
+        if (models.Count == 0) return models;
+
+        var listed = new List<AvailableModel>(models.Count + 1)
+        {
+            new(ModelName: RouterModelName, Provider: RouterModelProvider)
+        };
+        listed.AddRange(models);
+
+        return listed;
+    }
+
+    /// <summary>
+    /// Reports whether <paramref name="modelName"/> is one of the reserved names that ask the router
+    /// to choose the model itself (<see cref="RouterModelName"/> or <see cref="AutoSelectModelName"/>),
+    /// matched case-insensitively to mirror <see cref="IModelRouteResolver"/>'s own lookup semantics.
+    /// </summary>
+    private static bool IsRouterChoiceModelName(string modelName)
+    {
+        return string.Equals(a: modelName, b: RouterModelName, comparisonType: StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(a: modelName, b: AutoSelectModelName, comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Reads the request body, resolves the requested model against the known-model allowlist, and
+    /// rewrites <c>model</c> to the upstream provider's model id. The proxy only ever forwards to
+    /// upstreams present in this allowlist, so a request can never be routed back to the proxy itself.
+    /// The reserved names <see cref="RouterModelName"/> and <see cref="AutoSelectModelName"/> (any
+    /// casing) skip the lookup and let the router auto-select the highest-ranked currently-eligible
+    /// model instead.
+    /// </summary>
+    /// <param name="context">The HTTP context.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A <see cref="ModelRouteResolutionResult"/> describing the outcome.</returns>
+    public async Task<ModelRouteResolutionResult> ResolveModelRouteAsync(HttpContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        string body;
+        using (var reader = new StreamReader(stream: context.Request.Body, encoding: Encoding.UTF8, leaveOpen: true))
+        {
+            body = await reader.ReadToEndAsync(cancellationToken);
         }
 
-        /// <summary>
-        /// Intercepts an incoming HTTP request before it is forwarded.
-        /// </summary>
-        /// <param name="context">The HTTP context.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        public Task InterceptRequestAsync(HttpContext context)
+        _logger.LogDebug(message: "[INTERCEPTOR] Intercepted agent request message: {RequestBody}",
+            TruncateForLog(SanitizeForLog(body)));
+
+        if (string.IsNullOrWhiteSpace(body))
+            return ModelRouteResolutionResult.Failure("Request body must be a JSON object containing a 'model' field.");
+
+        JsonNode? json;
+        try
         {
+            json = JsonNode.Parse(body);
+        }
+        catch (JsonException)
+        {
+            return ModelRouteResolutionResult.Failure("Request body is not valid JSON.");
+        }
+
+        if (json is not JsonObject jsonObject)
+            return ModelRouteResolutionResult.Failure("Request body must be a JSON object containing a 'model' field.");
+
+        // PLAN.md Phase G: the dimension this request's own routing decision reads is the same one a
+        // later-arriving quality score for this same prompt will be written under (RouterMemoryScoreObserver),
+        // so a verifier score written on request N can actually change the model selected on request N+1.
+        // PLAN.md Phase H/I: the classification is computed once here and reused both for the dimension
+        // key and for IsUtility, so the dimension key and the tier IRoutingPolicy sees can never
+        // be classified differently for the same request.
+        var classification = _requestClassifier.Classify(jsonObject);
+        var liveDimension =
+            RouterDimension.ToLiveKey(liveMemoryPrefix: _liveMemoryPrefix, dimension: classification.Dimension);
+
+        // Phase 2a/2b (docs/router/live-feedback-learning-plan.md): the same newest-user-message text
+        // HeuristicRequestClassifier already extracted internally, re-extracted here via the same shared
+        // TotallyHot.ArcRouter.Telemetry.RequestTextExtractor - no new parsing rules - so MemoryKnnVoter
+        // and LogRegVoter can vote instead of abstaining. Computed once, for every request (not only the
+        // auto-select/unresolved-model paths below), so embedding-keyed memory keeps accumulating
+        // regardless of which IRoutingPolicy is configured.
+        var taskText = RequestTextExtractor.ExtractNewestUserMessage(jsonObject);
+
+        // The raw-body log above ([INTERCEPTOR] Intercepted agent request message) truncates at
+        // MaxLoggedBodyLength from the start of the body - for an agentic client like GitHub Copilot
+        // whose system prompt (tool descriptions, IDE context) routinely exceeds that cap on its own,
+        // the actual user question never survives the truncation. Logging the already-extracted newest
+        // user message as its own line guarantees it appears regardless of how large the surrounding
+        // request is.
+        _logger.LogDebug(
+            message: "[INTERCEPTOR] Newest user message: {UserMessage}",
+            taskText is null ? "(none found)" : TruncateForLog(SanitizeForLog(taskText)));
+
+        var embedding = await TryComputeEmbeddingAsync(taskText: taskText, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        var taskEmbedding = embedding?.Vector;
+
+        // The router's own consumption for this request, carried on every success below so telemetry
+        // can report savings net of what routing cost (research-doc §5.1's TotTok = router + model).
+        // Zero when no embedding was computed - a real measurement of "the router spent nothing".
+        var routerTokens = embedding?.TokenCount ?? 0;
+        var routingSignals = taskText is null && taskEmbedding is null
+            ? null
+            : new RoutingSignals(TaskText: taskText, TaskEmbedding: taskEmbedding);
+
+        var modelName = jsonObject["model"] is JsonValue modelValue && modelValue.TryGetValue<string>(out var value)
+            ? value
+            : null;
+
+        if (string.IsNullOrWhiteSpace(modelName))
+            return ModelRouteResolutionResult.Failure("Request body must include a non-empty 'model' field.");
+
+        // Captured before single-model-serving's forced override below (and before any agentic
+        // substitution) so it always reflects the client's literal string, independent of what is
+        // ultimately served - docs/router/orchestrator-live-path-plan.md §M2.2.
+        var clientRequestedModelName = modelName;
+        var substitutionReason = RoutingSubstitutionReason.None;
+        string? explicitCircuitTripBlockMessage = null;
+
+        // Local Proxy CLI: single-model serving ignores whatever model the client
+        // asked for and always routes to the one CLI-forced model (already confirmed configured in
+        // the constructor), mirroring LiteLLM's "litellm --model provider/name" behavior. Reported as
+        // RoutingSubstitutionReason.None rather than a dedicated reason: forced serving is a
+        // deployment-time decision with nothing to fail over from, not a per-request substitution -
+        // RequestedModel/RoutedModel diverging in telemetry already makes it visible.
+        if (_forcedModelName is not null) modelName = _forcedModelName;
+
+        // Either reserved name (any casing) is an explicit request for the router to pick, so it skips
+        // the allowlist lookup entirely and runs the same ranked auto-select the unresolved-model
+        // fallback below uses. Checked before TryResolve so a reserved name can't be shadowed by a
+        // configured model that happens to share it. Single-model serving is unaffected:
+        // _forcedModelName has already overwritten modelName above, so a forced proxy still serves its
+        // one model.
+        var isAutoSelectRequest = _forcedModelName is null && IsRouterChoiceModelName(modelName);
+
+        ResolvedModelRoute? route;
+        var isExploratory = false;
+        var propensity = 1.0;
+        string? dimBestModel = null;
+
+        if (isAutoSelectRequest)
+        {
+            var autoSelected = await ResolveAgenticRouteAsync(classification: classification,
+                liveDimension: liveDimension, signals: routingSignals, cancellationToken: cancellationToken);
+            if (autoSelected is null)
+            {
+                // Same "everything is unavailable" condition the fallback path reports, but phrased for a
+                // caller who asked for auto-select rather than one who named a model we didn't recognize.
+                _logger.LogWarning(
+                    "[INTERCEPTOR] Rejected auto-select request: no eligible model is currently available.");
+                return ModelRouteResolutionResult.Failure(
+                    $"model '{modelName}' could not be auto-selected: no eligible model is currently available.");
+            }
+
             _logger.LogInformation(
-                "[INTERCEPTOR] Intercepting request for {Method} {Scheme}://{Host}{Path}",
-                SanitizeForLog(context.Request.Method),
-                SanitizeForLog(context.Request.Scheme),
-                SanitizeForLog(context.Request.Host.ToString()),
-                SanitizeForLog(context.Request.Path.ToString()));
-            InterceptedRequestCount++;
-
-            return Task.CompletedTask;
+                message: "[INTERCEPTOR] Auto-select requested; routed to '{ResolvedModel}'.",
+                SanitizeForLog(autoSelected.Route.ModelName));
+            route = autoSelected.Route;
+            isExploratory = autoSelected.IsExploratory;
+            propensity = autoSelected.Propensity;
+            dimBestModel = autoSelected.DimBestModel;
+            substitutionReason = RoutingSubstitutionReason.AutoSelect;
         }
-
-        /// <summary>
-        /// Intercepts the response from the target server before it is sent to the client.
-        /// </summary>
-        /// <param name="context">The HTTP context.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        public Task InterceptResponseAsync(HttpContext context)
+        else if (!_modelRouteResolver.TryResolve(modelName: modelName, route: out route) ||
+                 !_modelRouteResolver.IsModelEnabled(modelName))
         {
-            _logger.LogInformation("[INTERCEPTOR] Intercepting response for {Path} with status {StatusCode}", SanitizeForLog(context.Request.Path.ToString()), context.Response.StatusCode);
-
-            return Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// Reports whether <paramref name="provider"/> is currently switched on (Governance &gt; Providers'
-        /// Stop/Play toggle). Exposed so <see cref="ProxyMiddleware"/> - which holds only this interceptor,
-        /// not the resolver itself - can apply the same gate immediately before attempting a candidate.
-        /// </summary>
-        public bool IsProviderEnabled(string provider) => _modelRouteResolver.IsProviderEnabled(provider);
-
-        /// <summary>
-        /// Reports whether <paramref name="modelName"/> is currently routable (Governance &gt; Providers'
-        /// per-model Start/Stop toggle, and the last "Refresh from endpoint" scan's presence result).
-        /// Exposed so <see cref="ProxyMiddleware"/> can apply the same gate immediately before attempting a
-        /// candidate, mirroring <see cref="IsProviderEnabled"/>.
-        /// </summary>
-        public bool IsModelEnabled(string modelName) => _modelRouteResolver.IsModelEnabled(modelName);
-
-        /// <summary>
-        /// Lists the client-facing models this proxy is configured to route. Used to answer the
-        /// OpenAI-compatible model discovery endpoint (<c>GET /v1/models</c>) and Ollama's native
-        /// equivalents (<c>GET /api/tags</c>, <c>POST /api/show</c>). When single-model serving
-        /// is forced (see the constructor's <c>singleModelServingOptions</c> parameter), only that one
-        /// model is listed, so a connecting tool sees exactly what it can actually get.
-        /// </summary>
-        /// <remarks>
-        /// <see cref="RouterModelName"/> is prepended as a synthetic entry so a client whose picker only
-        /// offers names from this list can still ask the router to choose. It is synthesized here rather
-        /// than configured as a <c>ModelList</c> entry because it resolves to no provider and no upstream
-        /// model id - it is a request for a decision, not a route - and a real entry would additionally
-        /// have to be excluded from every ranking and governance surface.
-        /// It is omitted in the two cases where selecting it could not work: single-model serving forces
-        /// its one model and bypasses auto-select entirely, and with no configured models there is
-        /// nothing for auto-select to choose between.
-        /// </remarks>
-        public IReadOnlyList<AvailableModel> ListAvailableModels()
-        {
-            var models = _modelRouteResolver.ListModels();
-
-            if (_forcedModelName is not null)
-            {
-                return models
-                    .Where(m => string.Equals(m.ModelName, _forcedModelName, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-            }
-
-            if (models.Count == 0)
-            {
-                return models;
-            }
-
-            var listed = new List<AvailableModel>(models.Count + 1)
-            {
-                new(RouterModelName, RouterModelProvider),
-            };
-            listed.AddRange(models);
-
-            return listed;
-        }
-
-        /// <summary>
-        /// Reports whether <paramref name="modelName"/> is one of the reserved names that ask the router
-        /// to choose the model itself (<see cref="RouterModelName"/> or <see cref="AutoSelectModelName"/>),
-        /// matched case-insensitively to mirror <see cref="IModelRouteResolver"/>'s own lookup semantics.
-        /// </summary>
-        private static bool IsRouterChoiceModelName(string modelName) =>
-            string.Equals(modelName, RouterModelName, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(modelName, AutoSelectModelName, StringComparison.OrdinalIgnoreCase);
-
-        /// <summary>
-        /// Reads the request body, resolves the requested model against the known-model allowlist, and
-        /// rewrites <c>model</c> to the upstream provider's model id. The proxy only ever forwards to
-        /// upstreams present in this allowlist, so a request can never be routed back to the proxy itself.
-        /// The reserved names <see cref="RouterModelName"/> and <see cref="AutoSelectModelName"/> (any
-        /// casing) skip the lookup and let the router auto-select the highest-ranked currently-eligible
-        /// model instead.
-        /// </summary>
-        /// <param name="context">The HTTP context.</param>
-        /// <param name="cancellationToken">A token to cancel the operation.</param>
-        /// <returns>A <see cref="ModelRouteResolutionResult"/> describing the outcome.</returns>
-        public async Task<ModelRouteResolutionResult> ResolveModelRouteAsync(HttpContext context, CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(context);
-
-            string body;
-            using (var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true))
-            {
-                body = await reader.ReadToEndAsync(cancellationToken);
-            }
-
-            _logger.LogDebug("[INTERCEPTOR] Intercepted agent request message: {RequestBody}", TruncateForLog(SanitizeForLog(body)));
-
-            if (string.IsNullOrWhiteSpace(body))
-            {
-                return ModelRouteResolutionResult.Failure("Request body must be a JSON object containing a 'model' field.");
-            }
-
-            JsonNode? json;
-            try
-            {
-                json = JsonNode.Parse(body);
-            }
-            catch (JsonException)
-            {
-                return ModelRouteResolutionResult.Failure("Request body is not valid JSON.");
-            }
-
-            if (json is not JsonObject jsonObject)
-            {
-                return ModelRouteResolutionResult.Failure("Request body must be a JSON object containing a 'model' field.");
-            }
-
-            // PLAN.md Phase G: the dimension this request's own routing decision reads is the same one a
-            // later-arriving quality score for this same prompt will be written under (RouterMemoryScoreObserver),
-            // so a verifier score written on request N can actually change the model selected on request N+1.
-            // PLAN.md Phase H/I: the classification is computed once here and reused both for the dimension
-            // key and for IsUtility, so the dimension key and the tier IRoutingPolicy sees can never
-            // be classified differently for the same request.
-            var classification = _requestClassifier.Classify(jsonObject);
-            var liveDimension = RouterDimension.ToLiveKey(_liveMemoryPrefix, classification.Dimension);
-
-            // Phase 2a/2b (docs/router/live-feedback-learning-plan.md): the same newest-user-message text
-            // HeuristicRequestClassifier already extracted internally, re-extracted here via the same shared
-            // TotallyHot.ArcRouter.Telemetry.RequestTextExtractor - no new parsing rules - so MemoryKnnVoter
-            // and LogRegVoter can vote instead of abstaining. Computed once, for every request (not only the
-            // auto-select/unresolved-model paths below), so embedding-keyed memory keeps accumulating
-            // regardless of which IRoutingPolicy is configured.
-            var taskText = RequestTextExtractor.ExtractNewestUserMessage(jsonObject);
-
-            // The raw-body log above ([INTERCEPTOR] Intercepted agent request message) truncates at
-            // MaxLoggedBodyLength from the start of the body - for an agentic client like GitHub Copilot
-            // whose system prompt (tool descriptions, IDE context) routinely exceeds that cap on its own,
-            // the actual user question never survives the truncation. Logging the already-extracted newest
-            // user message as its own line guarantees it appears regardless of how large the surrounding
-            // request is.
-            _logger.LogDebug(
-                "[INTERCEPTOR] Newest user message: {UserMessage}",
-                taskText is null ? "(none found)" : TruncateForLog(SanitizeForLog(taskText)));
-
-            var embedding = await TryComputeEmbeddingAsync(taskText, cancellationToken).ConfigureAwait(false);
-            var taskEmbedding = embedding?.Vector;
-
-            // The router's own consumption for this request, carried on every success below so telemetry
-            // can report savings net of what routing cost (research-doc §5.1's TotTok = router + model).
-            // Zero when no embedding was computed - a real measurement of "the router spent nothing".
-            var routerTokens = embedding?.TokenCount ?? 0;
-            var routingSignals = taskText is null && taskEmbedding is null
-                ? null
-                : new RoutingSignals(taskText, taskEmbedding);
-
-            var modelName = jsonObject["model"] is JsonValue modelValue && modelValue.TryGetValue<string>(out var value)
-                ? value
+            // Docs/router/utility-model-routing.md's generalized fallback: outside forced single-model
+            // serving, an unresolved model name is a routing decision, not a hard error - accept the
+            // request and let ResolveAgenticRouteAsync pick a real, allowlisted candidate.
+            // Single-model serving keeps its existing eager-validated behavior untouched (never reaches
+            // here with _forcedModelName set, since it overrides modelName above before this check).
+            // A model that resolved but is stopped/not-currently-upstream (IsModelEnabled false) is
+            // treated identically to an unresolved name - same fallback, same rejection message - rather
+            // than silently routing to a model the operator just disabled or the endpoint stopped
+            // reporting. The two cases still report distinct RoutingSubstitutionReasons, since a
+            // dashboard must not merge "we don't know this model" with "we know it but it's stopped" -
+            // TryResolve's [NotNullWhen(true)] out param means route is already non-null here exactly
+            // when the name resolved (even though IsModelEnabled is what triggered this branch).
+            var wasResolved = route is not null;
+            var agenticRoute = _forcedModelName is null
+                ? await ResolveAgenticRouteAsync(classification: classification, liveDimension: liveDimension,
+                    signals: routingSignals, cancellationToken: cancellationToken)
                 : null;
 
-            if (string.IsNullOrWhiteSpace(modelName))
+            if (agenticRoute is not null)
             {
-                return ModelRouteResolutionResult.Failure("Request body must include a non-empty 'model' field.");
-            }
-
-            // Captured before single-model-serving's forced override below (and before any agentic
-            // substitution) so it always reflects the client's literal string, independent of what is
-            // ultimately served - docs/router/orchestrator-live-path-plan.md §M2.2.
-            var clientRequestedModelName = modelName;
-            var substitutionReason = RoutingSubstitutionReason.None;
-            string? explicitCircuitTripBlockMessage = null;
-
-            // Local Proxy CLI: single-model serving ignores whatever model the client
-            // asked for and always routes to the one CLI-forced model (already confirmed configured in
-            // the constructor), mirroring LiteLLM's "litellm --model provider/name" behavior. Reported as
-            // RoutingSubstitutionReason.None rather than a dedicated reason: forced serving is a
-            // deployment-time decision with nothing to fail over from, not a per-request substitution -
-            // RequestedModel/RoutedModel diverging in telemetry already makes it visible.
-            if (_forcedModelName is not null)
-            {
-                modelName = _forcedModelName;
-            }
-
-            // Either reserved name (any casing) is an explicit request for the router to pick, so it skips
-            // the allowlist lookup entirely and runs the same ranked auto-select the unresolved-model
-            // fallback below uses. Checked before TryResolve so a reserved name can't be shadowed by a
-            // configured model that happens to share it. Single-model serving is unaffected:
-            // _forcedModelName has already overwritten modelName above, so a forced proxy still serves its
-            // one model.
-            var isAutoSelectRequest = _forcedModelName is null && IsRouterChoiceModelName(modelName);
-
-            ResolvedModelRoute? route;
-            var isExploratory = false;
-            var propensity = 1.0;
-            string? dimBestModel = null;
-
-            if (isAutoSelectRequest)
-            {
-                var autoSelected = await ResolveAgenticRouteAsync(classification, liveDimension, routingSignals, cancellationToken);
-                if (autoSelected is null)
-                {
-                    // Same "everything is unavailable" condition the fallback path reports, but phrased for a
-                    // caller who asked for auto-select rather than one who named a model we didn't recognize.
-                    _logger.LogWarning("[INTERCEPTOR] Rejected auto-select request: no eligible model is currently available.");
-                    return ModelRouteResolutionResult.Failure(
-                        $"model '{modelName}' could not be auto-selected: no eligible model is currently available.");
-                }
-
                 _logger.LogInformation(
-                    "[INTERCEPTOR] Auto-select requested; routed to '{ResolvedModel}'.",
-                    SanitizeForLog(autoSelected.Route.ModelName));
-                route = autoSelected.Route;
-                isExploratory = autoSelected.IsExploratory;
-                propensity = autoSelected.Propensity;
-                dimBestModel = autoSelected.DimBestModel;
-                substitutionReason = RoutingSubstitutionReason.AutoSelect;
-            }
-            else if (!_modelRouteResolver.TryResolve(modelName, out route) || !_modelRouteResolver.IsModelEnabled(modelName))
-            {
-                // Docs/router/utility-model-routing.md's generalized fallback: outside forced single-model
-                // serving, an unresolved model name is a routing decision, not a hard error - accept the
-                // request and let ResolveAgenticRouteAsync pick a real, allowlisted candidate.
-                // Single-model serving keeps its existing eager-validated behavior untouched (never reaches
-                // here with _forcedModelName set, since it overrides modelName above before this check).
-                // A model that resolved but is stopped/not-currently-upstream (IsModelEnabled false) is
-                // treated identically to an unresolved name - same fallback, same rejection message - rather
-                // than silently routing to a model the operator just disabled or the endpoint stopped
-                // reporting. The two cases still report distinct RoutingSubstitutionReasons, since a
-                // dashboard must not merge "we don't know this model" with "we know it but it's stopped" -
-                // TryResolve's [NotNullWhen(true)] out param means route is already non-null here exactly
-                // when the name resolved (even though IsModelEnabled is what triggered this branch).
-                var wasResolved = route is not null;
-                var agenticRoute = _forcedModelName is null
-                    ? await ResolveAgenticRouteAsync(classification, liveDimension, routingSignals, cancellationToken)
-                    : null;
-
-                if (agenticRoute is not null)
-                {
-                    _logger.LogInformation(
-                        "[INTERCEPTOR] Unresolved model '{ModelName}' accepted and agentically routed to '{ResolvedModel}'.",
-                        SanitizeForLog(modelName), SanitizeForLog(agenticRoute.Route.ModelName));
-                    route = agenticRoute.Route;
-                    isExploratory = agenticRoute.IsExploratory;
-                    propensity = agenticRoute.Propensity;
-                    dimBestModel = agenticRoute.DimBestModel;
-                    substitutionReason = wasResolved
-                        ? RoutingSubstitutionReason.ModelStopped
-                        : RoutingSubstitutionReason.UnresolvedName;
-                }
-                else
-                {
-                    _logger.LogWarning("[INTERCEPTOR] Rejected request for unknown model '{ModelName}'.", SanitizeForLog(modelName));
-                    return ModelRouteResolutionResult.Failure($"model '{modelName}' is not in the known model list.");
-                }
-            }
-
-            List<RouteCandidate> candidates;
-
-            if (_forcedModelName is not null)
-            {
-                // Local Proxy CLI single-model serving: one operator-chosen model, no substitution and no
-                // fallback chain - identical to the prior behavior. This candidate list is not itself
-                // filtered by circuit-breaker state (there is nothing to substitute it with), but
-                // ProxyMiddleware still applies its real-time ShouldBypass/ShouldBypassProvider checks to
-                // this forced candidate like any other, so a request still fails fast with a 502 if the
-                // forced model's target or provider is currently OPEN.
-                candidates = [RequestBodyIntrospection.BuildCandidate(jsonObject, route)];
+                    message:
+                    "[INTERCEPTOR] Unresolved model '{ModelName}' accepted and agentically routed to '{ResolvedModel}'.",
+                    SanitizeForLog(modelName), SanitizeForLog(agenticRoute.Route.ModelName));
+                route = agenticRoute.Route;
+                isExploratory = agenticRoute.IsExploratory;
+                propensity = agenticRoute.Propensity;
+                dimBestModel = agenticRoute.DimBestModel;
+                substitutionReason = wasResolved
+                    ? RoutingSubstitutionReason.ModelStopped
+                    : RoutingSubstitutionReason.UnresolvedName;
             }
             else
             {
-                // docs/adr/0004-.../0005-...: circuit-breaker substitution and the explicit-selection
-                // truthful-error carve-out both live in RoutingCandidateBuilder now - see its Build's doc
-                // comment for the full rationale, unchanged from when it lived inline here.
-                var buildResult = _routingCandidateBuilder.Build(jsonObject, route, substitutionReason, liveDimension);
-                candidates = buildResult.Candidates;
-                route = buildResult.Route;
-                substitutionReason = buildResult.SubstitutionReason;
-                explicitCircuitTripBlockMessage = buildResult.ExplicitCircuitTripBlockMessage;
-            }
-
-            return ModelRouteResolutionResult.Success(
-                candidates,
-                clientRequestedModelName,
-                substitutionReason,
-                taskEmbedding,
-                routerTokens,
-                isExploratory,
-                propensity,
-                classification,
-                taskText,
-                dimBestModel,
-                explicitCircuitTripBlockMessage);
-        }
-
-        /// <summary>
-        /// Computes <paramref name="taskText"/>'s embedding under <see cref="RoutingOptions.EmbeddingBudgetMs"/>,
-        /// or returns <see langword="null"/> without attempting the call when there is no client, no text,
-        /// or the client has not finished its one-time warm-up (docs/router/live-feedback-learning-plan.md
-        /// Phase 2b) - the routing hot path must never trigger the cold ~1.3 GB model download inline, and
-        /// must never block on learning. A timeout or any other failure is logged at warning and degrades to
-        /// <see langword="null"/> rather than failing the request; embedding-dependent voters simply abstain
-        /// and routing proceeds exactly as it did before this parameter existed.
-        /// </summary>
-        private async Task<EmbeddingResult?> TryComputeEmbeddingAsync(string? taskText, CancellationToken cancellationToken)
-        {
-            if (_embeddingClient is null || _embeddingWarmupState is not { IsWarm: true } || string.IsNullOrWhiteSpace(taskText))
-            {
-                return null;
-            }
-
-            using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-            try
-            {
-                // Inside the try, not before it: a misconfigured EmbeddingBudgetMs (e.g. negative - RoutingOptions'
-                // [Range(1, 60_000)] is data-annotation metadata only and is never enforced by EnsureValid or the
-                // options pipeline) would otherwise turn CancelAfter's ArgumentOutOfRangeException into a hard
-                // request failure instead of the clean abstention this method exists to guarantee.
-                budgetCts.CancelAfter(TimeSpan.FromMilliseconds(_embeddingBudgetMs));
-                return await _embeddingClient.EmbedAsync(taskText, budgetCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                _logger.LogWarning(
-                    "[INTERCEPTOR] Embedding computation exceeded the {BudgetMs}ms budget; routing without an embedding.",
-                    _embeddingBudgetMs);
-                return null;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "[INTERCEPTOR] Embedding computation failed; routing without an embedding.");
-                return null;
+                _logger.LogWarning(message: "[INTERCEPTOR] Rejected request for unknown model '{ModelName}'.",
+                    SanitizeForLog(modelName));
+                return ModelRouteResolutionResult.Failure($"model '{modelName}' is not in the known model list.");
             }
         }
 
-        /// <summary>
-        /// Picks a real, allowlisted route to serve a request whose <c>model</c> didn't match any configured
-        /// entry - the generalized fallback in <c>docs/router/utility-model-routing.md</c> - and also to serve
-        /// a request that explicitly asked for auto-select via <see cref="RouterModelName"/> or
-        /// <see cref="AutoSelectModelName"/>.
-        /// </summary>
-        /// <remarks>
-        /// PLAN.md Phase I / <c>docs/router/utility-model-routing.md</c> §B4: when a routing policy is
-        /// configured (<see cref="_routingPolicy"/>), this builds a <see cref="RoutingContext"/> from every
-        /// currently-eligible candidate and lets it choose - cost-aware and quality-gated for utility
-        /// traffic, <see cref="AgentAsARouter"/>'s memory ranking otherwise. A policy pick that doesn't
-        /// resolve to a live route (e.g. it named a model outside the configured <c>ModelList</c>) degrades
-        /// to the memory-only ranking rather than failing the request. With no policy configured - the
-        /// pre-Phase-I default - this is exactly <see cref="RoutingCandidateBuilder.RankEligibleModels"/>'s
-        /// top pick, unchanged.
-        /// </remarks>
-        /// <param name="classification">The request's Phase H classification, from <see cref="ResolveModelRouteAsync"/>.</param>
-        /// <param name="liveDimension">The request's live dimension key, from <see cref="ResolveModelRouteAsync"/>.</param>
-        /// <param name="signals">
-        /// The request's task text/embedding (docs/router/live-feedback-learning-plan.md Phase 2a), or
-        /// <see langword="null"/> when neither was available for this request, passed to
-        /// <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>.
-        /// Whether a non-null value reaches <c>MemoryKnnVoter</c>/<c>LogRegVoter</c> depends on
-        /// <see cref="_routingPolicy"/>'s concrete type: only a policy that overrides the
-        /// <see cref="RoutingSignals"/> overload (currently <c>OrchestratorRoutingPolicy</c>) forwards it
-        /// into voting - the interface's default implementation silently discards it, and the
-        /// live-registered <c>CompositeRoutingPolicy</c> does not override it.
-        /// </param>
-        /// <param name="cancellationToken">A token to cancel the operation.</param>
-        /// <returns>The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently available.</returns>
-        private async Task<AgenticRouteResult?> ResolveAgenticRouteAsync(
-            RequestClassification classification,
-            string liveDimension,
-            RoutingSignals? signals,
-            CancellationToken cancellationToken)
+        List<RouteCandidate> candidates;
+
+        if (_forcedModelName is not null)
         {
-            if (_routingPolicy is not null)
+            // Local Proxy CLI single-model serving: one operator-chosen model, no substitution and no
+            // fallback chain - identical to the prior behavior. This candidate list is not itself
+            // filtered by circuit-breaker state (there is nothing to substitute it with), but
+            // ProxyMiddleware still applies its real-time ShouldBypass/ShouldBypassProvider checks to
+            // this forced candidate like any other, so a request still fails fast with a 502 if the
+            // forced model's target or provider is currently OPEN.
+            candidates = [RequestBodyIntrospection.BuildCandidate(jsonObject: jsonObject, route: route)];
+        }
+        else
+        {
+            // docs/adr/0004-.../0005-...: circuit-breaker substitution and the explicit-selection
+            // truthful-error carve-out both live in RoutingCandidateBuilder now - see its Build's doc
+            // comment for the full rationale, unchanged from when it lived inline here.
+            var buildResult = _routingCandidateBuilder.Build(jsonObject: jsonObject, route: route,
+                substitutionReasonSoFar: substitutionReason, liveDimension: liveDimension);
+            candidates = buildResult.Candidates;
+            // buildResult.Route is deliberately not read back into `route`: the resolved route reaches
+            // the caller through buildResult.Candidates, which the Success(...) return below receives,
+            // and nothing between here and that return consults `route` again. Assigning it was a dead
+            // store that only looked like it carried the substitution forward.
+            substitutionReason = buildResult.SubstitutionReason;
+            explicitCircuitTripBlockMessage = buildResult.ExplicitCircuitTripBlockMessage;
+        }
+
+        return ModelRouteResolutionResult.Success(
+            candidates: candidates,
+            requestedModelName: clientRequestedModelName,
+            substitutionReason: substitutionReason,
+            taskEmbedding: taskEmbedding,
+            routerTokens: routerTokens,
+            isExploratory: isExploratory,
+            propensity: propensity,
+            classification: classification,
+            taskText: taskText,
+            dimBestModel: dimBestModel,
+            explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);
+    }
+
+    /// <summary>
+    /// Computes <paramref name="taskText"/>'s embedding under <see cref="RoutingOptions.EmbeddingBudgetMs"/>,
+    /// or returns <see langword="null"/> without attempting the call when there is no client, no text,
+    /// or the client has not finished its one-time warm-up (docs/router/live-feedback-learning-plan.md
+    /// Phase 2b) - the routing hot path must never trigger the cold ~1.3 GB model download inline, and
+    /// must never block on learning. A timeout or any other failure is logged at warning and degrades to
+    /// <see langword="null"/> rather than failing the request; embedding-dependent voters simply abstain
+    /// and routing proceeds exactly as it did before this parameter existed.
+    /// </summary>
+    private async Task<EmbeddingResult?> TryComputeEmbeddingAsync(string? taskText, CancellationToken cancellationToken)
+    {
+        if (_embeddingClient is null || _embeddingWarmupState is not { IsWarm: true } ||
+            string.IsNullOrWhiteSpace(taskText)) return null;
+
+        using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        try
+        {
+            // Inside the try, not before it: a misconfigured EmbeddingBudgetMs (e.g. negative - RoutingOptions'
+            // [Range(1, 60_000)] is data-annotation metadata only and is never enforced by EnsureValid or the
+            // options pipeline) would otherwise turn CancelAfter's ArgumentOutOfRangeException into a hard
+            // request failure instead of the clean abstention this method exists to guarantee.
+            budgetCts.CancelAfter(TimeSpan.FromMilliseconds(_embeddingBudgetMs));
+            return await _embeddingClient.EmbedAsync(text: taskText, cancellationToken: budgetCts.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                message:
+                "[INTERCEPTOR] Embedding computation exceeded the {BudgetMs}ms budget; routing without an embedding.",
+                _embeddingBudgetMs);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception: ex,
+                message: "[INTERCEPTOR] Embedding computation failed; routing without an embedding.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Picks a real, allowlisted route to serve a request whose <c>model</c> didn't match any configured
+    /// entry - the generalized fallback in <c>docs/router/utility-model-routing.md</c> - and also to serve
+    /// a request that explicitly asked for auto-select via <see cref="RouterModelName"/> or
+    /// <see cref="AutoSelectModelName"/>.
+    /// </summary>
+    /// <remarks>
+    /// PLAN.md Phase I / <c>docs/router/utility-model-routing.md</c> §B4: when a routing policy is
+    /// configured (<see cref="_routingPolicy"/>), this builds a <see cref="RoutingContext"/> from every
+    /// currently-eligible candidate and lets it choose - cost-aware and quality-gated for utility
+    /// traffic, <see cref="AgentAsARouter"/>'s memory ranking otherwise. A policy pick that doesn't
+    /// resolve to a live route (e.g. it named a model outside the configured <c>ModelList</c>) degrades
+    /// to the memory-only ranking rather than failing the request. With no policy configured - the
+    /// pre-Phase-I default - this is exactly <see cref="RoutingCandidateBuilder.RankEligibleModels"/>'s
+    /// top pick, unchanged.
+    /// </remarks>
+    /// <param name="classification">The request's Phase H classification, from <see cref="ResolveModelRouteAsync"/>.</param>
+    /// <param name="liveDimension">The request's live dimension key, from <see cref="ResolveModelRouteAsync"/>.</param>
+    /// <param name="signals">
+    /// The request's task text/embedding (docs/router/live-feedback-learning-plan.md Phase 2a), or
+    /// <see langword="null"/> when neither was available for this request, passed to
+    /// <see cref="IRoutingPolicy.SelectModelAsync(RoutingContext, RoutingSignals?, CancellationToken)"/>.
+    /// Whether a non-null value reaches <c>MemoryKnnVoter</c>/<c>LogRegVoter</c> depends on
+    /// <see cref="_routingPolicy"/>'s concrete type: only a policy that overrides the
+    /// <see cref="RoutingSignals"/> overload (currently <c>OrchestratorRoutingPolicy</c>) forwards it
+    /// into voting - the interface's default implementation silently discards it, and the
+    /// live-registered <c>CompositeRoutingPolicy</c> does not override it.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently
+    /// available.
+    /// </returns>
+    private async Task<AgenticRouteResult?> ResolveAgenticRouteAsync(
+        RequestClassification classification,
+        string liveDimension,
+        RoutingSignals? signals,
+        CancellationToken cancellationToken)
+    {
+        if (_routingPolicy is not null)
+        {
+            var candidates = BuildRoutingCandidates(liveDimension);
+            if (candidates.Count > 0)
             {
-                var candidates = BuildRoutingCandidates(liveDimension);
-                if (candidates.Count > 0)
+                var context = new RoutingContext(Dimension: liveDimension, IsUtility: classification.IsUtility,
+                    Candidates: candidates);
+                RoutingDecision? decision;
+                try
                 {
-                    var context = new RoutingContext(liveDimension, classification.IsUtility, candidates);
-                    RoutingDecision? decision;
-                    try
-                    {
-                        decision = await _routingPolicy.DecideOutcomeAsync(context, signals, cancellationToken);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        // A misbehaving policy or one of its dependencies (e.g. the price catalog) must not
-                        // fail the request - degrade to the existing memory-ranking fallback below instead.
-                        _logger.LogWarning(
-                            ex,
-                            "[INTERCEPTOR] Routing policy threw while selecting a model; falling back to memory ranking.");
-                        decision = null;
-                    }
+                    decision = await _routingPolicy.DecideOutcomeAsync(context: context, signals: signals,
+                        cancellationToken: cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A misbehaving policy or one of its dependencies (e.g. the price catalog) must not
+                    // fail the request - degrade to the existing memory-ranking fallback below instead.
+                    _logger.LogWarning(
+                        exception: ex,
+                        message:
+                        "[INTERCEPTOR] Routing policy threw while selecting a model; falling back to memory ranking.");
+                    decision = null;
+                }
 
-                    var selectedName = decision?.SelectedModel;
+                var selectedName = decision?.SelectedModel;
 
-                    // Validate that the policy returned a model from the eligible candidate set to enforce contract.
-                    var selectedInCandidates = selectedName is not null
-                        && candidates.Any(c => c.ModelName.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
-                    if (!selectedInCandidates)
-                    {
-                        if (selectedName is not null)
-                        {
-                            _logger.LogWarning(
-                                "[INTERCEPTOR] Routing policy selected ineligible model '{Model}' not in candidate set; falling back to memory ranking.",
-                                SanitizeForLog(selectedName));
-                        }
-                    }
-                    else if (_modelRouteResolver.TryResolve(selectedName!, out var selectedRoute))
-                    {
-                        // docs/router/utility-model-routing.md §B5: the routing decision itself (dimension,
-                        // isUtility, chosen model), logged through Serilog so it reaches the same telemetry
-                        // pipeline as every other structured routing log line (Program.cs's TelemetryLogEventSink
-                        // sink forwards every log event to connected dashboards, not just RoutingTelemetryEvent).
-                        _logger.LogInformation(
-                            "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}).",
-                            SanitizeForLog(selectedName!),
-                            SanitizeForLog(liveDimension),
-                            classification.IsUtility);
-                        return new AgenticRouteResult(
-                            selectedRoute,
-                            decision!.IsExploratory,
-                            decision.Propensity,
-                            Router.Orchestrator.OrchestratorRoutingPolicy.TryGetVoterPick(decision, Router.Orchestrator.VoterNames.DimBest));
-                    }
-                    else
-                    {
+                // Validate that the policy returned a model from the eligible candidate set to enforce contract.
+                var selectedInCandidates = selectedName is not null
+                                           && candidates.Any(c => c.ModelName.Equals(value: selectedName,
+                                               comparisonType: StringComparison.OrdinalIgnoreCase));
+                if (!selectedInCandidates)
+                {
+                    if (selectedName is not null)
                         _logger.LogWarning(
-                            "[INTERCEPTOR] Routing policy selected unresolvable model '{Model}'; falling back to memory ranking.",
-                            SanitizeForLog(selectedName!));
-                    }
+                            message:
+                            "[INTERCEPTOR] Routing policy selected ineligible model '{Model}' not in candidate set; falling back to memory ranking.",
+                            SanitizeForLog(selectedName));
+                }
+                else if (_modelRouteResolver.TryResolve(modelName: selectedName!, route: out var selectedRoute))
+                {
+                    // docs/router/utility-model-routing.md §B5: the routing decision itself (dimension,
+                    // isUtility, chosen model), logged through Serilog so it reaches the same telemetry
+                    // pipeline as every other structured routing log line (Program.cs's TelemetryLogEventSink
+                    // sink forwards every log event to connected dashboards, not just RoutingTelemetryEvent).
+                    _logger.LogInformation(
+                        message:
+                        "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}).",
+                        SanitizeForLog(selectedName!),
+                        SanitizeForLog(liveDimension),
+                        classification.IsUtility);
+                    return new AgenticRouteResult(
+                        Route: selectedRoute,
+                        IsExploratory: decision!.IsExploratory,
+                        Propensity: decision.Propensity,
+                        DimBestModel: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision,
+                            voterName: VoterNames.DimBest));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        message:
+                        "[INTERCEPTOR] Routing policy selected unresolvable model '{Model}'; falling back to memory ranking.",
+                        SanitizeForLog(selectedName!));
                 }
             }
-
-            // The memory-ranking fallback below was never a policy pick - IsExploratory=false,
-            // Propensity=1.0 (certain selection) is the correct provenance for it, matching the same
-            // default IRoutingPolicy.DecideOutcomeAsync's default implementation reports.
-            var fallbackRoute = _routingCandidateBuilder.RankEligibleModels([], liveDimension).FirstOrDefault();
-            return fallbackRoute is null ? null : new AgenticRouteResult(fallbackRoute, IsExploratory: false, Propensity: 1.0);
         }
 
-        /// <summary>
-        /// The outcome of <see cref="ResolveAgenticRouteAsync"/>: the resolved route plus the provenance
-        /// (docs/router/self-organizing-classification-plan.md Phase T1c) of how it was chosen, so
-        /// <see cref="ResolveModelRouteAsync"/> can carry <see cref="IsExploratory"/>/<see cref="Propensity"/>
-        /// into <see cref="ModelRouteResolutionResult"/> without a second round-trip through the policy.
-        /// </summary>
-        /// <param name="Route">The resolved route.</param>
-        /// <param name="IsExploratory">Whether this was an epsilon-greedy exploratory pick.</param>
-        /// <param name="Propensity">The propensity of the arm actually chosen.</param>
-        /// <param name="DimBestModel">
-        /// The model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen, or
-        /// <see langword="null"/> when it abstained - Phase T4's counterfactual baseline.
-        /// </param>
-        private sealed record AgenticRouteResult(
-            ResolvedModelRoute Route,
-            bool IsExploratory,
-            double Propensity,
-            string? DimBestModel = null);
-
-        /// <summary>
-        /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility
-        /// rules <see cref="RoutingCandidateBuilder.GetEligibleRoutes"/> applies for
-        /// <see cref="RoutingCandidateBuilder.RankEligibleModels"/>), ranked by <see cref="RouterMemory"/>
-        /// score - falling back to <see cref="RoutingCandidateBuilder.ColdStartRankingScore"/> for a
-        /// candidate with no recorded score yet, matching <see cref="RoutingCandidateBuilder.RankEligibleModels"/>'s
-        /// cold-start treatment - for better policy fallback behavior, for handing to an
-        /// <see cref="IRoutingPolicy"/>.
-        /// </summary>
-        /// <param name="liveDimension">The request's live dimension key for score lookup.</param>
-        private List<RoutingCandidate> BuildRoutingCandidates(string liveDimension)
-        {
-            var candidates = _routingCandidateBuilder.GetEligibleRoutes([]);
-            if (_routerMemory is not null && candidates.Count > 0)
-            {
-                candidates = candidates
-                    .OrderByDescending(e => _routerMemory.GetAverageScore(liveDimension, e.ModelName) ?? RoutingCandidateBuilder.ColdStartRankingScore)
-                    .ToList();
-            }
-
-            return candidates
-                .Select(e => new RoutingCandidate(e.Route.ModelName, e.Route.Provider, e.Route.IsFree))
-                .ToList();
-        }
-
-        /// <summary>
-        /// Strips CR/LF from a client-controlled value (request method, scheme, host, path, or the
-        /// requested model name from the body) before it is placed in a log message template. Without this,
-        /// a crafted value could inject newlines into a text log sink and forge additional, fabricated log
-        /// entries (CodeQL: "Log entries created from user input" / log forging, CWE-117). Chained
-        /// <see cref="string.Replace(string, string)"/> calls directly on the tainted value is the sanitizer
-        /// shape CodeQL's data-flow analysis recognizes as breaking the taint path - mirrors
-        /// <see cref="ProxyMiddleware"/>'s own <c>SanitizeForLog</c>.
-        /// </summary>
-        private static string SanitizeForLog(string? value) =>
-            value?.Replace("\r", " ").Replace("\n", " ") ?? string.Empty;
-
-        /// <summary>
-        /// Caps the length of a full request/response body before it is placed in a Debug-level log message,
-        /// so an unbounded payload never floods a text log sink. Applied on top of <see cref="SanitizeForLog"/>,
-        /// never in place of it.
-        /// </summary>
-        private const int MaxLoggedBodyLength = 4000;
-
-        private static string TruncateForLog(string value) =>
-            value.Length <= MaxLoggedBodyLength
-                ? value
-                : string.Concat(value.AsSpan(0, MaxLoggedBodyLength), "...[truncated]");
+        // The memory-ranking fallback below was never a policy pick - IsExploratory=false,
+        // Propensity=1.0 (certain selection) is the correct provenance for it, matching the same
+        // default IRoutingPolicy.DecideOutcomeAsync's default implementation reports.
+        var fallbackRoute = _routingCandidateBuilder
+            .RankEligibleModels(excludeModelNames: [], liveDimension: liveDimension).FirstOrDefault();
+        return fallbackRoute is null ? null : new AgenticRouteResult(Route: fallbackRoute, false, 1.0);
     }
-}
 
+    /// <summary>
+    /// Builds one <see cref="RoutingCandidate"/> per currently-eligible model (the same eligibility
+    /// rules <see cref="RoutingCandidateBuilder.GetEligibleRoutes"/> applies for
+    /// <see cref="RoutingCandidateBuilder.RankEligibleModels"/>), ranked by <see cref="RouterMemory"/>
+    /// score - falling back to <see cref="RoutingCandidateBuilder.ColdStartRankingScore"/> for a
+    /// candidate with no recorded score yet, matching <see cref="RoutingCandidateBuilder.RankEligibleModels"/>'s
+    /// cold-start treatment - for better policy fallback behavior, for handing to an
+    /// <see cref="IRoutingPolicy"/>.
+    /// </summary>
+    /// <param name="liveDimension">The request's live dimension key for score lookup.</param>
+    private List<RoutingCandidate> BuildRoutingCandidates(string liveDimension)
+    {
+        var candidates = _routingCandidateBuilder.GetEligibleRoutes([]);
+        if (_routerMemory is not null && candidates.Count > 0)
+            candidates = [.. candidates
+                .OrderByDescending(e =>
+                    _routerMemory.GetAverageScore(dimension: liveDimension, model: e.ModelName) ??
+                    RoutingCandidateBuilder.ColdStartRankingScore)];
+
+        return [.. candidates
+            .Select(e =>
+                new RoutingCandidate(ModelName: e.Route.ModelName, Provider: e.Route.Provider, IsFree: e.Route.IsFree))];
+    }
+
+    /// <summary>
+    /// Strips CR/LF from a client-controlled value (request method, scheme, host, path, or the
+    /// requested model name from the body) before it is placed in a log message template. Without this,
+    /// a crafted value could inject newlines into a text log sink and forge additional, fabricated log
+    /// entries (CodeQL: "Log entries created from user input" / log forging, CWE-117). Chained
+    /// <see cref="string.Replace(string, string)"/> calls directly on the tainted value is the sanitizer
+    /// shape CodeQL's data-flow analysis recognizes as breaking the taint path - mirrors
+    /// <see cref="ProxyMiddleware"/>'s own <c>SanitizeForLog</c>.
+    /// </summary>
+    private static string SanitizeForLog(string? value)
+    {
+        return value?.Replace(oldValue: "\r", newValue: " ").Replace(oldValue: "\n", newValue: " ") ?? string.Empty;
+    }
+
+    private static string TruncateForLog(string value)
+    {
+        return value.Length <= MaxLoggedBodyLength
+            ? value
+            : string.Concat(str0: value.AsSpan(0, length: MaxLoggedBodyLength), str1: "...[truncated]");
+    }
+
+    /// <summary>
+    /// The outcome of <see cref="ResolveAgenticRouteAsync"/>: the resolved route plus the provenance
+    /// (docs/router/self-organizing-classification-plan.md Phase T1c) of how it was chosen, so
+    /// <see cref="ResolveModelRouteAsync"/> can carry <see cref="IsExploratory"/>/<see cref="Propensity"/>
+    /// into <see cref="ModelRouteResolutionResult"/> without a second round-trip through the policy.
+    /// </summary>
+    /// <param name="Route">The resolved route.</param>
+    /// <param name="IsExploratory">Whether this was an epsilon-greedy exploratory pick.</param>
+    /// <param name="Propensity">The propensity of the arm actually chosen.</param>
+    /// <param name="DimBestModel">
+    /// The model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen, or
+    /// <see langword="null"/> when it abstained - Phase T4's counterfactual baseline.
+    /// </param>
+    private sealed record AgenticRouteResult(
+        ResolvedModelRoute Route,
+        bool IsExploratory,
+        double Propensity,
+        string? DimBestModel = null);
+}

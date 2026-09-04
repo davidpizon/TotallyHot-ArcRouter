@@ -1,5 +1,6 @@
-using TotallyHot.ArcRouter.PriceCatalog;
 using Microsoft.Extensions.Logging.Abstractions;
+using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.PriceCatalog.Sources;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
@@ -18,9 +19,9 @@ public class PriceSourceToggleStoreTests
         Assert.True(store.IsEnabled(PriceCatalogOptions.LiteLlmSourceName));
         Assert.True(store.IsEnabled(PriceCatalogOptions.OpenRouterSourceName));
         var names = store.List().Select(s => s.Name).ToList();
-        Assert.Equal(2, names.Count);
-        Assert.Contains(PriceCatalogOptions.LiteLlmSourceName, names);
-        Assert.Contains(PriceCatalogOptions.OpenRouterSourceName, names);
+        Assert.Equal(2, actual: names.Count);
+        Assert.Contains(expected: PriceCatalogOptions.LiteLlmSourceName, collection: names);
+        Assert.Contains(expected: PriceCatalogOptions.OpenRouterSourceName, collection: names);
     }
 
     [Fact]
@@ -30,7 +31,8 @@ public class PriceSourceToggleStoreTests
         // schema. Reporting "disabled" until it reloads is the safe direction: nothing polls in that window.
         using var temp = new TempDatabase();
         var repository = temp.CreateSourceRepository();
-        using var store = new PriceSourceToggleStore(repository, NullLogger<PriceSourceToggleStore>.Instance);
+        using var store =
+            new PriceSourceToggleStore(repository: repository, logger: NullLogger<PriceSourceToggleStore>.Instance);
 
         Assert.False(store.IsEnabled(PriceCatalogOptions.LiteLlmSourceName));
     }
@@ -46,16 +48,16 @@ public class PriceSourceToggleStoreTests
         var sourceRepository = temp.CreateSourceRepository();
         using var store = temp.CreateToggleStore(sourceRepository);
 
-        Assert.Equal(0, store.List().Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName).PriceCount);
+        Assert.Equal(0, actual: store.List().Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName).PriceCount);
 
         repository.UpsertPrices(
-            PriceCatalogOptions.LiteLlmSourceName,
-            priorityScore: 0,
-            [new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice("gpt-4o", "openai", 2.5m, 10m, null, null, null)],
-            DateTimeOffset.UtcNow);
+            sourceName: PriceCatalogOptions.LiteLlmSourceName,
+            0,
+            prices: [new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.5m, 10m, null, null, null)],
+            asOfUtc: DateTimeOffset.UtcNow);
 
         var source = store.List().Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName);
-        Assert.Equal(1, source.PriceCount);
+        Assert.Equal(1, actual: source.PriceCount);
     }
 
     [Fact]
@@ -77,7 +79,7 @@ public class PriceSourceToggleStoreTests
         var repository = temp.CreateSourceRepository();
         using (var store = temp.CreateToggleStore(repository))
         {
-            Assert.True(store.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false));
+            Assert.True(store.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false));
         }
 
         // A second store over the same database stands in for a restart: SQLite owns the flag, so the choice
@@ -94,9 +96,9 @@ public class PriceSourceToggleStoreTests
         var raised = false;
         store.Changed += () => raised = true;
 
-        Assert.False(store.SetEnabled("openpipe", enabled: true));
+        Assert.False(store.SetEnabled(sourceName: "openpipe", true));
         Assert.False(raised);
-        Assert.Equal(2, store.List().Count);
+        Assert.Equal(2, actual: store.List().Count);
     }
 
     [Fact]
@@ -107,9 +109,9 @@ public class PriceSourceToggleStoreTests
         var raised = 0;
         store.Changed += () => raised++;
 
-        store.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
+        store.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
 
-        Assert.Equal(1, raised);
+        Assert.Equal(1, actual: raised);
         Assert.False(store.List().Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName).Enabled);
     }
 
@@ -121,7 +123,7 @@ public class PriceSourceToggleStoreTests
         var token = store.GetSourceToken(PriceCatalogOptions.LiteLlmSourceName);
 
         Assert.False(token.IsCancellationRequested);
-        store.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
+        store.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
 
         // This is what aborts a fetch already in flight rather than waiting for the next cycle (D6).
         Assert.True(token.IsCancellationRequested);
@@ -134,7 +136,7 @@ public class PriceSourceToggleStoreTests
         using var store = temp.CreateToggleStore();
         var token = store.GetSourceToken(PriceCatalogOptions.LiteLlmSourceName);
 
-        store.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: true);
+        store.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, true);
 
         Assert.False(token.IsCancellationRequested);
     }
@@ -146,8 +148,8 @@ public class PriceSourceToggleStoreTests
         using var store = temp.CreateToggleStore();
         var original = store.GetSourceToken(PriceCatalogOptions.LiteLlmSourceName);
 
-        store.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: false);
-        store.SetEnabled(PriceCatalogOptions.LiteLlmSourceName, enabled: true);
+        store.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
+        store.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, true);
         var reissued = store.GetSourceToken(PriceCatalogOptions.LiteLlmSourceName);
 
         // A cancelled token never resets. Handing the old one back would leave the source reading as enabled
@@ -160,13 +162,13 @@ public class PriceSourceToggleStoreTests
     public void List_OrdersByRankThenName()
     {
         using var temp = new TempDatabase();
-        temp.SeedExtraSource("aaa-low-rank", priorityScore: 1);
-        temp.SeedExtraSource("zzz-high-rank", priorityScore: 5);
+        temp.SeedExtraSource(name: "aaa-low-rank", priorityScore: 1);
+        temp.SeedExtraSource(name: "zzz-high-rank", priorityScore: 5);
         using var store = temp.CreateToggleStore();
 
         var names = store.List().Select(s => s.Name).ToList();
 
-        Assert.Equal("zzz-high-rank", names[0]);
+        Assert.Equal(expected: "zzz-high-rank", actual: names[0]);
     }
 
     [Fact]
@@ -177,12 +179,13 @@ public class PriceSourceToggleStoreTests
         var raised = 0;
         store.Changed += () => raised++;
 
-        var reordered = store.Reorder([PriceCatalogOptions.OpenRouterSourceName, PriceCatalogOptions.LiteLlmSourceName]);
+        var reordered =
+            store.Reorder([PriceCatalogOptions.OpenRouterSourceName, PriceCatalogOptions.LiteLlmSourceName]);
 
         Assert.True(reordered);
-        Assert.Equal(1, raised);
+        Assert.Equal(1, actual: raised);
         // List() orders by rank descending, so the submitted order should now be reflected in read order too.
-        Assert.Equal(PriceCatalogOptions.OpenRouterSourceName, store.List()[0].Name);
+        Assert.Equal(expected: PriceCatalogOptions.OpenRouterSourceName, actual: store.List()[0].Name);
     }
 
     [Fact]
@@ -192,17 +195,27 @@ public class PriceSourceToggleStoreTests
         // (the gRPC service, the MCP tool) via PriceCatalogIngestionService.RecomputeWinnersAsync - this store
         // must not call it itself.
         using var temp = new TempDatabase();
-        temp.SeedExtraSource("high", enabled: true, priorityScore: 10);
+        temp.SeedExtraSource(name: "high", true, 10);
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         using var store = temp.CreateToggleStore(sourceRepository);
-        repository.UpsertPrices("high", 10, [new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice("gpt-4o", "openai", 2.50m, 10.00m, null, null, null)], DateTimeOffset.UtcNow);
-        repository.UpsertPrices(PriceCatalogOptions.LiteLlmSourceName, 0, [new TotallyHot.ArcRouter.PriceCatalog.Sources.NormalizedPrice("gpt-4o", "openai", 999m, 999m, null, null, null)], DateTimeOffset.UtcNow);
+        repository.UpsertPrices(sourceName: "high", 10,
+            prices:
+            [
+                new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 2.50m, 10.00m, null, null, null)
+            ], asOfUtc: DateTimeOffset.UtcNow);
+        repository.UpsertPrices(sourceName: PriceCatalogOptions.LiteLlmSourceName, 0,
+            prices: [new NormalizedPrice(ModelIdentifier: "gpt-4o", Provider: "openai", 999m, 999m, null, null, null)],
+            asOfUtc: DateTimeOffset.UtcNow);
 
-        Assert.True(store.Reorder([PriceCatalogOptions.LiteLlmSourceName, "high", PriceCatalogOptions.OpenRouterSourceName]));
+        Assert.True(store.Reorder([
+            PriceCatalogOptions.LiteLlmSourceName, "high", PriceCatalogOptions.OpenRouterSourceName
+        ]));
 
         // Still "high"'s number - the reorder itself did not touch model_prices.
-        Assert.Equal(2.50m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+        Assert.Equal(2.50m,
+            actual: repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
+                maxAge: TimeSpan.FromHours(24))!.InputPerMillionTokens);
     }
 
     [Fact]
@@ -229,4 +242,3 @@ public class PriceSourceToggleStoreTests
         Assert.Throws<ObjectDisposedException>(() => store.GetSourceToken(PriceCatalogOptions.LiteLlmSourceName));
     }
 }
-

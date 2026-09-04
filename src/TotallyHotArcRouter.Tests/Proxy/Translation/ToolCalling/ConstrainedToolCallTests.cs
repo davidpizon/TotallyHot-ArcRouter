@@ -1,16 +1,15 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 
 /// <summary>
 /// Covers constrained decoding end to end - request rewriting, envelope parsing, the buffered and streaming
 /// response paths, and the arming decision that selects it.
-///
 /// <para>
 /// The behavior these pin down is the one the delimiter dialects cannot offer: a model that emits an
 /// unregistered framing, or no framing at all, still produces a usable call because the sampler was never
@@ -42,11 +41,13 @@ public class ConstrainedToolCallTests
         Assert.Null(rewritten["tool_choice"]);
 
         var schema = Assert.IsType<JsonObject>(rewritten["response_format"]);
-        Assert.Equal("json_schema", schema["type"]!.GetValue<string>());
+        Assert.Equal(expected: "json_schema", actual: schema["type"]!.GetValue<string>());
 
         var system = SystemMessage(rewritten);
-        Assert.Contains("get_weather", system, StringComparison.Ordinal);
-        Assert.Contains("Returns the current weather", system, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_weather", actualString: system,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "Returns the current weather", actualString: system,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -56,7 +57,7 @@ public class ConstrainedToolCallTests
         // after the fact, it is unreachable in the grammar the sampler walks.
         var rewritten = Rewrite(RequestWithTools(WeatherTool, TimeTool));
 
-        Assert.Equal(["get_weather", "get_time"], CallBranchNames(rewritten));
+        Assert.Equal(expected: ["get_weather", "get_time"], actual: CallBranchNames(rewritten));
     }
 
     [Fact]
@@ -69,7 +70,7 @@ public class ConstrainedToolCallTests
         // relates the two choices. Each call is now one self-contained oneOf branch instead.
         var branches = CallBranches(Rewrite(RequestWithTools(WeatherTool, TimeTool)));
 
-        Assert.All(branches, branch =>
+        Assert.All(collection: branches, action: branch =>
         {
             var name = branch["properties"]!["name"]!["const"]!.GetValue<string>();
             var argumentProperties = branch["properties"]!["arguments"]!["properties"]!.AsObject()
@@ -80,10 +81,10 @@ public class ConstrainedToolCallTests
             {
                 "get_weather" => "city",
                 "get_time" => "timezone",
-                _ => throw new InvalidOperationException($"unexpected tool '{name}'"),
+                _ => throw new InvalidOperationException($"unexpected tool '{name}'")
             };
 
-            Assert.Equal([expected], argumentProperties);
+            Assert.Equal(expected: [expected], actual: argumentProperties);
         });
     }
 
@@ -92,12 +93,12 @@ public class ConstrainedToolCallTests
     {
         // Without an entry the tool would have no legal arguments shape at all, making it uncallable
         // despite being described to the model in the prompt.
-        const string NoArgsTool = """{"type":"function","function":{"name":"ping","description":"Pings."}}""";
+        const string noArgsTool = """{"type":"function","function":{"name":"ping","description":"Pings."}}""";
 
-        var branch = Assert.Single(CallBranches(Rewrite(RequestWithTools(NoArgsTool))));
+        var branch = Assert.Single(CallBranches(Rewrite(RequestWithTools(noArgsTool))));
 
-        Assert.Equal("ping", branch["properties"]!["name"]!["const"]!.GetValue<string>());
-        Assert.Equal("object", branch["properties"]!["arguments"]!["type"]!.GetValue<string>());
+        Assert.Equal(expected: "ping", actual: branch["properties"]!["name"]!["const"]!.GetValue<string>());
+        Assert.Equal(expected: "object", actual: branch["properties"]!["arguments"]!["type"]!.GetValue<string>());
     }
 
     [Fact]
@@ -110,7 +111,7 @@ public class ConstrainedToolCallTests
 
         var rewritten = Rewrite(request);
 
-        Assert.Equal("json_object", rewritten["response_format"]!["type"]!.GetValue<string>());
+        Assert.Equal(expected: "json_object", actual: rewritten["response_format"]!["type"]!.GetValue<string>());
         Assert.NotNull(rewritten["tools"]);
     }
 
@@ -133,12 +134,13 @@ public class ConstrainedToolCallTests
                         new JsonObject
                         {
                             ["id"] = "call_1",
-                            ["function"] = new JsonObject { ["name"] = "get_weather", ["arguments"] = """{"city":"Paris"}""" },
-                        },
-                    },
+                            ["function"] = new JsonObject
+                                { ["name"] = "get_weather", ["arguments"] = """{"city":"Paris"}""" }
+                        }
+                    }
                 },
-                new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_1", ["content"] = "17C" },
-            },
+                new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_1", ["content"] = "17C" }
+            }
         };
 
         var rewritten = Rewrite(request);
@@ -148,23 +150,28 @@ public class ConstrainedToolCallTests
 
         // The tool result became a user message, because `tool` is exactly the role these templates lack.
         var last = Assert.IsType<JsonObject>(messages[^1]);
-        Assert.Equal("user", last["role"]!.GetValue<string>());
-        Assert.Contains("17C", last["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Equal(expected: "user", actual: last["role"]!.GetValue<string>());
+        Assert.Contains(expectedSubstring: "17C", actualString: last["content"]!.GetValue<string>(),
+            comparisonType: StringComparison.Ordinal);
 
         // The assistant's prior call reads back as the same envelope it is asked to produce, so its own
         // transcript never teaches it a syntax that contradicts the grammar.
         var assistant = Assert.IsType<JsonObject>(messages[1]);
         Assert.Null(assistant["tool_calls"]);
-        Assert.Contains("\"tool_calls\"", assistant["content"]!.GetValue<string>(), StringComparison.Ordinal);
-        Assert.Contains("get_weather", assistant["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"tool_calls\"", actualString: assistant["content"]!.GetValue<string>(),
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "get_weather", actualString: assistant["content"]!.GetValue<string>(),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
     public void Rewrite_ANonChatBody_IsForwardedUntouched()
     {
-        var body = Encoding.UTF8.GetBytes("""{"model":"m","prompt":"hi"}""");
+        var body = """{"model":"m","prompt":"hi"}"""u8.ToArray();
 
-        Assert.Equal(body, ConstrainedToolCallRewriter.Rewrite(body, ToolCallDialectRegistry.Constrained, NullLogger.Instance));
+        Assert.Equal(expected: body,
+            actual: ConstrainedToolCallRewriter.Rewrite(openAiShapedBody: body,
+                dialect: ToolCallDialectRegistry.Constrained, logger: NullLogger.Instance));
     }
 
     // ----- Buffered responses -----
@@ -178,9 +185,9 @@ public class ConstrainedToolCallTests
         var message = response["choices"]![0]!["message"]!;
         var call = message["tool_calls"]![0]!;
 
-        Assert.Equal("get_weather", call["function"]!["name"]!.GetValue<string>());
-        Assert.Equal("""{"city":"Paris"}""", call["function"]!["arguments"]!.GetValue<string>());
-        Assert.Equal("tool_calls", response["choices"]![0]!["finish_reason"]!.GetValue<string>());
+        Assert.Equal(expected: "get_weather", actual: call["function"]!["name"]!.GetValue<string>());
+        Assert.Equal("""{"city":"Paris"}""", actual: call["function"]!["arguments"]!.GetValue<string>());
+        Assert.Equal(expected: "tool_calls", actual: response["choices"]![0]!["finish_reason"]!.GetValue<string>());
         Assert.Null(message["content"]);
     }
 
@@ -194,8 +201,8 @@ public class ConstrainedToolCallTests
 
         var message = response["choices"]![0]!["message"]!;
 
-        Assert.Equal("Waves kiss the shore.", message["content"]!.GetValue<string>());
-        Assert.Equal("stop", response["choices"]![0]!["finish_reason"]!.GetValue<string>());
+        Assert.Equal(expected: "Waves kiss the shore.", actual: message["content"]!.GetValue<string>());
+        Assert.Equal(expected: "stop", actual: response["choices"]![0]!["finish_reason"]!.GetValue<string>());
 
         // Upstream's own empty tool_calls is left exactly as it arrived rather than stripped: it already
         // means "no calls" to every OpenAI client, so rewriting it would be a change with no reader.
@@ -209,14 +216,14 @@ public class ConstrainedToolCallTests
         // and it says this model never needed constraining.
         var store = new FakeToolCallCapabilityStore();
         var body = """
-            {"choices":[{"message":{"role":"assistant","content":"","tool_calls":[
-              {"id":"x","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
-            """;
+                   {"choices":[{"message":{"role":"assistant","content":"","tool_calls":[
+                     {"id":"x","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
+                   """;
 
         var translated = TranslatorFor(store).TranslateResponse(Encoding.UTF8.GetBytes(body));
 
-        Assert.Equal(body, Encoding.UTF8.GetString(translated));
-        Assert.Equal("openai-native", Assert.Single(store.Recorded).Dialect);
+        Assert.Equal(expected: body, actual: Encoding.UTF8.GetString(translated));
+        Assert.Equal(expected: "openai-native", actual: Assert.Single(store.Recorded).Dialect);
     }
 
     [Fact]
@@ -227,14 +234,15 @@ public class ConstrainedToolCallTests
         // normalization for the model. Found by probing a live server, not by reading.
         var store = new FakeToolCallCapabilityStore();
         var body = """
-            {"choices":[{"message":{"role":"assistant","tool_calls":[],
-              "content":"{\"content\":\"\",\"tool_calls\":[{\"name\":\"get_weather\",\"arguments\":{\"city\":\"Paris\"}}]}"},"finish_reason":"stop"}]}
-            """;
+                   {"choices":[{"message":{"role":"assistant","tool_calls":[],
+                     "content":"{\"content\":\"\",\"tool_calls\":[{\"name\":\"get_weather\",\"arguments\":{\"city\":\"Paris\"}}]}"},"finish_reason":"stop"}]}
+                   """;
 
         var translated = TranslatorFor(store).TranslateResponse(Encoding.UTF8.GetBytes(body));
         var response = JsonNode.Parse(translated)!;
 
-        Assert.Equal("get_weather", response["choices"]![0]!["message"]!["tool_calls"]![0]!["function"]!["name"]!.GetValue<string>());
+        Assert.Equal(expected: "get_weather",
+            actual: response["choices"]![0]!["message"]!["tool_calls"]![0]!["function"]!["name"]!.GetValue<string>());
         Assert.Empty(store.Recorded);
     }
 
@@ -244,7 +252,8 @@ public class ConstrainedToolCallTests
         // Fail open. A degraded response the operator can see is recoverable; a dropped one is not.
         var body = BufferedResponse("I am not JSON at all.");
 
-        Assert.Equal(body, Encoding.UTF8.GetString(TranslatorFor().TranslateResponse(Encoding.UTF8.GetBytes(body))));
+        Assert.Equal(expected: body,
+            actual: Encoding.UTF8.GetString(TranslatorFor().TranslateResponse(Encoding.UTF8.GetBytes(body))));
     }
 
     // ----- Streaming -----
@@ -259,16 +268,15 @@ public class ConstrainedToolCallTests
 
         var emitted = new StringBuilder();
         foreach (var fragment in new[] { "{\"content\":\"", "Hel", "lo the", "re", "\",\"tool_calls\":[]}" })
-        {
             emitted.Append(Encoding.UTF8.GetString(translator.Push(Encoding.UTF8.GetBytes(Chunk(fragment)))));
-        }
 
         emitted.Append(Encoding.UTF8.GetString(translator.Flush()));
 
         var prose = ContentDeltas(emitted.ToString());
 
-        Assert.Equal("Hello there", prose);
-        Assert.DoesNotContain("tool_calls\\\":[]", emitted.ToString(), StringComparison.Ordinal);
+        Assert.Equal(expected: "Hello there", actual: prose);
+        Assert.DoesNotContain(expectedSubstring: "tool_calls\\\":[]", actualString: emitted.ToString(),
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -284,8 +292,10 @@ public class ConstrainedToolCallTests
 
         var text = emitted.ToString();
 
-        Assert.Contains("\"name\":\"get_weather\"", text, StringComparison.Ordinal);
-        Assert.Contains("\"finish_reason\":\"tool_calls\"", text, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"name\":\"get_weather\"", actualString: text,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "\"finish_reason\":\"tool_calls\"", actualString: text,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -296,13 +306,11 @@ public class ConstrainedToolCallTests
 
         var emitted = new StringBuilder();
         foreach (var fragment in new[] { "{\"content\":\"a\\u", "004", "2c\\nd", "\",\"tool_calls\":[]}" })
-        {
             emitted.Append(Encoding.UTF8.GetString(translator.Push(Encoding.UTF8.GetBytes(Chunk(fragment)))));
-        }
 
         emitted.Append(Encoding.UTF8.GetString(translator.Flush()));
 
-        Assert.Equal("aBc\nd", ContentDeltas(emitted.ToString()));
+        Assert.Equal(expected: "aBc\nd", actual: ContentDeltas(emitted.ToString()));
     }
 
     [Theory]
@@ -324,8 +332,8 @@ public class ConstrainedToolCallTests
 
         var prose = ContentDeltas(emitted.ToString());
 
-        Assert.Equal("sky \U0001F30A done", prose);
-        Assert.DoesNotContain('�', prose);
+        Assert.Equal(expected: "sky \U0001F30A done", actual: prose);
+        Assert.DoesNotContain('�', collection: prose);
     }
 
     [Fact]
@@ -341,7 +349,7 @@ public class ConstrainedToolCallTests
         emitted.Append(Encoding.UTF8.GetString(translator.Push(Encoding.UTF8.GetBytes(FinishChunk()))));
         emitted.Append(Encoding.UTF8.GetString(translator.Flush()));
 
-        Assert.Equal("ok", ContentDeltas(emitted.ToString()));
+        Assert.Equal(expected: "ok", actual: ContentDeltas(emitted.ToString()));
     }
 
     // ----- Arming -----
@@ -349,21 +357,23 @@ public class ConstrainedToolCallTests
     [Fact]
     public void AnEndpointSupportingJsonSchema_PrefersConstrainedDecoding()
     {
-        var store = new FakeToolCallCapabilityStore().SeedProvider(Provider, jsonSchemaResponseFormat: true);
+        var store = new FakeToolCallCapabilityStore().SeedProvider(providerKey: Provider, true);
 
-        var translator = new ToolCallNormalizerFactory(store).TryCreate(Route(), requestCarriesTools: true);
+        var translator = new ToolCallNormalizerFactory(store).TryCreate(route: Route(), true);
 
         var constrained = Assert.IsType<ConstrainedToolCallTranslator>(translator);
-        Assert.True(constrained.Plan.IsEmulating, "a constrained reply is not evidence of a native dialect");
-        Assert.True(constrained.Plan.IsObserving, "a native tool_calls reply is still worth recording");
+        Assert.True(condition: constrained.Plan.IsEmulating,
+            userMessage: "a constrained reply is not evidence of a native dialect");
+        Assert.True(condition: constrained.Plan.IsObserving,
+            userMessage: "a native tool_calls reply is still worth recording");
     }
 
     [Fact]
     public void AnEndpointWithoutJsonSchemaSupport_FallsBackToTheScanningPath()
     {
-        var store = new FakeToolCallCapabilityStore().SeedProvider(Provider, jsonSchemaResponseFormat: false);
+        var store = new FakeToolCallCapabilityStore().SeedProvider(providerKey: Provider, false);
 
-        var translator = new ToolCallNormalizerFactory(store).TryCreate(Route(), requestCarriesTools: true);
+        var translator = new ToolCallNormalizerFactory(store).TryCreate(route: Route(), true);
 
         Assert.IsType<ToolCallNormalizingTranslator>(translator);
     }
@@ -371,10 +381,10 @@ public class ConstrainedToolCallTests
     [Fact]
     public void AClientsOwnResponseFormat_DisablesConstrainedDecodingButNothingElse()
     {
-        var store = new FakeToolCallCapabilityStore().SeedProvider(Provider, jsonSchemaResponseFormat: true);
+        var store = new FakeToolCallCapabilityStore().SeedProvider(providerKey: Provider, true);
 
         var translator = new ToolCallNormalizerFactory(store)
-            .TryCreate(Route(), requestCarriesTools: true, requestCarriesResponseFormat: true);
+            .TryCreate(route: Route(), true, requestCarriesResponseFormat: true);
 
         Assert.IsType<ToolCallNormalizingTranslator>(translator);
     }
@@ -384,30 +394,33 @@ public class ConstrainedToolCallTests
     {
         // Constraining it would replace a working native path with a rewritten one.
         var store = new FakeToolCallCapabilityStore()
-            .SeedProvider(Provider, jsonSchemaResponseFormat: true)
-            .Seed(new ModelToolCapability(Provider, Model, "openai-native", DetectionConfidence.Observed));
+            .SeedProvider(providerKey: Provider, true)
+            .Seed(new ModelToolCapability(ProviderKey: Provider, ModelName: Model, Dialect: "openai-native",
+                Confidence: DetectionConfidence.Observed));
 
-        Assert.Null(new ToolCallNormalizerFactory(store).TryCreate(Route(), requestCarriesTools: true));
+        Assert.Null(new ToolCallNormalizerFactory(store).TryCreate(route: Route(), true));
     }
 
     [Fact]
     public void AnOperatorPin_WinsOverTheEndpointCapability_InBothDirections()
     {
-        var store = new FakeToolCallCapabilityStore().SeedProvider(Provider, jsonSchemaResponseFormat: true);
+        var store = new FakeToolCallCapabilityStore().SeedProvider(providerKey: Provider, true);
 
         // Pinned away from constrained: honored, even though the endpoint supports it.
-        store.Seed(new ModelToolCapability(Provider, Model, "hermes", DetectionConfidence.Operator));
+        store.Seed(new ModelToolCapability(ProviderKey: Provider, ModelName: Model, Dialect: "hermes",
+            Confidence: DetectionConfidence.Operator));
         Assert.IsType<ToolCallNormalizingTranslator>(
-            new ToolCallNormalizerFactory(store).TryCreate(Route(), requestCarriesTools: true));
+            new ToolCallNormalizerFactory(store).TryCreate(route: Route(), true));
 
         // Pinned onto constrained where detection said no: the documented escape hatch for the conservative
         // inference behind JsonSchemaResponseFormat.
         var unsupported = new FakeToolCallCapabilityStore()
-            .SeedProvider(Provider, jsonSchemaResponseFormat: false)
-            .Seed(new ModelToolCapability(Provider, Model, "constrained", DetectionConfidence.Operator));
+            .SeedProvider(providerKey: Provider, false)
+            .Seed(new ModelToolCapability(ProviderKey: Provider, ModelName: Model, Dialect: "constrained",
+                Confidence: DetectionConfidence.Operator));
 
         Assert.IsType<ConstrainedToolCallTranslator>(
-            new ToolCallNormalizerFactory(unsupported).TryCreate(Route(), requestCarriesTools: true));
+            new ToolCallNormalizerFactory(unsupported).TryCreate(route: Route(), true));
     }
 
     [Theory]
@@ -426,15 +439,16 @@ public class ConstrainedToolCallTests
         // Forwarding unrewritten is the right degradation: the client owns response_format, and without the
         // grammar there is nothing to read an envelope reply back with.
         var store = new FakeToolCallCapabilityStore()
-            .SeedProvider(Provider, jsonSchemaResponseFormat: true)
-            .Seed(new ModelToolCapability(Provider, Model, "constrained", DetectionConfidence.Operator));
+            .SeedProvider(providerKey: Provider, true)
+            .Seed(new ModelToolCapability(ProviderKey: Provider, ModelName: Model, Dialect: "constrained",
+                Confidence: DetectionConfidence.Operator));
 
         IPayloadTranslator? translator = null;
         var exception = Record.Exception(() => translator = new ToolCallNormalizerFactory(store).TryCreate(
-            Route(),
+            route: Route(),
             requestCarriesTools: carriesTools,
             requestCarriesToolHistory: carriesToolHistory,
-            requestCarriesResponseFormat: true));
+            true));
 
         Assert.Null(exception);
         Assert.Null(translator);
@@ -450,17 +464,17 @@ public class ConstrainedToolCallTests
         foreach (var dialect in ToolCallDialectRegistry.All.Where(d => d.EmulationPrompt is not null))
         {
             var store = new FakeToolCallCapabilityStore()
-                .Seed(new ModelToolCapability(Provider, Model, dialect.Name, DetectionConfidence.Operator));
+                .Seed(new ModelToolCapability(ProviderKey: Provider, ModelName: Model, Dialect: dialect.Name,
+                    Confidence: DetectionConfidence.Operator));
 
             var translator = new ToolCallNormalizerFactory(store).TryCreate(
-                Route(), requestCarriesTools: true, requestCarriesToolHistory: true);
+                route: Route(), true, true);
 
             if (translator is ToolCallEmulatingTranslator emulating)
-            {
                 Assert.True(
-                    emulating.Dialect.IsScannable,
+                    condition: emulating.Dialect.IsScannable,
+                    userMessage:
                     $"Dialect '{dialect.Name}' reached ToolCallEmulatingTranslator with no delimiters to read its reply back.");
-            }
         }
     }
 
@@ -468,17 +482,17 @@ public class ConstrainedToolCallTests
     public void ARequestOfferingNoToolsAndNoHistory_IsNotConstrained()
     {
         // Rule 1 still applies: the cheapest rewrite is the one never installed.
-        var store = new FakeToolCallCapabilityStore().SeedProvider(Provider, jsonSchemaResponseFormat: true);
+        var store = new FakeToolCallCapabilityStore().SeedProvider(providerKey: Provider, true);
 
-        Assert.Null(new ToolCallNormalizerFactory(store).TryCreate(Route(), requestCarriesTools: false));
+        Assert.Null(new ToolCallNormalizerFactory(store).TryCreate(route: Route(), false));
     }
 
     [Fact]
     public void TheConstrainedTranslator_ReshapesTheRequestButKeepsTheClientsPath()
     {
-        var store = new FakeToolCallCapabilityStore().SeedProvider(Provider, jsonSchemaResponseFormat: true);
+        var store = new FakeToolCallCapabilityStore().SeedProvider(providerKey: Provider, true);
 
-        var translator = new ToolCallNormalizerFactory(store).TryCreate(Route(), requestCarriesTools: true);
+        var translator = new ToolCallNormalizerFactory(store).TryCreate(route: Route(), true);
 
         Assert.IsAssignableFrom<IClientPathTranslator>(translator);
     }
@@ -488,9 +502,9 @@ public class ConstrainedToolCallTests
     private static JsonObject Rewrite(JsonObject request)
     {
         var rewritten = ConstrainedToolCallRewriter.Rewrite(
-            Encoding.UTF8.GetBytes(request.ToJsonString()),
-            ToolCallDialectRegistry.Constrained,
-            NullLogger.Instance);
+            openAiShapedBody: Encoding.UTF8.GetBytes(request.ToJsonString()),
+            dialect: ToolCallDialectRegistry.Constrained,
+            logger: NullLogger.Instance);
 
         return Assert.IsType<JsonObject>(JsonNode.Parse(rewritten));
     }
@@ -498,58 +512,70 @@ public class ConstrainedToolCallTests
     private static JsonObject RequestWithTools(params string[] tools)
     {
         var array = new JsonArray();
-        foreach (var tool in tools)
-        {
-            array.Add(JsonNode.Parse(tool));
-        }
+        foreach (var tool in tools) array.Add(JsonNode.Parse(tool));
 
         return new JsonObject
         {
             ["model"] = Model,
             ["messages"] = new JsonArray { new JsonObject { ["role"] = "user", ["content"] = "hi" } },
-            ["tools"] = array,
+            ["tools"] = array
         };
     }
 
-    private static string SystemMessage(JsonObject rewritten) =>
-        Assert.IsType<JsonObject>(Assert.IsType<JsonArray>(rewritten["messages"])[0])["content"]!.GetValue<string>();
+    private static string SystemMessage(JsonObject rewritten)
+    {
+        return Assert.IsType<JsonObject>(Assert.IsType<JsonArray>(rewritten["messages"])[0])["content"]!
+            .GetValue<string>();
+    }
 
     /// <summary>The per-tool <c>oneOf</c> branches the envelope constrains each call to.</summary>
     private static List<JsonObject> CallBranches(JsonObject rewritten)
     {
         var items = rewritten["response_format"]!["json_schema"]!["schema"]!["properties"]!["tool_calls"]!["items"]!;
-        return [.. Assert.IsType<JsonArray>(items["oneOf"]).Select(b => Assert.IsType<JsonObject>(b))];
+        return [.. Assert.IsType<JsonArray>(items["oneOf"]).Select(Assert.IsType<JsonObject>)];
     }
 
-    private static List<string> CallBranchNames(JsonObject rewritten) =>
-        [.. CallBranches(rewritten).Select(b => b["properties"]!["name"]!["const"]!.GetValue<string>())];
+    private static List<string> CallBranchNames(JsonObject rewritten)
+    {
+        return [.. CallBranches(rewritten).Select(b => b["properties"]!["name"]!["const"]!.GetValue<string>())];
+    }
 
-    private static ConstrainedToolCallTranslator TranslatorFor(FakeToolCallCapabilityStore? store = null) =>
-        new(
-            new ToolCallNormalizationPlan(Provider, Model, [ToolCallDialectRegistry.Constrained], IsObserving: true, IsEmulating: true),
-            ToolCallDialectRegistry.Constrained,
-            store,
-            NullLogger.Instance);
+    private static ConstrainedToolCallTranslator TranslatorFor(FakeToolCallCapabilityStore? store = null)
+    {
+        return new ConstrainedToolCallTranslator(
+            plan: new ToolCallNormalizationPlan(ProviderKey: Provider, ModelName: Model,
+                Candidates: [ToolCallDialectRegistry.Constrained], true, true),
+            dialect: ToolCallDialectRegistry.Constrained,
+            capabilityStore: store,
+            logger: NullLogger.Instance);
+    }
 
-    private static JsonObject Translate(string body) =>
-        Assert.IsType<JsonObject>(JsonNode.Parse(TranslatorFor().TranslateResponse(Encoding.UTF8.GetBytes(body))));
+    private static JsonObject Translate(string body)
+    {
+        return Assert.IsType<JsonObject>(
+            JsonNode.Parse(TranslatorFor().TranslateResponse(Encoding.UTF8.GetBytes(body))));
+    }
 
-    private static string BufferedResponse(string content) =>
-        new JsonObject
+    private static string BufferedResponse(string content)
+    {
+        return new JsonObject
         {
             ["choices"] = new JsonArray
             {
                 new JsonObject
                 {
-                    ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = content, ["tool_calls"] = new JsonArray() },
-                    ["finish_reason"] = "stop",
-                },
-            },
+                    ["message"] = new JsonObject
+                        { ["role"] = "assistant", ["content"] = content, ["tool_calls"] = new JsonArray() },
+                    ["finish_reason"] = "stop"
+                }
+            }
         }.ToJsonString();
+    }
 
     /// <summary>One SSE chunk carrying <paramref name="contentFragment"/> as <c>delta.content</c>.</summary>
-    private static string Chunk(string contentFragment) =>
-        $"data: {new JsonObject
+    private static string Chunk(string contentFragment)
+    {
+        return $"data: {new JsonObject
         {
             ["id"] = "c1",
             ["object"] = "chat.completion.chunk",
@@ -559,21 +585,24 @@ public class ConstrainedToolCallTests
                 {
                     ["index"] = 0,
                     ["delta"] = new JsonObject { ["content"] = contentFragment },
-                    ["finish_reason"] = null,
-                },
-            },
+                    ["finish_reason"] = null
+                }
+            }
         }.ToJsonString()}\n\n";
+    }
 
-    private static string FinishChunk() =>
-        $"data: {new JsonObject
+    private static string FinishChunk()
+    {
+        return $"data: {new JsonObject
         {
             ["id"] = "c1",
             ["object"] = "chat.completion.chunk",
             ["choices"] = new JsonArray
             {
-                new JsonObject { ["index"] = 0, ["delta"] = new JsonObject(), ["finish_reason"] = "stop" },
-            },
+                new JsonObject { ["index"] = 0, ["delta"] = new JsonObject(), ["finish_reason"] = "stop" }
+            }
         }.ToJsonString()}\n\n";
+    }
 
     /// <summary>Concatenates every <c>delta.content</c> the translator emitted, which is what a client would render.</summary>
     private static string ContentDeltas(string sse)
@@ -581,30 +610,26 @@ public class ConstrainedToolCallTests
         var prose = new StringBuilder();
         foreach (var line in sse.Split('\n'))
         {
-            if (!line.StartsWith("data: {", StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!line.StartsWith(value: "data: {", comparisonType: StringComparison.Ordinal)) continue;
 
             if (JsonNode.Parse(line["data: ".Length..]) is JsonObject chunk &&
                 chunk["choices"] is JsonArray { Count: > 0 } choices &&
                 choices[0]?["delta"]?["content"] is JsonValue value &&
                 value.TryGetValue<string>(out var text))
-            {
                 prose.Append(text);
-            }
         }
 
         return prose.ToString();
     }
 
-    private static ResolvedModelRoute Route() =>
-        new(
+    private static ResolvedModelRoute Route()
+    {
+        return new ResolvedModelRoute(
             ModelName: Model,
             Provider: Provider,
             ProviderModelId: Model,
             UpstreamBaseUrl: new Uri("http://127.0.0.1:1234/v1"),
             AuthHeaderName: "Authorization",
             ExtraHeaders: []);
+    }
 }
-

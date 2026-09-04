@@ -14,21 +14,20 @@ namespace TotallyHot.ArcRouter.Router.Embeddings;
 /// </summary>
 public sealed class PendingTaskEmbeddingCache
 {
-    /// <summary>A single cached embedding awaiting its verifier score, with the absolute time it expires.</summary>
-    /// <param name="Embedding">The task's embedding vector.</param>
-    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
-    private sealed record Entry(float[] Embedding, DateTimeOffset ExpiresAtUtc);
+    private readonly int _capacity;
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Queue<string> _insertionOrder = new();
     private readonly object _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _ttl;
-    private readonly int _capacity;
 
     /// <summary>Initializes a new instance of the <see cref="PendingTaskEmbeddingCache"/> class.</summary>
     /// <param name="options">Supplies the capacity and TTL bounds.</param>
-    /// <param name="timeProvider">Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for deterministic tests.</param>
+    /// <param name="timeProvider">
+    /// Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
+    /// deterministic tests.
+    /// </param>
     public PendingTaskEmbeddingCache(IOptions<RoutingOptions> options, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -63,12 +62,9 @@ public sealed class PendingTaskEmbeddingCache
         {
             EvictExpiredAndStale();
 
-            if (!_entries.ContainsKey(correlationId))
-            {
-                _insertionOrder.Enqueue(correlationId);
-            }
+            if (!_entries.ContainsKey(correlationId)) _insertionOrder.Enqueue(correlationId);
 
-            _entries[correlationId] = new Entry(embedding, _timeProvider.GetUtcNow() + _ttl);
+            _entries[correlationId] = new Entry(Embedding: embedding, ExpiresAtUtc: _timeProvider.GetUtcNow() + _ttl);
 
             while (_entries.Count > _capacity && _insertionOrder.Count > 0)
             {
@@ -92,7 +88,7 @@ public sealed class PendingTaskEmbeddingCache
             // EvictExpiredAndStale performs a full sweep, so no remaining entry is expired afterward.
             EvictExpiredAndStale();
 
-            if (_entries.Remove(correlationId, out var entry))
+            if (_entries.Remove(key: correlationId, value: out var entry))
             {
                 embedding = entry.Embedding;
                 return true;
@@ -117,10 +113,7 @@ public sealed class PendingTaskEmbeddingCache
         for (var i = 0; i < remaining; i++)
         {
             var key = _insertionOrder.Dequeue();
-            if (!_entries.TryGetValue(key, out var entry))
-            {
-                continue;
-            }
+            if (!_entries.TryGetValue(key: key, value: out var entry)) continue;
 
             if (entry.ExpiresAtUtc > now)
             {
@@ -131,4 +124,9 @@ public sealed class PendingTaskEmbeddingCache
             _entries.Remove(key);
         }
     }
+
+    /// <summary>A single cached embedding awaiting its verifier score, with the absolute time it expires.</summary>
+    /// <param name="Embedding">The task's embedding vector.</param>
+    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
+    private sealed record Entry(float[] Embedding, DateTimeOffset ExpiresAtUtc);
 }

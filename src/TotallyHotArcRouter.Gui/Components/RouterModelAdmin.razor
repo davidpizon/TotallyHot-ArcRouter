@@ -16,7 +16,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="20" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20"/> Router unreachable
             </div>
             <div class="text-xs text-slate-400">
                 Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
@@ -37,10 +37,10 @@
             <span class="text-xs text-slate-500 uppercase tracking-widest">Router Model</span>
             <div class="flex items-center gap-2">
                 <button @onclick="Reload" disabled="@Store.IsRetraining" class="btn btn-ghost flex items-center gap-1.5">
-                    <Icon Name="refresh" Size="20" /> Refresh
+                    <Icon Name="refresh" Size="20"/> Refresh
                 </button>
                 <button @onclick="Retrain" disabled="@Store.IsRetraining" class="btn btn-secondary flex items-center gap-1.5">
-                    <Icon Name="play" Size="20" />
+                    <Icon Name="play" Size="20"/>
                     @RetrainButtonLabel(status)
                 </button>
             </div>
@@ -69,7 +69,7 @@
             {
                 <div class="flex items-center justify-between gap-2">
                     <span class="text-sm font-semibold state-enabled">@status.ModelsRepresented model@(status.ModelsRepresented == 1 ? "" : "s")</span>
-                    <span class="text-xs text-slate-500 font-mono">trained @status.TrainedAtUtc?.ToLocalTime().ToString("g", CultureInfo.InvariantCulture)</span>
+                    <span class="text-xs text-slate-500 font-mono">trained @status.TrainedAtUtc?.ToLocalTime().ToString(format: "g", formatProvider: CultureInfo.InvariantCulture)</span>
                 </div>
                 <div class="text-xs text-slate-500">@status.TrainedFrom</div>
                 <div class="text-xs text-slate-500">
@@ -84,13 +84,14 @@
         <div class="rounded-lg p-3 space-y-1 ds-surface-card">
             <span class="text-xs text-slate-500 uppercase tracking-widest">Retrain Configuration</span>
             <div class="text-xs text-slate-400">
-                Automatic retrain fires every @status.RetrainThreshold new live entries; live samples are weighted @status.LiveSampleWeight.ToString("0.0#", CultureInfo.InvariantCulture)&times; a bootstrap sample.
+                Automatic retrain fires every @status.RetrainThreshold new live entries; live samples are weighted @status.LiveSampleWeight.ToString(format: "0.0#", provider: CultureInfo.InvariantCulture)&times; a bootstrap sample.
             </div>
         </div>
     }
 </div>
 
 @code {
+
     protected override async Task OnInitializedAsync()
     {
         Store.Changed += OnStoreChanged;
@@ -98,15 +99,30 @@
     }
 
     /// <summary>Re-renders when the store's state changes.</summary>
-    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+    private void OnStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>Unsubscribes from <see cref="LogRegModelAdminStore.Changed"/>.</summary>
-    public void Dispose() => Store.Changed -= OnStoreChanged;
+    public void Dispose()
+    {
+        Store.Changed -= OnStoreChanged;
+    }
 
-    /// <summary>Reloads the status. Implements both the unreachable state's Retry button and the loaded state's Refresh button.</summary>
-    private Task Reload() => Store.LoadAsync();
+    /// <summary>
+    /// Reloads the status. Implements both the unreachable state's Retry button and the loaded state's Refresh
+    /// button.
+    /// </summary>
+    private Task Reload()
+    {
+        return Store.LoadAsync();
+    }
 
-    /// <summary>Runs a retrain. Errors are left to <see cref="LogRegModelAdminStore.LastError"/>/<see cref="LogRegModelAdminStore.IsReachable"/> rather than surfaced here.</summary>
+    /// <summary>
+    /// Runs a retrain. Errors are left to <see cref="LogRegModelAdminStore.LastError"/>/
+    /// <see cref="LogRegModelAdminStore.IsReachable"/> rather than surfaced here.
+    /// </summary>
     private async Task Retrain()
     {
         try
@@ -120,7 +136,13 @@
         }
     }
 
-    /// <summary>Train / Retrain / Training… - the three button states the plan specifies (the fourth, router-unreachable, is the whole pane's error state above).</summary>
-    private string RetrainButtonLabel(LogRegModelStatusInfo status) =>
-        Store.IsRetraining ? "Training…" : status.ArtifactPresent ? "Retrain" : "Train";
+    /// <summary>
+    /// Train / Retrain / Training… - the three button states the plan specifies (the fourth, router-unreachable, is
+    /// the whole pane's error state above).
+    /// </summary>
+    private string RetrainButtonLabel(LogRegModelStatusInfo status)
+    {
+        return Store.IsRetraining ? "Training…" : status.ArtifactPresent ? "Retrain" : "Train";
+    }
+
 }

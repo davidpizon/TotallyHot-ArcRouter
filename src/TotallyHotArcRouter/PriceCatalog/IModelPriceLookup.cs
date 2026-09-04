@@ -18,4 +18,3 @@ public interface IModelPriceLookup
     /// </summary>
     ModelPrice? TryGetPrice(ModelKey key);
 }
-

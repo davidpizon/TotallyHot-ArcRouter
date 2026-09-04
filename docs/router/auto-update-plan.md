@@ -264,7 +264,7 @@ untouched install.
   `checksums.txt` together. Unscheduled; would need a signing key and its own key-management story.
 - **CI automation to publish the release zip + checksum on tag push.** This phase assumes the asset and
   `checksums.txt` already exist on the GitHub Release by the time `GitHubReleaseCheckClient` looks for
-  them. Verified: `.github/workflows/` (`dotnet-ci.yml`, `nuget-dependency-submission.yml`) contains no
+  them. Verified: `.github/workflows/` (`dotnet-ci.yml`) contained no
   release-publishing step, tag-triggered or otherwise — building a `Service`-profile publish, zipping it,
   hashing it, and creating a GitHub Release is entirely unscheduled, out of scope for this phase, and
   deliberately not built here (Phase 2 is the *consumption* side of the release pipeline, not the

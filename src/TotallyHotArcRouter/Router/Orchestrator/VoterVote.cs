@@ -26,6 +26,6 @@ public sealed record VoterVote(string VoterName, string? ModelName, double Confi
     public static VoterVote Abstain(string voterName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(voterName);
-        return new VoterVote(voterName, null, 0d);
+        return new VoterVote(VoterName: voterName, null, 0d);
     }
 }

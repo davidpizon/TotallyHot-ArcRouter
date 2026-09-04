@@ -18,8 +18,9 @@ namespace TotallyHot.ArcRouter.Tests.Router;
 /// </summary>
 public sealed class RoutingModeAdminGrpcServiceTests
 {
-    private static ServerCallContext CreateContext() =>
-        TestServerCallContext.Create(
+    private static ServerCallContext CreateContext()
+    {
+        return TestServerCallContext.Create(
             method: "Test",
             host: "localhost",
             deadline: DateTime.UtcNow.AddMinutes(1),
@@ -27,10 +28,11 @@ public sealed class RoutingModeAdminGrpcServiceTests
             cancellationToken: TestContext.Current.CancellationToken,
             peer: "test-peer",
             authContext: null!,
-            contextPropagationToken: null,
+            null,
             writeHeadersFunc: _ => Task.CompletedTask,
             writeOptionsGetter: () => null,
             writeOptionsSetter: _ => { });
+    }
 
     [Fact]
     public async Task GetRoutingMode_ReportsEveryVoterInFixedOrderWithTheirConfiguredWeights()
@@ -49,17 +51,19 @@ public sealed class RoutingModeAdminGrpcServiceTests
             EnableLlmRouterVoter = true,
             LlmRouterVoterWeight = 0.64,
             EnableClusterBestVoter = true,
-            ClusterBestVoterWeight = 0.5,
+            ClusterBestVoterWeight = 0.5
         };
         var service = new RoutingModeAdminGrpcService(Options.Create(options));
 
-        var response = await service.GetRoutingMode(new Contract.GetRoutingModeRequest(), CreateContext());
+        var response =
+            await service.GetRoutingMode(request: new Contract.GetRoutingModeRequest(), context: CreateContext());
 
         response.OrchestratorEnabled.Should().Be(true);
         response.ExplorationEnabled.Should().Be(true);
         response.ExplorationRate.Should().Be(0.05);
         response.Voters.Select(v => v.Name).Should()
-            .Equal(VoterNames.DimBest, VoterNames.MemoryKnn, VoterNames.LogReg, VoterNames.LlmRouter, VoterNames.ClusterBest);
+            .Equal(VoterNames.DimBest, VoterNames.MemoryKnn, VoterNames.LogReg, VoterNames.LlmRouter,
+                VoterNames.ClusterBest);
         response.Voters[0].Enabled.Should().BeTrue();
         response.Voters[0].Weight.Should().Be(0.9);
         response.Voters[2].Enabled.Should().BeFalse();
@@ -71,10 +75,12 @@ public sealed class RoutingModeAdminGrpcServiceTests
     [Fact]
     public async Task GetRoutingMode_ReportsTheOrchestratorKillSwitchWhenDisabled()
     {
-        var options = new RoutingOptions { EnableOrchestratorPolicy = false, EnableExploration = false, ExplorationRate = 0 };
+        var options = new RoutingOptions
+        { EnableOrchestratorPolicy = false, EnableExploration = false, ExplorationRate = 0 };
         var service = new RoutingModeAdminGrpcService(Options.Create(options));
 
-        var response = await service.GetRoutingMode(new Contract.GetRoutingModeRequest(), CreateContext());
+        var response =
+            await service.GetRoutingMode(request: new Contract.GetRoutingModeRequest(), context: CreateContext());
 
         response.OrchestratorEnabled.Should().BeFalse();
         response.ExplorationEnabled.Should().BeFalse();

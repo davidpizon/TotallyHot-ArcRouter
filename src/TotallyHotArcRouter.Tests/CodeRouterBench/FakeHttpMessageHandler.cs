@@ -19,11 +19,17 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
         _respond = respond;
     }
 
-    /// <summary>Builds a handler that always returns <paramref name="statusCode"/> with an empty body - for probe-failure fixtures.</summary>
-    public static FakeHttpMessageHandler AlwaysFails(HttpStatusCode statusCode = HttpStatusCode.ServiceUnavailable) =>
-        new(_ => new HttpResponseMessage(statusCode));
+    /// <summary>
+    /// Builds a handler that always returns <paramref name="statusCode"/> with an empty body - for probe-failure
+    /// fixtures.
+    /// </summary>
+    public static FakeHttpMessageHandler AlwaysFails(HttpStatusCode statusCode = HttpStatusCode.ServiceUnavailable)
+    {
+        return new FakeHttpMessageHandler(_ => new HttpResponseMessage(statusCode));
+    }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var response = _respond(request);

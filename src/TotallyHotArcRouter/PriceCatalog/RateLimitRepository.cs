@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Linq;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
@@ -31,19 +30,20 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
     /// captures can't race past a check-then-insert and both land a row. A no-op when
     /// <paramref name="headers"/> is empty. Also prunes history rows older than 30 days.
     /// </summary>
-    public void UpsertRateLimitHeaders(string providerKey, IReadOnlyList<RateLimitHeaderRow> headers, DateTimeOffset observedAtUtc)
+    public void UpsertRateLimitHeaders(string providerKey, IReadOnlyList<RateLimitHeaderRow> headers,
+        DateTimeOffset observedAtUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentNullException.ThrowIfNull(headers);
 
-        if (headers.Count == 0)
-        {
-            return;
-        }
+        if (headers.Count == 0) return;
 
-        var observedAt = observedAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
-        var minuteBucket = observedAtUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
-        var historyCutoff = (observedAtUtc - HistoryRetention).UtcDateTime.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+        var observedAt =
+            observedAtUtc.UtcDateTime.ToString(format: TimestampFormat, provider: CultureInfo.InvariantCulture);
+        var minuteBucket =
+            observedAtUtc.UtcDateTime.ToString(format: "yyyy-MM-ddTHH:mm", provider: CultureInfo.InvariantCulture);
+        var historyCutoff = (observedAtUtc - HistoryRetention).UtcDateTime.ToString(format: "yyyy-MM-ddTHH:mm",
+            provider: CultureInfo.InvariantCulture);
 
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
@@ -54,16 +54,16 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
             {
                 snapshot.Transaction = transaction;
                 snapshot.CommandText = """
-                    INSERT INTO provider_rate_limit_snapshot (provider_key, header_name, header_value, observed_at)
-                    VALUES ($key, $name, $value, $observed)
-                    ON CONFLICT(provider_key, header_name) DO UPDATE SET
-                        header_value = excluded.header_value,
-                        observed_at  = excluded.observed_at;
-                    """;
-                snapshot.Parameters.AddWithValue("$key", providerKey);
-                snapshot.Parameters.AddWithValue("$name", header.HeaderName.ToLowerInvariant());
-                snapshot.Parameters.AddWithValue("$value", header.HeaderValue);
-                snapshot.Parameters.AddWithValue("$observed", observedAt);
+                                       INSERT INTO provider_rate_limit_snapshot (provider_key, header_name, header_value, observed_at)
+                                       VALUES ($key, $name, $value, $observed)
+                                       ON CONFLICT(provider_key, header_name) DO UPDATE SET
+                                           header_value = excluded.header_value,
+                                           observed_at  = excluded.observed_at;
+                                       """;
+                snapshot.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+                snapshot.Parameters.AddWithValue(parameterName: "$name", value: header.HeaderName.ToLowerInvariant());
+                snapshot.Parameters.AddWithValue(parameterName: "$value", value: header.HeaderValue);
+                snapshot.Parameters.AddWithValue(parameterName: "$observed", value: observedAt);
                 snapshot.ExecuteNonQuery();
             }
 
@@ -71,14 +71,14 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
             {
                 insert.Transaction = transaction;
                 insert.CommandText = """
-                    INSERT INTO provider_rate_limit_history (provider_key, minute_bucket, header_name, header_value)
-                    VALUES ($key, $bucket, $name, $value)
-                    ON CONFLICT(provider_key, minute_bucket, header_name) DO NOTHING;
-                    """;
-                insert.Parameters.AddWithValue("$key", providerKey);
-                insert.Parameters.AddWithValue("$bucket", minuteBucket);
-                insert.Parameters.AddWithValue("$name", header.HeaderName.ToLowerInvariant());
-                insert.Parameters.AddWithValue("$value", header.HeaderValue);
+                                     INSERT INTO provider_rate_limit_history (provider_key, minute_bucket, header_name, header_value)
+                                     VALUES ($key, $bucket, $name, $value)
+                                     ON CONFLICT(provider_key, minute_bucket, header_name) DO NOTHING;
+                                     """;
+                insert.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+                insert.Parameters.AddWithValue(parameterName: "$bucket", value: minuteBucket);
+                insert.Parameters.AddWithValue(parameterName: "$name", value: header.HeaderName.ToLowerInvariant());
+                insert.Parameters.AddWithValue(parameterName: "$value", value: header.HeaderValue);
                 insert.ExecuteNonQuery();
             }
         }
@@ -91,9 +91,10 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
         using (var prune = connection.CreateCommand())
         {
             prune.Transaction = transaction;
-            prune.CommandText = "DELETE FROM provider_rate_limit_history WHERE provider_key = $key AND minute_bucket < $cutoff;";
-            prune.Parameters.AddWithValue("$key", providerKey);
-            prune.Parameters.AddWithValue("$cutoff", historyCutoff);
+            prune.CommandText =
+                "DELETE FROM provider_rate_limit_history WHERE provider_key = $key AND minute_bucket < $cutoff;";
+            prune.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+            prune.Parameters.AddWithValue(parameterName: "$cutoff", value: historyCutoff);
             prune.ExecuteNonQuery();
         }
 
@@ -105,18 +106,19 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
     /// <c>observed_at</c> of the capture that produced it. Returns an empty header list and a
     /// <see langword="null"/> instant when no header has ever been captured for this provider.
     /// </summary>
-    public (IReadOnlyList<RateLimitHeaderRow> Headers, DateTimeOffset? ObservedAtUtc) GetRateLimitSnapshot(string providerKey)
+    public (IReadOnlyList<RateLimitHeaderRow> Headers, DateTimeOffset? ObservedAtUtc) GetRateLimitSnapshot(
+        string providerKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
 
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT header_name, header_value, observed_at
-            FROM provider_rate_limit_snapshot
-            WHERE provider_key = $key;
-            """;
-        command.Parameters.AddWithValue("$key", providerKey);
+                              SELECT header_name, header_value, observed_at
+                              FROM provider_rate_limit_snapshot
+                              WHERE provider_key = $key;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
 
         // Every header captured together in one UpsertRateLimitHeaders call shares the same observed_at.
         // A header the provider stops sending keeps its old observed_at forever (nothing upserts it again),
@@ -133,26 +135,16 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
             {
                 var observedAt = ParseTimestamp(reader.GetString(2));
                 buffered.Add((reader.GetString(0), reader.GetString(1), observedAt));
-                if (latest is null || observedAt > latest)
-                {
-                    latest = observedAt;
-                }
+                if (latest is null || observedAt > latest) latest = observedAt;
             }
         }
 
-        if (latest is null)
-        {
-            return ([], null);
-        }
+        if (latest is null) return ([], null);
 
         var rows = new List<RateLimitHeaderRow>();
         foreach (var row in buffered)
-        {
             if (row.ObservedAt == latest)
-            {
-                rows.Add(new RateLimitHeaderRow(row.Name, row.Value));
-            }
-        }
+                rows.Add(new RateLimitHeaderRow(HeaderName: row.Name, HeaderValue: row.Value));
 
         return (rows, latest);
     }
@@ -168,18 +160,19 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
 
-        var sinceBucket = sinceUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+        var sinceBucket =
+            sinceUtc.UtcDateTime.ToString(format: "yyyy-MM-ddTHH:mm", provider: CultureInfo.InvariantCulture);
 
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT minute_bucket, header_name, header_value
-            FROM provider_rate_limit_history
-            WHERE provider_key = $key AND minute_bucket >= $since
-            ORDER BY minute_bucket;
-            """;
-        command.Parameters.AddWithValue("$key", providerKey);
-        command.Parameters.AddWithValue("$since", sinceBucket);
+                              SELECT minute_bucket, header_name, header_value
+                              FROM provider_rate_limit_history
+                              WHERE provider_key = $key AND minute_bucket >= $since
+                              ORDER BY minute_bucket;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+        command.Parameters.AddWithValue(parameterName: "$since", value: sinceBucket);
 
         // Rows arrive pre-sorted by minute_bucket, so a run of rows sharing the same bucket string is
         // always contiguous - one pass groups them without a Dictionary's unordered enumeration risk.
@@ -189,18 +182,14 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
             while (reader.Read())
             {
                 var bucket = reader.GetString(0);
-                if (buckets.Count == 0 || buckets[^1].Bucket != bucket)
-                {
-                    buckets.Add((bucket, []));
-                }
+                if (buckets.Count == 0 || buckets[^1].Bucket != bucket) buckets.Add((bucket, []));
 
-                buckets[^1].Headers.Add(new RateLimitHeaderRow(reader.GetString(1), reader.GetString(2)));
+                buckets[^1].Headers
+                    .Add(new RateLimitHeaderRow(HeaderName: reader.GetString(1), HeaderValue: reader.GetString(2)));
             }
         }
 
-        return buckets
-            .Select(b => new RateLimitHistoryBucket(ParseMinuteBucket(b.Bucket), b.Headers))
-            .ToList();
+        return [.. buckets.Select(b => new RateLimitHistoryBucket(BucketUtc: ParseMinuteBucket(b.Bucket), Headers: b.Headers))];
     }
 
     // minute_bucket is stored as "yyyy-MM-ddTHH:mm" (see UpsertRateLimitHeaders); appending seconds and a
@@ -208,10 +197,12 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
     /// <summary>Parses a stored <c>minute_bucket</c> string back into a UTC instant.</summary>
     /// <param name="minuteBucket">The bucket key, formatted <c>"yyyy-MM-ddTHH:mm"</c>.</param>
     /// <returns>The bucket start as a UTC <see cref="DateTimeOffset"/>.</returns>
-    private static DateTimeOffset ParseMinuteBucket(string minuteBucket) =>
-        DateTimeOffset.ParseExact(
-            minuteBucket + ":00Z",
-            "yyyy-MM-ddTHH:mm:ssK",
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal);
+    private static DateTimeOffset ParseMinuteBucket(string minuteBucket)
+    {
+        return DateTimeOffset.ParseExact(
+            input: minuteBucket + ":00Z",
+            format: "yyyy-MM-ddTHH:mm:ssK",
+            formatProvider: CultureInfo.InvariantCulture,
+            styles: DateTimeStyles.AssumeUniversal);
+    }
 }

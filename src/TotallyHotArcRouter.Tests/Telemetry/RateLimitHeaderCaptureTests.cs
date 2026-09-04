@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using System.Net.Http.Headers;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
@@ -22,10 +23,10 @@ public class RateLimitHeaderCaptureTests
             ("anthropic-ratelimit-unified-status", "allowed"),
             ("anthropic-ratelimit-future-header", "value"));
 
-        await capture.CaptureAsync("anthropic", headers, Ct);
+        await capture.CaptureAsync(providerKey: "anthropic", headers: headers, cancellationToken: Ct);
 
         var (snapshot, _) = repository.GetRateLimitSnapshot("anthropic");
-        Assert.Equal(3, snapshot.Count);
+        Assert.Equal(3, actual: snapshot.Count);
     }
 
     [Fact]
@@ -40,10 +41,10 @@ public class RateLimitHeaderCaptureTests
             ("x-ratelimit-remaining-tokens", "159975"),
             ("content-type", "application/json"));
 
-        await capture.CaptureAsync("openai", headers, Ct);
+        await capture.CaptureAsync(providerKey: "openai", headers: headers, cancellationToken: Ct);
 
         var (snapshot, observedAt) = repository.GetRateLimitSnapshot("openai");
-        Assert.Equal(2, snapshot.Count);
+        Assert.Equal(2, actual: snapshot.Count);
         Assert.NotNull(observedAt);
     }
 
@@ -58,10 +59,10 @@ public class RateLimitHeaderCaptureTests
             ("anthropic-ratelimit-tokens-remaining", "1000"),
             ("x-ratelimit-remaining-tokens", "2000"));
 
-        await capture.CaptureAsync("mixed-provider", headers, Ct);
+        await capture.CaptureAsync(providerKey: "mixed-provider", headers: headers, cancellationToken: Ct);
 
         var (snapshot, _) = repository.GetRateLimitSnapshot("mixed-provider");
-        Assert.Equal(2, snapshot.Count);
+        Assert.Equal(2, actual: snapshot.Count);
     }
 
     [Fact]
@@ -75,7 +76,7 @@ public class RateLimitHeaderCaptureTests
             ("content-type", "application/json"),
             ("x-request-id", "abc-123"));
 
-        await capture.CaptureAsync("anthropic", headers, Ct);
+        await capture.CaptureAsync(providerKey: "anthropic", headers: headers, cancellationToken: Ct);
 
         var (snapshot, observedAt) = repository.GetRateLimitSnapshot("anthropic");
         Assert.Empty(snapshot);
@@ -89,7 +90,8 @@ public class RateLimitHeaderCaptureTests
         var repository = temp.CreateRateLimitRepository();
         using var capture = new RateLimitHeaderCapture(repository);
 
-        await capture.CaptureAsync(string.Empty, BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), Ct);
+        await capture.CaptureAsync(providerKey: string.Empty,
+            headers: BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), cancellationToken: Ct);
 
         var (snapshot, _) = repository.GetRateLimitSnapshot("anthropic");
         Assert.Empty(snapshot);
@@ -103,12 +105,14 @@ public class RateLimitHeaderCaptureTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
         var brokenDatabase = new PriceCatalogDatabase(
-            Microsoft.Extensions.Options.Options.Create(new StorageOptions { DatabasePath = Path.Combine(temp.Path_, "does", "not", "exist.db") }));
+            Options.Create(new StorageOptions
+            { DatabasePath = Path.Combine(path1: temp.DatabasePath, path2: "does", path3: "not", path4: "exist.db") }));
         var repository = new RateLimitRepository(brokenDatabase);
         using var capture = new RateLimitHeaderCapture(repository);
 
         var exception = await Record.ExceptionAsync(() =>
-            capture.CaptureAsync("anthropic", BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), Ct));
+            capture.CaptureAsync(providerKey: "anthropic",
+                headers: BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), cancellationToken: Ct));
 
         Assert.Null(exception);
     }
@@ -117,7 +121,8 @@ public class RateLimitHeaderCaptureTests
     public async Task NullRateLimitHeaderCapture_NeverThrowsAndDoesNothing()
     {
         var exception = await Record.ExceptionAsync(() =>
-            NullRateLimitHeaderCapture.Instance.CaptureAsync("anthropic", BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), Ct));
+            NullRateLimitHeaderCapture.Instance.CaptureAsync(providerKey: "anthropic",
+                headers: BuildHeaders(("anthropic-ratelimit-tokens-remaining", "1")), cancellationToken: Ct));
 
         Assert.Null(exception);
     }
@@ -128,10 +133,7 @@ public class RateLimitHeaderCaptureTests
         // returning would hand callers a headers collection whose parent is already gone. The message has
         // no content and holds no unmanaged resources, so leaving it undisposed is harmless in a test.
         var response = new HttpResponseMessage();
-        foreach (var (name, value) in entries)
-        {
-            response.Headers.TryAddWithoutValidation(name, value);
-        }
+        foreach (var (name, value) in entries) response.Headers.TryAddWithoutValidation(name: name, value: value);
 
         return response.Headers;
     }

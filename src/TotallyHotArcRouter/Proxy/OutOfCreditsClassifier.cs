@@ -41,10 +41,7 @@ internal static class OutOfCreditsClassifier
 
         if (!string.IsNullOrEmpty(embeddedMessage))
         {
-            if (!MatchesKeywords(embeddedMessage))
-            {
-                return false;
-            }
+            if (!MatchesKeywords(embeddedMessage)) return false;
 
             message = embeddedMessage;
             return true;
@@ -60,15 +57,15 @@ internal static class OutOfCreditsClassifier
             return false;
         }
 
-        if (parsed is not JsonObject root || root["error"] is not JsonObject errorObject)
-        {
-            return false;
-        }
+        if (parsed is not JsonObject root || root["error"] is not JsonObject errorObject) return false;
 
-        var errorMessage = TryGetString(errorObject["message"], out var extractedMessage) ? extractedMessage : string.Empty;
+        var errorMessage = TryGetString(node: errorObject["message"], value: out var extractedMessage)
+            ? extractedMessage
+            : string.Empty;
 
         // OpenAI's typed signal, checked first: higher confidence than a message-keyword guess.
-        if (TryGetString(errorObject["code"], out var code) && string.Equals(code, "insufficient_quota", StringComparison.OrdinalIgnoreCase))
+        if (TryGetString(node: errorObject["code"], value: out var code) && string.Equals(a: code,
+                b: "insufficient_quota", comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             message = errorMessage.Length > 0 ? errorMessage : "insufficient_quota";
             return true;
@@ -83,8 +80,11 @@ internal static class OutOfCreditsClassifier
         return false;
     }
 
-    private static bool MatchesKeywords(string text) =>
-        Keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    private static bool MatchesKeywords(string text)
+    {
+        return Keywords.Any(keyword =>
+            text.Contains(value: keyword, comparisonType: StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// Safely reads <paramref name="node"/> as a string, without throwing when the upstream sent an

@@ -7,7 +7,9 @@
         @if (Conversation.HasFallbackTurns)
         {
             <span class="ds-badge-warning shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ls-tip" tabindex="0" aria-describedby="ls-tooltip"
-                  data-tip="One or more turns in this conversation used fallback routing">⚠ Fallback</span>
+                  data-tip="One or more turns in this conversation used fallback routing">
+                ⚠ Fallback
+            </span>
         }
         <span class="ml-auto text-xs font-mono text-slate-500 shrink-0 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Session ID, followed by the timestamps of the first and last turn">
@@ -21,7 +23,7 @@
               data-tip="@TotalCostTip">
             <span class="ls-stat-label">Total Cost</span>
             <span class="font-mono text-xs metric-positive">
-                @(Conversation.UnpricedTurns > 0 ? "≥ " : "")$@Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)
+                @(Conversation.UnpricedTurns > 0 ? "≥ " : "")$@Conversation.TotalCost.ToString(format: "F6", provider: CultureInfo.InvariantCulture)
             </span>
             @if (Conversation.UnpricedTurns > 0)
             {
@@ -31,13 +33,13 @@
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Cumulative prompt + completion tokens sent to the LLM across all turns">
             <span class="ls-stat-label">Total Tokens</span>
-            <span class="font-mono text-xs text-slate-200">@((Conversation.TotalPromptTokens + Conversation.TotalCompletionTokens).ToString("N0", CultureInfo.InvariantCulture))</span>
+            <span class="font-mono text-xs text-slate-200">@((Conversation.TotalPromptTokens + Conversation.TotalCompletionTokens).ToString(format: "N0", provider: CultureInfo.InvariantCulture))</span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
               data-tip="Average cost reduction percentage across all turns in this conversation">
             <span class="ls-stat-label">Avg ROI</span>
             <span class="font-mono text-xs @(AvgRoi > 0 ? "metric-positive" : "metric-neutral")">
-                @(AvgRoi > 0 ? $"{AvgRoi.ToString("F1", CultureInfo.InvariantCulture)}% ↓" : "—")
+                @(AvgRoi > 0 ? $"{AvgRoi.ToString(format: "F1", provider: CultureInfo.InvariantCulture)}% ↓" : "—")
             </span>
         </span>
         <span class="flex items-baseline gap-1 ls-tip" tabindex="0" aria-describedby="ls-tooltip"
@@ -51,7 +53,7 @@
                   data-tip="Total tokens per turn across this conversation - watch it climb turn over turn (the hockey stick curve)">
                 <span class="ls-stat-label">Trend</span>
                 <svg width="@SparklineWidth" height="@SparklineHeight" viewBox="0 0 @SparklineWidth @SparklineHeight" aria-hidden="true">
-                    <polyline points="@SparklinePoints" fill="none" class="sparkline-line" stroke-width="1.5" />
+                    <polyline points="@SparklinePoints" fill="none" class="sparkline-line" stroke-width="1.5"/>
                 </svg>
             </span>
         }
@@ -59,8 +61,10 @@
 </div>
 
 @code {
+
     /// <summary>The conversation pinned above the scrollable turn list.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public Conversation Conversation { get; set; } = null!;
 
     /// <summary>The average routing ROI across this conversation's turns, or 0 when there are none.</summary>
@@ -68,7 +72,10 @@
 
     // §5.6: a non-zero UnpricedTurns means the total is a floor, not a complete sum - the tooltip
     // discloses that explicitly rather than letting "$4.10" read as a confident total.
-    /// <summary>The Total Cost stat's tooltip, disclosing when unpriced turns make the total a floor rather than a complete sum.</summary>
+    /// <summary>
+    /// The Total Cost stat's tooltip, disclosing when unpriced turns make the total a floor rather than a complete
+    /// sum.
+    /// </summary>
     private string TotalCostTip => Conversation.UnpricedTurns > 0
         ? $"Sum of all priced LLM API costs for this conversation. {Conversation.UnpricedTurns} turn(s) had no known cost and are not included - the true total is at least this much."
         : "Sum of all LLM API costs for this conversation";
@@ -84,7 +91,7 @@
         get
         {
             var turns = Conversation.Turns
-                .Select(t => new TurnTokenPoint(t.TurnNumber, t.PromptTokens, t.CompletionTokens))
+                .Select(t => new TurnTokenPoint(TurnNumber: t.TurnNumber, PromptTokens: t.PromptTokens, CompletionTokens: t.CompletionTokens))
                 .ToList();
             var values = TokenCompoundingSeries.BuildSparkline(turns);
             if (values.Count == 0)
@@ -92,10 +99,10 @@
                 return string.Empty;
             }
 
-            var points = SparklineLayout.Normalize(values, SparklineWidth, SparklineHeight);
-            return string.Join(' ', points.Select(p =>
-                $"{p.X.ToString("F1", CultureInfo.InvariantCulture)},{p.Y.ToString("F1", CultureInfo.InvariantCulture)}"));
+            var points = SparklineLayout.Normalize(values: values, width: SparklineWidth, height: SparklineHeight);
+            return string.Join(' ', values: points.Select(p =>
+                $"{p.X.ToString(format: "F1", provider: CultureInfo.InvariantCulture)},{p.Y.ToString(format: "F1", provider: CultureInfo.InvariantCulture)}"));
         }
     }
-}
 
+}

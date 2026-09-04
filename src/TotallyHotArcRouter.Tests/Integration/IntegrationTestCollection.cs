@@ -4,7 +4,4 @@ namespace TotallyHot.ArcRouter.Tests.Integration;
 /// Serializes integration tests that may share system resources.
 /// </summary>
 [CollectionDefinition("Integration", DisableParallelization = true)]
-public sealed class IntegrationTestCollection
-{
-}
-
+public sealed class IntegrationTestCollection;

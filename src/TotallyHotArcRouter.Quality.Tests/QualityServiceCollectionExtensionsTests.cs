@@ -52,8 +52,8 @@ public class QualityServiceCollectionExtensionsTests
         Assert.IsType<NoJudgeAvailability>(provider.GetRequiredService<IJudgeAvailability>());
 
         var hosted = provider.GetServices<IHostedService>().ToList();
-        Assert.Contains(hosted, s => s is QualityGradingService);
-        Assert.Contains(hosted, s => s is QualityJoinSweepService);
+        Assert.Contains(collection: hosted, filter: s => s is QualityGradingService);
+        Assert.Contains(collection: hosted, filter: s => s is QualityJoinSweepService);
     }
 
     [Fact]
@@ -63,13 +63,13 @@ public class QualityServiceCollectionExtensionsTests
 
         var analyzers = provider.GetServices<IStaticAnalyzer>().ToList();
 
-        Assert.Contains(analyzers, a => a is DiagnosticSeverityAnalyzer);
-        Assert.Contains(analyzers, a => a is PlaceholderAnalyzer);
-        Assert.Contains(analyzers, a => a is TruncationAnalyzer);
-        Assert.Contains(analyzers, a => a is ComplexityAnalyzer);
+        Assert.Contains(collection: analyzers, filter: a => a is DiagnosticSeverityAnalyzer);
+        Assert.Contains(collection: analyzers, filter: a => a is PlaceholderAnalyzer);
+        Assert.Contains(collection: analyzers, filter: a => a is TruncationAnalyzer);
+        Assert.Contains(collection: analyzers, filter: a => a is ComplexityAnalyzer);
 
         // The composite must not be enumerable as one of the analyzers it composes, or it would recurse.
-        Assert.DoesNotContain(analyzers, a => a is CompositeStaticAnalyzer);
+        Assert.DoesNotContain(collection: analyzers, filter: a => a is CompositeStaticAnalyzer);
         Assert.NotNull(provider.GetRequiredService<CompositeStaticAnalyzer>());
     }
 
@@ -79,7 +79,7 @@ public class QualityServiceCollectionExtensionsTests
         var custom = new NullQualityScoreObserver();
         using var provider = BuildProvider(s => s.AddSingleton<IQualityScoreObserver>(custom));
 
-        Assert.Same(custom, provider.GetRequiredService<IQualityScoreObserver>());
+        Assert.Same(expected: custom, actual: provider.GetRequiredService<IQualityScoreObserver>());
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class QualityServiceCollectionExtensionsTests
         var custom = new AlwaysJudge();
         using var provider = BuildProvider(s => s.AddSingleton<IJudgeAvailability>(custom));
 
-        Assert.Same(custom, provider.GetRequiredService<IJudgeAvailability>());
+        Assert.Same(expected: custom, actual: provider.GetRequiredService<IJudgeAvailability>());
     }
 
     // The predecessor of this registration decided at startup whether the host could execute code, and
@@ -102,13 +102,17 @@ public class QualityServiceCollectionExtensionsTests
 
         var registeredTypes = provider.GetServices<IHostedService>().Select(s => s.GetType().Name).Order().ToList();
 
-        Assert.Equal([nameof(QualityGradingService), nameof(QualityJoinSweepService)], registeredTypes);
+        Assert.Equal(expected: [nameof(QualityGradingService), nameof(QualityJoinSweepService)],
+            actual: registeredTypes);
         Assert.Null(provider.GetService<IStaticAnalyzer>() as CompositeStaticAnalyzer);
     }
 
     /// <summary>A stand-in availability that always asks for a judge, used to prove the host's registration wins.</summary>
     private sealed class AlwaysJudge : IJudgeAvailability
     {
-        public bool WillJudge(QualityResult result) => true;
+        public bool WillJudge(QualityResult result)
+        {
+            return true;
+        }
     }
 }

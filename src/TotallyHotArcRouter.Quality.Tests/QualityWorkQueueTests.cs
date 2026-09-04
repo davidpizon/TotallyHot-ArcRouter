@@ -1,14 +1,17 @@
-using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Quality.Grading;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Quality.Tests;
 
 /// <summary>Covers the bounded work queue's enqueue and drop-on-full behavior.</summary>
 public class QualityWorkQueueTests
 {
-    private static QualityRequest Request() =>
-        new("code", CodeLanguage.Python, "write code", "code_generation", "gpt-5.4", "corr", "sess");
+    private static QualityRequest Request()
+    {
+        return new QualityRequest(Code: "code", Language: CodeLanguage.Python, Prompt: "write code",
+            Dimension: "code_generation",
+            Model: "gpt-5.4", CorrelationId: "corr", SessionId: "sess");
+    }
 
     [Fact]
     public void TryEnqueue_WithinCapacity_Succeeds()
@@ -16,7 +19,7 @@ public class QualityWorkQueueTests
         var queue = new QualityWorkQueue(Options.Create(new QualityOptions { QueueCapacity = 4 }));
 
         Assert.True(queue.TryEnqueue(Request()));
-        Assert.Equal(0, queue.DroppedCount);
+        Assert.Equal(0, actual: queue.DroppedCount);
     }
 
     [Fact]
@@ -29,7 +32,7 @@ public class QualityWorkQueueTests
         Assert.False(queue.TryEnqueue(Request()));
         Assert.False(queue.TryEnqueue(Request()));
 
-        Assert.Equal(2, queue.DroppedCount);
+        Assert.Equal(2, actual: queue.DroppedCount);
     }
 
     [Fact]
@@ -39,17 +42,14 @@ public class QualityWorkQueueTests
         const int total = 4000;
         var accepted = 0;
 
-        Parallel.For(0, total, _ =>
+        Parallel.For(0, toExclusive: total, body: _ =>
         {
-            if (queue.TryEnqueue(Request()))
-            {
-                Interlocked.Increment(ref accepted);
-            }
+            if (queue.TryEnqueue(Request())) Interlocked.Increment(ref accepted);
         });
 
         // Every item is either accepted or counted as dropped - nothing is lost or double-counted, and no
         // enqueue blocked or threw under load (the proxy hot path stays non-blocking).
-        Assert.Equal(total, accepted + queue.DroppedCount);
+        Assert.Equal(expected: total, actual: accepted + queue.DroppedCount);
         Assert.True(accepted <= 16);
     }
 
@@ -64,13 +64,9 @@ public class QualityWorkQueueTests
         await foreach (var _ in queue.DequeueAllAsync(TestContext.Current.CancellationToken))
         {
             drained++;
-            if (drained == 2)
-            {
-                break;
-            }
+            if (drained == 2) break;
         }
 
-        Assert.Equal(2, drained);
+        Assert.Equal(2, actual: drained);
     }
 }
-

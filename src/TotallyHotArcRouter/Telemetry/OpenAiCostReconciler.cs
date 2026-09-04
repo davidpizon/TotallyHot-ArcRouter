@@ -1,6 +1,5 @@
-using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -13,9 +12,9 @@ namespace TotallyHot.ArcRouter.Telemetry;
 public sealed class OpenAiCostReconciler : IProviderCostReconciler
 {
     private const string BaseUrl = "https://api.openai.com/v1/organization/costs";
+    private readonly string _adminApiKey;
 
     private readonly HttpClient _httpClient;
-    private readonly string _adminApiKey;
     private readonly ILogger<OpenAiCostReconciler>? _logger;
 
     /// <summary>Initializes a new instance of the <see cref="OpenAiCostReconciler"/> class.</summary>
@@ -29,41 +28,42 @@ public sealed class OpenAiCostReconciler : IProviderCostReconciler
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Provider => "openai";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<decimal> GetReportedCostAsync(DateOnly day, CancellationToken cancellationToken = default)
     {
-        var startUnix = new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeSeconds();
-        var endUnix = new DateTimeOffset(day.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToUnixTimeSeconds();
+        var startUnix = new DateTimeOffset(dateTime: day.ToDateTime(TimeOnly.MinValue), offset: TimeSpan.Zero)
+            .ToUnixTimeSeconds();
+        var endUnix = new DateTimeOffset(dateTime: day.AddDays(1).ToDateTime(TimeOnly.MinValue), offset: TimeSpan.Zero)
+            .ToUnixTimeSeconds();
 
-        decimal total = 0m;
+        var total = 0m;
         string? page = null;
 
         do
         {
             var uri = $"{BaseUrl}?start_time={startUnix}&end_time={endUnix}&bucket_width=1d" +
-                (page is null ? string.Empty : $"&page={Uri.EscapeDataString(page)}");
+                      (page is null ? string.Empty : $"&page={Uri.EscapeDataString(page)}");
 
             using var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-                _httpClient,
-                () => BuildRequest(uri),
+                httpClient: _httpClient,
+                requestFactory: () => BuildRequest(uri),
                 logger: _logger,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var root = JsonNode.Parse(body) as JsonObject
-                ?? throw new InvalidOperationException("OpenAI costs response was not a JSON object.");
+                       ?? throw new InvalidOperationException("OpenAI costs response was not a JSON object.");
 
             total += SumBucketResults(root);
 
             page = root["has_more"] is JsonValue hasMore && hasMore.TryGetValue<bool>(out var more) && more
                 ? root["next_page"]?.GetValue<string>()
                 : null;
-        }
-        while (page is not null);
+        } while (page is not null);
 
         return total;
     }
@@ -71,37 +71,27 @@ public sealed class OpenAiCostReconciler : IProviderCostReconciler
     /// <summary>Builds the GET request for <paramref name="uri"/>, authorized with the Admin API key.</summary>
     private HttpRequestMessage BuildRequest(string uri)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _adminApiKey);
+        var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue(scheme: "Bearer", parameter: _adminApiKey);
         return request;
     }
 
     /// <summary>Sums every bucket's <c>results[].amount.value</c> in one page of the response.</summary>
     private static decimal SumBucketResults(JsonObject root)
     {
-        if (root["data"] is not JsonArray buckets)
-        {
-            return 0m;
-        }
+        if (root["data"] is not JsonArray buckets) return 0m;
 
-        decimal sum = 0m;
+        var sum = 0m;
         foreach (var bucketNode in buckets)
         {
-            if (bucketNode is not JsonObject bucket || bucket["results"] is not JsonArray results)
-            {
-                continue;
-            }
+            if (bucketNode is not JsonObject bucket || bucket["results"] is not JsonArray results) continue;
 
             foreach (var resultNode in results)
-            {
                 if (resultNode is JsonObject result &&
                     result["amount"] is JsonObject amount &&
                     amount["value"] is JsonValue valueNode &&
                     valueNode.TryGetValue<decimal>(out var value))
-                {
                     sum += value;
-                }
-            }
         }
 
         return sum;

@@ -24,7 +24,11 @@ public sealed record RateLimitTrendPoint(long T, string Label, long? Remaining, 
 /// </param>
 /// <param name="Points">The bucketed points, chronologically ordered.</param>
 public sealed record RateLimitTrendModel(
-    string Kind, string Title, string Headline, string Unit, IReadOnlyList<RateLimitTrendPoint> Points);
+    string Kind,
+    string Title,
+    string Headline,
+    string Unit,
+    IReadOnlyList<RateLimitTrendPoint> Points);
 
 /// <summary>The bespoke chart format the ECharts renderer draws for a rate-limit trend. Serialized as its name.</summary>
 public static class RateLimitTrendChartKind
@@ -45,9 +49,13 @@ public static class RateLimitTrendChartBuilder
     /// <summary>
     /// Builds the trend chart for one dimension from its history points, chronologically ordered.
     /// </summary>
-    /// <param name="dimensionName">The dimension's raw header-segment name (e.g. <c>input-tokens</c>), used only to derive <see cref="RateLimitTrendModel.Title"/>.</param>
+    /// <param name="dimensionName">
+    /// The dimension's raw header-segment name (e.g. <c>input-tokens</c>), used only to derive
+    /// <see cref="RateLimitTrendModel.Title"/>.
+    /// </param>
     /// <param name="points">The dimension's history points (bucket instant, remaining, limit), in any order - sorted here.</param>
-    public static RateLimitTrendModel Build(string dimensionName, IReadOnlyList<(DateTimeOffset BucketUtc, long? Remaining, long? Limit)> points)
+    public static RateLimitTrendModel Build(string dimensionName,
+        IReadOnlyList<(DateTimeOffset BucketUtc, long? Remaining, long? Limit)> points)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dimensionName);
         ArgumentNullException.ThrowIfNull(points);
@@ -55,22 +63,29 @@ public static class RateLimitTrendChartBuilder
         var ordered = points.OrderBy(p => p.BucketUtc).ToList();
         var chartPoints = ordered
             .Select(p => new RateLimitTrendPoint(
-                p.BucketUtc.ToUnixTimeMilliseconds(),
-                p.BucketUtc.ToUniversalTime().ToString("HH:mm 'UTC'", Inv),
-                p.Remaining,
-                p.Limit))
+                T: p.BucketUtc.ToUnixTimeMilliseconds(),
+                Label: p.BucketUtc.ToUniversalTime().ToString(format: "HH:mm 'UTC'", formatProvider: Inv),
+                Remaining: p.Remaining,
+                Limit: p.Limit))
             .ToList();
 
         var headline = ordered.Count > 0 && ordered[^1].Remaining is { } last
-            ? last.ToString("N0", Inv)
+            ? last.ToString(format: "N0", provider: Inv)
             : "—";
 
-        var unit = string.Equals(dimensionName, "requests", StringComparison.OrdinalIgnoreCase) ? "req" : "tok";
+        var unit = string.Equals(a: dimensionName, b: "requests", comparisonType: StringComparison.OrdinalIgnoreCase)
+            ? "req"
+            : "tok";
 
-        return new RateLimitTrendModel(RateLimitTrendChartKind.RemainingLine, DimensionLabel(dimensionName), headline, unit, chartPoints);
+        return new RateLimitTrendModel(Kind: RateLimitTrendChartKind.RemainingLine,
+            Title: DimensionLabel(dimensionName), Headline: headline, Unit: unit, Points: chartPoints);
     }
 
     // "input-tokens" -> "Input tokens" - readable label, mirroring ProvidersAdmin.razor's DimensionLabel.
-    private static string DimensionLabel(string dimensionName) =>
-        dimensionName.Length == 0 ? dimensionName : dimensionName[..1].ToUpperInvariant() + dimensionName[1..].Replace('-', ' ');
+    private static string DimensionLabel(string dimensionName)
+    {
+        return dimensionName.Length == 0
+            ? dimensionName
+            : dimensionName[..1].ToUpperInvariant() + dimensionName[1..].Replace('-', ' ');
+    }
 }

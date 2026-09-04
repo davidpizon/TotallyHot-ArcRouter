@@ -15,13 +15,13 @@ public class CostReconciliationRetryPolicyTests
         using var client = new HttpClient(handler);
 
         var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-            client,
-            () => new HttpRequestMessage(HttpMethod.Get, "https://example.test/"),
+            httpClient: client,
+            requestFactory: () => new HttpRequestMessage(method: HttpMethod.Get, requestUri: "https://example.test/"),
             delayForAttempt: _ => TimeSpan.Zero,
             cancellationToken: Ct);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(1, handler.CallCount);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+        Assert.Equal(1, actual: handler.CallCount);
     }
 
     [Fact]
@@ -31,13 +31,13 @@ public class CostReconciliationRetryPolicyTests
         using var client = new HttpClient(handler);
 
         var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-            client,
-            () => new HttpRequestMessage(HttpMethod.Get, "https://example.test/"),
+            httpClient: client,
+            requestFactory: () => new HttpRequestMessage(method: HttpMethod.Get, requestUri: "https://example.test/"),
             delayForAttempt: _ => TimeSpan.Zero,
             cancellationToken: Ct);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(2, handler.CallCount);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+        Assert.Equal(2, actual: handler.CallCount);
     }
 
     [Theory]
@@ -53,13 +53,13 @@ public class CostReconciliationRetryPolicyTests
         using var client = new HttpClient(handler);
 
         var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-            client,
-            () => new HttpRequestMessage(HttpMethod.Get, "https://example.test/"),
+            httpClient: client,
+            requestFactory: () => new HttpRequestMessage(method: HttpMethod.Get, requestUri: "https://example.test/"),
             delayForAttempt: _ => TimeSpan.Zero,
             cancellationToken: Ct);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(2, handler.CallCount);
+        Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+        Assert.Equal(2, actual: handler.CallCount);
     }
 
     [Fact]
@@ -69,13 +69,13 @@ public class CostReconciliationRetryPolicyTests
         using var client = new HttpClient(handler);
 
         var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-            client,
-            () => new HttpRequestMessage(HttpMethod.Get, "https://example.test/"),
+            httpClient: client,
+            requestFactory: () => new HttpRequestMessage(method: HttpMethod.Get, requestUri: "https://example.test/"),
             delayForAttempt: _ => TimeSpan.Zero,
             cancellationToken: Ct);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal(1, handler.CallCount);
+        Assert.Equal(expected: HttpStatusCode.BadRequest, actual: response.StatusCode);
+        Assert.Equal(1, actual: handler.CallCount);
     }
 
     [Fact]
@@ -86,27 +86,28 @@ public class CostReconciliationRetryPolicyTests
             HttpStatusCode.ServiceUnavailable,
             HttpStatusCode.ServiceUnavailable,
             HttpStatusCode.ServiceUnavailable,
-            HttpStatusCode.OK, // never reached - MaxAttempts is 4
+            HttpStatusCode.OK // never reached - MaxAttempts is 4
         ]);
         using var client = new HttpClient(handler);
 
         var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-            client,
-            () => new HttpRequestMessage(HttpMethod.Get, "https://example.test/"),
+            httpClient: client,
+            requestFactory: () => new HttpRequestMessage(method: HttpMethod.Get, requestUri: "https://example.test/"),
             delayForAttempt: _ => TimeSpan.Zero,
             cancellationToken: Ct);
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Equal(CostReconciliationRetryPolicy.MaxAttempts, handler.CallCount);
+        Assert.Equal(expected: HttpStatusCode.ServiceUnavailable, actual: response.StatusCode);
+        Assert.Equal(expected: CostReconciliationRetryPolicy.MaxAttempts, actual: handler.CallCount);
     }
 
     private sealed class SequencedHandlerStub(IReadOnlyList<HttpStatusCode> statuses) : HttpMessageHandler
     {
         public int CallCount { get; private set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
-            var status = statuses[Math.Min(CallCount, statuses.Count - 1)];
+            var status = statuses[Math.Min(val1: CallCount, val2: statuses.Count - 1)];
             CallCount++;
             return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{}") });
         }

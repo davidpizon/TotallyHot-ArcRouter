@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Judge;
@@ -5,8 +6,6 @@ using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Tests.Proxy;
 using TotallyHot.ArcRouter.Tests.TestSupport;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
@@ -23,72 +22,79 @@ public class GEvalJudgeClientTests
         // Sampled token "4" (logprob 0 -> p=1) with a "3" alternative (logprob -1 -> p=e^-1=0.36788).
         // Weighted mean = (4*1 + 3*0.36788) / (1 + 0.36788) = 3.73113 -> normalized (3.73113-1)/4 = 0.68278.
         var json = """
-            {
-              "choices": [
-                {
-                  "message": { "content": "4" },
-                  "logprobs": {
-                    "content": [
-                      {
-                        "token": "4",
-                        "logprob": 0.0,
-                        "top_logprobs": [
-                          { "token": "4", "logprob": 0.0 },
-                          { "token": "3", "logprob": -1.0 }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              ]
-            }
-            """;
+                   {
+                     "choices": [
+                       {
+                         "message": { "content": "4" },
+                         "logprobs": {
+                           "content": [
+                             {
+                               "token": "4",
+                               "logprob": 0.0,
+                               "top_logprobs": [
+                                 { "token": "4", "logprob": 0.0 },
+                                 { "token": "3", "logprob": -1.0 }
+                               ]
+                             }
+                           ]
+                         }
+                       }
+                     ]
+                   }
+                   """;
 
         var client = CreateClient(json);
 
-        var result = await client.ScoreAsync(new JudgeScoreRequest("algorithm", "some response"), TestContext.Current.CancellationToken);
+        var result =
+            await client.ScoreAsync(
+                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
         Assert.True(result.UsedLogprobs);
-        Assert.InRange(result.Score, 0.68, 0.69);
+        Assert.InRange(actual: result.Score, 0.68, 0.69);
     }
 
     [Fact]
     public async Task ScoreAsync_ResponseWithNoLogprobs_FallsBackToSingleSampleParse()
     {
         var json = """
-            {
-              "choices": [
-                { "message": { "content": "The score is 4." } }
-              ]
-            }
-            """;
+                   {
+                     "choices": [
+                       { "message": { "content": "The score is 4." } }
+                     ]
+                   }
+                   """;
 
         var client = CreateClient(json);
 
-        var result = await client.ScoreAsync(new JudgeScoreRequest("algorithm", "some response"), TestContext.Current.CancellationToken);
+        var result =
+            await client.ScoreAsync(
+                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
         Assert.False(result.UsedLogprobs);
         // Digit "4" normalized: (4-1)/4 = 0.75.
-        Assert.Equal(0.75, result.Score, 6);
+        Assert.Equal(0.75, actual: result.Score, 6);
     }
 
     [Fact]
     public async Task ScoreAsync_NoParseableScoreAnywhere_Throws()
     {
         var json = """
-            {
-              "choices": [
-                { "message": { "content": "I cannot answer that." } }
-              ]
-            }
-            """;
+                   {
+                     "choices": [
+                       { "message": { "content": "I cannot answer that." } }
+                     ]
+                   }
+                   """;
 
         var client = CreateClient(json);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => client.ScoreAsync(new JudgeScoreRequest("algorithm", "some response"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.ScoreAsync(request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -96,8 +102,9 @@ public class GEvalJudgeClientTests
     {
         var client = CreateClient("""{ "choices": [] }""");
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => client.ScoreAsync(new JudgeScoreRequest("algorithm", "some response"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.ScoreAsync(request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -105,13 +112,14 @@ public class GEvalJudgeClientTests
     {
         var handler = FakeHttpMessageHandler.AlwaysFails(HttpStatusCode.InternalServerError);
         var client = new GEvalJudgeClient(
-            new FakeHttpClientFactory(handler),
-            CreateSelector(FreeResolver()),
-            new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
-            NullLogger<GEvalJudgeClient>.Instance);
+            httpClientFactory: new FakeHttpClientFactory(handler),
+            modelSelector: CreateSelector(FreeResolver()),
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+            logger: NullLogger<GEvalJudgeClient>.Instance);
 
-        await Assert.ThrowsAsync<HttpRequestException>(
-            () => client.ScoreAsync(new JudgeScoreRequest("algorithm", "some response"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.ScoreAsync(request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                cancellationToken: TestContext.Current.CancellationToken));
     }
 
     /// <summary>
@@ -124,17 +132,22 @@ public class GEvalJudgeClientTests
     [Fact]
     public async Task ScoreAsync_SendsToResolvedProviderRoute_WithProviderModelIdAndAuthHeader()
     {
-        var client = CreateClient("""{ "choices": [ { "message": { "content": "4" } } ] }""", out var captured, FreeResolver());
+        var client = CreateClient("""{ "choices": [ { "message": { "content": "4" } } ] }""",
+            captured: out var captured, resolver: FreeResolver());
 
-        var result = await client.ScoreAsync(new JudgeScoreRequest("algorithm", "some response"), TestContext.Current.CancellationToken);
+        var result =
+            await client.ScoreAsync(
+                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                cancellationToken: TestContext.Current.CancellationToken);
 
         var request = Assert.Single(captured);
-        Assert.Equal("http://localhost:1234/v1/chat/completions", request.Url);
-        Assert.Equal("Bearer judge-key", request.AuthorizationHeader);
-        Assert.Contains("\"model\":\"qwen2.5-7b-instruct\"", request.Body, StringComparison.Ordinal);
+        Assert.Equal(expected: "http://localhost:1234/v1/chat/completions", actual: request.Url);
+        Assert.Equal(expected: "Bearer judge-key", actual: request.AuthorizationHeader);
+        Assert.Contains(expectedSubstring: "\"model\":\"qwen2.5-7b-instruct\"", actualString: request.Body,
+            comparisonType: StringComparison.Ordinal);
 
         // The row is stamped with the client-facing name, not the upstream id.
-        Assert.Equal("local-judge", result!.JudgeModel);
+        Assert.Equal(expected: "local-judge", actual: result!.JudgeModel);
     }
 
     /// <summary>
@@ -150,16 +163,21 @@ public class GEvalJudgeClientTests
             baseUrl: "https://api.openai.com",
             isFree: false);
 
-        var client = CreateClient("""{ "choices": [] }""", out var captured, paidOnly);
+        var client = CreateClient("""{ "choices": [] }""", captured: out var captured, resolver: paidOnly);
 
-        var result = await client.ScoreAsync(new JudgeScoreRequest("algorithm", "some response"), TestContext.Current.CancellationToken);
+        var result =
+            await client.ScoreAsync(
+                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(result);
         Assert.Empty(captured);
     }
 
-    private static GEvalJudgeClient CreateClient(string responseJson) =>
-        CreateClient(responseJson, out _, FreeResolver());
+    private static GEvalJudgeClient CreateClient(string responseJson)
+    {
+        return CreateClient(responseJson: responseJson, captured: out _, resolver: FreeResolver());
+    }
 
     /// <summary>
     /// Builds a client over a fake handler, exposing the requests it received so a test can assert on the
@@ -180,21 +198,48 @@ public class GEvalJudgeClientTests
         var handler = new FakeHttpMessageHandler(request =>
         {
             requests.Add(new CapturedRequest(
-                request.RequestUri!.ToString(),
-                request.Headers.TryGetValues("Authorization", out var auth) ? string.Join(",", auth) : null,
-                request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? string.Empty));
+                Url: request.RequestUri!.ToString(),
+                AuthorizationHeader: request.Headers.TryGetValues(name: "Authorization", values: out var auth)
+                    ? string.Join(separator: ",", values: auth)
+                    : null,
+                Body: request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? string.Empty));
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(responseJson, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: responseJson, encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         });
 
         return new GEvalJudgeClient(
-            new FakeHttpClientFactory(handler),
-            CreateSelector(resolver, options),
-            new StaticOptionsMonitor<JudgeOptions>(options ?? new JudgeOptions()),
-            NullLogger<GEvalJudgeClient>.Instance);
+            httpClientFactory: new FakeHttpClientFactory(handler),
+            modelSelector: CreateSelector(resolver: resolver, options: options),
+            options: new StaticOptionsMonitor<JudgeOptions>(options ?? new JudgeOptions()),
+            logger: NullLogger<GEvalJudgeClient>.Instance);
+    }
+
+    /// <summary>A selector over <paramref name="resolver"/>, resolving whichever free model it exposes.</summary>
+    private static JudgeModelSelector CreateSelector(IModelRouteResolver resolver, JudgeOptions? options = null)
+    {
+        return new JudgeModelSelector(routeResolver: resolver,
+            options: new StaticOptionsMonitor<JudgeOptions>(options ?? new JudgeOptions()),
+            logger: NullLogger<JudgeModelSelector>.Instance);
+    }
+
+    /// <summary>
+    /// A resolver exposing one free model. The base URL deliberately carries a <c>/v1</c> suffix - the
+    /// LM Studio shape whose naive concatenation with the request path produced
+    /// <c>/v1/v1/chat/completions</c> before ProviderUrlBuilder handled it.
+    /// </summary>
+    private static IModelRouteResolver FreeResolver()
+    {
+        return ModelRouteResolverTestFactory.Create(
+            modelName: "local-judge",
+            providerModelId: "qwen2.5-7b-instruct",
+            baseUrl: "http://localhost:1234/v1",
+            apiKey: "judge-key",
+            providerName: "lmstudio",
+            isFree: true);
     }
 
     /// <summary>One outbound judge call, snapshotted while the request is still alive.</summary>
@@ -202,24 +247,4 @@ public class GEvalJudgeClientTests
     /// <param name="AuthorizationHeader">The Authorization header value, or null when none was sent.</param>
     /// <param name="Body">The serialized request body.</param>
     private sealed record CapturedRequest(string Url, string? AuthorizationHeader, string Body);
-
-    /// <summary>A selector over <paramref name="resolver"/>, resolving whichever free model it exposes.</summary>
-    private static JudgeModelSelector CreateSelector(IModelRouteResolver resolver, JudgeOptions? options = null) =>
-        new(resolver,
-            new StaticOptionsMonitor<JudgeOptions>(options ?? new JudgeOptions()),
-            NullLogger<JudgeModelSelector>.Instance);
-
-    /// <summary>
-    /// A resolver exposing one free model. The base URL deliberately carries a <c>/v1</c> suffix - the
-    /// LM Studio shape whose naive concatenation with the request path produced
-    /// <c>/v1/v1/chat/completions</c> before ProviderUrlBuilder handled it.
-    /// </summary>
-    private static IModelRouteResolver FreeResolver() =>
-        ModelRouteResolverTestFactory.Create(
-            modelName: "local-judge",
-            providerModelId: "qwen2.5-7b-instruct",
-            baseUrl: "http://localhost:1234/v1",
-            apiKey: "judge-key",
-            providerName: "lmstudio",
-            isFree: true);
 }

@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
@@ -49,11 +48,16 @@ public static class LegacyStorageMigration
         var migrated = 0;
 
         // isSqlite distinguishes the two copy strategies below - it is not a guess about the extension.
-        migrated += Migrate(options.ResolveDatabasePath(), "agent_telemetry.db", isSqlite: true, logger);
-        migrated += Migrate(options.ResolveBenchmarkDatabasePath(), "coderouterbench.db", isSqlite: true, logger);
-        migrated += Migrate(options.ResolveTranscriptDatabasePath(), "transcripts.db", isSqlite: true, logger);
-        migrated += Migrate(options.ResolveLogRegModelPath(), "logreg_voter_model.json", isSqlite: false, logger);
-        migrated += Migrate(options.ResolveClusterModelPath(), "cluster_model.json", isSqlite: false, logger);
+        migrated += Migrate(destinationPath: options.ResolveDatabasePath(), fileName: "agent_telemetry.db", true,
+            logger: logger);
+        migrated += Migrate(destinationPath: options.ResolveBenchmarkDatabasePath(), fileName: "coderouterbench.db",
+            true, logger: logger);
+        migrated += Migrate(destinationPath: options.ResolveTranscriptDatabasePath(), fileName: "transcripts.db", true,
+            logger: logger);
+        migrated += Migrate(destinationPath: options.ResolveLogRegModelPath(), fileName: "logreg_voter_model.json",
+            false, logger: logger);
+        migrated += Migrate(destinationPath: options.ResolveClusterModelPath(), fileName: "cluster_model.json", false,
+            logger: logger);
 
         return migrated;
     }
@@ -71,45 +75,33 @@ public static class LegacyStorageMigration
         // also what keeps the migration inert in tests, which point StorageOptions at temp directories.
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.Equals(
-                destinationDirectory?.TrimEnd('/', '\\'),
-                StorageOptions.ResolveMachineSharedDirectory().TrimEnd('/', '\\'),
-                StringComparison.OrdinalIgnoreCase))
-        {
+                a: destinationDirectory?.TrimEnd('/', '\\'),
+                b: StorageOptions.ResolveMachineSharedDirectory().TrimEnd('/', '\\'),
+                comparisonType: StringComparison.OrdinalIgnoreCase))
             return 0;
-        }
 
-        if (File.Exists(destinationPath))
-        {
-            return 0;
-        }
+        if (File.Exists(destinationPath)) return 0;
 
         foreach (var legacyDirectory in StorageOptions.ResolveLegacyDirectories())
         {
-            var legacyPath = Path.Combine(legacyDirectory, fileName);
-            if (!File.Exists(legacyPath))
-            {
-                continue;
-            }
+            var legacyPath = Path.Combine(path1: legacyDirectory, path2: fileName);
+            if (!File.Exists(legacyPath)) continue;
 
             try
             {
                 Directory.CreateDirectory(destinationDirectory!);
 
                 if (isSqlite)
-                {
-                    CopyDatabase(legacyPath, destinationPath);
-                }
+                    CopyDatabase(legacyPath: legacyPath, destinationPath: destinationPath);
                 else
-                {
-                    File.Copy(legacyPath, destinationPath);
-                }
+                    File.Copy(sourceFileName: legacyPath, destFileName: destinationPath);
 
                 // Rename rather than delete: the operator keeps a recoverable copy, and the suffix stops a
                 // later run (e.g. after someone deletes the new file) from silently adopting it again.
-                File.Move(legacyPath, legacyPath + MigratedSuffix, overwrite: true);
+                File.Move(sourceFileName: legacyPath, destFileName: legacyPath + MigratedSuffix, true);
 
                 logger.LogInformation(
-                    "Migrated {FileName} from the legacy per-user location {LegacyPath} to {DestinationPath}.",
+                    message: "Migrated {FileName} from the legacy per-user location {LegacyPath} to {DestinationPath}.",
                     fileName,
                     legacyPath,
                     destinationPath);
@@ -121,13 +113,14 @@ public static class LegacyStorageMigration
                 // Leave the legacy file exactly as it was: unrenamed, so a later run (with the permissions
                 // it lacked here) can still pick it up.
                 logger.LogWarning(
-                    ex,
+                    exception: ex,
+                    message:
                     "Could not migrate {FileName} from {LegacyPath} to {DestinationPath}; continuing with a new file.",
                     fileName,
                     legacyPath,
                     destinationPath);
 
-                TryDeletePartialDestination(destinationPath, logger);
+                TryDeletePartialDestination(destinationPath: destinationPath, logger: logger);
                 return 0;
             }
         }
@@ -150,7 +143,7 @@ public static class LegacyStorageMigration
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = legacyPath,
-            Mode = SqliteOpenMode.ReadWrite,
+            Mode = SqliteOpenMode.ReadWrite
         }.ToString();
 
         using var connection = new SqliteConnection(connectionString);
@@ -158,7 +151,7 @@ public static class LegacyStorageMigration
 
         using var vacuum = connection.CreateCommand();
         vacuum.CommandText = "VACUUM INTO $destination;";
-        vacuum.Parameters.AddWithValue("$destination", destinationPath);
+        vacuum.Parameters.AddWithValue(parameterName: "$destination", value: destinationPath);
         vacuum.ExecuteNonQuery();
     }
 
@@ -170,14 +163,12 @@ public static class LegacyStorageMigration
     {
         try
         {
-            if (File.Exists(destinationPath))
-            {
-                File.Delete(destinationPath);
-            }
+            if (File.Exists(destinationPath)) File.Delete(destinationPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Could not remove the partially migrated file at {DestinationPath}.", destinationPath);
+            logger.LogWarning(exception: ex,
+                message: "Could not remove the partially migrated file at {DestinationPath}.", destinationPath);
         }
     }
 }

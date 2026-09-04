@@ -1,15 +1,15 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Moq;
 using System.Text;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -22,13 +22,15 @@ public class RequestInterceptorTests
     // InferLiveDimension's KeywordDimensionInferrer default (empty prompt) always resolves here -
     // matching the dimension RequestInterceptor's fallback ranking will read for these requests.
     private static readonly string DefaultLiveDimension =
-        RouterDimension.ToLiveKey(new QualityOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
+        RouterDimension.ToLiveKey(liveMemoryPrefix: new QualityOptions().LiveMemoryPrefix,
+            dimension: RouterDimension.CodeGeneration);
 
     [Fact]
     public async Task InterceptRequestAsync_IncrementsCount_AndLogsStructuredMessage()
     {
         var loggerMock = new Mock<ILogger<RequestInterceptor>>();
-        var interceptor = new RequestInterceptor(loggerMock.Object, ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: loggerMock.Object,
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Get;
         context.Request.Scheme = "https";
@@ -38,22 +40,25 @@ public class RequestInterceptorTests
         await interceptor.InterceptRequestAsync(context);
         await interceptor.InterceptRequestAsync(context);
 
-        Assert.Equal(2, interceptor.InterceptedRequestCount);
-        VerifyLogContains(loggerMock, LogLevel.Information, "[INTERCEPTOR] Intercepting request for");
+        Assert.Equal(2, actual: interceptor.InterceptedRequestCount);
+        VerifyLogContains(loggerMock: loggerMock, level: LogLevel.Information,
+            expectedText: "[INTERCEPTOR] Intercepting request for");
     }
 
     [Fact]
     public async Task InterceptResponseAsync_LogsStructuredMessage()
     {
         var loggerMock = new Mock<ILogger<RequestInterceptor>>();
-        var interceptor = new RequestInterceptor(loggerMock.Object, ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: loggerMock.Object,
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
         var context = new DefaultHttpContext();
         context.Request.Path = "/chat";
         context.Response.StatusCode = StatusCodes.Status200OK;
 
         await interceptor.InterceptResponseAsync(context);
 
-        VerifyLogContains(loggerMock, LogLevel.Information, "[INTERCEPTOR] Intercepting response for");
+        VerifyLogContains(loggerMock: loggerMock, level: LogLevel.Information,
+            expectedText: "[INTERCEPTOR] Intercepting response for");
     }
 
     // docs/router/tool-call-normalization.md §3.4 performance rule 1: whether the request offered any
@@ -71,30 +76,37 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
-        var result = await interceptor.ResolveModelRouteAsync(CreateContextWithBody(body), TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: CreateContextWithBody(body),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.True(result.Candidates.Count > 1, "expected a fallback candidate, otherwise this only tests the primary");
-        Assert.All(result.Candidates, candidate => Assert.Equal(expected, candidate.CarriesTools));
+        Assert.True(condition: result.Candidates.Count > 1,
+            userMessage: "expected a fallback candidate, otherwise this only tests the primary");
+        Assert.All(collection: result.Candidates,
+            action: candidate => Assert.Equal(expected: expected, actual: candidate.CarriesTools));
     }
 
     [Fact]
     public async Task ResolveModelRouteAsync_KnownModel_RewritesBodyToProviderModelId()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4-2026-01", "https://api.openai.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
+            baseUrl: "https://api.openai.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4","temperature":0.7}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("gpt-5.4-2026-01", result.Route!.ProviderModelId);
+        Assert.Equal(expected: "gpt-5.4-2026-01", actual: result.Route!.ProviderModelId);
 
         using var document = JsonDocument.Parse(result.RewrittenBody!);
-        Assert.Equal("gpt-5.4-2026-01", document.RootElement.GetProperty("model").GetString());
-        Assert.Equal(0.7, document.RootElement.GetProperty("temperature").GetDouble());
+        Assert.Equal(expected: "gpt-5.4-2026-01", actual: document.RootElement.GetProperty("model").GetString());
+        Assert.Equal(0.7, actual: document.RootElement.GetProperty("temperature").GetDouble());
     }
 
     [Fact]
@@ -102,14 +114,16 @@ public class RequestInterceptorTests
     {
         // The agentic fallback (below) has nothing to fall back to when the allowlist itself is empty, so
         // this is the one case where an unresolved model still fails outside single-model serving.
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
         var context = CreateContextWithBody("""{"model":"not-a-known-model"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
         Assert.Null(result.Route);
-        Assert.Contains("not-a-known-model", result.ErrorMessage);
+        Assert.Contains(expectedSubstring: "not-a-known-model", actualString: result.ErrorMessage);
     }
 
     // docs/router/utility-model-routing.md's generalized fallback: outside single-model serving, an
@@ -119,18 +133,21 @@ public class RequestInterceptorTests
     [Fact]
     public async Task ResolveModelRouteAsync_UnknownModel_ModelsConfigured_AgenticallyRoutesToConfiguredModel()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4-2026-01", "https://api.openai.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
+            baseUrl: "https://api.openai.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"agentic-router"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("gpt-5.4", result.Route!.ModelName);
-        Assert.Equal("gpt-5.4-2026-01", result.Route!.ProviderModelId);
+        Assert.Equal(expected: "gpt-5.4", actual: result.Route!.ModelName);
+        Assert.Equal(expected: "gpt-5.4-2026-01", actual: result.Route!.ProviderModelId);
 
         using var document = JsonDocument.Parse(result.RewrittenBody!);
-        Assert.Equal("gpt-5.4-2026-01", document.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "gpt-5.4-2026-01", actual: document.RootElement.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -140,15 +157,17 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(DefaultLiveDimension, "gpt-5.4", 0.2);
-        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "gpt-5.4", 0.2);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "kimi-k2.5", 0.9);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, routerMemory: memory);
         var context = CreateContextWithBody("""{"model":"agentic-router"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
     }
 
     // PLAN.md Phase G's regression test: a verifier score written for one request must change which
@@ -164,29 +183,31 @@ public class RequestInterceptorTests
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
         var observer = new RouterMemoryScoreObserver(
-            memory,
-            Options.Create(new QualityOptions()),
-            Mock.Of<ILogger<RouterMemoryScoreObserver>>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+            memory: memory,
+            options: Options.Create(new QualityOptions()),
+            logger: Mock.Of<ILogger<RouterMemoryScoreObserver>>());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, routerMemory: memory);
 
         // Request N: the verifier scores a bug-fixing response from kimi-k2.5 highly, off the hot path.
         await observer.ObserveAsync(
-            new QualityResult
+            result: new QualityResult
             {
                 Model = "kimi-k2.5",
                 Dimension = RouterDimension.BugFixing,
-                UnifiedScore = 0.95,
+                UnifiedScore = 0.95
             },
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Request N+1: a new, same-dimension prompt ("fix this bug...") auto-selects.
         var context = CreateContextWithBody(
             """{"model":"auto","messages":[{"role":"user","content":"Please fix this bug in my code."}]}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
     }
 
     // "model": "auto" is the explicit, documented way to ask the router to choose - it must run the same
@@ -202,19 +223,21 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5-upstream"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(DefaultLiveDimension, "gpt-5.4", 0.2);
-        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "gpt-5.4", 0.2);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "kimi-k2.5", 0.9);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, routerMemory: memory);
         var context = CreateContextWithBody($$"""{"model":"{{requestedModel}}"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
 
         // The forwarded body must carry the selected model's upstream id, never the literal "auto".
         using var document = JsonDocument.Parse(result.RewrittenBody!);
-        Assert.Equal("kimi-k2.5-upstream", document.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "kimi-k2.5-upstream", actual: document.RootElement.GetProperty("model").GetString());
     }
 
     // The advertised alias must behave identically to "auto" - it is the name a picker actually sends back,
@@ -230,20 +253,22 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5-upstream"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(DefaultLiveDimension, "gpt-5.4", 0.2);
-        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "gpt-5.4", 0.2);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "kimi-k2.5", 0.9);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, routerMemory: memory);
         var context = CreateContextWithBody($$"""{"model":"{{requestedModel}}"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
 
         // The forwarded body must carry the selected model's upstream id - the router name is never a real
         // upstream model, so leaking it through would be rejected by whatever provider received it.
         using var document = JsonDocument.Parse(result.RewrittenBody!);
-        Assert.Equal("kimi-k2.5-upstream", document.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "kimi-k2.5-upstream", actual: document.RootElement.GetProperty("model").GetString());
     }
 
     // Same allowlist-shadowing guarantee "auto" has: the advertised name is reserved, so an operator who
@@ -255,15 +280,17 @@ public class RequestInterceptorTests
             ("totallyhot-arcrouter", "openai", "some-literal-model"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(DefaultLiveDimension, "totallyhot-arcrouter", 0.2);
-        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "totallyhot-arcrouter", 0.2);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "kimi-k2.5", 0.9);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, routerMemory: memory);
         var context = CreateContextWithBody("""{"model":"totallyhot-arcrouter"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
     }
 
     // The reserved name wins over the allowlist: an operator who happens to configure a model called "auto"
@@ -275,15 +302,17 @@ public class RequestInterceptorTests
             ("auto", "openai", "some-literal-model"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(DefaultLiveDimension, "auto", 0.2);
-        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, routerMemory: memory);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "auto", 0.2);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "kimi-k2.5", 0.9);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, routerMemory: memory);
         var context = CreateContextWithBody("""{"model":"auto"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
     }
 
     // Auto-select can only pick from currently-eligible models. With none left, there is nothing to select,
@@ -295,18 +324,25 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://api.openai.com", Enabled = false }
+                ["prov-a"] = new() { BaseUrl = "https://api.openai.com", Enabled = false }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4" }]
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4" }
+            ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"auto"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("auto-selected", result.ErrorMessage!, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "auto-selected", actualString: result.ErrorMessage!,
+            comparisonType: StringComparison.Ordinal);
     }
 
     // Single-model serving still overrides everything the client asks for, "auto" included - a proxy started
@@ -318,28 +354,31 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "kimi-k2.5", 0.9);
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
-            new SingleModelServingOptions { ForcedModelName = "gpt-5.4" },
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = "gpt-5.4" },
             routerMemory: memory);
         var context = CreateContextWithBody("""{"model":"auto"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Single(result.Candidates);
-        Assert.Equal("gpt-5.4", result.Route!.ModelName);
+        Assert.Equal(expected: "gpt-5.4", actual: result.Route!.ModelName);
     }
 
     [Fact]
     public async Task ResolveModelRouteAsync_MissingModelField_ReturnsFailure()
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
         var context = CreateContextWithBody("""{"messages":[]}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
         Assert.NotNull(result.ErrorMessage);
@@ -348,10 +387,12 @@ public class RequestInterceptorTests
     [Fact]
     public async Task ResolveModelRouteAsync_MalformedJson_ReturnsFailure()
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
         var context = CreateContextWithBody("not-json");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
         Assert.NotNull(result.ErrorMessage);
@@ -360,10 +401,12 @@ public class RequestInterceptorTests
     [Fact]
     public async Task ResolveModelRouteAsync_EmptyBody_ReturnsFailure()
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
         var context = CreateContextWithBody(string.Empty);
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
     }
@@ -374,10 +417,12 @@ public class RequestInterceptorTests
     [InlineData("42")]
     public async Task ResolveModelRouteAsync_NonObjectJsonRoot_ReturnsFailure_WithoutThrowing(string body)
     {
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), ModelRouteResolverTestFactory.Empty());
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
         var context = CreateContextWithBody(body);
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
         Assert.NotNull(result.ErrorMessage);
@@ -392,11 +437,12 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var models = interceptor.ListAvailableModels();
 
-        Assert.Equal(resolver.ListModels(), models.Where(m => m.ModelName != "totallyhot-arcrouter"));
+        Assert.Equal(expected: resolver.ListModels(), actual: models.Where(m => m.ModelName != "totallyhot-arcrouter"));
     }
 
     // Editors that attach to this proxy as a provider force the user to pick one name from the discovery
@@ -408,12 +454,13 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
 
         var models = interceptor.ListAvailableModels();
 
-        Assert.Equal("totallyhot-arcrouter", models[0].ModelName);
-        Assert.Equal(3, models.Count);
+        Assert.Equal(expected: "totallyhot-arcrouter", actual: models[0].ModelName);
+        Assert.Equal(3, actual: models.Count);
     }
 
     // With nothing configured to route to, selecting the router entry could only ever fail - so it must not
@@ -422,8 +469,8 @@ public class RequestInterceptorTests
     public void ListAvailableModels_NoModelsConfigured_OmitsTheRouterEntry()
     {
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            ModelRouteResolverTestFactory.Empty());
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
 
         var models = interceptor.ListAvailableModels();
 
@@ -439,13 +486,13 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
-            new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
 
         var models = interceptor.ListAvailableModels();
 
-        Assert.DoesNotContain(models, m => m.ModelName == "totallyhot-arcrouter");
+        Assert.DoesNotContain(collection: models, filter: m => m.ModelName == "totallyhot-arcrouter");
     }
 
     // Local Proxy CLI: an invalid --model CLI value must fail at startup
@@ -457,12 +504,15 @@ public class RequestInterceptorTests
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
             new RequestInterceptor(
-                Mock.Of<ILogger<RequestInterceptor>>(),
-                resolver,
-                new SingleModelServingOptions { ForcedModelName = "not-a-configured-model" }));
+                logger: Mock.Of<ILogger<RequestInterceptor>>(),
+                modelRouteResolver: resolver,
+                singleModelServingOptions: new SingleModelServingOptions
+                { ForcedModelName = "not-a-configured-model" }));
 
-        Assert.Contains("not-a-configured-model", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("gpt-5.4", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "not-a-configured-model", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "gpt-5.4", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -471,9 +521,9 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
 
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
-            new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
 
         Assert.NotNull(interceptor);
     }
@@ -481,20 +531,22 @@ public class RequestInterceptorTests
     [Fact]
     public async Task ResolveModelRouteAsync_SingleModelServingForced_OverridesClientRequestedModel()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4-2026-01", "https://api.openai.com");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
+            baseUrl: "https://api.openai.com");
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
-            new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
         var context = CreateContextWithBody("""{"model":"whatever-the-client-thinks-it-wants"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("gpt-5.4-2026-01", result.Route!.ProviderModelId);
+        Assert.Equal(expected: "gpt-5.4-2026-01", actual: result.Route!.ProviderModelId);
 
         using var document = JsonDocument.Parse(result.RewrittenBody!);
-        Assert.Equal("gpt-5.4-2026-01", document.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "gpt-5.4-2026-01", actual: document.RootElement.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -504,40 +556,43 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
-            new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = "gpt-5.4" });
 
         var models = interceptor.ListAvailableModels();
 
         var model = Assert.Single(models);
-        Assert.Equal("gpt-5.4", model.ModelName);
+        Assert.Equal(expected: "gpt-5.4", actual: model.ModelName);
     }
 
     // docs/router/agent-resilience-strategies.md's Circuit Breaker replaced the old static per-model
     // Fallbacks list: every other configured model is now automatically a dynamic next-best candidate, so
     // no explicit backup declaration is needed for this to work.
     [Fact]
-    public async Task ResolveModelRouteAsync_OtherModelsConfigured_BuildsOrderedCandidates_EachRewrittenToItsOwnUpstreamId()
+    public async Task
+        ResolveModelRouteAsync_OtherModelsConfigured_BuildsOrderedCandidates_EachRewrittenToItsOwnUpstreamId()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
             ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(2, result.Candidates.Count);
+        Assert.Equal(2, actual: result.Candidates.Count);
 
-        Assert.Equal("prov-a", result.Candidates[0].Route.Provider);
-        Assert.Equal("prov-b", result.Candidates[1].Route.Provider);
+        Assert.Equal(expected: "prov-a", actual: result.Candidates[0].Route.Provider);
+        Assert.Equal(expected: "prov-b", actual: result.Candidates[1].Route.Provider);
 
         using var primaryBody = JsonDocument.Parse(result.Candidates[0].RewrittenBody);
-        Assert.Equal("primary-upstream", primaryBody.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "primary-upstream", actual: primaryBody.RootElement.GetProperty("model").GetString());
         using var backupBody = JsonDocument.Parse(result.Candidates[1].RewrittenBody);
-        Assert.Equal("backup-upstream", backupBody.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected: "backup-upstream", actual: backupBody.RootElement.GetProperty("model").GetString());
     }
 
     [Fact]
@@ -548,24 +603,29 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "shared-id", "https://a.example.com"),
             ("backup", "prov-b", "shared-id", "https://b.example.com"));
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(2, result.Candidates.Count);
-        Assert.Equal("prov-b", result.Candidates[1].Route.Provider);
+        Assert.Equal(2, actual: result.Candidates.Count);
+        Assert.Equal(expected: "prov-b", actual: result.Candidates[1].Route.Provider);
     }
 
     [Fact]
     public async Task ResolveModelRouteAsync_OnlyConfiguredModel_YieldsSingleCandidate()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Single(result.Candidates);
@@ -581,16 +641,17 @@ public class RequestInterceptorTests
             ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
             ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
-            new SingleModelServingOptions { ForcedModelName = "primary" });
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = "primary" });
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Single(result.Candidates);
-        Assert.Equal("prov-a", result.Candidates[0].Route.Provider);
+        Assert.Equal(expected: "prov-a", actual: result.Candidates[0].Route.Provider);
     }
 
     [Fact]
@@ -604,26 +665,27 @@ public class RequestInterceptorTests
             ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
             ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
         var circuitBreaker = new CircuitBreaker();
-        var primaryTarget = new CircuitBreakerTargetKey("prov-a", "https://a.example.com/", "primary-upstream");
-        for (var i = 0; i < 3; i++)
-        {
-            circuitBreaker.RecordFailure(primaryTarget); // default FailureThreshold is 3
-        }
+        var primaryTarget = new CircuitBreakerTargetKey(Provider: "prov-a", BaseUrl: "https://a.example.com/",
+            ProviderModelId: "primary-upstream");
+        for (var i = 0; i < 3; i++) circuitBreaker.RecordFailure(primaryTarget); // default FailureThreshold is 3
         Assert.True(circuitBreaker.IsOpen(primaryTarget));
         // Provider-wide state is untouched - this is a target-level-only trip.
         Assert.False(circuitBreaker.IsProviderOpen("prov-a"));
 
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         // The route is left unsubstituted - candidates[0] still reports the client's real choice.
-        Assert.Equal("primary", result.Candidates[0].Route.ModelName);
-        Assert.Equal(RoutingSubstitutionReason.None, result.SubstitutionReason);
+        Assert.Equal(expected: "primary", actual: result.Candidates[0].Route.ModelName);
+        Assert.Equal(expected: RoutingSubstitutionReason.None, actual: result.SubstitutionReason);
         // Target-level: no per-provider interaction-status record exists, so this is always the generic message.
-        Assert.Equal("Model 'primary' is temporarily unavailable.", result.ExplicitCircuitTripBlockMessage);
+        Assert.Equal(expected: "Model 'primary' is temporarily unavailable.",
+            actual: result.ExplicitCircuitTripBlockMessage);
     }
 
     [Fact]
@@ -637,21 +699,24 @@ public class RequestInterceptorTests
         Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
 
         var interactionStatus = new ProviderInteractionStatusStore();
-        interactionStatus.RecordFailure("prov-a", "Refresh from endpoint", "admin-recorded reason");
-        interactionStatus.RecordLiveTrafficFailure("prov-a", ProviderInteractionKind.OutOfCredits, "Your credit balance is too low.");
+        interactionStatus.RecordFailure(providerKey: "prov-a", operation: "Refresh from endpoint",
+            message: "admin-recorded reason");
+        interactionStatus.RecordLiveTrafficFailure(providerKey: "prov-a", kind: ProviderInteractionKind.OutOfCredits,
+            message: "Your credit balance is too low.");
 
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             circuitBreaker: circuitBreaker,
             interactionStatusStore: interactionStatus);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("primary", result.Candidates[0].Route.ModelName);
-        Assert.Equal("Your credit balance is too low.", result.ExplicitCircuitTripBlockMessage);
+        Assert.Equal(expected: "primary", actual: result.Candidates[0].Route.ModelName);
+        Assert.Equal(expected: "Your credit balance is too low.", actual: result.ExplicitCircuitTripBlockMessage);
     }
 
     [Fact]
@@ -666,22 +731,25 @@ public class RequestInterceptorTests
         circuitBreaker.RecordProviderFailure("prov-a");
 
         var interactionStatus = new ProviderInteractionStatusStore();
-        interactionStatus.RecordFailure("prov-a", "Refresh from endpoint", "Provider returned 401.");
+        interactionStatus.RecordFailure(providerKey: "prov-a", operation: "Refresh from endpoint",
+            message: "Provider returned 401.");
 
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             circuitBreaker: circuitBreaker,
             interactionStatusStore: interactionStatus);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("Provider returned 401.", result.ExplicitCircuitTripBlockMessage);
+        Assert.Equal(expected: "Provider returned 401.", actual: result.ExplicitCircuitTripBlockMessage);
     }
 
     [Fact]
-    public async Task ResolveModelRouteAsync_ExplicitPrimaryProviderCircuitOpen_NoRecordInEitherTrack_UsesGenericMessage()
+    public async Task
+        ResolveModelRouteAsync_ExplicitPrimaryProviderCircuitOpen_NoRecordInEitherTrack_UsesGenericMessage()
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
             ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
@@ -690,15 +758,17 @@ public class RequestInterceptorTests
         circuitBreaker.RecordProviderFailure("prov-a");
 
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             circuitBreaker: circuitBreaker,
             interactionStatusStore: new ProviderInteractionStatusStore());
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("This provider is temporarily unavailable.", result.ExplicitCircuitTripBlockMessage);
+        Assert.Equal(expected: "This provider is temporarily unavailable.",
+            actual: result.ExplicitCircuitTripBlockMessage);
     }
 
     [Fact]
@@ -712,14 +782,16 @@ public class RequestInterceptorTests
         var circuitBreaker = new CircuitBreaker();
         circuitBreaker.RecordProviderFailure("prov-a");
 
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var context = CreateContextWithBody("""{"model":"auto"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.ExplicitCircuitTripBlockMessage);
-        Assert.DoesNotContain(result.Candidates, c => c.Route.Provider == "prov-a");
+        Assert.DoesNotContain(collection: result.Candidates, filter: c => c.Route.Provider == "prov-a");
     }
 
     [Fact]
@@ -731,24 +803,28 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://a.example.com", Enabled = false },
-                ["prov-b"] = new ProviderOptions { BaseUrl = "https://b.example.com" }
+                ["prov-a"] = new() { BaseUrl = "https://a.example.com", Enabled = false },
+                ["prov-b"] = new() { BaseUrl = "https://b.example.com" }
             },
             ModelList =
             [
-                new ModelRouteEntry { ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream" },
+                new ModelRouteEntry
+                    { ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream" },
                 new ModelRouteEntry { ModelName = "backup", Provider = "prov-b", ProviderModelId = "backup-upstream" }
             ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.ExplicitCircuitTripBlockMessage);
-        Assert.Equal("backup", result.Candidates[0].Route.ModelName);
+        Assert.Equal(expected: "backup", actual: result.Candidates[0].Route.ModelName);
     }
 
     [Fact]
@@ -758,23 +834,25 @@ public class RequestInterceptorTests
         // selection with its target circuit-open, ExplicitCircuitTripBlockMessage is set regardless of
         // whether a substitute would have existed (docs/adr/0005 (expanded scope)), so ProxyMiddleware
         // short-circuits with a client-facing 503 rather than ever attempting the network call.
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
         var circuitBreaker = new CircuitBreaker();
-        var target = new CircuitBreakerTargetKey("test-provider", "https://api.openai.com/", "gpt-5.4");
-        for (var i = 0; i < 3; i++)
-        {
-            circuitBreaker.RecordFailure(target);
-        }
+        var target = new CircuitBreakerTargetKey(Provider: "test-provider", BaseUrl: "https://api.openai.com/",
+            ProviderModelId: "gpt-5.4");
+        for (var i = 0; i < 3; i++) circuitBreaker.RecordFailure(target);
 
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var context = CreateContextWithBody("""{"model":"gpt-5.4"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Single(result.Candidates);
-        Assert.Equal("gpt-5.4", result.Candidates[0].Route.ModelName);
-        Assert.Equal("Model 'gpt-5.4' is temporarily unavailable.", result.ExplicitCircuitTripBlockMessage);
+        Assert.Equal(expected: "gpt-5.4", actual: result.Candidates[0].Route.ModelName);
+        Assert.Equal(expected: "Model 'gpt-5.4' is temporarily unavailable.",
+            actual: result.ExplicitCircuitTripBlockMessage);
     }
 
     [Fact]
@@ -784,25 +862,29 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://a.example.com", Enabled = false },
-                ["prov-b"] = new ProviderOptions { BaseUrl = "https://b.example.com" }
+                ["prov-a"] = new() { BaseUrl = "https://a.example.com", Enabled = false },
+                ["prov-b"] = new() { BaseUrl = "https://b.example.com" }
             },
             ModelList =
             [
-                new ModelRouteEntry { ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream" },
+                new ModelRouteEntry
+                    { ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream" },
                 new ModelRouteEntry { ModelName = "backup", Provider = "prov-b", ProviderModelId = "backup-upstream" }
             ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         // The stopped primary is swapped out entirely - it must not appear anywhere in the candidate list.
-        Assert.Equal("backup", result.Candidates[0].Route.ModelName);
-        Assert.DoesNotContain(result.Candidates, c => c.Route.ModelName == "primary");
+        Assert.Equal(expected: "backup", actual: result.Candidates[0].Route.ModelName);
+        Assert.DoesNotContain(collection: result.Candidates, filter: c => c.Route.ModelName == "primary");
     }
 
     [Fact]
@@ -815,19 +897,25 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://api.openai.com", Enabled = false }
+                ["prov-a"] = new() { BaseUrl = "https://api.openai.com", Enabled = false }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4" }]
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4" }
+            ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Single(result.Candidates);
-        Assert.Equal("gpt-5.4", result.Candidates[0].Route.ModelName);
+        Assert.Equal(expected: "gpt-5.4", actual: result.Candidates[0].Route.ModelName);
     }
 
     [Fact]
@@ -840,15 +928,21 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://api.openai.com", Enabled = false }
+                ["prov-a"] = new() { BaseUrl = "https://api.openai.com", Enabled = false }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4" }]
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4" }
+            ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"unknown-model"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
     }
@@ -870,24 +964,30 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://a.example.com" },
-                ["prov-b"] = new ProviderOptions { BaseUrl = "https://b.example.com" }
+                ["prov-a"] = new() { BaseUrl = "https://a.example.com" },
+                ["prov-b"] = new() { BaseUrl = "https://b.example.com" }
             },
             ModelList =
             [
-                new ModelRouteEntry { ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream", Enabled = false },
+                new ModelRouteEntry
+                {
+                    ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream", Enabled = false
+                },
                 new ModelRouteEntry { ModelName = "backup", Provider = "prov-b", ProviderModelId = "backup-upstream" }
             ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("backup", result.Candidates[0].Route.ModelName);
-        Assert.DoesNotContain(result.Candidates, c => c.Route.ModelName == "primary");
+        Assert.Equal(expected: "backup", actual: result.Candidates[0].Route.ModelName);
+        Assert.DoesNotContain(collection: result.Candidates, filter: c => c.Route.ModelName == "primary");
     }
 
     [Fact]
@@ -899,23 +999,30 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://a.example.com" },
-                ["prov-b"] = new ProviderOptions { BaseUrl = "https://b.example.com" }
+                ["prov-a"] = new() { BaseUrl = "https://a.example.com" },
+                ["prov-b"] = new() { BaseUrl = "https://b.example.com" }
             },
             ModelList =
             [
-                new ModelRouteEntry { ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream", PresentUpstream = false },
+                new ModelRouteEntry
+                {
+                    ModelName = "primary", Provider = "prov-a", ProviderModelId = "primary-upstream",
+                    PresentUpstream = false
+                },
                 new ModelRouteEntry { ModelName = "backup", Provider = "prov-b", ProviderModelId = "backup-upstream" }
             ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("backup", result.Candidates[0].Route.ModelName);
+        Assert.Equal(expected: "backup", actual: result.Candidates[0].Route.ModelName);
     }
 
     [Fact]
@@ -927,15 +1034,22 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://api.openai.com" }
+                ["prov-a"] = new() { BaseUrl = "https://api.openai.com" }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4", Enabled = false }]
+            ModelList =
+            [
+                new ModelRouteEntry
+                    { ModelName = "gpt-5.4", Provider = "prov-a", ProviderModelId = "gpt-5.4", Enabled = false }
+            ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.IsSuccess);
     }
@@ -950,24 +1064,31 @@ public class RequestInterceptorTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["prov-a"] = new ProviderOptions { BaseUrl = "https://a.example.com" },
-                ["prov-b"] = new ProviderOptions { BaseUrl = "https://b.example.com" }
+                ["prov-a"] = new() { BaseUrl = "https://a.example.com" },
+                ["prov-b"] = new() { BaseUrl = "https://b.example.com" }
             },
             ModelList =
             [
-                new ModelRouteEntry { ModelName = "stopped", Provider = "prov-a", ProviderModelId = "stopped-upstream", Enabled = false },
+                new ModelRouteEntry
+                {
+                    ModelName = "stopped", Provider = "prov-a", ProviderModelId = "stopped-upstream", Enabled = false
+                },
                 new ModelRouteEntry { ModelName = "running", Provider = "prov-b", ProviderModelId = "running-upstream" }
             ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
-        var interceptor = new RequestInterceptor(Mock.Of<ILogger<RequestInterceptor>>(), resolver);
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
         var context = CreateContextWithBody("""{"model":"totally-unknown-name"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.All(result.Candidates, c => Assert.NotEqual("stopped", c.Route.ModelName));
-        Assert.Contains(result.Candidates, c => c.Route.ModelName == "running");
+        Assert.All(collection: result.Candidates,
+            action: c => Assert.NotEqual(expected: "stopped", actual: c.Route.ModelName));
+        Assert.Contains(collection: result.Candidates, filter: c => c.Route.ModelName == "running");
     }
 
     private static DefaultHttpContext CreateContextWithBody(string body)
@@ -979,16 +1100,16 @@ public class RequestInterceptorTests
         return context;
     }
 
-    private static void VerifyLogContains(Mock<ILogger<RequestInterceptor>> loggerMock, LogLevel level, string expectedText)
+    private static void VerifyLogContains(Mock<ILogger<RequestInterceptor>> loggerMock, LogLevel level,
+        string expectedText)
     {
         loggerMock.Verify(
-            logger => logger.Log(
+            expression: logger => logger.Log(
                 level,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(expectedText, StringComparison.Ordinal)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
+            times: Times.AtLeastOnce);
     }
 }
-

@@ -5,7 +5,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Builds the JSON Schema that constrained decoding forces a model's reply into, from the <c>tools</c> the
 /// client offered - the request half of <see cref="ToolCallDialectRegistry.Constrained"/>.
-///
 /// <para>
 /// The envelope is deliberately <c>{"content", "tool_calls"}</c> rather than a bare call object, and that
 /// shape is the whole reason this approach is safe. A schema describing only a tool call would make
@@ -15,10 +14,12 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// output. Verified live against <c>qwen2.5-coder-7b-instruct-ghidra-v2</c>: asked for a haiku with two
 /// tools offered, it returned prose and <c>"tool_calls": []</c>.
 /// </para>
-///
 /// <para>
-/// <b>Each call is one branch of a <c>oneOf</c>, with its name pinned by <c>const</c> alongside its own
-/// argument schema.</b> That is the property delimiter scanning can never have: a hallucinated tool name
+/// <b>
+/// Each call is one branch of a <c>oneOf</c>, with its name pinned by <c>const</c> alongside its own
+/// argument schema.
+/// </b>
+/// That is the property delimiter scanning can never have: a hallucinated tool name
 /// is not merely detected and rejected after the fact, it is unrepresentable in the grammar the sampler is
 /// walking, so the tokens spelling it are never emitted - and neither is a real name paired with the wrong
 /// tool's arguments, because the two live in the same branch rather than in sibling properties a grammar
@@ -57,19 +58,14 @@ internal static class ToolCallEnvelopeSchema
         var branches = new JsonArray();
         foreach (var node in describedTools)
         {
-            if (node is not JsonObject tool || tool["function"] is not JsonObject function)
-            {
-                continue;
-            }
+            if (node is not JsonObject tool || tool["function"] is not JsonObject function) continue;
 
             // Read with OpenAI's own field name, not a dialect's: `tools` is what the *client* sent, and the
             // client always speaks OpenAI regardless of which dialect the model answers in.
             if (function["name"] is not JsonValue nameValue ||
                 !nameValue.TryGetValue<string>(out var name) ||
                 string.IsNullOrEmpty(name))
-            {
                 continue;
-            }
 
             // One self-contained branch per tool, with the name pinned by `const` *inside* the same object
             // as its own argument schema. This is what actually couples the two. An earlier shape put a
@@ -90,16 +86,13 @@ internal static class ToolCallEnvelopeSchema
                     // the correct reading of "takes no arguments".
                     ["arguments"] = function["parameters"] is JsonObject parameters
                         ? JsonSchemaSanitizer.ForConstrainedDecoding(parameters.DeepClone().AsObject())
-                        : new JsonObject { ["type"] = "object" },
+                        : new JsonObject { ["type"] = "object" }
                 },
-                ["required"] = new JsonArray { "name", "arguments" },
+                ["required"] = new JsonArray { "name", "arguments" }
             });
         }
 
-        if (branches.Count == 0)
-        {
-            return null;
-        }
+        if (branches.Count == 0) return null;
 
         return new JsonObject
         {
@@ -111,8 +104,8 @@ internal static class ToolCallEnvelopeSchema
                 // property be required and that additionalProperties be false throughout the *tool's own*
                 // parameter schemas - which are the client's, not ours to rewrite. Constraining the envelope
                 // without imposing that on arbitrary client schemas is the point.
-                ["schema"] = BuildEnvelope(branches),
-            },
+                ["schema"] = BuildEnvelope(branches)
+            }
         };
     }
 
@@ -130,24 +123,26 @@ internal static class ToolCallEnvelopeSchema
     /// beside another tool's arguments while reading as though it did not.
     /// </para>
     /// </remarks>
-    private static JsonObject BuildEnvelope(JsonArray branches) => new()
+    private static JsonObject BuildEnvelope(JsonArray branches)
     {
-        ["type"] = "object",
-        ["properties"] = new JsonObject
+        return new JsonObject
         {
-            [ContentProperty] = new JsonObject
+            ["type"] = "object",
+            ["properties"] = new JsonObject
             {
-                ["type"] = "string",
-                ["description"] = "Your reply to the user. Leave empty when calling a tool.",
+                [ContentProperty] = new JsonObject
+                {
+                    ["type"] = "string",
+                    ["description"] = "Your reply to the user. Leave empty when calling a tool."
+                },
+                [ToolCallsProperty] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["description"] = "Tools to invoke. Empty when no tool is needed.",
+                    ["items"] = new JsonObject { ["oneOf"] = branches }
+                }
             },
-            [ToolCallsProperty] = new JsonObject
-            {
-                ["type"] = "array",
-                ["description"] = "Tools to invoke. Empty when no tool is needed.",
-                ["items"] = new JsonObject { ["oneOf"] = branches },
-            },
-        },
-        ["required"] = new JsonArray { ContentProperty, ToolCallsProperty },
-    };
+            ["required"] = new JsonArray { ContentProperty, ToolCallsProperty }
+        };
+    }
 }
-

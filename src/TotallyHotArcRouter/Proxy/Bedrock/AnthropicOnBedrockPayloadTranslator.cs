@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Proxy.Translation;
-using Microsoft.AspNetCore.Http;
 
 namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 
@@ -15,7 +14,6 @@ namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 /// header - so this translator reuses <see cref="AnthropicPayloadTranslator"/>'s message/tool/response
 /// translation logic directly (both are <c>internal</c> exactly to enable this reuse) rather than
 /// reimplementing it.
-///
 /// <para>
 /// Unlike <see cref="AnthropicPayloadTranslator"/>, this translator is <b>always</b> applied - there is
 /// no Bedrock-native client sending Bedrock-shaped requests directly the way Claude Code sends
@@ -25,70 +23,58 @@ namespace TotallyHot.ArcRouter.Proxy.Bedrock;
 /// </summary>
 public sealed class AnthropicOnBedrockPayloadTranslator : IBedrockPayloadTranslator
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
     // Matches AnthropicPayloadTranslator's own floor - see its remarks for why a default is needed at
     // all (Bedrock's Claude body requires max_tokens exactly as native Anthropic's does).
     private const int DefaultMaxTokens = 4096;
 
     private const string BedrockAnthropicVersion = "bedrock-2023-05-31";
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Provider => "bedrock-anthropic";
 
-    /// <inheritdoc />
-    public bool ShouldTranslate(HttpRequest request) => true;
+    /// <inheritdoc/>
+    public bool ShouldTranslate(HttpRequest request)
+    {
+        return true;
+    }
 
-    /// <inheritdoc />
-    public Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming) =>
+    /// <inheritdoc/>
+    public Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming)
+    {
         throw new NotSupportedException(
             "Bedrock providers are invoked via the AWS SDK (IAmazonBedrockRuntime), not a forwarded HTTP URL. " +
             "ProxyMiddleware forks to its Bedrock invocation path before this would ever be called for an IBedrockPayloadTranslator.");
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public byte[] TranslateRequest(byte[] openAiShapedBody)
     {
         var root = JsonNode.Parse(openAiShapedBody) as JsonObject
-            ?? throw new JsonException("Anthropic-on-Bedrock request translation expected a JSON object body.");
+                   ?? throw new JsonException("Anthropic-on-Bedrock request translation expected a JSON object body.");
 
         var bedrock = new JsonObject { ["anthropic_version"] = BedrockAnthropicVersion };
 
-        var messages = root["messages"] as JsonArray ?? new JsonArray();
+        var messages = root["messages"] as JsonArray ?? [];
         var (system, translatedMessages) = AnthropicPayloadTranslator.TranslateMessages(messages);
 
-        if (system is not null)
-        {
-            bedrock["system"] = system;
-        }
+        if (system is not null) bedrock["system"] = system;
 
         bedrock["messages"] = translatedMessages;
 
         if (AnthropicPayloadTranslator.TranslateTools(root["tools"] as JsonArray) is { } tools)
-        {
             bedrock["tools"] = tools;
-        }
 
         if (AnthropicPayloadTranslator.TranslateToolChoice(root["tool_choice"]) is { } toolChoice)
-        {
             bedrock["tool_choice"] = toolChoice;
-        }
 
-        if (root["temperature"] is JsonNode temperature)
-        {
-            bedrock["temperature"] = temperature.DeepClone();
-        }
+        if (root["temperature"] is { } temperature) bedrock["temperature"] = temperature.DeepClone();
 
-        if (root["top_p"] is JsonNode topP)
-        {
-            bedrock["top_p"] = topP.DeepClone();
-        }
+        if (root["top_p"] is { } topP) bedrock["top_p"] = topP.DeepClone();
 
-        if (root["top_k"] is JsonNode topK)
-        {
-            bedrock["top_k"] = topK.DeepClone();
-        }
+        if (root["top_k"] is { } topK) bedrock["top_k"] = topK.DeepClone();
 
-        bedrock["max_tokens"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is JsonNode maxTokens
+        bedrock["max_tokens"] = (root["max_tokens"] ?? root["max_completion_tokens"]) is { } maxTokens
             ? maxTokens.DeepClone()
             : DefaultMaxTokens;
 
@@ -100,17 +86,10 @@ public sealed class AnthropicOnBedrockPayloadTranslator : IBedrockPayloadTransla
             case JsonArray stopArray:
                 var stopSequences = new JsonArray();
                 foreach (var element in stopArray)
-                {
                     if (element is JsonValue value && value.TryGetValue<string>(out var sequence))
-                    {
                         stopSequences.Add(sequence);
-                    }
-                }
 
-                if (stopSequences.Count > 0)
-                {
-                    bedrock["stop_sequences"] = stopSequences;
-                }
+                if (stopSequences.Count > 0) bedrock["stop_sequences"] = stopSequences;
 
                 break;
         }
@@ -118,28 +97,32 @@ public sealed class AnthropicOnBedrockPayloadTranslator : IBedrockPayloadTransla
         // No "model" (the SDK's ModelId parameter carries it) and no "stream" (the SDK method choice -
         // InvokeModel vs InvokeModelWithResponseStream - carries it, unlike native Anthropic's own body
         // flag) - the two respects in which this envelope genuinely differs from native Anthropic's.
-        if (root["thinking"] is JsonObject thinkingParam)
-        {
-            bedrock["thinking"] = thinkingParam.DeepClone();
-        }
+        if (root["thinking"] is JsonObject thinkingParam) bedrock["thinking"] = thinkingParam.DeepClone();
 
-        return JsonSerializer.SerializeToUtf8Bytes(bedrock, SerializerOptions);
+        return JsonSerializer.SerializeToUtf8Bytes(value: bedrock, options: SerializerOptions);
     }
 
-    /// <inheritdoc />
-    public byte[] TranslateResponse(byte[] nativeShapedBody) =>
+    /// <inheritdoc/>
+    public byte[] TranslateResponse(byte[] nativeShapedBody)
+    {
         // Bedrock's Claude InvokeModel response body is the same content[]/stop_reason/usage envelope as
         // native Anthropic's (verified against AWS's docs) - reused verbatim, not reimplemented.
-        new AnthropicPayloadTranslator().TranslateResponse(nativeShapedBody);
+        return new AnthropicPayloadTranslator().TranslateResponse(nativeShapedBody);
+    }
 
-    /// <inheritdoc />
-    public IStreamTranslator CreateStreamTranslator() =>
+    /// <inheritdoc/>
+    public IStreamTranslator CreateStreamTranslator()
+    {
         throw new NotSupportedException(
             "Bedrock streaming uses CreateBedrockStreamChunkTranslator (no SSE framing to buffer - the AWS SDK " +
             "already decodes each chunk), not IStreamTranslator.");
+    }
 
-    /// <inheritdoc />
-    public IBedrockStreamChunkTranslator CreateBedrockStreamChunkTranslator() => new AnthropicOnBedrockStreamChunkTranslator();
+    /// <inheritdoc/>
+    public IBedrockStreamChunkTranslator CreateBedrockStreamChunkTranslator()
+    {
+        return new AnthropicOnBedrockStreamChunkTranslator();
+    }
 }
 
 /// <summary>
@@ -156,11 +139,16 @@ internal sealed class AnthropicOnBedrockStreamChunkTranslator : IBedrockStreamCh
     /// Translates a single already-decoded Bedrock streaming chunk by delegating to the inner
     /// <see cref="AnthropicStreamTranslator"/>'s native-JSON event handling.
     /// </summary>
-    public byte[] TranslateChunk(byte[] nativeChunkJson) => _inner.TranslateNativeJsonChunk(nativeChunkJson) ?? [];
+    public byte[] TranslateChunk(byte[] nativeChunkJson)
+    {
+        return _inner.TranslateNativeJsonChunk(nativeChunkJson) ?? [];
+    }
 
     /// <summary>
     /// Flushes any buffered state in the inner stream translator once the Bedrock stream ends.
     /// </summary>
-    public byte[] Flush() => _inner.Flush();
+    public byte[] Flush()
+    {
+        return _inner.Flush();
+    }
 }
-

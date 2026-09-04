@@ -1,8 +1,7 @@
-using System.Net.Http.Json;
+using Microsoft.Extensions.Options;
+using System.Globalization;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Judge;
@@ -52,33 +51,49 @@ public sealed class GEvalJudgeClient : IJudgeClient
         "Overall quality: correctness, clarity, and usefulness of the response for the task it was given.";
 
     /// <summary>
+    /// The chat-completions path appended to the provider's base URL, collapsed against it by
+    /// <see cref="ProviderUrlBuilder.BuildPassthroughUrl"/>.
+    /// </summary>
+    private const string ChatCompletionsPath = "/v1/chat/completions";
+
+    /// <summary>
     /// Per-dimension G-Eval evaluation criteria, authored once as a static prompt fragment rather than
     /// generated via auto-CoT and cached (see this type's remarks for why). Keys match the router's
     /// dimension labels (docs/router/self-organizing-classification-plan.md's heuristic classifier
     /// output); an unrecognized dimension falls back to <see cref="DefaultCriteria"/>.
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> DimensionCriteria = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["algorithm"] = "Algorithmic correctness: does the response solve the stated problem with a sound approach, correct edge-case handling, and reasonable complexity?",
-        ["bug_fixing"] = "Bug-fixing quality: does the response correctly identify and fix the described defect without introducing new ones or changing unrelated behavior?",
-        ["test_generation"] = "Test quality: do the generated tests meaningfully exercise the described behavior, including edge cases, and would they actually fail on a broken implementation?",
-        ["code_review"] = "Review quality: does the response identify real issues, explain them clearly, and avoid flagging non-issues?",
-        ["design"] = "Design quality: is the proposed design coherent, addresses the stated requirements, and reasonably justifies its tradeoffs?",
-        ["explanation"] = "Explanation quality: is the explanation accurate, clear, and appropriately complete for the question asked?",
-    };
+    private static readonly IReadOnlyDictionary<string, string> DimensionCriteria =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["algorithm"] =
+                "Algorithmic correctness: does the response solve the stated problem with a sound approach, correct edge-case handling, and reasonable complexity?",
+            ["bug_fixing"] =
+                "Bug-fixing quality: does the response correctly identify and fix the described defect without introducing new ones or changing unrelated behavior?",
+            ["test_generation"] =
+                "Test quality: do the generated tests meaningfully exercise the described behavior, including edge cases, and would they actually fail on a broken implementation?",
+            ["code_review"] =
+                "Review quality: does the response identify real issues, explain them clearly, and avoid flagging non-issues?",
+            ["design"] =
+                "Design quality: is the proposed design coherent, addresses the stated requirements, and reasonably justifies its tradeoffs?",
+            ["explanation"] =
+                "Explanation quality: is the explanation accurate, clear, and appropriately complete for the question asked?"
+        };
 
-    private static readonly Regex ScoreDigitPattern = new(@"[1-5]", RegexOptions.Compiled);
-
-    /// <summary>The chat-completions path appended to the provider's base URL, collapsed against it by <see cref="ProviderUrlBuilder.BuildPassthroughUrl"/>.</summary>
-    private const string ChatCompletionsPath = "/v1/chat/completions";
+    // ReSharper disable once RedundantVerbatimStringPrefix
+    // Kept on every regex literal even when the current pattern has no backslash: it is what stops
+    // a later `\d` or `\s` from being read as a C# escape instead of a regex one.
+    private static readonly Regex ScoreDigitPattern = new(pattern: @"[1-5]", options: RegexOptions.Compiled);
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<GEvalJudgeClient> _logger;
     private readonly JudgeModelSelector _modelSelector;
     private readonly IOptionsMonitor<JudgeOptions> _options;
-    private readonly ILogger<GEvalJudgeClient> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="GEvalJudgeClient"/> class.</summary>
-    /// <param name="httpClientFactory">Supplies the named <see cref="HttpClientName"/> client used to reach the judge backbone.</param>
+    /// <param name="httpClientFactory">
+    /// Supplies the named <see cref="HttpClientName"/> client used to reach the judge
+    /// backbone.
+    /// </param>
     /// <param name="modelSelector">Resolves which free provider model to call for each score.</param>
     /// <param name="options">Supplies the request timeout, read live so a settings change needs no restart.</param>
     /// <param name="logger">The logger.</param>
@@ -99,18 +114,16 @@ public sealed class GEvalJudgeClient : IJudgeClient
         _logger = logger;
     }
 
-    /// <inheritdoc />
-    public async Task<JudgeScoreResult?> ScoreAsync(JudgeScoreRequest request, CancellationToken cancellationToken = default)
+    /// <inheritdoc/>
+    public async Task<JudgeScoreResult?> ScoreAsync(JudgeScoreRequest request,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var route = _modelSelector.Resolve();
-        if (route is null)
-        {
-            return null;
-        }
+        if (route is null) return null;
 
-        var prompt = BuildPrompt(request.Dimension, request.ResponseText);
+        var prompt = BuildPrompt(dimension: request.Dimension, responseText: request.ResponseText);
         var client = _httpClientFactory.CreateClient(HttpClientName);
         client.Timeout = TimeSpan.FromSeconds(_options.CurrentValue.RequestTimeoutSeconds);
 
@@ -118,58 +131,55 @@ public sealed class GEvalJudgeClient : IJudgeClient
         // the upstream only recognizes its own identifier.
         var chatRequest = new ChatCompletionRequest(
             Model: route.ProviderModelId,
-            Messages: [new ChatMessage("user", prompt)],
-            Temperature: 0,
-            Logprobs: true,
-            TopLogprobs: 5,
-            MaxTokens: 8);
+            Messages: [new ChatMessage(Role: "user", Content: prompt)],
+            0,
+            true,
+            5,
+            8);
 
-        var url = ProviderUrlBuilder.BuildPassthroughUrl(route.UpstreamBaseUrl, ChatCompletionsPath, queryString: null);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = JsonContent.Create(chatRequest, JudgeJsonContext.Default.ChatCompletionRequest),
-        };
+        var url = ProviderUrlBuilder.BuildPassthroughUrl(baseUrl: route.UpstreamBaseUrl,
+            requestPath: ChatCompletionsPath, null);
+        using var httpRequest = new HttpRequestMessage(method: HttpMethod.Post, requestUri: url);
+        httpRequest.Content = JsonContent.Create(inputValue: chatRequest,
+            jsonTypeInfo: JudgeJsonContext.Default.ChatCompletionRequest);
 
         // Applied by hand rather than via ProviderCredentialResolver.ApplyToRequest: the route already
         // carries these values resolved, so re-resolving them would need this client to hold an
         // IProviderConfigStore and an IEnvironmentVariableProvider it otherwise has no use for.
         foreach (var (name, value) in route.ExtraHeaders)
-        {
-            if (!httpRequest.Headers.TryAddWithoutValidation(name, value))
-            {
+            if (!httpRequest.Headers.TryAddWithoutValidation(name: name, value: value))
                 // Only the name is logged - the value may be the provider's credential.
                 _logger.LogWarning(
+                    message:
                     "Judge provider {Provider} configures header {HeaderName}, which HTTP rejected as a malformed name; the request proceeds without it.",
                     route.Provider,
                     name);
-            }
-        }
 
-        using var response = await client.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+        using var response = await client.SendAsync(request: httpRequest, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var parsed = await response.Content.ReadFromJsonAsync(JudgeJsonContext.Default.ChatCompletionResponse, cancellationToken)
+        var parsed = await response.Content
+            .ReadFromJsonAsync(jsonTypeInfo: JudgeJsonContext.Default.ChatCompletionResponse,
+                cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         var choice = parsed?.Choices?.FirstOrDefault();
         if (choice is null)
-        {
-            throw new InvalidOperationException($"Judge backbone '{route.ModelName}' returned a response carrying no choices.");
-        }
+            throw new InvalidOperationException(
+                $"Judge backbone '{route.ModelName}' returned a response carrying no choices.");
 
         var weighted = TryComputeWeightedScore(choice.Logprobs?.Content);
         if (weighted is { } weightedScore)
-        {
-            return new JudgeScoreResult(weightedScore, UsedLogprobs: true, route.ModelName);
-        }
+            return new JudgeScoreResult(Score: weightedScore, true, JudgeModel: route.ModelName);
 
         var fallback = TryParseFallbackScore(choice.Message?.Content);
         if (fallback is { } fallbackScore)
         {
             _logger.LogDebug(
-                "Judge backbone {JudgeModel} returned no usable logprobs; used single-sample fallback parse.",
+                message: "Judge backbone {JudgeModel} returned no usable logprobs; used single-sample fallback parse.",
                 route.ModelName);
-            return new JudgeScoreResult(fallbackScore, UsedLogprobs: false, route.ModelName);
+            return new JudgeScoreResult(Score: fallbackScore, false, JudgeModel: route.ModelName);
         }
 
         throw new InvalidOperationException(
@@ -182,28 +192,31 @@ public sealed class GEvalJudgeClient : IJudgeClient
     /// </summary>
     private static string BuildPrompt(string dimension, string responseText)
     {
-        var criteria = DimensionCriteria.TryGetValue(dimension ?? string.Empty, out var dimensionCriteria)
+        // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
+        // Nullable annotations are a compile-time contract, not a runtime guarantee - the dimension
+        // originates in scored telemetry, where it can be absent.
+        var criteria = DimensionCriteria.TryGetValue(key: dimension ?? string.Empty, value: out var dimensionCriteria)
             ? dimensionCriteria
             : DefaultCriteria;
 
         return $"""
-            You are an expert evaluator. Your task is to rate the quality of an AI assistant's response on a
-            scale of 1 (worst) to 5 (best), according to the following criterion:
+                You are an expert evaluator. Your task is to rate the quality of an AI assistant's response on a
+                scale of 1 (worst) to 5 (best), according to the following criterion:
 
-            {criteria}
+                {criteria}
 
-            Evaluation steps:
-            1. Read the response carefully.
-            2. Judge it strictly against the criterion above, not against unrelated qualities.
-            3. Decide on a single integer score from 1 to 5.
+                Evaluation steps:
+                1. Read the response carefully.
+                2. Judge it strictly against the criterion above, not against unrelated qualities.
+                3. Decide on a single integer score from 1 to 5.
 
-            Response to evaluate:
-            ---
-            {responseText}
-            ---
+                Response to evaluate:
+                ---
+                {responseText}
+                ---
 
-            Respond with only a single digit from 1 to 5 and nothing else.
-            """;
+                Respond with only a single digit from 1 to 5 and nothing else.
+                """;
     }
 
     /// <summary>
@@ -215,39 +228,22 @@ public sealed class GEvalJudgeClient : IJudgeClient
     /// </summary>
     private static double? TryComputeWeightedScore(IReadOnlyList<TokenLogprob>? content)
     {
-        if (content is null || content.Count == 0)
-        {
-            return null;
-        }
+        if (content is null || content.Count == 0) return null;
 
         foreach (var token in content)
         {
-            if (!TryParseScoreDigit(token.Token, out _))
-            {
-                continue;
-            }
+            if (!TryParseScoreDigit(token: token.Token, digit: out _)) continue;
 
             var candidates = new List<(int Digit, double Logprob)>();
             if (token.TopLogprobs is { Count: > 0 })
-            {
                 foreach (var candidate in token.TopLogprobs)
-                {
-                    if (TryParseScoreDigit(candidate.Token, out var digit))
-                    {
+                    if (TryParseScoreDigit(token: candidate.Token, digit: out var digit))
                         candidates.Add((digit, candidate.Logprob));
-                    }
-                }
-            }
 
-            if (candidates.Count == 0 && TryParseScoreDigit(token.Token, out var sampledDigit))
-            {
+            if (candidates.Count == 0 && TryParseScoreDigit(token: token.Token, digit: out var sampledDigit))
                 candidates.Add((sampledDigit, token.Logprob));
-            }
 
-            if (candidates.Count == 0)
-            {
-                continue;
-            }
+            if (candidates.Count == 0) continue;
 
             double sumProbability = 0;
             double weightedSum = 0;
@@ -258,10 +254,7 @@ public sealed class GEvalJudgeClient : IJudgeClient
                 weightedSum += digit * probability;
             }
 
-            if (sumProbability <= 0)
-            {
-                continue;
-            }
+            if (sumProbability <= 0) continue;
 
             return Normalize(weightedSum / sumProbability);
         }
@@ -275,13 +268,10 @@ public sealed class GEvalJudgeClient : IJudgeClient
     /// </summary>
     private static double? TryParseFallbackScore(string? content)
     {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(content)) return null;
 
         var match = ScoreDigitPattern.Match(content);
-        return match.Success ? Normalize(int.Parse(match.Value, System.Globalization.CultureInfo.InvariantCulture)) : null;
+        return match.Success ? Normalize(int.Parse(s: match.Value, provider: CultureInfo.InvariantCulture)) : null;
     }
 
     /// <summary>Attempts to parse a token's trimmed text as a score digit in <c>[1, 5]</c>.</summary>
@@ -289,61 +279,71 @@ public sealed class GEvalJudgeClient : IJudgeClient
     {
         digit = 0;
         var trimmed = token?.Trim();
-        if (string.IsNullOrEmpty(trimmed) || trimmed.Length != 1)
-        {
-            return false;
-        }
+        if (string.IsNullOrEmpty(trimmed) || trimmed.Length != 1) return false;
 
-        if (!int.TryParse(trimmed, out var value) || value < MinScore || value > MaxScore)
-        {
-            return false;
-        }
+        if (!int.TryParse(s: trimmed, result: out var value) || value < MinScore || value > MaxScore) return false;
 
         digit = value;
         return true;
     }
 
     /// <summary>Maps a raw 1-5 mean score onto <c>[0, 1]</c>.</summary>
-    private static double Normalize(double meanScore) => Math.Clamp((meanScore - MinScore) / (MaxScore - MinScore), 0.0, 1.0);
+    private static double Normalize(double meanScore)
+    {
+        return Math.Clamp(value: (meanScore - MinScore) / (MaxScore - MinScore), 0.0, 1.0);
+    }
 }
 
 /// <summary>The OpenAI-compatible chat-completions request body <see cref="GEvalJudgeClient"/> sends.</summary>
 internal sealed record ChatCompletionRequest(
     [property: JsonPropertyName("model")] string Model,
-    [property: JsonPropertyName("messages")] IReadOnlyList<ChatMessage> Messages,
-    [property: JsonPropertyName("temperature")] double Temperature,
-    [property: JsonPropertyName("logprobs")] bool Logprobs,
-    [property: JsonPropertyName("top_logprobs")] int TopLogprobs,
-    [property: JsonPropertyName("max_tokens")] int MaxTokens);
+    [property: JsonPropertyName("messages")]
+    IReadOnlyList<ChatMessage> Messages,
+    [property: JsonPropertyName("temperature")]
+    double Temperature,
+    [property: JsonPropertyName("logprobs")]
+    bool Logprobs,
+    [property: JsonPropertyName("top_logprobs")]
+    int TopLogprobs,
+    [property: JsonPropertyName("max_tokens")]
+    int MaxTokens);
 
 /// <summary>One chat message in an OpenAI-compatible request.</summary>
 internal sealed record ChatMessage(
     [property: JsonPropertyName("role")] string Role,
-    [property: JsonPropertyName("content")] string Content);
+    [property: JsonPropertyName("content")]
+    string Content);
 
 /// <summary>The OpenAI-compatible chat-completions response body (only the fields <see cref="GEvalJudgeClient"/> reads).</summary>
 internal sealed record ChatCompletionResponse(
-    [property: JsonPropertyName("choices")] IReadOnlyList<ChatChoice>? Choices);
+    [property: JsonPropertyName("choices")]
+    IReadOnlyList<ChatChoice>? Choices);
 
 /// <summary>One completion choice.</summary>
 internal sealed record ChatChoice(
-    [property: JsonPropertyName("message")] ChatMessage? Message,
-    [property: JsonPropertyName("logprobs")] ChoiceLogprobs? Logprobs);
+    [property: JsonPropertyName("message")]
+    ChatMessage? Message,
+    [property: JsonPropertyName("logprobs")]
+    ChoiceLogprobs? Logprobs);
 
 /// <summary>A choice's logprobs block.</summary>
 internal sealed record ChoiceLogprobs(
-    [property: JsonPropertyName("content")] IReadOnlyList<TokenLogprob>? Content);
+    [property: JsonPropertyName("content")]
+    IReadOnlyList<TokenLogprob>? Content);
 
 /// <summary>One generated token's logprob and its top alternative-token candidates.</summary>
 internal sealed record TokenLogprob(
     [property: JsonPropertyName("token")] string Token,
-    [property: JsonPropertyName("logprob")] double Logprob,
-    [property: JsonPropertyName("top_logprobs")] IReadOnlyList<TopLogprobCandidate>? TopLogprobs);
+    [property: JsonPropertyName("logprob")]
+    double Logprob,
+    [property: JsonPropertyName("top_logprobs")]
+    IReadOnlyList<TopLogprobCandidate>? TopLogprobs);
 
 /// <summary>One candidate alternative token and its logprob, from a token's <c>top_logprobs</c> list.</summary>
 internal sealed record TopLogprobCandidate(
     [property: JsonPropertyName("token")] string Token,
-    [property: JsonPropertyName("logprob")] double Logprob);
+    [property: JsonPropertyName("logprob")]
+    double Logprob);
 
 /// <summary>Source-generated JSON contract for the judge backbone's request/response DTOs.</summary>
 [JsonSerializable(typeof(ChatCompletionRequest))]

@@ -12,41 +12,41 @@ namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 public class ClusterLedgerTests
 {
     private static readonly ClusterModelArtifact TwoClusterArtifact = new(
-        EmbeddingDimension: 2,
+        2,
         Centroids: [[1f, 0f], [0f, 1f]],
-        ChosenK: 2,
+        2,
         TrainedAtUtc: DateTimeOffset.UtcNow,
         ClusterSizes: [0, 0],
         ClusterDimensionHistograms: [new Dictionary<string, int>(), new Dictionary<string, int>()],
         ClusterTopTerms: [[], []],
         TrainedFrom: "test",
-        BootstrapTaskCount: 0,
-        MemoryEntryCount: 0);
+        0,
+        0);
 
     [Fact]
     public void Build_EntriesNearEachCentroid_AggregatesIntoTheMatchingCluster()
     {
         MemoryEntry[] entries =
         [
-            Entry([1, 0], "model-a", 1.0),
-            Entry([1, 0], "model-a", 0.5),
-            Entry([0, 1], "model-b", 0.8),
+            Entry(embedding: [1, 0], model: "model-a", 1.0),
+            Entry(embedding: [1, 0], model: "model-a", 0.5),
+            Entry(embedding: [0, 1], model: "model-b", 0.8)
         ];
 
-        var ledger = ClusterLedger.Build(TwoClusterArtifact, entries);
+        var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries);
 
-        Assert.Equal(0.75, ledger[0]["model-a"].MeanScore, precision: 6);
-        Assert.Equal(2, ledger[0]["model-a"].ObservationCount);
-        Assert.Equal(0.8, ledger[1]["model-b"].MeanScore, precision: 6);
-        Assert.Equal(1, ledger[1]["model-b"].ObservationCount);
+        Assert.Equal(0.75, actual: ledger[0]["model-a"].MeanScore, 6);
+        Assert.Equal(2, actual: ledger[0]["model-a"].ObservationCount);
+        Assert.Equal(0.8, actual: ledger[1]["model-b"].MeanScore, 6);
+        Assert.Equal(1, actual: ledger[1]["model-b"].ObservationCount);
     }
 
     [Fact]
     public void Build_EveryClusterIndexIsPresentEvenWhenEmpty()
     {
-        var ledger = ClusterLedger.Build(TwoClusterArtifact, []);
+        var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: []);
 
-        Assert.Equal(2, ledger.Count);
+        Assert.Equal(2, actual: ledger.Count);
         Assert.Empty(ledger[0]);
         Assert.Empty(ledger[1]);
     }
@@ -54,9 +54,9 @@ public class ClusterLedgerTests
     [Fact]
     public void Build_EntryWithMismatchedEmbeddingDimension_IsExcluded()
     {
-        MemoryEntry[] entries = [Entry([1, 0, 0], "model-a", 1.0)];
+        MemoryEntry[] entries = [Entry(embedding: [1, 0, 0], model: "model-a", 1.0)];
 
-        var ledger = ClusterLedger.Build(TwoClusterArtifact, entries);
+        var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries);
 
         Assert.Empty(ledger[0]);
         Assert.Empty(ledger[1]);
@@ -68,9 +68,9 @@ public class ClusterLedgerTests
         // A vector equidistant from both centroids has similarity ~0.707 to each - below a 0.99 threshold,
         // it should be excluded from every cluster's ledger rather than forced into one.
         var equidistant = Normalize([1, 1]);
-        MemoryEntry[] entries = [Entry(equidistant, "model-a", 1.0)];
+        MemoryEntry[] entries = [Entry(embedding: equidistant, model: "model-a", 1.0)];
 
-        var ledger = ClusterLedger.Build(TwoClusterArtifact, entries, assignmentThreshold: 0.99);
+        var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries, 0.99);
 
         Assert.Empty(ledger[0]);
         Assert.Empty(ledger[1]);
@@ -81,18 +81,21 @@ public class ClusterLedgerTests
     {
         MemoryEntry[] entries =
         [
-            Entry([1, 0], "Model-A", 1.0),
-            Entry([1, 0], "model-a", 0.0),
+            Entry(embedding: [1, 0], model: "Model-A", 1.0),
+            Entry(embedding: [1, 0], model: "model-a", 0.0)
         ];
 
-        var ledger = ClusterLedger.Build(TwoClusterArtifact, entries);
+        var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries);
 
         Assert.Single(ledger[0]);
-        Assert.Equal(2, ledger[0].Values.Single().ObservationCount);
+        Assert.Equal(2, actual: ledger[0].Values.Single().ObservationCount);
     }
 
-    private static MemoryEntry Entry(float[] embedding, string model, double score) =>
-        new(0, embedding, model, score, Cost: 0.01, VerifierTrace: null, DateTimeOffset.UtcNow);
+    private static MemoryEntry Entry(float[] embedding, string model, double score)
+    {
+        return new MemoryEntry(0, TaskEmbedding: embedding, ChosenModel: model, Score: score, 0.01, null,
+            CreatedAtUtc: DateTimeOffset.UtcNow);
+    }
 
     private static float[] Normalize(float[] vector)
     {

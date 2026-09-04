@@ -10,7 +10,10 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// </summary>
 internal static class ManagementResultExecutor
 {
-    /// <summary>Runs <paramref name="action"/>, returning <see cref="ManagementResult{T}.Ok"/> on success or <see cref="ManagementErrorType.Internal"/> with <paramref name="failureMessage"/> on any exception.</summary>
+    /// <summary>
+    /// Runs <paramref name="action"/>, returning <see cref="ManagementResult{T}.Ok"/> on success or
+    /// <see cref="ManagementErrorType.Internal"/> with <paramref name="failureMessage"/> on any exception.
+    /// </summary>
     public static ManagementResult<T> TryExecute<T>(Func<T> action, string failureMessage)
     {
         try
@@ -19,7 +22,7 @@ internal static class ManagementResultExecutor
         }
         catch (Exception)
         {
-            return ManagementResult<T>.Fail(ManagementErrorType.Internal, failureMessage);
+            return ManagementResult<T>.Fail(errorType: ManagementErrorType.Internal, message: failureMessage);
         }
     }
 
@@ -36,7 +39,7 @@ internal static class ManagementResultExecutor
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return ManagementResult<T>.Fail(ManagementErrorType.Internal, failureMessage);
+            return ManagementResult<T>.Fail(errorType: ManagementErrorType.Internal, message: failureMessage);
         }
     }
 }

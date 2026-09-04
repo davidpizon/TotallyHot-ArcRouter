@@ -10,10 +10,13 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// </summary>
 public static class LogRegModelArtifactSerializer
 {
-    /// <summary>Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually inspected artifact file stays human-readable.</summary>
+    /// <summary>
+    /// Serializer options shared by <see cref="Serialize"/> and <see cref="Deserialize"/>: indented so a manually
+    /// inspected artifact file stays human-readable.
+    /// </summary>
     private static readonly JsonSerializerOptions Options = new()
     {
-        WriteIndented = true,
+        WriteIndented = true
     };
 
     /// <summary>Serializes <paramref name="artifact"/> to indented JSON.</summary>
@@ -26,12 +29,13 @@ public static class LogRegModelArtifactSerializer
         {
             Vocabulary = [.. artifact.Vocabulary],
             InverseDocumentFrequency = [.. artifact.InverseDocumentFrequency],
-            ClassWeights = artifact.ClassWeights.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            ClassWeights =
+                artifact.ClassWeights.ToDictionary(keySelector: kvp => kvp.Key, elementSelector: kvp => kvp.Value),
             IsPlaceholder = artifact.IsPlaceholder,
-            TrainedFrom = artifact.TrainedFrom,
+            TrainedFrom = artifact.TrainedFrom
         };
 
-        return JsonSerializer.Serialize(dto, Options);
+        return JsonSerializer.Serialize(value: dto, options: Options);
     }
 
     /// <summary>Deserializes an artifact previously produced by <see cref="Serialize"/>.</summary>
@@ -41,15 +45,15 @@ public static class LogRegModelArtifactSerializer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
 
-        var dto = JsonSerializer.Deserialize<Dto>(json, Options)
-            ?? throw new FormatException("The logreg voter model document deserialized to null.");
+        var dto = JsonSerializer.Deserialize<Dto>(json: json, options: Options)
+                  ?? throw new FormatException("The logreg voter model document deserialized to null.");
 
         var artifact = new LogRegModelArtifact(
-            dto.Vocabulary,
-            dto.InverseDocumentFrequency,
-            dto.ClassWeights,
-            dto.IsPlaceholder,
-            dto.TrainedFrom);
+            Vocabulary: dto.Vocabulary,
+            InverseDocumentFrequency: dto.InverseDocumentFrequency,
+            ClassWeights: dto.ClassWeights,
+            IsPlaceholder: dto.IsPlaceholder,
+            TrainedFrom: dto.TrainedFrom);
         Validate(artifact);
         return artifact;
     }
@@ -70,82 +74,70 @@ public static class LogRegModelArtifactSerializer
         ArgumentNullException.ThrowIfNull(artifact);
 
         if (artifact.Vocabulary.Count == 0)
-        {
             throw new FormatException("The logreg voter model document has an empty vocabulary.");
-        }
 
         if (artifact.Vocabulary.Any(string.IsNullOrWhiteSpace))
-        {
             // A null/blank term would later become a Dictionary<string, int> key in LogRegVoter's
             // vocabulary index, which throws ArgumentNullException (null) or silently collides with every
             // other blank entry (whitespace) - reject it here as a format error instead.
             throw new FormatException("The logreg voter model document's vocabulary contains a null or blank term.");
-        }
 
         if (artifact.Vocabulary.Distinct(StringComparer.Ordinal).Count() != artifact.Vocabulary.Count)
-        {
             throw new FormatException("The logreg voter model document's vocabulary contains duplicate terms.");
-        }
 
         if (artifact.InverseDocumentFrequency.Count != artifact.Vocabulary.Count)
-        {
             throw new FormatException(
                 $"The logreg voter model document's inverseDocumentFrequency has length " +
                 $"{artifact.InverseDocumentFrequency.Count}, expected {artifact.Vocabulary.Count} (one per vocabulary term).");
-        }
 
         if (artifact.InverseDocumentFrequency.Any(value => !double.IsFinite(value)))
-        {
             throw new FormatException(
                 "The logreg voter model document's inverseDocumentFrequency contains a non-finite value (NaN or Infinity).");
-        }
 
         foreach (var (model, weights) in artifact.ClassWeights)
         {
             if (weights is null)
-            {
                 // A JSON document can carry an explicit null value for a classWeights entry (e.g.
                 // "model-a": null); accessing weights.Length below would otherwise throw
                 // NullReferenceException instead of a controlled FormatException.
                 throw new FormatException($"The logreg voter model's weight vector for '{model}' is null.");
-            }
 
             if (weights.Length != artifact.Vocabulary.Count + 1)
-            {
                 throw new FormatException(
                     $"The logreg voter model's weight vector for '{model}' has length {weights.Length}, " +
                     $"expected {artifact.Vocabulary.Count + 1} (vocabulary size + 1 bias term).");
-            }
 
             if (weights.Any(value => !double.IsFinite(value)))
-            {
                 throw new FormatException(
                     $"The logreg voter model's weight vector for '{model}' contains a non-finite value (NaN or Infinity).");
-            }
         }
     }
 
-    /// <summary>The wire shape for <see cref="LogRegModelArtifact"/>, needed because the record's <see cref="IReadOnlyDictionary{TKey,TValue}"/>/<see cref="IReadOnlyList{T}"/> members don't round-trip through <c>System.Text.Json</c>'s default record support.</summary>
+    /// <summary>
+    /// The wire shape for <see cref="LogRegModelArtifact"/>, needed because the record's
+    /// <see cref="IReadOnlyDictionary{TKey,TValue}"/>/<see cref="IReadOnlyList{T}"/> members don't round-trip through
+    /// <c>System.Text.Json</c>'s default record support.
+    /// </summary>
     private sealed class Dto
     {
         /// <summary>Gets or sets the fixed TF-IDF vocabulary, in index order.</summary>
         [JsonPropertyName("vocabulary")]
-        public List<string> Vocabulary { get; set; } = [];
+        public List<string> Vocabulary { get; init; } = [];
 
         /// <summary>Gets or sets the per-term inverse document frequency weights, same index order as <see cref="Vocabulary"/>.</summary>
         [JsonPropertyName("inverseDocumentFrequency")]
-        public List<double> InverseDocumentFrequency { get; set; } = [];
+        public List<double> InverseDocumentFrequency { get; init; } = [];
 
         /// <summary>Gets or sets the per-class weight vectors, keyed by canonicalized model id.</summary>
         [JsonPropertyName("classWeights")]
-        public Dictionary<string, double[]> ClassWeights { get; set; } = [];
+        public Dictionary<string, double[]> ClassWeights { get; init; } = [];
 
         /// <summary>Gets or sets whether this artifact is a hand-built placeholder rather than a real training run.</summary>
         [JsonPropertyName("isPlaceholder")]
-        public bool IsPlaceholder { get; set; }
+        public bool IsPlaceholder { get; init; }
 
         /// <summary>Gets or sets the human-readable training provenance string.</summary>
         [JsonPropertyName("trainedFrom")]
-        public string TrainedFrom { get; set; } = string.Empty;
+        public string TrainedFrom { get; init; } = string.Empty;
     }
 }

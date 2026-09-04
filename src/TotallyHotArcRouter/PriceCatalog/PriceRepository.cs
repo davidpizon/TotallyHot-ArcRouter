@@ -1,7 +1,7 @@
+using Microsoft.Data.Sqlite;
 using System.Globalization;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.Data.Sqlite;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
@@ -55,8 +55,9 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
 
-        var sourceId = GetOrCreateSourceId(connection, transaction, sourceName, priorityScore);
-        var timestamp = asOfUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+        var sourceId = GetOrCreateSourceId(connection: connection, transaction: transaction, sourceName: sourceName,
+            priorityScore: priorityScore);
+        var timestamp = asOfUtc.UtcDateTime.ToString(format: TimestampFormat, provider: CultureInfo.InvariantCulture);
 
         var written = 0;
         foreach (var price in prices)
@@ -67,19 +68,24 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
             // priority gate below and lets the runtime cost lookup resolve on ModelName. A miss falls back to
             // the source's own keys verbatim: an unmatched model is left unresolved, never mis-mapped. See
             // docs/router/d3-alias-resolution.md.
-            var resolution = _identityResolver?.Resolve(sourceName, price.ModelIdentifier, price.Provider);
+            var resolution = _identityResolver?.Resolve(sourceName: sourceName,
+                aggregatorModelId: price.ModelIdentifier, aggregatorProvider: price.Provider);
             var providerName = resolution?.Identity.Provider ?? price.Provider;
             var modelIdentifier = resolution?.Identity.ModelName ?? price.ModelIdentifier;
             var isApproximate = resolution?.IsApproximate ?? false;
 
-            var providerId = GetOrCreateProviderId(connection, transaction, providerName);
-            var modelId = GetOrCreateModelId(connection, transaction, modelIdentifier);
+            var providerId = GetOrCreateProviderId(connection: connection, transaction: transaction,
+                providerName: providerName);
+            var modelId = GetOrCreateModelId(connection: connection, transaction: transaction,
+                modelIdentifier: modelIdentifier);
 
             // The alias records the source's own name against whatever internal model id it resolved to (the
             // configured ModelName on a hit, the raw key on a miss). Written unconditionally, same as the
             // observation row itself now - neither has a priority concept of its own.
-            UpsertAlias(connection, transaction, sourceId, modelId, price.ModelIdentifier);
-            UpsertPriceRow(connection, transaction, modelId, providerId, sourceId, price, timestamp, isApproximate);
+            UpsertAlias(connection: connection, transaction: transaction, sourceId: sourceId, modelId: modelId,
+                aggregatorName: price.ModelIdentifier);
+            UpsertPriceRow(connection: connection, transaction: transaction, modelId: modelId, providerId: providerId,
+                sourceId: sourceId, price: price, timestamp: timestamp, isApproximate: isApproximate);
             written++;
         }
 
@@ -87,10 +93,7 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
 
         // Recomputed on its own connection, after commit: RecomputeWinners re-reads model_price_observations,
         // so it must see this batch's writes as committed rows, not as an in-flight transaction it can't see.
-        if (written > 0)
-        {
-            RecomputeWinners();
-        }
+        if (written > 0) RecomputeWinners();
 
         return written;
     }
@@ -118,8 +121,10 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
     /// one row shape while answering different questions about it.
     /// </para>
     /// </remarks>
-    public ModelPrice? GetFreshPrice(ModelKey key, TimeSpan maxAge) =>
-        ReadPrice(key, FormatCutoff(maxAge))?.Price;
+    public ModelPrice? GetFreshPrice(ModelKey key, TimeSpan maxAge)
+    {
+        return ReadPrice(key: key, cutoff: FormatCutoff(maxAge))?.Price;
+    }
 
     /// <summary>
     /// Returns every published rate tier for a <c>(model, provider)</c> key at <em>any</em> age, together
@@ -132,7 +137,10 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
     /// served" is about operator intent, which does not soften just because the question is a display one.
     /// Returns <see langword="null"/> only when there is no row at all, or it publishes no standard rates.
     /// </remarks>
-    public CatalogPriceEntry? GetPriceEntry(ModelKey key) => ReadPrice(key, cutoff: null);
+    public CatalogPriceEntry? GetPriceEntry(ModelKey key)
+    {
+        return ReadPrice(key: key, null);
+    }
 
     /// <summary>
     /// Re-derives <c>model_prices</c> - the served winner per <c>(model, provider)</c> cell - from every
@@ -158,35 +166,35 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            WITH ranked AS (
-                SELECT o.*, s.priority_score,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY o.model_id, o.provider_id
-                           ORDER BY s.priority_score DESC, o.last_updated_utc DESC
-                       ) AS rn
-                FROM model_price_observations o
-                JOIN aggregator_sources s ON s.source_id = o.aggregator_source_id
-                WHERE s.enabled = 1
-            )
-            INSERT INTO model_prices (
-                model_id, provider_id, aggregator_source_id,
-                standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
-                batch_input_price, batch_output_price, last_updated_utc, is_approximate)
-            SELECT model_id, provider_id, aggregator_source_id,
-                   standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
-                   batch_input_price, batch_output_price, last_updated_utc, is_approximate
-            FROM ranked WHERE rn = 1
-            ON CONFLICT(model_id, provider_id) DO UPDATE SET
-                aggregator_source_id    = excluded.aggregator_source_id,
-                standard_input_price    = excluded.standard_input_price,
-                standard_output_price   = excluded.standard_output_price,
-                cached_input_price      = excluded.cached_input_price,
-                cache_write_input_price = excluded.cache_write_input_price,
-                batch_input_price       = excluded.batch_input_price,
-                batch_output_price      = excluded.batch_output_price,
-                last_updated_utc        = excluded.last_updated_utc,
-                is_approximate          = excluded.is_approximate;
-            """;
+                              WITH ranked AS (
+                                  SELECT o.*, s.priority_score,
+                                         ROW_NUMBER() OVER (
+                                             PARTITION BY o.model_id, o.provider_id
+                                             ORDER BY s.priority_score DESC, o.last_updated_utc DESC
+                                         ) AS rn
+                                  FROM model_price_observations o
+                                  JOIN aggregator_sources s ON s.source_id = o.aggregator_source_id
+                                  WHERE s.enabled = 1
+                              )
+                              INSERT INTO model_prices (
+                                  model_id, provider_id, aggregator_source_id,
+                                  standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
+                                  batch_input_price, batch_output_price, last_updated_utc, is_approximate)
+                              SELECT model_id, provider_id, aggregator_source_id,
+                                     standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
+                                     batch_input_price, batch_output_price, last_updated_utc, is_approximate
+                              FROM ranked WHERE rn = 1
+                              ON CONFLICT(model_id, provider_id) DO UPDATE SET
+                                  aggregator_source_id    = excluded.aggregator_source_id,
+                                  standard_input_price    = excluded.standard_input_price,
+                                  standard_output_price   = excluded.standard_output_price,
+                                  cached_input_price      = excluded.cached_input_price,
+                                  cache_write_input_price = excluded.cache_write_input_price,
+                                  batch_input_price       = excluded.batch_input_price,
+                                  batch_output_price      = excluded.batch_output_price,
+                                  last_updated_utc        = excluded.last_updated_utc,
+                                  is_approximate          = excluded.is_approximate;
+                              """;
         return command.ExecuteNonQuery();
     }
 
@@ -230,19 +238,13 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
               ORDER BY mp.last_updated_utc DESC
               LIMIT 1;
               """;
-        command.Parameters.AddWithValue("$model", key.ModelName);
-        command.Parameters.AddWithValue("$provider", key.Provider);
+        command.Parameters.AddWithValue(parameterName: "$model", value: key.ModelName);
+        command.Parameters.AddWithValue(parameterName: "$provider", value: key.Provider);
 
-        if (cutoff is not null)
-        {
-            command.Parameters.AddWithValue("$cutoff", cutoff);
-        }
+        if (cutoff is not null) command.Parameters.AddWithValue(parameterName: "$cutoff", value: cutoff);
 
         using var reader = command.ExecuteReader();
-        if (!reader.Read() || reader.IsDBNull(0) || reader.IsDBNull(1))
-        {
-            return null;
-        }
+        if (!reader.Read() || reader.IsDBNull(0) || reader.IsDBNull(1)) return null;
 
         var price = new ModelPrice(
             InputPerMillionTokens: reader.GetDecimal(0),
@@ -253,7 +255,7 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
             BatchInputPerMillionTokens: reader.IsDBNull(5) ? null : reader.GetDecimal(5),
             BatchOutputPerMillionTokens: reader.IsDBNull(6) ? null : reader.GetDecimal(6));
 
-        return new CatalogPriceEntry(price, ParseTimestamp(reader.GetString(7)));
+        return new CatalogPriceEntry(Price: price, LastUpdatedUtc: ParseTimestamp(reader.GetString(7)));
     }
 
     /// <summary>
@@ -275,48 +277,50 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
         // only through the Governance panel. Writing them back here would mean every poll silently reset the
         // operator's choice to whatever default the ingestion loop happened to pass in.
         upsert.CommandText = """
-            INSERT INTO aggregator_sources (source_name, priority_score)
-            VALUES ($name, $priority)
-            ON CONFLICT(source_name) DO UPDATE SET source_name = excluded.source_name
-            RETURNING source_id;
-            """;
-        upsert.Parameters.AddWithValue("$name", sourceName);
-        upsert.Parameters.AddWithValue("$priority", priorityScore);
-        return Convert.ToInt32(upsert.ExecuteScalar(), CultureInfo.InvariantCulture);
+                             INSERT INTO aggregator_sources (source_name, priority_score)
+                             VALUES ($name, $priority)
+                             ON CONFLICT(source_name) DO UPDATE SET source_name = excluded.source_name
+                             RETURNING source_id;
+                             """;
+        upsert.Parameters.AddWithValue(parameterName: "$name", value: sourceName);
+        upsert.Parameters.AddWithValue(parameterName: "$priority", value: priorityScore);
+        return Convert.ToInt32(value: upsert.ExecuteScalar(), provider: CultureInfo.InvariantCulture);
     }
 
     /// <summary>
     /// Returns the id of the provider row for <paramref name="providerName"/>, inserting it if it does not
     /// already exist.
     /// </summary>
-    private static int GetOrCreateProviderId(SqliteConnection connection, SqliteTransaction transaction, string providerName)
+    private static int GetOrCreateProviderId(SqliteConnection connection, SqliteTransaction transaction,
+        string providerName)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO providers (provider_name) VALUES ($name)
-            ON CONFLICT(provider_name) DO UPDATE SET provider_name = excluded.provider_name
-            RETURNING provider_id;
-            """;
-        command.Parameters.AddWithValue("$name", providerName);
-        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+                              INSERT INTO providers (provider_name) VALUES ($name)
+                              ON CONFLICT(provider_name) DO UPDATE SET provider_name = excluded.provider_name
+                              RETURNING provider_id;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$name", value: providerName);
+        return Convert.ToInt32(value: command.ExecuteScalar(), provider: CultureInfo.InvariantCulture);
     }
 
     /// <summary>
     /// Returns the id of the model row for <paramref name="modelIdentifier"/>, inserting it if it does not
     /// already exist.
     /// </summary>
-    private static int GetOrCreateModelId(SqliteConnection connection, SqliteTransaction transaction, string modelIdentifier)
+    private static int GetOrCreateModelId(SqliteConnection connection, SqliteTransaction transaction,
+        string modelIdentifier)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO models (model_identifier) VALUES ($id)
-            ON CONFLICT(model_identifier) DO UPDATE SET model_identifier = excluded.model_identifier
-            RETURNING model_id;
-            """;
-        command.Parameters.AddWithValue("$id", modelIdentifier);
-        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+                              INSERT INTO models (model_identifier) VALUES ($id)
+                              ON CONFLICT(model_identifier) DO UPDATE SET model_identifier = excluded.model_identifier
+                              RETURNING model_id;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$id", value: modelIdentifier);
+        return Convert.ToInt32(value: command.ExecuteScalar(), provider: CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -333,13 +337,13 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO model_aliases (model_id, source_id, aggregator_name)
-            VALUES ($model, $source, $name)
-            ON CONFLICT(source_id, aggregator_name) DO UPDATE SET model_id = excluded.model_id;
-            """;
-        command.Parameters.AddWithValue("$model", modelId);
-        command.Parameters.AddWithValue("$source", sourceId);
-        command.Parameters.AddWithValue("$name", aggregatorName);
+                              INSERT INTO model_aliases (model_id, source_id, aggregator_name)
+                              VALUES ($model, $source, $name)
+                              ON CONFLICT(source_id, aggregator_name) DO UPDATE SET model_id = excluded.model_id;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$model", value: modelId);
+        command.Parameters.AddWithValue(parameterName: "$source", value: sourceId);
+        command.Parameters.AddWithValue(parameterName: "$name", value: aggregatorName);
         command.ExecuteNonQuery();
     }
 
@@ -361,35 +365,41 @@ public sealed class PriceRepository : PriceCatalogRepositoryBase
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO model_price_observations (
-                model_id, provider_id, aggregator_source_id,
-                standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
-                batch_input_price, batch_output_price, last_updated_utc, is_approximate)
-            VALUES (
-                $model, $provider, $source,
-                $stdIn, $stdOut, $cachedIn, $cacheWrite,
-                $batchIn, $batchOut, $updated, $approximate)
-            ON CONFLICT(model_id, provider_id, aggregator_source_id) DO UPDATE SET
-                standard_input_price    = excluded.standard_input_price,
-                standard_output_price   = excluded.standard_output_price,
-                cached_input_price      = excluded.cached_input_price,
-                cache_write_input_price = excluded.cache_write_input_price,
-                batch_input_price       = excluded.batch_input_price,
-                batch_output_price      = excluded.batch_output_price,
-                last_updated_utc        = excluded.last_updated_utc,
-                is_approximate          = excluded.is_approximate;
-            """;
-        command.Parameters.AddWithValue("$model", modelId);
-        command.Parameters.AddWithValue("$provider", providerId);
-        command.Parameters.AddWithValue("$source", sourceId);
-        command.Parameters.AddWithValue("$stdIn", (object?)price.StandardInputPrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("$stdOut", (object?)price.StandardOutputPrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("$cachedIn", (object?)price.CachedInputPrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("$cacheWrite", (object?)price.CacheWriteInputPrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("$batchIn", (object?)price.BatchInputPrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("$batchOut", (object?)price.BatchOutputPrice ?? DBNull.Value);
-        command.Parameters.AddWithValue("$updated", timestamp);
-        command.Parameters.AddWithValue("$approximate", isApproximate ? 1 : 0);
+                              INSERT INTO model_price_observations (
+                                  model_id, provider_id, aggregator_source_id,
+                                  standard_input_price, standard_output_price, cached_input_price, cache_write_input_price,
+                                  batch_input_price, batch_output_price, last_updated_utc, is_approximate)
+                              VALUES (
+                                  $model, $provider, $source,
+                                  $stdIn, $stdOut, $cachedIn, $cacheWrite,
+                                  $batchIn, $batchOut, $updated, $approximate)
+                              ON CONFLICT(model_id, provider_id, aggregator_source_id) DO UPDATE SET
+                                  standard_input_price    = excluded.standard_input_price,
+                                  standard_output_price   = excluded.standard_output_price,
+                                  cached_input_price      = excluded.cached_input_price,
+                                  cache_write_input_price = excluded.cache_write_input_price,
+                                  batch_input_price       = excluded.batch_input_price,
+                                  batch_output_price      = excluded.batch_output_price,
+                                  last_updated_utc        = excluded.last_updated_utc,
+                                  is_approximate          = excluded.is_approximate;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$model", value: modelId);
+        command.Parameters.AddWithValue(parameterName: "$provider", value: providerId);
+        command.Parameters.AddWithValue(parameterName: "$source", value: sourceId);
+        command.Parameters.AddWithValue(parameterName: "$stdIn",
+            value: (object?)price.StandardInputPrice ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$stdOut",
+            value: (object?)price.StandardOutputPrice ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$cachedIn",
+            value: (object?)price.CachedInputPrice ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$cacheWrite",
+            value: (object?)price.CacheWriteInputPrice ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$batchIn",
+            value: (object?)price.BatchInputPrice ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$batchOut",
+            value: (object?)price.BatchOutputPrice ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$updated", value: timestamp);
+        command.Parameters.AddWithValue(parameterName: "$approximate", value: isApproximate ? 1 : 0);
         command.ExecuteNonQuery();
     }
 }

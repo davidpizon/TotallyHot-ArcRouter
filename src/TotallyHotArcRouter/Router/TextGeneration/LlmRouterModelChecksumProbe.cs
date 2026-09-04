@@ -1,7 +1,5 @@
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Checksums;
 
 namespace TotallyHot.ArcRouter.Router.TextGeneration;
@@ -53,7 +51,10 @@ internal sealed class LlmRouterModelTreeEntryLfs
 /// model.onnx.data almost always are; tokenizer.json sometimes is).
 /// </param>
 /// <param name="Size">The file's published size in bytes.</param>
-/// <param name="Algorithm">Which hash <paramref name="PublishedOid"/> is, and so which algorithm a downloaded/cached copy must be verified with.</param>
+/// <param name="Algorithm">
+/// Which hash <paramref name="PublishedOid"/> is, and so which algorithm a downloaded/cached copy
+/// must be verified with.
+/// </param>
 public sealed record LlmRouterModelPublishedFile(string PublishedOid, long Size, PublishedChecksumAlgorithm Algorithm);
 
 /// <summary>The result of one successful <see cref="LlmRouterModelChecksumProbe.TryFetchAsync"/> call.</summary>
@@ -92,7 +93,8 @@ public sealed class LlmRouterModelChecksumProbe
     /// factory-created client for the singleton's lifetime.
     /// </param>
     /// <param name="logger">The logger.</param>
-    public LlmRouterModelChecksumProbe(IHttpClientFactory httpClientFactory, ILogger<LlmRouterModelChecksumProbe> logger)
+    public LlmRouterModelChecksumProbe(IHttpClientFactory httpClientFactory,
+        ILogger<LlmRouterModelChecksumProbe> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(logger);
@@ -109,13 +111,16 @@ public sealed class LlmRouterModelChecksumProbe
     /// </summary>
     /// <param name="baseUrl">The model folder URL, e.g. <c>https://huggingface.co/{owner}/{repo}/resolve/{ref}/{path}</c>.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    public async Task<LlmRouterModelChecksumProbeResult?> TryFetchAsync(string baseUrl, CancellationToken cancellationToken)
+    public async Task<LlmRouterModelChecksumProbeResult?> TryFetchAsync(string baseUrl,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
 
-        if (!TryParseResolveUrl(baseUrl, out var owner, out var repo, out var modelRef, out var pathPrefix))
+        if (!TryParseResolveUrl(url: baseUrl, owner: out var owner, repo: out var repo, modelRef: out var modelRef,
+                pathPrefix: out var pathPrefix))
         {
             _logger.LogInformation(
+                message:
                 "llm_router checksum probe skipped for {BaseUrl}: not a recognized Hugging Face model resolve URL.",
                 baseUrl);
             return null;
@@ -129,7 +134,8 @@ public sealed class LlmRouterModelChecksumProbe
         try
         {
             using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
-            using var response = await httpClient.GetAsync(apiUrl, cancellationToken).ConfigureAwait(false);
+            using var response = await httpClient.GetAsync(requestUri: apiUrl, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var entries = await response.Content
@@ -155,19 +161,14 @@ public sealed class LlmRouterModelChecksumProbe
             Dictionary<string, LlmRouterModelPublishedFile> files = [];
             foreach (var entry in entries)
             {
-                if (!string.Equals(entry.Type, "file", StringComparison.Ordinal) ||
+                if (!string.Equals(a: entry.Type, b: "file", comparisonType: StringComparison.Ordinal) ||
                     string.IsNullOrWhiteSpace(entry.Path) ||
                     string.IsNullOrWhiteSpace(entry.Oid) ||
-                    !entry.Path.StartsWith(folderPrefix, StringComparison.Ordinal))
-                {
+                    !entry.Path.StartsWith(value: folderPrefix, comparisonType: StringComparison.Ordinal))
                     continue;
-                }
 
                 var relativePath = entry.Path[folderPrefix.Length..];
-                if (relativePath.Contains('/', StringComparison.Ordinal))
-                {
-                    continue;
-                }
+                if (relativePath.Contains('/', comparisonType: StringComparison.Ordinal)) continue;
 
                 // An entry with a non-empty Lfs.Oid is Git LFS-tracked: the real content hash lives there
                 // (SHA-256), not in the entry's own git-blob oid (which is only the small pointer file's
@@ -175,20 +176,23 @@ public sealed class LlmRouterModelChecksumProbe
                 // transfers. model.onnx and model.onnx.data are almost always LFS-tracked given their
                 // size; tokenizer.json sometimes is too.
                 files[relativePath] = entry.Lfs is { Oid: { Length: > 0 } lfsOid } lfs
-                    ? new LlmRouterModelPublishedFile(lfsOid, lfs.Size ?? entry.Size, PublishedChecksumAlgorithm.LfsSha256)
-                    : new LlmRouterModelPublishedFile(entry.Oid, entry.Size, PublishedChecksumAlgorithm.GitBlobSha1);
+                    ? new LlmRouterModelPublishedFile(PublishedOid: lfsOid, Size: lfs.Size ?? entry.Size,
+                        Algorithm: PublishedChecksumAlgorithm.LfsSha256)
+                    : new LlmRouterModelPublishedFile(PublishedOid: entry.Oid, Size: entry.Size,
+                        Algorithm: PublishedChecksumAlgorithm.GitBlobSha1);
             }
 
             _logger.LogInformation(
-                "llm_router checksum probe found {FileCount} published file(s) at {BaseUrl}.", files.Count, baseUrl);
+                message: "llm_router checksum probe found {FileCount} published file(s) at {BaseUrl}.", files.Count,
+                baseUrl);
             return new LlmRouterModelChecksumProbeResult(files);
         }
         catch (Exception ex) when (ex is HttpRequestException or NotSupportedException or JsonException ||
-            (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+                                   (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logger.LogWarning(
-                ex,
-                "llm_router checksum probe failed for {BaseUrl}; falling back to existence-only verification.",
+                exception: ex,
+                message: "llm_router checksum probe failed for {BaseUrl}; falling back to existence-only verification.",
                 baseUrl);
             return null;
         }
@@ -201,36 +205,38 @@ public sealed class LlmRouterModelChecksumProbe
     /// ref containing an encoded slash (<c>%2F</c>) would become <c>%252F</c> and the API call would
     /// 404. Unescaping first undoes that existing encoding before re-escaping exactly once.
     /// </summary>
-    private static string EscapeUriSegment(string segment) => Uri.EscapeDataString(Uri.UnescapeDataString(segment));
+    private static string EscapeUriSegment(string segment)
+    {
+        return Uri.EscapeDataString(Uri.UnescapeDataString(segment));
+    }
 
     /// <summary>Re-escapes every slash-separated segment of a model-relative path prefix, individually.</summary>
-    private static string EscapePathPrefix(string pathPrefix) =>
-        string.Join('/', pathPrefix.Split('/').Select(EscapeUriSegment));
+    private static string EscapePathPrefix(string pathPrefix)
+    {
+        return string.Join('/', values: pathPrefix.Split('/').Select(EscapeUriSegment));
+    }
 
     /// <summary>
     /// Parses <c>https://huggingface.co/{owner}/{repo}/resolve/{ref}/{path...}</c> into its components.
     /// <paramref name="pathPrefix"/> is empty when the folder is the repository root.
     /// </summary>
-    private static bool TryParseResolveUrl(string url, out string owner, out string repo, out string modelRef, out string pathPrefix)
+    private static bool TryParseResolveUrl(string url, out string owner, out string repo, out string modelRef,
+        out string pathPrefix)
     {
         owner = repo = modelRef = pathPrefix = string.Empty;
 
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
-            !string.Equals(uri.Host, "huggingface.co", StringComparison.OrdinalIgnoreCase))
-        {
+        if (!Uri.TryCreate(uriString: url, uriKind: UriKind.Absolute, result: out var uri) ||
+            !string.Equals(a: uri.Host, b: "huggingface.co", comparisonType: StringComparison.OrdinalIgnoreCase))
             return false;
-        }
 
-        var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (segments.Length < 4 || !string.Equals(segments[2], "resolve", StringComparison.Ordinal))
-        {
-            return false;
-        }
+        var segments = uri.AbsolutePath.Trim('/').Split('/', options: StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4 ||
+            !string.Equals(a: segments[2], b: "resolve", comparisonType: StringComparison.Ordinal)) return false;
 
         owner = segments[0];
         repo = segments[1];
         modelRef = segments[3];
-        pathPrefix = segments.Length > 4 ? string.Join('/', segments[4..]) : string.Empty;
+        pathPrefix = segments.Length > 4 ? string.Join('/', value: segments[4..]) : string.Empty;
         return true;
     }
 }

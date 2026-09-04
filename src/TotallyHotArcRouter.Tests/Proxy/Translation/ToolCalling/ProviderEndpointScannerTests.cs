@@ -1,8 +1,8 @@
+using Moq;
 using System.Net;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 
@@ -10,7 +10,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// Coverage for the provider endpoint-flavor scan (<c>docs/router/tool-call-normalization.md</c> §3.3,
 /// Phase 2). Every probe is stubbed - no live provider, matching the verification approach
 /// <c>unified-api-translation.md</c> §2 settled on for the translator work.
-///
 /// <para>
 /// The cases that carry weight are the version-suffix handling (LM Studio and Ollama are normally
 /// configured with a <c>/v1</c> base, but their native APIs sit at the root, so probing the wrong URL would
@@ -21,12 +20,21 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 public sealed class ProviderEndpointScannerTests
 {
     private const string OpenAiBody = """{"object":"list","data":[{"id":"gpt-5.4"}]}""";
-    private const string AnthropicBody = """{"data":[{"id":"claude-4","type":"model"}],"has_more":false,"first_id":"claude-4"}""";
+
+    private const string AnthropicBody =
+        """{"data":[{"id":"claude-4","type":"model"}],"has_more":false,"first_id":"claude-4"}""";
+
     private const string LmStudioBody = """{"object":"list","data":[{"id":"qwen2.5-coder"}]}""";
     private const string OllamaTagsBody = """{"models":[{"name":"qwen2.5-coder:7b"}]}""";
-    private const string AnthropicMessageBody = """{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}]}""";
-    private const string AnthropicErrorBody = """{"type":"error","error":{"type":"not_found_error","message":"model: arcrouter-capability-probe"}}""";
-    private const string OpenAiStyleErrorBody = """{"error":{"message":"Unknown model","type":"invalid_request_error"}}""";
+
+    private const string AnthropicMessageBody =
+        """{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}]}""";
+
+    private const string AnthropicErrorBody =
+        """{"type":"error","error":{"type":"not_found_error","message":"model: arcrouter-capability-probe"}}""";
+
+    private const string OpenAiStyleErrorBody =
+        """{"error":{"message":"Unknown model","type":"invalid_request_error"}}""";
 
     /// <summary>Answers 200 for any URL whose path is in <paramref name="okPaths"/>, 404 otherwise.</summary>
     private static ProviderEndpointScanner ScannerFor(
@@ -38,13 +46,15 @@ public sealed class ProviderEndpointScannerTests
             var url = request.RequestUri!.ToString();
             recordedUrls?.Add(url);
 
-            var match = okPaths.FirstOrDefault(kvp => url.EndsWith(kvp.Key, StringComparison.OrdinalIgnoreCase));
+            var match = okPaths.FirstOrDefault(kvp =>
+                url.EndsWith(value: kvp.Key, comparisonType: StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(match.Key is not null
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(match.Value) }
                 : new HttpResponseMessage(HttpStatusCode.NotFound));
         });
 
-        return new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        return new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 
     /// <summary>
@@ -62,24 +72,27 @@ public sealed class ProviderEndpointScannerTests
         {
             recordedRequests?.Add(request);
 
-            if (request.Method == HttpMethod.Get && request.RequestUri!.ToString().EndsWith("/v1/models", StringComparison.OrdinalIgnoreCase))
-            {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(modelsBody) });
-            }
+            if (request.Method == HttpMethod.Get && request.RequestUri!.ToString()
+                    .EndsWith(value: "/v1/models", comparisonType: StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = new StringContent(modelsBody) });
 
-            if (request.Method == HttpMethod.Post && request.RequestUri!.ToString().EndsWith("/v1/messages", StringComparison.OrdinalIgnoreCase))
-            {
-                return Task.FromResult(new HttpResponseMessage(messagesStatus) { Content = new StringContent(messagesBody) });
-            }
+            if (request.Method == HttpMethod.Post && request.RequestUri!.ToString()
+                    .EndsWith(value: "/v1/messages", comparisonType: StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(new HttpResponseMessage(messagesStatus)
+                { Content = new StringContent(messagesBody) });
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         });
 
-        return new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        return new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
     }
 
-    private static ProviderOptions Provider(string baseUrl, bool probeAnthropicMessages = false) =>
-        new() { BaseUrl = baseUrl, ProbeAnthropicMessages = probeAnthropicMessages };
+    private static ProviderOptions Provider(string baseUrl, bool probeAnthropicMessages = false)
+    {
+        return new ProviderOptions { BaseUrl = baseUrl, ProbeAnthropicMessages = probeAnthropicMessages };
+    }
 
     // ----- Each flavor detected -----
 
@@ -88,7 +101,8 @@ public sealed class ProviderEndpointScannerTests
     {
         var scanner = ScannerFor(new Dictionary<string, string> { ["/v1/models"] = OpenAiBody });
 
-        var result = await scanner.ScanAsync("openai", Provider("https://api.openai.com"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "openai", provider: Provider("https://api.openai.com"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.OpenAiCompatible);
         Assert.False(result.AnthropicCompatible);
@@ -104,7 +118,8 @@ public sealed class ProviderEndpointScannerTests
         // Anthropic's pagination markers can.
         var scanner = ScannerFor(new Dictionary<string, string> { ["/v1/models"] = AnthropicBody });
 
-        var result = await scanner.ScanAsync("anthropic", Provider("https://api.anthropic.com"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "anthropic", provider: Provider("https://api.anthropic.com"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.AnthropicCompatible);
         Assert.False(result.OpenAiCompatible);
@@ -116,10 +131,11 @@ public sealed class ProviderEndpointScannerTests
         var scanner = ScannerFor(new Dictionary<string, string>
         {
             ["/v1/models"] = OpenAiBody,
-            ["/api/v0/models"] = LmStudioBody,
+            ["/api/v0/models"] = LmStudioBody
         });
 
-        var result = await scanner.ScanAsync("lmstudio", Provider("http://localhost:1234/v1"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "lmstudio", provider: Provider("http://localhost:1234/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.OpenAiCompatible);
         Assert.True(result.LmStudioNative);
@@ -133,22 +149,26 @@ public sealed class ProviderEndpointScannerTests
     {
         // ProbeAnthropicMessages defaults to false - the whole point of the opt-in gate.
         var requests = new List<HttpRequestMessage>();
-        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.OK, AnthropicMessageBody, requests);
+        var scanner = ScannerForMessagesProbe(modelsBody: OpenAiBody, messagesStatus: HttpStatusCode.OK,
+            messagesBody: AnthropicMessageBody, recordedRequests: requests);
 
-        var result = await scanner.ScanAsync("lmstudio", Provider("http://localhost:1234/v1"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "lmstudio", provider: Provider("http://localhost:1234/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.AnthropicCompatible);
-        Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Post);
+        Assert.DoesNotContain(collection: requests, filter: r => r.Method == HttpMethod.Post);
     }
 
     [Fact]
     public async Task TheMessagesProbe_DetectsCompatibility_WhenOptedInAndTheModelListDidNot()
     {
         // LM Studio's /v1/models is plain OpenAI shape, but it separately answers /v1/messages.
-        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.OK, AnthropicMessageBody);
+        var scanner = ScannerForMessagesProbe(modelsBody: OpenAiBody, messagesStatus: HttpStatusCode.OK,
+            messagesBody: AnthropicMessageBody);
 
         var result = await scanner.ScanAsync(
-            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "lmstudio", provider: Provider(baseUrl: "http://localhost:1234/v1", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.OpenAiCompatible);
         Assert.True(result.AnthropicCompatible);
@@ -159,10 +179,12 @@ public sealed class ProviderEndpointScannerTests
     {
         // The sentinel model id never exists on a real deployment - a well-formed Anthropic error response
         // still proves the endpoint speaks the dialect, the expected outcome for almost every real probe.
-        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.NotFound, AnthropicErrorBody);
+        var scanner = ScannerForMessagesProbe(modelsBody: OpenAiBody, messagesStatus: HttpStatusCode.NotFound,
+            messagesBody: AnthropicErrorBody);
 
         var result = await scanner.ScanAsync(
-            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "lmstudio", provider: Provider(baseUrl: "http://localhost:1234/v1", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.AnthropicCompatible);
     }
@@ -172,10 +194,12 @@ public sealed class ProviderEndpointScannerTests
     {
         // A plain OpenAI-style error body (no top-level "type":"error" envelope) must not be mistaken for
         // Anthropic's own error shape - most 404s for an unrecognized route will look like this or worse.
-        var scanner = ScannerForMessagesProbe(OpenAiBody, HttpStatusCode.NotFound, OpenAiStyleErrorBody);
+        var scanner = ScannerForMessagesProbe(modelsBody: OpenAiBody, messagesStatus: HttpStatusCode.NotFound,
+            messagesBody: OpenAiStyleErrorBody);
 
         var result = await scanner.ScanAsync(
-            "openai", Provider("https://api.openai.com", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "openai", provider: Provider(baseUrl: "https://api.openai.com", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.AnthropicCompatible);
     }
@@ -185,13 +209,15 @@ public sealed class ProviderEndpointScannerTests
     {
         // Opting in must never double a network call the scan would have made anyway.
         var requests = new List<HttpRequestMessage>();
-        var scanner = ScannerForMessagesProbe(AnthropicBody, HttpStatusCode.OK, AnthropicMessageBody, requests);
+        var scanner = ScannerForMessagesProbe(modelsBody: AnthropicBody, messagesStatus: HttpStatusCode.OK,
+            messagesBody: AnthropicMessageBody, recordedRequests: requests);
 
         var result = await scanner.ScanAsync(
-            "anthropic", Provider("https://api.anthropic.com", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "anthropic", provider: Provider(baseUrl: "https://api.anthropic.com", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.AnthropicCompatible);
-        Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Post);
+        Assert.DoesNotContain(collection: requests, filter: r => r.Method == HttpMethod.Post);
     }
 
     [Fact]
@@ -209,14 +235,16 @@ public sealed class ProviderEndpointScannerTests
 
             return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent(OpenAiBody) };
         });
-        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         await scanner.ScanAsync(
-            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "lmstudio", provider: Provider(baseUrl: "http://localhost:1234/v1", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
-        Assert.Contains("arcrouter-capability-probe", capturedContent);
-        Assert.Contains("\"max_tokens\":1", capturedContent);
+        Assert.Contains(expectedSubstring: "arcrouter-capability-probe", actualString: capturedContent);
+        Assert.Contains(expectedSubstring: "\"max_tokens\":1", actualString: capturedContent);
     }
 
     [Fact]
@@ -228,25 +256,29 @@ public sealed class ProviderEndpointScannerTests
             urls.Add(request.RequestUri!.ToString());
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         });
-        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         await scanner.ScanAsync(
-            "lmstudio", Provider("http://localhost:1234/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "lmstudio", provider: Provider(baseUrl: "http://localhost:1234/v1", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Contains("http://localhost:1234/v1/messages", urls);
+        Assert.Contains(expected: "http://localhost:1234/v1/messages", collection: urls);
     }
 
     [Fact]
     public async Task AnUnreachableEndpoint_WithMessagesProbingEnabled_StillRecordsAResultRatherThanThrowing()
     {
         var handler = new DelegatingHandlerStub(_ => throw new HttpRequestException("connection refused"));
-        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         var result = await scanner.ScanAsync(
-            "dead", Provider("http://localhost:9/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "dead", provider: Provider(baseUrl: "http://localhost:9/v1", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.AnthropicCompatible);
-        Assert.Contains("connection refused", result.ScanError);
+        Assert.Contains(expectedSubstring: "connection refused", actualString: result.ScanError);
     }
 
     [Fact]
@@ -260,11 +292,13 @@ public sealed class ProviderEndpointScannerTests
             messagesBody: OpenAiStyleErrorBody);
 
         var result = await scanner.ScanAsync(
-            "dead", Provider("http://localhost:9/v1", probeAnthropicMessages: true), TestContext.Current.CancellationToken);
+            providerKey: "dead", provider: Provider(baseUrl: "http://localhost:9/v1", true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.AnthropicCompatible);
-        Assert.Contains("/v1/messages", result.ScanError);
-        Assert.Contains("did not match the Anthropic Messages API shape", result.ScanError);
+        Assert.Contains(expectedSubstring: "/v1/messages", actualString: result.ScanError);
+        Assert.Contains(expectedSubstring: "did not match the Anthropic Messages API shape",
+            actualString: result.ScanError);
     }
 
     // ----- json_schema support is inferred from the native flavors, never probed -----
@@ -279,10 +313,11 @@ public sealed class ProviderEndpointScannerTests
         var scanner = ScannerFor(new Dictionary<string, string>
         {
             ["/v1/models"] = OpenAiBody,
-            [nativePath] = nativeBody,
+            [nativePath] = nativeBody
         });
 
-        var result = await scanner.ScanAsync("local", Provider("http://localhost:1234/v1"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "local", provider: Provider("http://localhost:1234/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.JsonSchemaResponseFormat);
     }
@@ -295,7 +330,8 @@ public sealed class ProviderEndpointScannerTests
         // outright - and constrained mode exists for local models, not for these.
         var scanner = ScannerFor(new Dictionary<string, string> { ["/v1/models"] = OpenAiBody });
 
-        var result = await scanner.ScanAsync("openai", Provider("https://api.openai.com"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "openai", provider: Provider("https://api.openai.com"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.JsonSchemaResponseFormat);
     }
@@ -305,7 +341,8 @@ public sealed class ProviderEndpointScannerTests
     {
         var scanner = ScannerFor(new Dictionary<string, string>());
 
-        var result = await scanner.ScanAsync("dead", Provider("http://localhost:9/v1"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "dead", provider: Provider("http://localhost:9/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.JsonSchemaResponseFormat);
         Assert.NotNull(result.ScanError);
@@ -317,10 +354,11 @@ public sealed class ProviderEndpointScannerTests
         var scanner = ScannerFor(new Dictionary<string, string>
         {
             ["/v1/models"] = OpenAiBody,
-            ["/api/tags"] = OllamaTagsBody,
+            ["/api/tags"] = OllamaTagsBody
         });
 
-        var result = await scanner.ScanAsync("ollama", Provider("http://localhost:11434/v1"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "ollama", provider: Provider("http://localhost:11434/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.OpenAiCompatible);
         Assert.True(result.OllamaNative);
@@ -334,24 +372,27 @@ public sealed class ProviderEndpointScannerTests
         // Probing http://localhost:11434/v1/api/tags would 404 on every Ollama install, recording the
         // native flavor as absent and costing tier-1 template detection its best source.
         var urls = new List<string>();
-        var scanner = ScannerFor(new Dictionary<string, string>(), urls);
+        var scanner = ScannerFor(okPaths: new Dictionary<string, string>(), recordedUrls: urls);
 
-        await scanner.ScanAsync("ollama", Provider("http://localhost:11434/v1"), TestContext.Current.CancellationToken);
+        await scanner.ScanAsync(providerKey: "ollama", provider: Provider("http://localhost:11434/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Contains("http://localhost:11434/api/tags", urls);
-        Assert.Contains("http://localhost:11434/api/v0/models", urls);
-        Assert.DoesNotContain(urls, u => u.Contains("/v1/api/", StringComparison.Ordinal));
+        Assert.Contains(expected: "http://localhost:11434/api/tags", collection: urls);
+        Assert.Contains(expected: "http://localhost:11434/api/v0/models", collection: urls);
+        Assert.DoesNotContain(collection: urls,
+            filter: u => u.Contains(value: "/v1/api/", comparisonType: StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task ABaseWithoutAVersionSegment_StillProbesV1Models()
     {
         var urls = new List<string>();
-        var scanner = ScannerFor(new Dictionary<string, string>(), urls);
+        var scanner = ScannerFor(okPaths: new Dictionary<string, string>(), recordedUrls: urls);
 
-        await scanner.ScanAsync("openai", Provider("https://api.openai.com"), TestContext.Current.CancellationToken);
+        await scanner.ScanAsync(providerKey: "openai", provider: Provider("https://api.openai.com"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Contains("https://api.openai.com/v1/models", urls);
+        Assert.Contains(expected: "https://api.openai.com/v1/models", collection: urls);
     }
 
     [Fact]
@@ -360,27 +401,30 @@ public sealed class ProviderEndpointScannerTests
         // Gemini-style bases carry /v1beta, which ManagementFacade.BuildModelsUrl matches with Contains
         // rather than EndsWith. Appending /v1/models here would produce .../v1beta/v1/models and 404.
         var urls = new List<string>();
-        var scanner = ScannerFor(new Dictionary<string, string>(), urls);
+        var scanner = ScannerFor(okPaths: new Dictionary<string, string>(), recordedUrls: urls);
 
         await scanner.ScanAsync(
-            "gemini",
-            Provider("https://generativelanguage.googleapis.com/v1beta"),
-            TestContext.Current.CancellationToken);
+            providerKey: "gemini",
+            provider: Provider("https://generativelanguage.googleapis.com/v1beta"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Contains("https://generativelanguage.googleapis.com/v1beta/models", urls);
-        Assert.DoesNotContain(urls, u => u.Contains("/v1beta/v1/", StringComparison.Ordinal));
+        Assert.Contains(expected: "https://generativelanguage.googleapis.com/v1beta/models", collection: urls);
+        Assert.DoesNotContain(collection: urls,
+            filter: u => u.Contains(value: "/v1beta/v1/", comparisonType: StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task ATrailingSlash_DoesNotProduceADoubleSlash()
     {
         var urls = new List<string>();
-        var scanner = ScannerFor(new Dictionary<string, string>(), urls);
+        var scanner = ScannerFor(okPaths: new Dictionary<string, string>(), recordedUrls: urls);
 
-        await scanner.ScanAsync("ollama", Provider("http://localhost:11434/v1/"), TestContext.Current.CancellationToken);
+        await scanner.ScanAsync(providerKey: "ollama", provider: Provider("http://localhost:11434/v1/"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain(urls, u => u.Contains("//api/", StringComparison.Ordinal));
-        Assert.Contains("http://localhost:11434/api/tags", urls);
+        Assert.DoesNotContain(collection: urls,
+            filter: u => u.Contains(value: "//api/", comparisonType: StringComparison.Ordinal));
+        Assert.Contains(expected: "http://localhost:11434/api/tags", collection: urls);
     }
 
     // ----- Failure handling: a scan must always produce a result -----
@@ -390,7 +434,8 @@ public sealed class ProviderEndpointScannerTests
     {
         var scanner = ScannerFor(new Dictionary<string, string>());
 
-        var result = await scanner.ScanAsync("dead", Provider("http://localhost:9/v1"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "dead", provider: Provider("http://localhost:9/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.OpenAiCompatible);
         Assert.False(result.LmStudioNative);
@@ -406,7 +451,8 @@ public sealed class ProviderEndpointScannerTests
         // 404s as an error would make every normal cloud provider look broken in the GUI.
         var scanner = ScannerFor(new Dictionary<string, string> { ["/v1/models"] = OpenAiBody });
 
-        var result = await scanner.ScanAsync("openai", Provider("https://api.openai.com"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "openai", provider: Provider("https://api.openai.com"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(result.ScanError);
     }
@@ -415,24 +461,27 @@ public sealed class ProviderEndpointScannerTests
     public async Task AnUnreachableHost_IsRecordedRatherThanThrown()
     {
         var handler = new DelegatingHandlerStub(_ => throw new HttpRequestException("connection refused"));
-        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
-        var result = await scanner.ScanAsync("dead", Provider("http://localhost:9/v1"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "dead", provider: Provider("http://localhost:9/v1"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.OpenAiCompatible);
-        Assert.Contains("connection refused", result.ScanError);
+        Assert.Contains(expectedSubstring: "connection refused", actualString: result.ScanError);
     }
 
     [Fact]
     public async Task AMalformedBaseUrl_IsReportedWithoutAnyProbe()
     {
         var urls = new List<string>();
-        var scanner = ScannerFor(new Dictionary<string, string>(), urls);
+        var scanner = ScannerFor(okPaths: new Dictionary<string, string>(), recordedUrls: urls);
 
-        var result = await scanner.ScanAsync("broken", Provider("not-a-url"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "broken", provider: Provider("not-a-url"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(urls);
-        Assert.Contains("Invalid BaseUrl", result.ScanError);
+        Assert.Contains(expectedSubstring: "Invalid BaseUrl", actualString: result.ScanError);
     }
 
     [Fact]
@@ -441,7 +490,8 @@ public sealed class ProviderEndpointScannerTests
         // A captive portal or reverse proxy answering 200 with HTML must not read as OpenAI-compatible.
         var scanner = ScannerFor(new Dictionary<string, string> { ["/v1/models"] = "<html>hello</html>" });
 
-        var result = await scanner.ScanAsync("weird", Provider("https://example.invalid"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "weird", provider: Provider("https://example.invalid"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.OpenAiCompatible);
         Assert.False(result.AnthropicCompatible);
@@ -455,9 +505,10 @@ public sealed class ProviderEndpointScannerTests
         // unreachable, when in fact it answered with something unusable.
         var scanner = ScannerFor(new Dictionary<string, string> { ["/v1/models"] = "<html>hello</html>" });
 
-        var result = await scanner.ScanAsync("weird", Provider("https://example.invalid"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "weird", provider: Provider("https://example.invalid"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Contains("not valid JSON", result.ScanError);
+        Assert.Contains(expectedSubstring: "not valid JSON", actualString: result.ScanError);
     }
 
     [Fact]
@@ -465,10 +516,11 @@ public sealed class ProviderEndpointScannerTests
     {
         var scanner = ScannerFor(new Dictionary<string, string> { ["/v1/models"] = """{"message":"unauthorized"}""" });
 
-        var result = await scanner.ScanAsync("weird", Provider("https://example.invalid"), TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "weird", provider: Provider("https://example.invalid"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.OpenAiCompatible);
-        Assert.Contains("no 'data' array", result.ScanError);
+        Assert.Contains(expectedSubstring: "no 'data' array", actualString: result.ScanError);
     }
 
     // ----- Credentials are applied exactly as the forwarding path applies them -----
@@ -484,7 +536,8 @@ public sealed class ProviderEndpointScannerTests
             captured ??= request;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         });
-        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         var provider = new ProviderOptions
         {
@@ -494,10 +547,11 @@ public sealed class ProviderEndpointScannerTests
             [
                 new ProviderHeader { Name = "x-api-key", Value = "sk-test" },
                 new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }
-            ],
+            ]
         };
 
-        await scanner.ScanAsync("anthropic", provider, TestContext.Current.CancellationToken);
+        await scanner.ScanAsync(providerKey: "anthropic", provider: provider,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
         Assert.True(captured!.Headers.Contains("anthropic-version"));
@@ -516,9 +570,11 @@ public sealed class ProviderEndpointScannerTests
         var handler = new DelegatingHandlerStub(request =>
         {
             captured ??= request;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(OpenAiBody) });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(OpenAiBody) });
         });
-        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         var provider = new ProviderOptions
         {
@@ -527,10 +583,11 @@ public sealed class ProviderEndpointScannerTests
             [
                 new ProviderHeader { Name = "not a valid header name", Value = "sk-test" },
                 new ProviderHeader { Name = "also invalid", Value = "x" }
-            ],
+            ]
         };
 
-        var result = await scanner.ScanAsync("broken-headers", provider, TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "broken-headers", provider: provider,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.OpenAiCompatible);
         Assert.NotNull(captured);
@@ -538,8 +595,8 @@ public sealed class ProviderEndpointScannerTests
         // Enumerated rather than asked via Headers.Contains(name): that method validates the name it is
         // given and throws FormatException for a malformed one, so probing with the bad name would test
         // HttpHeaders rather than the scanner.
-        Assert.DoesNotContain(captured!.Headers, header =>
-            header.Key.Contains(' ', StringComparison.Ordinal));
+        Assert.DoesNotContain(collection: captured!.Headers, filter: header =>
+            header.Key.Contains(' ', comparisonType: StringComparison.Ordinal));
     }
 
     [Fact]
@@ -550,30 +607,32 @@ public sealed class ProviderEndpointScannerTests
         // "returned 401" goes hunting for a wrong API key when the actual fault is the header name.
         var handler = new DelegatingHandlerStub(_ =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
-        var scanner = new ProviderEndpointScanner(new HttpClient(handler), Mock.Of<IEnvironmentVariableProvider>());
+        var scanner = new ProviderEndpointScanner(httpClient: new HttpClient(handler),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         var provider = new ProviderOptions
         {
             BaseUrl = "https://example.invalid",
-            Headers = [new ProviderHeader { Name = "not a valid header name", Value = "sk-test" }],
+            Headers = [new ProviderHeader { Name = "not a valid header name", Value = "sk-test" }]
         };
 
-        var result = await scanner.ScanAsync("broken-headers", provider, TestContext.Current.CancellationToken);
+        var result = await scanner.ScanAsync(providerKey: "broken-headers", provider: provider,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Contains("not a valid header name", result.ScanError);
-        Assert.Contains("not valid HTTP header names", result.ScanError);
+        Assert.Contains(expectedSubstring: "not a valid header name", actualString: result.ScanError);
+        Assert.Contains(expectedSubstring: "not valid HTTP header names", actualString: result.ScanError);
         // The value is a secret and must not be echoed alongside the name.
-        Assert.DoesNotContain("sk-test", result.ScanError, StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "sk-test", actualString: result.ScanError,
+            comparisonType: StringComparison.Ordinal);
     }
 
-    private sealed class DelegatingHandlerStub : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
 
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return handler(request);
+        }
     }
 }
-

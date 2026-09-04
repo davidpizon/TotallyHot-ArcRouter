@@ -21,12 +21,24 @@ public static class RegretComparisonReportBuilder
     /// </summary>
     /// <param name="outcomes">The split to score every router against.</param>
     /// <param name="probingOutcomes">The probing split's outcomes, for warm-starting the bandit baselines.</param>
-    /// <param name="probingMatrix">The frozen probing-split (dimension, model) prior, e.g. from <see cref="DimensionModelScoreMatrix.FromDatabase"/>.</param>
-    /// <param name="logRegArtifact">The trained TF-IDF artifact backing <see cref="LogRegBaseline"/>, e.g. from <see cref="LogRegTrainer.Train"/>.</param>
-    /// <param name="knnArtifact">The frozen embedding index backing <see cref="KnnRetrievalBaseline"/>, e.g. from <see cref="KnnRetrievalIndexBuilder.BuildAsync"/>.</param>
+    /// <param name="probingMatrix">
+    /// The frozen probing-split (dimension, model) prior, e.g. from
+    /// <see cref="DimensionModelScoreMatrix.FromDatabase"/>.
+    /// </param>
+    /// <param name="logRegArtifact">
+    /// The trained TF-IDF artifact backing <see cref="LogRegBaseline"/>, e.g. from
+    /// <see cref="LogRegTrainer.Train"/>.
+    /// </param>
+    /// <param name="knnArtifact">
+    /// The frozen embedding index backing <see cref="KnnRetrievalBaseline"/>, e.g. from
+    /// <see cref="KnnRetrievalIndexBuilder.BuildAsync"/>.
+    /// </param>
     /// <param name="orchestratorArm">The isolated Orchestrator arm, e.g. from <see cref="OrchestratorArmFactory.Build"/>.</param>
     /// <param name="weights">The reward weights - the same instance every router is scored under.</param>
-    /// <returns>One <see cref="RegretReplayResult"/> per router, in a fixed, reproducible order (Always-*m* per model, DimensionBest, LinUCB, LinTS, LogReg, kNN Retrieval, Orchestrator).</returns>
+    /// <returns>
+    /// One <see cref="RegretReplayResult"/> per router, in a fixed, reproducible order (Always-*m* per model,
+    /// DimensionBest, LinUCB, LinTS, LogReg, kNN Retrieval, Orchestrator).
+    /// </returns>
     public static IReadOnlyList<RegretReplayResult> BuildReport(
         IReadOnlyList<RegretTaskOutcome> outcomes,
         IReadOnlyList<RegretTaskOutcome> probingOutcomes,
@@ -47,23 +59,21 @@ public static class RegretComparisonReportBuilder
         var results = new List<RegretReplayResult>();
 
         foreach (var modelId in DistinctModelIds(outcomes))
-        {
-            results.Add(Replay(new AlwaysModelBaseline(modelId), outcomes, weights));
-        }
+            results.Add(Replay(router: new AlwaysModelBaseline(modelId), outcomes: outcomes, weights: weights));
 
-        results.Add(Replay(new DimensionBestBaseline(probingMatrix), outcomes, weights));
+        results.Add(Replay(router: new DimensionBestBaseline(probingMatrix), outcomes: outcomes, weights: weights));
 
         var linUcb = new LinUcbBaseline();
-        linUcb.WarmStart(probingOutcomes, weights);
-        results.Add(Replay(linUcb, outcomes, weights));
+        linUcb.WarmStart(probingTasks: probingOutcomes, weights: weights);
+        results.Add(Replay(router: linUcb, outcomes: outcomes, weights: weights));
 
         var linTs = new LinThompsonSamplingBaseline();
-        linTs.WarmStart(probingOutcomes, weights);
-        results.Add(Replay(linTs, outcomes, weights));
+        linTs.WarmStart(probingTasks: probingOutcomes, weights: weights);
+        results.Add(Replay(router: linTs, outcomes: outcomes, weights: weights));
 
-        results.Add(Replay(new LogRegBaseline(logRegArtifact), outcomes, weights));
-        results.Add(Replay(new KnnRetrievalBaseline(knnArtifact), outcomes, weights));
-        results.Add(Replay(orchestratorArm, outcomes, weights));
+        results.Add(Replay(router: new LogRegBaseline(logRegArtifact), outcomes: outcomes, weights: weights));
+        results.Add(Replay(router: new KnnRetrievalBaseline(knnArtifact), outcomes: outcomes, weights: weights));
+        results.Add(Replay(router: orchestratorArm, outcomes: outcomes, weights: weights));
 
         return results;
     }
@@ -77,16 +87,17 @@ public static class RegretComparisonReportBuilder
         ArgumentNullException.ThrowIfNull(rows);
 
         var builder = new StringBuilder();
-        builder.AppendLine(CultureInfo.InvariantCulture, $"### {title}");
+        builder.AppendLine(provider: CultureInfo.InvariantCulture, handler: $"### {title}");
         builder.AppendLine();
         builder.AppendLine("| Router | CumReg | AvgPerf | TotTok | $Total | Perf/$ | Scored | Skipped |");
         builder.AppendLine("|---|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var row in rows)
         {
             var perfPerDollar = row.PerfPerDollar is { } value
-                ? value.ToString("F2", CultureInfo.InvariantCulture)
+                ? value.ToString(format: "F2", provider: CultureInfo.InvariantCulture)
                 : "—";
-            builder.AppendLine(CultureInfo.InvariantCulture,
+            builder.AppendLine(provider: CultureInfo.InvariantCulture,
+                handler:
                 $"| {row.RouterName} | {row.CumulativeRegret:F4} | {row.AvgPerf:F4} | {row.TotalTokens} | {row.TotalCostUsd:F4} | {perfPerDollar} | {row.ScoredTaskCount} | {row.SkippedTaskCount} |");
         }
 
@@ -94,13 +105,21 @@ public static class RegretComparisonReportBuilder
     }
 
     /// <summary>Replays one router over <paramref name="outcomes"/> under <paramref name="weights"/>.</summary>
-    private static RegretReplayResult Replay(IRegretBaselineRouter router, IReadOnlyList<RegretTaskOutcome> outcomes, RewardWeights weights) =>
-        RegretReplayEngine.Replay(outcomes, router, weights);
+    private static RegretReplayResult Replay(IRegretBaselineRouter router, IReadOnlyList<RegretTaskOutcome> outcomes,
+        RewardWeights weights)
+    {
+        return RegretReplayEngine.Replay(tasks: outcomes, router: router, weights: weights);
+    }
 
     /// <summary>Every canonical model id scored on at least one task in <paramref name="outcomes"/>, in a fixed ordinal order.</summary>
-    private static IReadOnlyList<string> DistinctModelIds(IReadOnlyList<RegretTaskOutcome> outcomes) =>
-        [.. outcomes
-            .SelectMany(outcome => outcome.Cells.Keys)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(id => id, StringComparer.Ordinal)];
+    private static IReadOnlyList<string> DistinctModelIds(IReadOnlyList<RegretTaskOutcome> outcomes)
+    {
+        return
+        [
+            .. outcomes
+                .SelectMany(outcome => outcome.Cells.Keys)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(keySelector: id => id, comparer: StringComparer.Ordinal)
+        ];
+    }
 }

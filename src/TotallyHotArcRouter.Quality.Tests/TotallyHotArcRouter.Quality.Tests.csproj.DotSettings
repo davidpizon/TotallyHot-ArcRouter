@@ -1,0 +1,26 @@
+<wpf:ResourceDictionary xml:space="preserve"
+                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                        xmlns:s="clr-namespace:System;assembly=mscorlib"
+                        xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml"
+                        xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+
+  <!--
+    Project-scoped ReSharper severities for the Qodana Community for .NET scan. See
+    TotallyHotArcRouter.Qodana.slnx.DotSettings for why these decisions live in .DotSettings files
+    rather than in qodana.yaml.
+
+    "This return type can be made non-nullable."
+
+    Both sites are StaticAnalyzerTests' Fixed and Throws doubles, implementing IStaticAnalyzer.Analyze
+    - which returns StaticAnalysisFinding? because an analyzer with nothing to report returns null.
+    That one stub always returns a finding, and another always throws before returning at all, says
+    nothing about the contract they stand in for. Narrowing them would make the doubles diverge from
+    the interface they exist to impersonate, which is the one thing a double must not do.
+
+    The same decision is recorded for the six sites in TotallyHotArcRouter.Tests. This file exists
+    because these two live in a different project, and .DotSettings severities do not inherit across
+    projects.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ReturnTypeCanBeNotNullable/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+</wpf:ResourceDictionary>

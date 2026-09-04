@@ -3,9 +3,8 @@
 
    Shows feed metadata only - row counts and schedule, never prices. That's D5 (licensing), not a layout
    choice: see docs/router/model-price-catalog.md. *@
-@implements IDisposable
-@using System.Threading
 @using Microsoft.JSInterop
+@implements IDisposable
 @inject PriceSourceStore Store
 @inject IJSRuntime Js
 
@@ -18,7 +17,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="20" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20"/> Router unreachable
             </div>
             <div class="text-xs text-slate-400">
                 Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
@@ -42,14 +41,14 @@
                 @if (Store.Schedule is not null)
                 {
                     <span class="flex items-center gap-1.5 text-xs text-slate-500" title="@DescribeSchedule()">
-                        <Icon Name="clock" Size="20" />
+                        <Icon Name="clock" Size="20"/>
                         @DescribeCountdown()
                     </span>
                 }
                 <button @onclick="PullNow"
                         disabled="@Store.IsRefreshing"
                         class="btn btn-secondary flex items-center gap-1.5">
-                    <Icon Name="refresh" Size="20" />
+                    <Icon Name="refresh" Size="20"/>
                     @(Store.IsRefreshing ? "Pulling…" : "Pull Now")
                 </button>
             </div>
@@ -80,7 +79,7 @@
 
                 var canDrag = canReorder && !Store.IsRefreshing;
                 var isLifted = _dragActive && _dragName == source.Name;
-                var borderClass = isLifted ? "ds-source-border-lifted" : (source.Enabled ? "" : "ds-source-border-dim");
+                var borderClass = isLifted ? "ds-source-border-lifted" : source.Enabled ? "" : "ds-source-border-dim";
 
                 @* Keep Razor comments outside the tag: written between attributes they are emitted as literal
                    markup rather than stripped, which reaches the browser as an invalid attribute name and takes
@@ -117,71 +116,70 @@
                    methods below, because routing pointermove through interop at 60-120Hz would visibly lag the
                    card behind the cursor. *@
                 <div @key="source.Name" data-flip-key="@source.Name" class="ds-card-slot">
-                <div class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted card-pinned" : "") ds-surface-card-draggable @borderClass"
-                     @onpointerdown="e => OnPointerDown(source, e)">
-                    @* Header: rank controls + name + toggle *@
-                    <div class="flex items-start justify-between gap-2">
-                        <div class="flex items-start gap-2 min-w-0">
-                            @if (canReorder)
-                            {
-                                <div class="flex items-center shrink-0" title="Drag to reorder. Priority: higher wins a contested price.">
-                                    <Icon Name="grip-vertical" Size="14" Class="text-slate-600" />
-                                </div>
-                            }
-                            <div class="min-w-0">
-                                <div class="flex items-center gap-2">
-                                    <Icon Name="database" Size="20" />
-                                    <span class="text-sm font-semibold @(source.Enabled ? "state-enabled" : "state-disabled")">
-                                        @source.Name
-                                    </span>
-                                    @if (canReorder)
-                                    {
-                                        <span class="text-xs font-mono text-slate-500">#@(index + 1)</span>
-                                    }
-                                </div>
-                                <div class="text-xs text-slate-500 mt-0.5">
-                                    @if (source.Enabled)
-                                    {
-                                        <span>Polled every cycle and served to routing.</span>
-                                    }
-                                    else
-                                    {
-                                        <span>Disabled — not polled, and its prices are not served.</span>
-                                    }
+                    <div class="rounded-lg p-3 space-y-2.5 @(canDrag ? "drag-enabled" : "drag-disabled") @(isLifted ? "card-lifted card-pinned" : "") ds-surface-card-draggable @borderClass"
+                         @onpointerdown="e => OnPointerDown(source: source, e: e)">
+                        @* Header: rank controls + name + toggle *@
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex items-start gap-2 min-w-0">
+                                @if (canReorder)
+                                {
+                                    <div class="flex items-center shrink-0" title="Drag to reorder. Priority: higher wins a contested price.">
+                                        <Icon Name="grip-vertical" Size="14" Class="text-slate-600"/>
+                                    </div>
+                                }
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        <Icon Name="database" Size="20"/>
+                                        <span class="text-sm font-semibold @(source.Enabled ? "state-enabled" : "state-disabled")">
+                                            @source.Name
+                                        </span>
+                                        @if (canReorder)
+                                        {
+                                            <span class="text-xs font-mono text-slate-500">#@(index + 1)</span>
+                                        }
+                                    </div>
+                                    <div class="text-xs text-slate-500 mt-0.5">
+                                        @if (source.Enabled)
+                                        {
+                                            <span>Polled every cycle and served to routing.</span>
+                                        }
+                                        else
+                                        {
+                                            <span>Disabled — not polled, and its prices are not served.</span>
+                                        }
+                                    </div>
                                 </div>
                             </div>
+                            <button @onclick="() => Toggle(source)"
+                                    title="@(source.Enabled ? "Disable this source" : "Enable this source")"
+                                    class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(source.Enabled ? "toggle-enabled" : "toggle-disabled")">
+                                <span class="w-1.5 h-1.5 rounded-full @(source.Enabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+                                @(source.Enabled ? "ENABLED" : "DISABLED")
+                            </button>
                         </div>
-                        <button @onclick="() => Toggle(source)"
-                                title="@(source.Enabled ? "Disable this source" : "Enable this source")"
-                                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(source.Enabled ? "toggle-enabled" : "toggle-disabled")">
-                            <span class="w-1.5 h-1.5 rounded-full @(source.Enabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
-                            @(source.Enabled ? "ENABLED" : "DISABLED")
-                        </button>
-                    </div>
 
-                    @* Feed metadata: a count, never prices (D5). *@
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs text-slate-500">Prices stored</span>
-                        <span class="font-mono text-xs text-slate-300">@source.PriceCount.ToString("N0", CultureInfo.InvariantCulture)</span>
-                    </div>
-
-                    @if (outcome is not null)
-                    {
-                        <div class="rounded px-2 py-1.5 text-xs @(outcome.Succeeded ? "ds-outcome-success" : "ds-outcome-critical")">
-                            @if (outcome.Succeeded)
-                            {
-                                <span class="text-emerald-400">✅ Last pull refreshed @outcome.PriceCount.ToString("N0", CultureInfo.InvariantCulture) prices.</span>
-                            }
-                            else
-                            {
-                                <span class="text-red-300">⚠️ Last pull failed: @outcome.Error</span>
-                            }
+                        @* Feed metadata: a count, never prices (D5). *@
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-slate-500">Prices stored</span>
+                            <span class="font-mono text-xs text-slate-300">@source.PriceCount.ToString(format: "N0", provider: CultureInfo.InvariantCulture)</span>
                         </div>
-                    }
-                </div>
+
+                        @if (outcome is not null)
+                        {
+                            <div class="rounded px-2 py-1.5 text-xs @(outcome.Succeeded ? "ds-outcome-success" : "ds-outcome-critical")">
+                                @if (outcome.Succeeded)
+                                {
+                                    <span class="text-emerald-400">✅ Last pull refreshed @outcome.PriceCount.ToString(format: "N0", provider: CultureInfo.InvariantCulture) prices.</span>
+                                }
+                                else
+                                {
+                                    <span class="text-red-300">⚠️ Last pull failed: @outcome.Error</span>
+                                }
+                            </div>
+                        }
+                    </div>
                 </div>
             }
         </div>
     }
 </div>
-

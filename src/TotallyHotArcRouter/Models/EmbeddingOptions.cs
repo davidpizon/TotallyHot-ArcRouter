@@ -59,15 +59,13 @@ public sealed class EmbeddingOptions
     /// <exception cref="ArgumentException">Thrown when a required URL is not an absolute URI.</exception>
     public void EnsureValid()
     {
-        if (!Uri.TryCreate(ModelUrl, UriKind.Absolute, out _))
-        {
-            throw new ArgumentException($"'{nameof(ModelUrl)}' must be an absolute URI.", nameof(ModelUrl));
-        }
+        if (!Uri.TryCreate(uriString: ModelUrl, uriKind: UriKind.Absolute, result: out _))
+            throw new ArgumentException(message: $"'{nameof(ModelUrl)}' must be an absolute URI.",
+                paramName: nameof(ModelUrl));
 
-        if (!Uri.TryCreate(TokenizerJsonUrl, UriKind.Absolute, out _))
-        {
-            throw new ArgumentException($"'{nameof(TokenizerJsonUrl)}' must be an absolute URI.", nameof(TokenizerJsonUrl));
-        }
+        if (!Uri.TryCreate(uriString: TokenizerJsonUrl, uriKind: UriKind.Absolute, result: out _))
+            throw new ArgumentException(message: $"'{nameof(TokenizerJsonUrl)}' must be an absolute URI.",
+                paramName: nameof(TokenizerJsonUrl));
     }
 
     /// <summary>
@@ -80,22 +78,20 @@ public sealed class EmbeddingOptions
     {
         var expanded = Environment.ExpandEnvironmentVariables(ModelCacheDirectory);
 
-        if (expanded.Contains(LocalAppDataToken, StringComparison.OrdinalIgnoreCase))
+        if (expanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(localAppData))
-            {
-                localAppData = AppContext.BaseDirectory;
-            }
+            if (string.IsNullOrEmpty(localAppData)) localAppData = AppContext.BaseDirectory;
 
             localAppData = localAppData.TrimEnd('/', '\\');
-            expanded = expanded.Replace(LocalAppDataToken, localAppData, StringComparison.OrdinalIgnoreCase);
+            expanded = expanded.Replace(oldValue: LocalAppDataToken, newValue: localAppData,
+                comparisonType: StringComparison.OrdinalIgnoreCase);
         }
 
-        expanded = expanded.Replace('\\', Path.DirectorySeparatorChar);
+        expanded = expanded.Replace('\\', newChar: Path.DirectorySeparatorChar);
 
         return Path.IsPathRooted(expanded)
             ? expanded
-            : Path.Combine(AppContext.BaseDirectory, expanded);
+            : Path.Combine(path1: AppContext.BaseDirectory, path2: expanded);
     }
 }

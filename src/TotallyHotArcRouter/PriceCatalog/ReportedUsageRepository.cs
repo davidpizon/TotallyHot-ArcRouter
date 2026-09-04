@@ -48,18 +48,18 @@ public sealed class ReportedUsageRepository : PriceCatalogRepositoryBase
     /// <see cref="ReportedUsageRetention"/> for this provider. A no-op when <paramref name="rows"/> is
     /// empty - a failed or empty fetch must never wipe out an existing snapshot.
     /// </summary>
-    public void UpsertReportedUsage(string providerKey, IReadOnlyList<ReportedUsageRow> rows, DateTimeOffset fetchedAtUtc)
+    public void UpsertReportedUsage(string providerKey, IReadOnlyList<ReportedUsageRow> rows,
+        DateTimeOffset fetchedAtUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentNullException.ThrowIfNull(rows);
 
-        if (rows.Count == 0)
-        {
-            return;
-        }
+        if (rows.Count == 0) return;
 
-        var fetchedAt = fetchedAtUtc.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
-        var cutoff = fetchedAtUtc.UtcDateTime.AddTicks(-ReportedUsageRetention.Ticks).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var fetchedAt =
+            fetchedAtUtc.UtcDateTime.ToString(format: TimestampFormat, provider: CultureInfo.InvariantCulture);
+        var cutoff = fetchedAtUtc.UtcDateTime.AddTicks(-ReportedUsageRetention.Ticks)
+            .ToString(format: "yyyy-MM-dd", provider: CultureInfo.InvariantCulture);
 
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
@@ -69,33 +69,35 @@ public sealed class ReportedUsageRepository : PriceCatalogRepositoryBase
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO provider_reported_usage_snapshot
-                    (provider_key, usage_day, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, fetched_at_utc)
-                VALUES ($key, $day, $model, $input, $output, $cacheCreate, $cacheRead, $fetchedAt)
-                ON CONFLICT(provider_key, usage_day, model) DO UPDATE SET
-                    input_tokens          = excluded.input_tokens,
-                    output_tokens         = excluded.output_tokens,
-                    cache_creation_tokens = excluded.cache_creation_tokens,
-                    cache_read_tokens     = excluded.cache_read_tokens,
-                    fetched_at_utc        = excluded.fetched_at_utc;
-                """;
-            command.Parameters.AddWithValue("$key", providerKey);
-            command.Parameters.AddWithValue("$day", row.UsageDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-            command.Parameters.AddWithValue("$model", row.Model);
-            command.Parameters.AddWithValue("$input", row.InputTokens);
-            command.Parameters.AddWithValue("$output", row.OutputTokens);
-            command.Parameters.AddWithValue("$cacheCreate", row.CacheCreationTokens);
-            command.Parameters.AddWithValue("$cacheRead", row.CacheReadTokens);
-            command.Parameters.AddWithValue("$fetchedAt", fetchedAt);
+                                  INSERT INTO provider_reported_usage_snapshot
+                                      (provider_key, usage_day, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, fetched_at_utc)
+                                  VALUES ($key, $day, $model, $input, $output, $cacheCreate, $cacheRead, $fetchedAt)
+                                  ON CONFLICT(provider_key, usage_day, model) DO UPDATE SET
+                                      input_tokens          = excluded.input_tokens,
+                                      output_tokens         = excluded.output_tokens,
+                                      cache_creation_tokens = excluded.cache_creation_tokens,
+                                      cache_read_tokens     = excluded.cache_read_tokens,
+                                      fetched_at_utc        = excluded.fetched_at_utc;
+                                  """;
+            command.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+            command.Parameters.AddWithValue(parameterName: "$day",
+                value: row.UsageDay.ToString(format: "yyyy-MM-dd", provider: CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue(parameterName: "$model", value: row.Model);
+            command.Parameters.AddWithValue(parameterName: "$input", value: row.InputTokens);
+            command.Parameters.AddWithValue(parameterName: "$output", value: row.OutputTokens);
+            command.Parameters.AddWithValue(parameterName: "$cacheCreate", value: row.CacheCreationTokens);
+            command.Parameters.AddWithValue(parameterName: "$cacheRead", value: row.CacheReadTokens);
+            command.Parameters.AddWithValue(parameterName: "$fetchedAt", value: fetchedAt);
             command.ExecuteNonQuery();
         }
 
         using (var prune = connection.CreateCommand())
         {
             prune.Transaction = transaction;
-            prune.CommandText = "DELETE FROM provider_reported_usage_snapshot WHERE provider_key = $key AND usage_day < $cutoff;";
-            prune.Parameters.AddWithValue("$key", providerKey);
-            prune.Parameters.AddWithValue("$cutoff", cutoff);
+            prune.CommandText =
+                "DELETE FROM provider_reported_usage_snapshot WHERE provider_key = $key AND usage_day < $cutoff;";
+            prune.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
+            prune.Parameters.AddWithValue(parameterName: "$cutoff", value: cutoff);
             prune.ExecuteNonQuery();
         }
 
@@ -114,32 +116,30 @@ public sealed class ReportedUsageRepository : PriceCatalogRepositoryBase
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT usage_day, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, fetched_at_utc
-            FROM provider_reported_usage_snapshot
-            WHERE provider_key = $key
-            ORDER BY usage_day, model;
-            """;
-        command.Parameters.AddWithValue("$key", providerKey);
+                              SELECT usage_day, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, fetched_at_utc
+                              FROM provider_reported_usage_snapshot
+                              WHERE provider_key = $key
+                              ORDER BY usage_day, model;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$key", value: providerKey);
 
         var rows = new List<ReportedUsageRow>();
         DateTimeOffset? latest = null;
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var day = DateOnly.ParseExact(reader.GetString(0), "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var day = DateOnly.ParseExact(s: reader.GetString(0), format: "yyyy-MM-dd",
+                provider: CultureInfo.InvariantCulture);
             rows.Add(new ReportedUsageRow(
-                day,
-                reader.GetString(1),
-                reader.GetInt64(2),
-                reader.GetInt64(3),
-                reader.GetInt64(4),
-                reader.GetInt64(5)));
+                UsageDay: day,
+                Model: reader.GetString(1),
+                InputTokens: reader.GetInt64(2),
+                OutputTokens: reader.GetInt64(3),
+                CacheCreationTokens: reader.GetInt64(4),
+                CacheReadTokens: reader.GetInt64(5)));
 
             var fetchedAt = ParseTimestamp(reader.GetString(6));
-            if (latest is null || fetchedAt > latest)
-            {
-                latest = fetchedAt;
-            }
+            if (latest is null || fetchedAt > latest) latest = fetchedAt;
         }
 
         return (rows, latest);

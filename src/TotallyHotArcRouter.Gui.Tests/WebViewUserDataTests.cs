@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Gui.Services;
 using AwesomeAssertions;
+using TotallyHot.ArcRouter.Gui.Services;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -25,7 +25,8 @@ public sealed class WebViewUserDataTests
     [InlineData("   ")]
     public void ResolveFolder_WithBlankOverride_FallsBackToApplicationData(string? blank)
     {
-        var folder = WebViewUserData.ResolveFolder(@"C:\Users\example\AppData\Local", blank);
+        var folder = WebViewUserData.ResolveFolder(localApplicationDataPath: @"C:\Users\example\AppData\Local",
+            existingOverride: blank);
 
         folder.Should().Be(@"C:\Users\example\AppData\Local\TotallyHotArcRouter\WebView2");
     }
@@ -33,7 +34,8 @@ public sealed class WebViewUserDataTests
     [Fact]
     public void ResolveFolder_WithOverride_KeepsIt()
     {
-        var folder = WebViewUserData.ResolveFolder(@"C:\Users\example\AppData\Local", @"D:\webview-cache");
+        var folder = WebViewUserData.ResolveFolder(localApplicationDataPath: @"C:\Users\example\AppData\Local",
+            existingOverride: @"D:\webview-cache");
 
         folder.Should().Be(@"D:\webview-cache");
     }
@@ -54,7 +56,7 @@ public sealed class WebViewUserDataTests
         var original = Environment.GetEnvironmentVariable(WebViewUserData.UserDataFolderVariable);
         try
         {
-            Environment.SetEnvironmentVariable(WebViewUserData.UserDataFolderVariable, null);
+            Environment.SetEnvironmentVariable(variable: WebViewUserData.UserDataFolderVariable, null);
 
             var folder = WebViewUserData.Apply();
 
@@ -63,7 +65,7 @@ public sealed class WebViewUserDataTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable(WebViewUserData.UserDataFolderVariable, original);
+            Environment.SetEnvironmentVariable(variable: WebViewUserData.UserDataFolderVariable, value: original);
         }
     }
 
@@ -71,10 +73,10 @@ public sealed class WebViewUserDataTests
     public void Apply_LeavesAnExplicitOverrideInPlace()
     {
         var original = Environment.GetEnvironmentVariable(WebViewUserData.UserDataFolderVariable);
-        var chosen = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var chosen = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid().ToString());
         try
         {
-            Environment.SetEnvironmentVariable(WebViewUserData.UserDataFolderVariable, chosen);
+            Environment.SetEnvironmentVariable(variable: WebViewUserData.UserDataFolderVariable, value: chosen);
 
             WebViewUserData.Apply().Should().Be(chosen);
 
@@ -82,8 +84,8 @@ public sealed class WebViewUserDataTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable(WebViewUserData.UserDataFolderVariable, original);
-            Directory.Delete(chosen, recursive: true);
+            Environment.SetEnvironmentVariable(variable: WebViewUserData.UserDataFolderVariable, value: original);
+            Directory.Delete(path: chosen, true);
         }
     }
 }

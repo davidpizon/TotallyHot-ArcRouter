@@ -1,0 +1,104 @@
+<wpf:ResourceDictionary xml:space="preserve"
+                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                        xmlns:s="clr-namespace:System;assembly=mscorlib"
+                        xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml"
+                        xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+
+  <!--
+    Project-scoped ReSharper severities for the Qodana Community for .NET scan. See
+    TotallyHotArcRouter.Qodana.slnx.DotSettings for why these decisions live in .DotSettings files
+    rather than in qodana.yaml.
+
+    Short-lived 'HttpClient': the inspection guards against socket exhaustion from churning real
+    HttpClients in production. Every one of its 37 findings is in this project, where the client is
+    bound to an in-memory TestServer handler and deliberately scoped to a single test so cases cannot
+    leak state into each other - there is no socket to exhaust, and sharing one client across tests
+    would trade a non-problem for real cross-test coupling.
+
+    Scoped to this project on purpose rather than turned off solution-wide, so a short-lived
+    HttpClient in production code is still reported.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ShortLivedHttpClient/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "Fold this into an object or collection initializer."
+
+    All 63 are arrange blocks in this project, and the rewrite makes them worse. A test that reads
+
+        var ledger = new StubLedger();
+        ledger.MaxTurnBySession["sess-1"] = 4;   // simulates a restart mid-conversation
+
+    becomes a nested-property initializer with nowhere to put that trailing comment, and the setup
+    stops reading as a sequence of arranged facts. Several others would collapse four separate
+    DefaultHttpContext.Request assignments into one nested initializer, which is harder to scan and
+    harder to diff when a single field changes.
+
+    Scoped to this project rather than turned off solution-wide, so the same finding in production
+    code is still reported.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UseObjectOrCollectionInitializer/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "Merge these checks into one pattern."
+
+    The seven production sites were read individually and four were applied - the genuinely better
+    ones, where `is JsonArray { Count: > 0 }` and `is > 0 and <= Ceiling` say what the conjunction
+    was spelling out. The seventeen here are assertions and arrange conditions, where merging buys
+    nothing: a test's `&&` chain is usually enumerating the conditions it means to check, and a
+    merged pattern hides that enumeration.
+
+    This is also what ADR-0008 asks for directly: score smells on production code, because "test
+    projects are the regression net, not the catalog". Production stays enabled.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MergeIntoPattern/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This return type can be made non-nullable."
+
+    Six of the seven are test doubles implementing a production interface whose own signature is
+    nullable - IRegretBaselineRouter.Route returns null to mean "this router abstains on this task",
+    IModelPriceLookup returns null for an unpriced model, IStaticAnalyzer returns null for clean
+    code. A stub that happens never to return null in one test is not evidence about the contract,
+    and narrowing the stub makes it stop mirroring the interface it exists to stand in for.
+
+    The seventh was production (AnthropicStreamTranslator.HandleMessageStop) and has been applied.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ReturnTypeCanBeNotNullable/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This null check is always false / this ?. qualifier is never null."
+
+    Both pairs are defensive checks the nullable annotations declare unnecessary, at boundaries where
+    the annotation is a claim rather than a guarantee: InMemoryProviderConfigStore guards an options
+    object filled by the configuration binder, which writes nulls through non-nullable properties by
+    reflection, and the Moq sites index into an object[] of captured invocation arguments. Deleting
+    a guard because an annotation promises it cannot fire is how the annotation's being wrong turns
+    into a NullReferenceException.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConditionalAccessQualifierIsNonNullableAccordingToAPIContract/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This method has an async overload."
+
+    Both remaining sites are SqliteCommand.ExecuteReader, and taking the advice would be a pure loss.
+    Microsoft.Data.Sqlite's async methods are not asynchronous: SQLite exposes no async I/O, so
+    ExecuteReaderAsync and ReadAsync call straight through to their synchronous counterparts and
+    hand back an already-completed Task. Converting buys no thread release and costs a state machine
+    and a Task allocation per call, on a path a test runs in a loop.
+
+    Genuine async overloads elsewhere - File.WriteAllTextAsync, StreamReader.ReadToEndAsync,
+    CancellationTokenSource.CancelAsync - were applied rather than suppressed.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MethodHasAsyncOverload/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This parameter is only used for a precondition check."
+
+    All five are lambda parameters inside Assert.All or a handler stub, used only in the assertion
+    that is the point of the test - `Assert.All(models, m => Assert.NotNull(m.Id))` uses `m` for
+    nothing else by design. The inspection is describing what a test assertion looks like.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ParameterOnlyUsedForPreconditionCheck_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+</wpf:ResourceDictionary>

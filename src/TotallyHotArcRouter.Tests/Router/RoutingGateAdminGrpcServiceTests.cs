@@ -13,8 +13,9 @@ namespace TotallyHot.ArcRouter.Tests.Router;
 /// </summary>
 public sealed class RoutingGateAdminGrpcServiceTests
 {
-    private static ServerCallContext CreateContext() =>
-        TestServerCallContext.Create(
+    private static ServerCallContext CreateContext()
+    {
+        return TestServerCallContext.Create(
             method: "Test",
             host: "localhost",
             deadline: DateTime.UtcNow.AddMinutes(1),
@@ -22,10 +23,11 @@ public sealed class RoutingGateAdminGrpcServiceTests
             cancellationToken: TestContext.Current.CancellationToken,
             peer: "test-peer",
             authContext: null!,
-            contextPropagationToken: null,
+            null,
             writeHeadersFunc: _ => Task.CompletedTask,
             writeOptionsGetter: () => null,
             writeOptionsSetter: _ => { });
+    }
 
     [Fact]
     public async Task GetRoutingGate_ReportsTheGatesCurrentState()
@@ -33,7 +35,8 @@ public sealed class RoutingGateAdminGrpcServiceTests
         var gate = new FakeRoutingGate(isEnabled: false);
         var service = new RoutingGateAdminGrpcService(gate);
 
-        var response = await service.GetRoutingGate(new Contract.GetRoutingGateRequest(), CreateContext());
+        var response =
+            await service.GetRoutingGate(request: new Contract.GetRoutingGateRequest(), context: CreateContext());
 
         response.Enabled.Should().BeFalse();
     }
@@ -44,7 +47,8 @@ public sealed class RoutingGateAdminGrpcServiceTests
         var gate = new FakeRoutingGate(isEnabled: true);
         var service = new RoutingGateAdminGrpcService(gate);
 
-        var response = await service.SetRoutingGate(new Contract.SetRoutingGateRequest { Enabled = false }, CreateContext());
+        var response = await service.SetRoutingGate(request: new Contract.SetRoutingGateRequest { Enabled = false },
+            context: CreateContext());
 
         gate.IsEnabled.Should().BeFalse();
         response.Enabled.Should().BeFalse();
@@ -61,6 +65,9 @@ public sealed class RoutingGateAdminGrpcServiceTests
     {
         public bool IsEnabled { get; private set; } = isEnabled;
 
-        public void SetEnabled(bool enabled) => IsEnabled = enabled;
+        public void SetEnabled(bool enabled)
+        {
+            IsEnabled = enabled;
+        }
     }
 }

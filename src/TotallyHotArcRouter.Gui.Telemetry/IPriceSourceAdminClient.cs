@@ -29,6 +29,6 @@ public interface IPriceSourceAdminClient
     /// The call failed, the router is unreachable, or <paramref name="namesInPriorityOrder"/> did not name
     /// every existing source exactly once.
     /// </exception>
-    Task<PriceRefreshResult> ReorderAsync(IReadOnlyList<string> namesInPriorityOrder, CancellationToken cancellationToken = default);
+    Task<PriceRefreshResult> ReorderAsync(IReadOnlyList<string> namesInPriorityOrder,
+        CancellationToken cancellationToken = default);
 }
-

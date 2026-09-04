@@ -12,8 +12,8 @@ public class EmbeddingOptionsTests
     {
         var options = new EmbeddingOptions();
 
-        Assert.Equal(1024, options.EmbeddingDimension);
-        Assert.Equal(512, options.MaxTokens);
+        Assert.Equal(1024, actual: options.EmbeddingDimension);
+        Assert.Equal(512, actual: options.MaxTokens);
         Assert.False(string.IsNullOrWhiteSpace(options.ModelUrl));
         Assert.False(string.IsNullOrWhiteSpace(options.TokenizerJsonUrl));
     }
@@ -23,7 +23,7 @@ public class EmbeddingOptionsTests
     {
         var options = new EmbeddingOptions { ModelUrl = "not-a-url" };
 
-        Assert.Throws<ArgumentException>(() => options.EnsureValid());
+        Assert.Throws<ArgumentException>(options.EnsureValid);
     }
 
     [Fact]
@@ -31,7 +31,7 @@ public class EmbeddingOptionsTests
     {
         var options = new EmbeddingOptions { TokenizerJsonUrl = "not-a-url" };
 
-        Assert.Throws<ArgumentException>(() => options.EnsureValid());
+        Assert.Throws<ArgumentException>(options.EnsureValid);
     }
 
     [Fact]
@@ -61,6 +61,7 @@ public class EmbeddingOptionsTests
 
         var resolved = options.ResolveModelCacheDirectory();
 
-        Assert.DoesNotContain("%LOCALAPPDATA%", resolved, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(expectedSubstring: "%LOCALAPPDATA%", actualString: resolved,
+            comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 }

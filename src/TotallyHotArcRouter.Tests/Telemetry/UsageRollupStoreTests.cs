@@ -20,21 +20,23 @@ public class UsageRollupStoreTests
         int promptTokens = 100,
         int completionTokens = 50,
         decimal? costUsd = 1.5m,
-        string? requestId = null) =>
-        new(
+        string? requestId = null)
+    {
+        return new UsageLedgerEntry(
             SessionId: sessionId,
-            TurnNumber: 1,
+            1,
             Provider: provider,
             RequestedModel: model,
             ResolvedModel: model,
             PromptTokens: promptTokens,
             CompletionTokens: completionTokens,
-            CacheCreationTokens: null,
-            CacheReadTokens: null,
+            null,
+            null,
             EstimatedCostUsd: costUsd,
             CostConfidence: costUsd is null ? CostConfidence.Unknown : CostConfidence.Catalog,
             OccurredAtUtc: occurredAtUtc ?? DateTimeOffset.UtcNow,
             RequestId: requestId ?? Guid.NewGuid().ToString("N"));
+    }
 
     // Anchors a test's entries to midday rather than to the current time-of-day. Tests that record a
     // second entry a few minutes after the first and then assert both landed in the *same* P1D bucket are
@@ -43,8 +45,10 @@ public class UsageRollupStoreTests
     // entry's date) then sees only the earlier bucket, and the accumulated totals come up short - a real
     // failure that reproduces for only a few minutes out of every 24h. Midday leaves ~12h of headroom on
     // either side, so the offsets these tests add can never reach a bucket boundary.
-    private static DateTimeOffset MiddayDaysAgo(int days) =>
-        new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero).AddDays(-days).AddHours(12);
+    private static DateTimeOffset MiddayDaysAgo(int days)
+    {
+        return new DateTimeOffset(dateTime: DateTime.UtcNow.Date, offset: TimeSpan.Zero).AddDays(-days).AddHours(12);
+    }
 
     [Fact]
     public async Task RollForward_AppliesLedgerEntry_QueryableAfterBucketCompletes()
@@ -54,18 +58,20 @@ public class UsageRollupStoreTests
         var ledger = temp.CreateUsageLedger(rollup);
 
         var occurredAt = DateTimeOffset.UtcNow.AddDays(-2);
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: occurredAt, promptTokens: 100, completionTokens: 50, costUsd: 1.5m), Ct);
+        await ledger.RecordAsync(
+            entry: MakeEntry(occurredAtUtc: occurredAt, promptTokens: 100, completionTokens: 50, costUsd: 1.5m),
+            cancellationToken: Ct);
 
-        var dayStart = new DateTimeOffset(occurredAt.Date, TimeSpan.Zero);
-        var results = rollup.Query(dayStart, dayStart.AddDays(1), "P1D", "model");
+        var dayStart = new DateTimeOffset(dateTime: occurredAt.Date, offset: TimeSpan.Zero);
+        var results = rollup.Query(from: dayStart, to: dayStart.AddDays(1), bucketWidth: "P1D", groupBy: "model");
 
         var bucket = Assert.Single(results);
-        Assert.Equal("gpt-4o", bucket.GroupKey);
-        Assert.Equal(1, bucket.Requests);
-        Assert.Equal(0, bucket.UnpricedRequests);
-        Assert.Equal(100, bucket.PromptTokens);
-        Assert.Equal(50, bucket.CompletionTokens);
-        Assert.Equal(1.5m, bucket.CostUsd);
+        Assert.Equal(expected: "gpt-4o", actual: bucket.GroupKey);
+        Assert.Equal(1, actual: bucket.Requests);
+        Assert.Equal(0, actual: bucket.UnpricedRequests);
+        Assert.Equal(100, actual: bucket.PromptTokens);
+        Assert.Equal(50, actual: bucket.CompletionTokens);
+        Assert.Equal(1.5m, actual: bucket.CostUsd);
     }
 
     [Fact]
@@ -76,13 +82,14 @@ public class UsageRollupStoreTests
         var ledger = temp.CreateUsageLedger(rollup);
 
         var occurredAt = DateTimeOffset.UtcNow.AddDays(-2);
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: occurredAt, costUsd: null), Ct);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: occurredAt, costUsd: null), cancellationToken: Ct);
 
-        var dayStart = new DateTimeOffset(occurredAt.Date, TimeSpan.Zero);
-        var bucket = Assert.Single(rollup.Query(dayStart, dayStart.AddDays(1), "P1D", "model"));
+        var dayStart = new DateTimeOffset(dateTime: occurredAt.Date, offset: TimeSpan.Zero);
+        var bucket = Assert.Single(rollup.Query(from: dayStart, to: dayStart.AddDays(1), bucketWidth: "P1D",
+            groupBy: "model"));
 
-        Assert.Equal(1, bucket.UnpricedRequests);
-        Assert.Equal(0m, bucket.CostUsd);
+        Assert.Equal(1, actual: bucket.UnpricedRequests);
+        Assert.Equal(0m, actual: bucket.CostUsd);
     }
 
     [Fact]
@@ -92,11 +99,12 @@ public class UsageRollupStoreTests
         var rollup = temp.CreateRollupStore();
         var ledger = temp.CreateUsageLedger(rollup);
 
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow.AddDays(-2)), Ct);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow.AddDays(-2)),
+            cancellationToken: Ct);
 
         var second = await rollup.RollForwardAsync(Ct);
 
-        Assert.Equal(0, second);
+        Assert.Equal(0, actual: second);
     }
 
     [Fact]
@@ -107,16 +115,21 @@ public class UsageRollupStoreTests
         var ledger = temp.CreateUsageLedger(rollup);
 
         var occurredAt = MiddayDaysAgo(2);
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: occurredAt, promptTokens: 100, completionTokens: 50, costUsd: 1.5m), Ct);
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: occurredAt.AddMinutes(1), promptTokens: 10, completionTokens: 5, costUsd: 0.25m), Ct);
+        await ledger.RecordAsync(
+            entry: MakeEntry(occurredAtUtc: occurredAt, promptTokens: 100, completionTokens: 50, costUsd: 1.5m),
+            cancellationToken: Ct);
+        await ledger.RecordAsync(
+            entry: MakeEntry(occurredAtUtc: occurredAt.AddMinutes(1), promptTokens: 10, completionTokens: 5,
+                costUsd: 0.25m), cancellationToken: Ct);
 
-        var dayStart = new DateTimeOffset(occurredAt.Date, TimeSpan.Zero);
-        var bucket = Assert.Single(rollup.Query(dayStart, dayStart.AddDays(1), "P1D", "model"));
+        var dayStart = new DateTimeOffset(dateTime: occurredAt.Date, offset: TimeSpan.Zero);
+        var bucket = Assert.Single(rollup.Query(from: dayStart, to: dayStart.AddDays(1), bucketWidth: "P1D",
+            groupBy: "model"));
 
-        Assert.Equal(2, bucket.Requests);
-        Assert.Equal(110, bucket.PromptTokens);
-        Assert.Equal(55, bucket.CompletionTokens);
-        Assert.Equal(1.75m, bucket.CostUsd);
+        Assert.Equal(2, actual: bucket.Requests);
+        Assert.Equal(110, actual: bucket.PromptTokens);
+        Assert.Equal(55, actual: bucket.CompletionTokens);
+        Assert.Equal(1.75m, actual: bucket.CostUsd);
     }
 
     [Fact]
@@ -128,19 +141,20 @@ public class UsageRollupStoreTests
         using var temp = new TempDatabase();
         var ledgerOnly = temp.CreateUsageLedger(rollupStore: null);
         var occurredAt = MiddayDaysAgo(2);
-        await ledgerOnly.RecordAsync(MakeEntry(occurredAtUtc: occurredAt), Ct);
-        await ledgerOnly.RecordAsync(MakeEntry(occurredAtUtc: occurredAt.AddMinutes(5)), Ct);
+        await ledgerOnly.RecordAsync(entry: MakeEntry(occurredAtUtc: occurredAt), cancellationToken: Ct);
+        await ledgerOnly.RecordAsync(entry: MakeEntry(occurredAtUtc: occurredAt.AddMinutes(5)), cancellationToken: Ct);
 
         var rollup = temp.CreateRollupStore();
         var processed = await rollup.RollForwardAsync(Ct);
 
-        Assert.Equal(2, processed);
-        var dayStart = new DateTimeOffset(occurredAt.Date, TimeSpan.Zero);
-        var bucket = Assert.Single(rollup.Query(dayStart, dayStart.AddDays(1), "P1D", "model"));
-        Assert.Equal(2, bucket.Requests);
+        Assert.Equal(2, actual: processed);
+        var dayStart = new DateTimeOffset(dateTime: occurredAt.Date, offset: TimeSpan.Zero);
+        var bucket = Assert.Single(rollup.Query(from: dayStart, to: dayStart.AddDays(1), bucketWidth: "P1D",
+            groupBy: "model"));
+        Assert.Equal(2, actual: bucket.Requests);
 
         // Re-running finds nothing new: the checkpoint already covers both entries.
-        Assert.Equal(0, await rollup.RollForwardAsync(Ct));
+        Assert.Equal(0, actual: await rollup.RollForwardAsync(Ct));
     }
 
     [Fact]
@@ -151,10 +165,10 @@ public class UsageRollupStoreTests
         var ledger = temp.CreateUsageLedger(rollup);
 
         // "Now" - today's P1D bucket cannot have fully elapsed.
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow), Ct);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow), cancellationToken: Ct);
 
-        var todayStart = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
-        var results = rollup.Query(todayStart, todayStart.AddDays(1), "P1D", "model");
+        var todayStart = new DateTimeOffset(dateTime: DateTime.UtcNow.Date, offset: TimeSpan.Zero);
+        var results = rollup.Query(from: todayStart, to: todayStart.AddDays(1), bucketWidth: "P1D", groupBy: "model");
 
         Assert.Empty(results);
     }
@@ -167,13 +181,17 @@ public class UsageRollupStoreTests
         var ledger = temp.CreateUsageLedger(rollup);
 
         var occurredAt = DateTimeOffset.UtcNow.AddDays(-3);
-        await ledger.RecordAsync(MakeEntry(provider: "openai", model: "gpt-4o", occurredAtUtc: occurredAt, costUsd: 1m), Ct);
-        await ledger.RecordAsync(MakeEntry(provider: "anthropic", model: "claude", occurredAtUtc: occurredAt.AddMinutes(1), costUsd: 2m), Ct);
+        await ledger.RecordAsync(
+            entry: MakeEntry(provider: "openai", model: "gpt-4o", occurredAtUtc: occurredAt, costUsd: 1m),
+            cancellationToken: Ct);
+        await ledger.RecordAsync(
+            entry: MakeEntry(provider: "anthropic", model: "claude", occurredAtUtc: occurredAt.AddMinutes(1),
+                costUsd: 2m), cancellationToken: Ct);
 
-        var summary = rollup.Summary(occurredAt.AddDays(-1), DateTimeOffset.UtcNow.AddDays(-1));
+        var summary = rollup.Summary(from: occurredAt.AddDays(-1), to: DateTimeOffset.UtcNow.AddDays(-1));
 
-        Assert.Equal(2, summary.Requests);
-        Assert.Equal(3m, summary.CostUsd);
+        Assert.Equal(2, actual: summary.Requests);
+        Assert.Equal(3m, actual: summary.CostUsd);
     }
 
     [Fact]
@@ -184,15 +202,20 @@ public class UsageRollupStoreTests
         var ledger = temp.CreateUsageLedger(rollup);
 
         var occurredAt = MiddayDaysAgo(2);
-        await ledger.RecordAsync(MakeEntry(provider: "openai", model: "gpt-4o", occurredAtUtc: occurredAt, costUsd: 1m), Ct);
-        await ledger.RecordAsync(MakeEntry(provider: "openai", model: "gpt-4o-mini", occurredAtUtc: occurredAt.AddMinutes(1), costUsd: 0.5m), Ct);
+        await ledger.RecordAsync(
+            entry: MakeEntry(provider: "openai", model: "gpt-4o", occurredAtUtc: occurredAt, costUsd: 1m),
+            cancellationToken: Ct);
+        await ledger.RecordAsync(
+            entry: MakeEntry(provider: "openai", model: "gpt-4o-mini", occurredAtUtc: occurredAt.AddMinutes(1),
+                costUsd: 0.5m), cancellationToken: Ct);
 
-        var dayStart = new DateTimeOffset(occurredAt.Date, TimeSpan.Zero);
-        var bucket = Assert.Single(rollup.Query(dayStart, dayStart.AddDays(1), "P1D", "provider"));
+        var dayStart = new DateTimeOffset(dateTime: occurredAt.Date, offset: TimeSpan.Zero);
+        var bucket = Assert.Single(rollup.Query(from: dayStart, to: dayStart.AddDays(1), bucketWidth: "P1D",
+            groupBy: "provider"));
 
-        Assert.Equal("openai", bucket.GroupKey);
-        Assert.Equal(2, bucket.Requests);
-        Assert.Equal(1.5m, bucket.CostUsd);
+        Assert.Equal(expected: "openai", actual: bucket.GroupKey);
+        Assert.Equal(2, actual: bucket.Requests);
+        Assert.Equal(1.5m, actual: bucket.CostUsd);
     }
 
     [Fact]
@@ -204,14 +227,14 @@ public class UsageRollupStoreTests
 
         // 2026-03-08 07:30 UTC is 02:30 America/New_York on the US spring-forward date - a local wall-clock
         // time that never occurs in that timezone.
-        var occurredAt = new DateTimeOffset(2026, 3, 8, 7, 30, 0, TimeSpan.Zero);
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: occurredAt), Ct);
+        var occurredAt = new DateTimeOffset(2026, 3, 8, 7, 30, 0, offset: TimeSpan.Zero);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: occurredAt), cancellationToken: Ct);
 
         var results = rollup.Query(
-            new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 3, 15, 0, 0, 0, TimeSpan.Zero),
-            "P1D",
-            "day");
+            from: new DateTimeOffset(2026, 3, 1, 0, 0, 0, offset: TimeSpan.Zero),
+            to: new DateTimeOffset(2026, 3, 15, 0, 0, 0, offset: TimeSpan.Zero),
+            bucketWidth: "P1D",
+            groupBy: "day");
 
         Assert.Single(results);
     }

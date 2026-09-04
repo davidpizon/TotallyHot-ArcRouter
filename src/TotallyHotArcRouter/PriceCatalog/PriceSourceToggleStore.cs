@@ -1,5 +1,4 @@
 using TotallyHot.ArcRouter.Proxy.Concurrency;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
@@ -25,18 +24,17 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// </remarks>
 public sealed class PriceSourceToggleStore : IDisposable
 {
-    private readonly PriceSourceRepository _repository;
-    private readonly ILogger<PriceSourceToggleStore> _logger;
-
-    // Guards only _sourceTokens/_disposed below - an unrelated concern to the snapshot cache, which owns its
-    // own private gate (SnapshotCache<T>'s invariant explicitly calls out why the two must not share one).
-    private readonly object _gate = new();
-
     // Rebuilt and swapped as a whole via SnapshotCache<T> (docs/router/code-smell-refactoring-plan.md M2),
     // so IsEnabled's lock-free read - called by the ingestion loop per source per cycle - always sees a
     // fully-formed map, never a torn one.
     private readonly SnapshotCache<IReadOnlyDictionary<string, PriceSourceState>> _cache =
         new(new Dictionary<string, PriceSourceState>(StringComparer.OrdinalIgnoreCase));
+
+    // Guards only _sourceTokens/_disposed below - an unrelated concern to the snapshot cache, which owns its
+    // own private gate (SnapshotCache<T>'s invariant explicitly calls out why the two must not share one).
+    private readonly Lock _gate = new();
+    private readonly ILogger<PriceSourceToggleStore> _logger;
+    private readonly PriceSourceRepository _repository;
 
     private readonly Dictionary<string, CancellationTokenSource> _sourceTokens =
         new(StringComparer.OrdinalIgnoreCase);
@@ -64,6 +62,23 @@ public sealed class PriceSourceToggleStore : IDisposable
         _logger = logger;
     }
 
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        List<CancellationTokenSource> tokens;
+
+        lock (_gate)
+        {
+            if (_disposed) return;
+
+            _disposed = true;
+            tokens = [.. _sourceTokens.Values];
+            _sourceTokens.Clear();
+        }
+
+        foreach (var cts in tokens) cts.Dispose();
+    }
+
     /// <summary>Raised after a toggle has been persisted and the snapshot swapped.</summary>
     public event Action? Changed;
 
@@ -71,9 +86,12 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// Re-reads every source's state from the database and swaps the snapshot. Called once at startup, and
     /// after each write so the cache reflects what was actually persisted rather than what was requested.
     /// </summary>
-    public void Reload() =>
+    public void Reload()
+    {
         _cache.Rebuild(() => _repository.GetSourceStates()
-            .ToDictionary(s => s.Name, s => s, StringComparer.OrdinalIgnoreCase));
+            .ToDictionary(keySelector: s => s.Name, elementSelector: s => s,
+                comparer: StringComparer.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// Gets every known source's current state, ordered by rank then name. Read live from the database, not
@@ -90,10 +108,15 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// rows, called by the panel and the startup check - never on the routing hot path - so reading through
     /// costs nothing worth caching.
     /// </remarks>
-    public IReadOnlyList<PriceSourceState> List() =>
-        [.. _repository.GetSourceStates()
-            .OrderByDescending(s => s.PriorityScore)
-            .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)];
+    public IReadOnlyList<PriceSourceState> List()
+    {
+        return
+        [
+            .. _repository.GetSourceStates()
+                .OrderByDescending(s => s.PriorityScore)
+                .ThenBy(keySelector: s => s.Name, comparer: StringComparer.OrdinalIgnoreCase)
+        ];
+    }
 
     /// <summary>
     /// Gets whether <paramref name="sourceName"/> should be polled and served.
@@ -105,8 +128,10 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// poll. Returning <see langword="true"/> for it would put a source into the ingestion loop that does not
     /// exist.
     /// </remarks>
-    public bool IsEnabled(string sourceName) =>
-        _cache.Current.TryGetValue(sourceName, out var state) && state.Enabled;
+    public bool IsEnabled(string sourceName)
+    {
+        return _cache.Current.TryGetValue(key: sourceName, value: out var state) && state.Enabled;
+    }
 
     /// <summary>
     /// Persists a source's toggle, cancels its in-flight fetch when disabling, refreshes the cache, and
@@ -117,22 +142,17 @@ public sealed class PriceSourceToggleStore : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
 
-        if (!_repository.SetSourceEnabled(sourceName, enabled))
-        {
-            return false;
-        }
+        if (!_repository.SetSourceEnabled(sourceName: sourceName, enabled: enabled)) return false;
 
         if (!enabled)
-        {
             // Cancel before reloading: a fetch racing this call should see the cancellation, and the
             // re-check against the refreshed snapshot before upsert catches whatever slips past.
             CancelSource(sourceName);
-        }
 
         Reload();
 
         _logger.LogInformation(
-            "Price source {Source} was {State} from the Governance panel.",
+            message: "Price source {Source} was {State} from the Governance panel.",
             sourceName,
             enabled ? "enabled" : "disabled");
 
@@ -155,14 +175,11 @@ public sealed class PriceSourceToggleStore : IDisposable
     {
         ArgumentNullException.ThrowIfNull(namesInPriorityOrder);
 
-        if (!_repository.ReorderSources(namesInPriorityOrder))
-        {
-            return false;
-        }
+        if (!_repository.ReorderSources(namesInPriorityOrder)) return false;
 
         _logger.LogInformation(
-            "Price sources reordered from the Governance panel: {Order}.",
-            string.Join(" > ", namesInPriorityOrder));
+            message: "Price sources reordered from the Governance panel: {Order}.",
+            string.Join(separator: " > ", values: namesInPriorityOrder));
 
         Changed?.Invoke();
         return true;
@@ -176,7 +193,7 @@ public sealed class PriceSourceToggleStore : IDisposable
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            ObjectDisposedException.ThrowIf(condition: _disposed, instance: this);
             return GetOrCreateTokenSource(sourceName).Token;
         }
     }
@@ -191,17 +208,12 @@ public sealed class PriceSourceToggleStore : IDisposable
 
         lock (_gate)
         {
-            if (_disposed || !_sourceTokens.TryGetValue(sourceName, out toCancel))
-            {
-                return;
-            }
-
-            // Drop it from the map while holding the lock, so a concurrent GetSourceToken for a
+            // Dropped from the map while holding the lock, so a concurrent GetSourceToken for a
             // *re-enabled* source builds a fresh one instead of handing out this already-cancelled token.
             // A cancelled token never resets, so reusing it would leave the source permanently unfetchable -
             // the source would read as enabled in the panel and never poll again, which is exactly the kind
             // of silent lie the toggle exists to avoid.
-            _sourceTokens.Remove(sourceName);
+            if (_disposed || !_sourceTokens.Remove(key: sourceName, value: out toCancel)) return;
         }
 
         // Cancel outside the lock: continuations registered on the token run inline on Cancel(), and one
@@ -215,7 +227,7 @@ public sealed class PriceSourceToggleStore : IDisposable
     /// <summary>Returns the existing token source for <paramref name="sourceName"/>, creating one if none exists.</summary>
     private CancellationTokenSource GetOrCreateTokenSource(string sourceName)
     {
-        if (!_sourceTokens.TryGetValue(sourceName, out var cts))
+        if (!_sourceTokens.TryGetValue(key: sourceName, value: out var cts))
         {
             cts = new CancellationTokenSource();
             _sourceTokens[sourceName] = cts;
@@ -223,28 +235,4 @@ public sealed class PriceSourceToggleStore : IDisposable
 
         return cts;
     }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        List<CancellationTokenSource> tokens;
-
-        lock (_gate)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            tokens = [.. _sourceTokens.Values];
-            _sourceTokens.Clear();
-        }
-
-        foreach (var cts in tokens)
-        {
-            cts.Dispose();
-        }
-    }
 }
-

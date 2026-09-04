@@ -17,11 +17,13 @@ namespace TotallyHot.ArcRouter.Tests.TestSupport;
 /// <param name="modelIdentity">The identity to report; defaults to <see cref="IEmbeddingClient.UnknownModelIdentity"/>.</param>
 internal sealed class StubEmbeddingClient(string? modelIdentity = null) : IEmbeddingClient
 {
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string ModelIdentity { get; } = modelIdentity ?? IEmbeddingClient.UnknownModelIdentity;
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <exception cref="NotSupportedException">Always - this stub exists only to report an identity.</exception>
-    public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default) =>
+    public Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
+    {
         throw new NotSupportedException($"{nameof(StubEmbeddingClient)} does not embed; it only reports an identity.");
+    }
 }

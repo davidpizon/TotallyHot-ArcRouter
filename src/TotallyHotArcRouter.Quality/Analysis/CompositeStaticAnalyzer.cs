@@ -28,8 +28,17 @@ public sealed class CompositeStaticAnalyzer : IStaticAnalyzer
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "composite";
+
+    /// <inheritdoc/>
+    public StaticAnalysisFinding? Analyze(string code, CodeLanguage language)
+    {
+        var report = Report(code: code, language: language);
+        return report.Score is { } score
+            ? new StaticAnalysisFinding(Analyzer: Name, Score: score, Notes: report.Notes)
+            : null;
+    }
 
     /// <summary>Runs every analyzer and composes their findings into one report.</summary>
     /// <param name="code">The source code to analyze.</param>
@@ -39,7 +48,7 @@ public sealed class CompositeStaticAnalyzer : IStaticAnalyzer
     {
         ArgumentNullException.ThrowIfNull(code);
 
-        double sum = 0.0;
+        var sum = 0.0;
         var count = 0;
         var notes = new List<string>();
 
@@ -48,35 +57,27 @@ public sealed class CompositeStaticAnalyzer : IStaticAnalyzer
             StaticAnalysisFinding? finding;
             try
             {
-                finding = analyzer.Analyze(code, language);
+                finding = analyzer.Analyze(code: code, language: language);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
-                    ex,
-                    "Static analyzer {Analyzer} threw on a {Language} snippet; skipping its contribution.",
+                    exception: ex,
+                    message: "Static analyzer {Analyzer} threw on a {Language} snippet; skipping its contribution.",
                     analyzer.Name,
                     language);
                 continue;
             }
 
-            if (finding is null)
-            {
-                continue;
-            }
+            if (finding is null) continue;
 
-            sum += Math.Clamp(finding.Score, 0.0, 1.0);
+            sum += Math.Clamp(value: finding.Score, 0.0, 1.0);
             count++;
             notes.AddRange(finding.Notes.Select(n => $"{finding.Analyzer}: {n}"));
         }
 
-        return count == 0 ? new StaticAnalysisReport(null, []) : new StaticAnalysisReport(sum / count, notes);
-    }
-
-    /// <inheritdoc />
-    public StaticAnalysisFinding? Analyze(string code, CodeLanguage language)
-    {
-        var report = Report(code, language);
-        return report.Score is { } score ? new StaticAnalysisFinding(Name, score, report.Notes) : null;
+        return count == 0
+            ? new StaticAnalysisReport(null, Notes: [])
+            : new StaticAnalysisReport(Score: sum / count, Notes: notes);
     }
 }

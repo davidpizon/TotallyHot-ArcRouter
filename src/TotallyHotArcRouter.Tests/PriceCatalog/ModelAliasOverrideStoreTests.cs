@@ -20,10 +20,12 @@ public sealed class ModelAliasOverrideStoreTests
         using var db = new TempDatabase();
         var store = db.CreateOverrideStore();
 
-        store.Upsert("LiteLLM", "big-pickle", "gpt-5.4");
+        store.Upsert(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle", modelName: "gpt-5.4");
 
         var o = Assert.Single(store.GetAll());
-        Assert.Equal(new ModelAliasOverride("LiteLLM", "big-pickle", "gpt-5.4"), o);
+        Assert.Equal(
+            expected: new ModelAliasOverride(SourceName: "LiteLLM", AggregatorModelKey: "big-pickle",
+                ModelName: "gpt-5.4"), actual: o);
     }
 
     [Fact]
@@ -32,11 +34,11 @@ public sealed class ModelAliasOverrideStoreTests
         using var db = new TempDatabase();
         var store = db.CreateOverrideStore();
 
-        store.Upsert("LiteLLM", "big-pickle", "gpt-5.4");
-        store.Upsert("LiteLLM", "big-pickle", "gpt-6");
+        store.Upsert(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle", modelName: "gpt-5.4");
+        store.Upsert(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle", modelName: "gpt-6");
 
         var o = Assert.Single(store.GetAll());
-        Assert.Equal("gpt-6", o.ModelName);
+        Assert.Equal(expected: "gpt-6", actual: o.ModelName);
     }
 
     [Fact]
@@ -44,9 +46,10 @@ public sealed class ModelAliasOverrideStoreTests
     {
         using var db = new TempDatabase();
         var store = db.CreateOverrideStore();
-        store.Upsert("LiteLLM", "big-pickle", "gpt-5.4");
+        store.Upsert(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle", modelName: "gpt-5.4");
 
-        Assert.Equal("gpt-5.4", store.TryGetModelName("litellm", "BIG-PICKLE"));
+        Assert.Equal(expected: "gpt-5.4",
+            actual: store.TryGetModelName(sourceName: "litellm", aggregatorModelKey: "BIG-PICKLE"));
     }
 
     [Fact]
@@ -55,7 +58,7 @@ public sealed class ModelAliasOverrideStoreTests
         using var db = new TempDatabase();
         var store = db.CreateOverrideStore();
 
-        Assert.Null(store.TryGetModelName("LiteLLM", "big-pickle"));
+        Assert.Null(store.TryGetModelName(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle"));
     }
 
     [Fact]
@@ -63,9 +66,9 @@ public sealed class ModelAliasOverrideStoreTests
     {
         using var db = new TempDatabase();
         var store = db.CreateOverrideStore();
-        store.Upsert("LiteLLM", "big-pickle", "gpt-5.4");
+        store.Upsert(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle", modelName: "gpt-5.4");
 
-        Assert.True(store.Remove("LiteLLM", "big-pickle"));
+        Assert.True(store.Remove(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle"));
         Assert.Empty(store.GetAll());
     }
 
@@ -75,7 +78,7 @@ public sealed class ModelAliasOverrideStoreTests
         using var db = new TempDatabase();
         var store = db.CreateOverrideStore();
 
-        Assert.False(store.Remove("LiteLLM", "big-pickle"));
+        Assert.False(store.Remove(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle"));
     }
 
     [Fact]
@@ -84,9 +87,9 @@ public sealed class ModelAliasOverrideStoreTests
         using var db = new TempDatabase();
         var store = db.CreateOverrideStore();
 
-        store.Upsert("LiteLLM", "big-pickle", "gpt-5.4");
-        store.Upsert("OpenRouter", "big-pickle", "gpt-6");
+        store.Upsert(sourceName: "LiteLLM", aggregatorModelKey: "big-pickle", modelName: "gpt-5.4");
+        store.Upsert(sourceName: "OpenRouter", aggregatorModelKey: "big-pickle", modelName: "gpt-6");
 
-        Assert.Equal(2, store.GetAll().Count);
+        Assert.Equal(2, actual: store.GetAll().Count);
     }
 }

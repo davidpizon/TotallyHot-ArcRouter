@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Charts;
-
 namespace TotallyHot.ArcRouter.Gui.Charts.Tests;
 
 /// <summary>
@@ -28,10 +26,10 @@ public class TokenCompoundingSeriesTests
         var result = TokenCompoundingSeries.Build([new TurnTokenPoint(1, 100, 40)]);
 
         var point = Assert.Single(result);
-        Assert.Equal(1, point.TurnNumber);
-        Assert.Equal(100, point.CumulativePromptTokens);
-        Assert.Equal(40, point.CumulativeCompletionTokens);
-        Assert.Equal(140, point.CumulativeTotalTokens);
+        Assert.Equal(1, actual: point.TurnNumber);
+        Assert.Equal(100, actual: point.CumulativePromptTokens);
+        Assert.Equal(40, actual: point.CumulativeCompletionTokens);
+        Assert.Equal(140, actual: point.CumulativeTotalTokens);
     }
 
     [Fact]
@@ -39,27 +37,28 @@ public class TokenCompoundingSeriesTests
     {
         IReadOnlyList<TurnTokenPoint> turns =
         [
-            new TurnTokenPoint(1, 2104, 891),
-            new TurnTokenPoint(2, 3240, 1205),
-            new TurnTokenPoint(3, 4567, 1798),
+            new(1, 2104, 891),
+            new(2, 3240, 1205),
+            new(3, 4567, 1798)
         ];
 
         var result = TokenCompoundingSeries.Build(turns);
 
-        Assert.Equal(3, result.Count);
+        Assert.Equal(3, actual: result.Count);
 
-        Assert.Equal(1, result[0].TurnNumber);
-        Assert.Equal(2104, result[0].CumulativePromptTokens);
-        Assert.Equal(891, result[0].CumulativeCompletionTokens);
+        Assert.Equal(1, actual: result[0].TurnNumber);
+        Assert.Equal(2104, actual: result[0].CumulativePromptTokens);
+        Assert.Equal(891, actual: result[0].CumulativeCompletionTokens);
 
-        Assert.Equal(2, result[1].TurnNumber);
-        Assert.Equal(2104 + 3240, result[1].CumulativePromptTokens);
-        Assert.Equal(891 + 1205, result[1].CumulativeCompletionTokens);
+        Assert.Equal(2, actual: result[1].TurnNumber);
+        Assert.Equal(expected: 2104 + 3240, actual: result[1].CumulativePromptTokens);
+        Assert.Equal(expected: 891 + 1205, actual: result[1].CumulativeCompletionTokens);
 
-        Assert.Equal(3, result[2].TurnNumber);
-        Assert.Equal(2104 + 3240 + 4567, result[2].CumulativePromptTokens);
-        Assert.Equal(891 + 1205 + 1798, result[2].CumulativeCompletionTokens);
-        Assert.Equal(result[2].CumulativePromptTokens + result[2].CumulativeCompletionTokens, result[2].CumulativeTotalTokens);
+        Assert.Equal(3, actual: result[2].TurnNumber);
+        Assert.Equal(expected: 2104 + 3240 + 4567, actual: result[2].CumulativePromptTokens);
+        Assert.Equal(expected: 891 + 1205 + 1798, actual: result[2].CumulativeCompletionTokens);
+        Assert.Equal(expected: result[2].CumulativePromptTokens + result[2].CumulativeCompletionTokens,
+            actual: result[2].CumulativeTotalTokens);
     }
 
     [Fact]
@@ -67,18 +66,18 @@ public class TokenCompoundingSeriesTests
     {
         IReadOnlyList<TurnTokenPoint> turns =
         [
-            new TurnTokenPoint(2, 300, 30),
-            new TurnTokenPoint(1, 100, 10),
-            new TurnTokenPoint(3, 500, 50),
+            new(2, 300, 30),
+            new(1, 100, 10),
+            new(3, 500, 50)
         ];
 
         var result = TokenCompoundingSeries.Build(turns);
 
-        Assert.Equal([1, 2, 3], result.Select(p => p.TurnNumber));
+        Assert.Equal(expected: [1, 2, 3], actual: result.Select(p => p.TurnNumber));
         // Turn 1 must be accumulated first regardless of input order, or turn 2's cumulative would be wrong.
-        Assert.Equal(100, result[0].CumulativePromptTokens);
-        Assert.Equal(100 + 300, result[1].CumulativePromptTokens);
-        Assert.Equal(100 + 300 + 500, result[2].CumulativePromptTokens);
+        Assert.Equal(100, actual: result[0].CumulativePromptTokens);
+        Assert.Equal(expected: 100 + 300, actual: result[1].CumulativePromptTokens);
+        Assert.Equal(expected: 100 + 300 + 500, actual: result[2].CumulativePromptTokens);
     }
 
     [Fact]
@@ -87,14 +86,14 @@ public class TokenCompoundingSeriesTests
         // Mirrors a real mock turn: a final summary-only turn with 0 completion tokens.
         IReadOnlyList<TurnTokenPoint> turns =
         [
-            new TurnTokenPoint(1, 1000, 200),
-            new TurnTokenPoint(2, 500, 0),
+            new(1, 1000, 200),
+            new(2, 500, 0)
         ];
 
         var result = TokenCompoundingSeries.Build(turns);
 
-        Assert.Equal(1500, result[1].CumulativePromptTokens);
-        Assert.Equal(200, result[1].CumulativeCompletionTokens);
+        Assert.Equal(1500, actual: result[1].CumulativePromptTokens);
+        Assert.Equal(200, actual: result[1].CumulativeCompletionTokens);
     }
 
     [Fact]
@@ -116,15 +115,15 @@ public class TokenCompoundingSeriesTests
     {
         IReadOnlyList<TurnTokenPoint> turns =
         [
-            new TurnTokenPoint(1, 100, 20),
-            new TurnTokenPoint(2, 150, 25),
+            new(1, 100, 20),
+            new(2, 150, 25)
         ];
 
         var result = TokenCompoundingSeries.BuildSparkline(turns);
 
         // Per-turn totals (120, 175), not cumulative (120, 295) - a sparkline shows the trend shape,
         // not a running sum.
-        Assert.Equal([120, 175], result);
+        Assert.Equal(expected: [120, 175], actual: result);
     }
 
     [Fact]
@@ -132,14 +131,13 @@ public class TokenCompoundingSeriesTests
     {
         IReadOnlyList<TurnTokenPoint> turns =
         [
-            new TurnTokenPoint(3, 50, 10),
-            new TurnTokenPoint(1, 100, 20),
-            new TurnTokenPoint(2, 150, 25),
+            new(3, 50, 10),
+            new(1, 100, 20),
+            new(2, 150, 25)
         ];
 
         var result = TokenCompoundingSeries.BuildSparkline(turns);
 
-        Assert.Equal([120, 175, 60], result);
+        Assert.Equal(expected: [120, 175, 60], actual: result);
     }
 }
-

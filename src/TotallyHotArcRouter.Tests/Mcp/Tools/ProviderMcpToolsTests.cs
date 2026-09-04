@@ -1,9 +1,9 @@
+using Moq;
 using TotallyHot.ArcRouter.Mcp.Tools;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Tests.Proxy;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp.Tools;
 
@@ -14,19 +14,26 @@ namespace TotallyHot.ArcRouter.Tests.Mcp.Tools;
 /// </summary>
 public sealed class ProviderMcpToolsTests
 {
-    private static ModelRoutingOptions SeedOptions() => new()
+    private static ModelRoutingOptions SeedOptions()
     {
-        Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+        return new ModelRoutingOptions
         {
-            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
-        },
-        ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
-    };
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+            },
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
+            ]
+        };
+    }
 
     private static ProviderMcpTools CreateTools(out InMemoryProviderConfigStore store)
     {
         store = new InMemoryProviderConfigStore(SeedOptions());
-        var facade = new ManagementFacade(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient());
+        var facade = new ManagementFacade(store: store, environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient());
         return new ProviderMcpTools(facade);
     }
 
@@ -36,12 +43,12 @@ public sealed class ProviderMcpToolsTests
         var tools = CreateTools(out var store);
 
         var result = await tools.UpsertProviderAsync(
-            "openai",
-            new ProviderWriteRequest(BaseUrl: "https://api.openai.com/v2", AuthHeaderName: null),
-            TestContext.Current.CancellationToken);
+            key: "openai",
+            request: new ProviderWriteRequest(BaseUrl: "https://api.openai.com/v2", null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.IsType<ProvidersResponse>(result);
-        Assert.Equal("https://api.openai.com/v2", store.Snapshot.Options.Providers["openai"].BaseUrl);
+        Assert.Equal(expected: "https://api.openai.com/v2", actual: store.Snapshot.Options.Providers["openai"].BaseUrl);
     }
 
     [Fact]
@@ -49,11 +56,12 @@ public sealed class ProviderMcpToolsTests
     {
         var tools = CreateTools(out _);
 
-        var result = await tools.RemoveProviderAsync("nope", TestContext.Current.CancellationToken);
+        var result =
+            await tools.RemoveProviderAsync(key: "nope", cancellationToken: TestContext.Current.CancellationToken);
 
         var errorProperty = result.GetType().GetProperty("error");
         Assert.NotNull(errorProperty);
-        Assert.NotNull(errorProperty!.GetValue(result));
+        Assert.NotNull(errorProperty.GetValue(result));
     }
 
     [Fact]
@@ -61,11 +69,10 @@ public sealed class ProviderMcpToolsTests
     {
         var tools = CreateTools(out _);
 
-        var result = tools.SetProviderBudget("openai", new ProviderBudgetWriteRequest(10m, null));
+        var result = tools.SetProviderBudget(providerKey: "openai", request: new ProviderBudgetWriteRequest(10m, null));
 
         var typeProperty = result.GetType().GetProperty("type");
         Assert.NotNull(typeProperty);
-        Assert.Equal(nameof(ManagementErrorType.Unavailable), typeProperty!.GetValue(result));
+        Assert.Equal(expected: nameof(ManagementErrorType.Unavailable), actual: typeProperty.GetValue(result));
     }
 }
-

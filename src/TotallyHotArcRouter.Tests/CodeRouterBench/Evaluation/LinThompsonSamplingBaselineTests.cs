@@ -10,18 +10,20 @@ public class LinThompsonSamplingBaselineTests
     [Fact]
     public void Replay_OneArmStrictlyBetter_ConvergesToPickingIt()
     {
-        var baseline = new LinThompsonSamplingBaseline(v: 0.5, lambda: 1d, seed: 42);
+        var baseline = new LinThompsonSamplingBaseline();
         var tasks = Enumerable.Range(0, 200)
-            .Select(i => new RegretTaskOutcome($"t{i}", "code_generation", new Dictionary<string, RegretOutcomeCell>
-            {
-                ["good-model"] = new(Score: 0.9, CostUsd: 0.0, TotalTokens: 100),
-                ["bad-model"] = new(Score: 0.1, CostUsd: 0.0, TotalTokens: 100),
-            }))
+            .Select(i => new RegretTaskOutcome(TaskId: $"t{i}", Dimension: "code_generation",
+                Cells: new Dictionary<string, RegretOutcomeCell>
+                {
+                    ["good-model"] = new(0.9, 0.0, 100),
+                    ["bad-model"] = new(0.1, 0.0, 100)
+                }))
             .ToArray();
 
-        var result = RegretReplayEngine.Replay(tasks, baseline, Weights);
+        var result = RegretReplayEngine.Replay(tasks: tasks, router: baseline, weights: Weights);
 
-        Assert.True(result.AvgPerf > 0.7, $"AvgPerf was {result.AvgPerf}, expected convergence toward good-model's 0.9");
+        Assert.True(condition: result.AvgPerf > 0.7,
+            userMessage: $"AvgPerf was {result.AvgPerf}, expected convergence toward good-model's 0.9");
     }
 
     [Fact]
@@ -29,18 +31,21 @@ public class LinThompsonSamplingBaselineTests
     {
         RegretTaskOutcome[] tasks =
         [
-            .. Enumerable.Range(0, 50).Select(i => new RegretTaskOutcome($"t{i}", "code_generation", new Dictionary<string, RegretOutcomeCell>
-            {
-                ["model-a"] = new(Score: 0.6, CostUsd: 0.0, TotalTokens: 100),
-                ["model-b"] = new(Score: 0.5, CostUsd: 0.0, TotalTokens: 100),
-            })),
+            .. Enumerable.Range(0, 50).Select(i => new RegretTaskOutcome(TaskId: $"t{i}", Dimension: "code_generation",
+                Cells: new Dictionary<string, RegretOutcomeCell>
+                {
+                    ["model-a"] = new(0.6, 0.0, 100),
+                    ["model-b"] = new(0.5, 0.0, 100)
+                }))
         ];
 
-        var first = RegretReplayEngine.Replay(tasks, new LinThompsonSamplingBaseline(seed: 42), Weights);
-        var second = RegretReplayEngine.Replay(tasks, new LinThompsonSamplingBaseline(seed: 42), Weights);
+        var first = RegretReplayEngine.Replay(tasks: tasks, router: new LinThompsonSamplingBaseline(seed: 42),
+            weights: Weights);
+        var second = RegretReplayEngine.Replay(tasks: tasks, router: new LinThompsonSamplingBaseline(seed: 42),
+            weights: Weights);
 
-        Assert.Equal(first.CumulativeRegret, second.CumulativeRegret, precision: 12);
-        Assert.Equal(first.AvgPerf, second.AvgPerf, precision: 12);
+        Assert.Equal(expected: first.CumulativeRegret, actual: second.CumulativeRegret, 12);
+        Assert.Equal(expected: first.AvgPerf, actual: second.AvgPerf, 12);
     }
 
     [Fact]
@@ -48,19 +53,20 @@ public class LinThompsonSamplingBaselineTests
     {
         RegretTaskOutcome[] probing =
         [
-            new("p1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "p1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["model-a"] = new(Score: 0.9, CostUsd: 0.0, TotalTokens: 100),
-                ["model-b"] = new(Score: 0.1, CostUsd: 0.0, TotalTokens: 100),
-            }),
+                ["model-a"] = new(0.9, 0.0, 100),
+                ["model-b"] = new(0.1, 0.0, 100)
+            })
         ];
 
         var first = new LinThompsonSamplingBaseline(seed: 42);
-        first.WarmStart(probing, Weights);
+        first.WarmStart(probingTasks: probing, weights: Weights);
         var second = new LinThompsonSamplingBaseline(seed: 42);
-        second.WarmStart(probing, Weights);
+        second.WarmStart(probingTasks: probing, weights: Weights);
 
-        var context = new RegretReplayContext("t1", "code_generation", ["model-a", "model-b"]);
-        Assert.Equal(first.Route(context), second.Route(context));
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "code_generation",
+            CandidateModelIds: ["model-a", "model-b"]);
+        Assert.Equal(expected: first.Route(context), actual: second.Route(context));
     }
 }

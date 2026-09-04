@@ -3,7 +3,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// The built-in set of <see cref="ToolCallDialect"/>s, and the lookups over it that detection and
 /// normalization need (see <c>docs/router/tool-call-normalization.md</c> §3.1).
-///
 /// <para>
 /// Entries are ordered most- to least-specific, and <see cref="ScannableDialects"/> preserves that
 /// order, because <see cref="DialectMatcher.MatchAny"/> resolves ties by taking the first dialect that
@@ -36,8 +35,8 @@ internal static class ToolCallDialectRegistry
         Name: "hermes",
         Delimiters:
         [
-            new DialectDelimiter("<tool_call>", "</tool_call>"),
-            new DialectDelimiter("<tools>", "</tools>")
+            new DialectDelimiter(Open: "<tool_call>", Close: "</tool_call>"),
+            new DialectDelimiter(Open: "<tools>", Close: "</tools>")
         ],
         NameKey: "name",
         ArgumentsKey: "arguments");
@@ -52,7 +51,7 @@ internal static class ToolCallDialectRegistry
     /// </summary>
     public static readonly ToolCallDialect Mistral = new(
         Name: "mistral",
-        Delimiters: [new DialectDelimiter("[TOOL_CALLS]", Close: null)],
+        Delimiters: [new DialectDelimiter(Open: "[TOOL_CALLS]", null)],
         NameKey: "name",
         ArgumentsKey: "arguments");
 
@@ -60,7 +59,6 @@ internal static class ToolCallDialectRegistry
     /// The Llama 3.x JSON tool-call form, which keys its arguments as <c>"parameters"</c> rather than
     /// <c>"arguments"</c> - the reason a hardcoded <c>arguments</c> lookup silently drops a
     /// Llama-family call even when the surrounding text is found.
-    ///
     /// <para>
     /// Only the <c>&lt;|python_tag|&gt;</c>-delimited form is registered. Llama also sometimes emits a
     /// *bare* JSON object with no delimiter at all, and that form is **deliberately excluded**: a
@@ -72,7 +70,7 @@ internal static class ToolCallDialectRegistry
     /// </summary>
     public static readonly ToolCallDialect Llama3Json = new(
         Name: "llama3-json",
-        Delimiters: [new DialectDelimiter("<|python_tag|>", Close: null)],
+        Delimiters: [new DialectDelimiter(Open: "<|python_tag|>", null)],
         NameKey: "name",
         ArgumentsKey: "parameters");
 
@@ -88,7 +86,7 @@ internal static class ToolCallDialectRegistry
     /// </summary>
     public static readonly ToolCallDialect FunctionCall = new(
         Name: "function-call",
-        Delimiters: [new DialectDelimiter("<function-call>", "</function-call>")],
+        Delimiters: [new DialectDelimiter(Open: "<function-call>", Close: "</function-call>")],
         NameKey: "name",
         ArgumentsKey: "arguments");
 
@@ -97,7 +95,6 @@ internal static class ToolCallDialectRegistry
     /// any text convention: the request carries a <c>response_format</c> JSON schema, and the server's own
     /// sampler (llama.cpp GBNF grammar under LM Studio, the equivalent under Ollama) makes any other shape
     /// unrepresentable. Mirrors LiteLLM's JSON-mode fallback for models without native tool calling.
-    ///
     /// <para>
     /// Has no delimiters, so <see cref="ToolCallDialect.IsScannable"/> is false and it never joins
     /// <see cref="ScannableDialects"/> - there is nothing to scan *for*. The reply is a whole JSON envelope
@@ -106,7 +103,6 @@ internal static class ToolCallDialectRegistry
     /// framing (or none at all) defeats delimiter matching completely; it cannot defeat a grammar that
     /// forbids emitting anything else.
     /// </para>
-    ///
     /// <para>
     /// <b>It still carries an <see cref="ToolCallDialect.EmulationPrompt"/>, and that is not redundant.</b>
     /// The obvious reading - the schema is the instruction, so a prompt would only repeat it - is wrong, and
@@ -120,7 +116,6 @@ internal static class ToolCallDialectRegistry
     /// reason; only the postamble differs, because the reply format it describes is the one the grammar
     /// already enforces.
     /// </para>
-    ///
     /// <para>
     /// Because it has a prompt, ordering in <see cref="ToolCallNormalizerFactory"/> matters: the constrained
     /// branch must be tested <em>before</em> the "has an emulation prompt" branch, or a constrained model
@@ -134,30 +129,27 @@ internal static class ToolCallDialectRegistry
         NameKey: "name",
         ArgumentsKey: "arguments",
         EmulationPrompt: new EmulationPrompt(
-            Preamble:
-                """
-                # Tools
+            """
+            # Tools
 
-                You may call one or more functions to assist with the user query.
+            You may call one or more functions to assist with the user query.
 
-                You are provided with function signatures within <tools></tools> XML tags:
-                <tools>
-                """,
-            Postamble:
-                """
-                </tools>
+            You are provided with function signatures within <tools></tools> XML tags:
+            <tools>
+            """,
+            """
+            </tools>
 
-                Reply with a JSON object containing two fields: "content" for your reply to the user, and
-                "tool_calls" for any functions to invoke, each as {"name": <function-name>, "arguments":
-                <args-json-object>}. Leave "tool_calls" empty when no function is needed, and leave
-                "content" empty when calling one. Never answer from memory what a function can determine.
-                """));
+            Reply with a JSON object containing two fields: "content" for your reply to the user, and
+            "tool_calls" for any functions to invoke, each as {"name": <function-name>, "arguments":
+            <args-json-object>}. Leave "tool_calls" empty when no function is needed, and leave
+            "content" empty when calling one. Never answer from memory what a function can determine.
+            """));
 
     /// <summary>
     /// The canonical dialect TotallyHot.ArcRouter *teaches* a model that has no usable native tool calling
     /// (Phase 5). It reuses Hermes framing on purpose, so emulated replies are parsed by the same
     /// matcher path as a real Hermes echo rather than needing a second parser.
-    ///
     /// <para>
     /// <b>This wording is measured, not written.</b> It is the Qwen/Hermes chat template's own
     /// instruction text, near-verbatim, and it was chosen because three hand-written alternatives all
@@ -168,7 +160,6 @@ internal static class ToolCallDialectRegistry
     /// to phrasing the model has seen in training, so the emulated dialect borrows rather than invents.
     /// Rewriting this text is a change that must be re-measured, not reasoned about.
     /// </para>
-    ///
     /// <para>
     /// Both Hermes delimiters are registered, and the second one is not redundant. Told to wrap schemas in
     /// <c>&lt;tools&gt;</c> and to reply in <c>&lt;tool_call&gt;</c>, the model deterministically replied
@@ -183,30 +174,28 @@ internal static class ToolCallDialectRegistry
         Name: "emulated",
         Delimiters:
         [
-            new DialectDelimiter("<tool_call>", "</tool_call>"),
-            new DialectDelimiter("<tools>", "</tools>")
+            new DialectDelimiter(Open: "<tool_call>", Close: "</tool_call>"),
+            new DialectDelimiter(Open: "<tools>", Close: "</tools>")
         ],
         NameKey: "name",
         ArgumentsKey: "arguments",
         EmulationPrompt: new EmulationPrompt(
-            Preamble:
-                """
-                # Tools
+            """
+            # Tools
 
-                You may call one or more functions to assist with the user query.
+            You may call one or more functions to assist with the user query.
 
-                You are provided with function signatures within <tools></tools> XML tags:
-                <tools>
-                """,
-            Postamble:
-                """
-                </tools>
+            You are provided with function signatures within <tools></tools> XML tags:
+            <tools>
+            """,
+            """
+            </tools>
 
-                For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
-                <tool_call>
-                {"name": <function-name>, "arguments": <args-json-object>}
-                </tool_call>
-                """));
+            For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+            <tool_call>
+            {"name": <function-name>, "arguments": <args-json-object>}
+            </tool_call>
+            """));
 
     /// <summary>
     /// Every built-in dialect, including the non-scannable <see cref="OpenAiNative"/> sentinel, so a
@@ -235,11 +224,10 @@ internal static class ToolCallDialectRegistry
     /// rebuilt per request.
     /// </summary>
     public static char[] ScannableOpenerFirstChars { get; } =
-        ScannableDialects
+        [.. ScannableDialects
             .SelectMany(dialect => dialect.Delimiters)
             .Select(delimiter => delimiter.Open[0])
-            .Distinct()
-            .ToArray();
+            .Distinct()];
 
     // DeepSeek is deliberately absent. Its tool-call template uses special delimiter tokens built from
     // non-ASCII full-width characters, and registering a guessed spelling would be worse than
@@ -260,16 +248,13 @@ internal static class ToolCallDialectRegistry
     public static bool TryGet(string? name, out ToolCallDialect dialect)
     {
         foreach (var candidate in All)
-        {
-            if (string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(a: candidate.Name, b: name, comparisonType: StringComparison.OrdinalIgnoreCase))
             {
                 dialect = candidate;
                 return true;
             }
-        }
 
         dialect = OpenAiNative;
         return false;
     }
 }
-

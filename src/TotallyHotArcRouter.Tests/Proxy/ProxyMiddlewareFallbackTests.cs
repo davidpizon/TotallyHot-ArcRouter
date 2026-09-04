@@ -1,14 +1,13 @@
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Proxy.Translation;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Proxy.Translation;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -40,25 +39,23 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
             return Ok($"served-by-{request.RequestUri!.Host}");
         });
 
         var capturing = new CapturingPublisher();
-        var context = await RunAsync(resolver, handler, capturing, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, telemetryPublisher: capturing,
+            requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
-        Assert.Equal("served-by-" + PrimaryHost, await ReadBodyAsync(context));
+        Assert.Equal(expected: "served-by-" + PrimaryHost, actual: await ReadBodyAsync(context));
 
         var telemetry = await capturing.WaitAsync();
         Assert.False(telemetry.IsFallback);
-        Assert.Equal("primary", telemetry.RequestedModel);
-        Assert.Equal("prov-a", telemetry.Provider);
+        Assert.Equal(expected: "primary", actual: telemetry.RequestedModel);
+        Assert.Equal(expected: "prov-a", actual: telemetry.Provider);
     }
 
     [Fact]
@@ -73,24 +70,26 @@ public class ProxyMiddlewareFallbackTests
             : Ok("served-by-backup"));
 
         var capturing = new CapturingPublisher();
-        var context = await RunAsync(resolver, handler, capturing, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, telemetryPublisher: capturing,
+            requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
 
         var telemetry = await capturing.WaitAsync();
         Assert.True(telemetry.IsFallback);
         // The client still asked for "primary"; the backup provider actually served it.
-        Assert.Equal("primary", telemetry.RequestedModel);
-        Assert.Equal("prov-b", telemetry.Provider);
-        Assert.Equal("backup-upstream", telemetry.ResolvedModel);
+        Assert.Equal(expected: "primary", actual: telemetry.RequestedModel);
+        Assert.Equal(expected: "prov-b", actual: telemetry.Provider);
+        Assert.Equal(expected: "backup-upstream", actual: telemetry.ResolvedModel);
         // M2.3/M2.2: RoutedModel is "backup" (the model that served), and the transport-level failover
         // reports RoutingSubstitutionReason.Failover regardless of the resolution-time reason.
-        Assert.Equal("backup", telemetry.RoutedModel);
-        Assert.Equal(RoutingSubstitutionReason.Failover, telemetry.SubstitutionReason);
-        Assert.Equal("primary", context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
-        Assert.Equal("backup", context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
-        Assert.Equal(RoutingSubstitutionReason.Failover.ToString(), context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
+        Assert.Equal(expected: "backup", actual: telemetry.RoutedModel);
+        Assert.Equal(expected: RoutingSubstitutionReason.Failover, actual: telemetry.SubstitutionReason);
+        Assert.Equal(expected: "primary", actual: context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal(expected: "backup", actual: context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.Failover),
+            actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
     }
 
     [Fact]
@@ -104,10 +103,11 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.ServiceUnavailable)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -121,10 +121,11 @@ public class ProxyMiddlewareFallbackTests
             ? Status((HttpStatusCode)429)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -141,7 +142,7 @@ public class ProxyMiddlewareFallbackTests
         {
             // Same host for both; distinguish by the rewritten upstream model id in the body.
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("backup-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "backup-upstream", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("served-by-backup");
@@ -150,9 +151,10 @@ public class ProxyMiddlewareFallbackTests
             return Status((HttpStatusCode)429);
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(429, context.Response.StatusCode);
+        Assert.Equal(429, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
@@ -172,10 +174,11 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.Unauthorized)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "auto",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -191,17 +194,17 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
-            return request.RequestUri!.Host == PrimaryHost ? Status(HttpStatusCode.Unauthorized) : Ok("served-by-backup");
+            return request.RequestUri!.Host == PrimaryHost
+                ? Status(HttpStatusCode.Unauthorized)
+                : Ok("served-by-backup");
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(401, context.Response.StatusCode);
+        Assert.Equal(401, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
@@ -218,7 +221,7 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("backup-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "backup-upstream", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("served-by-backup");
@@ -227,14 +230,16 @@ public class ProxyMiddlewareFallbackTests
             return Status(HttpStatusCode.Unauthorized);
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(401, context.Response.StatusCode);
+        Assert.Equal(401, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
     [Fact]
-    public async Task InvokeAsync_AutoSelectedPrimaryGemini400EmbeddedUnauthenticated_DifferentProviderBackup_FailsOver()
+    public async Task
+        InvokeAsync_AutoSelectedPrimaryGemini400EmbeddedUnauthenticated_DifferentProviderBackup_FailsOver()
     {
         // Gemini reports an invalid/expired API key as 400 (not 401), since the key travels as a "key="
         // query parameter rather than an Authorization header - with an embedded
@@ -251,28 +256,29 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gemini"] = new GeminiPayloadTranslator(),
+            ["gemini"] = new GeminiPayloadTranslator()
         };
 
         var handler = new RoutingHandlerStub(request => request.RequestUri!.Host == PrimaryHost
             ? GeminiEmbeddedAuthErrorResponse()
             : Ok("served-by-backup"));
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -287,43 +293,42 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gemini"] = new GeminiPayloadTranslator(),
+            ["gemini"] = new GeminiPayloadTranslator()
         };
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
             return request.RequestUri!.Host == PrimaryHost ? GeminiEmbeddedAuthErrorResponse() : Ok("served-by-backup");
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
 
-        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Equal(400, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
 
         using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
         Assert.Contains(
-            "API key not valid",
-            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+            expectedSubstring: "API key not valid",
+            actualString: responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     [Fact]
-    public async Task InvokeAsync_PrimaryGemini400EmbeddedUnauthenticated_SameProviderBackup_DoesNotFailOver_AndForwardsRealMessage()
+    public async Task
+        InvokeAsync_PrimaryGemini400EmbeddedUnauthenticated_SameProviderBackup_DoesNotFailOver_AndForwardsRealMessage()
     {
         // Both models are on "gemini" (the same credential), so this must NOT fail over - the backup
         // would be rejected with the identical invalid key. The client still sees the 400, but with
@@ -336,13 +341,13 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gemini"] = new GeminiPayloadTranslator(),
+            ["gemini"] = new GeminiPayloadTranslator()
         };
 
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("gemini-2.5-flash", StringComparison.Ordinal))
+            if (body.Contains(value: "gemini-2.5-flash", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("should-not-be-served");
@@ -351,26 +356,27 @@ public class ProxyMiddlewareFallbackTests
             return GeminiEmbeddedAuthErrorResponse();
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
 
-        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Equal(400, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
 
         using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
         Assert.Contains(
-            "API key not valid",
-            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+            expectedSubstring: "API key not valid",
+            actualString: responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     [Fact]
@@ -388,7 +394,7 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gemini"] = new GeminiPayloadTranslator(),
+            ["gemini"] = new GeminiPayloadTranslator()
         };
 
         const string rawBody = """{"reason":"invalid_argument","details":"request body too large"}""";
@@ -396,7 +402,7 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("gemini-2.5-flash", StringComparison.Ordinal))
+            if (body.Contains(value: "gemini-2.5-flash", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("should-not-be-served");
@@ -404,26 +410,27 @@ public class ProxyMiddlewareFallbackTests
 
             return new HttpResponseMessage(HttpStatusCode.BadRequest)
             {
-                Content = new StringContent(rawBody, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: rawBody, encoding: Encoding.UTF8, mediaType: "application/json")
             };
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
 
-        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Equal(400, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
-        Assert.Equal(rawBody, await ReadBodyAsync(context));
+        Assert.Equal(expected: rawBody, actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -442,13 +449,13 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
 
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            if (body.Contains(value: "claude-opus-4-7", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("should-not-be-served");
@@ -457,26 +464,27 @@ public class ProxyMiddlewareFallbackTests
             return AnthropicEmbeddedErrorResponse();
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
 
-        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Equal(400, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
 
         using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
         Assert.Equal(
-            "messages: at least one message is required",
-            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+            expected: "messages: at least one message is required",
+            actual: responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     [Fact]
@@ -492,7 +500,7 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
 
         const string rawBody = """{"reason":"unrecognized_shape"}""";
@@ -500,7 +508,7 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            if (body.Contains(value: "claude-opus-4-7", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("should-not-be-served");
@@ -508,26 +516,27 @@ public class ProxyMiddlewareFallbackTests
 
             return new HttpResponseMessage(HttpStatusCode.BadRequest)
             {
-                Content = new StringContent(rawBody, Encoding.UTF8, "application/json"),
+                Content = new StringContent(content: rawBody, encoding: Encoding.UTF8, mediaType: "application/json")
             };
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
 
-        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Equal(400, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
-        Assert.Equal(rawBody, await ReadBodyAsync(context));
+        Assert.Equal(expected: rawBody, actual: await ReadBodyAsync(context));
     }
 
     // ----- Out-of-credits (docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) -----
@@ -543,18 +552,19 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
 
         var handler = new RoutingHandlerStub(request => request.RequestUri!.Host == PrimaryHost
             ? AnthropicOutOfCreditsResponse()
             : Ok("served-by-backup"));
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators,
@@ -563,16 +573,16 @@ public class ProxyMiddlewareFallbackTests
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
         Assert.True(circuitBreaker.IsProviderOpen("anthropic"));
         var liveTraffic = interactionStatus.GetLiveTraffic("anthropic");
         Assert.NotNull(liveTraffic);
-        Assert.False(liveTraffic!.Ok);
-        Assert.Equal(ProviderInteractionKind.OutOfCredits, liveTraffic.Kind);
-        Assert.Contains("credit balance", liveTraffic.Message);
+        Assert.False(liveTraffic.Ok);
+        Assert.Equal(expected: ProviderInteractionKind.OutOfCredits, actual: liveTraffic.Kind);
+        Assert.Contains(expectedSubstring: "credit balance", actualString: liveTraffic.Message);
     }
 
     [Fact]
@@ -587,13 +597,13 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
 
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            if (body.Contains(value: "claude-opus-4-7", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("should-not-be-served");
@@ -602,26 +612,27 @@ public class ProxyMiddlewareFallbackTests
             return AnthropicOutOfCreditsResponse();
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
 
-        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Equal(400, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
 
         using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
         Assert.Contains(
-            "credit balance",
-            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+            expectedSubstring: "credit balance",
+            actualString: responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     [Fact]
@@ -634,43 +645,42 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
             return request.RequestUri!.Host == PrimaryHost ? AnthropicOutOfCreditsResponse() : Ok("served-by-backup");
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators
             }
         );
 
-        var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
 
-        Assert.Equal(400, context.Response.StatusCode);
+        Assert.Equal(400, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
 
         using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
         Assert.Contains(
-            "credit balance",
-            responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+            expectedSubstring: "credit balance",
+            actualString: responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
     }
 
     [Fact]
-    public async Task InvokeAsync_AnthropicOutOfCredits_TripsWholeProvider_SubsequentSameProviderRequestBypassesWithoutNetworkCall()
+    public async Task
+        InvokeAsync_AnthropicOutOfCredits_TripsWholeProvider_SubsequentSameProviderRequestBypassesWithoutNetworkCall()
     {
         var circuitBreaker = new CircuitBreaker();
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
@@ -680,14 +690,14 @@ public class ProxyMiddlewareFallbackTests
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = new AnthropicPayloadTranslator(),
+            ["anthropic"] = new AnthropicPayloadTranslator()
         };
 
         var siblingAttempted = false;
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("claude-opus-4-7", StringComparison.Ordinal))
+            if (body.Contains(value: "claude-opus-4-7", comparisonType: StringComparison.Ordinal))
             {
                 siblingAttempted = true;
                 return Ok("should-not-be-served");
@@ -696,11 +706,12 @@ public class ProxyMiddlewareFallbackTests
             return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : AnthropicOutOfCreditsResponse();
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators,
@@ -709,13 +720,13 @@ public class ProxyMiddlewareFallbackTests
         );
 
         // Auto-selected first request: out-of-credits discovered live, fails over cross-provider.
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
-        Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
+        var firstContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: firstContext.Response.StatusCode);
         Assert.True(circuitBreaker.IsProviderOpen("anthropic"));
 
         // A second, explicit request for "sibling" (same now-open provider) is never attempted at all.
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
-        Assert.Equal(503, secondContext.Response.StatusCode);
+        var secondContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "sibling");
+        Assert.Equal(503, actual: secondContext.Response.StatusCode);
         Assert.False(siblingAttempted);
     }
 
@@ -732,10 +743,11 @@ public class ProxyMiddlewareFallbackTests
             ? OpenAiInsufficientQuotaResponse()
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "auto",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -748,21 +760,20 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
             return request.RequestUri!.Host == PrimaryHost ? OpenAiInsufficientQuotaResponse() : Ok("served-by-backup");
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(429, context.Response.StatusCode);
+        Assert.Equal(429, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
 
         using var responseJson = JsonDocument.Parse(await ReadBodyAsync(context));
-        Assert.Equal("insufficient_quota", responseJson.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(expected: "insufficient_quota",
+            actual: responseJson.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     [Fact]
@@ -779,7 +790,7 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("backup-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "backup-upstream", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("served-by-backup");
@@ -789,14 +800,15 @@ public class ProxyMiddlewareFallbackTests
             {
                 Content = new StringContent(
                     """{"error":{"message":"Rate limit exceeded.","type":"rate_limit_error"}}""",
-                    Encoding.UTF8,
-                    "application/json"),
+                    encoding: Encoding.UTF8,
+                    mediaType: "application/json")
             };
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(429, context.Response.StatusCode);
+        Assert.Equal(429, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
@@ -816,10 +828,11 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.MethodNotAllowed)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "auto",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -832,17 +845,17 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
-            return request.RequestUri!.Host == PrimaryHost ? Status(HttpStatusCode.MethodNotAllowed) : Ok("served-by-backup");
+            return request.RequestUri!.Host == PrimaryHost
+                ? Status(HttpStatusCode.MethodNotAllowed)
+                : Ok("served-by-backup");
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(405, context.Response.StatusCode);
+        Assert.Equal(405, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
@@ -860,7 +873,7 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("backup-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "backup-upstream", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("served-by-backup");
@@ -869,9 +882,10 @@ public class ProxyMiddlewareFallbackTests
             return Status(HttpStatusCode.MethodNotAllowed);
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(405, context.Response.StatusCode);
+        Assert.Equal(405, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
@@ -892,10 +906,11 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.Forbidden)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "auto",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -908,17 +923,15 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
             return request.RequestUri!.Host == PrimaryHost ? Status(HttpStatusCode.Forbidden) : Ok("served-by-backup");
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(403, context.Response.StatusCode);
+        Assert.Equal(403, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
@@ -936,7 +949,7 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("backup-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "backup-upstream", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("served-by-backup");
@@ -945,14 +958,16 @@ public class ProxyMiddlewareFallbackTests
             return Status(HttpStatusCode.Forbidden);
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(403, context.Response.StatusCode);
+        Assert.Equal(403, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
     [Fact]
-    public async Task InvokeAsync_ExplicitPrimary403_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
+    public async Task
+        InvokeAsync_ExplicitPrimary403_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
     {
         // A 403 trips every model on the provider at once (RecordProviderFailure) - a permission/API-key-
         // scope problem would reject any model on that provider identically, not just the one that
@@ -970,25 +985,23 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("sibling-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "sibling-upstream", comparisonType: StringComparison.Ordinal))
             {
                 siblingAttempted = true;
                 return Ok("should-not-be-served");
             }
 
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupAttempted = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupAttempted = true;
 
             return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.Forbidden);
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CircuitBreaker = circuitBreaker
@@ -996,16 +1009,16 @@ public class ProxyMiddlewareFallbackTests
         );
 
         // First request against explicit "primary": 403 discovered live, relayed unchanged - no failover.
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-        Assert.Equal(403, firstContext.Response.StatusCode);
+        var firstContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+        Assert.Equal(403, actual: firstContext.Response.StatusCode);
         Assert.False(backupAttempted);
         Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
 
         // A second, explicit request for "sibling" (same provider as "primary", never itself failed) is
         // never attempted at all - the provider-wide circuit blocks it outright, and the client is told
         // why rather than silently routed to "backup".
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
-        Assert.Equal(503, secondContext.Response.StatusCode);
+        var secondContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "sibling");
+        Assert.Equal(503, actual: secondContext.Response.StatusCode);
         Assert.False(siblingAttempted);
     }
 
@@ -1020,10 +1033,11 @@ public class ProxyMiddlewareFallbackTests
             ? Status(HttpStatusCode.NotFound)
             : Ok("served-by-backup"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
     }
 
     [Fact]
@@ -1042,7 +1056,7 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("backup-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "backup-upstream", comparisonType: StringComparison.Ordinal))
             {
                 backupCalled = true;
                 return Ok("served-by-backup");
@@ -1051,10 +1065,11 @@ public class ProxyMiddlewareFallbackTests
             return Status(HttpStatusCode.NotFound);
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
         Assert.True(backupCalled);
     }
 
@@ -1081,11 +1096,12 @@ public class ProxyMiddlewareFallbackTests
             return Ok("served-by-backup");
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CircuitBreaker = circuitBreaker
@@ -1096,26 +1112,28 @@ public class ProxyMiddlewareFallbackTests
         // before failing over to the backup within the same request.
         for (var i = 0; i < 3; i++)
         {
-            var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-            Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-            Assert.Equal("served-by-backup", await ReadBodyAsync(context));
+            var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+            Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+            Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
         }
 
-        Assert.Equal(3, primaryAttempts);
-        Assert.True(circuitBreaker.IsOpen(new CircuitBreakerTargetKey("prov-a", $"https://{PrimaryHost}/", "primary-upstream")));
+        Assert.Equal(3, actual: primaryAttempts);
+        Assert.True(circuitBreaker.IsOpen(new CircuitBreakerTargetKey(Provider: "prov-a",
+            BaseUrl: $"https://{PrimaryHost}/", ProviderModelId: "primary-upstream")));
         Assert.False(circuitBreaker.IsProviderOpen("prov-a"));
 
         // A fourth, explicit request: the primary target's own circuit is now open, so - docs/adr/0005
         // (expanded scope) - it is never silently substituted, even though "prov-a" itself is never marked
         // unhealthy (unlike 401's provider-wide trip). It is blocked with a synthesized per-model message
         // and never attempted, rather than silently routed to "backup".
-        var finalContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-        Assert.Equal(503, finalContext.Response.StatusCode);
-        Assert.Equal(3, primaryAttempts); // unchanged - the 4th request never touched the primary target again
+        var finalContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+        Assert.Equal(503, actual: finalContext.Response.StatusCode);
+        Assert.Equal(3, actual: primaryAttempts); // unchanged - the 4th request never touched the primary target again
     }
 
     [Fact]
-    public async Task InvokeAsync_AutoSelectedPrimary401_TripsWholeProvider_SubsequentAutoSelectedRequestBypassesADifferentModel_OnSameProvider()
+    public async Task
+        InvokeAsync_AutoSelectedPrimary401_TripsWholeProvider_SubsequentAutoSelectedRequestBypassesADifferentModel_OnSameProvider()
     {
         // A 401 trips every model on the provider at once (RecordProviderFailure), not just the one that
         // surfaced it - a shared, real CircuitBreaker (not each class's own independent default instance)
@@ -1133,20 +1151,23 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("sibling-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "sibling-upstream", comparisonType: StringComparison.Ordinal))
             {
                 siblingAttempted = true;
                 return Ok("should-not-be-served");
             }
 
-            return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.Unauthorized);
+            return request.RequestUri!.Host == BackupHost
+                ? Ok("served-by-backup")
+                : Status(HttpStatusCode.Unauthorized);
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CircuitBreaker = circuitBreaker
@@ -1154,20 +1175,21 @@ public class ProxyMiddlewareFallbackTests
         );
 
         // First auto-selected request: 401, provider-wide trip, fails over cross-provider to "backup".
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
-        Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(firstContext));
+        var firstContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: firstContext.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(firstContext));
 
         // A second auto-selected request must never attempt any model on the now-open provider at all -
         // the provider-wide circuit bypasses it outright.
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
-        Assert.Equal(StatusCodes.Status200OK, secondContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(secondContext));
+        var secondContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: secondContext.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(secondContext));
         Assert.False(siblingAttempted);
     }
 
     [Fact]
-    public async Task InvokeAsync_ExplicitPrimary401_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
+    public async Task
+        InvokeAsync_ExplicitPrimary401_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
     {
         // docs/adr/0005 (expanded scope): both requests here are explicit, so neither is silently
         // substituted - the first relays the real 401 it discovered live, and the second (for a sibling
@@ -1183,43 +1205,44 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("sibling-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "sibling-upstream", comparisonType: StringComparison.Ordinal))
             {
                 siblingAttempted = true;
                 return Ok("should-not-be-served");
             }
 
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupAttempted = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupAttempted = true;
 
-            return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.Unauthorized);
+            return request.RequestUri!.Host == BackupHost
+                ? Ok("served-by-backup")
+                : Status(HttpStatusCode.Unauthorized);
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CircuitBreaker = circuitBreaker
             }
         );
 
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-        Assert.Equal(401, firstContext.Response.StatusCode);
+        var firstContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+        Assert.Equal(401, actual: firstContext.Response.StatusCode);
         Assert.False(backupAttempted);
         Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
 
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
-        Assert.Equal(503, secondContext.Response.StatusCode);
+        var secondContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "sibling");
+        Assert.Equal(503, actual: secondContext.Response.StatusCode);
         Assert.False(siblingAttempted);
     }
 
     [Fact]
-    public async Task InvokeAsync_AutoSelectedPrimary405_TripsWholeProvider_SubsequentAutoSelectedRequestBypassesADifferentModel_OnSameProvider()
+    public async Task
+        InvokeAsync_AutoSelectedPrimary405_TripsWholeProvider_SubsequentAutoSelectedRequestBypassesADifferentModel_OnSameProvider()
     {
         // Like 401 above, a 405 trips every model on the provider at once (RecordProviderFailure) - a
         // gateway/WAF block at the edge would reject any model on that provider identically, not just the
@@ -1236,38 +1259,42 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("sibling-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "sibling-upstream", comparisonType: StringComparison.Ordinal))
             {
                 siblingAttempted = true;
                 return Ok("should-not-be-served");
             }
 
-            return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.MethodNotAllowed);
+            return request.RequestUri!.Host == BackupHost
+                ? Ok("served-by-backup")
+                : Status(HttpStatusCode.MethodNotAllowed);
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CircuitBreaker = circuitBreaker
             }
         );
 
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
-        Assert.Equal(StatusCodes.Status200OK, firstContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(firstContext));
+        var firstContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: firstContext.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(firstContext));
 
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "auto");
-        Assert.Equal(StatusCodes.Status200OK, secondContext.Response.StatusCode);
-        Assert.Equal("served-by-backup", await ReadBodyAsync(secondContext));
+        var secondContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: secondContext.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(secondContext));
         Assert.False(siblingAttempted);
     }
 
     [Fact]
-    public async Task InvokeAsync_ExplicitPrimary405_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
+    public async Task
+        InvokeAsync_ExplicitPrimary405_TripsWholeProvider_SubsequentExplicitRequestRelaysTheTruthWithoutNetworkCall()
     {
         var circuitBreaker = new CircuitBreaker();
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
@@ -1280,38 +1307,38 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request =>
         {
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (body.Contains("sibling-upstream", StringComparison.Ordinal))
+            if (body.Contains(value: "sibling-upstream", comparisonType: StringComparison.Ordinal))
             {
                 siblingAttempted = true;
                 return Ok("should-not-be-served");
             }
 
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupAttempted = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupAttempted = true;
 
-            return request.RequestUri!.Host == BackupHost ? Ok("served-by-backup") : Status(HttpStatusCode.MethodNotAllowed);
+            return request.RequestUri!.Host == BackupHost
+                ? Ok("served-by-backup")
+                : Status(HttpStatusCode.MethodNotAllowed);
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CircuitBreaker = circuitBreaker
             }
         );
 
-        var firstContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-        Assert.Equal(405, firstContext.Response.StatusCode);
+        var firstContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+        Assert.Equal(405, actual: firstContext.Response.StatusCode);
         Assert.False(backupAttempted);
         Assert.True(circuitBreaker.IsProviderOpen("prov-a"));
 
-        var secondContext = await RunWithSharedMiddleware(middleware, requestedModel: "sibling");
-        Assert.Equal(503, secondContext.Response.StatusCode);
+        var secondContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "sibling");
+        Assert.Equal(503, actual: secondContext.Response.StatusCode);
         Assert.False(siblingAttempted);
     }
 
@@ -1339,17 +1366,15 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
             return request.RequestUri!.Host == PrimaryHost ? Status(status) : Ok("served-by-backup");
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal((int)status, context.Response.StatusCode);
+        Assert.Equal(expected: (int)status, actual: context.Response.StatusCode);
         Assert.False(backupCalled);
     }
 
@@ -1362,9 +1387,10 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(_ => throw new HttpRequestException("connection refused"));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status502BadGateway, actual: context.Response.StatusCode);
     }
 
     // Proves/disproves the socket-refusal-surfaced-as-403 question in
@@ -1382,17 +1408,18 @@ public class ProxyMiddlewareFallbackTests
             ("primary", "prov-a", "primary-upstream", $"https://{PrimaryHost}"));
 
         var handler = new RoutingHandlerStub(_ => throw new HttpRequestException(
-            "No connection could be made because the target machine actively refused it.",
-            new SocketException((int)SocketError.ConnectionRefused)));
+            message: "No connection could be made because the target machine actively refused it.",
+            inner: new SocketException((int)SocketError.ConnectionRefused)));
 
-        var context = await RunAsync(resolver, handler, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "primary",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
-        Assert.NotEqual(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status502BadGateway, actual: context.Response.StatusCode);
+        Assert.NotEqual(expected: StatusCodes.Status403Forbidden, actual: context.Response.StatusCode);
 
         var body = await ReadBodyAsync(context);
         using var json = JsonDocument.Parse(body);
-        Assert.Equal("502", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(expected: "502", actual: json.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
     // Mirrors the full multi-provider cascade from the production log (zhipu 405 -> moonshot 401 ->
@@ -1416,15 +1443,16 @@ public class ProxyMiddlewareFallbackTests
             "moonshot.test" => Status(HttpStatusCode.Unauthorized),
             "minimax.test" => Status(HttpStatusCode.Unauthorized),
             "ollama.test" => throw new HttpRequestException(
-                "No connection could be made because the target machine actively refused it.",
-                new SocketException((int)SocketError.ConnectionRefused)),
-            _ => throw new InvalidOperationException("unexpected host"),
+                message: "No connection could be made because the target machine actively refused it.",
+                inner: new SocketException((int)SocketError.ConnectionRefused)),
+            _ => throw new InvalidOperationException("unexpected host")
         });
 
-        var context = await RunAsync(resolver, handler, requestedModel: "auto", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, requestedModel: "auto",
+            requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
-        Assert.NotEqual(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        Assert.Equal(expected: StatusCodes.Status502BadGateway, actual: context.Response.StatusCode);
+        Assert.NotEqual(expected: StatusCodes.Status403Forbidden, actual: context.Response.StatusCode);
     }
 
     [Fact]
@@ -1438,18 +1466,19 @@ public class ProxyMiddlewareFallbackTests
         var handler = new RoutingHandlerStub(request => request.RequestUri!.Host switch
         {
             "backup2.test" => Ok("served-by-backup2"),
-            _ => Status(HttpStatusCode.BadGateway), // primary and backup1 both 5xx
+            _ => Status(HttpStatusCode.BadGateway) // primary and backup1 both 5xx
         });
 
         var capturing = new CapturingPublisher();
-        var context = await RunAsync(resolver, handler, capturing, requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
+        var context = await RunAsync(resolver: resolver, handler: handler, telemetryPublisher: capturing,
+            requestedModel: "primary", requestAborted: TestContext.Current.CancellationToken);
 
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal("served-by-backup2", await ReadBodyAsync(context));
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-backup2", actual: await ReadBodyAsync(context));
 
         var telemetry = await capturing.WaitAsync();
         Assert.True(telemetry.IsFallback);
-        Assert.Equal("prov-c", telemetry.Provider);
+        Assert.Equal(expected: "prov-c", actual: telemetry.Provider);
     }
 
     [Fact]
@@ -1462,10 +1491,7 @@ public class ProxyMiddlewareFallbackTests
 
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == BackupHost)
-            {
-                backupCalled = true;
-            }
+            if (request.RequestUri!.Host == BackupHost) backupCalled = true;
 
             // A genuine client abort: cancellation requested on the inbound request, surfaced as an OCE.
             throw new OperationCanceledException();
@@ -1476,7 +1502,7 @@ public class ProxyMiddlewareFallbackTests
 
         // The client going away is not an outage - it must propagate, not silently fail over to a backup.
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            RunAsync(resolver, handler, requestedModel: "primary", requestAborted: aborted.Token));
+            RunAsync(resolver: resolver, handler: handler, requestedModel: "primary", requestAborted: aborted.Token));
 
         Assert.False(backupCalled);
     }
@@ -1496,21 +1522,19 @@ public class ProxyMiddlewareFallbackTests
         var primaryAttempts = 0;
         var handler = new RoutingHandlerStub(request =>
         {
-            if (request.RequestUri!.Host == PrimaryHost)
-            {
-                primaryAttempts++;
-            }
+            if (request.RequestUri!.Host == PrimaryHost) primaryAttempts++;
 
             return request.RequestUri!.Host == PrimaryHost
                 ? Status(HttpStatusCode.ServiceUnavailable)
                 : Ok("served-by-backup");
         });
 
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver, circuitBreaker: circuitBreaker);
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver, circuitBreaker: circuitBreaker);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 CircuitBreaker = circuitBreaker
@@ -1521,20 +1545,21 @@ public class ProxyMiddlewareFallbackTests
         // before falling over to the backup within the same request.
         for (var i = 0; i < 3; i++)
         {
-            var context = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
-            Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+            var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+            Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         }
 
-        Assert.Equal(3, primaryAttempts);
-        Assert.True(circuitBreaker.IsOpen(new CircuitBreakerTargetKey("prov-a", $"https://{PrimaryHost}/", "primary-upstream")));
+        Assert.Equal(3, actual: primaryAttempts);
+        Assert.True(circuitBreaker.IsOpen(new CircuitBreakerTargetKey(Provider: "prov-a",
+            BaseUrl: $"https://{PrimaryHost}/", ProviderModelId: "primary-upstream")));
 
         // A fourth, explicit request: the primary's circuit is now open, so - docs/adr/0005 (expanded
         // scope) - RequestInterceptor no longer substitutes the backup; it blocks the request with a
         // synthesized message instead, and no attempt against "primary" is ever made.
-        var finalContext = await RunWithSharedMiddleware(middleware, requestedModel: "primary");
+        var finalContext = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
 
-        Assert.Equal(503, finalContext.Response.StatusCode);
-        Assert.Equal(3, primaryAttempts); // unchanged - the 4th request never touched the primary at all
+        Assert.Equal(503, actual: finalContext.Response.StatusCode);
+        Assert.Equal(3, actual: primaryAttempts); // unchanged - the 4th request never touched the primary at all
     }
 
     private static async Task<HttpContext> RunWithSharedMiddleware(ProxyMiddleware middleware, string requestedModel)
@@ -1550,54 +1575,156 @@ public class ProxyMiddlewareFallbackTests
         context.Response.Body = new MemoryStream();
         context.RequestAborted = TestContext.Current.CancellationToken;
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
         return context;
     }
 
-    // -- helpers -------------------------------------------------------------
-
-    private static HttpResponseMessage Ok(string body) =>
-        new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "text/plain") };
-
-    private static HttpResponseMessage Status(HttpStatusCode status) =>
-        new(status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
-
-    private static HttpResponseMessage GeminiEmbeddedAuthErrorResponse() => new(HttpStatusCode.BadRequest)
+    [Fact]
+    public async Task
+        InvokeAsync_CustomTranslatorOptsIntoEmbeddedErrorDecoding_SurfacesItsMessage_WithoutMiddlewareKnowingItsType()
     {
-        Content = new StringContent(
-            """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"UNAUTHENTICATED"}}""",
-            Encoding.UTF8,
-            "application/json"),
-    };
+        // The reason IPayloadTranslator.HandlesEmbeddedErrorAt/TryExtractEmbeddedError exist: a translator
+        // ProxyMiddleware has never heard of gets its own error envelope decoded and surfaced. The
+        // middleware previously branched on `translator is GeminiPayloadTranslator` / `is
+        // AnthropicPayloadTranslator` and called a static extractor on each, so a provider like this one
+        // was silently un-classified - TranslateResponse would mangle its error into the bogus empty
+        // completion this test asserts the client does NOT receive. Nothing here touches ProxyMiddleware.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-custom", "primary-upstream", $"https://{PrimaryHost}"));
 
-    private static HttpResponseMessage AnthropicEmbeddedErrorResponse() => new(HttpStatusCode.BadRequest)
-    {
-        Content = new StringContent(
-            """{"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}""",
-            Encoding.UTF8,
-            "application/json"),
-    };
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["prov-custom"] = new FakeTranslator(handlesEmbeddedErrors: true)
+        };
 
-    private static HttpResponseMessage AnthropicOutOfCreditsResponse() => new(HttpStatusCode.BadRequest)
-    {
-        Content = new StringContent(
-            """{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}""",
-            Encoding.UTF8,
-            "application/json"),
-    };
+        var handler = new RoutingHandlerStub(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"customError":{"detail":"tenant credential rejected"}}""",
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
+        });
 
-    private static HttpResponseMessage OpenAiInsufficientQuotaResponse() => new((HttpStatusCode)429)
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+        var middleware = new ProxyMiddleware(
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies { Translators = translators });
+
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+
+        Assert.Equal(400, actual: context.Response.StatusCode);
+
+        var body = await ReadBodyAsync(context);
+        using var responseJson = JsonDocument.Parse(body);
+        Assert.Equal(
+            expected: "tenant credential rejected",
+            actual: responseJson.RootElement.GetProperty("error").GetProperty("message").GetString());
+        Assert.DoesNotContain(expectedSubstring: FakeTranslator.MangledResponseMarker, actualString: body,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TranslatorThatDoesNotOptIntoEmbeddedErrorDecoding_KeepsTheUntouchedTranslatedPath()
     {
-        Content = new StringContent(
-            """{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}""",
-            Encoding.UTF8,
-            "application/json"),
-    };
+        // The other half of the seam: the interface defaults must stay behaviorally inert. A translator
+        // that says nothing about embedded errors must not have its error body pre-read - pre-reading is
+        // observable (a buffered body is forwarded whole rather than streamed, and it is what ADR-0004's
+        // out-of-credits classifier inspects), so the default has to leave the response exactly where it
+        // was: routed through TranslateResponse like any other non-2xx from a translated provider.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("primary", "prov-custom", "primary-upstream", $"https://{PrimaryHost}"));
+
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["prov-custom"] = new FakeTranslator(handlesEmbeddedErrors: false)
+        };
+
+        var handler = new RoutingHandlerStub(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"customError":{"detail":"tenant credential rejected"}}""",
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
+        });
+
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+        var middleware = new ProxyMiddleware(
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies { Translators = translators });
+
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "primary");
+
+        Assert.Equal(400, actual: context.Response.StatusCode);
+        Assert.Contains(expectedSubstring: FakeTranslator.MangledResponseMarker,
+            actualString: await ReadBodyAsync(context), comparisonType: StringComparison.Ordinal);
+    }
+
+    private static HttpResponseMessage Ok(string body)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "text/plain") };
+    }
+
+    private static HttpResponseMessage Status(HttpStatusCode status)
+    {
+        return new HttpResponseMessage(status)
+        { Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json") };
+    }
+
+    private static HttpResponseMessage GeminiEmbeddedAuthErrorResponse()
+    {
+        return new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"UNAUTHENTICATED"}}""",
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
+        };
+    }
+
+    private static HttpResponseMessage AnthropicEmbeddedErrorResponse()
+    {
+        return new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}""",
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
+        };
+    }
+
+    private static HttpResponseMessage AnthropicOutOfCreditsResponse()
+    {
+        return new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}""",
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
+        };
+    }
+
+    private static HttpResponseMessage OpenAiInsufficientQuotaResponse()
+    {
+        return new HttpResponseMessage((HttpStatusCode)429)
+        {
+            Content = new StringContent(
+                """{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}""",
+                encoding: Encoding.UTF8,
+                mediaType: "application/json")
+        };
+    }
 
     private static async Task<string> ReadBodyAsync(HttpContext context)
     {
         context.Response.Body.Position = 0;
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        using var reader = new StreamReader(stream: context.Response.Body, encoding: Encoding.UTF8);
         return await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
     }
 
@@ -1608,11 +1735,12 @@ public class ProxyMiddlewareFallbackTests
         string requestedModel = "primary",
         CancellationToken requestAborted = default)
     {
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
         var middleware = new ProxyMiddleware(
-            NullLogger<ProxyMiddleware>.Instance,
-            interceptor,
-            new HttpClient(handler),
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
             dependencies: new ProxyMiddlewareDependencies
             {
                 TelemetryPublisher = telemetryPublisher
@@ -1630,14 +1758,73 @@ public class ProxyMiddlewareFallbackTests
         context.Response.Body = new MemoryStream();
         context.RequestAborted = requestAborted;
 
-        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
         return context;
+    }
+
+    // -- helpers -------------------------------------------------------------
+
+    /// <summary>
+    /// A minimal third-party <see cref="IPayloadTranslator"/> for a provider ProxyMiddleware has no
+    /// compile-time knowledge of. <paramref name="handlesEmbeddedErrors"/> flips only the two
+    /// embedded-error members, so the pair of tests above differ in exactly the thing under test.
+    /// <see cref="TranslateResponse"/> deliberately destroys the body it is handed (stamping
+    /// <see cref="MangledResponseMarker"/>) - that is what makes "did the pre-read happen?" observable
+    /// from the client's side, and it mirrors what a real translator does to an error envelope it was
+    /// never meant to see.
+    /// </summary>
+    private sealed class FakeTranslator(bool handlesEmbeddedErrors) : IPayloadTranslator
+    {
+        internal const string MangledResponseMarker = "mangled-by-translate-response";
+
+        public string Provider => "prov-custom";
+
+        public Uri BuildRequestUri(Uri baseUrl, string providerModelId, bool isStreaming)
+        {
+            return new Uri(baseUri: baseUrl, relativeUri: "/v1/chat/completions");
+        }
+
+        public byte[] TranslateRequest(byte[] openAiShapedBody)
+        {
+            return openAiShapedBody;
+        }
+
+        public byte[] TranslateResponse(byte[] nativeShapedBody)
+        {
+            return Encoding.UTF8.GetBytes($$"""{"choices":[],"note":"{{MangledResponseMarker}}"}""");
+        }
+
+        public IStreamTranslator CreateStreamTranslator()
+        {
+            throw new NotSupportedException("These tests never take the streaming path.");
+        }
+
+        public bool HandlesEmbeddedErrorAt(int statusCode)
+        {
+            return handlesEmbeddedErrors && statusCode == StatusCodes.Status400BadRequest;
+        }
+
+        public bool TryExtractEmbeddedError(byte[] body, out EmbeddedProviderError error)
+        {
+            error = default;
+            if (!handlesEmbeddedErrors) return false;
+
+            var detail = JsonDocument.Parse(body).RootElement
+                .GetProperty("customError").GetProperty("detail").GetString();
+            if (string.IsNullOrEmpty(detail)) return false;
+
+            error = new EmbeddedProviderError(Status: "CREDENTIAL_REJECTED", Message: detail, true);
+            return true;
+        }
     }
 
     private sealed class RoutingHandlerStub(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(handler(request));
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(handler(request));
+        }
     }
 
     private sealed class CapturingPublisher : ITelemetryPublisher
@@ -1651,14 +1838,17 @@ public class ProxyMiddlewareFallbackTests
             return Task.CompletedTask;
         }
 
-        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
 
         public async Task<RoutingTelemetryEvent> WaitAsync()
         {
-            var completed = await Task.WhenAny(_tcs.Task, Task.Delay(TimeSpan.FromSeconds(5)));
-            Assert.True(ReferenceEquals(completed, _tcs.Task), "Timed out waiting for a routing telemetry event.");
+            var completed = await Task.WhenAny(task1: _tcs.Task, task2: Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.True(condition: ReferenceEquals(objA: completed, objB: _tcs.Task),
+                userMessage: "Timed out waiting for a routing telemetry event.");
             return await _tcs.Task;
         }
     }
 }
-

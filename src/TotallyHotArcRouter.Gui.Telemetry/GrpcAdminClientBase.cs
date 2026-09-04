@@ -48,6 +48,12 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
     /// <summary>Gets the generated gRPC client this admin client wraps.</summary>
     protected TGeneratedClient Client { get; }
 
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedChannel?.Dispose();
+    }
+
     /// <summary>Constructs this client's concrete <typeparamref name="TException"/> from a wrapped failure.</summary>
     protected abstract TException CreateException(string message, Exception? innerException, bool isUnavailable);
 
@@ -60,8 +66,10 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
     /// </summary>
     /// <param name="ex">The failed call's exception.</param>
     /// <param name="action">Describes the failed operation, e.g. <c>"Could not read the price sources"</c>.</param>
-    protected TException Wrap(RpcException ex, string action) =>
-        Wrap(ex, $"{action}: the router is not reachable.", action);
+    protected TException Wrap(RpcException ex, string action)
+    {
+        return Wrap(ex: ex, unavailableMessage: $"{action}: the router is not reachable.", action: action);
+    }
 
     /// <summary>
     /// Wraps <paramref name="ex"/> like <see cref="Wrap(RpcException, string)"/>, but with an explicit
@@ -70,11 +78,10 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
     /// shape (e.g. <c>RoutingGateAdminClient</c>, whose actions describe individual calls but whose
     /// unavailable message is action-agnostic).
     /// </summary>
-    protected TException Wrap(RpcException ex, string unavailableMessage, string action) =>
-        ex.StatusCode == StatusCode.Unavailable
-            ? CreateException(unavailableMessage, ex, true)
-            : CreateException($"{action}: {ex.Status.Detail}", ex, false);
-
-    /// <inheritdoc />
-    public void Dispose() => _ownedChannel?.Dispose();
+    protected TException Wrap(RpcException ex, string unavailableMessage, string action)
+    {
+        return ex.StatusCode == StatusCode.Unavailable
+            ? CreateException(message: unavailableMessage, innerException: ex, true)
+            : CreateException(message: $"{action}: {ex.Status.Detail}", innerException: ex, false);
+    }
 }

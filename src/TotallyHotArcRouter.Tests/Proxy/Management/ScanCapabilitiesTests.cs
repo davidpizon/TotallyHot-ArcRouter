@@ -1,13 +1,10 @@
+using Moq;
 using System.Net;
 using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using TotallyHot.ArcRouter.Tests.Proxy;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
@@ -16,7 +13,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// (<c>docs/router/tool-call-normalization.md</c> Phase 2): the explicit
 /// <c>POST /admin/providers/{key}/scan-capabilities</c> path, and the best-effort refresh that runs after a
 /// provider save.
-///
 /// <para>
 /// The load-bearing guarantee is that the save-time scan can never affect the save. A provider that is
 /// simply not running yet must still be configurable - which is the normal case when adding a local
@@ -29,38 +25,59 @@ public sealed class ScanCapabilitiesTests : IDisposable
 
     private readonly TempDatabase _temp = new();
 
-    private static InMemoryProviderConfigStore StoreWithProvider(string key = "lmstudio") =>
-        new(new ModelRoutingOptions
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
+
+    private static InMemoryProviderConfigStore StoreWithProvider(string key = "lmstudio")
+    {
+        return new InMemoryProviderConfigStore(new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [key] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1" },
-            },
+                [key] = new() { BaseUrl = "http://localhost:1234/v1" }
+            }
         });
+    }
 
-    private ToolCallCapabilityStore CapabilityStore() => _temp.CreateToolCallCapabilityStore();
+    private ToolCallCapabilityStore CapabilityStore()
+    {
+        return _temp.CreateToolCallCapabilityStore();
+    }
 
-    private static ProviderEndpointScanner Scanner(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) =>
-        new(new HttpClient(new DelegatingHandlerStub(handler)), Mock.Of<IEnvironmentVariableProvider>());
+    private static ProviderEndpointScanner Scanner(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+    {
+        return new ProviderEndpointScanner(httpClient: new HttpClient(new DelegatingHandlerStub(handler)),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
+    }
 
-    private static ProviderEndpointScanner AlwaysOk(string body) =>
-        Scanner(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) }));
+    private static ProviderEndpointScanner AlwaysOk(string body)
+    {
+        return Scanner(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(body) }));
+    }
 
-    private static ProviderEndpointScanner AlwaysThrows() =>
-        Scanner(_ => throw new HttpRequestException("connection refused"));
+    private static ProviderEndpointScanner AlwaysThrows()
+    {
+        return Scanner(_ => throw new HttpRequestException("connection refused"));
+    }
 
     private static ManagementFacade Facade(
         IProviderConfigStore store,
         ProviderEndpointScanner? scanner = null,
         ToolCallCapabilityStore? capabilityStore = null,
-        IProviderInteractionStatusStore? interactionStatusStore = null) =>
-        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient(),
-            new ManagementFacadeDependencies
+        IProviderInteractionStatusStore? interactionStatusStore = null)
+    {
+        return new ManagementFacade(store: store, environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies
             {
                 EndpointScanner = scanner,
                 CapabilityStore = capabilityStore,
-                InteractionStatusStore = interactionStatusStore,
+                InteractionStatusStore = interactionStatusStore
             });
+    }
 
     // ----- The explicit scan endpoint -----
 
@@ -68,9 +85,10 @@ public sealed class ScanCapabilitiesTests : IDisposable
     public async Task ScanCapabilities_PersistsWhatTheProviderAnswered()
     {
         var capabilities = CapabilityStore();
-        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), capabilities);
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysOk(OpenAiBody), capabilityStore: capabilities);
 
-        var result = await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        var result = await facade.ScanCapabilitiesAsync(key: "lmstudio",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.True(result.Value!.OpenAiCompatible);
@@ -84,9 +102,9 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // path returns through - reads the capability store fresh each call, so a scan's effect must be
         // visible there too, not just via the narrower GetProviderCapabilities the test above checks.
         var capabilities = CapabilityStore();
-        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), capabilities);
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysOk(OpenAiBody), capabilityStore: capabilities);
 
-        await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "lmstudio", cancellationToken: TestContext.Current.CancellationToken);
 
         var provider = Assert.Single(facade.ListProviders().Providers);
         Assert.NotNull(provider.EndpointCapabilities);
@@ -96,7 +114,8 @@ public sealed class ScanCapabilitiesTests : IDisposable
     [Fact]
     public void ListProviders_BeforeAnyScanHasRun_LeavesEndpointCapabilitiesNull()
     {
-        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), CapabilityStore());
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysOk(OpenAiBody),
+            capabilityStore: CapabilityStore());
 
         var provider = Assert.Single(facade.ListProviders().Providers);
 
@@ -110,19 +129,24 @@ public sealed class ScanCapabilitiesTests : IDisposable
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["lmstudio"] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1" },
+                ["lmstudio"] = new() { BaseUrl = "http://localhost:1234/v1" }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "qwen2.5-coder", Provider = "lmstudio", ProviderModelId = "qwen2.5-coder" }],
+            ModelList =
+            [
+                new ModelRouteEntry
+                    { ModelName = "qwen2.5-coder", Provider = "lmstudio", ProviderModelId = "qwen2.5-coder" }
+            ]
         });
         var capabilities = CapabilityStore();
         capabilities.TryRecordModelCapability(new ModelToolCapability(
-            "lmstudio", "qwen2.5-coder", "hermes", DetectionConfidence.Observed, "test evidence"));
-        var facade = Facade(store, AlwaysOk(OpenAiBody), capabilities);
+            ProviderKey: "lmstudio", ModelName: "qwen2.5-coder", Dialect: "hermes",
+            Confidence: DetectionConfidence.Observed, Evidence: "test evidence"));
+        var facade = Facade(store: store, scanner: AlwaysOk(OpenAiBody), capabilityStore: capabilities);
 
         var model = Assert.Single(Assert.Single(facade.ListProviders().Providers).Models);
 
-        Assert.Equal("hermes", model.Dialect);
-        Assert.Equal("Observed", model.Confidence);
+        Assert.Equal(expected: "hermes", actual: model.Dialect);
+        Assert.Equal(expected: "Observed", actual: model.Confidence);
     }
 
     [Fact]
@@ -134,9 +158,13 @@ public sealed class ScanCapabilitiesTests : IDisposable
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["lmstudio"] = new ProviderOptions { BaseUrl = "http://localhost:1234/v1" },
+                ["lmstudio"] = new() { BaseUrl = "http://localhost:1234/v1" }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "qwen2.5-coder", Provider = "lmstudio", ProviderModelId = "qwen2.5-coder" }],
+            ModelList =
+            [
+                new ModelRouteEntry
+                    { ModelName = "qwen2.5-coder", Provider = "lmstudio", ProviderModelId = "qwen2.5-coder" }
+            ]
         });
         var facade = Facade(store);
 
@@ -151,12 +179,14 @@ public sealed class ScanCapabilitiesTests : IDisposable
     [Fact]
     public async Task ScanCapabilities_ForAnUnknownProvider_IsNotFound()
     {
-        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), CapabilityStore());
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysOk(OpenAiBody),
+            capabilityStore: CapabilityStore());
 
-        var result = await facade.ScanCapabilitiesAsync("nope", TestContext.Current.CancellationToken);
+        var result =
+            await facade.ScanCapabilitiesAsync(key: "nope", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.NotFound, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.NotFound, actual: result.ErrorType);
     }
 
     [Fact]
@@ -166,10 +196,11 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // instance), so this must degrade rather than throw.
         var facade = Facade(StoreWithProvider());
 
-        var result = await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        var result = await facade.ScanCapabilitiesAsync(key: "lmstudio",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
-        Assert.Equal(ManagementErrorType.Unavailable, result.ErrorType);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
     }
 
     [Fact]
@@ -178,13 +209,14 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // Unlike the save-time scan, an explicit scan's failure is surfaced - the operator asked for it, so
         // they should see why it did not work.
         var capabilities = CapabilityStore();
-        var facade = Facade(StoreWithProvider(), AlwaysThrows(), capabilities);
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysThrows(), capabilityStore: capabilities);
 
-        var result = await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        var result = await facade.ScanCapabilitiesAsync(key: "lmstudio",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success); // the scan itself completed; it reports the failure in its payload
         Assert.False(result.Value!.OpenAiCompatible);
-        Assert.Contains("connection refused", result.Value.ScanError);
+        Assert.Contains(expectedSubstring: "connection refused", actualString: result.Value.ScanError);
     }
 
     [Fact]
@@ -198,10 +230,12 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // here, is the behavior that makes bounding it safe: when the budget elapses mid-probe, HttpClient
         // surfaces it as TaskCanceledException, and ScanAsync must report that in its payload rather than
         // let it escape into the admin endpoint as a 500.
-        var timesOut = Scanner(_ => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout."));
-        var facade = Facade(StoreWithProvider(), timesOut, CapabilityStore());
+        var timesOut = Scanner(_ =>
+            throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout."));
+        var facade = Facade(store: StoreWithProvider(), scanner: timesOut, capabilityStore: CapabilityStore());
 
-        var result = await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        var result = await facade.ScanCapabilitiesAsync(key: "lmstudio",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.False(result.Value!.OpenAiCompatible);
@@ -216,16 +250,16 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // would otherwise persist a result no probe ever established - durably degrading a healthy
         // provider's record to "answers nothing" just because the operator navigated away mid-scan.
         var capabilities = CapabilityStore();
-        var healthy = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), capabilities);
-        await healthy.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        var healthy = Facade(store: StoreWithProvider(), scanner: AlwaysOk(OpenAiBody), capabilityStore: capabilities);
+        await healthy.ScanCapabilitiesAsync(key: "lmstudio", cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(capabilities.GetProviderCapabilities("lmstudio")!.OpenAiCompatible);
 
         using var aborted = new CancellationTokenSource();
         await aborted.CancelAsync();
-        var facade = Facade(StoreWithProvider(), AlwaysThrows(), capabilities);
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysThrows(), capabilityStore: capabilities);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => facade.ScanCapabilitiesAsync("lmstudio", aborted.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            facade.ScanCapabilitiesAsync(key: "lmstudio", cancellationToken: aborted.Token));
 
         Assert.True(capabilities.GetProviderCapabilities("lmstudio")!.OpenAiCompatible);
     }
@@ -238,15 +272,17 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // real observation about the provider and must still be recorded - otherwise the guard would
         // suppress precisely the failures an operator runs an explicit scan to discover.
         var capabilities = CapabilityStore();
-        var timesOut = Scanner(_ => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout."));
-        var facade = Facade(StoreWithProvider(), timesOut, capabilities);
+        var timesOut = Scanner(_ =>
+            throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout."));
+        var facade = Facade(store: StoreWithProvider(), scanner: timesOut, capabilityStore: capabilities);
 
-        var result = await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        var result = await facade.ScanCapabilitiesAsync(key: "lmstudio",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         var stored = capabilities.GetProviderCapabilities("lmstudio");
         Assert.NotNull(stored);
-        Assert.False(stored!.OpenAiCompatible);
+        Assert.False(stored.OpenAiCompatible);
         Assert.False(string.IsNullOrWhiteSpace(stored.ScanError));
     }
 
@@ -256,9 +292,10 @@ public sealed class ScanCapabilitiesTests : IDisposable
     public async Task ScanCapabilities_OnSuccess_RecordsASuccessfulInteraction()
     {
         var interactionStatus = new ProviderInteractionStatusStore();
-        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), CapabilityStore(), interactionStatus);
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysOk(OpenAiBody),
+            capabilityStore: CapabilityStore(), interactionStatusStore: interactionStatus);
 
-        await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "lmstudio", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(interactionStatus.Get("lmstudio")!.Ok);
     }
@@ -267,14 +304,15 @@ public sealed class ScanCapabilitiesTests : IDisposable
     public async Task ScanCapabilities_WhenTheScanErrors_RecordsAFailure()
     {
         var interactionStatus = new ProviderInteractionStatusStore();
-        var facade = Facade(StoreWithProvider(), AlwaysThrows(), CapabilityStore(), interactionStatus);
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysThrows(), capabilityStore: CapabilityStore(),
+            interactionStatusStore: interactionStatus);
 
-        await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "lmstudio", cancellationToken: TestContext.Current.CancellationToken);
 
         var status = interactionStatus.Get("lmstudio");
         Assert.NotNull(status);
-        Assert.False(status!.Ok);
-        Assert.Equal("Scan capabilities", status.Operation);
+        Assert.False(status.Ok);
+        Assert.Equal(expected: "Scan capabilities", actual: status.Operation);
     }
 
     [Fact]
@@ -283,15 +321,17 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // docs/adr/0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md's track
         // separation: an admin action must never write, clear, or otherwise affect LiveTraffic.
         var interactionStatus = new ProviderInteractionStatusStore();
-        interactionStatus.RecordLiveTrafficFailure("lmstudio", ProviderInteractionKind.OutOfCredits, "out of credits");
-        var facade = Facade(StoreWithProvider(), AlwaysOk(OpenAiBody), CapabilityStore(), interactionStatus);
+        interactionStatus.RecordLiveTrafficFailure(providerKey: "lmstudio", kind: ProviderInteractionKind.OutOfCredits,
+            message: "out of credits");
+        var facade = Facade(store: StoreWithProvider(), scanner: AlwaysOk(OpenAiBody),
+            capabilityStore: CapabilityStore(), interactionStatusStore: interactionStatus);
 
-        await facade.ScanCapabilitiesAsync("lmstudio", TestContext.Current.CancellationToken);
+        await facade.ScanCapabilitiesAsync(key: "lmstudio", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(interactionStatus.Get("lmstudio")!.Ok);
         var liveTraffic = interactionStatus.GetLiveTraffic("lmstudio");
         Assert.NotNull(liveTraffic);
-        Assert.False(liveTraffic!.Ok);
+        Assert.False(liveTraffic.Ok);
     }
 
     // ----- The best-effort scan on provider save -----
@@ -301,12 +341,12 @@ public sealed class ScanCapabilitiesTests : IDisposable
     {
         var store = StoreWithProvider();
         var capabilities = CapabilityStore();
-        var facade = Facade(store, AlwaysOk(OpenAiBody), capabilities);
+        var facade = Facade(store: store, scanner: AlwaysOk(OpenAiBody), capabilityStore: capabilities);
 
         await facade.UpsertProviderAsync(
-            "lmstudio",
-            new ProviderWriteRequest("http://localhost:1234/v1", null, null, null, null),
-            TestContext.Current.CancellationToken);
+            key: "lmstudio",
+            request: new ProviderWriteRequest(BaseUrl: "http://localhost:1234/v1", null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(capabilities.GetProviderCapabilities("lmstudio")!.OpenAiCompatible);
     }
@@ -316,15 +356,16 @@ public sealed class ScanCapabilitiesTests : IDisposable
     {
         // The case that matters: adding a local provider before starting the server it points at.
         var store = StoreWithProvider();
-        var facade = Facade(store, AlwaysThrows(), CapabilityStore());
+        var facade = Facade(store: store, scanner: AlwaysThrows(), capabilityStore: CapabilityStore());
 
         var result = await facade.UpsertProviderAsync(
-            "lmstudio",
-            new ProviderWriteRequest("http://localhost:1234/v1", null, null, null, null),
-            TestContext.Current.CancellationToken);
+            key: "lmstudio",
+            request: new ProviderWriteRequest(BaseUrl: "http://localhost:1234/v1", null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("http://localhost:1234/v1", store.Snapshot.Options.Providers["lmstudio"].BaseUrl);
+        Assert.Equal(expected: "http://localhost:1234/v1",
+            actual: store.Snapshot.Options.Providers["lmstudio"].BaseUrl);
     }
 
     [Fact]
@@ -334,12 +375,12 @@ public sealed class ScanCapabilitiesTests : IDisposable
         var facade = Facade(store);
 
         var result = await facade.UpsertProviderAsync(
-            "lmstudio",
-            new ProviderWriteRequest("https://changed.invalid", null, null, null, null),
-            TestContext.Current.CancellationToken);
+            key: "lmstudio",
+            request: new ProviderWriteRequest(BaseUrl: "https://changed.invalid", null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
-        Assert.Equal("https://changed.invalid", store.Snapshot.Options.Providers["lmstudio"].BaseUrl);
+        Assert.Equal(expected: "https://changed.invalid", actual: store.Snapshot.Options.Providers["lmstudio"].BaseUrl);
     }
 
     [Fact]
@@ -349,28 +390,25 @@ public sealed class ScanCapabilitiesTests : IDisposable
         // already been persisted must not be reported as failed.
         var store = StoreWithProvider();
         var facade = Facade(
-            store,
-            Scanner(_ => throw new InvalidOperationException("boom")),
-            CapabilityStore());
+            store: store,
+            scanner: Scanner(_ => throw new InvalidOperationException("boom")),
+            capabilityStore: CapabilityStore());
 
         var result = await facade.UpsertProviderAsync(
-            "lmstudio",
-            new ProviderWriteRequest("https://changed.invalid", null, null, null, null),
-            TestContext.Current.CancellationToken);
+            key: "lmstudio",
+            request: new ProviderWriteRequest(BaseUrl: "https://changed.invalid", null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
     }
 
-    public void Dispose() => _temp.Dispose();
-
-    private sealed class DelegatingHandlerStub : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
 
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) => _handler = handler;
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => _handler(request);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return handler(request);
+        }
     }
 }
-

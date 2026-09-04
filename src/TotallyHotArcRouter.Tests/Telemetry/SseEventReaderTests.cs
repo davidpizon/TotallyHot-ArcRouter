@@ -26,7 +26,7 @@ public class SseEventReaderTests
 
         var events = SseEventReader.ReadDataEvents(sse).ToList();
 
-        Assert.Equal([1, 2, 3], events.Select(e => (int)e["n"]!));
+        Assert.Equal(expected: [1, 2, 3], actual: events.Select(e => (int)e["n"]!));
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class SseEventReaderTests
         var events = SseEventReader.ReadDataEvents(sse).ToList();
 
         Assert.Single(events);
-        Assert.Equal(1, (int)events[0]["n"]!);
+        Assert.Equal(1, actual: (int)events[0]["n"]!);
     }
 
     [Fact]
@@ -80,4 +80,3 @@ public class SseEventReaderTests
         Assert.Single(events);
     }
 }
-

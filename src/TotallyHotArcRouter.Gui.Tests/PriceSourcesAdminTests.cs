@@ -1,9 +1,9 @@
+using AwesomeAssertions;
+using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using Bunit;
-using AwesomeAssertions;
-
+using IElement = AngleSharp.Dom.IElement;
 // MAUI's implicit usings bring in a Microsoft.Maui.Controls.PointerEventArgs that collides with Blazor's.
 using PointerEventArgs = Microsoft.AspNetCore.Components.Web.PointerEventArgs;
 
@@ -15,9 +15,9 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class PriceSourcesAdminTests
 {
-    private static Bunit.BunitContext NewContext(IPriceSourceAdminClient client)
+    private static BunitContext NewContext(IPriceSourceAdminClient client)
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.Services.AddSingleton(new PriceSourceStore(client));
         // reorderFlip.capture/play are a cosmetic drag-settle animation - Loose so a drag test doesn't
         // have to stub out every rect/transition call to reach the reorder it's actually asserting on.
@@ -29,7 +29,7 @@ public sealed class PriceSourcesAdminTests
     public void Renders_a_card_per_source_with_its_metadata()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 1247)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 1247)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
@@ -44,10 +44,10 @@ public sealed class PriceSourcesAdminTests
     {
         // 6h interval anchored 2h ago leaves 4h, rendered coarse.
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
             PollInterval = TimeSpan.FromHours(6),
-            AnchorAge = TimeSpan.FromHours(2),
+            AnchorAge = TimeSpan.FromHours(2)
         });
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -59,10 +59,10 @@ public sealed class PriceSourcesAdminTests
     public void Renders_minutes_alone_inside_the_last_hour()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
             PollInterval = TimeSpan.FromHours(6),
-            AnchorAge = TimeSpan.FromMinutes(340),
+            AnchorAge = TimeSpan.FromMinutes(340)
         });
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -77,10 +77,10 @@ public sealed class PriceSourcesAdminTests
         // The panel can see the schedule but not the cycle, so past the due time "due now" is the last thing
         // it actually knows. A negative number would read as a broken clock rather than a busy router.
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
             PollInterval = TimeSpan.FromHours(6),
-            AnchorAge = TimeSpan.FromHours(7),
+            AnchorAge = TimeSpan.FromHours(7)
         });
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -95,15 +95,16 @@ public sealed class PriceSourcesAdminTests
         // The whole point of re-anchoring on any cycle: a manual pull buys a full interval, rather than
         // leaving the clock reading "in 4m" immediately after the user pulled.
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
             PollInterval = TimeSpan.FromHours(6),
-            AnchorAge = TimeSpan.FromMinutes(355),
+            AnchorAge = TimeSpan.FromMinutes(355)
         });
         var cut = ctx.Render<PriceSourcesAdmin>();
         cut.Markup.Should().Contain("Next pull in 4m");
 
-        cut.FindAll("button").First(b => b.TextContent.Contains("Pull Now", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
 
         // Reset off the pull's own response - no follow-up call, no window showing a pull that already ran.
         cut.Markup.Should().Contain("Next pull in 5h 59m");
@@ -116,7 +117,7 @@ public sealed class PriceSourcesAdminTests
         // as a fact.
         using var ctx = NewContext(new FakeClient
         {
-            ListError = new PriceSourceAdminException("nope", isUnavailable: true),
+            ListError = new PriceSourceAdminException(message: "nope", isUnavailable: true)
         });
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -128,7 +129,7 @@ public sealed class PriceSourcesAdminTests
     public void Renders_a_disabled_source_as_not_served()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: false, PriorityScore: 0, PriceCount: 1247)));
+            new PriceSourceStatus(Name: "litellm", false, 0, 1247)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
@@ -142,11 +143,12 @@ public sealed class PriceSourcesAdminTests
     public void Clicking_the_toggle_flips_the_source()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("ENABLED", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "ENABLED", comparisonType: StringComparison.Ordinal)).Click();
 
         client.LastSetEnabled.Should().Be(("litellm", false));
         cut.Markup.Should().Contain("DISABLED");
@@ -163,13 +165,14 @@ public sealed class PriceSourcesAdminTests
         // so the button never reflected the flip until the component was torn down and recreated - which
         // is why a plain bUnit .Click() alone (no pointerdown) never caught it.
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
-        cut.FindAll("button").First(b => b.TextContent.Contains("ENABLED", StringComparison.Ordinal)).Click();
+        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "ENABLED", comparisonType: StringComparison.Ordinal)).Click();
 
         client.LastSetEnabled.Should().Be(("litellm", false));
         cut.Markup.Should().Contain("DISABLED");
@@ -179,11 +182,12 @@ public sealed class PriceSourcesAdminTests
     public void Clicking_pull_now_runs_a_cycle_and_reports_outcomes()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 0));
+            new PriceSourceStatus(Name: "litellm", true, 0, 0));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Pull Now", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
 
         client.RefreshCount.Should().Be(1);
         cut.Markup.Should().Contain("Last pull refreshed 42 prices");
@@ -193,14 +197,15 @@ public sealed class PriceSourcesAdminTests
     public void Surfaces_a_failed_pull_outcome_inline()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 0))
+            new PriceSourceStatus(Name: "litellm", true, 0, 0))
         {
-            RefreshOutcome = new PriceRefreshOutcome("litellm", Succeeded: false, PriceCount: 0, Error: "simulated source outage"),
+            RefreshOutcome = new PriceRefreshOutcome(Source: "litellm", false, 0, Error: "simulated source outage")
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Pull Now", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().Contain("simulated source outage");
     }
@@ -209,14 +214,15 @@ public sealed class PriceSourcesAdminTests
     public void Surfaces_a_rejected_toggle_in_the_error_banner()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
-            SetEnabledError = new PriceSourceAdminException("No price source named 'litellm' exists."),
+            SetEnabledError = new PriceSourceAdminException("No price source named 'litellm' exists.")
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("ENABLED", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "ENABLED", comparisonType: StringComparison.Ordinal)).Click();
 
         // A rejected mutation must land in the panel, not escape into the renderer.
         cut.Markup.Should().Contain("No price source named");
@@ -227,7 +233,7 @@ public sealed class PriceSourcesAdminTests
     {
         using var ctx = NewContext(new FakeClient
         {
-            ListError = new PriceSourceAdminException("the router is not reachable.", isUnavailable: true),
+            ListError = new PriceSourceAdminException(message: "the router is not reachable.", isUnavailable: true)
         });
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -241,16 +247,17 @@ public sealed class PriceSourcesAdminTests
     public void A_toggle_that_finds_the_router_gone_falls_back_to_the_unreachable_state()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
             SetEnabledError = new PriceSourceAdminException(
-                "Could not disable 'litellm': the router is not reachable.",
-                isUnavailable: true),
+                message: "Could not disable 'litellm': the router is not reachable.",
+                isUnavailable: true)
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("ENABLED", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "ENABLED", comparisonType: StringComparison.Ordinal)).Click();
 
         // The proxy died between the load and the click. The store's reachability has to follow, or the panel
         // keeps presenting a live-looking list of stale toggles.
@@ -261,14 +268,16 @@ public sealed class PriceSourcesAdminTests
     public void A_rejected_toggle_keeps_the_panel_on_screen()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
-            SetEnabledError = new PriceSourceAdminException("Could not disable 'litellm': No price source named 'litellm' exists."),
+            SetEnabledError =
+                new PriceSourceAdminException("Could not disable 'litellm': No price source named 'litellm' exists.")
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("ENABLED", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "ENABLED", comparisonType: StringComparison.Ordinal)).Click();
 
         // The router answered, so the data on screen is still good: the error belongs inline, and blanking the
         // panel into a "router down" state would be both wrong and would hide this message.
@@ -281,7 +290,7 @@ public sealed class PriceSourcesAdminTests
     public void SingleSource_HasNoGrabHandle()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
@@ -294,8 +303,8 @@ public sealed class PriceSourcesAdminTests
     public void TwoSources_EachCardHasAGrabHandle()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -310,12 +319,12 @@ public sealed class PriceSourcesAdminTests
     public async Task Dragging_the_top_card_to_the_last_rank_moves_it_there()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        await DragAsync(cut, from: 0, toIndex: 1);
+        await DragAsync(cut: cut, 0, 1);
 
         client.ReorderCount.Should().Be(1);
         client.LastReorderRequest.Should().Equal("openrouter", "litellm");
@@ -327,12 +336,12 @@ public sealed class PriceSourcesAdminTests
     public async Task Dragging_the_bottom_card_to_the_first_rank_moves_it_there()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        await DragAsync(cut, from: 1, toIndex: 0);
+        await DragAsync(cut: cut, 1, 0);
 
         client.ReorderCount.Should().Be(1);
         client.LastReorderRequest.Should().Equal("openrouter", "litellm");
@@ -344,15 +353,16 @@ public sealed class PriceSourcesAdminTests
         // A reorder recomputes from storage rather than pulling, so it must not leave an earlier manual
         // pull's outcome banner on screen looking like it describes the reorder that just happened.
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Pull Now", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
         cut.Markup.Should().Contain("Last pull refreshed");
 
-        await DragAsync(cut, from: 0, toIndex: 1);
+        await DragAsync(cut: cut, 0, 1);
 
         cut.Markup.Should().NotContain("Last pull refreshed");
     }
@@ -361,19 +371,19 @@ public sealed class PriceSourcesAdminTests
     public async Task A_drag_that_ends_on_the_rank_it_started_from_does_not_reorder()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         // Out to the other rank and back again before releasing. The working order ends up identical to the
         // store's, so there is nothing to persist - and, critically, the card must not be left detached over
         // the one it swapped with. That was the reported bug this drag model replaced.
-        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
-        await cut.InvokeAsync(() => cut.Instance.DragStarted());
+        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        await cut.InvokeAsync(cut.Instance.DragStarted);
         await cut.InvokeAsync(() => cut.Instance.MoveDraggedTo(1));
         await cut.InvokeAsync(() => cut.Instance.MoveDraggedTo(0));
-        await cut.InvokeAsync(() => cut.Instance.EndDrag());
+        await cut.InvokeAsync(cut.Instance.EndDrag);
 
         client.ReorderCount.Should().Be(0);
         cut.Markup.Should().NotContain("card-lifted");
@@ -386,15 +396,15 @@ public sealed class PriceSourcesAdminTests
     public async Task A_press_that_never_becomes_a_drag_does_not_reorder()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         // Pointerdown, then a release that JS never promoted to a drag because the pointer never travelled
         // far enough. This is what every click on the enable/disable toggle looks like from the card.
-        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
-        await cut.InvokeAsync(() => cut.Instance.EndDrag());
+        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        await cut.InvokeAsync(cut.Instance.EndDrag);
 
         client.ReorderCount.Should().Be(0);
         cut.Markup.Should().NotContain("card-lifted");
@@ -404,8 +414,8 @@ public sealed class PriceSourcesAdminTests
     public void Each_source_card_sits_in_its_own_slot()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
@@ -420,8 +430,8 @@ public sealed class PriceSourcesAdminTests
     public void The_flip_key_is_on_the_slot_not_the_card()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
@@ -438,12 +448,12 @@ public sealed class PriceSourcesAdminTests
     public async Task A_lifted_card_is_rendered_pinned_so_re_renders_cannot_strip_it()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
-        await cut.InvokeAsync(() => cut.Instance.DragStarted());
+        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        await cut.InvokeAsync(cut.Instance.DragStarted);
 
         // JS adds card-pinned itself for immediacy, but Blazor has to render it too: Blazor rewrites the
         // whole class attribute on every render, starting with the one DragStarted triggers here. A card
@@ -462,14 +472,14 @@ public sealed class PriceSourcesAdminTests
     public void A_plain_click_never_lifts_a_card()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         // Pointerdown alone - what every click on the toggle looks like from the card, since the press
         // bubbles up before the click completes. The lift only arrives via DragStarted, which JS withholds
         // until the pointer has actually travelled, so nothing is lifted (or detached) here.
-        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
 
         cut.Markup.Should().NotContain("card-lifted");
     }
@@ -478,14 +488,15 @@ public sealed class PriceSourcesAdminTests
     public void Pressing_a_card_hands_the_drag_to_js()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 0, ClientY = 42 });
+        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0, ClientY = 42 });
 
         // JS owns the drag from the press onward, so this handoff is the whole C# half of starting one.
-        var start = ctx.JSInterop.Invocations.Should().ContainSingle(i => i.Identifier == "reorderFlip.startDrag").Subject;
+        var start = ctx.JSInterop.Invocations.Should().ContainSingle(i => i.Identifier == "reorderFlip.startDrag")
+            .Subject;
         start.Arguments[0].Should().Be("#price-source-stack");
         start.Arguments[2].Should().Be("litellm");
         start.Arguments[3].Should().Be(42d);
@@ -495,12 +506,12 @@ public sealed class PriceSourcesAdminTests
     public void A_right_click_does_not_start_a_drag()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         // Button 2 is the secondary button - that press is asking for a context menu, not a reorder.
-        Card(cut, 0).PointerDown(new PointerEventArgs { Button = 2 });
+        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 2 });
 
         ctx.JSInterop.Invocations.Should().NotContain(i => i.Identifier == "reorderFlip.startDrag");
     }
@@ -511,8 +522,10 @@ public sealed class PriceSourcesAdminTests
     /// inside its own `.ds-card-slot` wrapper - the slot is the in-flow layout unit, the card is what
     /// gets lifted out of the flow while dragging.
     /// </summary>
-    private static AngleSharp.Dom.IElement Card(IRenderedComponent<PriceSourcesAdmin> cut, int index) =>
-        cut.FindAll("div.ds-card-stack > div.ds-card-slot > div.rounded-lg")[index];
+    private static IElement Card(IRenderedComponent<PriceSourcesAdmin> cut, int index)
+    {
+        return cut.FindAll("div.ds-card-stack > div.ds-card-slot > div.rounded-lg")[index];
+    }
 
     /// <summary>
     /// Drives a whole drag the way the browser would: press the card, then replay the three callbacks
@@ -522,18 +535,18 @@ public sealed class PriceSourcesAdminTests
     /// </summary>
     private static async Task DragAsync(IRenderedComponent<PriceSourcesAdmin> cut, int from, int toIndex)
     {
-        Card(cut, from).PointerDown(new PointerEventArgs { Button = 0 });
-        await cut.InvokeAsync(() => cut.Instance.DragStarted());
+        Card(cut: cut, index: from).PointerDown(new PointerEventArgs { Button = 0 });
+        await cut.InvokeAsync(cut.Instance.DragStarted);
         await cut.InvokeAsync(() => cut.Instance.MoveDraggedTo(toIndex));
-        await cut.InvokeAsync(() => cut.Instance.EndDrag());
+        await cut.InvokeAsync(cut.Instance.EndDrag);
     }
 
     [Fact]
     public void No_razor_comment_leaks_into_the_rendered_markup()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
@@ -548,27 +561,28 @@ public sealed class PriceSourcesAdminTests
     public void A_lone_source_card_does_not_offer_a_drag_cursor()
     {
         using var ctx = NewContext(new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10)));
+            new PriceSourceStatus(Name: "litellm", true, 0, 10)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
 
         // Same reasoning as the arrows: with nothing to reorder against, a card that invites a drag is a lie.
-        Card(cut, 0).GetAttribute("class").Should().Contain("drag-disabled");
+        Card(cut: cut, 0).GetAttribute("class").Should().Contain("drag-disabled");
     }
 
     [Fact]
     public async Task A_rejected_reorder_is_surfaced_inline()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10),
-            new PriceSourceStatus("openrouter", Enabled: true, PriorityScore: -10, PriceCount: 5))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10),
+            new PriceSourceStatus(Name: "openrouter", true, -10, 5))
         {
-            ReorderError = new PriceSourceAdminException("The submitted order must name every existing price source exactly once."),
+            ReorderError =
+                new PriceSourceAdminException("The submitted order must name every existing price source exactly once.")
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        await DragAsync(cut, from: 0, toIndex: 1);
+        await DragAsync(cut: cut, 0, 1);
 
         cut.Markup.Should().Contain("must name every existing price source");
     }
@@ -577,27 +591,27 @@ public sealed class PriceSourcesAdminTests
     public void A_pull_that_finds_the_router_gone_falls_back_to_the_unreachable_state()
     {
         var client = new FakeClient(
-            new PriceSourceStatus("litellm", Enabled: true, PriorityScore: 0, PriceCount: 10))
+            new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
             RefreshError = new PriceSourceAdminException(
-                "Could not refresh the price sources: the router is not reachable.",
-                isUnavailable: true),
+                message: "Could not refresh the price sources: the router is not reachable.",
+                isUnavailable: true)
         };
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Pull Now", StringComparison.Ordinal)).Click();
+        cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().Contain("Router unreachable");
     }
 
     private sealed class FakeClient(params PriceSourceStatus[] sources) : IPriceSourceAdminClient
     {
-        private List<PriceSourceStatus> _sources = [.. sources];
-
         // Mirrors the router's rule that any completed cycle re-anchors the schedule. A fake that returned a
         // fixed anchor would let a panel that ignores the refreshed schedule pass the reset test by accident.
         private DateTimeOffset _anchor = DateTimeOffset.UtcNow;
+        private List<PriceSourceStatus> _sources = [.. sources];
 
         /// <summary>The interval the fake router reports; the panel counts down to anchor + this.</summary>
         public TimeSpan PollInterval { get; init; } = TimeSpan.FromHours(6);
@@ -617,7 +631,7 @@ public sealed class PriceSourcesAdminTests
         public PriceSourceAdminException? ReorderError { get; init; }
 
         public PriceRefreshOutcome RefreshOutcome { get; init; } =
-            new("litellm", Succeeded: true, PriceCount: 42, Error: null);
+            new(Source: "litellm", true, 42, null);
 
         public (string Name, bool Enabled)? LastSetEnabled { get; private set; }
 
@@ -627,17 +641,17 @@ public sealed class PriceSourcesAdminTests
 
         public int ReorderCount { get; private set; }
 
-        public Task<PriceSourceList> ListAsync(CancellationToken cancellationToken = default) =>
-            ListError is not null
+        public Task<PriceSourceList> ListAsync(CancellationToken cancellationToken = default)
+        {
+            return ListError is not null
                 ? Task.FromException<PriceSourceList>(ListError)
                 : Task.FromResult(Snapshot());
+        }
 
-        public Task<PriceSourceList> SetEnabledAsync(string name, bool enabled, CancellationToken cancellationToken = default)
+        public Task<PriceSourceList> SetEnabledAsync(string name, bool enabled,
+            CancellationToken cancellationToken = default)
         {
-            if (SetEnabledError is not null)
-            {
-                return Task.FromException<PriceSourceList>(SetEnabledError);
-            }
+            if (SetEnabledError is not null) return Task.FromException<PriceSourceList>(SetEnabledError);
 
             LastSetEnabled = (name, enabled);
             _sources = [.. _sources.Select(s => s.Name == name ? s with { Enabled = enabled } : s)];
@@ -645,33 +659,29 @@ public sealed class PriceSourcesAdminTests
             return Task.FromResult(Snapshot());
         }
 
-        private PriceSourceList Snapshot() => new(_sources, new PriceSourceSchedule(PollInterval, _anchor));
-
         public Task<PriceRefreshResult> RefreshAsync(CancellationToken cancellationToken = default)
         {
-            if (RefreshError is not null)
-            {
-                return Task.FromException<PriceRefreshResult>(RefreshError);
-            }
+            if (RefreshError is not null) return Task.FromException<PriceRefreshResult>(RefreshError);
 
             RefreshCount++;
-            _sources = [.. _sources.Select(s => s.Name == RefreshOutcome.Source
-                ? s with { PriceCount = RefreshOutcome.PriceCount }
-                : s)];
+            _sources =
+            [
+                .. _sources.Select(s => s.Name == RefreshOutcome.Source
+                    ? s with { PriceCount = RefreshOutcome.PriceCount }
+                    : s)
+            ];
             _anchor = DateTimeOffset.UtcNow;
             return Task.FromResult(new PriceRefreshResult(
-                [RefreshOutcome],
-                RefreshOutcome.PriceCount,
-                _sources,
-                new PriceSourceSchedule(PollInterval, _anchor)));
+                Outcomes: [RefreshOutcome],
+                FreshPriceCount: RefreshOutcome.PriceCount,
+                Sources: _sources,
+                Schedule: new PriceSourceSchedule(PollInterval: PollInterval, ScheduleAnchorUtc: _anchor)));
         }
 
-        public Task<PriceRefreshResult> ReorderAsync(IReadOnlyList<string> namesInPriorityOrder, CancellationToken cancellationToken = default)
+        public Task<PriceRefreshResult> ReorderAsync(IReadOnlyList<string> namesInPriorityOrder,
+            CancellationToken cancellationToken = default)
         {
-            if (ReorderError is not null)
-            {
-                return Task.FromException<PriceRefreshResult>(ReorderError);
-            }
+            if (ReorderError is not null) return Task.FromException<PriceRefreshResult>(ReorderError);
 
             ReorderCount++;
             LastReorderRequest = namesInPriorityOrder;
@@ -683,11 +693,16 @@ public sealed class PriceSourcesAdminTests
             // Deliberately does NOT touch _anchor: a reorder recomputes from storage, it does not pull, so
             // it must not reset the countdown the way RefreshAsync's re-anchor does above.
             return Task.FromResult(new PriceRefreshResult(
-                [],
-                _sources.Sum(s => s.PriceCount),
-                _sources,
-                new PriceSourceSchedule(PollInterval, _anchor)));
+                Outcomes: [],
+                FreshPriceCount: _sources.Sum(s => s.PriceCount),
+                Sources: _sources,
+                Schedule: new PriceSourceSchedule(PollInterval: PollInterval, ScheduleAnchorUtc: _anchor)));
+        }
+
+        private PriceSourceList Snapshot()
+        {
+            return new PriceSourceList(Sources: _sources,
+                Schedule: new PriceSourceSchedule(PollInterval: PollInterval, ScheduleAnchorUtc: _anchor));
         }
     }
 }
-

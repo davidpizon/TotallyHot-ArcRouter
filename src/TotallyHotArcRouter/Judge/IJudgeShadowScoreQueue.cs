@@ -9,6 +9,9 @@ namespace TotallyHot.ArcRouter.Judge;
 /// </summary>
 public interface IJudgeShadowScoreQueue
 {
+    /// <summary>The number of jobs dropped because the queue was full.</summary>
+    long DroppedCount { get; }
+
     /// <summary>Attempts to enqueue a job without blocking.</summary>
     /// <param name="job">The job to enqueue.</param>
     /// <returns><see langword="true"/> if enqueued; <see langword="false"/> if the queue was full (dropped).</returns>
@@ -18,7 +21,4 @@ public interface IJudgeShadowScoreQueue
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>An async stream of queued jobs.</returns>
     IAsyncEnumerable<JudgeShadowScoringJob> DequeueAllAsync(CancellationToken cancellationToken);
-
-    /// <summary>The number of jobs dropped because the queue was full.</summary>
-    long DroppedCount { get; }
 }

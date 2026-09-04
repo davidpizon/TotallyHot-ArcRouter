@@ -17,19 +17,16 @@ internal static class DelimiterBalance
     public static bool IsBalanced(string code, out string? error)
     {
         var stack = new Stack<char>();
-        char quote = '\0';
+        var quote = '\0';
         var inLineComment = false;
 
-        for (int i = 0; i < code.Length; i++)
+        for (var i = 0; i < code.Length; i++)
         {
-            char c = code[i];
+            var c = code[i];
 
             if (inLineComment)
             {
-                if (c == '\n')
-                {
-                    inLineComment = false;
-                }
+                if (c == '\n') inLineComment = false;
 
                 continue;
             }
@@ -42,10 +39,7 @@ internal static class DelimiterBalance
                     continue;
                 }
 
-                if (c == quote)
-                {
-                    quote = '\0';
-                }
+                if (c == quote) quote = '\0';
 
                 continue;
             }
@@ -66,7 +60,7 @@ internal static class DelimiterBalance
                     stack.Push(c);
                     break;
                 case ')':
-                    if (!TryClose(stack, '('))
+                    if (!TryClose(stack: stack, '('))
                     {
                         error = "Unbalanced ')'.";
                         return false;
@@ -74,7 +68,7 @@ internal static class DelimiterBalance
 
                     break;
                 case ']':
-                    if (!TryClose(stack, '['))
+                    if (!TryClose(stack: stack, '['))
                     {
                         error = "Unbalanced ']'.";
                         return false;
@@ -82,14 +76,12 @@ internal static class DelimiterBalance
 
                     break;
                 case '}':
-                    if (!TryClose(stack, '{'))
+                    if (!TryClose(stack: stack, '{'))
                     {
                         error = "Unbalanced '}'.";
                         return false;
                     }
 
-                    break;
-                default:
                     break;
             }
         }
@@ -110,8 +102,12 @@ internal static class DelimiterBalance
         return true;
     }
 
-    /// <summary>Pops the delimiter stack if it is non-empty and the top entry matches the expected opening character, indicating a balanced close.</summary>
-    private static bool TryClose(Stack<char> stack, char expectedOpen) =>
-        stack.Count > 0 && stack.Pop() == expectedOpen;
+    /// <summary>
+    /// Pops the delimiter stack if it is non-empty and the top entry matches the expected opening character,
+    /// indicating a balanced close.
+    /// </summary>
+    private static bool TryClose(Stack<char> stack, char expectedOpen)
+    {
+        return stack.Count > 0 && stack.Pop() == expectedOpen;
+    }
 }
-

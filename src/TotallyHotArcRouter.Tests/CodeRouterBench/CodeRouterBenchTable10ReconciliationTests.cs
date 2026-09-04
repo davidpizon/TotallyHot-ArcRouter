@@ -1,8 +1,8 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Quality;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
@@ -30,7 +30,7 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 /// own "ordering, not absolute parity" standard applied one phase earlier.
 /// </para>
 /// </remarks>
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class CodeRouterBenchTable10ReconciliationTests
 {
     private const string SkipReason =
@@ -38,9 +38,30 @@ public class CodeRouterBenchTable10ReconciliationTests
         "(Governance -> Benchmark Data, the sync_benchmark_data MCP tool, or --sync-benchmark-data). " +
         "The corpus is synced on demand, never populated automatically by CI.";
 
+    // research-doc Table 10, in AllDimensions order (CdGen, Algo, Bug, Comp, Refac, DS, Multi, Und, TstGn).
+    // Keys are kept in the spelling the published table uses (mixed case, dashed Anthropic versions) rather
+    // than the router's canonical form, so this stays a verbatim transcription of the source it reconciles
+    // against. DimensionModelScoreMatrix.AverageScore canonicalizes its model argument, so these resolve.
+    private static readonly IReadOnlyDictionary<string, double[]> PublishedTable10 = new Dictionary<string, double[]>
+    {
+        ["claude-opus-4-6"] = [.315, .254, .717, .860, .607, .142, .408, .193, .392],
+        ["gpt-5.4"] = [.282, .257, .567, .639, .644, .063, .346, .150, .764],
+        ["claude-sonnet-4-6"] = [.275, .258, .698, .751, .615, .068, .407, .180, .395],
+        ["glm-5"] = [.298, .472, .728, .537, .516, .079, .362, .174, .592],
+        ["Qwen3-Max"] = [.262, .310, .660, .591, .336, .111, .350, .123, .827],
+        ["qwen3.5-plus"] = [.282, .397, .666, .538, .296, .114, .355, .149, .714],
+        ["kimi-k2.5"] = [.269, .254, .653, .590, .386, .184, .372, .195, .430],
+        ["MiniMax-M2.7"] = [.239, .073, .528, .563, .603, .145, .331, .184, .494]
+    };
+
+    // Every dimension/model cell for these models matches Table 10 to within 0.01.
+    private static readonly string[] CleanModels = ["claude-opus-4-6", "gpt-5.4", "claude-sonnet-4-6", "kimi-k2.5"];
+
     /// <summary>The real, installed corpus database - not a temp fixture. See the class summary.</summary>
-    private static BenchmarkDatabase OpenRealDatabase() =>
-        new(Options.Create(new StorageOptions()));
+    private static BenchmarkDatabase OpenRealDatabase()
+    {
+        return new BenchmarkDatabase(Options.Create(new StorageOptions()));
+    }
 
     /// <summary>
     /// Whether the real corpus has probing-split rows, decided without writing anything.
@@ -55,10 +76,7 @@ public class CodeRouterBenchTable10ReconciliationTests
     /// </remarks>
     private static bool ProbingSplitIsPopulated(BenchmarkDatabase database)
     {
-        if (!File.Exists(database.DatabasePath))
-        {
-            return false;
-        }
+        if (!File.Exists(database.DatabasePath)) return false;
 
         try
         {
@@ -79,45 +97,26 @@ public class CodeRouterBenchTable10ReconciliationTests
         }
     }
 
-    // research-doc Table 10, in AllDimensions order (CdGen, Algo, Bug, Comp, Refac, DS, Multi, Und, TstGn).
-    // Keys are kept in the spelling the published table uses (mixed case, dashed Anthropic versions) rather
-    // than the router's canonical form, so this stays a verbatim transcription of the source it reconciles
-    // against. DimensionModelScoreMatrix.AverageScore canonicalizes its model argument, so these resolve.
-    private static readonly IReadOnlyDictionary<string, double[]> PublishedTable10 = new Dictionary<string, double[]>
-    {
-        ["claude-opus-4-6"] = [.315, .254, .717, .860, .607, .142, .408, .193, .392],
-        ["gpt-5.4"] = [.282, .257, .567, .639, .644, .063, .346, .150, .764],
-        ["claude-sonnet-4-6"] = [.275, .258, .698, .751, .615, .068, .407, .180, .395],
-        ["glm-5"] = [.298, .472, .728, .537, .516, .079, .362, .174, .592],
-        ["Qwen3-Max"] = [.262, .310, .660, .591, .336, .111, .350, .123, .827],
-        ["qwen3.5-plus"] = [.282, .397, .666, .538, .296, .114, .355, .149, .714],
-        ["kimi-k2.5"] = [.269, .254, .653, .590, .386, .184, .372, .195, .430],
-        ["MiniMax-M2.7"] = [.239, .073, .528, .563, .603, .145, .331, .184, .494],
-    };
-
-    // Every dimension/model cell for these models matches Table 10 to within 0.01.
-    private static readonly string[] CleanModels = ["claude-opus-4-6", "gpt-5.4", "claude-sonnet-4-6", "kimi-k2.5"];
-
     [Fact]
     public void ProbingSplitMatrix_RowAverages_MatchTable10AvgPerf()
     {
         var database = OpenRealDatabase();
-        Assert.SkipUnless(ProbingSplitIsPopulated(database), SkipReason);
+        Assert.SkipUnless(condition: ProbingSplitIsPopulated(database), reason: SkipReason);
 
-        var matrix = DimensionModelScoreMatrix.FromDatabase(database, "probing");
+        var matrix = DimensionModelScoreMatrix.FromDatabase(database: database, split: "probing");
 
         foreach (var (model, published) in PublishedTable10)
         {
             var computedAverage = RouterDimension.AllDimensions
-                .Select(dimension => matrix.AverageScore(dimension, model))
+                .Select(dimension => matrix.AverageScore(dimension: dimension, model: model))
                 .Select(score => score ?? throw new InvalidOperationException(
                     $"Probing split has no rows for dimension/model pair under '{model}'."))
                 .Average();
             var publishedAverage = published.Average();
 
             Assert.True(
-                Math.Abs(computedAverage - publishedAverage) < 0.05,
-                $"{model}: computed AvgPerf {computedAverage:F3} vs published {publishedAverage:F3}");
+                condition: Math.Abs(computedAverage - publishedAverage) < 0.05,
+                userMessage: $"{model}: computed AvgPerf {computedAverage:F3} vs published {publishedAverage:F3}");
         }
     }
 
@@ -125,9 +124,9 @@ public class CodeRouterBenchTable10ReconciliationTests
     public void ProbingSplitMatrix_EveryCell_MatchesTable10_ForCleanModels()
     {
         var database = OpenRealDatabase();
-        Assert.SkipUnless(ProbingSplitIsPopulated(database), SkipReason);
+        Assert.SkipUnless(condition: ProbingSplitIsPopulated(database), reason: SkipReason);
 
-        var matrix = DimensionModelScoreMatrix.FromDatabase(database, "probing");
+        var matrix = DimensionModelScoreMatrix.FromDatabase(database: database, split: "probing");
 
         foreach (var model in CleanModels)
         {
@@ -135,12 +134,12 @@ public class CodeRouterBenchTable10ReconciliationTests
             for (var i = 0; i < RouterDimension.AllDimensions.Count; i++)
             {
                 var dimension = RouterDimension.AllDimensions[i];
-                var computed = matrix.AverageScore(dimension, model);
+                var computed = matrix.AverageScore(dimension: dimension, model: model);
 
                 Assert.NotNull(computed);
                 Assert.True(
-                    Math.Abs(computed.Value - published[i]) < 0.01,
-                    $"{model}/{dimension}: computed {computed.Value:F3} vs published {published[i]:F3}");
+                    condition: Math.Abs(computed.Value - published[i]) < 0.01,
+                    userMessage: $"{model}/{dimension}: computed {computed.Value:F3} vs published {published[i]:F3}");
             }
         }
     }

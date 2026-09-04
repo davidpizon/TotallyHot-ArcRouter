@@ -3,7 +3,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// The read/record surface the request path uses to decide how - or whether - to normalize a model's
 /// tool calls (<c>docs/router/tool-call-normalization.md</c> Phase 1).
-///
 /// <para>
 /// Narrower than the concrete <see cref="ToolCallCapabilityStore"/>, which also owns cache lifecycle
 /// (<c>Reload</c>) and change notification. The split mirrors <c>IBudgetEnforcer</c> over
@@ -39,4 +38,3 @@ public interface IToolCallCapabilityStore
     /// </returns>
     bool TryRecordModelCapability(ModelToolCapability capability);
 }
-

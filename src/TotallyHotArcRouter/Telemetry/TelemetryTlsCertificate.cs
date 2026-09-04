@@ -33,7 +33,10 @@ public static class TelemetryTlsCertificate
     private const string CertificateFileName = "telemetry-cert.pfx";
     private const string PasswordFileName = "telemetry-cert-pwd.txt";
 
-    /// <summary>The protected secret store's name for the certificate password (<c>docs/router/secrets-at-rest-plan.md</c> §3's naming convention).</summary>
+    /// <summary>
+    /// The protected secret store's name for the certificate password (<c>docs/router/secrets-at-rest-plan.md</c>
+    /// §3's naming convention).
+    /// </summary>
     private const string PasswordSecretName = "telemetry:cert-password";
 
     /// <summary>
@@ -43,11 +46,12 @@ public static class TelemetryTlsCertificate
     /// </summary>
     public static X509Certificate2 GetOrCreate()
     {
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TotallyHotArcRouter");
+        var directory = Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            path2: "TotallyHotArcRouter");
         return GetOrCreate(
-            Path.Combine(directory, CertificateFileName),
-            Path.Combine(directory, PasswordFileName),
-            new ProtectedSecretStore());
+            certificatePath: Path.Combine(path1: directory, path2: CertificateFileName),
+            passwordPath: Path.Combine(path1: directory, path2: PasswordFileName),
+            secretStore: new ProtectedSecretStore());
     }
 
     /// <summary>
@@ -60,21 +64,20 @@ public static class TelemetryTlsCertificate
     /// migrated into <paramref name="secretStore"/> when the store holds no entry yet, then deleted.
     /// </param>
     /// <param name="secretStore">The protected secret store the password is read from and persisted to.</param>
-    internal static X509Certificate2 GetOrCreate(string certificatePath, string passwordPath, ProtectedSecretStore secretStore)
+    internal static X509Certificate2 GetOrCreate(string certificatePath, string passwordPath,
+        ProtectedSecretStore secretStore)
     {
         var directory = Path.GetDirectoryName(certificatePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
-        if (File.Exists(certificatePath) && TryResolvePassword(passwordPath, secretStore, out var existingPassword))
-        {
-            return X509CertificateLoader.LoadPkcs12FromFile(certificatePath, existingPassword, X509KeyStorageFlags.Exportable);
-        }
+        if (File.Exists(certificatePath) && TryResolvePassword(passwordPath: passwordPath, secretStore: secretStore,
+                password: out var existingPassword))
+            return X509CertificateLoader.LoadPkcs12FromFile(path: certificatePath, password: existingPassword,
+                keyStorageFlags: X509KeyStorageFlags.Exportable);
 
         using var rsa = RSA.Create(2048);
-        var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var request = new CertificateRequest(subjectName: "CN=localhost", key: rsa,
+            hashAlgorithm: HashAlgorithmName.SHA256, padding: RSASignaturePadding.Pkcs1);
 
         var subjectAlternativeNames = new SubjectAlternativeNameBuilder();
         subjectAlternativeNames.AddDnsName("localhost");
@@ -83,22 +86,25 @@ public static class TelemetryTlsCertificate
         request.CertificateExtensions.Add(subjectAlternativeNames.Build());
 
         request.CertificateExtensions.Add(
-            new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], critical: false)); // Server Authentication
+            new X509EnhancedKeyUsageExtension(enhancedKeyUsages: [new Oid("1.3.6.1.5.5.7.3.1")],
+                false)); // Server Authentication
 
         using var certificate = request.CreateSelfSigned(
-            DateTimeOffset.UtcNow.AddDays(-1), // Slight backdate to avoid immediate not-yet-valid clock-skew issues.
-            DateTimeOffset.UtcNow.AddYears(2));
+            notBefore: DateTimeOffset.UtcNow
+                .AddDays(-1), // Slight backdate to avoid immediate not-yet-valid clock-skew issues.
+            notAfter: DateTimeOffset.UtcNow.AddYears(2));
 
         // Random per-installation password, not a hardcoded literal - there is nothing checked into
         // source or compiled into either binary that would let a stray reader of the source decrypt
         // an intercepted .pfx.
         var password = Guid.NewGuid().ToString("N");
-        var certificateBytes = certificate.Export(X509ContentType.Pkcs12, password);
+        var certificateBytes = certificate.Export(contentType: X509ContentType.Pkcs12, password: password);
 
-        File.WriteAllBytes(certificatePath, certificateBytes);
-        StorePassword(passwordPath, secretStore, password);
+        File.WriteAllBytes(path: certificatePath, bytes: certificateBytes);
+        StorePassword(passwordPath: passwordPath, secretStore: secretStore, password: password);
 
-        return X509CertificateLoader.LoadPkcs12(certificateBytes, password, X509KeyStorageFlags.Exportable);
+        return X509CertificateLoader.LoadPkcs12(data: certificateBytes, password: password,
+            keyStorageFlags: X509KeyStorageFlags.Exportable);
     }
 
     /// <summary>
@@ -108,10 +114,7 @@ public static class TelemetryTlsCertificate
     /// </summary>
     private static bool TryResolvePassword(string passwordPath, ProtectedSecretStore secretStore, out string password)
     {
-        if (secretStore.TryRead(PasswordSecretName, out password))
-        {
-            return true;
-        }
+        if (secretStore.TryRead(name: PasswordSecretName, value: out password)) return true;
 
         if (!File.Exists(passwordPath))
         {
@@ -125,7 +128,7 @@ public static class TelemetryTlsCertificate
         // store is unavailable, the legacy file stays exactly where it is and keeps working.
         try
         {
-            secretStore.Write(PasswordSecretName, password);
+            secretStore.Write(name: PasswordSecretName, value: password);
             File.Delete(passwordPath);
         }
         catch (PlatformNotSupportedException)
@@ -135,17 +138,19 @@ public static class TelemetryTlsCertificate
         return true;
     }
 
-    /// <summary>Persists a freshly generated password to the protected store, falling back to the legacy plaintext file when the store is unavailable on this platform.</summary>
+    /// <summary>
+    /// Persists a freshly generated password to the protected store, falling back to the legacy plaintext file when
+    /// the store is unavailable on this platform.
+    /// </summary>
     private static void StorePassword(string passwordPath, ProtectedSecretStore secretStore, string password)
     {
         try
         {
-            secretStore.Write(PasswordSecretName, password);
+            secretStore.Write(name: PasswordSecretName, value: password);
         }
         catch (PlatformNotSupportedException)
         {
-            File.WriteAllText(passwordPath, password);
+            File.WriteAllText(path: passwordPath, contents: password);
         }
     }
 }
-

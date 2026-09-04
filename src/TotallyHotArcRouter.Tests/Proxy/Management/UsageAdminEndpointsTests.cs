@@ -1,11 +1,11 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using System.Net;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
@@ -15,19 +15,25 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// against a booted <see cref="ProxyServer"/>, mirroring <see cref="ProviderAdminEndpointsTests"/>.
 /// </summary>
 [Collection("ProxyLifecycle")]
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public sealed class UsageAdminEndpointsTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static ModelRoutingOptions SeedOptions() => new()
+    private static ModelRoutingOptions SeedOptions()
     {
-        Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+        return new ModelRoutingOptions
         {
-            ["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
-        },
-        ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
-    };
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+            },
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
+            ]
+        };
+    }
 
     private static ProxyServer BuildServer(
         IProviderConfigStore store,
@@ -35,41 +41,46 @@ public sealed class UsageAdminEndpointsTests
         string? managementToken = null)
     {
         var environment = Mock.Of<IEnvironmentVariableProvider>();
-        var resolver = new ModelRouteResolver(store, environment);
-        var interceptor = new RequestInterceptor(NullLogger<RequestInterceptor>.Instance, resolver);
-        var middleware = new ProxyMiddleware(NullLogger<ProxyMiddleware>.Instance, interceptor);
+        var resolver = new ModelRouteResolver(store: store, environment: environment);
+        var interceptor =
+            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+        var middleware = new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance, interceptor: interceptor);
 
         return new ProxyServer(
-            NullLogger<ProxyServer>.Instance,
-            middleware,
-            port: 0,
-            grpcPort: 0,
+            logger: NullLogger<ProxyServer>.Instance,
+            proxyMiddleware: middleware,
+            0,
+            0,
             dependencies: new ProxyServerDependencies
             {
                 ManagementToken = managementToken,
                 ManagementApi = new ManagementApiDependencies(store)
                 {
                     Environment = environment,
-                    UsageRollupStore = rollupStore,
-                },
+                    UsageRollupStore = rollupStore
+                }
             });
     }
 
-    private static string BaseAddress(ProxyServer server) =>
-        server.Addresses.Single(a => a.StartsWith("http://", StringComparison.Ordinal)).TrimEnd('/');
+    private static string BaseAddress(ProxyServer server)
+    {
+        return server.Addresses.Single(a => a.StartsWith(value: "http://", comparisonType: StringComparison.Ordinal))
+            .TrimEnd('/');
+    }
 
     [Fact]
     public async Task GetSummary_NoRollupStoreWired_Returns503()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var response = await client.GetAsync($"{BaseAddress(server)}/admin/usage/summary?window=day", Ct);
+            var response = await client.GetAsync(requestUri: $"{BaseAddress(server)}/admin/usage/summary?window=day",
+                cancellationToken: Ct);
 
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.ServiceUnavailable, actual: response.StatusCode);
         }
         finally
         {
@@ -84,22 +95,23 @@ public sealed class UsageAdminEndpointsTests
         var rollup = temp.CreateRollupStore();
         var ledger = temp.CreateUsageLedger(rollup);
         await ledger.RecordAsync(
-            new UsageLedgerEntry(
-                "sess-1", 1, "openai", "gpt-5.4", "gpt-5.4",
-                100, 50, null, null, 2m, CostConfidence.Catalog,
-                DateTimeOffset.UtcNow.AddDays(-2), Guid.NewGuid().ToString("N")),
-            Ct);
+            entry: new UsageLedgerEntry(
+                SessionId: "sess-1", 1, Provider: "openai", RequestedModel: "gpt-5.4", ResolvedModel: "gpt-5.4",
+                100, 50, null, null, 2m, CostConfidence: CostConfidence.Catalog,
+                OccurredAtUtc: DateTimeOffset.UtcNow.AddDays(-2), RequestId: Guid.NewGuid().ToString("N")),
+            cancellationToken: Ct);
 
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var json = await client.GetStringAsync($"{BaseAddress(server)}/admin/usage/summary?window=week", Ct);
+            var json = await client.GetStringAsync(requestUri: $"{BaseAddress(server)}/admin/usage/summary?window=week",
+                cancellationToken: Ct);
             using var document = JsonDocument.Parse(json);
 
-            Assert.Equal(1, document.RootElement.GetProperty("requests").GetInt32());
+            Assert.Equal(1, actual: document.RootElement.GetProperty("requests").GetInt32());
         }
         finally
         {
@@ -112,14 +124,17 @@ public sealed class UsageAdminEndpointsTests
     {
         using var temp = new TempDatabase();
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, rollupStore: temp.CreateRollupStore());
+        await using var server = BuildServer(store: store, rollupStore: temp.CreateRollupStore());
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var response = await client.GetAsync($"{BaseAddress(server)}/admin/usage/rollup?from=not-a-date&to=2026-01-01T00:00:00Z", Ct);
+            var response =
+                await client.GetAsync(
+                    requestUri: $"{BaseAddress(server)}/admin/usage/rollup?from=not-a-date&to=2026-01-01T00:00:00Z",
+                    cancellationToken: Ct);
 
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.BadRequest, actual: response.StatusCode);
         }
         finally
         {
@@ -135,27 +150,27 @@ public sealed class UsageAdminEndpointsTests
         var ledger = temp.CreateUsageLedger(rollup);
         var occurredAt = DateTimeOffset.UtcNow.AddDays(-2);
         await ledger.RecordAsync(
-            new UsageLedgerEntry(
-                "sess-1", 1, "openai", "gpt-5.4", "gpt-5.4",
-                100, 50, null, null, 2m, CostConfidence.Catalog,
-                occurredAt, Guid.NewGuid().ToString("N")),
-            Ct);
+            entry: new UsageLedgerEntry(
+                SessionId: "sess-1", 1, Provider: "openai", RequestedModel: "gpt-5.4", ResolvedModel: "gpt-5.4",
+                100, 50, null, null, 2m, CostConfidence: CostConfidence.Catalog,
+                OccurredAtUtc: occurredAt, RequestId: Guid.NewGuid().ToString("N")),
+            cancellationToken: Ct);
 
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var dayStart = new DateTimeOffset(occurredAt.Date, TimeSpan.Zero);
+            var dayStart = new DateTimeOffset(dateTime: occurredAt.Date, offset: TimeSpan.Zero);
             var url = $"{BaseAddress(server)}/admin/usage/rollup?from={Uri.EscapeDataString(dayStart.ToString("O"))}" +
                       $"&to={Uri.EscapeDataString(dayStart.AddDays(1).ToString("O"))}&width=day&groupBy=model";
-            var json = await client.GetStringAsync(url, Ct);
+            var json = await client.GetStringAsync(requestUri: url, cancellationToken: Ct);
             using var document = JsonDocument.Parse(json);
 
             var bucket = Assert.Single(document.RootElement.EnumerateArray());
-            Assert.Equal("gpt-5.4", bucket.GetProperty("groupKey").GetString());
-            Assert.Equal(1, bucket.GetProperty("requests").GetInt32());
+            Assert.Equal(expected: "gpt-5.4", actual: bucket.GetProperty("groupKey").GetString());
+            Assert.Equal(1, actual: bucket.GetProperty("requests").GetInt32());
         }
         finally
         {
@@ -171,29 +186,31 @@ public sealed class UsageAdminEndpointsTests
         var ledger = temp.CreateUsageLedger(rollup);
         var occurredAt = DateTimeOffset.UtcNow.AddDays(-2);
         await ledger.RecordAsync(
-            new UsageLedgerEntry(
-                "sess-1", 1, "openai", "gpt-5.4", "gpt-5.4",
-                100, 50, null, null, 2m, CostConfidence.Catalog,
-                occurredAt, Guid.NewGuid().ToString("N")),
-            Ct);
+            entry: new UsageLedgerEntry(
+                SessionId: "sess-1", 1, Provider: "openai", RequestedModel: "gpt-5.4", ResolvedModel: "gpt-5.4",
+                100, 50, null, null, 2m, CostConfidence: CostConfidence.Catalog,
+                OccurredAtUtc: occurredAt, RequestId: Guid.NewGuid().ToString("N")),
+            cancellationToken: Ct);
 
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var dayStart = new DateTimeOffset(occurredAt.Date, TimeSpan.Zero);
+            var dayStart = new DateTimeOffset(dateTime: occurredAt.Date, offset: TimeSpan.Zero);
             var url = $"{BaseAddress(server)}/admin/usage/export?from={Uri.EscapeDataString(dayStart.ToString("O"))}" +
                       $"&to={Uri.EscapeDataString(dayStart.AddDays(1).ToString("O"))}&width=day&groupBy=model&format=csv";
-            var response = await client.GetAsync(url, Ct);
+            var response = await client.GetAsync(requestUri: url, cancellationToken: Ct);
             var csv = await response.Content.ReadAsStringAsync(Ct);
 
-            Assert.Equal("text/csv", response.Content.Headers.ContentType?.MediaType);
-            var lines = csv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
-            Assert.Equal(2, lines.Length);
-            Assert.StartsWith("BucketStartUtc,", lines[0], StringComparison.Ordinal);
-            Assert.Contains("gpt-5.4", lines[1], StringComparison.Ordinal);
+            Assert.Equal(expected: "text/csv", actual: response.Content.Headers.ContentType?.MediaType);
+            var lines = csv.Split(separator: "\r\n", options: StringSplitOptions.RemoveEmptyEntries);
+            Assert.Equal(2, actual: lines.Length);
+            Assert.StartsWith(expectedStartString: "BucketStartUtc,", actualString: lines[0],
+                comparisonType: StringComparison.Ordinal);
+            Assert.Contains(expectedSubstring: "gpt-5.4", actualString: lines[1],
+                comparisonType: StringComparison.Ordinal);
         }
         finally
         {
@@ -207,17 +224,18 @@ public sealed class UsageAdminEndpointsTests
         using var temp = new TempDatabase();
         var rollup = temp.CreateRollupStore();
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var url = $"{BaseAddress(server)}/admin/usage/export?from={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-1).ToString("O"))}" +
-                      $"&to={Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"))}";
-            var response = await client.GetAsync(url, Ct);
+            var url =
+                $"{BaseAddress(server)}/admin/usage/export?from={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-1).ToString("O"))}" +
+                $"&to={Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"))}";
+            var response = await client.GetAsync(requestUri: url, cancellationToken: Ct);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+            Assert.Equal(expected: "application/json", actual: response.Content.Headers.ContentType?.MediaType);
         }
         finally
         {
@@ -230,16 +248,17 @@ public sealed class UsageAdminEndpointsTests
     {
         using var temp = new TempDatabase();
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, rollupStore: temp.CreateRollupStore());
+        await using var server = BuildServer(store: store, rollupStore: temp.CreateRollupStore());
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var url = $"{BaseAddress(server)}/admin/usage/export?from={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-1).ToString("O"))}" +
-                      $"&to={Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"))}&format=xml";
-            var response = await client.GetAsync(url, Ct);
+            var url =
+                $"{BaseAddress(server)}/admin/usage/export?from={Uri.EscapeDataString(DateTimeOffset.UtcNow.AddDays(-1).ToString("O"))}" +
+                $"&to={Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"))}&format=xml";
+            var response = await client.GetAsync(requestUri: url, cancellationToken: Ct);
 
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.BadRequest, actual: response.StatusCode);
         }
         finally
         {
@@ -251,14 +270,15 @@ public sealed class UsageAdminEndpointsTests
     public async Task GetSummary_WithManagementToken_RequiresToken()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store, managementToken: "secret-token");
+        await using var server = BuildServer(store: store, managementToken: "secret-token");
         await server.StartAsync(Ct);
         try
         {
             using var client = new HttpClient();
-            var response = await client.GetAsync($"{BaseAddress(server)}/admin/usage/summary?window=day", Ct);
+            var response = await client.GetAsync(requestUri: $"{BaseAddress(server)}/admin/usage/summary?window=day",
+                cancellationToken: Ct);
 
-            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            Assert.Equal(expected: HttpStatusCode.Unauthorized, actual: response.StatusCode);
         }
         finally
         {

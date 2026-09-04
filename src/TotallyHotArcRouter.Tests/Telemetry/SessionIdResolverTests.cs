@@ -1,7 +1,7 @@
-using System.Text.Json.Nodes;
-using TotallyHot.ArcRouter.Telemetry;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
+using System.Text.Json.Nodes;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
@@ -14,18 +14,21 @@ public class SessionIdResolverTests
 {
     private readonly SessionIdResolver _resolver = new();
 
-    private static IHeaderDictionary EmptyHeaders() => new HeaderDictionary();
+    private static IHeaderDictionary EmptyHeaders()
+    {
+        return new HeaderDictionary();
+    }
 
     [Fact]
     public void Resolve_NullHeaders_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => _resolver.Resolve(null!, null));
+        Assert.Throws<ArgumentNullException>(() => _resolver.Resolve(headers: null!, null));
     }
 
     [Fact]
     public void Resolve_NoHeaderAndNoBody_ReturnsNull()
     {
-        var result = _resolver.Resolve(EmptyHeaders(), null);
+        var result = _resolver.Resolve(headers: EmptyHeaders(), null);
 
         Assert.Null(result);
     }
@@ -35,9 +38,9 @@ public class SessionIdResolverTests
     {
         var headers = new HeaderDictionary { ["x-claude-code-session-id"] = "sess-abc" };
 
-        var result = _resolver.Resolve(headers, null);
+        var result = _resolver.Resolve(headers: headers, null);
 
-        Assert.Equal("sess-abc", result);
+        Assert.Equal(expected: "sess-abc", actual: result);
     }
 
     [Fact]
@@ -45,9 +48,9 @@ public class SessionIdResolverTests
     {
         var headers = new HeaderDictionary { ["x-claude-session-id"] = "sess-fallback" };
 
-        var result = _resolver.Resolve(headers, null);
+        var result = _resolver.Resolve(headers: headers, null);
 
-        Assert.Equal("sess-fallback", result);
+        Assert.Equal(expected: "sess-fallback", actual: result);
     }
 
     [Fact]
@@ -56,12 +59,12 @@ public class SessionIdResolverTests
         var headers = new HeaderDictionary
         {
             ["x-claude-code-session-id"] = "primary",
-            ["x-claude-session-id"] = "secondary",
+            ["x-claude-session-id"] = "secondary"
         };
 
-        var result = _resolver.Resolve(headers, null);
+        var result = _resolver.Resolve(headers: headers, null);
 
-        Assert.Equal("primary", result);
+        Assert.Equal(expected: "primary", actual: result);
     }
 
     [Fact]
@@ -70,12 +73,12 @@ public class SessionIdResolverTests
         var headers = new HeaderDictionary
         {
             ["x-claude-code-session-id"] = new StringValues("   "),
-            ["x-claude-session-id"] = "sess-real",
+            ["x-claude-session-id"] = "sess-real"
         };
 
-        var result = _resolver.Resolve(headers, null);
+        var result = _resolver.Resolve(headers: headers, null);
 
-        Assert.Equal("sess-real", result);
+        Assert.Equal(expected: "sess-real", actual: result);
     }
 
     [Theory]
@@ -91,9 +94,9 @@ public class SessionIdResolverTests
     {
         var body = new JsonObject { [fieldName] = "sess-from-body" };
 
-        var result = _resolver.Resolve(EmptyHeaders(), body);
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: body);
 
-        Assert.Equal("sess-from-body", result);
+        Assert.Equal(expected: "sess-from-body", actual: result);
     }
 
     [Fact]
@@ -102,9 +105,9 @@ public class SessionIdResolverTests
         var headers = new HeaderDictionary { ["x-claude-code-session-id"] = "from-header" };
         var body = new JsonObject { ["session_id"] = "from-body" };
 
-        var result = _resolver.Resolve(headers, body);
+        var result = _resolver.Resolve(headers: headers, body: body);
 
-        Assert.Equal("from-header", result);
+        Assert.Equal(expected: "from-header", actual: result);
     }
 
     [Fact]
@@ -112,9 +115,9 @@ public class SessionIdResolverTests
     {
         var body = new JsonObject { ["session_id"] = "primary", ["thread_id"] = "secondary" };
 
-        var result = _resolver.Resolve(EmptyHeaders(), body);
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: body);
 
-        Assert.Equal("primary", result);
+        Assert.Equal(expected: "primary", actual: result);
     }
 
     [Fact]
@@ -122,12 +125,12 @@ public class SessionIdResolverTests
     {
         var body = new JsonObject
         {
-            ["metadata"] = new JsonObject { ["user_id"] = "user-42_session_sess-xyz" },
+            ["metadata"] = new JsonObject { ["user_id"] = "user-42_session_sess-xyz" }
         };
 
-        var result = _resolver.Resolve(EmptyHeaders(), body);
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: body);
 
-        Assert.Equal("sess-xyz", result);
+        Assert.Equal(expected: "sess-xyz", actual: result);
     }
 
     [Fact]
@@ -135,10 +138,10 @@ public class SessionIdResolverTests
     {
         var body = new JsonObject
         {
-            ["metadata"] = new JsonObject { ["user_id"] = "user-42" },
+            ["metadata"] = new JsonObject { ["user_id"] = "user-42" }
         };
 
-        var result = _resolver.Resolve(EmptyHeaders(), body);
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: body);
 
         Assert.Null(result);
     }
@@ -149,18 +152,18 @@ public class SessionIdResolverTests
         var body = new JsonObject
         {
             ["session_id"] = "from-field",
-            ["metadata"] = new JsonObject { ["user_id"] = "user-42_session_from-metadata" },
+            ["metadata"] = new JsonObject { ["user_id"] = "user-42_session_from-metadata" }
         };
 
-        var result = _resolver.Resolve(EmptyHeaders(), body);
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: body);
 
-        Assert.Equal("from-field", result);
+        Assert.Equal(expected: "from-field", actual: result);
     }
 
     [Fact]
     public void Resolve_EmptyBodyObject_ReturnsNull()
     {
-        var result = _resolver.Resolve(EmptyHeaders(), new JsonObject());
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: []);
 
         Assert.Null(result);
     }
@@ -170,9 +173,8 @@ public class SessionIdResolverTests
     {
         var body = new JsonObject { ["session_id"] = 12345 };
 
-        var result = _resolver.Resolve(EmptyHeaders(), body);
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: body);
 
         Assert.Null(result);
     }
 }
-

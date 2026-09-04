@@ -32,10 +32,10 @@ public sealed class ComplexityAnalyzer : IStaticAnalyzer
     private static readonly string[] BranchKeywords =
         ["if", "else", "elif", "for", "while", "case", "catch", "except", "switch", "&&", "||"];
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "complexity";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public StaticAnalysisFinding? Analyze(string code, CodeLanguage language)
     {
         ArgumentNullException.ThrowIfNull(code);
@@ -47,10 +47,7 @@ public sealed class ComplexityAnalyzer : IStaticAnalyzer
             .ToList();
 
         // A snippet this short has no shape worth scoring; abstain rather than manufacture an opinion.
-        if (lines.Count < MinimumLines)
-        {
-            return null;
-        }
+        if (lines.Count < MinimumLines) return null;
 
         var indentUnit = InferIndentUnit(lines);
         var maxDepth = lines.Max(l => (l.Length - l.TrimStart(' ').Length) / indentUnit);
@@ -73,7 +70,8 @@ public sealed class ComplexityAnalyzer : IStaticAnalyzer
             notes.Add($"branch density {density:F2} per line exceeds a budget of {BranchDensityBudget:F2}");
         }
 
-        return new StaticAnalysisFinding(Name, StaticAnalyzerScoring.ClampScore(Floor, penalty), notes);
+        return new StaticAnalysisFinding(Analyzer: Name,
+            Score: StaticAnalyzerScoring.ClampScore(floor: Floor, penalty: penalty), Notes: notes);
     }
 
     /// <summary>
@@ -87,10 +85,13 @@ public sealed class ComplexityAnalyzer : IStaticAnalyzer
             .Where(i => i > 0)
             .ToList();
 
-        return indents.Count == 0 ? 4 : Math.Max(1, indents.Min());
+        return indents.Count == 0 ? 4 : Math.Max(1, val2: indents.Min());
     }
 
     /// <summary>Counts branch keywords on one line, matching whole words so <c>ifconfig</c> is not a branch.</summary>
-    private static int CountBranches(string line) =>
-        BranchKeywords.Sum(keyword => WordMatching.WholeWordOccurrences(line, keyword).Count());
+    private static int CountBranches(string line)
+    {
+        return BranchKeywords.Sum(keyword =>
+            WordMatching.WholeWordOccurrences(haystack: line, needle: keyword).Count());
+    }
 }

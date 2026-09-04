@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Gui.Models;
 using AwesomeAssertions;
+using TotallyHot.ArcRouter.Gui.Models;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -24,18 +24,18 @@ public sealed class MockDataTests
     [Fact]
     public void BuildMetricHistory_is_deterministic_for_the_same_instant()
     {
-        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
 
         var first = MockData.BuildMetricHistory(now);
         var second = MockData.BuildMetricHistory(now);
 
-        first.Should().BeEquivalentTo(second, options => options.WithStrictOrdering());
+        first.Should().BeEquivalentTo(expectation: second, config: options => options.WithStrictOrdering());
     }
 
     [Fact]
     public void BuildMetricHistory_never_produces_points_after_now()
     {
-        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
 
         var points = MockData.BuildMetricHistory(now);
 
@@ -46,7 +46,7 @@ public sealed class MockDataTests
     [Fact]
     public void BuildMetricHistory_spans_multiple_sessions_with_positive_metrics()
     {
-        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var now = new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero);
 
         var points = MockData.BuildMetricHistory(now);
 
@@ -70,9 +70,11 @@ public sealed class MockDataTests
     [Fact]
     public void RoutingEntry_record_equality_compares_all_fields()
     {
-        var steps = new List<RoutingStep> { new(StepStatus.Ok, "Agent selected model") };
-        var a = new RoutingEntry("1", "session", "trace", "Agent", "gpt-4o-mini", false, 100, 50, 0.01m, 0.05m, 0.04m, 80m, "14:32:01", steps);
-        var b = new RoutingEntry("1", "session", "trace", "Agent", "gpt-4o-mini", false, 100, 50, 0.01m, 0.05m, 0.04m, 80m, "14:32:01", steps);
+        var steps = new List<RoutingStep> { new(Status: StepStatus.Ok, Message: "Agent selected model") };
+        var a = new RoutingEntry(Id: "1", SessionId: "session", TraceId: "trace", Agent: "Agent", Model: "gpt-4o-mini",
+            false, 100, 50, 0.01m, 0.05m, 0.04m, 80m, Timestamp: "14:32:01", RoutingSteps: steps);
+        var b = new RoutingEntry(Id: "1", SessionId: "session", TraceId: "trace", Agent: "Agent", Model: "gpt-4o-mini",
+            false, 100, 50, 0.01m, 0.05m, 0.04m, 80m, Timestamp: "14:32:01", RoutingSteps: steps);
         var differentModel = a with { Model = "gpt-4o" };
 
         a.Should().Be(b);
@@ -89,4 +91,3 @@ public sealed class MockDataTests
         entry.RoutingSteps.Should().NotBeEmpty();
     }
 }
-

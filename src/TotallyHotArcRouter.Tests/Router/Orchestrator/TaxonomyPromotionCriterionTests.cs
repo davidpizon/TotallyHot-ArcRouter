@@ -13,8 +13,12 @@ public sealed class TaxonomyPromotionCriterionTests
     private static TaxonomyComparisonWindow Window(
         double? dimensionError = 0.30,
         double? clusterError = 0.10,
-        double coverage = 0.95) =>
-        new(dimensionError, clusterError, coverage);
+        double coverage = 0.95)
+    {
+        return new TaxonomyComparisonWindow(DimensionMeanAbsoluteError: dimensionError,
+            ClusterMeanAbsoluteError: clusterError,
+            ClusterCoverage: coverage);
+    }
 
     [Fact]
     public void IsMet_FourConsecutiveQualifyingWindows_ReturnsTrue()
@@ -55,7 +59,7 @@ public sealed class TaxonomyPromotionCriterionTests
     public void Qualifies_ClusterErrorEqualToDimensionError_ReturnsFalse()
     {
         // "Strictly lower" - a tie is not evidence the learned taxonomy explains traffic better.
-        Assert.False(TaxonomyPromotionCriterion.Qualifies(Window(dimensionError: 0.2, clusterError: 0.2)));
+        Assert.False(TaxonomyPromotionCriterion.Qualifies(Window(0.2, 0.2)));
     }
 
     [Theory]
@@ -64,7 +68,7 @@ public sealed class TaxonomyPromotionCriterionTests
     [InlineData(0.81, true)]
     public void Qualifies_CoverageFloorIsInclusive(double coverage, bool expected)
     {
-        Assert.Equal(expected, TaxonomyPromotionCriterion.Qualifies(Window(coverage: coverage)));
+        Assert.Equal(expected: expected, actual: TaxonomyPromotionCriterion.Qualifies(Window(coverage: coverage)));
     }
 
     [Fact]
@@ -89,6 +93,6 @@ public sealed class TaxonomyPromotionCriterionTests
     [Fact]
     public void IsMet_NonPositiveWindowCount_Throws()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => TaxonomyPromotionCriterion.IsMet([Window()], consecutiveWindows: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => TaxonomyPromotionCriterion.IsMet(windows: [Window()], 0));
     }
 }

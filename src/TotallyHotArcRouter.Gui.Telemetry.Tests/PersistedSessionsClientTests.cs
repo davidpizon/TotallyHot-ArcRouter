@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using AwesomeAssertions;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -19,7 +18,7 @@ public class PersistedSessionsClientTests
     [Fact]
     public async Task ListAsync_MapsEveryFieldOffTheWire()
     {
-        var createdAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+        var createdAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, offset: TimeSpan.Zero);
         var response = new Contract.ListPersistedSessionsResponse { TranscriptCaptureEnabled = true };
         response.Transcripts.Add(new Contract.PersistedTranscript
         {
@@ -33,12 +32,12 @@ public class PersistedSessionsClientTests
             CostUsd = "0.0042",
             InputTokens = 100,
             OutputTokens = 50,
-            MemoryEntryId = 7,
+            MemoryEntryId = 7
         });
         var stub = new StubClient { Response = response };
         using var client = new PersistedSessionsClient(stub);
 
-        var result = await client.ListAsync(10, TestContext.Current.CancellationToken);
+        var result = await client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
         result.TranscriptCaptureEnabled.Should().BeTrue();
         var transcript = result.Transcripts.Should().ContainSingle().Subject;
@@ -65,12 +64,12 @@ public class PersistedSessionsClientTests
             CorrelationId = "sess-bare:1",
             CreatedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
             RequestedModel = "gpt-5.4",
-            RoutedModel = "gpt-5.4",
+            RoutedModel = "gpt-5.4"
         });
         var stub = new StubClient { Response = response };
         using var client = new PersistedSessionsClient(stub);
 
-        var result = await client.ListAsync(10, TestContext.Current.CancellationToken);
+        var result = await client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
         var transcript = result.Transcripts.Should().ContainSingle().Subject;
         transcript.PromptText.Should().BeNull();
@@ -88,7 +87,7 @@ public class PersistedSessionsClientTests
         var stub = new StubClient { Response = response };
         using var client = new PersistedSessionsClient(stub);
 
-        var result = await client.ListAsync(10, TestContext.Current.CancellationToken);
+        var result = await client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
         result.TranscriptCaptureEnabled.Should().BeFalse();
         result.Transcripts.Should().BeEmpty();
@@ -97,11 +96,12 @@ public class PersistedSessionsClientTests
     [Fact]
     public async Task ListAsync_Unavailable_BecomesAPlainLanguageMessage()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new PersistedSessionsClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(
-            () => client.ListAsync(10, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(() =>
+            client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read persisted sessions: the router is not reachable.");
         ex.InnerException.Should().BeOfType<RpcException>();
@@ -111,11 +111,12 @@ public class PersistedSessionsClientTests
     [Fact]
     public async Task ListAsync_ARejection_KeepsTheServersOwnDetailAndIsNotFlaggedUnavailable()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new PersistedSessionsClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(
-            () => client.ListAsync(10, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(() =>
+            client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read persisted sessions: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -165,12 +166,16 @@ public class PersistedSessionsClientTests
 
         public override AsyncUnaryCall<Contract.ListPersistedSessionsResponse> ListPersistedSessionsAsync(
             Contract.ListPersistedSessionsRequest request,
-            CallOptions options) =>
-            new(
-                Failure is null ? Task.FromResult(Response) : Task.FromException<Contract.ListPersistedSessionsResponse>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+            CallOptions options)
+        {
+            return new AsyncUnaryCall<Contract.ListPersistedSessionsResponse>(
+                responseAsync: Failure is null
+                    ? Task.FromResult(Response)
+                    : Task.FromException<Contract.ListPersistedSessionsResponse>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
     }
 }

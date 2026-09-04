@@ -2,7 +2,10 @@ using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
-/// <summary>Covers <see cref="ReportedUsageRepository.UpsertReportedUsage"/>/<see cref="ReportedUsageRepository.GetReportedUsage"/> (docs/router/secrets-at-rest-plan.md §8.1).</summary>
+/// <summary>
+/// Covers <see cref="ReportedUsageRepository.UpsertReportedUsage"/>/
+/// <see cref="ReportedUsageRepository.GetReportedUsage"/> (docs/router/secrets-at-rest-plan.md §8.1).
+/// </summary>
 public class ReportedUsageRepositoryTests
 {
     private static DateOnly Yesterday => DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
@@ -29,22 +32,23 @@ public class ReportedUsageRepositoryTests
         var fetchedAt = DateTimeOffset.UtcNow;
 
         repository.UpsertReportedUsage(
-            "anthropic",
+            providerKey: "anthropic",
+            rows:
             [
-                new ReportedUsageRow(Yesterday, "claude-opus-4-1", 100, 50, 5, 10),
-                new ReportedUsageRow(Yesterday, "claude-sonnet-5", 200, 80, 0, 0),
+                new ReportedUsageRow(UsageDay: Yesterday, Model: "claude-opus-4-1", 100, 50, 5, 10),
+                new ReportedUsageRow(UsageDay: Yesterday, Model: "claude-sonnet-5", 200, 80, 0, 0)
             ],
-            fetchedAt);
+            fetchedAtUtc: fetchedAt);
 
         var (rows, latestFetchedAt) = repository.GetReportedUsage("anthropic");
 
-        Assert.Equal(2, rows.Count);
-        Assert.Equal(fetchedAt, latestFetchedAt);
-        var opus = Assert.Single(rows, r => r.Model == "claude-opus-4-1");
-        Assert.Equal(100, opus.InputTokens);
-        Assert.Equal(50, opus.OutputTokens);
-        Assert.Equal(5, opus.CacheCreationTokens);
-        Assert.Equal(10, opus.CacheReadTokens);
+        Assert.Equal(2, actual: rows.Count);
+        Assert.Equal(expected: fetchedAt, actual: latestFetchedAt);
+        var opus = Assert.Single(collection: rows, predicate: r => r.Model == "claude-opus-4-1");
+        Assert.Equal(100, actual: opus.InputTokens);
+        Assert.Equal(50, actual: opus.OutputTokens);
+        Assert.Equal(5, actual: opus.CacheCreationTokens);
+        Assert.Equal(10, actual: opus.CacheReadTokens);
     }
 
     [Fact]
@@ -55,14 +59,18 @@ public class ReportedUsageRepositoryTests
         var repository = new ReportedUsageRepository(temp.Database);
         var day = Yesterday;
 
-        repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(day, "claude-opus-4-1", 100, 50, 0, 0)], DateTimeOffset.UtcNow);
-        repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(day, "claude-opus-4-1", 150, 75, 0, 0)], DateTimeOffset.UtcNow);
+        repository.UpsertReportedUsage(providerKey: "anthropic",
+            rows: [new ReportedUsageRow(UsageDay: day, Model: "claude-opus-4-1", 100, 50, 0, 0)],
+            fetchedAtUtc: DateTimeOffset.UtcNow);
+        repository.UpsertReportedUsage(providerKey: "anthropic",
+            rows: [new ReportedUsageRow(UsageDay: day, Model: "claude-opus-4-1", 150, 75, 0, 0)],
+            fetchedAtUtc: DateTimeOffset.UtcNow);
 
         var (rows, _) = repository.GetReportedUsage("anthropic");
 
         var row = Assert.Single(rows);
-        Assert.Equal(150, row.InputTokens);
-        Assert.Equal(75, row.OutputTokens);
+        Assert.Equal(150, actual: row.InputTokens);
+        Assert.Equal(75, actual: row.OutputTokens);
     }
 
     [Fact]
@@ -73,8 +81,12 @@ public class ReportedUsageRepositoryTests
         var repository = new ReportedUsageRepository(temp.Database);
         var day = Yesterday;
 
-        repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(day, "claude-opus-4-1", 1, 1, 0, 0)], DateTimeOffset.UtcNow);
-        repository.UpsertReportedUsage("openai", [new ReportedUsageRow(day, "gpt-5.4", 2, 2, 0, 0)], DateTimeOffset.UtcNow);
+        repository.UpsertReportedUsage(providerKey: "anthropic",
+            rows: [new ReportedUsageRow(UsageDay: day, Model: "claude-opus-4-1", 1, 1, 0, 0)],
+            fetchedAtUtc: DateTimeOffset.UtcNow);
+        repository.UpsertReportedUsage(providerKey: "openai",
+            rows: [new ReportedUsageRow(UsageDay: day, Model: "gpt-5.4", 2, 2, 0, 0)],
+            fetchedAtUtc: DateTimeOffset.UtcNow);
 
         Assert.Single(repository.GetReportedUsage("anthropic").Rows);
         Assert.Single(repository.GetReportedUsage("openai").Rows);
@@ -87,9 +99,11 @@ public class ReportedUsageRepositoryTests
         temp.Database.EnsureCreated();
         var repository = new ReportedUsageRepository(temp.Database);
         var day = Yesterday;
-        repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(day, "claude-opus-4-1", 1, 1, 0, 0)], DateTimeOffset.UtcNow);
+        repository.UpsertReportedUsage(providerKey: "anthropic",
+            rows: [new ReportedUsageRow(UsageDay: day, Model: "claude-opus-4-1", 1, 1, 0, 0)],
+            fetchedAtUtc: DateTimeOffset.UtcNow);
 
-        repository.UpsertReportedUsage("anthropic", [], DateTimeOffset.UtcNow);
+        repository.UpsertReportedUsage(providerKey: "anthropic", rows: [], fetchedAtUtc: DateTimeOffset.UtcNow);
 
         Assert.Single(repository.GetReportedUsage("anthropic").Rows);
     }
@@ -102,13 +116,17 @@ public class ReportedUsageRepositoryTests
         var repository = new ReportedUsageRepository(temp.Database);
         var oldDay = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-100));
         var oldFetchedAt = DateTimeOffset.UtcNow.AddDays(-100);
-        repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(oldDay, "claude-opus-4-1", 1, 1, 0, 0)], oldFetchedAt);
+        repository.UpsertReportedUsage(providerKey: "anthropic",
+            rows: [new ReportedUsageRow(UsageDay: oldDay, Model: "claude-opus-4-1", 1, 1, 0, 0)],
+            fetchedAtUtc: oldFetchedAt);
 
         // A later cycle re-fetches the trailing window, which no longer includes oldDay - the retention
         // sweep should drop it rather than let it linger forever.
-        repository.UpsertReportedUsage("anthropic", [new ReportedUsageRow(Yesterday, "claude-opus-4-1", 1, 1, 0, 0)], DateTimeOffset.UtcNow);
+        repository.UpsertReportedUsage(providerKey: "anthropic",
+            rows: [new ReportedUsageRow(UsageDay: Yesterday, Model: "claude-opus-4-1", 1, 1, 0, 0)],
+            fetchedAtUtc: DateTimeOffset.UtcNow);
 
         var (rows, _) = repository.GetReportedUsage("anthropic");
-        Assert.DoesNotContain(rows, r => r.UsageDay == oldDay);
+        Assert.DoesNotContain(collection: rows, filter: r => r.UsageDay == oldDay);
     }
 }

@@ -1,9 +1,9 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Checksums;
 using TotallyHot.ArcRouter.CodeRouterBench;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
@@ -17,7 +17,7 @@ public class BenchmarkDataStatusServiceTests
     public void Current_BeforeAnyRecheck_IsNull()
     {
         using var temp = new TempBenchmarkDatabase();
-        var service = CreateService(temp, FakeHttpMessageHandler.AlwaysFails());
+        var service = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
 
         Assert.Null(service.Current);
     }
@@ -34,17 +34,16 @@ public class BenchmarkDataStatusServiceTests
             .Select(spec => (spec.FileName, Oid: GitBlobHash.Compute(Encoding.UTF8.GetBytes(spec.FileName))))
             .ToArray();
         foreach (var (fileName, oid) in files)
-        {
-            ledger.Upsert(new BenchmarkFileLedgerEntry(fileName, oid, 7, 0, "commit1", DateTimeOffset.UtcNow));
-        }
+            ledger.Upsert(new BenchmarkFileLedgerEntry(FileName: fileName, PublishedOid: oid, 7, 0,
+                RepoCommit: "commit1", SyncedAtUtc: DateTimeOffset.UtcNow));
 
-        var service = CreateService(temp, TreeHandler(files));
+        var service = CreateService(temp: temp, handler: TreeHandler(files));
 
         var status = await service.RecheckAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(BenchmarkDataState.Current, status.State);
+        Assert.Equal(expected: BenchmarkDataState.Current, actual: status.State);
         Assert.Null(status.Reason);
-        Assert.Same(status, service.Current);
+        Assert.Same(expected: status, actual: service.Current);
     }
 
     [Fact]
@@ -53,11 +52,12 @@ public class BenchmarkDataStatusServiceTests
         using var temp = new TempBenchmarkDatabase();
         temp.CreateLedger(); // schema only, no rows synced yet
 
-        var service = CreateService(temp, TreeHandler(("models.json", "somepublishedoid00000000000000000000000")));
+        var service = CreateService(temp: temp,
+            handler: TreeHandler(("models.json", "somepublishedoid00000000000000000000000")));
 
         var status = await service.RecheckAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(BenchmarkDataState.Update, status.State);
+        Assert.Equal(expected: BenchmarkDataState.Update, actual: status.State);
     }
 
     [Fact]
@@ -66,24 +66,26 @@ public class BenchmarkDataStatusServiceTests
         using var temp = new TempBenchmarkDatabase();
         var ledger = temp.CreateLedger();
         ledger.Upsert(new BenchmarkFileLedgerEntry(
-            "models.json", "stale0000000000000000000000000000000000", 7, 0, "commit0", DateTimeOffset.UtcNow));
+            FileName: "models.json", PublishedOid: "stale0000000000000000000000000000000000", 7, 0,
+            RepoCommit: "commit0", SyncedAtUtc: DateTimeOffset.UtcNow));
 
-        var service = CreateService(temp, TreeHandler(("models.json", "fresh0000000000000000000000000000000000")));
+        var service = CreateService(temp: temp,
+            handler: TreeHandler(("models.json", "fresh0000000000000000000000000000000000")));
 
         var status = await service.RecheckAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(BenchmarkDataState.Update, status.State);
+        Assert.Equal(expected: BenchmarkDataState.Update, actual: status.State);
     }
 
     [Fact]
     public async Task RecheckAsync_ProbeUnreachable_ReportsCheckFailedRatherThanThrowing()
     {
         using var temp = new TempBenchmarkDatabase();
-        var service = CreateService(temp, FakeHttpMessageHandler.AlwaysFails());
+        var service = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
 
         var status = await service.RecheckAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(BenchmarkDataState.CheckFailed, status.State);
+        Assert.Equal(expected: BenchmarkDataState.CheckFailed, actual: status.State);
         Assert.NotNull(status.Reason);
     }
 
@@ -96,51 +98,56 @@ public class BenchmarkDataStatusServiceTests
             .Select(spec => (spec.FileName, Oid: GitBlobHash.Compute(Encoding.UTF8.GetBytes(spec.FileName))))
             .ToArray();
         foreach (var (fileName, oid) in files)
-        {
-            ledger.Upsert(new BenchmarkFileLedgerEntry(fileName, oid, 7, 0, "commit1", DateTimeOffset.UtcNow));
-        }
+            ledger.Upsert(new BenchmarkFileLedgerEntry(FileName: fileName, PublishedOid: oid, 7, 0,
+                RepoCommit: "commit1", SyncedAtUtc: DateTimeOffset.UtcNow));
 
         // A probe that succeeds once, then fails - simulating Hugging Face going unreachable between checks.
         var callCount = 0;
-        var handler = new FakeHttpMessageHandler(request =>
+        var handler = new FakeHttpMessageHandler(_ =>
         {
             callCount++;
             return callCount == 1
                 ? TreeResponse(files)
                 : new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
         });
-        var service = CreateService(temp, handler);
+        var service = CreateService(temp: temp, handler: handler);
 
         var first = await service.RecheckAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(BenchmarkDataState.Current, first.State);
+        Assert.Equal(expected: BenchmarkDataState.Current, actual: first.State);
 
         var second = await service.RecheckAsync(TestContext.Current.CancellationToken);
 
         // A later probe failure must never leave the stale "Current" reading in place - a genuinely
         // drifted machine would then look fine.
-        Assert.Equal(BenchmarkDataState.CheckFailed, second.State);
-        Assert.Equal(BenchmarkDataState.CheckFailed, service.Current!.State);
+        Assert.Equal(expected: BenchmarkDataState.CheckFailed, actual: second.State);
+        Assert.Equal(expected: BenchmarkDataState.CheckFailed, actual: service.Current!.State);
     }
 
     private static BenchmarkDataStatusService CreateService(TempBenchmarkDatabase temp, HttpMessageHandler handler)
     {
-        var probe = new BenchmarkChecksumProbe(new FakeHttpClientFactory(handler), NullLogger<BenchmarkChecksumProbe>.Instance);
+        var probe = new BenchmarkChecksumProbe(httpClientFactory: new FakeHttpClientFactory(handler),
+            logger: NullLogger<BenchmarkChecksumProbe>.Instance);
         var ledger = new BenchmarkFileLedger(temp.Database);
         return new BenchmarkDataStatusService(
-            probe, ledger, Options.Create(new BenchmarkSyncOptions()), NullLogger<BenchmarkDataStatusService>.Instance);
+            probe: probe, ledger: ledger, options: Options.Create(new BenchmarkSyncOptions()),
+            logger: NullLogger<BenchmarkDataStatusService>.Instance);
     }
 
-    private static FakeHttpMessageHandler TreeHandler(params (string FileName, string Oid)[] files) =>
-        new(_ => TreeResponse(files));
+    private static FakeHttpMessageHandler TreeHandler(params (string FileName, string Oid)[] files)
+    {
+        return new FakeHttpMessageHandler(_ => TreeResponse(files));
+    }
 
     private static HttpResponseMessage TreeResponse(params (string FileName, string Oid)[] files)
     {
-        var entries = files.Select(f => $$"""{ "type": "file", "path": "{{f.FileName}}", "oid": "{{f.Oid}}", "size": 7 }""");
+        var entries = files.Select(f =>
+            $$"""{ "type": "file", "path": "{{f.FileName}}", "oid": "{{f.Oid}}", "size": 7 }""");
         var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent($"[{string.Join(',', entries)}]", Encoding.UTF8, "application/json"),
+            Content = new StringContent(content: $"[{string.Join(',', values: entries)}]", encoding: Encoding.UTF8,
+                mediaType: "application/json")
         };
-        response.Headers.Add("X-Repo-Commit", "commit1");
+        response.Headers.Add(name: "X-Repo-Commit", value: "commit1");
         return response;
     }
 }

@@ -1,7 +1,7 @@
+using AwesomeAssertions;
+using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
-using Bunit;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -14,9 +14,9 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class ConsoleTabTests
 {
-    private static Bunit.BunitContext NewContext()
+    private static BunitContext NewContext()
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton(new LiveDataStore(serverAddress: "https://127.0.0.1:59992"));
         return ctx;
@@ -78,7 +78,7 @@ public sealed class ConsoleTabTests
         var cut = ctx.Render<ConsoleTab>();
         cut.Markup.Should().Contain("Auto-Scroll: ON");
 
-        cut.InvokeAsync(() => cut.Instance.OnManualScrollUp());
+        cut.InvokeAsync(cut.Instance.OnManualScrollUp);
 
         cut.Markup.Should().Contain("Auto-Scroll: OFF");
     }
@@ -90,8 +90,7 @@ public sealed class ConsoleTabTests
 
         var cut = ctx.Render<ConsoleTab>();
 
-        var act = () => cut.Dispose();
+        var act = cut.Dispose;
         act.Should().NotThrow();
     }
 }
-

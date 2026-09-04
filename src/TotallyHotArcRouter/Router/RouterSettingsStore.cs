@@ -1,6 +1,4 @@
 using System.Globalization;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -26,10 +24,16 @@ namespace TotallyHot.ArcRouter.Router;
 /// </remarks>
 public sealed class RouterSettingsStore
 {
-    /// <summary>The <c>router_settings</c> key for <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/>, stored as <c>"0"</c>/<c>"1"</c>.</summary>
+    /// <summary>
+    /// The <c>router_settings</c> key for <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/>, stored as
+    /// <c>"0"</c>/<c>"1"</c>.
+    /// </summary>
     public const string AdaptiveRoutingEnabledKey = "AdaptiveRoutingEnabled";
 
-    /// <summary>The <c>router_settings</c> key for <see cref="Models.RoutingOptions.EmbeddingMemoryCapacity"/>, stored as its base-10 integer string.</summary>
+    /// <summary>
+    /// The <c>router_settings</c> key for <see cref="Models.RoutingOptions.EmbeddingMemoryCapacity"/>, stored as its
+    /// base-10 integer string.
+    /// </summary>
     public const string EmbeddingMemoryCapacityKey = "EmbeddingMemoryCapacity";
 
     /// <summary>The <c>router_settings</c> key for <see cref="Judge.JudgeOptions.Enabled"/>, stored as <c>"0"</c>/<c>"1"</c>.</summary>
@@ -42,7 +46,10 @@ public sealed class RouterSettingsStore
     /// </summary>
     public const string JudgeModelNameKey = "JudgeModelName";
 
-    /// <summary>The <c>router_settings</c> key for <see cref="Transcripts.TranscriptOptions.Enabled"/>, stored as <c>"0"</c>/<c>"1"</c>.</summary>
+    /// <summary>
+    /// The <c>router_settings</c> key for <see cref="Transcripts.TranscriptOptions.Enabled"/>, stored as <c>"0"</c>/
+    /// <c>"1"</c>.
+    /// </summary>
     public const string TranscriptCaptureEnabledKey = "TranscriptCaptureEnabled";
 
     private readonly RouterMemoryDatabase _database;
@@ -72,7 +79,7 @@ public sealed class RouterSettingsStore
     /// <returns><see langword="true"/> if a row exists for <paramref name="key"/>; otherwise <see langword="false"/>.</returns>
     public bool TryGetBool(string key, out bool value)
     {
-        if (TryGetRaw(key, out var raw) && raw is "1" or "0")
+        if (TryGetRaw(key: key, value: out var raw) && raw is "1" or "0")
         {
             value = raw == "1";
             return true;
@@ -85,10 +92,14 @@ public sealed class RouterSettingsStore
     /// <summary>Reads a stored integer override, if one has been set.</summary>
     /// <param name="key">The setting key, e.g. <see cref="EmbeddingMemoryCapacityKey"/>.</param>
     /// <param name="value">The stored value, when present and parseable.</param>
-    /// <returns><see langword="true"/> if a row exists for <paramref name="key"/> and parses as an integer; otherwise <see langword="false"/>.</returns>
+    /// <returns>
+    /// <see langword="true"/> if a row exists for <paramref name="key"/> and parses as an integer; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
     public bool TryGetInt(string key, out int value)
     {
-        if (TryGetRaw(key, out var raw) && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        if (TryGetRaw(key: key, value: out var raw) && int.TryParse(s: raw, style: NumberStyles.Integer,
+                provider: CultureInfo.InvariantCulture, result: out var parsed))
         {
             value = parsed;
             return true;
@@ -107,16 +118,28 @@ public sealed class RouterSettingsStore
     /// row always reports <see langword="true"/> - including one holding the empty string, which callers
     /// are free to treat as its own meaningful value rather than as an absent override.
     /// </remarks>
-    public bool TryGetString(string key, out string value) => TryGetRaw(key, out value);
+    public bool TryGetString(string key, out string value)
+    {
+        return TryGetRaw(key: key, value: out value);
+    }
 
     /// <summary>Persists a boolean override, replacing any prior value for <paramref name="key"/>.</summary>
-    public void SetBool(string key, bool value) => SetRaw(key, value ? "1" : "0");
+    public void SetBool(string key, bool value)
+    {
+        SetRaw(key: key, value: value ? "1" : "0");
+    }
 
     /// <summary>Persists a string override, replacing any prior value for <paramref name="key"/>.</summary>
-    public void SetString(string key, string value) => SetRaw(key, value);
+    public void SetString(string key, string value)
+    {
+        SetRaw(key: key, value: value);
+    }
 
     /// <summary>Persists an integer override, replacing any prior value for <paramref name="key"/>.</summary>
-    public void SetInt(string key, int value) => SetRaw(key, value.ToString(CultureInfo.InvariantCulture));
+    public void SetInt(string key, int value)
+    {
+        SetRaw(key: key, value: value.ToString(CultureInfo.InvariantCulture));
+    }
 
     /// <summary>Reads a raw stored value by key.</summary>
     private bool TryGetRaw(string key, out string value)
@@ -124,7 +147,7 @@ public sealed class RouterSettingsStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT value FROM router_settings WHERE key = $key;";
-        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue(parameterName: "$key", value: key);
 
         var result = command.ExecuteScalar();
         if (result is string raw)
@@ -143,13 +166,13 @@ public sealed class RouterSettingsStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO router_settings (key, value) VALUES ($key, $value)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-            """;
-        command.Parameters.AddWithValue("$key", key);
-        command.Parameters.AddWithValue("$value", value);
+                              INSERT INTO router_settings (key, value) VALUES ($key, $value)
+                              ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$key", value: key);
+        command.Parameters.AddWithValue(parameterName: "$value", value: value);
         command.ExecuteNonQuery();
 
-        _logger.LogInformation("Router setting {Key} updated to {Value}.", key, value);
+        _logger.LogInformation(message: "Router setting {Key} updated to {Value}.", key, value);
     }
 }

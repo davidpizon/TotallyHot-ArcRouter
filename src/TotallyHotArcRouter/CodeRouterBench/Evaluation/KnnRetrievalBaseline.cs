@@ -18,30 +18,34 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// </remarks>
 public sealed class KnnRetrievalBaseline : IRegretBaselineRouter
 {
-    private readonly IReadOnlyDictionary<string, KnnRetrievalEntry> _entriesByTaskId;
     private readonly IReadOnlyList<KnnRetrievalEntry> _entries;
+    private readonly IReadOnlyDictionary<string, KnnRetrievalEntry> _entriesByTaskId;
 
     /// <summary>Initializes a new instance of the <see cref="KnnRetrievalBaseline"/> class.</summary>
-    /// <param name="artifact">The frozen index, e.g. from <see cref="KnnRetrievalIndexBuilder.BuildAsync"/> or <see cref="KnnRetrievalArtifactSerializer.Deserialize"/>.</param>
+    /// <param name="artifact">
+    /// The frozen index, e.g. from <see cref="KnnRetrievalIndexBuilder.BuildAsync"/> or
+    /// <see cref="KnnRetrievalArtifactSerializer.Deserialize"/>.
+    /// </param>
     /// <param name="k">The number of nearest neighbors to vote over. Must be positive.</param>
     public KnnRetrievalBaseline(KnnRetrievalArtifact artifact, int k = 5)
     {
         ArgumentNullException.ThrowIfNull(artifact);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(k, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: k, 0);
         KnnRetrievalArtifactSerializer.Validate(artifact);
 
         _entries = artifact.Entries;
-        _entriesByTaskId = artifact.Entries.ToDictionary(entry => entry.TaskId, StringComparer.Ordinal);
+        _entriesByTaskId =
+            artifact.Entries.ToDictionary(keySelector: entry => entry.TaskId, comparer: StringComparer.Ordinal);
         K = k;
     }
 
     /// <summary>Gets the number of nearest neighbors this baseline votes over.</summary>
     public int K { get; }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "knn_retrieval";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     /// <remarks>
     /// Votes are counted per candidate label among the <see cref="K"/> nearest neighbors (highest cosine
     /// similarity first, leave-one-out), restricted to neighbors whose label is in
@@ -54,23 +58,21 @@ public sealed class KnnRetrievalBaseline : IRegretBaselineRouter
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (!_entriesByTaskId.TryGetValue(context.TaskId, out var query))
-        {
-            return null;
-        }
+        if (!_entriesByTaskId.TryGetValue(key: context.TaskId, value: out var query)) return null;
 
         return _entries
-            .Where(entry => !string.Equals(entry.TaskId, query.TaskId, StringComparison.Ordinal))
-            .Select(entry => (Entry: entry, Similarity: DotProduct(query.Embedding, entry.Embedding)))
+            .Where(entry => !string.Equals(a: entry.TaskId, b: query.TaskId, comparisonType: StringComparison.Ordinal))
+            .Select(entry => (Entry: entry, Similarity: DotProduct(a: query.Embedding, b: entry.Embedding)))
             .OrderByDescending(pair => pair.Similarity)
-            .ThenBy(pair => pair.Entry.TaskId, StringComparer.Ordinal)
+            .ThenBy(keySelector: pair => pair.Entry.TaskId, comparer: StringComparer.Ordinal)
             .Take(K)
             .Where(pair => context.CandidateModelIds.Contains(pair.Entry.Label))
-            .GroupBy(pair => pair.Entry.Label, StringComparer.Ordinal)
-            .Select(group => (Model: group.Key, Votes: group.Count(), TotalSimilarity: group.Sum(pair => pair.Similarity)))
+            .GroupBy(keySelector: pair => pair.Entry.Label, comparer: StringComparer.Ordinal)
+            .Select(group => (Model: group.Key, Votes: group.Count(),
+                TotalSimilarity: group.Sum(pair => pair.Similarity)))
             .OrderByDescending(candidate => candidate.Votes)
             .ThenByDescending(candidate => candidate.TotalSimilarity)
-            .ThenBy(candidate => candidate.Model, StringComparer.Ordinal)
+            .ThenBy(keySelector: candidate => candidate.Model, comparer: StringComparer.Ordinal)
             .Select(candidate => (string?)candidate.Model)
             .FirstOrDefault();
     }
@@ -82,10 +84,7 @@ public sealed class KnnRetrievalBaseline : IRegretBaselineRouter
     private static double DotProduct(IReadOnlyList<float> a, IReadOnlyList<float> b)
     {
         double sum = 0;
-        for (var i = 0; i < a.Count; i++)
-        {
-            sum += a[i] * b[i];
-        }
+        for (var i = 0; i < a.Count; i++) sum += a[i] * b[i];
 
         return sum;
     }

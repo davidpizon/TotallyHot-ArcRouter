@@ -2,8 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
@@ -50,27 +49,36 @@ internal sealed class LocalEndpointResponder
     /// </remarks>
     private const string RouterArchitecture = "arcrouter";
 
-    private readonly ILogger _logger;
-    private readonly RequestInterceptor _interceptor;
-
     // Read only when describing models on /api/show. Both are in-memory snapshot lookups (see
     // ToolCallCapabilityStore), so consulting them from a request handler costs a dictionary probe, not a
     // query - which matters because a client's model picker polls this endpoint.
-    private readonly Translation.ToolCalling.IToolCallCapabilityStore? _capabilityStore;
-    private readonly Translation.ToolCalling.IModelContextWindowStore? _contextWindowStore;
+    private readonly IToolCallCapabilityStore? _capabilityStore;
+    private readonly IModelContextWindowStore? _contextWindowStore;
+    private readonly RequestInterceptor _interceptor;
+
+    private readonly ILogger _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LocalEndpointResponder"/> class.
     /// </summary>
     /// <param name="logger">Logger shared with the owning <see cref="ProxyMiddleware"/> instance.</param>
     /// <param name="interceptor">Request interceptor, used only for its configured model list.</param>
-    /// <param name="capabilityStore">Optional source of each model's detected tool-call dialect, used only to describe models on <c>POST /api/show</c>. <see langword="null"/> is behaviorally inert: every model reads as unclassified, which <see cref="Translation.ToolCalling.OllamaModelCapabilities.ForDialect"/> already treats as tool-capable, so the declared capabilities are unchanged.</param>
-    /// <param name="contextWindowStore">Optional source of each model's probed context window, used only to populate <c>POST /api/show</c>'s <c>model_info</c>. <see langword="null"/> is behaviorally inert: <c>model_info</c> is omitted entirely.</param>
+    /// <param name="capabilityStore">
+    /// Optional source of each model's detected tool-call dialect, used only to describe models
+    /// on <c>POST /api/show</c>. <see langword="null"/> is behaviorally inert: every model reads as unclassified, which
+    /// <see cref="Translation.ToolCalling.OllamaModelCapabilities.ForDialect"/> already treats as tool-capable, so the
+    /// declared capabilities are unchanged.
+    /// </param>
+    /// <param name="contextWindowStore">
+    /// Optional source of each model's probed context window, used only to populate
+    /// <c>POST /api/show</c>'s <c>model_info</c>. <see langword="null"/> is behaviorally inert: <c>model_info</c> is omitted
+    /// entirely.
+    /// </param>
     public LocalEndpointResponder(
         ILogger logger,
         RequestInterceptor interceptor,
-        Translation.ToolCalling.IToolCallCapabilityStore? capabilityStore,
-        Translation.ToolCalling.IModelContextWindowStore? contextWindowStore)
+        IToolCallCapabilityStore? capabilityStore,
+        IModelContextWindowStore? contextWindowStore)
     {
         _logger = logger;
         _interceptor = interceptor;
@@ -83,9 +91,12 @@ internal sealed class LocalEndpointResponder
     /// (<c>GET /v1/models</c>), matched case-insensitively and with an optional trailing slash tolerated,
     /// since both conventions vary by client.
     /// </summary>
-    public static bool IsModelsListRequest(HttpRequest request) =>
-        HttpMethods.IsGet(request.Method) &&
-        string.Equals(request.Path.Value?.TrimEnd('/'), ModelsListPath, System.StringComparison.OrdinalIgnoreCase);
+    public static bool IsModelsListRequest(HttpRequest request)
+    {
+        return HttpMethods.IsGet(request.Method) &&
+               string.Equals(a: request.Path.Value?.TrimEnd('/'), b: ModelsListPath,
+                   comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Writes the configured model list as an OpenAI-compatible <c>/v1/models</c> response, mirroring
@@ -95,41 +106,28 @@ internal sealed class LocalEndpointResponder
     public async Task WriteModelsListResponseAsync(HttpContext context)
     {
         var entries = _interceptor.ListAvailableModels()
-            .Select(model => new ModelListEntry(model.ModelName, "model", 0, model.Provider))
+            .Select(model => new ModelListEntry(Id: model.ModelName, Object: "model", 0, OwnedBy: model.Provider))
             .ToList();
 
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";
 
         await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new ModelsListResponse("list", entries)),
-            context.RequestAborted);
+            text: JsonSerializer.Serialize(new ModelsListResponse(Object: "list", Data: entries)),
+            cancellationToken: context.RequestAborted);
     }
-
-    /// <summary>
-    /// A single entry in the <c>/v1/models</c> response, shaped to match OpenAI's model list schema.
-    /// </summary>
-    private sealed record ModelListEntry(
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("object")] string Object,
-        [property: JsonPropertyName("created")] long Created,
-        [property: JsonPropertyName("owned_by")] string OwnedBy);
-
-    /// <summary>
-    /// The top-level <c>/v1/models</c> response envelope, shaped to match OpenAI's model list schema.
-    /// </summary>
-    private sealed record ModelsListResponse(
-        [property: JsonPropertyName("object")] string Object,
-        [property: JsonPropertyName("data")] IReadOnlyList<ModelListEntry> Data);
 
     /// <summary>
     /// Determines whether a request targets Ollama's native model discovery endpoint
     /// (<c>GET /api/tags</c>), matched case-insensitively and with an optional trailing slash tolerated,
     /// mirroring <see cref="IsModelsListRequest"/>.
     /// </summary>
-    public static bool IsOllamaTagsRequest(HttpRequest request) =>
-        HttpMethods.IsGet(request.Method) &&
-        string.Equals(request.Path.Value?.TrimEnd('/'), OllamaTagsPath, System.StringComparison.OrdinalIgnoreCase);
+    public static bool IsOllamaTagsRequest(HttpRequest request)
+    {
+        return HttpMethods.IsGet(request.Method) &&
+               string.Equals(a: request.Path.Value?.TrimEnd('/'), b: OllamaTagsPath,
+                   comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Writes the configured model list as an Ollama-native <c>/api/tags</c> response, so a client that
@@ -141,63 +139,40 @@ internal sealed class LocalEndpointResponder
     {
         var entries = _interceptor.ListAvailableModels()
             .Select(model => new OllamaTagEntry(
-                model.ModelName,
-                model.ModelName,
-                DateTimeOffset.UtcNow.ToString("O"),
+                Name: model.ModelName,
+                Model: model.ModelName,
+                ModifiedAt: DateTimeOffset.UtcNow.ToString("O"),
                 0,
-                string.Empty,
-                new OllamaTagDetails("gguf", string.Empty, string.Empty)))
+                Digest: string.Empty,
+                Details: new OllamaTagDetails(Format: "gguf", Family: string.Empty, ParameterSize: string.Empty)))
             .ToList();
 
         // Debug, not Information: this fires on every poll from an Ollama-shaped client's model picker
         // (potentially frequent), and its outcome is fully captured by the response itself - this exists so
         // a trace can distinguish "answered locally from /api/tags" from the per-model routing path's own
         // logging, without adding noise at the default log level.
-        _logger.LogDebug("Answered {Path} locally with {Count} configured model(s).", OllamaTagsPath, entries.Count);
+        _logger.LogDebug(message: "Answered {Path} locally with {Count} configured model(s).", OllamaTagsPath,
+            entries.Count);
 
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";
 
         await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new OllamaTagsResponse(entries)),
-            context.RequestAborted);
+            text: JsonSerializer.Serialize(new OllamaTagsResponse(entries)),
+            cancellationToken: context.RequestAborted);
     }
-
-    /// <summary>
-    /// The <c>details</c> object of one <see cref="OllamaTagEntry"/>, shaped to match Ollama's
-    /// <c>/api/tags</c> schema. Only the fields Ollama always populates are set; format-specific fields the
-    /// router has no equivalent for are left as ordinary defaults rather than fabricated.
-    /// </summary>
-    private sealed record OllamaTagDetails(
-        [property: JsonPropertyName("format")] string Format,
-        [property: JsonPropertyName("family")] string Family,
-        [property: JsonPropertyName("parameter_size")] string ParameterSize);
-
-    /// <summary>
-    /// A single entry in the <c>/api/tags</c> response, shaped to match Ollama's native model list schema.
-    /// </summary>
-    private sealed record OllamaTagEntry(
-        [property: JsonPropertyName("name")] string Name,
-        [property: JsonPropertyName("model")] string Model,
-        [property: JsonPropertyName("modified_at")] string ModifiedAt,
-        [property: JsonPropertyName("size")] long Size,
-        [property: JsonPropertyName("digest")] string Digest,
-        [property: JsonPropertyName("details")] OllamaTagDetails Details);
-
-    /// <summary>
-    /// The top-level <c>/api/tags</c> response envelope, shaped to match Ollama's native model list schema.
-    /// </summary>
-    private sealed record OllamaTagsResponse(
-        [property: JsonPropertyName("models")] IReadOnlyList<OllamaTagEntry> Models);
 
     /// <summary>
     /// Determines whether a request targets Ollama's native per-model detail endpoint (<c>POST /api/show</c>),
     /// matched case-insensitively and with an optional trailing slash tolerated, mirroring
     /// <see cref="IsOllamaTagsRequest"/>.
     /// </summary>
-    public static bool IsOllamaShowRequest(HttpRequest request) =>
-        HttpMethods.IsPost(request.Method) &&
-        string.Equals(request.Path.Value?.TrimEnd('/'), OllamaShowPath, System.StringComparison.OrdinalIgnoreCase);
+    public static bool IsOllamaShowRequest(HttpRequest request)
+    {
+        return HttpMethods.IsPost(request.Method) &&
+               string.Equals(a: request.Path.Value?.TrimEnd('/'), b: OllamaShowPath,
+                   comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Answers Ollama's native <c>POST /api/show</c> from local configuration instead of forwarding it
@@ -211,7 +186,7 @@ internal sealed class LocalEndpointResponder
     public async Task WriteOllamaShowResponseAsync(HttpContext context)
     {
         string body;
-        using (var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true))
+        using (var reader = new StreamReader(stream: context.Request.Body, encoding: Encoding.UTF8, leaveOpen: true))
         {
             body = await reader.ReadToEndAsync(context.RequestAborted);
         }
@@ -222,9 +197,7 @@ internal sealed class LocalEndpointResponder
             if (JsonNode.Parse(body) is JsonObject jsonObject &&
                 jsonObject["model"] is JsonValue modelValue &&
                 modelValue.TryGetValue<string>(out var value))
-            {
                 modelName = value;
-            }
         }
         catch (JsonException)
         {
@@ -235,7 +208,8 @@ internal sealed class LocalEndpointResponder
         var model = modelName is null
             ? null
             : _interceptor.ListAvailableModels()
-                .FirstOrDefault(m => string.Equals(m.ModelName, modelName, System.StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(m =>
+                    string.Equals(a: m.ModelName, b: modelName, comparisonType: StringComparison.OrdinalIgnoreCase));
 
         if (model is null)
         {
@@ -245,18 +219,19 @@ internal sealed class LocalEndpointResponder
             // routing path and surface as a confusing 400 from whatever upstream that name happened to
             // resolve to (see OllamaShowPath's remarks).
             _logger.LogInformation(
-                "Answered {Path} locally: unknown model '{ModelName}' requested; returning 404.",
+                message: "Answered {Path} locally: unknown model '{ModelName}' requested; returning 404.",
                 OllamaShowPath,
                 LogRedaction.Sanitize(modelName));
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(
-                JsonSerializer.Serialize(new OllamaErrorResponse($"model '{modelName}' not found")),
-                context.RequestAborted);
+                text: JsonSerializer.Serialize(new OllamaErrorResponse($"model '{modelName}' not found")),
+                cancellationToken: context.RequestAborted);
             return;
         }
 
-        _logger.LogDebug("Answered {Path} locally for model {Model}.", OllamaShowPath, LogRedaction.Sanitize(model.ModelName));
+        _logger.LogDebug(message: "Answered {Path} locally for model {Model}.", OllamaShowPath,
+            LogRedaction.Sanitize(model.ModelName));
 
         var (capabilities, modelInfo) = DescribeModel(model);
 
@@ -264,14 +239,14 @@ internal sealed class LocalEndpointResponder
         context.Response.ContentType = "application/json";
 
         await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new OllamaShowResponse(
-                string.Empty,
-                string.Empty,
-                string.Empty,
-                new OllamaTagDetails("gguf", string.Empty, string.Empty),
-                modelInfo,
-                capabilities)),
-            context.RequestAborted);
+            text: JsonSerializer.Serialize(new OllamaShowResponse(
+                Modelfile: string.Empty,
+                Parameters: string.Empty,
+                Template: string.Empty,
+                Details: new OllamaTagDetails(Format: "gguf", Family: string.Empty, ParameterSize: string.Empty),
+                ModelInfo: modelInfo,
+                Capabilities: capabilities)),
+            cancellationToken: context.RequestAborted);
     }
 
     /// <summary>
@@ -304,34 +279,41 @@ internal sealed class LocalEndpointResponder
     private (IReadOnlyList<string> Capabilities, IReadOnlyDictionary<string, JsonNode>? ModelInfo) DescribeModel(
         AvailableModel model)
     {
-        if (string.Equals(model.Provider, RequestInterceptor.RouterModelProvider, System.StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(a: model.Provider, b: RequestInterceptor.RouterModelProvider,
+                comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             var eligible = _interceptor.ListAvailableModels()
-                .Where(m => !string.Equals(m.Provider, RequestInterceptor.RouterModelProvider, System.StringComparison.OrdinalIgnoreCase))
+                .Where(m => !string.Equals(a: m.Provider, b: RequestInterceptor.RouterModelProvider,
+                    comparisonType: StringComparison.OrdinalIgnoreCase))
                 .Where(m => _interceptor.IsProviderEnabled(m.Provider) && _interceptor.IsModelEnabled(m.ModelName))
                 .ToList();
 
-            var union = Translation.ToolCalling.OllamaModelCapabilities.Union(
-                eligible.Select(m => Translation.ToolCalling.OllamaModelCapabilities.ForDialect(
-                    _capabilityStore?.GetModelCapability(m.Provider, m.ModelName)?.Dialect)));
+            var union = OllamaModelCapabilities.Union(
+                eligible.Select(m => OllamaModelCapabilities.ForDialect(
+                    _capabilityStore?.GetModelCapability(providerKey: m.Provider, modelName: m.ModelName)?.Dialect)));
 
             // Max, not min: the alias advertises the best it can route to. This over-advertises by
             // construction - auto-select may land on a model with a smaller window - which is the accepted
             // trade-off recorded in docs/router/ollama-show-capabilities-plan.md.
             var widest = eligible
-                .Select(m => _contextWindowStore?.GetModelContextWindow(m.Provider, m.ModelName)?.ContextLength)
+                .Select(m =>
+                    _contextWindowStore?.GetModelContextWindow(providerKey: m.Provider, modelName: m.ModelName)
+                        ?.ContextLength)
                 .Where(length => length is > 0)
                 .DefaultIfEmpty(null)
                 .Max();
 
-            return (union, BuildModelInfo(RouterArchitecture, widest));
+            return (union, BuildModelInfo(architecture: RouterArchitecture, contextLength: widest));
         }
 
-        var capabilities = Translation.ToolCalling.OllamaModelCapabilities.ForDialect(
-            _capabilityStore?.GetModelCapability(model.Provider, model.ModelName)?.Dialect);
-        var window = _contextWindowStore?.GetModelContextWindow(model.Provider, model.ModelName);
+        var capabilities = OllamaModelCapabilities.ForDialect(
+            _capabilityStore?.GetModelCapability(providerKey: model.Provider, modelName: model.ModelName)?.Dialect);
+        var window =
+            _contextWindowStore?.GetModelContextWindow(providerKey: model.Provider, modelName: model.ModelName);
 
-        return (capabilities, BuildModelInfo(window?.Architecture ?? RouterArchitecture, window?.ContextLength));
+        return (capabilities,
+            BuildModelInfo(architecture: window?.Architecture ?? RouterArchitecture,
+                contextLength: window?.ContextLength));
     }
 
     /// <summary>
@@ -342,14 +324,64 @@ internal sealed class LocalEndpointResponder
     /// <c>{arch}.context_length</c> and clients resolve it by reading <c>general.architecture</c> first, so
     /// a length published without a matching architecture is unreachable through the standard read path.
     /// </remarks>
-    private static IReadOnlyDictionary<string, JsonNode>? BuildModelInfo(string architecture, int? contextLength) =>
-        contextLength is > 0
+    private static IReadOnlyDictionary<string, JsonNode>? BuildModelInfo(string architecture, int? contextLength)
+    {
+        return contextLength is > 0
             ? new Dictionary<string, JsonNode>(StringComparer.Ordinal)
             {
                 ["general.architecture"] = JsonValue.Create(architecture),
-                [$"{architecture}.context_length"] = JsonValue.Create(contextLength.Value),
+                [$"{architecture}.context_length"] = JsonValue.Create(contextLength.Value)
             }
             : null;
+    }
+
+    /// <summary>
+    /// A single entry in the <c>/v1/models</c> response, shaped to match OpenAI's model list schema.
+    /// </summary>
+    private sealed record ModelListEntry(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("object")] string Object,
+        [property: JsonPropertyName("created")]
+        long Created,
+        [property: JsonPropertyName("owned_by")]
+        string OwnedBy);
+
+    /// <summary>
+    /// The top-level <c>/v1/models</c> response envelope, shaped to match OpenAI's model list schema.
+    /// </summary>
+    private sealed record ModelsListResponse(
+        [property: JsonPropertyName("object")] string Object,
+        [property: JsonPropertyName("data")] IReadOnlyList<ModelListEntry> Data);
+
+    /// <summary>
+    /// The <c>details</c> object of one <see cref="OllamaTagEntry"/>, shaped to match Ollama's
+    /// <c>/api/tags</c> schema. Only the fields Ollama always populates are set; format-specific fields the
+    /// router has no equivalent for are left as ordinary defaults rather than fabricated.
+    /// </summary>
+    private sealed record OllamaTagDetails(
+        [property: JsonPropertyName("format")] string Format,
+        [property: JsonPropertyName("family")] string Family,
+        [property: JsonPropertyName("parameter_size")]
+        string ParameterSize);
+
+    /// <summary>
+    /// A single entry in the <c>/api/tags</c> response, shaped to match Ollama's native model list schema.
+    /// </summary>
+    private sealed record OllamaTagEntry(
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("model")] string Model,
+        [property: JsonPropertyName("modified_at")]
+        string ModifiedAt,
+        [property: JsonPropertyName("size")] long Size,
+        [property: JsonPropertyName("digest")] string Digest,
+        [property: JsonPropertyName("details")]
+        OllamaTagDetails Details);
+
+    /// <summary>
+    /// The top-level <c>/api/tags</c> response envelope, shaped to match Ollama's native model list schema.
+    /// </summary>
+    private sealed record OllamaTagsResponse(
+        [property: JsonPropertyName("models")] IReadOnlyList<OllamaTagEntry> Models);
 
     /// <summary>
     /// The <c>POST /api/show</c> response envelope, shaped to match Ollama's native per-model detail schema.
@@ -365,10 +397,14 @@ internal sealed class LocalEndpointResponder
     /// here the router genuinely knows the answer to.
     /// </remarks>
     private sealed record OllamaShowResponse(
-        [property: JsonPropertyName("modelfile")] string Modelfile,
-        [property: JsonPropertyName("parameters")] string Parameters,
-        [property: JsonPropertyName("template")] string Template,
-        [property: JsonPropertyName("details")] OllamaTagDetails Details,
+        [property: JsonPropertyName("modelfile")]
+        string Modelfile,
+        [property: JsonPropertyName("parameters")]
+        string Parameters,
+        [property: JsonPropertyName("template")]
+        string Template,
+        [property: JsonPropertyName("details")]
+        OllamaTagDetails Details,
 
         // Omitted rather than serialized as null when unknown. This endpoint serializes without options, so
         // default handling would write `"model_info": null` - which a client can read as "no context
@@ -377,8 +413,8 @@ internal sealed class LocalEndpointResponder
         [property: JsonPropertyName("model_info")]
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyDictionary<string, JsonNode>? ModelInfo,
-
-        [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities);
+        [property: JsonPropertyName("capabilities")]
+        IReadOnlyList<string> Capabilities);
 
     /// <summary>An Ollama-shaped <c>{"error": "..."}</c> envelope, used for a <c>POST /api/show</c> naming an unknown model.</summary>
     private sealed record OllamaErrorResponse(

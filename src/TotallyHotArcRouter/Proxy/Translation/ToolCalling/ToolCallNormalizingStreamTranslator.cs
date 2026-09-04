@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -12,7 +11,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <c>tool_calls</c> delta before it reaches the client (<c>docs/router/tool-call-normalization.md</c>
 /// Phase 4). Created per response by
 /// <see cref="ToolCallNormalizingTranslator.CreateStreamTranslator"/>; not thread-safe.
-///
 /// <para>
 /// This is the layer that exists because a slow local model streams one token per SSE event, so a
 /// delimiter - or its closing counterpart - can be split across arbitrarily many chunks. That
@@ -20,7 +18,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// it hands off to <see cref="DialectMatcher.ExtractFromRegionBody"/>, so the streaming and buffered
 /// paths cannot drift about what counts as a call.
 /// </para>
-///
 /// <para>
 /// The upstream body needs no structural reshaping - it already is an OpenAI
 /// <c>chat.completion.chunk</c> - so only <c>choices[0].delta.content</c>/<c>.tool_calls</c> and
@@ -31,7 +28,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// than one choice (a client-supplied <c>n</c> &gt; 1) fails open rather than being rewritten, so no
 /// choice's content is lost.
 /// </para>
-///
 /// <para>
 /// Never throws. A region that fails to parse is forwarded as ordinary content, delimiters included,
 /// with a warning - see <see cref="ToolCallNormalizingTranslator"/>'s remarks.
@@ -39,9 +35,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// </summary>
 internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-    private static readonly byte[] DoneLine = Encoding.UTF8.GetBytes("data: [DONE]\n\n");
-
     /// <summary>
     /// The cap on text held inside an open region before it is abandoned and flushed as ordinary content
     /// (§3.4 performance rule 4). Without it, a single stray <c>&lt;tool_call&gt;</c> - or a Mistral
@@ -51,44 +44,47 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
     /// </summary>
     private const int MaxBufferedRegionChars = 64 * 1024;
 
-    private readonly ToolCallNormalizationPlan _plan;
-    private readonly ToolCallObservationRecorder _recorder;
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly byte[] DoneLine = "data: [DONE]\n\n"u8.ToArray();
     private readonly ILogger _logger;
+    private readonly IReadOnlyList<string> _openerTokens;
 
     // Every armed opener, paired with the dialect that owns it, so a match knows what it matched.
     private readonly IReadOnlyList<(ToolCallDialect Dialect, DialectDelimiter Delimiter)> _openers;
-    private readonly IReadOnlyList<string> _openerTokens;
+
+    private readonly ToolCallNormalizationPlan _plan;
+    private readonly ToolCallObservationRecorder _recorder;
+    private readonly StringBuilder _regionInner = new();
 
     // Raw upstream bytes not yet forming a complete SSE event - the same "\n\n"-delimited framing every
     // stream translator here implements; CR stripped on ingestion.
-    private readonly List<byte> _sseBuffer = new();
-
-    // Text carried across Push calls that is not yet classifiable as safe-to-emit content, an opening
-    // delimiter, or an open region's accumulated body.
-    private string _pending = string.Empty;
-    private bool _insideRegion;
-    private ToolCallDialect? _activeDialect;
+    private readonly List<byte> _sseBuffer = [];
     private DialectDelimiter? _activeDelimiter;
-    private readonly StringBuilder _regionInner = new();
-
-    private int _toolCallIndex;
-    private bool _hasSynthesizedToolCalls;
+    private ToolCallDialect? _activeDialect;
 
     // Set once this response has proved it emits native OpenAI tool_calls. From that point every event is
     // forwarded raw: a model that already speaks the protocol must never have its prose *example* of a
     // tool call rewritten into a real invocation, which is the false-positive provider-wide arming caused.
     private bool _disarmed;
-
-    // Set once this stream has logged its one multi-choice ("n" > 1) fail-open warning, so a long
-    // multi-choice stream doesn't warn on every chunk.
-    private bool _loggedMultiChoiceWarning;
+    private bool _hasSynthesizedToolCalls;
+    private bool _insideRegion;
+    private JsonNode? _lastChunkCreated;
 
     // Captured from the most recently parsed upstream chunk so a synthesized chunk built in Flush - which
     // has no upstream chunk of its own - still carries the id/created/model fields real OpenAI clients
     // expect on every chunk.
     private JsonNode? _lastChunkId;
-    private JsonNode? _lastChunkCreated;
     private JsonNode? _lastChunkModel;
+
+    // Set once this stream has logged its one multi-choice ("n" > 1) fail-open warning, so a long
+    // multi-choice stream doesn't warn on every chunk.
+    private bool _loggedMultiChoiceWarning;
+
+    // Text carried across Push calls that is not yet classifiable as safe-to-emit content, an opening
+    // delimiter, or an open region's accumulated body.
+    private string _pending = string.Empty;
+
+    private int _toolCallIndex;
 
     /// <summary>Initializes a new instance of the <see cref="ToolCallNormalizingStreamTranslator"/> class.</summary>
     /// <param name="plan">Which dialects to scan for, and whether to record what this response reveals.</param>
@@ -104,7 +100,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
         _plan = plan;
         _logger = logger;
-        _recorder = new ToolCallObservationRecorder(plan, capabilityStore);
+        _recorder = new ToolCallObservationRecorder(plan: plan, store: capabilityStore);
 
         _openers = [.. plan.Candidates.SelectMany(d => d.Delimiters.Select(delim => (Dialect: d, Delimiter: delim)))];
         _openerTokens = [.. _openers.Select(o => o.Delimiter.Open)];
@@ -113,40 +109,33 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         // runtime condition - but the scan below indexes _openers[0] unconditionally, so state it here
         // instead of surfacing it as an IndexOutOfRangeException on the first content chunk.
         if (_openers.Count == 0)
-        {
-            throw new ArgumentException("A normalization plan must arm at least one scannable dialect.", nameof(plan));
-        }
+            throw new ArgumentException(message: "A normalization plan must arm at least one scannable dialect.",
+                paramName: nameof(plan));
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public byte[] Push(ReadOnlySpan<byte> upstreamChunk)
     {
         foreach (var b in upstreamChunk)
-        {
             if (b != (byte)'\r')
-            {
                 _sseBuffer.Add(b);
-            }
-        }
 
         using var output = new MemoryStream();
 
         int delimiter;
         while ((delimiter = IndexOfDoubleNewline()) >= 0)
         {
-            var eventBytes = _sseBuffer.GetRange(0, delimiter).ToArray();
-            _sseBuffer.RemoveRange(0, delimiter + 2);
+            var eventBytes = _sseBuffer.GetRange(0, count: delimiter).ToArray();
+            _sseBuffer.RemoveRange(0, count: delimiter + 2);
 
             if (ProcessEvent(eventBytes) is { } translated)
-            {
-                output.Write(translated, 0, translated.Length);
-            }
+                output.Write(buffer: translated, 0, count: translated.Length);
         }
 
         return output.ToArray();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public byte[] Flush()
     {
         using var output = new MemoryStream();
@@ -157,9 +146,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
             var remaining = _sseBuffer.ToArray();
             _sseBuffer.Clear();
             if (ProcessEvent(remaining) is { } translated)
-            {
-                output.Write(translated, 0, translated.Length);
-            }
+                output.Write(buffer: translated, 0, count: translated.Length);
         }
 
         // Anything still held back is lost data if silently dropped. This is the backstop for a stream
@@ -168,29 +155,26 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         // rather than after it.
         var contentOut = new StringBuilder();
         var callsOut = new List<ExtractedToolCall>();
-        FinishOpenRegion(contentOut, callsOut);
+        FinishOpenRegion(contentOut: contentOut, callsOut: callsOut);
 
         var leftover = contentOut.ToString();
         if ((leftover.Length > 0 || callsOut.Count > 0) &&
-            BuildSyntheticChunk(leftover, callsOut) is { } leftoverChunk)
-        {
-            output.Write(leftoverChunk, 0, leftoverChunk.Length);
-        }
+            BuildSyntheticChunk(content: leftover, calls: callsOut) is { } leftoverChunk)
+            output.Write(buffer: leftoverChunk, 0, count: leftoverChunk.Length);
 
-        output.Write(DoneLine, 0, DoneLine.Length);
+        output.Write(buffer: DoneLine, 0, count: DoneLine.Length);
         return output.ToArray();
     }
 
-    /// <summary>Finds the first blank-line separator (<c>\n\n</c>) marking a complete SSE event, or -1 when none is buffered yet.</summary>
+    /// <summary>
+    /// Finds the first blank-line separator (<c>\n\n</c>) marking a complete SSE event, or -1 when none is buffered
+    /// yet.
+    /// </summary>
     private int IndexOfDoubleNewline()
     {
         for (var i = 0; i + 1 < _sseBuffer.Count; i++)
-        {
             if (_sseBuffer[i] == (byte)'\n' && _sseBuffer[i + 1] == (byte)'\n')
-            {
                 return i;
-            }
-        }
 
         return -1;
     }
@@ -207,20 +191,20 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
     private static byte[] PassthroughRawEvent(byte[] eventBytes)
     {
         var passthrough = new byte[eventBytes.Length + 2];
-        eventBytes.CopyTo(passthrough, 0);
+        eventBytes.CopyTo(array: passthrough, 0);
         passthrough[^2] = (byte)'\n';
         passthrough[^1] = (byte)'\n';
         return passthrough;
     }
 
-    /// <summary>Translates one raw SSE event, or returns null when nothing is client-visible yet (fully buffered) or the event carries no choices to inspect.</summary>
+    /// <summary>
+    /// Translates one raw SSE event, or returns null when nothing is client-visible yet (fully buffered) or the event
+    /// carries no choices to inspect.
+    /// </summary>
     private byte[]? ProcessEvent(byte[] eventBytes)
     {
         var payload = ExtractDataPayload(eventBytes);
-        if (payload is null || payload == "[DONE]")
-        {
-            return null;
-        }
+        if (payload is null or "[DONE]") return null;
 
         JsonObject chunk;
         try
@@ -237,10 +221,8 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         _lastChunkModel = chunk["model"]?.DeepClone();
 
         if (chunk["choices"] is not JsonArray { Count: > 0 } choices || choices[0] is not JsonObject choice)
-        {
             // Nothing to scan (e.g. a trailing usage-only chunk) - forward unchanged.
             return PassthroughRawEvent(eventBytes);
-        }
 
         if (choices.Count > 1)
         {
@@ -251,6 +233,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
             {
                 _loggedMultiChoiceWarning = true;
                 _logger.LogWarning(
+                    message:
                     "Tool-call normalization: chunk had {ChoiceCount} choices; only a single choice per chunk is supported, so it is forwarded unrewritten to avoid dropping data. Logged once per stream.",
                     choices.Count);
             }
@@ -258,10 +241,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
             return PassthroughRawEvent(eventBytes);
         }
 
-        if (_disarmed)
-        {
-            return PassthroughRawEvent(eventBytes);
-        }
+        if (_disarmed) return PassthroughRawEvent(eventBytes);
 
         var originalDelta = choice["delta"] as JsonObject;
 
@@ -285,14 +265,11 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
             var held = TakeHeldTextRaw();
 
             var rawEvent = PassthroughRawEvent(eventBytes);
-            if (held.Length == 0 || BuildSyntheticChunk(held, []) is not { } heldChunk)
-            {
-                return rawEvent;
-            }
+            if (held.Length == 0 || BuildSyntheticChunk(content: held, calls: []) is not { } heldChunk) return rawEvent;
 
             var combined = new byte[heldChunk.Length + rawEvent.Length];
-            heldChunk.CopyTo(combined, 0);
-            rawEvent.CopyTo(combined, heldChunk.Length);
+            heldChunk.CopyTo(array: combined, 0);
+            rawEvent.CopyTo(array: combined, index: heldChunk.Length);
             return combined;
         }
 
@@ -302,9 +279,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         var emitted = new StringBuilder();
         var emittedCalls = new List<ExtractedToolCall>();
         if (contentText is not null)
-        {
-            ProcessContent(contentText, emitted, emittedCalls);
-        }
+            ProcessContent(newContent: contentText, contentOut: emitted, callsOut: emittedCalls);
 
         var originalFinishReason = choice["finish_reason"]?.GetValue<string>();
 
@@ -312,23 +287,17 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         // dialect's region can end (Mistral's [TOOL_CALLS] has no closing token by design). Resolving it
         // here rather than in Flush is what lets its calls be emitted on the finish chunk itself, so the
         // client sees finish_reason "tool_calls" rather than "stop" followed by an orphaned tool call.
-        if (originalFinishReason is not null)
-        {
-            FinishOpenRegion(emitted, emittedCalls);
-        }
+        if (originalFinishReason is not null) FinishOpenRegion(contentOut: emitted, callsOut: emittedCalls);
 
         // Clone the original delta's other fields (role, or anything a future upstream adds) - only
         // "content" is ever replaced or removed.
         var outputDelta = originalDelta is not null
-            ? originalDelta.DeepClone() as JsonObject ?? new JsonObject()
-            : new JsonObject();
+            ? originalDelta.DeepClone() as JsonObject ?? []
+            : [];
         outputDelta.Remove("content");
 
         var emittedContent = emitted.ToString();
-        if (emittedContent.Length > 0)
-        {
-            outputDelta["content"] = emittedContent;
-        }
+        if (emittedContent.Length > 0) outputDelta["content"] = emittedContent;
 
         if (emittedCalls.Count > 0)
         {
@@ -342,27 +311,21 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
         // Nothing changed and nothing to say for this event (fully buffered mid-region, no role, no finish
         // reason) - suppress the chunk rather than emitting an empty delta.
-        if (outputDelta.Count == 0 && finishReason is null)
-        {
-            return null;
-        }
+        if (outputDelta.Count == 0 && finishReason is null) return null;
 
         var outputChoice = new JsonObject
         {
             ["index"] = choice["index"]?.DeepClone() ?? 0,
             ["delta"] = outputDelta,
-            ["finish_reason"] = finishReason,
+            ["finish_reason"] = finishReason
         };
 
-        if (choice["logprobs"] is { } logprobs)
-        {
-            outputChoice["logprobs"] = logprobs.DeepClone();
-        }
+        if (choice["logprobs"] is { } logprobs) outputChoice["logprobs"] = logprobs.DeepClone();
 
-        var outputChunk = chunk.DeepClone() as JsonObject ?? new JsonObject();
+        var outputChunk = chunk.DeepClone() as JsonObject ?? [];
         outputChunk["choices"] = new JsonArray { outputChoice };
 
-        var json = JsonSerializer.Serialize(outputChunk, SerializerOptions);
+        var json = JsonSerializer.Serialize(value: outputChunk, options: SerializerOptions);
         return Encoding.UTF8.GetBytes($"data: {json}\n\n");
     }
 
@@ -391,9 +354,10 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
                     return;
                 }
 
-                if (TryFindEarliestOpener(_pending, out var openIndex, out var dialect, out var delimiter))
+                if (TryFindEarliestOpener(text: _pending, openIndex: out var openIndex, dialect: out var dialect,
+                        delimiter: out var delimiter))
                 {
-                    contentOut.Append(_pending, 0, openIndex);
+                    contentOut.Append(value: _pending, 0, count: openIndex);
                     _pending = _pending[(openIndex + delimiter.Open.Length)..];
                     _insideRegion = true;
                     _activeDialect = dialect;
@@ -402,14 +366,12 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
                     continue;
                 }
 
-                var holdBack = Math.Min(_pending.Length, LongestPartialSuffixMatch(_pending, _openerTokens));
+                var holdBack = Math.Min(val1: _pending.Length,
+                    val2: LongestPartialSuffixMatch(text: _pending, candidates: _openerTokens));
                 var safeLength = _pending.Length - holdBack;
-                if (safeLength <= 0)
-                {
-                    return;
-                }
+                if (safeLength <= 0) return;
 
-                contentOut.Append(_pending, 0, safeLength);
+                contentOut.Append(value: _pending, 0, count: safeLength);
                 _pending = _pending[safeLength..];
                 continue;
             }
@@ -426,32 +388,27 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
                 return;
             }
 
-            var closeIndex = _pending.IndexOf(closeToken, StringComparison.Ordinal);
+            var closeIndex = _pending.IndexOf(value: closeToken, comparisonType: StringComparison.Ordinal);
             if (closeIndex >= 0)
             {
-                _regionInner.Append(_pending, 0, closeIndex);
+                _regionInner.Append(value: _pending, 0, count: closeIndex);
                 _pending = _pending[(closeIndex + closeToken.Length)..];
-                CloseRegion(closeToken, contentOut, callsOut);
+                CloseRegion(closeToken: closeToken, contentOut: contentOut, callsOut: callsOut);
                 continue;
             }
 
-            var closeHoldBack = Math.Min(_pending.Length, LongestPartialSuffixMatch(_pending, [closeToken]));
+            var closeHoldBack = Math.Min(val1: _pending.Length,
+                val2: LongestPartialSuffixMatch(text: _pending, candidates: [closeToken]));
             var safeInnerLength = _pending.Length - closeHoldBack;
             if (safeInnerLength > 0)
             {
-                _regionInner.Append(_pending, 0, safeInnerLength);
+                _regionInner.Append(value: _pending, 0, count: safeInnerLength);
                 _pending = _pending[safeInnerLength..];
             }
 
-            if (AbandonRegionIfOversized(contentOut))
-            {
-                continue;
-            }
+            if (AbandonRegionIfOversized(contentOut)) continue;
 
-            if (safeInnerLength <= 0)
-            {
-                return;
-            }
+            if (safeInnerLength <= 0) return;
         }
     }
 
@@ -471,7 +428,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         _activeDialect = null;
         _activeDelimiter = null;
 
-        var extracted = DialectMatcher.ExtractFromRegionBody(inner, dialect);
+        var extracted = DialectMatcher.ExtractFromRegionBody(body: inner, dialect: dialect);
         if (extracted.Count > 0)
         {
             callsOut.AddRange(extracted);
@@ -480,6 +437,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         }
 
         _logger.LogWarning(
+            message:
             "Tool-call normalization: {OpenToken}...{CloseToken} did not contain a valid tool call; forwarding the raw text as plain content.",
             openToken,
             closeToken);
@@ -515,7 +473,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
         if (delimiter.Close is null)
         {
-            var extracted = DialectMatcher.ExtractFromRegionBody(inner, dialect);
+            var extracted = DialectMatcher.ExtractFromRegionBody(body: inner, dialect: dialect);
             if (extracted.Count > 0)
             {
                 callsOut.AddRange(extracted);
@@ -524,12 +482,14 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
             }
 
             _logger.LogWarning(
+                message:
                 "Tool-call normalization: the text after {OpenToken} did not contain a valid tool call; forwarding it as plain content.",
                 delimiter.Open);
         }
         else
         {
             _logger.LogWarning(
+                message:
                 "Tool-call normalization: the message ended with an unterminated {OpenToken} block; forwarding the raw text as plain content.",
                 delimiter.Open);
         }
@@ -568,12 +528,10 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
     /// <returns><see langword="true"/> when the region was abandoned.</returns>
     private bool AbandonRegionIfOversized(StringBuilder contentOut)
     {
-        if (_regionInner.Length <= MaxBufferedRegionChars)
-        {
-            return false;
-        }
+        if (_regionInner.Length <= MaxBufferedRegionChars) return false;
 
         _logger.LogWarning(
+            message:
             "Tool-call normalization: a {OpenToken} block exceeded {Limit} buffered characters without completing; forwarding it as plain content.",
             _activeDelimiter!.Open,
             MaxBufferedRegionChars);
@@ -601,8 +559,8 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
                 ["function"] = new JsonObject
                 {
                     ["name"] = call.Name,
-                    ["arguments"] = call.ArgumentsJson,
-                },
+                    ["arguments"] = call.ArgumentsJson
+                }
             });
         }
 
@@ -616,16 +574,10 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
     /// </summary>
     private byte[]? BuildSyntheticChunk(string content, IReadOnlyList<ExtractedToolCall> calls)
     {
-        if (content.Length == 0 && calls.Count == 0)
-        {
-            return null;
-        }
+        if (content.Length == 0 && calls.Count == 0) return null;
 
         var delta = new JsonObject();
-        if (content.Length > 0)
-        {
-            delta["content"] = content;
-        }
+        if (content.Length > 0) delta["content"] = content;
 
         if (calls.Count > 0)
         {
@@ -645,27 +597,18 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
                     // A call synthesized here was resolved after the upstream's own finish chunk (or with
                     // no finish chunk at all), so this is the only place its finish_reason can be stated.
-                    ["finish_reason"] = calls.Count > 0 ? "tool_calls" : null,
-                },
-            },
+                    ["finish_reason"] = calls.Count > 0 ? "tool_calls" : null
+                }
+            }
         };
 
-        if (_lastChunkId is not null)
-        {
-            chunk["id"] = _lastChunkId.DeepClone();
-        }
+        if (_lastChunkId is not null) chunk["id"] = _lastChunkId.DeepClone();
 
-        if (_lastChunkCreated is not null)
-        {
-            chunk["created"] = _lastChunkCreated.DeepClone();
-        }
+        if (_lastChunkCreated is not null) chunk["created"] = _lastChunkCreated.DeepClone();
 
-        if (_lastChunkModel is not null)
-        {
-            chunk["model"] = _lastChunkModel.DeepClone();
-        }
+        if (_lastChunkModel is not null) chunk["model"] = _lastChunkModel.DeepClone();
 
-        var json = JsonSerializer.Serialize(chunk, SerializerOptions);
+        var json = JsonSerializer.Serialize(value: chunk, options: SerializerOptions);
         return Encoding.UTF8.GetBytes($"data: {json}\n\n");
     }
 
@@ -686,11 +629,8 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
         foreach (var (candidateDialect, candidateDelimiter) in _openers)
         {
-            var index = text.IndexOf(candidateDelimiter.Open, StringComparison.Ordinal);
-            if (index < 0)
-            {
-                continue;
-            }
+            var index = text.IndexOf(value: candidateDelimiter.Open, comparisonType: StringComparison.Ordinal);
+            if (index < 0) continue;
 
             if (openIndex < 0 || index < openIndex ||
                 (index == openIndex && candidateDelimiter.Open.Length > delimiter.Open.Length))
@@ -715,21 +655,25 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
         foreach (var candidate in candidates)
         {
-            var limit = Math.Min(text.Length, candidate.Length - 1);
+            var limit = Math.Min(val1: text.Length, val2: candidate.Length - 1);
+            // `length > best` with `best` starting at 0 and only ever growing already guarantees
+            // length >= 1, so the old `length > 0 &&` guard could never be false.
             for (var length = limit; length > best; length--)
-            {
-                if (length > 0 && string.CompareOrdinal(text, text.Length - length, candidate, 0, length) == 0)
+                if (string.CompareOrdinal(strA: text, indexA: text.Length - length, strB: candidate, 0,
+                        length: length) == 0)
                 {
                     best = length;
                     break;
                 }
-            }
         }
 
         return best;
     }
 
-    /// <summary>Pulls the <c>data:</c> field value out of one SSE event. Multiple <c>data:</c> lines within one event are joined with <c>"\n"</c> per the SSE spec. Returns null when the event has no data line.</summary>
+    /// <summary>
+    /// Pulls the <c>data:</c> field value out of one SSE event. Multiple <c>data:</c> lines within one event are
+    /// joined with <c>"\n"</c> per the SSE spec. Returns null when the event has no data line.
+    /// </summary>
     private static string? ExtractDataPayload(byte[] eventBytes)
     {
         var text = Encoding.UTF8.GetString(eventBytes);
@@ -737,19 +681,12 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
         foreach (var line in text.Split('\n'))
         {
-            if (!line.StartsWith("data:", StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!line.StartsWith(value: "data:", comparisonType: StringComparison.Ordinal)) continue;
 
             if (data is null)
-            {
                 data = new StringBuilder();
-            }
             else
-            {
                 data.Append('\n');
-            }
 
             var value = line.Length > 5 && line[5] == ' ' ? line[6..] : line[5..];
             data.Append(value);
@@ -758,4 +695,3 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         return data?.ToString();
     }
 }
-

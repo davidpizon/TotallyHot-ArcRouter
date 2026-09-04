@@ -12,15 +12,16 @@ namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 public sealed class OrchestratorVoterPickTests
 {
     /// <summary>Builds a decision carrying only the supplied breakdown entries.</summary>
-    private static RoutingDecision Decision(params (string Key, double Score)[] entries) =>
-        new(
-            "kimi-k2.5",
+    private static RoutingDecision Decision(params (string Key, double Score)[] entries)
+    {
+        return new RoutingDecision(
+            selectedModel: "kimi-k2.5",
             0.5,
-            "test",
-            DateTimeOffset.UtcNow,
-            entries.ToDictionary(e => e.Key, e => e.Score, StringComparer.OrdinalIgnoreCase),
-            isExploratory: false,
-            propensity: 1.0);
+            rationale: "test",
+            timestampUtc: DateTimeOffset.UtcNow,
+            candidateScores: entries.ToDictionary(keySelector: e => e.Key, elementSelector: e => e.Score,
+                comparer: StringComparer.OrdinalIgnoreCase));
+    }
 
     [Fact]
     public void TryGetVoterPick_ReturnsThatVotersModel()
@@ -30,7 +31,8 @@ public sealed class OrchestratorVoterPickTests
             ("voter:dim_best:glm-5", 0.9),
             ("voter:memory_kNN:kimi-k2.5", 0.57));
 
-        Assert.Equal("glm-5", OrchestratorRoutingPolicy.TryGetVoterPick(decision, VoterNames.DimBest));
+        Assert.Equal(expected: "glm-5",
+            actual: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision, voterName: VoterNames.DimBest));
     }
 
     [Fact]
@@ -40,7 +42,7 @@ public sealed class OrchestratorVoterPickTests
         // ensemble's own pick - that would manufacture a counterfactual nobody chose.
         var decision = Decision(("kimi-k2.5", 0.57), ("voter:memory_kNN:kimi-k2.5", 0.57));
 
-        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(decision, VoterNames.DimBest));
+        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision, voterName: VoterNames.DimBest));
     }
 
     [Fact]
@@ -50,7 +52,7 @@ public sealed class OrchestratorVoterPickTests
             ("voter:logreg:glm-5", 0.43),
             ("voter:cluster_best:minimax-m2.7", 0.5));
 
-        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(decision, VoterNames.DimBest));
+        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision, voterName: VoterNames.DimBest));
     }
 
     [Fact]
@@ -61,8 +63,8 @@ public sealed class OrchestratorVoterPickTests
         var decision = Decision(("voter:dim_best:openrouter:meta-llama/llama-3.1", 0.9));
 
         Assert.Equal(
-            "openrouter:meta-llama/llama-3.1",
-            OrchestratorRoutingPolicy.TryGetVoterPick(decision, VoterNames.DimBest));
+            expected: "openrouter:meta-llama/llama-3.1",
+            actual: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision, voterName: VoterNames.DimBest));
     }
 
     [Fact]
@@ -72,12 +74,12 @@ public sealed class OrchestratorVoterPickTests
         // be read back as though dim_best had voted for it.
         var decision = Decision(("voter:custom", 1.2));
 
-        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(decision, VoterNames.DimBest));
+        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision, voterName: VoterNames.DimBest));
     }
 
     [Fact]
     public void TryGetVoterPick_EmptyBreakdown_ReturnsNull()
     {
-        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(Decision(), VoterNames.DimBest));
+        Assert.Null(OrchestratorRoutingPolicy.TryGetVoterPick(decision: Decision(), voterName: VoterNames.DimBest));
     }
 }

@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Models;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
@@ -22,7 +22,7 @@ public enum CircuitState
     Open,
 
     /// <summary>The cooldown has expired; a single probe request decides whether to close or re-open.</summary>
-    HalfOpen,
+    HalfOpen
 }
 
 /// <summary>
@@ -39,8 +39,11 @@ public enum CircuitState
 public readonly record struct CircuitBreakerTargetKey(string Provider, string BaseUrl, string ProviderModelId)
 {
     /// <summary>Builds the target key for a resolved route's concrete upstream.</summary>
-    public static CircuitBreakerTargetKey FromRoute(ResolvedModelRoute route) =>
-        new(route.Provider, route.UpstreamBaseUrl.ToString(), route.ProviderModelId);
+    public static CircuitBreakerTargetKey FromRoute(ResolvedModelRoute route)
+    {
+        return new CircuitBreakerTargetKey(Provider: route.Provider, BaseUrl: route.UpstreamBaseUrl.ToString(),
+            ProviderModelId: route.ProviderModelId);
+    }
 }
 
 /// <summary>
@@ -82,32 +85,55 @@ public interface ICircuitBreaker
     /// </summary>
     bool ShouldBypass(CircuitBreakerTargetKey target);
 
-    /// <summary>Records a successful (non-outage) response from <paramref name="target"/>: closes its circuit and resets its failure/trip counters, and also closes <paramref name="target"/>'s provider-wide circuit (see the type-level remarks).</summary>
+    /// <summary>
+    /// Records a successful (non-outage) response from <paramref name="target"/>: closes its circuit and resets its
+    /// failure/trip counters, and also closes <paramref name="target"/>'s provider-wide circuit (see the type-level remarks).
+    /// </summary>
     void RecordSuccess(CircuitBreakerTargetKey target);
 
-    /// <summary>Records an outage-classified failure (timeout, 429, or 5xx) from <paramref name="target"/>, tripping its circuit to OPEN once the configured failure threshold is reached (or immediately, doubling the cooldown, if this failure was the half-open probe itself).</summary>
+    /// <summary>
+    /// Records an outage-classified failure (timeout, 429, or 5xx) from <paramref name="target"/>, tripping its
+    /// circuit to OPEN once the configured failure threshold is reached (or immediately, doubling the cooldown, if this
+    /// failure was the half-open probe itself).
+    /// </summary>
     void RecordFailure(CircuitBreakerTargetKey target);
 
-    /// <summary>Provider-wide equivalent of <see cref="IsOpen"/>: is every model on <paramref name="provider"/> currently bypassed?</summary>
+    /// <summary>
+    /// Provider-wide equivalent of <see cref="IsOpen"/>: is every model on <paramref name="provider"/> currently
+    /// bypassed?
+    /// </summary>
     bool IsProviderOpen(string provider);
 
-    /// <summary>Provider-wide equivalent of <see cref="ShouldBypass"/>, called immediately before attempting a candidate on <paramref name="provider"/>.</summary>
+    /// <summary>
+    /// Provider-wide equivalent of <see cref="ShouldBypass"/>, called immediately before attempting a candidate on
+    /// <paramref name="provider"/>.
+    /// </summary>
     bool ShouldBypassProvider(string provider);
 
-    /// <summary>Records a provider-wide failure (e.g. a 401 - an invalid credential affects every model on the provider, not just the one that surfaced it), tripping every model on <paramref name="provider"/> to OPEN immediately - unlike <see cref="RecordFailure"/>, this does not wait for repeated occurrences, since a single 401 is already decisive.</summary>
+    /// <summary>
+    /// Records a provider-wide failure (e.g. a 401 - an invalid credential affects every model on the provider, not
+    /// just the one that surfaced it), tripping every model on <paramref name="provider"/> to OPEN immediately - unlike
+    /// <see cref="RecordFailure"/>, this does not wait for repeated occurrences, since a single 401 is already decisive.
+    /// </summary>
     void RecordProviderFailure(string provider);
 }
 
-/// <inheritdoc cref="ICircuitBreaker" />
+/// <inheritdoc cref="ICircuitBreaker"/>
 public sealed class CircuitBreaker : ICircuitBreaker
 {
     private readonly CircuitBreakerOptions _options;
-    private readonly TimeProvider _timeProvider;
-    private readonly ConcurrentDictionary<CircuitBreakerTargetKey, TargetState> _targetStates = new();
     private readonly ConcurrentDictionary<string, TargetState> _providerStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<CircuitBreakerTargetKey, TargetState> _targetStates = new();
+    private readonly TimeProvider _timeProvider;
 
-    /// <param name="options">Failure threshold and cooldown tuning; defaults to <see cref="CircuitBreakerOptions"/>'s own defaults when omitted.</param>
-    /// <param name="timeProvider">Clock used for cooldown expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for deterministic tests.</param>
+    /// <param name="options">
+    /// Failure threshold and cooldown tuning; defaults to <see cref="CircuitBreakerOptions"/>'s own
+    /// defaults when omitted.
+    /// </param>
+    /// <param name="timeProvider">
+    /// Clock used for cooldown expiry; defaults to <see cref="TimeProvider.System"/>. Overridable
+    /// for deterministic tests.
+    /// </param>
     public CircuitBreaker(IOptions<CircuitBreakerOptions>? options = null, TimeProvider? timeProvider = null)
     {
         _options = options?.Value ?? new CircuitBreakerOptions();
@@ -115,36 +141,51 @@ public sealed class CircuitBreaker : ICircuitBreaker
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    /// <inheritdoc />
-    public bool IsOpen(CircuitBreakerTargetKey target) => IsOpenCore(_targetStates, target);
-
-    /// <inheritdoc />
-    public bool ShouldBypass(CircuitBreakerTargetKey target) => ShouldBypassCore(_targetStates, target);
-
-    /// <inheritdoc />
-    public void RecordSuccess(CircuitBreakerTargetKey target)
+    /// <inheritdoc/>
+    public bool IsOpen(CircuitBreakerTargetKey target)
     {
-        RecordSuccessCore(_targetStates, target);
-        RecordSuccessCore(_providerStates, target.Provider);
+        return IsOpenCore(states: _targetStates, key: target);
     }
 
-    /// <inheritdoc />
-    public void RecordFailure(CircuitBreakerTargetKey target) => RecordFailureCore(_targetStates, target);
+    /// <inheritdoc/>
+    public bool ShouldBypass(CircuitBreakerTargetKey target)
+    {
+        return ShouldBypassCore(states: _targetStates, key: target);
+    }
 
-    /// <inheritdoc />
-    public bool IsProviderOpen(string provider) => IsOpenCore(_providerStates, provider);
+    /// <inheritdoc/>
+    public void RecordSuccess(CircuitBreakerTargetKey target)
+    {
+        RecordSuccessCore(states: _targetStates, key: target);
+        RecordSuccessCore(states: _providerStates, key: target.Provider);
+    }
 
-    /// <inheritdoc />
-    public bool ShouldBypassProvider(string provider) => ShouldBypassCore(_providerStates, provider);
+    /// <inheritdoc/>
+    public void RecordFailure(CircuitBreakerTargetKey target)
+    {
+        RecordFailureCore(states: _targetStates, key: target);
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
+    public bool IsProviderOpen(string provider)
+    {
+        return IsOpenCore(states: _providerStates, key: provider);
+    }
+
+    /// <inheritdoc/>
+    public bool ShouldBypassProvider(string provider)
+    {
+        return ShouldBypassCore(states: _providerStates, key: provider);
+    }
+
+    /// <inheritdoc/>
     public void RecordProviderFailure(string provider)
     {
         // Unlike RecordFailureCore's per-target threshold (a single 5xx/timeout is plausibly transient, so
         // several consecutive ones are required before trusting the signal), a provider-wide failure like a
         // 401 is decisive the first time it's seen - an invalid/expired credential does not "maybe" affect
         // the provider, it does. Trip immediately rather than waiting for FailureThreshold occurrences.
-        var state = _providerStates.GetOrAdd(provider, static _ => new TargetState());
+        var state = _providerStates.GetOrAdd(key: provider, valueFactory: static _ => new TargetState());
 
         lock (state)
         {
@@ -158,17 +199,17 @@ public sealed class CircuitBreaker : ICircuitBreaker
     /// while the cooldown is still running, so a target whose cooldown already expired reads as not-open
     /// even though it has not yet been formally moved to HALF-OPEN by <see cref="ShouldBypassCore{TKey}"/>.
     /// </summary>
-    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <typeparam name="TKey">
+    /// Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/>
+    /// (per-provider).
+    /// </typeparam>
     /// <param name="states">The per-target or per-provider state dictionary to read from.</param>
     /// <param name="key">The target or provider key to check.</param>
     /// <returns><see langword="true"/> if <paramref name="key"/> is OPEN and still cooling down.</returns>
     private bool IsOpenCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {
-        if (!states.TryGetValue(key, out var state))
-        {
-            return false;
-        }
+        if (!states.TryGetValue(key: key, value: out var state)) return false;
 
         lock (state)
         {
@@ -181,14 +222,17 @@ public sealed class CircuitBreaker : ICircuitBreaker
     /// the OPEN-&gt;HALF-OPEN transition once the cooldown expires and claims the single probe slot for the
     /// caller that observes the transition, so concurrent callers keep bypassing until that probe resolves.
     /// </summary>
-    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <typeparam name="TKey">
+    /// Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/>
+    /// (per-provider).
+    /// </typeparam>
     /// <param name="states">The per-target or per-provider state dictionary to read/mutate.</param>
     /// <param name="key">The target or provider key about to be attempted.</param>
     /// <returns><see langword="true"/> if the caller must skip this attempt entirely.</returns>
     private bool ShouldBypassCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {
-        var state = states.GetOrAdd(key, static _ => new TargetState());
+        var state = states.GetOrAdd(key: key, valueFactory: static _ => new TargetState());
 
         lock (state)
         {
@@ -198,10 +242,7 @@ public sealed class CircuitBreaker : ICircuitBreaker
                     return false;
 
                 case CircuitState.Open:
-                    if (_timeProvider.GetUtcNow() < state.CooldownExpiresAt)
-                    {
-                        return true;
-                    }
+                    if (_timeProvider.GetUtcNow() < state.CooldownExpiresAt) return true;
 
                     // Cooldown expired: transition to HALF-OPEN and let this caller through as the single
                     // probe. A concurrent caller sees ProbeInFlight below and keeps bypassing until the
@@ -211,10 +252,7 @@ public sealed class CircuitBreaker : ICircuitBreaker
                     return false;
 
                 default: // HalfOpen
-                    if (state.ProbeInFlight)
-                    {
-                        return true;
-                    }
+                    if (state.ProbeInFlight) return true;
 
                     // A prior probe resolved (RecordSuccess/RecordFailure clears ProbeInFlight) without
                     // moving out of HalfOpen - shouldn't normally happen, but claim the slot rather than
@@ -230,17 +268,18 @@ public sealed class CircuitBreaker : ICircuitBreaker
     /// the circuit for <paramref name="key"/> and clears its failure/trip counters. A key that was never
     /// seen (or never failed) is left untouched since it is already implicitly Closed.
     /// </summary>
-    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <typeparam name="TKey">
+    /// Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/>
+    /// (per-provider).
+    /// </typeparam>
     /// <param name="states">The per-target or per-provider state dictionary to mutate.</param>
     /// <param name="key">The target or provider key that just succeeded.</param>
     private static void RecordSuccessCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {
-        if (!states.TryGetValue(key, out var state))
-        {
+        if (!states.TryGetValue(key: key, value: out var state))
             // Never seen (or never failed) - already implicitly Closed; nothing to reset.
             return;
-        }
 
         lock (state)
         {
@@ -257,13 +296,16 @@ public sealed class CircuitBreaker : ICircuitBreaker
     /// failure only trips the circuit once <see cref="CircuitBreakerOptions.FailureThreshold"/> consecutive
     /// failures have accumulated.
     /// </summary>
-    /// <typeparam name="TKey">Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/> (per-provider).</typeparam>
+    /// <typeparam name="TKey">
+    /// Either <see cref="CircuitBreakerTargetKey"/> (per-target) or <see cref="string"/>
+    /// (per-provider).
+    /// </typeparam>
     /// <param name="states">The per-target or per-provider state dictionary to mutate.</param>
     /// <param name="key">The target or provider key that just failed.</param>
     private void RecordFailureCore<TKey>(ConcurrentDictionary<TKey, TargetState> states, TKey key)
         where TKey : notnull
     {
-        var state = states.GetOrAdd(key, static _ => new TargetState());
+        var state = states.GetOrAdd(key: key, valueFactory: static _ => new TargetState());
 
         lock (state)
         {
@@ -294,8 +336,8 @@ public sealed class CircuitBreaker : ICircuitBreaker
     /// </summary>
     private void Trip(TargetState state)
     {
-        var exponent = Math.Max(0, state.ConsecutiveTrips - 1);
-        var scaled = _options.BaseCooldown * Math.Pow(2, exponent);
+        var exponent = Math.Max(0, val2: state.ConsecutiveTrips - 1);
+        var scaled = _options.BaseCooldown * Math.Pow(2, y: exponent);
         var cooldown = scaled > _options.MaxCooldown ? _options.MaxCooldown : scaled;
 
         state.State = CircuitState.Open;
@@ -304,14 +346,16 @@ public sealed class CircuitBreaker : ICircuitBreaker
         state.CooldownExpiresAt = _timeProvider.GetUtcNow() + cooldown;
     }
 
-    /// <summary>Mutable per-key state (per-target or per-provider), always accessed under its own lock (see each method above).</summary>
+    /// <summary>
+    /// Mutable per-key state (per-target or per-provider), always accessed under its own lock (see each method
+    /// above).
+    /// </summary>
     private sealed class TargetState
     {
-        public CircuitState State;
         public int ConsecutiveFailures;
         public int ConsecutiveTrips;
         public DateTimeOffset CooldownExpiresAt;
         public bool ProbeInFlight;
+        public CircuitState State;
     }
 }
-

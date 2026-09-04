@@ -23,11 +23,23 @@ public static class EmbeddingLogRegTrainer
     /// Trains one ridge-regularized linear regression head per distinct <see cref="LogRegTrainingSample.ModelKey"/>
     /// present in <paramref name="samples"/>, by batch gradient descent over weighted squared error.
     /// </summary>
-    /// <param name="samples">The training examples. Every sample must carry an embedding of length <paramref name="embeddingDimension"/>.</param>
+    /// <param name="samples">
+    /// The training examples. Every sample must carry an embedding of length
+    /// <paramref name="embeddingDimension"/>.
+    /// </param>
     /// <param name="embeddingDimension">The embedding dimension every sample's vector must match.</param>
-    /// <param name="trainedFrom">The provenance string to stamp on the resulting artifact - see <see cref="EmbeddingLogRegModelArtifact.TrainedFrom"/>.</param>
-    /// <param name="bootstrapTaskCount">The number of OOD bootstrap tasks that contributed to <paramref name="samples"/>, for <see cref="EmbeddingLogRegModelArtifact.BootstrapTaskCount"/>.</param>
-    /// <param name="memoryEntryCount">The number of live memory entries that contributed to <paramref name="samples"/>, for <see cref="EmbeddingLogRegModelArtifact.MemoryEntryCount"/>.</param>
+    /// <param name="trainedFrom">
+    /// The provenance string to stamp on the resulting artifact - see
+    /// <see cref="EmbeddingLogRegModelArtifact.TrainedFrom"/>.
+    /// </param>
+    /// <param name="bootstrapTaskCount">
+    /// The number of OOD bootstrap tasks that contributed to <paramref name="samples"/>, for
+    /// <see cref="EmbeddingLogRegModelArtifact.BootstrapTaskCount"/>.
+    /// </param>
+    /// <param name="memoryEntryCount">
+    /// The number of live memory entries that contributed to <paramref name="samples"/>, for
+    /// <see cref="EmbeddingLogRegModelArtifact.MemoryEntryCount"/>.
+    /// </param>
     /// <param name="embeddingModel">
     /// The identity of the embedding client whose vectors <paramref name="samples"/> were produced by,
     /// recorded on the artifact so a consumer can refuse to score against it after a same-dimension
@@ -37,8 +49,14 @@ public static class EmbeddingLogRegTrainer
     /// <param name="epochs">The number of full gradient-descent passes per model head.</param>
     /// <param name="learningRate">The gradient-descent step size.</param>
     /// <param name="l2Regularization">The L2 penalty applied to every non-bias weight each epoch.</param>
-    /// <returns>A trained <see cref="EmbeddingLogRegModelArtifact"/> with one head per distinct model key in <paramref name="samples"/>.</returns>
-    /// <exception cref="ArgumentException"><paramref name="samples"/> is empty, or a sample's embedding length does not match <paramref name="embeddingDimension"/>.</exception>
+    /// <returns>
+    /// A trained <see cref="EmbeddingLogRegModelArtifact"/> with one head per distinct model key in
+    /// <paramref name="samples"/>.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="samples"/> is empty, or a sample's embedding length does not match
+    /// <paramref name="embeddingDimension"/>.
+    /// </exception>
     public static EmbeddingLogRegModelArtifact Train(
         IReadOnlyList<LogRegTrainingSample> samples,
         int embeddingDimension,
@@ -52,43 +70,38 @@ public static class EmbeddingLogRegTrainer
     {
         ArgumentNullException.ThrowIfNull(samples);
         ArgumentException.ThrowIfNullOrWhiteSpace(trainedFrom);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(embeddingDimension, 0);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(epochs, 0);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(learningRate, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: embeddingDimension, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: epochs, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: learningRate, 0);
         ArgumentOutOfRangeException.ThrowIfNegative(l2Regularization);
         ArgumentOutOfRangeException.ThrowIfNegative(bootstrapTaskCount);
         ArgumentOutOfRangeException.ThrowIfNegative(memoryEntryCount);
 
         if (samples.Count == 0)
-        {
-            throw new ArgumentException("At least one training sample is required.", nameof(samples));
-        }
+            throw new ArgumentException(message: "At least one training sample is required.",
+                paramName: nameof(samples));
 
         foreach (var sample in samples)
-        {
             if (sample.Embedding.Length != embeddingDimension)
-            {
                 throw new ArgumentException(
+                    message:
                     $"Sample for model '{sample.ModelKey}' has a {sample.Embedding.Length}-dimensional embedding, " +
                     $"expected {embeddingDimension}.",
-                    nameof(samples));
-            }
-        }
+                    paramName: nameof(samples));
 
         var classWeights = new Dictionary<string, double[]>(StringComparer.Ordinal);
-        foreach (var group in samples.GroupBy(s => s.ModelKey, StringComparer.Ordinal))
-        {
+        foreach (var group in samples.GroupBy(keySelector: s => s.ModelKey, comparer: StringComparer.Ordinal))
             classWeights[group.Key] = TrainOneHead(
-                [.. group], embeddingDimension, epochs, learningRate, l2Regularization);
-        }
+                samples: [.. group], embeddingDimension: embeddingDimension, epochs: epochs, learningRate: learningRate,
+                l2Regularization: l2Regularization);
 
         return new EmbeddingLogRegModelArtifact(
-            embeddingDimension,
-            classWeights,
-            trainedFrom,
-            bootstrapTaskCount,
-            memoryEntryCount,
-            embeddingModel);
+            EmbeddingDimension: embeddingDimension,
+            ClassWeights: classWeights,
+            TrainedFrom: trainedFrom,
+            BootstrapTaskCount: bootstrapTaskCount,
+            MemoryEntryCount: memoryEntryCount,
+            EmbeddingModel: embeddingModel);
     }
 
     /// <summary>
@@ -105,13 +118,11 @@ public static class EmbeddingLogRegTrainer
         var weights = new double[embeddingDimension + 1];
         var totalWeight = samples.Sum(s => s.Weight);
         if (totalWeight <= 0)
-        {
             // Every sample for this head carries non-positive weight (e.g. all-zero live weighting with
             // no bootstrap rows) - gradient descent below would divide by zero. An all-zero head still
             // participates in EmbeddingLogRegModelArtifactSerializer.Validate (finite values) and simply
             // predicts a flat 0 score, which argmax treats like any other tied-low candidate.
             return weights;
-        }
 
         for (var epoch = 0; epoch < epochs; epoch++)
         {
@@ -120,24 +131,16 @@ public static class EmbeddingLogRegTrainer
             foreach (var sample in samples)
             {
                 var prediction = weights[0];
-                for (var i = 0; i < embeddingDimension; i++)
-                {
-                    prediction += weights[i + 1] * sample.Embedding[i];
-                }
+                for (var i = 0; i < embeddingDimension; i++) prediction += weights[i + 1] * sample.Embedding[i];
 
                 var error = (prediction - sample.Score) * sample.Weight;
                 gradient[0] += error;
-                for (var i = 0; i < embeddingDimension; i++)
-                {
-                    gradient[i + 1] += error * sample.Embedding[i];
-                }
+                for (var i = 0; i < embeddingDimension; i++) gradient[i + 1] += error * sample.Embedding[i];
             }
 
             weights[0] -= learningRate * gradient[0] / totalWeight;
             for (var w = 1; w < weights.Length; w++)
-            {
-                weights[w] -= learningRate * ((gradient[w] / totalWeight) + (l2Regularization * weights[w]));
-            }
+                weights[w] -= learningRate * (gradient[w] / totalWeight + l2Regularization * weights[w]);
         }
 
         return weights;

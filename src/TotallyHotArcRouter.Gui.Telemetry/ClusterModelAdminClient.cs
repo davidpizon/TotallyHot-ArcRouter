@@ -1,5 +1,5 @@
-using System.Runtime.CompilerServices;
 using Grpc.Core;
+using System.Runtime.CompilerServices;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
@@ -13,7 +13,7 @@ public sealed class ClusterModelAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="ClusterModelAdminException"/> class.</summary>
     public ClusterModelAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -28,7 +28,7 @@ public enum ClusterRetrainResultKindInfo
     Declined,
 
     /// <summary>A retrain was already in progress; this call was skipped rather than queued.</summary>
-    AlreadyRunning,
+    AlreadyRunning
 }
 
 /// <summary>One trained cluster, as rendered by the Governance → Cluster Model panel.</summary>
@@ -46,11 +46,17 @@ public sealed record ClusterInfo(int Size, string Name);
 /// <param name="ArtifactPresent">Whether a trained artifact currently exists on disk.</param>
 /// <param name="ChosenK">The number of clusters the k-sweep selected, or 0 if no artifact exists.</param>
 /// <param name="TrainedAtUtc">When the current artifact was trained, or <see langword="null"/> if none exists.</param>
-/// <param name="TrainedFrom">Human-readable provenance: source mix, the k-selection sweep's outcome, and the training date.</param>
+/// <param name="TrainedFrom">
+/// Human-readable provenance: source mix, the k-selection sweep's outcome, and the training
+/// date.
+/// </param>
 /// <param name="Clusters">Every trained cluster's size and name, in artifact order.</param>
 /// <param name="BootstrapTaskCount">The number of OOD bootstrap tasks that contributed to the current artifact.</param>
 /// <param name="MemoryEntryCount">The number of live memory entries that contributed to the current artifact.</param>
-/// <param name="EntriesSinceLastRetrain">Live memory entries accumulated since the current artifact's <see cref="MemoryEntryCount"/> was recorded, or every live entry if no artifact exists.</param>
+/// <param name="EntriesSinceLastRetrain">
+/// Live memory entries accumulated since the current artifact's
+/// <see cref="MemoryEntryCount"/> was recorded, or every live entry if no artifact exists.
+/// </param>
 /// <param name="RetentionDays">The configured transcript retention window, in days.</param>
 /// <param name="MaxTranscriptRows">The configured maximum transcript row count before oldest-first eviction.</param>
 /// <param name="CurrentTranscriptRowCount">The transcript table's current row count.</param>
@@ -75,7 +81,10 @@ public sealed record ClusterRetrainBootstrapProgressInfo(int TasksEmbedded);
 /// <param name="Kind">The result category.</param>
 /// <param name="Message">A human-readable explanation, suitable for the panel's status line.</param>
 /// <param name="Status">The status computed immediately after the retrain attempt.</param>
-public sealed record ClusterRetrainResultInfo(ClusterRetrainResultKindInfo Kind, string Message, ClusterModelStatusInfo Status);
+public sealed record ClusterRetrainResultInfo(
+    ClusterRetrainResultKindInfo Kind,
+    string Message,
+    ClusterModelStatusInfo Status);
 
 /// <summary>
 /// One message on the retrain stream: a <see cref="BootstrapProgress"/> tick, or - exactly once, as the
@@ -84,7 +93,9 @@ public sealed record ClusterRetrainResultInfo(ClusterRetrainResultKindInfo Kind,
 /// </summary>
 /// <param name="BootstrapProgress">A bootstrap-embedding progress tick, or <see langword="null"/> for the result message.</param>
 /// <param name="Result">The retrain's outcome, set only on the final message.</param>
-public sealed record ClusterRetrainEvent(ClusterRetrainBootstrapProgressInfo? BootstrapProgress, ClusterRetrainResultInfo? Result);
+public sealed record ClusterRetrainEvent(
+    ClusterRetrainBootstrapProgressInfo? BootstrapProgress,
+    ClusterRetrainResultInfo? Result);
 
 /// <summary>
 /// Client for the proxy's <c>ClusterModelAdminService</c> - the Governance → Cluster Model panel's read and
@@ -93,14 +104,16 @@ public sealed record ClusterRetrainEvent(ClusterRetrainBootstrapProgressInfo? Bo
 /// </summary>
 public sealed class ClusterModelAdminClient
     : GrpcAdminClientBase<Contract.ClusterModelAdminService.ClusterModelAdminServiceClient, ClusterModelAdminException>,
-      IClusterModelAdminClient
+        IClusterModelAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="ClusterModelAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public ClusterModelAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.ClusterModelAdminService.ClusterModelAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.ClusterModelAdminService.ClusterModelAdminServiceClient(callInvoker))
     {
     }
 
@@ -114,27 +127,29 @@ public sealed class ClusterModelAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<ClusterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetClusterModelStatusAsync(new Contract.GetClusterModelStatusRequest(), cancellationToken: cancellationToken)
+                .GetClusterModelStatusAsync(request: new Contract.GetClusterModelStatusRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             return MapStatus(response);
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not read the cluster model status");
+            throw Wrap(ex: ex, action: "Could not read the cluster model status");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async IAsyncEnumerable<ClusterRetrainEvent> RetrainAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var call = Client.RetrainClusterModel(new Contract.RetrainClusterModelRequest(), cancellationToken: cancellationToken);
+        using var call = Client.RetrainClusterModel(request: new Contract.RetrainClusterModelRequest(),
+            cancellationToken: cancellationToken);
         var stream = call.ResponseStream;
 
         while (true)
@@ -148,64 +163,79 @@ public sealed class ClusterModelAdminClient
             {
                 // Not caught inside a try that also yields: an iterator cannot yield from within a catch
                 // block, so MoveNext's outcome is captured here and acted on outside the try.
-                throw Wrap(ex, "Cluster model retrain failed");
+                throw Wrap(ex: ex, action: "Cluster model retrain failed");
             }
 
-            if (!hasNext)
-            {
-                yield break;
-            }
+            if (!hasNext) yield break;
 
             yield return MapEvent(stream.Current);
         }
     }
 
     /// <summary>Converts a gRPC-contract status response into the client's <see cref="ClusterModelStatusInfo"/>.</summary>
-    private static ClusterModelStatusInfo MapStatus(Contract.ClusterModelStatusResponse response) => new(
-        response.ArtifactPresent,
-        response.ChosenK,
-        response.TrainedAtUtc?.ToDateTimeOffset(),
-        response.TrainedFrom,
-        [.. response.ClusterSizes.Zip(response.ClusterNames, (size, name) => new ClusterInfo(size, name))],
-        response.BootstrapTaskCount,
-        response.MemoryEntryCount,
-        response.EntriesSinceLastRetrain,
-        response.RetentionDays,
-        response.MaxTranscriptRows,
-        response.CurrentTranscriptRowCount);
+    private static ClusterModelStatusInfo MapStatus(Contract.ClusterModelStatusResponse response)
+    {
+        return new ClusterModelStatusInfo(
+            ArtifactPresent: response.ArtifactPresent,
+            ChosenK: response.ChosenK,
+            TrainedAtUtc: response.TrainedAtUtc?.ToDateTimeOffset(),
+            TrainedFrom: response.TrainedFrom,
+            Clusters:
+            [
+                .. response.ClusterSizes.Zip(second: response.ClusterNames,
+                    resultSelector: (size, name) => new ClusterInfo(Size: size, Name: name))
+            ],
+            BootstrapTaskCount: response.BootstrapTaskCount,
+            MemoryEntryCount: response.MemoryEntryCount,
+            EntriesSinceLastRetrain: response.EntriesSinceLastRetrain,
+            RetentionDays: response.RetentionDays,
+            MaxTranscriptRows: response.MaxTranscriptRows,
+            CurrentTranscriptRowCount: response.CurrentTranscriptRowCount);
+    }
 
     /// <summary>
     /// Converts a gRPC-contract retrain stream message into the client's <see cref="ClusterRetrainEvent"/>.
     /// Switches explicitly on every defined <see cref="Contract.ClusterRetrainStreamEvent.EventOneofCase"/>,
     /// including <c>None</c> - mirrors <c>BenchmarkDataAdminClient.MapEvent</c>'s reasoning.
     /// </summary>
-    private static ClusterRetrainEvent MapEvent(Contract.ClusterRetrainStreamEvent wire) => wire.EventCase switch
+    private static ClusterRetrainEvent MapEvent(Contract.ClusterRetrainStreamEvent wire)
     {
-        Contract.ClusterRetrainStreamEvent.EventOneofCase.BootstrapProgress =>
-            new ClusterRetrainEvent(
-                new ClusterRetrainBootstrapProgressInfo(wire.BootstrapProgress.TasksEmbedded),
-                Result: null),
-        Contract.ClusterRetrainStreamEvent.EventOneofCase.Result =>
-            new ClusterRetrainEvent(
-                BootstrapProgress: null,
-                new ClusterRetrainResultInfo(MapResultKind(wire.Result.Kind), wire.Result.Message, MapStatus(wire.Result.Status))),
-        _ => new ClusterRetrainEvent(BootstrapProgress: null, Result: null),
-    };
+        return wire.EventCase switch
+        {
+            Contract.ClusterRetrainStreamEvent.EventOneofCase.BootstrapProgress =>
+                new ClusterRetrainEvent(
+                    BootstrapProgress: new ClusterRetrainBootstrapProgressInfo(wire.BootstrapProgress.TasksEmbedded),
+                    null),
+            Contract.ClusterRetrainStreamEvent.EventOneofCase.Result =>
+                new ClusterRetrainEvent(
+                    null,
+                    Result: new ClusterRetrainResultInfo(Kind: MapResultKind(wire.Result.Kind),
+                        Message: wire.Result.Message, Status: MapStatus(wire.Result.Status))),
+            _ => new ClusterRetrainEvent(null, null)
+        };
+    }
 
     /// <summary>
     /// Maps the wire result kind onto the client's enum. <c>CLUSTER_RETRAIN_RESULT_KIND_UNSPECIFIED</c> and
     /// any future value degrade to <see cref="ClusterRetrainResultKindInfo.Declined"/> - the panel treats an
     /// unrecognized outcome as "nothing was written" rather than implying success.
     /// </summary>
-    private static ClusterRetrainResultKindInfo MapResultKind(Contract.ClusterRetrainResultKind kind) => kind switch
+    private static ClusterRetrainResultKindInfo MapResultKind(Contract.ClusterRetrainResultKind kind)
     {
-        Contract.ClusterRetrainResultKind.Trained => ClusterRetrainResultKindInfo.Trained,
-        Contract.ClusterRetrainResultKind.Declined => ClusterRetrainResultKindInfo.Declined,
-        Contract.ClusterRetrainResultKind.AlreadyRunning => ClusterRetrainResultKindInfo.AlreadyRunning,
-        _ => ClusterRetrainResultKindInfo.Declined,
-    };
+        return kind switch
+        {
+            Contract.ClusterRetrainResultKind.Trained => ClusterRetrainResultKindInfo.Trained,
+            Contract.ClusterRetrainResultKind.Declined => ClusterRetrainResultKindInfo.Declined,
+            Contract.ClusterRetrainResultKind.AlreadyRunning => ClusterRetrainResultKindInfo.AlreadyRunning,
+            _ => ClusterRetrainResultKindInfo.Declined
+        };
+    }
 
-    /// <inheritdoc />
-    protected override ClusterModelAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override ClusterModelAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new ClusterModelAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }

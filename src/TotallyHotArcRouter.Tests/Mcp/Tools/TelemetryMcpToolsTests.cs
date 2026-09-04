@@ -1,8 +1,7 @@
+using Moq;
 using TotallyHot.ArcRouter.Mcp.Tools;
-using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp.Tools;
 
@@ -17,13 +16,13 @@ public sealed class TelemetryMcpToolsTests
     {
         using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        var tools = new TelemetryMcpTools(budgetStore, Mock.Of<ISpendTracker>());
+        var tools = new TelemetryMcpTools(budgetStore: budgetStore, spendTracker: Mock.Of<ISpendTracker>());
 
         var status = tools.GetBudgetStatus("unbudgeted-provider");
 
         Assert.Null(status.DollarCap);
         Assert.Null(status.TokenCap);
-        Assert.Equal(0m, status.DollarSpent);
+        Assert.Equal(0m, actual: status.DollarSpent);
     }
 
     [Fact]
@@ -31,27 +30,26 @@ public sealed class TelemetryMcpToolsTests
     {
         using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        budgetStore.SetBudget("openai", 100m, 1_000L);
-        var tools = new TelemetryMcpTools(budgetStore, Mock.Of<ISpendTracker>());
+        budgetStore.SetBudget(providerKey: "openai", 100m, 1_000L);
+        var tools = new TelemetryMcpTools(budgetStore: budgetStore, spendTracker: Mock.Of<ISpendTracker>());
 
         var status = tools.GetBudgetStatus("openai");
 
-        Assert.Equal(100m, status.DollarCap);
-        Assert.Equal(1_000L, status.TokenCap);
+        Assert.Equal(100m, actual: status.DollarCap);
+        Assert.Equal(1_000L, actual: status.TokenCap);
     }
 
     [Fact]
     public void GetSpendSummary_DelegatesToSpendTracker()
     {
         using var temp = new TempDatabase();
-        var expected = new SpendSummary(RequestCount: 3, TotalPromptTokens: 100, TotalCompletionTokens: 50, TotalCostUsd: 1.23m);
+        var expected = new SpendSummary(3, 100, 50, 1.23m);
         var spendTracker = new Mock<ISpendTracker>();
         spendTracker.Setup(t => t.GetSummary()).Returns(expected);
-        var tools = new TelemetryMcpTools(temp.CreateBudgetStore(), spendTracker.Object);
+        var tools = new TelemetryMcpTools(budgetStore: temp.CreateBudgetStore(), spendTracker: spendTracker.Object);
 
         var summary = tools.GetSpendSummary();
 
-        Assert.Equal(expected, summary);
+        Assert.Equal(expected: expected, actual: summary);
     }
 }
-

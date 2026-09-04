@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Quality;
@@ -21,8 +20,12 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// compared against. <c>logreg</c> is trained fresh, in-memory, from the same OOD outcome rows and
 /// precomputed embeddings N4 already computes for <see cref="KnnRetrievalBaseline"/> - via the real,
 /// production <see cref="EmbeddingLogRegTrainer"/> - and never touches the operator's own
-/// <c>logreg_voter_model.json</c> on disk. <b><c>memory_kNN</c>, <c>cluster_best</c>, and <c>llm_router</c>
-/// are deliberately excluded</b>, per this doc's status notes: <c>memory_kNN</c> and <c>cluster_best</c>
+/// <c>logreg_voter_model.json</c> on disk.
+/// <b>
+/// <c>memory_kNN</c>, <c>cluster_best</c>, and <c>llm_router</c>
+/// are deliberately excluded
+/// </b>
+/// , per this doc's status notes: <c>memory_kNN</c> and <c>cluster_best</c>
 /// would otherwise need "memory"/cluster state manufactured from the same 176-task evaluation corpus
 /// (<c>cluster_best</c> doubly so, since a taxonomy fit to 176 tasks split across ~9 dimensions would
 /// leave nearly every cluster below <see cref="RoutingOptions.ClusterBestMinObservations"/> and abstain
@@ -43,7 +46,10 @@ public static class OrchestratorArmFactory
     /// </summary>
     /// <param name="database">The synced CodeRouterBench corpus - <c>dim_best</c>'s frozen probing-split prior.</param>
     /// <param name="oodOutcomes">The OOD split's outcomes, e.g. from <see cref="OodRegretTaskOutcomeLoader.Load"/>.</param>
-    /// <param name="embeddingIndex">The OOD split's precomputed embedding index, e.g. from <see cref="KnnRetrievalIndexBuilder.BuildAsync"/>.</param>
+    /// <param name="embeddingIndex">
+    /// The OOD split's precomputed embedding index, e.g. from
+    /// <see cref="KnnRetrievalIndexBuilder.BuildAsync"/>.
+    /// </param>
     /// <param name="loggerFactory">Creates each voter's and the policy's own logger.</param>
     /// <returns>An <see cref="OrchestratorArmBaseline"/> ready to replay against any split.</returns>
     public static OrchestratorArmBaseline Build(
@@ -58,39 +64,40 @@ public static class OrchestratorArmFactory
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
         var embeddingsByTaskId = embeddingIndex.Entries.ToDictionary(
-            entry => entry.TaskId,
-            entry => entry.Embedding as float[] ?? [.. entry.Embedding],
-            StringComparer.Ordinal);
+            keySelector: entry => entry.TaskId,
+            elementSelector: entry => entry.Embedding as float[] ?? [.. entry.Embedding],
+            comparer: StringComparer.Ordinal);
 
         var dimBestVoter = new DimBestVoter(
-            database,
-            new RouterMemory(),
-            loggerFactory.CreateLogger<DimBestVoter>(),
-            Options.Create(new QualityOptions()));
+            database: database,
+            routerMemory: new RouterMemory(),
+            logger: loggerFactory.CreateLogger<DimBestVoter>(),
+            qualityOptions: Options.Create(new QualityOptions()));
 
         var voters = new List<IRoutingVoter> { dimBestVoter };
 
-        var samples = BuildLogRegTrainingSamples(oodOutcomes, embeddingsByTaskId);
+        var samples = BuildLogRegTrainingSamples(oodOutcomes: oodOutcomes, embeddingsByTaskId: embeddingsByTaskId);
         if (samples.Count > 0)
         {
             var artifact = EmbeddingLogRegTrainer.Train(
-                samples,
+                samples: samples,
                 embeddingDimension: embeddingIndex.EmbeddingDimension,
-                trainedFrom: $"N5 harness bootstrap from {oodOutcomes.Count} OOD task(s), built {DateTimeOffset.UtcNow:O}",
+                trainedFrom:
+                $"N5 harness bootstrap from {oodOutcomes.Count} OOD task(s), built {DateTimeOffset.UtcNow:O}",
                 bootstrapTaskCount: oodOutcomes.Count,
-                memoryEntryCount: 0,
+                0,
                 embeddingModel: embeddingIndex.EmbeddingModel);
 
-            voters.Add(new LogRegVoter(loggerFactory.CreateLogger<LogRegVoter>(), artifact));
+            voters.Add(new LogRegVoter(logger: loggerFactory.CreateLogger<LogRegVoter>(), model: artifact));
         }
 
         var routingOptions = new RoutingOptions { EnableExploration = false, ExplorationRate = 0d };
         var policy = new OrchestratorRoutingPolicy(
-            voters,
-            new FrozenOptionsMonitor<RoutingOptions>(routingOptions),
-            loggerFactory.CreateLogger<OrchestratorRoutingPolicy>());
+            voters: voters,
+            optionsMonitor: new FrozenOptionsMonitor<RoutingOptions>(routingOptions),
+            logger: loggerFactory.CreateLogger<OrchestratorRoutingPolicy>());
 
-        return new OrchestratorArmBaseline(policy, embeddingsByTaskId);
+        return new OrchestratorArmBaseline(policy: policy, embeddingsByTaskId: embeddingsByTaskId);
     }
 
     /// <summary>
@@ -108,15 +115,10 @@ public static class OrchestratorArmFactory
         var samples = new List<LogRegTrainingSample>();
         foreach (var outcome in oodOutcomes)
         {
-            if (!embeddingsByTaskId.TryGetValue(outcome.TaskId, out var embedding))
-            {
-                continue;
-            }
+            if (!embeddingsByTaskId.TryGetValue(key: outcome.TaskId, value: out var embedding)) continue;
 
             foreach (var (model, cell) in outcome.Cells)
-            {
-                samples.Add(new LogRegTrainingSample(embedding, model, cell.Score, Weight: 1.0));
-            }
+                samples.Add(new LogRegTrainingSample(Embedding: embedding, ModelKey: model, Score: cell.Score, 1.0));
         }
 
         return samples;

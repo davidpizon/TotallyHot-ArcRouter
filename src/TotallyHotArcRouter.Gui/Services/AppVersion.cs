@@ -44,12 +44,9 @@ public static class AppVersion
     /// <returns>The version without build metadata, or <see cref="Unknown"/> when there is nothing to strip.</returns>
     public static string Strip(string? informationalVersion)
     {
-        if (string.IsNullOrWhiteSpace(informationalVersion))
-        {
-            return Unknown;
-        }
+        if (string.IsNullOrWhiteSpace(informationalVersion)) return Unknown;
 
-        var plusIndex = informationalVersion.IndexOf('+', StringComparison.Ordinal);
+        var plusIndex = informationalVersion.IndexOf('+', comparisonType: StringComparison.Ordinal);
         return plusIndex >= 0 ? informationalVersion[..plusIndex] : informationalVersion;
     }
 }

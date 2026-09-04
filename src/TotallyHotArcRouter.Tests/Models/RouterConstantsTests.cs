@@ -13,8 +13,8 @@ public class RouterConstantsTests
     [Fact]
     public void Constants_MatchExpectedContract()
     {
-        Assert.Equal("kimi-k2.5", RouterConstants.DefaultModel);
-        Assert.Equal("fallback", RouterConstants.FallbackReason);
+        Assert.Equal(expected: "kimi-k2.5", actual: RouterConstants.DefaultModel);
+        Assert.Equal(expected: "fallback", actual: RouterConstants.FallbackReason);
     }
 
     /// <summary>
@@ -23,13 +23,12 @@ public class RouterConstantsTests
     [Fact]
     public void SupportedModels_ContainsDefaultModel_AndHasNoDuplicates()
     {
-        Assert.Contains(RouterConstants.DefaultModel, RouterConstants.SupportedModels);
+        Assert.Contains(expected: RouterConstants.DefaultModel, collection: RouterConstants.SupportedModels);
 
         var distinctCount = RouterConstants.SupportedModels
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
 
-        Assert.Equal(distinctCount, RouterConstants.SupportedModels.Count);
+        Assert.Equal(expected: distinctCount, actual: RouterConstants.SupportedModels.Count);
     }
 }
-

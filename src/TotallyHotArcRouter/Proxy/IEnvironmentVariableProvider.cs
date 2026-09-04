@@ -17,7 +17,9 @@ public interface IEnvironmentVariableProvider
 /// </summary>
 public sealed class EnvironmentVariableProvider : IEnvironmentVariableProvider
 {
-    /// <inheritdoc />
-    public string? GetVariable(string name) => Environment.GetEnvironmentVariable(name);
+    /// <inheritdoc/>
+    public string? GetVariable(string name)
+    {
+        return Environment.GetEnvironmentVariable(name);
+    }
 }
-

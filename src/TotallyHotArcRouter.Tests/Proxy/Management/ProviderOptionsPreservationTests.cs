@@ -1,9 +1,8 @@
+using Moq;
 using System.Reflection;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
-using TotallyHot.ArcRouter.Tests.Proxy;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
@@ -13,13 +12,11 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// fallen behind the type - silently clearing a since-removed provider flag on every edit and every
 /// Stop/Play toggle, and all four <c>Aws*</c> fields on an edit. The loss was durable, since
 /// <see cref="IProviderConfigStore"/> persists the whole config on each mutation.
-///
 /// <para>
 /// The reflection test below is the point of this file. Per-field assertions would just be a third
 /// hand-maintained list with the same failure mode - it would pass happily the day someone adds a property
 /// and forgets it.
 /// </para>
-///
 /// <para>
 /// That self-maintaining property takes <em>two</em> parts, and only one of them is the reflection.
 /// <see cref="AssertAllPropertiesPreservedExcept"/> compares every property automatically, but a dropped
@@ -34,33 +31,41 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 public sealed class ProviderOptionsPreservationTests
 {
     /// <summary>Every field set to a non-default value, so "was it carried?" is detectable for all of them.</summary>
-    private static ProviderOptions FullyPopulated() => new()
+    private static ProviderOptions FullyPopulated()
     {
-        Name = "Example Provider",
-        ProviderType = "Anthropic",
-        BaseUrl = "https://example.invalid",
-        AuthHeaderName = "x-api-key",
-        Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
-        IsFree = true,
-        Enabled = false,
-        ProbeAnthropicMessages = true,
-        AwsRegion = "us-east-1",
-        AwsAccessKeyIdEnvVar = "AWS_ID",
-        AwsSecretAccessKeyEnvVar = "AWS_SECRET",
-        AwsSessionTokenEnvVar = "AWS_TOKEN",
-    };
+        return new ProviderOptions
+        {
+            Name = "Example Provider",
+            ProviderType = "Anthropic",
+            BaseUrl = "https://example.invalid",
+            AuthHeaderName = "x-api-key",
+            Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
+            IsFree = true,
+            Enabled = false,
+            ProbeAnthropicMessages = true,
+            AwsRegion = "us-east-1",
+            AwsAccessKeyIdEnvVar = "AWS_ID",
+            AwsSecretAccessKeyEnvVar = "AWS_SECRET",
+            AwsSessionTokenEnvVar = "AWS_TOKEN"
+        };
+    }
 
-    private static ManagementFacade CreateFacade(IProviderConfigStore store) =>
-        new(store, Mock.Of<IEnvironmentVariableProvider>(), new HttpClient());
+    private static ManagementFacade CreateFacade(IProviderConfigStore store)
+    {
+        return new ManagementFacade(store: store, environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient());
+    }
 
-    private static InMemoryProviderConfigStore StoreWith(ProviderOptions provider) =>
-        new(new ModelRoutingOptions
+    private static InMemoryProviderConfigStore StoreWith(ProviderOptions provider)
+    {
+        return new InMemoryProviderConfigStore(new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["bedrock"] = provider,
-            },
+                ["bedrock"] = provider
+            }
         });
+    }
 
     // ----- The guard on the guard -----
 
@@ -85,21 +90,19 @@ public sealed class ProviderOptionsPreservationTests
 
                 // Headers defaults to an empty list, so "non-default" means "has entries" rather than a
                 // reference comparison, which would be trivially satisfied by any new list.
-                if (populatedValue is IReadOnlyList<ProviderHeader> headers)
-                {
-                    return headers.Count == 0;
-                }
+                if (populatedValue is IReadOnlyList<ProviderHeader> headers) return headers.Count == 0;
 
-                return Equals(populatedValue, defaultValue);
+                return Equals(objA: populatedValue, objB: defaultValue);
             })
             .Select(property => property.Name)
             .ToList();
 
         Assert.True(
-            stillDefault.Count == 0,
-            $"FullyPopulated() leaves these at their default: {string.Join(", ", stillDefault)}. "
-                + "Set each to a distinct non-default value, otherwise a write path that drops the property "
-                + "would still pass AssertAllPropertiesPreservedExcept.");
+            condition: stillDefault.Count == 0,
+            userMessage:
+            $"FullyPopulated() leaves these at their default: {string.Join(separator: ", ", values: stillDefault)}. "
+            + "Set each to a distinct non-default value, otherwise a write path that drops the property "
+            + "would still pass AssertAllPropertiesPreservedExcept.");
     }
 
     // ----- The guard that survives a future property being added -----
@@ -112,15 +115,15 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         // A minimal edit: change only the base URL. Everything else must survive untouched.
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            BaseUrl: "https://changed.invalid",
-            AuthHeaderName: null),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid",
+                null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
 
-        Assert.Equal("https://changed.invalid", updated.BaseUrl);
-        AssertAllPropertiesPreservedExcept(original, updated, nameof(ProviderOptions.BaseUrl));
+        Assert.Equal(expected: "https://changed.invalid", actual: updated.BaseUrl);
+        AssertAllPropertiesPreservedExcept(original: original, updated: updated, nameof(ProviderOptions.BaseUrl));
     }
 
     [Fact]
@@ -130,12 +133,13 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(original);
         var facade = CreateFacade(store);
 
-        await facade.SetEnabledAsync("bedrock", new ProviderEnabledWriteRequest(Enabled: true), TestContext.Current.CancellationToken);
+        await facade.SetEnabledAsync(key: "bedrock", request: new ProviderEnabledWriteRequest(Enabled: true),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
 
         Assert.True(updated.Enabled);
-        AssertAllPropertiesPreservedExcept(original, updated, nameof(ProviderOptions.Enabled));
+        AssertAllPropertiesPreservedExcept(original: original, updated: updated, nameof(ProviderOptions.Enabled));
     }
 
     /// <summary>
@@ -155,26 +159,25 @@ public sealed class ProviderOptionsPreservationTests
 
         foreach (var property in properties)
         {
-            if (expectedToChange.Contains(property.Name, StringComparer.Ordinal))
-            {
-                continue;
-            }
+            if (expectedToChange.Contains(value: property.Name, comparer: StringComparer.Ordinal)) continue;
 
             var before = property.GetValue(original);
             var after = property.GetValue(updated);
 
             // Headers is a list; compare by content so a rebuilt-but-equivalent list still counts as
             // preserved, which is what the caller actually cares about.
-            if (before is IReadOnlyList<ProviderHeader> beforeHeaders && after is IReadOnlyList<ProviderHeader> afterHeaders)
+            if (before is IReadOnlyList<ProviderHeader> beforeHeaders &&
+                after is IReadOnlyList<ProviderHeader> afterHeaders)
             {
                 Assert.Equal(
-                    beforeHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar, h.Locked)),
-                    afterHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar, h.Locked)));
+                    expected: beforeHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar, h.Locked)),
+                    actual: afterHeaders.Select(h => (h.Name, h.Value, h.ValueEnvVar, h.Locked)));
                 continue;
             }
 
             Assert.True(
-                Equals(before, after),
+                condition: Equals(objA: before, objB: after),
+                userMessage:
                 $"ProviderOptions.{property.Name} was not preserved: expected '{before}', found '{after}'. " +
                 "If a property was just added to ProviderOptions, make sure the facade's write paths carry it.");
         }
@@ -188,11 +191,11 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid", null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("Anthropic", store.Snapshot.Options.Providers["bedrock"].ProviderType);
+        Assert.Equal(expected: "Anthropic", actual: store.Snapshot.Options.Providers["bedrock"].ProviderType);
     }
 
     [Fact]
@@ -201,11 +204,11 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, ProviderType: "OpenAI"),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid", null, ProviderType: "OpenAI"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
+        Assert.Equal(expected: "OpenAI", actual: store.Snapshot.Options.Providers["bedrock"].ProviderType);
     }
 
     [Theory]
@@ -219,9 +222,9 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, ProviderType: blank),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid", null, ProviderType: blank),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(store.Snapshot.Options.Providers["bedrock"].ProviderType);
     }
@@ -232,12 +235,12 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null, ProviderType: "  OpenAI  "),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid", null, ProviderType: "  OpenAI  "),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // Stored untrimmed, this would fail Enum.TryParse in the editor and silently show "Other".
-        Assert.Equal("OpenAI", store.Snapshot.Options.Providers["bedrock"].ProviderType);
+        Assert.Equal(expected: "OpenAI", actual: store.Snapshot.Options.Providers["bedrock"].ProviderType);
     }
 
     [Fact]
@@ -248,15 +251,15 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            "https://changed.invalid", null),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid", null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
-        Assert.Equal("us-east-1", updated.AwsRegion);
-        Assert.Equal("AWS_ID", updated.AwsAccessKeyIdEnvVar);
-        Assert.Equal("AWS_SECRET", updated.AwsSecretAccessKeyEnvVar);
-        Assert.Equal("AWS_TOKEN", updated.AwsSessionTokenEnvVar);
+        Assert.Equal(expected: "us-east-1", actual: updated.AwsRegion);
+        Assert.Equal(expected: "AWS_ID", actual: updated.AwsAccessKeyIdEnvVar);
+        Assert.Equal(expected: "AWS_SECRET", actual: updated.AwsSecretAccessKeyEnvVar);
+        Assert.Equal(expected: "AWS_TOKEN", actual: updated.AwsSessionTokenEnvVar);
     }
 
     // ----- Adding a brand-new provider still gets the documented defaults -----
@@ -270,14 +273,14 @@ public sealed class ProviderOptionsPreservationTests
         var store = new InMemoryProviderConfigStore(new ModelRoutingOptions());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("fresh", new ProviderWriteRequest(
-            BaseUrl: "https://fresh.invalid",
-            AuthHeaderName: null),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "fresh", request: new ProviderWriteRequest(
+                BaseUrl: "https://fresh.invalid",
+                null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var created = store.Snapshot.Options.Providers["fresh"];
-        Assert.Equal("https://fresh.invalid", created.BaseUrl);
-        Assert.Equal("Authorization", created.AuthHeaderName);
+        Assert.Equal(expected: "https://fresh.invalid", actual: created.BaseUrl);
+        Assert.Equal(expected: "Authorization", actual: created.AuthHeaderName);
         Assert.True(created.Enabled);
         Assert.False(created.IsFree);
         Assert.Empty(created.Headers);
@@ -291,14 +294,14 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            BaseUrl: "https://changed.invalid",
-            AuthHeaderName: null,
-            ProviderName: null),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid",
+                null,
+                ProviderName: null),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
-        Assert.Equal("Example Provider", updated.Name);
+        Assert.Equal(expected: "Example Provider", actual: updated.Name);
     }
 
     [Fact]
@@ -307,11 +310,11 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            BaseUrl: "https://changed.invalid",
-            AuthHeaderName: null,
-            ProviderName: ""),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid",
+                null,
+                ProviderName: ""),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
         Assert.Null(updated.Name);
@@ -323,11 +326,11 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            BaseUrl: "https://changed.invalid",
-            AuthHeaderName: null,
-            ProviderName: "  \t\n  "),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid",
+                null,
+                ProviderName: "  \t\n  "),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
         Assert.Null(updated.Name);
@@ -339,14 +342,14 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            BaseUrl: "https://changed.invalid",
-            AuthHeaderName: null,
-            ProviderName: "New Provider Name"),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid",
+                null,
+                ProviderName: "New Provider Name"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
-        Assert.Equal("New Provider Name", updated.Name);
+        Assert.Equal(expected: "New Provider Name", actual: updated.Name);
     }
 
     [Fact]
@@ -355,14 +358,13 @@ public sealed class ProviderOptionsPreservationTests
         var store = StoreWith(FullyPopulated());
         var facade = CreateFacade(store);
 
-        await facade.UpsertProviderAsync("bedrock", new ProviderWriteRequest(
-            BaseUrl: "https://changed.invalid",
-            AuthHeaderName: null,
-            ProviderName: "  New Provider Name  "),
-            TestContext.Current.CancellationToken);
+        await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
+                BaseUrl: "https://changed.invalid",
+                null,
+                ProviderName: "  New Provider Name  "),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
-        Assert.Equal("New Provider Name", updated.Name);
+        Assert.Equal(expected: "New Provider Name", actual: updated.Name);
     }
 }
-

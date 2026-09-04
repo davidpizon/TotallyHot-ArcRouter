@@ -11,4 +11,3 @@ namespace TotallyHot.ArcRouter.Gui.Console;
 /// matching <c>TotallyHot.ArcRouter.Gui.Telemetry.RoutingTelemetryEventDto</c>'s decoupling rationale.
 /// </summary>
 public sealed record LogLineDto(DateTimeOffset TimestampUtc, string Level, string Message);
-

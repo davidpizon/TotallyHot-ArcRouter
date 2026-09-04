@@ -6,7 +6,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Reads the <c>{"content", "tool_calls"}</c> envelope that constrained decoding produces back into prose
 /// plus a list of calls - the response counterpart to <see cref="ToolCallEnvelopeSchema"/>.
-///
 /// <para>
 /// Shared by the buffered and streaming translators for the same reason <see cref="DialectMatcher"/> is:
 /// two implementations of "what counts as a call" drift, and the streaming path is the one where a
@@ -37,10 +36,7 @@ internal static class ToolCallEnvelopeParser
         JsonObject envelope;
         try
         {
-            if (JsonNode.Parse(envelopeJson) is not JsonObject parsed)
-            {
-                return false;
-            }
+            if (JsonNode.Parse(envelopeJson) is not JsonObject parsed) return false;
 
             envelope = parsed;
         }
@@ -51,17 +47,13 @@ internal static class ToolCallEnvelopeParser
 
         if (envelope[ToolCallEnvelopeSchema.ContentProperty] is JsonValue contentValue &&
             contentValue.TryGetValue<string>(out var text))
-        {
             prose = text;
-        }
 
         if (envelope[ToolCallEnvelopeSchema.ToolCallsProperty] is not JsonArray toolCalls)
-        {
             // A schema-constrained reply always carries the key, but a server that ignored the schema (or an
             // operator override pointing this dialect at a model whose endpoint silently dropped it) may
             // not. Prose with no calls is a complete, valid answer, so this is a success, not a failure.
             return true;
-        }
 
         var extracted = new List<ExtractedToolCall>();
         foreach (var node in toolCalls)
@@ -70,9 +62,7 @@ internal static class ToolCallEnvelopeParser
                 call["name"] is not JsonValue nameValue ||
                 !nameValue.TryGetValue<string>(out var name) ||
                 string.IsNullOrEmpty(name))
-            {
                 continue;
-            }
 
             // OpenAI carries arguments as a serialized JSON *string*, while the envelope carries them as a
             // real nested object - so this re-serializes rather than reading a string out. An absent
@@ -80,12 +70,11 @@ internal static class ToolCallEnvelopeParser
             // absence means the server ignored the schema, and a call with no arguments is still a call.
             var arguments = call["arguments"];
             extracted.Add(new ExtractedToolCall(
-                name,
-                arguments?.ToJsonString(SerializerOptions) ?? "{}"));
+                Name: name,
+                ArgumentsJson: arguments?.ToJsonString(SerializerOptions) ?? "{}"));
         }
 
         calls = extracted;
         return true;
     }
 }
-

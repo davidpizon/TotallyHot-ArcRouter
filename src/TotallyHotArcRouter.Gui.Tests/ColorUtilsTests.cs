@@ -1,10 +1,12 @@
-using TotallyHot.ArcRouter.Gui.Utils;
 using AwesomeAssertions;
+using TotallyHot.ArcRouter.Gui.Utils;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
-/// <summary>Tests for <see cref="ColorUtils"/>: it is a thin delegation to <c>ChartPalette</c>, so these
-/// tests only guard the delegation itself (determinism and null-safety), not the palette's hashing.</summary>
+/// <summary>
+/// Tests for <see cref="ColorUtils"/>: it is a thin delegation to <c>ChartPalette</c>, so these
+/// tests only guard the delegation itself (determinism and null-safety), not the palette's hashing.
+/// </summary>
 public sealed class ColorUtilsTests
 {
     [Fact]
@@ -33,4 +35,3 @@ public sealed class ColorUtilsTests
         a.Should().NotBe(b);
     }
 }
-

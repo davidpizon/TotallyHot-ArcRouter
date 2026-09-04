@@ -13,7 +13,7 @@ public abstract class GrpcAdminException : Exception
     /// <param name="innerException">The underlying <see cref="Grpc.Core.RpcException"/>, if any.</param>
     /// <param name="isUnavailable">Whether the failure was specifically the router being unreachable.</param>
     protected GrpcAdminException(string message, Exception? innerException, bool isUnavailable)
-        : base(message, innerException)
+        : base(message: message, innerException: innerException)
     {
         IsUnavailable = isUnavailable;
     }

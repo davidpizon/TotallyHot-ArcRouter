@@ -1,8 +1,7 @@
-using System.Text.Json;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
@@ -18,11 +17,11 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </summary>
 public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminService.RouterModelAdminServiceBase
 {
-    private readonly IEmbeddingLogRegTrainingService _trainingService;
-    private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly RoutingOptions _routingOptions;
-    private readonly string _modelPath;
     private readonly ILogger<LogRegModelAdminGrpcService> _logger;
+    private readonly IMemoryEntryStore _memoryEntryStore;
+    private readonly string _modelPath;
+    private readonly RoutingOptions _routingOptions;
+    private readonly IEmbeddingLogRegTrainingService _trainingService;
 
     /// <summary>Initializes a new instance of the <see cref="LogRegModelAdminGrpcService"/> class.</summary>
     /// <param name="trainingService">Runs the guarded retrain sequence for the panel's retrain button.</param>
@@ -50,20 +49,24 @@ public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminServi
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.LogRegModelStatusResponse> GetLogRegModelStatus(
         Contract.GetLogRegModelStatusRequest request,
-        ServerCallContext context) =>
-        await BuildStatusAsync(context.CancellationToken).ConfigureAwait(false);
+        ServerCallContext context)
+    {
+        return await BuildStatusAsync(context.CancellationToken).ConfigureAwait(false);
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task RetrainLogRegModel(
         Contract.RetrainLogRegModelRequest request,
         IServerStreamWriter<Contract.LogRegRetrainStreamEvent> responseStream,
         ServerCallContext context)
     {
         var progress = new StreamingBootstrapProgress(responseStream);
-        var outcome = await _trainingService.RetrainAsync(progress, context.CancellationToken).ConfigureAwait(false);
+        var outcome = await _trainingService
+            .RetrainAsync(bootstrapProgress: progress, cancellationToken: context.CancellationToken)
+            .ConfigureAwait(false);
 
         // Re-read from disk rather than deriving the response from the outcome alone, mirroring
         // ClusterModelAdminGrpcService's "report the true post-mutation state" convention - the panel's
@@ -77,8 +80,8 @@ public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminServi
             {
                 Kind = MapResultKind(outcome.Kind),
                 Message = outcome.Message,
-                Status = status,
-            },
+                Status = status
+            }
         }).ConfigureAwait(false);
     }
 
@@ -96,7 +99,7 @@ public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminServi
         {
             ArtifactPresent = artifact is not null,
             RetrainThreshold = _routingOptions.LogRegRetrainThreshold,
-            LiveSampleWeight = _routingOptions.LogRegLiveSampleWeight,
+            LiveSampleWeight = _routingOptions.LogRegLiveSampleWeight
         };
 
         if (artifact is null)
@@ -112,12 +115,10 @@ public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminServi
         response.BootstrapTaskCount = artifact.BootstrapTaskCount;
         response.MemoryEntryCount = artifact.MemoryEntryCount;
         response.ModelsRepresented = artifact.ClassWeights.Count;
-        response.EntriesSinceLastRetrain = Math.Max(0, currentEntryCount - artifact.MemoryEntryCount);
+        response.EntriesSinceLastRetrain = Math.Max(0, val2: currentEntryCount - artifact.MemoryEntryCount);
 
         if (File.Exists(_modelPath))
-        {
             response.TrainedAtUtc = Timestamp.FromDateTimeOffset(File.GetLastWriteTimeUtc(_modelPath));
-        }
 
         return response;
     }
@@ -129,10 +130,7 @@ public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminServi
     /// </summary>
     private EmbeddingLogRegModelArtifact? TryLoadArtifact()
     {
-        if (!File.Exists(_modelPath))
-        {
-            return null;
-        }
+        if (!File.Exists(_modelPath)) return null;
 
         try
         {
@@ -140,19 +138,23 @@ public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminServi
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
         {
-            _logger.LogWarning(ex, "Failed to load the logreg voter model from {Path} for the admin panel.", _modelPath);
+            _logger.LogWarning(exception: ex,
+                message: "Failed to load the logreg voter model from {Path} for the admin panel.", _modelPath);
             return null;
         }
     }
 
     /// <summary>Maps the domain retrain result category onto its wire enum.</summary>
-    private static Contract.LogRegRetrainResultKind MapResultKind(LogRegTrainingResultKind kind) => kind switch
+    private static Contract.LogRegRetrainResultKind MapResultKind(LogRegTrainingResultKind kind)
     {
-        LogRegTrainingResultKind.Trained => Contract.LogRegRetrainResultKind.Trained,
-        LogRegTrainingResultKind.Declined => Contract.LogRegRetrainResultKind.Declined,
-        LogRegTrainingResultKind.AlreadyRunning => Contract.LogRegRetrainResultKind.AlreadyRunning,
-        _ => Contract.LogRegRetrainResultKind.Unspecified,
-    };
+        return kind switch
+        {
+            LogRegTrainingResultKind.Trained => Contract.LogRegRetrainResultKind.Trained,
+            LogRegTrainingResultKind.Declined => Contract.LogRegRetrainResultKind.Declined,
+            LogRegTrainingResultKind.AlreadyRunning => Contract.LogRegRetrainResultKind.AlreadyRunning,
+            _ => Contract.LogRegRetrainResultKind.Unspecified
+        };
+    }
 
     /// <summary>
     /// Bridges <see cref="IEmbeddingLogRegTrainingService.RetrainAsync"/>'s synchronous
@@ -168,13 +170,18 @@ public sealed class LogRegModelAdminGrpcService : Contract.RouterModelAdminServi
 
         /// <summary>Initializes a new instance of the <see cref="StreamingBootstrapProgress"/> class.</summary>
         /// <param name="stream">The gRPC response stream to write each progress event to.</param>
-        public StreamingBootstrapProgress(IServerStreamWriter<Contract.LogRegRetrainStreamEvent> stream) => _stream = stream;
+        public StreamingBootstrapProgress(IServerStreamWriter<Contract.LogRegRetrainStreamEvent> stream)
+        {
+            _stream = stream;
+        }
 
         /// <inheritdoc/>
-        public void Report(int tasksEmbedded) =>
+        public void Report(int tasksEmbedded)
+        {
             _stream.WriteAsync(new Contract.LogRegRetrainStreamEvent
             {
-                BootstrapProgress = new Contract.LogRegRetrainBootstrapProgress { TasksEmbedded = tasksEmbedded },
+                BootstrapProgress = new Contract.LogRegRetrainBootstrapProgress { TasksEmbedded = tasksEmbedded }
             }).GetAwaiter().GetResult();
+        }
     }
 }

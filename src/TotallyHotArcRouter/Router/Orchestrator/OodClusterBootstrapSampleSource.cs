@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Router.Embeddings;
@@ -59,34 +58,30 @@ public sealed class OodClusterBootstrapSampleSource
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(_database.DatabasePath))
-        {
             throw new InvalidOperationException(
                 $"The CodeRouterBench corpus database was not found at '{_database.DatabasePath}' - is the corpus synced?");
-        }
 
         Dictionary<string, string> taskPrompts;
         try
         {
-            using var connection = _database.OpenConnection();
-            using var command = connection.CreateCommand();
+            await using var connection = _database.OpenConnection();
+            await using var command = connection.CreateCommand();
             command.CommandText = "SELECT task_id, raw_json FROM benchmark_ood_tasks;";
-            using var reader = command.ExecuteReader();
+            await using var reader = command.ExecuteReader();
 
             taskPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
             while (reader.Read())
             {
                 var taskId = reader.GetString(0);
                 var text = LogRegTrainer.TryExtractPrompt(reader.GetString(1));
-                if (text is not null)
-                {
-                    taskPrompts[taskId] = text;
-                }
+                if (text is not null) taskPrompts[taskId] = text;
             }
         }
         catch (SqliteException ex)
         {
             throw new InvalidOperationException(
-                $"Failed to read the CodeRouterBench OOD split from '{_database.DatabasePath}'.", ex);
+                message: $"Failed to read the CodeRouterBench OOD split from '{_database.DatabasePath}'.",
+                innerException: ex);
         }
 
         var samples = new List<ClusterTrainingSample>(taskPrompts.Count);
@@ -95,14 +90,16 @@ public sealed class OodClusterBootstrapSampleSource
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var embedding = await _embeddingClient.EmbedAsync(prompt, cancellationToken).ConfigureAwait(false);
-            samples.Add(new ClusterTrainingSample(embedding.Vector, Dimension: null, Weight: 1.0));
+            var embedding = await _embeddingClient.EmbedAsync(text: prompt, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            samples.Add(new ClusterTrainingSample(Embedding: embedding.Vector, null, 1.0));
 
             embeddedTaskCount++;
             progress?.Report(embeddedTaskCount);
         }
 
         _logger.LogInformation(
+            message:
             "OOD cluster bootstrap source produced {SampleCount} training sample(s) from {TaskCount} embedded task(s).",
             samples.Count,
             embeddedTaskCount);

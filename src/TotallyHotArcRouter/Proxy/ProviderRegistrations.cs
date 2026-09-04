@@ -25,18 +25,18 @@ internal static class ProviderRegistrations
             // as Anthropic's own content[]/usage shape: IPayloadTranslator.ShouldTranslate lets real
             // Claude Code traffic on /v1/messages pass through untranslated (docs/router/unified-api-
             // translation.md §4.4), so its own captured bytes stay native rather than becoming OpenAI-shaped.
-            new ProviderRegistration("anthropic", UsageParserShape.Native, CostReconciler: null),
+            new ProviderRegistration(ProviderKey: "anthropic", UsageParserShape: UsageParserShape.Native, null),
 
             // OpenAI's own traffic needs no translation at all - the captured bytes are already its shape.
-            new ProviderRegistration("openai", UsageParserShape.OpenAiCompatible, CostReconciler: null),
+            new ProviderRegistration(ProviderKey: "openai", UsageParserShape: UsageParserShape.OpenAiCompatible, null),
 
             // Ollama's OpenAI-compatible routes answer in OpenAI's own shape with no translator in front of
             // them (docs/router/unified-api-translation.md §4.1, pinned by OllamaProviderTests).
-            new ProviderRegistration("ollama", UsageParserShape.OpenAiCompatible, CostReconciler: null),
+            new ProviderRegistration(ProviderKey: "ollama", UsageParserShape: UsageParserShape.OpenAiCompatible, null),
 
             // Gemini always translates: GeminiPayloadTranslator converts its response to OpenAI's shape
             // before ProxyMiddleware ever captures it (docs/router/unified-api-translation.md §4.3).
-            new ProviderRegistration("gemini", UsageParserShape.OpenAiCompatible, CostReconciler: null),
+            new ProviderRegistration(ProviderKey: "gemini", UsageParserShape: UsageParserShape.OpenAiCompatible, null),
 
             // The three Bedrock-routed providers (docs/router/unified-api-translation.md §4.2): each
             // translator's TranslateResponse always converts AWS's native response body into OpenAI's
@@ -46,11 +46,14 @@ internal static class ProviderRegistrations
             // reusing AnthropicPayloadTranslator's response-conversion logic internally - that reuse is
             // what performs the native-to-OpenAI conversion, so the bytes this extractor ever sees for it
             // are OpenAI-shaped, never native Anthropic content[]/usage.
-            new ProviderRegistration("bedrock-titan", UsageParserShape.OpenAiCompatible, CostReconciler: null),
-            new ProviderRegistration("bedrock-llama", UsageParserShape.OpenAiCompatible, CostReconciler: null),
-            new ProviderRegistration("bedrock-anthropic", UsageParserShape.OpenAiCompatible, CostReconciler: null),
+            new ProviderRegistration(ProviderKey: "bedrock-titan", UsageParserShape: UsageParserShape.OpenAiCompatible,
+                null),
+            new ProviderRegistration(ProviderKey: "bedrock-llama", UsageParserShape: UsageParserShape.OpenAiCompatible,
+                null),
+            new ProviderRegistration(ProviderKey: "bedrock-anthropic",
+                UsageParserShape: UsageParserShape.OpenAiCompatible, null)
         };
 
-        return registrations.ToDictionary(r => r.ProviderKey, StringComparer.OrdinalIgnoreCase);
+        return registrations.ToDictionary(keySelector: r => r.ProviderKey, comparer: StringComparer.OrdinalIgnoreCase);
     }
 }

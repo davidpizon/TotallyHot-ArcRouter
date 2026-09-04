@@ -52,7 +52,7 @@ public static class RouterDimension
         DataScience,
         MultiLanguage,
         CodeUnderstanding,
-        TestGeneration,
+        TestGeneration
     ];
 
     /// <summary>
@@ -65,5 +65,8 @@ public static class RouterDimension
     /// <param name="liveMemoryPrefix">The configured live-namespace prefix (e.g. <c>"live:"</c>).</param>
     /// <param name="dimension">The dimension, typically one of <see cref="AllDimensions"/>.</param>
     /// <returns>The composed <c>RouterMemory</c> key.</returns>
-    public static string ToLiveKey(string liveMemoryPrefix, string dimension) => liveMemoryPrefix + dimension;
+    public static string ToLiveKey(string liveMemoryPrefix, string dimension)
+    {
+        return liveMemoryPrefix + dimension;
+    }
 }

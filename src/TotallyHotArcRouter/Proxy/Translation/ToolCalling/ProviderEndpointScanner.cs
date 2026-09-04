@@ -7,14 +7,12 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// <summary>
 /// Probes a provider's well-known paths to discover which API flavors its endpoint actually answers
 /// (<c>docs/router/tool-call-normalization.md</c> §3.3, Phase 2).
-///
 /// <para>
 /// Routing continues to speak OpenAI-compatible only. The native flavors are recorded because they expose
 /// model metadata the OpenAI-shaped endpoint does not - Ollama's <c>/api/show</c> returns the literal chat
 /// template, which is the cheapest and most reliable source of a model's tool-call dialect. So this scan
 /// pays for itself immediately through detection rather than being groundwork for a future routing change.
 /// </para>
-///
 /// <para>
 /// Every probe is independent and best-effort, following <c>ManagementFacade</c>'s existing
 /// <c>DiscoverModelsCoreAsync</c>: credentials and the provider's own custom headers are applied exactly as
@@ -40,8 +38,9 @@ public sealed class ProviderEndpointScanner
     private const string AnthropicMessagesProbeBody =
         $$"""{"model":"{{AnthropicProbeModel}}","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}""";
 
-    private readonly HttpClient _httpClient;
     private readonly IEnvironmentVariableProvider _environment;
+
+    private readonly HttpClient _httpClient;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderEndpointScanner"/> class.</summary>
     /// <param name="httpClient">Client used to issue the probes.</param>
@@ -83,21 +82,24 @@ public sealed class ProviderEndpointScanner
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentNullException.ThrowIfNull(provider);
 
-        if (!Uri.TryCreate(provider.BaseUrl, UriKind.Absolute, out _))
-        {
+        if (!Uri.TryCreate(uriString: provider.BaseUrl, uriKind: UriKind.Absolute, result: out _))
             return new ProviderEndpointCapabilities(
-                providerKey, false, false, false, false, false, DateTimeOffset.UtcNow,
+                ProviderKey: providerKey, false, false, false, false, false, ScannedAtUtc: DateTimeOffset.UtcNow,
                 ScanError: $"Invalid BaseUrl: '{provider.BaseUrl}'.");
-        }
 
         var root = ProviderUrlBuilder.StripVersionSuffix(provider.BaseUrl);
 
         // The OpenAI-shaped list is reused to detect Anthropic too: both answer GET /v1/models, and they are
         // told apart by response shape rather than by a second request (see ClassifyModelsBody).
-        var openAiProbe = await ProbeAsync(ProviderUrlBuilder.BuildModelsUrl(provider.BaseUrl), provider, cancellationToken)
+        var openAiProbe = await ProbeAsync(url: ProviderUrlBuilder.BuildModelsUrl(provider.BaseUrl), provider: provider,
+                cancellationToken: cancellationToken)
             .ConfigureAwait(false);
-        var lmStudioProbe = await ProbeAsync($"{root}/api/v0/models", provider, cancellationToken).ConfigureAwait(false);
-        var ollamaProbe = await ProbeAsync($"{root}/api/tags", provider, cancellationToken).ConfigureAwait(false);
+        var lmStudioProbe =
+            await ProbeAsync(url: $"{root}/api/v0/models", provider: provider, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        var ollamaProbe =
+            await ProbeAsync(url: $"{root}/api/tags", provider: provider, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
 
         var (openAiCompatible, anthropicCompatible, unrecognizedBody) = ClassifyModelsBody(openAiProbe);
 
@@ -107,7 +109,9 @@ public sealed class ProviderEndpointScanner
         string? messagesProbeError = null;
         if (!anthropicCompatible && provider.ProbeAnthropicMessages)
         {
-            var messagesProbe = await ProbeAnthropicMessagesAsync(provider, cancellationToken).ConfigureAwait(false);
+            var messagesProbe =
+                await ProbeAnthropicMessagesAsync(provider: provider, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
             anthropicCompatible = messagesProbe.Compatible;
             messagesProbeError = messagesProbe.Error;
         }
@@ -158,23 +162,19 @@ public sealed class ProviderEndpointScanner
     private static (bool OpenAiCompatible, bool AnthropicCompatible, string? UnrecognizedBody) ClassifyModelsBody(
         ProbeResult probe)
     {
-        if (!probe.Succeeded || probe.Body is null)
-        {
-            return (false, false, null);
-        }
+        if (!probe.Succeeded || probe.Body is null) return (false, false, null);
 
         try
         {
             using var document = JsonDocument.Parse(probe.Body);
             if (document.RootElement.ValueKind != JsonValueKind.Object ||
-                !document.RootElement.TryGetProperty("data", out var data) ||
+                !document.RootElement.TryGetProperty(propertyName: "data", value: out var data) ||
                 data.ValueKind != JsonValueKind.Array)
-            {
-                return (false, false, "The models endpoint returned a success status but no 'data' array; it does not look like a model list.");
-            }
+                return (false, false,
+                    "The models endpoint returned a success status but no 'data' array; it does not look like a model list.");
 
-            var looksAnthropic = document.RootElement.TryGetProperty("has_more", out _)
-                || document.RootElement.TryGetProperty("first_id", out _);
+            var looksAnthropic = document.RootElement.TryGetProperty(propertyName: "has_more", value: out _)
+                                 || document.RootElement.TryGetProperty(propertyName: "first_id", value: out _);
 
             return looksAnthropic ? (false, true, null) : (true, false, null);
         }
@@ -211,35 +211,35 @@ public sealed class ProviderEndpointScanner
         ProviderOptions provider, CancellationToken cancellationToken)
     {
         var url = ProviderUrlBuilder.BuildMessagesUrl(provider.BaseUrl);
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var target))
-        {
+        if (!Uri.TryCreate(uriString: url, uriKind: UriKind.Absolute, result: out var target))
             return (false, $"Invalid probe URL '{url}'.");
-        }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, target)
-        {
-            Content = new StringContent(AnthropicMessagesProbeBody, Encoding.UTF8, "application/json"),
-        };
+        using var request = new HttpRequestMessage(method: HttpMethod.Post, requestUri: target);
+        request.Content = new StringContent(content: AnthropicMessagesProbeBody, encoding: Encoding.UTF8,
+            mediaType: "application/json");
 
-        var rejectedHeaders = ProviderCredentialResolver.ApplyToRequest(request, provider, _environment);
+        var rejectedHeaders =
+            ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);
 
         try
         {
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (ClassifyMessagesBody(response.IsSuccessStatusCode, body))
-            {
-                return (true, null);
-            }
+            if (ClassifyMessagesBody(succeeded: response.IsSuccessStatusCode, body: body)) return (true, null);
 
             // Not an exception, but not a match either: the endpoint answered, just not with a body shaped
             // like Anthropic's dialect. Recorded so an opted-in probe that found nothing still shows up in
             // ScanError instead of silently vanishing when nothing else answers.
-            return (false, Explain($"{target} returned {(int)response.StatusCode} with a body that did not match the Anthropic Messages API shape.", rejectedHeaders));
+            return (false,
+                Explain(
+                    reason:
+                    $"{target} returned {(int)response.StatusCode} with a body that did not match the Anthropic Messages API shape.",
+                    rejectedHeaders: rejectedHeaders));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
         {
-            return (false, Explain($"{target}: {ex.Message}", rejectedHeaders));
+            return (false, Explain(reason: $"{target}: {ex.Message}", rejectedHeaders: rejectedHeaders));
         }
     }
 
@@ -250,30 +250,22 @@ public sealed class ProviderEndpointScanner
     /// </summary>
     private static bool ClassifyMessagesBody(bool succeeded, string? body)
     {
-        if (string.IsNullOrEmpty(body))
-        {
-            return false;
-        }
+        if (string.IsNullOrEmpty(body)) return false;
 
         try
         {
             using var document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return false;
-            }
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
 
             if (succeeded)
-            {
-                return document.RootElement.TryGetProperty("type", out var messageType)
-                    && messageType.ValueEquals("message");
-            }
+                return document.RootElement.TryGetProperty(propertyName: "type", value: out var messageType)
+                       && messageType.ValueEquals("message");
 
-            return document.RootElement.TryGetProperty("type", out var errorType)
-                && errorType.ValueEquals("error")
-                && document.RootElement.TryGetProperty("error", out var errorObject)
-                && errorObject.ValueKind == JsonValueKind.Object
-                && errorObject.TryGetProperty("type", out _);
+            return document.RootElement.TryGetProperty(propertyName: "type", value: out var errorType)
+                   && errorType.ValueEquals("error")
+                   && document.RootElement.TryGetProperty(propertyName: "error", value: out var errorObject)
+                   && errorObject.ValueKind == JsonValueKind.Object
+                   && errorObject.TryGetProperty(propertyName: "type", value: out _);
         }
         catch (JsonException)
         {
@@ -282,35 +274,37 @@ public sealed class ProviderEndpointScanner
     }
 
     /// <summary>Issues one GET with the provider's credentials and custom headers applied.</summary>
-    private async Task<ProbeResult> ProbeAsync(string url, ProviderOptions provider, CancellationToken cancellationToken)
+    private async Task<ProbeResult> ProbeAsync(string url, ProviderOptions provider,
+        CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var target))
-        {
-            return new ProbeResult(false, null, $"Invalid probe URL '{url}'.");
-        }
+        if (!Uri.TryCreate(uriString: url, uriKind: UriKind.Absolute, result: out var target))
+            return new ProbeResult(false, null, Error: $"Invalid probe URL '{url}'.");
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, target);
+        using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: target);
 
         // Identical to the forwarding path, so a provider needing an extra header to answer at all (e.g.
         // Anthropic's anthropic-version) gets it without any provider-specific branch here. Any header name
         // HTTP refused comes back so a failure can name it rather than reading as a bad credential.
-        var rejectedHeaders = ProviderCredentialResolver.ApplyToRequest(request, provider, _environment);
+        var rejectedHeaders =
+            ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);
 
         try
         {
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-            {
                 return new ProbeResult(
-                    false, null, Explain($"{target} returned {(int)response.StatusCode}.", rejectedHeaders));
-            }
+                    false, null,
+                    Error: Explain(reason: $"{target} returned {(int)response.StatusCode}.",
+                        rejectedHeaders: rejectedHeaders));
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            return new ProbeResult(true, body, null);
+            return new ProbeResult(true, Body: body, null);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
         {
-            return new ProbeResult(false, null, Explain($"{target}: {ex.Message}", rejectedHeaders));
+            return new ProbeResult(false, null,
+                Error: Explain(reason: $"{target}: {ex.Message}", rejectedHeaders: rejectedHeaders));
         }
     }
 
@@ -319,17 +313,20 @@ public sealed class ProviderEndpointScanner
     /// does not read as a credential or connectivity problem. Only the names are reported - their values may
     /// be secrets.
     /// </summary>
-    private static string Explain(string reason, IReadOnlyList<string>? rejectedHeaders) =>
-        rejectedHeaders is null or { Count: 0 }
+    private static string Explain(string reason, IReadOnlyList<string>? rejectedHeaders)
+    {
+        return rejectedHeaders is null or { Count: 0 }
             ? reason
             : $"{reason} Note: these configured header names are not valid HTTP header names and were not "
-                + $"sent: {string.Join(", ", rejectedHeaders.Select(name => $"'{name}'"))}.";
+              + $"sent: {string.Join(separator: ", ", values: rejectedHeaders.Select(name => $"'{name}'"))}.";
+    }
 
     /// <summary>Joins each probe's failure reason into one line for <c>scan_error</c>.</summary>
-    private static string SummarizeFailure(params string?[] reasons) =>
-        string.Join(" | ", reasons.Where(r => !string.IsNullOrWhiteSpace(r)));
+    private static string SummarizeFailure(params string?[] reasons)
+    {
+        return string.Join(separator: " | ", values: reasons.Where(r => !string.IsNullOrWhiteSpace(r)));
+    }
 
     /// <summary>One probe's outcome: whether it answered 2xx, its body, and why it failed if it didn't.</summary>
     private sealed record ProbeResult(bool Succeeded, string? Body, string? Error);
 }
-

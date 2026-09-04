@@ -1,6 +1,6 @@
-using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -28,49 +28,49 @@ public sealed class RouterMemoryDatabase
     /// atomic upsert.
     /// </remarks>
     private const string SchemaSql = """
-        CREATE TABLE IF NOT EXISTS memory_entries (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            embedding        BLOB    NOT NULL,
-            chosen_model     TEXT    NOT NULL,
-            score            REAL    NOT NULL,
-            cost             REAL    NOT NULL,
-            verifier_trace   TEXT    NULL,
-            created_at_utc   TEXT    NOT NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS memory_entries (
+                                         id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                                         embedding        BLOB    NOT NULL,
+                                         chosen_model     TEXT    NOT NULL,
+                                         score            REAL    NOT NULL,
+                                         cost             REAL    NOT NULL,
+                                         verifier_trace   TEXT    NULL,
+                                         created_at_utc   TEXT    NOT NULL
+                                     );
 
-        CREATE TABLE IF NOT EXISTS dimension_scores (
-            dimension        TEXT    NOT NULL,
-            model            TEXT    NOT NULL,
-            sum              REAL    NOT NULL,
-            count            INTEGER NOT NULL,
-            PRIMARY KEY (dimension, model)
-        );
+                                     CREATE TABLE IF NOT EXISTS dimension_scores (
+                                         dimension        TEXT    NOT NULL,
+                                         model            TEXT    NOT NULL,
+                                         sum              REAL    NOT NULL,
+                                         count            INTEGER NOT NULL,
+                                         PRIMARY KEY (dimension, model)
+                                     );
 
-        CREATE TABLE IF NOT EXISTS router_settings (
-            key              TEXT    PRIMARY KEY,
-            value            TEXT    NOT NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS router_settings (
+                                         key              TEXT    PRIMARY KEY,
+                                         value            TEXT    NOT NULL
+                                     );
 
-        CREATE TABLE IF NOT EXISTS judge_shadow_scores (
-            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-            correlation_id        TEXT    NOT NULL,
-            created_at_utc        TEXT    NOT NULL,
-            dimension             TEXT    NOT NULL,
-            model                 TEXT    NOT NULL,
-            static_score          REAL    NOT NULL,
-            judge_score           REAL    NOT NULL,
-            judge_model           TEXT    NOT NULL,
-            judge_prompt_version  TEXT    NOT NULL,
-            judge_latency_ms      INTEGER NOT NULL,
-            used_logprobs         INTEGER NOT NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS judge_shadow_scores (
+                                         id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                                         correlation_id        TEXT    NOT NULL,
+                                         created_at_utc        TEXT    NOT NULL,
+                                         dimension             TEXT    NOT NULL,
+                                         model                 TEXT    NOT NULL,
+                                         static_score          REAL    NOT NULL,
+                                         judge_score           REAL    NOT NULL,
+                                         judge_model           TEXT    NOT NULL,
+                                         judge_prompt_version  TEXT    NOT NULL,
+                                         judge_latency_ms      INTEGER NOT NULL,
+                                         used_logprobs         INTEGER NOT NULL
+                                     );
 
-        CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_correlation_id
-            ON judge_shadow_scores (correlation_id);
+                                     CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_correlation_id
+                                         ON judge_shadow_scores (correlation_id);
 
-        CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_created_at
-            ON judge_shadow_scores (created_at_utc);
-        """;
+                                     CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_created_at
+                                         ON judge_shadow_scores (created_at_utc);
+                                     """;
 
     /// <summary>The resolved absolute path of the database file.</summary>
     private readonly string _databasePath;
@@ -86,7 +86,7 @@ public sealed class RouterMemoryDatabase
         var configuredPath = routingOptions.Value.EmbeddingMemoryDatabasePath;
         _databasePath = Path.IsPathRooted(configuredPath)
             ? configuredPath
-            : Path.Combine(AppContext.BaseDirectory, configuredPath);
+            : Path.Combine(path1: AppContext.BaseDirectory, path2: configuredPath);
     }
 
     /// <summary>Gets the resolved absolute path of the database file.</summary>
@@ -112,10 +112,7 @@ public sealed class RouterMemoryDatabase
     public void EnsureCreated()
     {
         var directory = Path.GetDirectoryName(_databasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
         using var connection = OpenConnection();
 
@@ -150,14 +147,15 @@ public sealed class RouterMemoryDatabase
     /// </summary>
     private static void MigrateProvenanceColumns(SqliteConnection connection)
     {
-        if (!ColumnExists(connection, "memory_entries", "is_exploratory"))
+        if (!ColumnExists(connection: connection, table: "memory_entries", column: "is_exploratory"))
         {
             using var alterIsExploratory = connection.CreateCommand();
-            alterIsExploratory.CommandText = "ALTER TABLE memory_entries ADD COLUMN is_exploratory INTEGER NOT NULL DEFAULT 0;";
+            alterIsExploratory.CommandText =
+                "ALTER TABLE memory_entries ADD COLUMN is_exploratory INTEGER NOT NULL DEFAULT 0;";
             alterIsExploratory.ExecuteNonQuery();
         }
 
-        if (!ColumnExists(connection, "memory_entries", "propensity"))
+        if (!ColumnExists(connection: connection, table: "memory_entries", column: "propensity"))
         {
             using var alterPropensity = connection.CreateCommand();
             alterPropensity.CommandText = "ALTER TABLE memory_entries ADD COLUMN propensity REAL NOT NULL DEFAULT 1.0;";
@@ -175,7 +173,7 @@ public sealed class RouterMemoryDatabase
     /// </summary>
     private static void MigrateDimensionColumn(SqliteConnection connection)
     {
-        if (!ColumnExists(connection, "memory_entries", "dimension"))
+        if (!ColumnExists(connection: connection, table: "memory_entries", column: "dimension"))
         {
             using var alterDimension = connection.CreateCommand();
             alterDimension.CommandText = "ALTER TABLE memory_entries ADD COLUMN dimension TEXT NULL;";
@@ -195,10 +193,11 @@ public sealed class RouterMemoryDatabase
     /// </summary>
     private static void MigrateIsJudgeScoredColumn(SqliteConnection connection)
     {
-        if (!ColumnExists(connection, "memory_entries", "is_judge_scored"))
+        if (!ColumnExists(connection: connection, table: "memory_entries", column: "is_judge_scored"))
         {
             using var alterIsJudgeScored = connection.CreateCommand();
-            alterIsJudgeScored.CommandText = "ALTER TABLE memory_entries ADD COLUMN is_judge_scored INTEGER NOT NULL DEFAULT 0;";
+            alterIsJudgeScored.CommandText =
+                "ALTER TABLE memory_entries ADD COLUMN is_judge_scored INTEGER NOT NULL DEFAULT 0;";
             alterIsJudgeScored.ExecuteNonQuery();
         }
     }
@@ -216,7 +215,7 @@ public sealed class RouterMemoryDatabase
     /// </summary>
     private static void MigrateEmbeddingModelColumn(SqliteConnection connection)
     {
-        if (!ColumnExists(connection, "memory_entries", "embedding_model"))
+        if (!ColumnExists(connection: connection, table: "memory_entries", column: "embedding_model"))
         {
             using var alterEmbeddingModel = connection.CreateCommand();
             alterEmbeddingModel.CommandText = "ALTER TABLE memory_entries ADD COLUMN embedding_model TEXT NULL;";
@@ -243,14 +242,14 @@ public sealed class RouterMemoryDatabase
     /// </remarks>
     private static void MigrateJudgeShadowScoreColumns(SqliteConnection connection)
     {
-        if (ColumnExists(connection, "judge_shadow_scores", "verifier_score"))
+        if (ColumnExists(connection: connection, table: "judge_shadow_scores", column: "verifier_score"))
         {
             using var rename = connection.CreateCommand();
             rename.CommandText = "ALTER TABLE judge_shadow_scores RENAME COLUMN verifier_score TO static_score;";
             rename.ExecuteNonQuery();
         }
 
-        if (ColumnExists(connection, "judge_shadow_scores", "executed"))
+        if (ColumnExists(connection: connection, table: "judge_shadow_scores", column: "executed"))
         {
             using var drop = connection.CreateCommand();
             drop.CommandText = "ALTER TABLE judge_shadow_scores DROP COLUMN executed;";
@@ -260,13 +259,16 @@ public sealed class RouterMemoryDatabase
 
     /// <summary>Checks whether <paramref name="table"/> already has a column named <paramref name="column"/>.</summary>
     /// <param name="connection">An open connection to query.</param>
-    /// <param name="table">The table name. Must be a compile-time constant - interpolated directly into the PRAGMA, which does not accept a bound parameter for a table name.</param>
+    /// <param name="table">
+    /// The table name. Must be a compile-time constant - interpolated directly into the PRAGMA, which does
+    /// not accept a bound parameter for a table name.
+    /// </param>
     /// <param name="column">The column name to look for.</param>
     private static bool ColumnExists(SqliteConnection connection, string table, string column)
     {
         using var command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column;";
-        command.Parameters.AddWithValue("$column", column);
-        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
+        command.Parameters.AddWithValue(parameterName: "$column", value: column);
+        return Convert.ToInt32(value: command.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0;
     }
 }

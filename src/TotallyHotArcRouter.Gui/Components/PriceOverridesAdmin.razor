@@ -5,7 +5,6 @@
    docs/router/token-tracking-implementation-plan.md Phase 3, §5.7. *@
 @implements IDisposable
 @inject ProviderAdminStore Store
-@using TotallyHot.ArcRouter.Gui.Admin
 
 <div class="h-full overflow-y-auto pr-1">
     @if (!Store.IsLoaded)
@@ -16,7 +15,7 @@
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="20" /> Router unreachable
+                <Icon Name="alert-triangle" Size="20"/> Router unreachable
             </div>
             <div class="text-xs text-slate-400">
                 Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
@@ -54,7 +53,9 @@
                     @foreach (var d in Store.PriceResolutionDiagnosis)
                     {
                         <div class="flex items-center justify-between gap-2 text-xs font-mono">
-                            <span class="text-slate-300">@d.ModelName <span class="text-slate-600">(@d.Provider)</span></span>
+                            <span class="text-slate-300">
+                                @d.ModelName <span class="text-slate-600">(@d.Provider)</span>
+                            </span>
                             <span class="@DiagnosisClass(d)">@DiagnosisLabel(d)</span>
                         </div>
                     }
@@ -65,8 +66,8 @@
         @* Add form *@
         <div class="rounded-lg p-3 space-y-2 mb-3 ds-surface-card-bordered">
             <div class="grid gap-2 ls-price-overrides-grid">
-                <input @bind="_newSourceName" placeholder="Source (e.g. LiteLLM)" class="px-2 py-1.5 text-xs ds-input" />
-                <input @bind="_newAggregatorModelKey" placeholder="Aggregator model key (e.g. big-pickle)" class="px-2 py-1.5 text-xs font-mono ds-input" />
+                <input @bind="_newSourceName" placeholder="Source (e.g. LiteLLM)" class="px-2 py-1.5 text-xs ds-input"/>
+                <input @bind="_newAggregatorModelKey" placeholder="Aggregator model key (e.g. big-pickle)" class="px-2 py-1.5 text-xs font-mono ds-input"/>
                 <select @bind="_newModelName" class="px-2 py-1.5 text-xs ds-input">
                     <option value="">Select configured model…</option>
                     @foreach (var modelName in ConfiguredModelNames)
@@ -97,7 +98,7 @@
                             <span class="text-emerald-400">@o.ModelName</span>
                         </div>
                         <button @onclick="() => Remove(o)" title="Remove this override" class="btn btn-ghost shrink-0">
-                            <Icon Name="trash" Size="20" />
+                            <Icon Name="trash" Size="20"/>
                         </button>
                     </div>
                 }
@@ -113,12 +114,16 @@
     private string _newModelName = string.Empty;
 
     /// <summary>The Resolution Diagnosis row's status label for one configured model.</summary>
-    private static string DiagnosisLabel(PriceResolutionDiagnosisView d) =>
-        !d.Resolved ? "Unresolved" : d.IsApproximate ? "Approximate" : "Exact";
+    private static string DiagnosisLabel(PriceResolutionDiagnosisView d)
+    {
+        return !d.Resolved ? "Unresolved" : d.IsApproximate ? "Approximate" : "Exact";
+    }
 
     /// <summary>The CSS color class for one configured model's resolution status.</summary>
-    private static string DiagnosisClass(PriceResolutionDiagnosisView d) =>
-        !d.Resolved ? "metric-critical" : d.IsApproximate ? "metric-fallback" : "metric-positive";
+    private static string DiagnosisClass(PriceResolutionDiagnosisView d)
+    {
+        return !d.Resolved ? "metric-critical" : d.IsApproximate ? "metric-fallback" : "metric-positive";
+    }
 
     /// <summary>Whether the Add form has every field filled in and can submit.</summary>
     private bool CanAdd =>
@@ -129,7 +134,7 @@
     // Every currently configured model name, across every provider - the only values an override can
     // legally resolve to (SetPriceOverride rejects anything else).
     private IEnumerable<string> ConfiguredModelNames =>
-        Store.Providers.SelectMany(p => p.Models).Select(m => m.ModelName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(m => m, StringComparer.OrdinalIgnoreCase);
+        Store.Providers.SelectMany(p => p.Models).Select(m => m.ModelName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(keySelector: m => m, comparer: StringComparer.OrdinalIgnoreCase);
 
     protected override async Task OnInitializedAsync()
     {
@@ -139,32 +144,52 @@
     }
 
     /// <summary>Re-renders when the store's state changes.</summary>
-    private void OnStoreChanged() => InvokeAsync(StateHasChanged);
+    private void OnStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>Unsubscribes from <see cref="ProviderAdminStore.Changed"/>.</summary>
-    public void Dispose() => Store.Changed -= OnStoreChanged;
-
-    /// <summary>Clears the inline error and reloads providers and price overrides. Implements the unreachable state's Retry button.</summary>
-    private Task Reload() => RunAsync(async () =>
+    public void Dispose()
     {
-        await Store.LoadAsync();
-        await Store.LoadPriceOverridesAsync();
-    });
+        Store.Changed -= OnStoreChanged;
+    }
+
+    /// <summary>
+    /// Clears the inline error and reloads providers and price overrides. Implements the unreachable state's Retry
+    /// button.
+    /// </summary>
+    private Task Reload()
+    {
+        return RunAsync(async () =>
+        {
+            await Store.LoadAsync();
+            await Store.LoadPriceOverridesAsync();
+        });
+    }
 
     /// <summary>Submits the Add form's fields as a new price override, then clears the form on success.</summary>
-    private Task Add() => RunAsync(async () =>
+    private Task Add()
     {
-        await Store.SetPriceOverrideAsync(new PriceOverrideWriteRequest(_newSourceName, _newAggregatorModelKey, _newModelName));
-        _newSourceName = string.Empty;
-        _newAggregatorModelKey = string.Empty;
-        _newModelName = string.Empty;
-    });
+        return RunAsync(async () =>
+        {
+            await Store.SetPriceOverrideAsync(new PriceOverrideWriteRequest(SourceName: _newSourceName, AggregatorModelKey: _newAggregatorModelKey, ModelName: _newModelName));
+            _newSourceName = string.Empty;
+            _newAggregatorModelKey = string.Empty;
+            _newModelName = string.Empty;
+        });
+    }
 
     /// <summary>Removes one price override.</summary>
-    private Task Remove(PriceOverrideView o) =>
-        RunAsync(() => Store.RemovePriceOverrideAsync(o.SourceName, o.AggregatorModelKey));
+    private Task Remove(PriceOverrideView o)
+    {
+        return RunAsync(() => Store.RemovePriceOverrideAsync(sourceName: o.SourceName, aggregatorModelKey: o.AggregatorModelKey));
+    }
 
-    /// <summary>Runs a mutation, surfacing a failure in the inline error banner rather than letting it escape into the renderer.</summary>
+    /// <summary>
+    /// Runs a mutation, surfacing a failure in the inline error banner rather than letting it escape into the
+    /// renderer.
+    /// </summary>
     private async Task RunAsync(Func<Task> operation)
     {
         _opError = null;
@@ -177,4 +202,5 @@
             _opError = ex.Message;
         }
     }
+
 }

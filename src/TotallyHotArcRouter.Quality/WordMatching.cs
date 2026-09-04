@@ -18,10 +18,7 @@ public static class WordMatching
     /// <returns><see langword="true"/> if at least one whole-word occurrence exists.</returns>
     public static bool ContainsWholeWord(string haystack, string needle)
     {
-        foreach (var _ in WholeWordOccurrences(haystack, needle))
-        {
-            return true;
-        }
+        foreach (var _ in WholeWordOccurrences(haystack: haystack, needle: needle)) return true;
 
         return false;
     }
@@ -44,15 +41,14 @@ public static class WordMatching
         ArgumentException.ThrowIfNullOrEmpty(needle);
 
         var index = 0;
-        while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        while ((index = haystack.IndexOf(value: needle, startIndex: index, comparisonType: StringComparison.Ordinal)) >=
+               0)
         {
             var before = index == 0 || !char.IsLetterOrDigit(haystack[index - 1]);
-            var after = index + needle.Length >= haystack.Length || !char.IsLetterOrDigit(haystack[index + needle.Length]);
+            var after = index + needle.Length >= haystack.Length ||
+                        !char.IsLetterOrDigit(haystack[index + needle.Length]);
 
-            if (before && after)
-            {
-                yield return index;
-            }
+            if (before && after) yield return index;
 
             index += needle.Length;
         }

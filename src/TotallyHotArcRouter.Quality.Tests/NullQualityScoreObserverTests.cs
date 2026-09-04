@@ -10,7 +10,7 @@ public class NullQualityScoreObserverTests
     {
         var observer = new NullQualityScoreObserver();
 
-        await observer.ObserveAsync(new QualityResult(), TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: new QualityResult(),
+            cancellationToken: TestContext.Current.CancellationToken);
     }
 }
-

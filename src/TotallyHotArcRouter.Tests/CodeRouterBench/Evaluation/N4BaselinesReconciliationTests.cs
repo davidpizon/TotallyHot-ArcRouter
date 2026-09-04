@@ -1,9 +1,9 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router.Embeddings;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
@@ -27,7 +27,7 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 /// downloads correctly." <see cref="Router.Orchestrator.OodBootstrapSampleSourceTests"/> makes the same
 /// choice for the live voter's own OOD bootstrap path.
 /// </remarks>
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class N4BaselinesReconciliationTests
 {
     private const string SkipReason =
@@ -35,15 +35,15 @@ public class N4BaselinesReconciliationTests
         "(Governance -> Benchmark Data, the sync_benchmark_data MCP tool, or --sync-benchmark-data). " +
         "The corpus is synced on demand, never populated automatically by CI.";
 
-    private static BenchmarkDatabase OpenRealDatabase() => new(Options.Create(new StorageOptions()));
+    private static BenchmarkDatabase OpenRealDatabase()
+    {
+        return new BenchmarkDatabase(Options.Create(new StorageOptions()));
+    }
 
     // Mirrors LogRegTrainerReconciliationTests.AtLeastOneOodResultIsResolved exactly.
     private static bool AtLeastOneOodResultIsResolved(BenchmarkDatabase database)
     {
-        if (!File.Exists(database.DatabasePath))
-        {
-            return false;
-        }
+        if (!File.Exists(database.DatabasePath)) return false;
 
         try
         {
@@ -67,7 +67,7 @@ public class N4BaselinesReconciliationTests
     public async Task Replay_OnRealOodCorpus_ProducesNonPlaceholderScoresForBothBaselines()
     {
         var database = OpenRealDatabase();
-        Assert.SkipUnless(AtLeastOneOodResultIsResolved(database), SkipReason);
+        Assert.SkipUnless(condition: AtLeastOneOodResultIsResolved(database), reason: SkipReason);
 
         var outcomes = OodRegretTaskOutcomeLoader.Load(database);
         Assert.NotEmpty(outcomes);
@@ -75,16 +75,22 @@ public class N4BaselinesReconciliationTests
         var logRegArtifact = LogRegTrainer.Train(database);
         var logRegBaseline = new LogRegBaseline(logRegArtifact);
 
-        var knnArtifact = await KnnRetrievalIndexBuilder.BuildAsync(database, new DeterministicFakeEmbeddingClient(), TestContext.Current.CancellationToken);
+        var knnArtifact = await KnnRetrievalIndexBuilder.BuildAsync(database: database,
+            embeddingClient: new DeterministicFakeEmbeddingClient(),
+            cancellationToken: TestContext.Current.CancellationToken);
         var knnBaseline = new KnnRetrievalBaseline(knnArtifact);
 
-        var logRegResult = RegretReplayEngine.Replay(outcomes, logRegBaseline, RewardWeights.Canonical);
-        var knnResult = RegretReplayEngine.Replay(outcomes, knnBaseline, RewardWeights.Canonical);
+        var logRegResult =
+            RegretReplayEngine.Replay(tasks: outcomes, router: logRegBaseline, weights: RewardWeights.Canonical);
+        var knnResult =
+            RegretReplayEngine.Replay(tasks: outcomes, router: knnBaseline, weights: RewardWeights.Canonical);
 
-        Assert.True(logRegResult.ScoredTaskCount > 0, "LogReg baseline routed zero real OOD tasks.");
+        Assert.True(condition: logRegResult.ScoredTaskCount > 0,
+            userMessage: "LogReg baseline routed zero real OOD tasks.");
         Assert.True(double.IsFinite(logRegResult.CumulativeRegret));
 
-        Assert.True(knnResult.ScoredTaskCount > 0, "kNN Retrieval baseline routed zero real OOD tasks.");
+        Assert.True(condition: knnResult.ScoredTaskCount > 0,
+            userMessage: "kNN Retrieval baseline routed zero real OOD tasks.");
         Assert.True(double.IsFinite(knnResult.CumulativeRegret));
     }
 
@@ -99,12 +105,9 @@ public class N4BaselinesReconciliationTests
             // finite, which is all this reconciliation test needs from an embedding.
             var hash = text.GetHashCode(StringComparison.Ordinal);
             var vector = new float[8];
-            for (var i = 0; i < vector.Length; i++)
-            {
-                vector[i] = ((hash >> (i * 4)) & 0xF) / 15f;
-            }
+            for (var i = 0; i < vector.Length; i++) vector[i] = ((hash >> (i * 4)) & 0xF) / 15f;
 
-            return Task.FromResult(new EmbeddingResult(vector, TokenCount: 0));
+            return Task.FromResult(new EmbeddingResult(Vector: vector, 0));
         }
     }
 }

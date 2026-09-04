@@ -1,6 +1,5 @@
-using System.Reflection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 
@@ -12,8 +11,12 @@ namespace TotallyHot.ArcRouter.Judge;
 /// judge's two operator-facing settings - <see cref="JudgeOptions.Enabled"/> and
 /// <see cref="JudgeOptions.ModelName"/> - live only in the <c>router_settings</c> table and the System
 /// Settings window that writes it; <see cref="JudgeOptions"/> is deliberately not bound from
-/// <c>appsettings.json</c> at all, so the precedence chain here is just <b>stored override &gt; coded
-/// default</b> rather than that type's three-level one.
+/// <c>appsettings.json</c> at all, so the precedence chain here is just
+/// <b>
+/// stored override &gt; coded
+/// default
+/// </b>
+/// rather than that type's three-level one.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -45,9 +48,10 @@ public sealed class JudgeSettingsConfigureOptions : IConfigureOptions<JudgeOptio
     private static readonly PropertyInfo ModelNameProperty =
         typeof(JudgeOptions).GetProperty(nameof(JudgeOptions.ModelName))!;
 
-    private readonly RouterSettingsStore _store;
-    private readonly IModelRouteResolver _routeResolver;
     private readonly ILogger<JudgeSettingsConfigureOptions> _logger;
+    private readonly IModelRouteResolver _routeResolver;
+
+    private readonly RouterSettingsStore _store;
 
     /// <summary>Initializes a new instance of the <see cref="JudgeSettingsConfigureOptions"/> class.</summary>
     /// <param name="store">The settings store to read overrides from.</param>
@@ -67,27 +71,26 @@ public sealed class JudgeSettingsConfigureOptions : IConfigureOptions<JudgeOptio
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public void Configure(JudgeOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (_store.TryGetBool(RouterSettingsStore.JudgeEnabledKey, out var enabled))
+        if (_store.TryGetBool(key: RouterSettingsStore.JudgeEnabledKey, value: out var enabled))
         {
-            EnabledProperty.SetValue(options, enabled);
+            EnabledProperty.SetValue(obj: options, value: enabled);
         }
         else
         {
             // No stored row: fall back to "on if a free backbone exists". Any eligible model will do here -
             // which one the judge ultimately picks is JudgeModelSelector.Resolve()'s business, and asking
             // it would need JudgeOptions.ModelName, which is the value being configured.
-            var hasBackbone = JudgeModelSelector.EnumerateEligible(_routeResolver, _logger).Any();
-            EnabledProperty.SetValue(options, hasBackbone);
+            var hasBackbone = JudgeModelSelector.EnumerateEligible(routeResolver: _routeResolver, logger: _logger)
+                .Any();
+            EnabledProperty.SetValue(obj: options, value: hasBackbone);
         }
 
-        if (_store.TryGetString(RouterSettingsStore.JudgeModelNameKey, out var modelName))
-        {
-            ModelNameProperty.SetValue(options, modelName);
-        }
+        if (_store.TryGetString(key: RouterSettingsStore.JudgeModelNameKey, value: out var modelName))
+            ModelNameProperty.SetValue(obj: options, value: modelName);
     }
 }

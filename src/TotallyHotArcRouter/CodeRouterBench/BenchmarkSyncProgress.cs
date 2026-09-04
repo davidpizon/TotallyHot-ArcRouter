@@ -16,7 +16,7 @@ public enum BenchmarkSyncStage
     Completed,
 
     /// <summary>The file's sync failed; its prior table rows and ledger entry are untouched.</summary>
-    Failed,
+    Failed
 }
 
 /// <summary>
@@ -58,7 +58,10 @@ public sealed record BenchmarkSyncPlan(IReadOnlyList<BenchmarkSyncPlanFile> File
 /// <param name="FileName">The file that was synced.</param>
 /// <param name="Succeeded">Whether the file's checksum verified, parsed, and imported successfully.</param>
 /// <param name="RowCount">The number of rows imported, when <paramref name="Succeeded"/> is <see langword="true"/>.</param>
-/// <param name="ErrorMessage">A human-readable failure reason, when <paramref name="Succeeded"/> is <see langword="false"/>.</param>
+/// <param name="ErrorMessage">
+/// A human-readable failure reason, when <paramref name="Succeeded"/> is
+/// <see langword="false"/>.
+/// </param>
 /// <param name="Skipped">
 /// Whether this file was never downloaded because its ledger checksum already matched the published
 /// one. A skipped file is always <paramref name="Succeeded"/> with its prior <paramref name="RowCount"/>;

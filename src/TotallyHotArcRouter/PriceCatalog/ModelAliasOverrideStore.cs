@@ -1,5 +1,3 @@
-using Microsoft.Data.Sqlite;
-
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
@@ -35,17 +33,16 @@ public sealed class ModelAliasOverrideStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT source_name, aggregator_model_key, model_name
-            FROM model_alias_overrides
-            ORDER BY source_name, aggregator_model_key;
-            """;
+                              SELECT source_name, aggregator_model_key, model_name
+                              FROM model_alias_overrides
+                              ORDER BY source_name, aggregator_model_key;
+                              """;
 
         var overrides = new List<ModelAliasOverride>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-        {
-            overrides.Add(new ModelAliasOverride(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
-        }
+            overrides.Add(new ModelAliasOverride(SourceName: reader.GetString(0),
+                AggregatorModelKey: reader.GetString(1), ModelName: reader.GetString(2)));
 
         return overrides;
     }
@@ -63,12 +60,12 @@ public sealed class ModelAliasOverrideStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT model_name
-            FROM model_alias_overrides
-            WHERE source_name = $source COLLATE NOCASE AND aggregator_model_key = $key COLLATE NOCASE;
-            """;
-        command.Parameters.AddWithValue("$source", sourceName);
-        command.Parameters.AddWithValue("$key", aggregatorModelKey);
+                              SELECT model_name
+                              FROM model_alias_overrides
+                              WHERE source_name = $source COLLATE NOCASE AND aggregator_model_key = $key COLLATE NOCASE;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$source", value: sourceName);
+        command.Parameters.AddWithValue(parameterName: "$key", value: aggregatorModelKey);
 
         return command.ExecuteScalar() as string;
     }
@@ -83,13 +80,13 @@ public sealed class ModelAliasOverrideStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO model_alias_overrides (source_name, aggregator_model_key, model_name)
-            VALUES ($source, $key, $model)
-            ON CONFLICT(source_name, aggregator_model_key) DO UPDATE SET model_name = excluded.model_name;
-            """;
-        command.Parameters.AddWithValue("$source", sourceName);
-        command.Parameters.AddWithValue("$key", aggregatorModelKey);
-        command.Parameters.AddWithValue("$model", modelName);
+                              INSERT INTO model_alias_overrides (source_name, aggregator_model_key, model_name)
+                              VALUES ($source, $key, $model)
+                              ON CONFLICT(source_name, aggregator_model_key) DO UPDATE SET model_name = excluded.model_name;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$source", value: sourceName);
+        command.Parameters.AddWithValue(parameterName: "$key", value: aggregatorModelKey);
+        command.Parameters.AddWithValue(parameterName: "$model", value: modelName);
         command.ExecuteNonQuery();
     }
 
@@ -105,11 +102,11 @@ public sealed class ModelAliasOverrideStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            DELETE FROM model_alias_overrides
-            WHERE source_name = $source COLLATE NOCASE AND aggregator_model_key = $key COLLATE NOCASE;
-            """;
-        command.Parameters.AddWithValue("$source", sourceName);
-        command.Parameters.AddWithValue("$key", aggregatorModelKey);
+                              DELETE FROM model_alias_overrides
+                              WHERE source_name = $source COLLATE NOCASE AND aggregator_model_key = $key COLLATE NOCASE;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$source", value: sourceName);
+        command.Parameters.AddWithValue(parameterName: "$key", value: aggregatorModelKey);
         return command.ExecuteNonQuery() > 0;
     }
 }

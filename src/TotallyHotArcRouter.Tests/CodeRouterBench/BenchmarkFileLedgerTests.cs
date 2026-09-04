@@ -22,15 +22,15 @@ public class BenchmarkFileLedgerTests
         var entry = new BenchmarkFileLedgerEntry(
             FileName: "id_probing_results_long.csv",
             PublishedOid: "ac74df13c0b582e12c92507c40e54a57ca0db65a",
-            SizeBytes: 6_426_347,
-            RowCount: 56_640,
+            6_426_347,
+            56_640,
             RepoCommit: "deadbeef",
             SyncedAtUtc: DateTimeOffset.Parse("2026-08-12T00:00:00Z"));
 
         ledger.Upsert(entry);
         var found = ledger.TryGet("id_probing_results_long.csv");
 
-        Assert.Equal(entry, found);
+        Assert.Equal(expected: entry, actual: found);
     }
 
     [Fact]
@@ -41,15 +41,15 @@ public class BenchmarkFileLedgerTests
         var first = new BenchmarkFileLedgerEntry(
             FileName: "ood176_results_long.csv",
             PublishedOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            SizeBytes: 100,
-            RowCount: 1,
+            100,
+            1,
             RepoCommit: "commit-a",
             SyncedAtUtc: DateTimeOffset.Parse("2026-08-01T00:00:00Z"));
         var second = first with
         {
             PublishedOid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             RepoCommit = "commit-b",
-            SyncedAtUtc = DateTimeOffset.Parse("2026-08-12T00:00:00Z"),
+            SyncedAtUtc = DateTimeOffset.Parse("2026-08-12T00:00:00Z")
         };
 
         ledger.Upsert(first);
@@ -57,7 +57,7 @@ public class BenchmarkFileLedgerTests
 
         var all = ledger.GetAll();
         Assert.Single(all);
-        Assert.Equal(second, all[0]);
+        Assert.Equal(expected: second, actual: all[0]);
     }
 
     [Fact]
@@ -66,14 +66,16 @@ public class BenchmarkFileLedgerTests
         using var temp = new TempBenchmarkDatabase();
         var ledger = temp.CreateLedger();
         ledger.Upsert(new BenchmarkFileLedgerEntry(
-            "ood176_tasks.jsonl", "a", 1, 1, "c", DateTimeOffset.UtcNow));
+            FileName: "ood176_tasks.jsonl", PublishedOid: "a", 1, 1, RepoCommit: "c",
+            SyncedAtUtc: DateTimeOffset.UtcNow));
         ledger.Upsert(new BenchmarkFileLedgerEntry(
-            "id_test_tasks.jsonl", "b", 1, 1, "c", DateTimeOffset.UtcNow));
+            FileName: "id_test_tasks.jsonl", PublishedOid: "b", 1, 1, RepoCommit: "c",
+            SyncedAtUtc: DateTimeOffset.UtcNow));
 
         var all = ledger.GetAll();
 
-        Assert.Equal(2, all.Count);
-        Assert.Equal("id_test_tasks.jsonl", all[0].FileName);
-        Assert.Equal("ood176_tasks.jsonl", all[1].FileName);
+        Assert.Equal(2, actual: all.Count);
+        Assert.Equal(expected: "id_test_tasks.jsonl", actual: all[0].FileName);
+        Assert.Equal(expected: "ood176_tasks.jsonl", actual: all[1].FileName);
     }
 }

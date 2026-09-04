@@ -15,8 +15,9 @@ public class UsageLedgerTests
         DateTimeOffset? occurredAtUtc = null,
         int? promptTokens = 10,
         int? completionTokens = 5,
-        decimal? estimatedCostUsd = 0.01m) =>
-        new(
+        decimal? estimatedCostUsd = 0.01m)
+    {
+        return new UsageLedgerEntry(
             SessionId: sessionId,
             TurnNumber: turnNumber,
             Provider: provider,
@@ -24,12 +25,13 @@ public class UsageLedgerTests
             ResolvedModel: requestedModel,
             PromptTokens: promptTokens,
             CompletionTokens: completionTokens,
-            CacheCreationTokens: null,
-            CacheReadTokens: null,
+            null,
+            null,
             EstimatedCostUsd: estimatedCostUsd,
             CostConfidence: CostConfidence.Unknown,
             OccurredAtUtc: occurredAtUtc ?? DateTimeOffset.UtcNow,
             RequestId: requestId);
+    }
 
     private static int CountRows(TempDatabase temp)
     {
@@ -45,9 +47,9 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(MakeEntry(), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(), cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -57,11 +59,11 @@ public class UsageLedgerTests
         var ledger = temp.CreateUsageLedger();
         var entry = MakeEntry(requestId: "req-abc-123");
 
-        await ledger.RecordAsync(entry, TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(entry, TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(entry, TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: entry, cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: entry, cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: entry, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -72,10 +74,12 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(MakeEntry(requestId: "req-xyz", promptTokens: 10, completionTokens: 5), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "req-xyz", promptTokens: 999, completionTokens: 999), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "req-xyz", promptTokens: 10, completionTokens: 5),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "req-xyz", promptTokens: 999, completionTokens: 999),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -85,12 +89,14 @@ public class UsageLedgerTests
         // sub-second jitter a retried telemetry publish could introduce), must still collide.
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
-        var baseTime = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var baseTime = new DateTimeOffset(2026, 1, 1, 12, 0, 0, offset: TimeSpan.Zero);
 
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: baseTime), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: baseTime.AddMilliseconds(400)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: baseTime),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: baseTime.AddMilliseconds(400)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -98,12 +104,14 @@ public class UsageLedgerTests
     {
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
-        var baseTime = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var baseTime = new DateTimeOffset(2026, 1, 1, 12, 0, 0, offset: TimeSpan.Zero);
 
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: baseTime), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: baseTime.AddSeconds(1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: baseTime),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: baseTime.AddSeconds(1)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, CountRows(temp));
+        Assert.Equal(2, actual: CountRows(temp));
     }
 
     [Theory]
@@ -114,9 +122,10 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(MakeEntry(promptTokens: promptTokens, completionTokens: completionTokens), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(promptTokens: promptTokens, completionTokens: completionTokens),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, CountRows(temp));
+        Assert.Equal(0, actual: CountRows(temp));
     }
 
     [Fact]
@@ -125,9 +134,10 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(MakeEntry(estimatedCostUsd: -0.5m), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(estimatedCostUsd: -0.5m),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, CountRows(temp));
+        Assert.Equal(0, actual: CountRows(temp));
     }
 
     [Fact]
@@ -136,9 +146,10 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow.AddHours(1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow.AddHours(1)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, CountRows(temp));
+        Assert.Equal(0, actual: CountRows(temp));
     }
 
     [Fact]
@@ -147,9 +158,10 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow.AddMinutes(1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(occurredAtUtc: DateTimeOffset.UtcNow.AddMinutes(1)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, CountRows(temp));
+        Assert.Equal(1, actual: CountRows(temp));
     }
 
     [Fact]
@@ -158,7 +170,7 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        Assert.Equal(0, ledger.GetMaxTurnNumber("unknown-session"));
+        Assert.Equal(0, actual: ledger.GetMaxTurnNumber("unknown-session"));
     }
 
     [Fact]
@@ -167,13 +179,17 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        await ledger.RecordAsync(MakeEntry(sessionId: "sess-a", turnNumber: 1, requestId: "req-1"), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(sessionId: "sess-a", turnNumber: 2, requestId: "req-2"), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(sessionId: "sess-a", turnNumber: 3, requestId: "req-3"), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(sessionId: "sess-b", turnNumber: 7, requestId: "req-4"), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(sessionId: "sess-a", requestId: "req-1"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(sessionId: "sess-a", 2, requestId: "req-2"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(sessionId: "sess-a", 3, requestId: "req-3"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(sessionId: "sess-b", 7, requestId: "req-4"),
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(3, ledger.GetMaxTurnNumber("sess-a"));
-        Assert.Equal(7, ledger.GetMaxTurnNumber("sess-b"));
+        Assert.Equal(3, actual: ledger.GetMaxTurnNumber("sess-a"));
+        Assert.Equal(7, actual: ledger.GetMaxTurnNumber("sess-b"));
     }
 
     [Fact]
@@ -181,16 +197,19 @@ public class UsageLedgerTests
     {
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
-        var cutoff = new DateTimeOffset(2026, 1, 10, 0, 0, 0, TimeSpan.Zero);
+        var cutoff = new DateTimeOffset(2026, 1, 10, 0, 0, 0, offset: TimeSpan.Zero);
 
-        await ledger.RecordAsync(MakeEntry(requestId: "old", occurredAtUtc: cutoff.AddDays(-1)), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "boundary", occurredAtUtc: cutoff), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "new", occurredAtUtc: cutoff.AddDays(1)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "old", occurredAtUtc: cutoff.AddDays(-1)),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "boundary", occurredAtUtc: cutoff),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(entry: MakeEntry(requestId: "new", occurredAtUtc: cutoff.AddDays(1)),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var deleted = ledger.DeleteOlderThan(cutoff);
 
-        Assert.Equal(1, deleted);
-        Assert.Equal(2, CountRows(temp));
+        Assert.Equal(1, actual: deleted);
+        Assert.Equal(2, actual: CountRows(temp));
     }
 
     [Fact]
@@ -198,19 +217,31 @@ public class UsageLedgerTests
     {
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
-        var windowStart = new DateTimeOffset(2026, 1, 10, 0, 0, 0, TimeSpan.Zero);
+        var windowStart = new DateTimeOffset(2026, 1, 10, 0, 0, 0, offset: TimeSpan.Zero);
         var windowEnd = windowStart.AddDays(1);
 
-        await ledger.RecordAsync(MakeEntry(requestId: "in-window-openai-1", provider: "openai", estimatedCostUsd: 1.25m, occurredAtUtc: windowStart), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "in-window-openai-2", provider: "openai", estimatedCostUsd: 2.50m, occurredAtUtc: windowStart.AddHours(12)), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "in-window-anthropic", provider: "anthropic", estimatedCostUsd: 99m, occurredAtUtc: windowStart.AddHours(1)), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "before-window", provider: "openai", estimatedCostUsd: 100m, occurredAtUtc: windowStart.AddSeconds(-1)), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "at-window-end", provider: "openai", estimatedCostUsd: 100m, occurredAtUtc: windowEnd), TestContext.Current.CancellationToken);
-        await ledger.RecordAsync(MakeEntry(requestId: "no-cost", provider: "openai", estimatedCostUsd: null, occurredAtUtc: windowStart.AddHours(2)), TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(
+            entry: MakeEntry(requestId: "in-window-openai-1", provider: "openai", estimatedCostUsd: 1.25m,
+                occurredAtUtc: windowStart), cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(
+            entry: MakeEntry(requestId: "in-window-openai-2", provider: "openai", estimatedCostUsd: 2.50m,
+                occurredAtUtc: windowStart.AddHours(12)), cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(
+            entry: MakeEntry(requestId: "in-window-anthropic", provider: "anthropic", estimatedCostUsd: 99m,
+                occurredAtUtc: windowStart.AddHours(1)), cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(
+            entry: MakeEntry(requestId: "before-window", provider: "openai", estimatedCostUsd: 100m,
+                occurredAtUtc: windowStart.AddSeconds(-1)), cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(
+            entry: MakeEntry(requestId: "at-window-end", provider: "openai", estimatedCostUsd: 100m,
+                occurredAtUtc: windowEnd), cancellationToken: TestContext.Current.CancellationToken);
+        await ledger.RecordAsync(
+            entry: MakeEntry(requestId: "no-cost", provider: "openai", estimatedCostUsd: null,
+                occurredAtUtc: windowStart.AddHours(2)), cancellationToken: TestContext.Current.CancellationToken);
 
-        var total = ledger.SumEstimatedCostUsd("openai", windowStart, windowEnd);
+        var total = ledger.SumEstimatedCostUsd(provider: "openai", fromUtc: windowStart, toUtc: windowEnd);
 
-        Assert.Equal(3.75m, total);
+        Assert.Equal(3.75m, actual: total);
     }
 
     [Fact]
@@ -219,8 +250,9 @@ public class UsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        var total = ledger.SumEstimatedCostUsd("openai", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
+        var total = ledger.SumEstimatedCostUsd(provider: "openai", fromUtc: DateTimeOffset.UtcNow.AddDays(-1),
+            toUtc: DateTimeOffset.UtcNow);
 
-        Assert.Equal(0m, total);
+        Assert.Equal(0m, actual: total);
     }
 }

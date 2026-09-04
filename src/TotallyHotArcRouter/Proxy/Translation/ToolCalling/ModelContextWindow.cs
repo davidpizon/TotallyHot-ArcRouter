@@ -5,7 +5,6 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// provider's own metadata during an endpoint scan and reported back to Ollama-shaped clients through
 /// <c>POST /api/show</c>'s <c>model_info</c>
 /// (<c>docs/router/ollama-show-capabilities-plan.md</c>).
-///
 /// <para>
 /// Keyed on (provider, model) for the same reason <see cref="ModelToolCapability"/> is: the window belongs
 /// to the loaded model rather than to the server, so one LM Studio process can serve a 32k model and a

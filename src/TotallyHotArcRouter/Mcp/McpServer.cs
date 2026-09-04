@@ -1,18 +1,13 @@
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Options;
 using System.Net;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Mcp.Tools;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Mcp;
 
@@ -77,7 +72,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(benchmarkSyncOptions);
         ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
         ArgumentOutOfRangeException.ThrowIfNegative(port);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: port, 65535);
 
         _host = Host.CreateDefaultBuilder()
             // Same reasoning as ProxyServer's identical filter: this inner host is an implementation
@@ -88,8 +83,8 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
             // config, so without it Microsoft.AspNetCore.Routing.EndpointMiddleware's per-request
             // "Executed endpoint" Information logs would flood the default console provider.
             .ConfigureLogging(logging => logging
-                .AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None)
-                .AddFilter("Microsoft", LogLevel.Warning))
+                .AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None)
+                .AddFilter(category: "Microsoft", level: LogLevel.Warning))
             .ConfigureWebHostDefaults(webBuilder =>
             {
                 webBuilder.UseKestrel(options =>
@@ -101,23 +96,19 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                     // Letting this throw fails the whole McpServer construction, which McpHostedService's
                     // own try/catch logs and swallows at the top level - the same "MCP is non-essential,
                     // don't fail the process" posture, just enforced one level up.
-                    var certificate = TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate.GetOrCreate();
+                    var certificate = TelemetryTlsCertificate.GetOrCreate();
                     if (port == 0)
-                    {
-                        options.Listen(IPAddress.Loopback, port, listenOptions =>
+                        options.Listen(address: IPAddress.Loopback, port: port, configure: listenOptions =>
                         {
                             listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
                             listenOptions.UseHttps(certificate);
                         });
-                    }
                     else
-                    {
-                        options.ListenLocalhost(port, listenOptions =>
+                        options.ListenLocalhost(port: port, configure: listenOptions =>
                         {
                             listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
                             listenOptions.UseHttps(certificate);
                         });
-                    }
                 });
 
                 webBuilder.ConfigureServices(services =>
@@ -166,33 +157,36 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     {
         get
         {
-            var addresses = _host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses;
+            var addresses = _host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()
+                ?.Addresses;
             return addresses is null ? [] : new List<string>(addresses);
         }
     }
-
-    /// <summary>Starts the MCP endpoint.</summary>
-    public Task StartAsync(CancellationToken cancellationToken) => _host.StartAsync(cancellationToken);
-
-    /// <summary>Stops the MCP endpoint.</summary>
-    public Task StopAsync(CancellationToken cancellationToken) => _host.StopAsync(cancellationToken);
 
     /// <summary>Disposes the inner host.</summary>
     public async ValueTask DisposeAsync()
     {
         if (_host is IAsyncDisposable asyncHost)
-        {
             await asyncHost.DisposeAsync().ConfigureAwait(false);
-        }
         else
-        {
             _host.Dispose();
-        }
-
-        GC.SuppressFinalize(this);
     }
 
-    /// <inheritdoc />
-    public void Dispose() => _host.Dispose();
-}
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _host.Dispose();
+    }
 
+    /// <summary>Starts the MCP endpoint.</summary>
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        return _host.StartAsync(cancellationToken);
+    }
+
+    /// <summary>Stops the MCP endpoint.</summary>
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        return _host.StopAsync(cancellationToken);
+    }
+}

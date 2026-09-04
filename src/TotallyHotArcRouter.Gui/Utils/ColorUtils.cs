@@ -10,6 +10,8 @@ public static class ColorUtils
     /// <see cref="ChartPalette"/> in the Charts library so the Blazor components and the chart builders
     /// share one palette (and one FNV-1a hash) rather than drifting apart.
     /// </summary>
-    public static string GetColorForAgent(string? agentName) => ChartPalette.ColorFor(agentName);
+    public static string GetColorForAgent(string? agentName)
+    {
+        return ChartPalette.ColorFor(agentName);
+    }
 }
-

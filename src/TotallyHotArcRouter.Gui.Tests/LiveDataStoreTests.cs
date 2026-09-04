@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Gui.Services;
 using AwesomeAssertions;
+using TotallyHot.ArcRouter.Gui.Services;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -62,4 +62,3 @@ public sealed class LiveDataStoreTests
         LiveDataStore.DefaultServerAddress.Should().Be("https://localhost:5002");
     }
 }
-

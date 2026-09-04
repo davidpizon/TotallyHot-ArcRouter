@@ -37,10 +37,8 @@ internal sealed record ToolCallNormalizationPlan(
     /// (§3.4 performance rule 3). Computed once per request rather than per chunk.
     /// </summary>
     public char[] OpenerFirstChars { get; } =
-        Candidates
+        [.. Candidates
             .SelectMany(dialect => dialect.Delimiters)
             .Select(delimiter => delimiter.Open[0])
-            .Distinct()
-            .ToArray();
+            .Distinct()];
 }
-

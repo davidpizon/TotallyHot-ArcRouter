@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Models;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Tests.Models;
 
@@ -16,17 +16,17 @@ public class RoutingOptionsTests
     {
         var options = new RoutingOptions();
 
-        Assert.Equal(RouterConstants.DefaultModel, options.DefaultModel);
-        Assert.Equal(8, options.MaxCandidates);
-        Assert.Equal(10, options.MaxNeighborCount);
+        Assert.Equal(expected: RouterConstants.DefaultModel, actual: options.DefaultModel);
+        Assert.Equal(8, actual: options.MaxCandidates);
+        Assert.Equal(10, actual: options.MaxNeighborCount);
         Assert.True(options.EnableExploration);
-        Assert.Equal(0.05, options.ExplorationRate, 3);
-        Assert.Equal(1.0, options.Epsilon1, 3);
-        Assert.Equal(-0.1, options.Epsilon2, 3);
-        Assert.Equal(0.3, options.UtilityMinQualityScore, 3);
-        Assert.Equal("router_embedding_memory.db", options.EmbeddingMemoryDatabasePath);
-        Assert.Equal(0.5, options.EmbeddingSimilarityThreshold, 3);
-        Assert.Equal(20_000, options.EmbeddingMemoryCapacity);
+        Assert.Equal(0.05, actual: options.ExplorationRate, 3);
+        Assert.Equal(1.0, actual: options.Epsilon1, 3);
+        Assert.Equal(-0.1, actual: options.Epsilon2, 3);
+        Assert.Equal(0.3, actual: options.UtilityMinQualityScore, 3);
+        Assert.Equal(expected: "router_embedding_memory.db", actual: options.EmbeddingMemoryDatabasePath);
+        Assert.Equal(0.5, actual: options.EmbeddingSimilarityThreshold, 3);
+        Assert.Equal(20_000, actual: options.EmbeddingMemoryCapacity);
         Assert.True(options.EnableOrchestratorPolicy);
     }
 
@@ -42,7 +42,7 @@ public class RoutingOptionsTests
         // Null, not a guessed model: an auto-picked baseline would manufacture a savings figure the
         // operator never chose. See AlwaysBaselineModel's remarks.
         Assert.Null(options.AlwaysBaselineModel);
-        Assert.Equal(0.054m, options.SelfHostedRouterPricePerMillionTokens);
+        Assert.Equal(0.054m, actual: options.SelfHostedRouterPricePerMillionTokens);
     }
 
     /// <summary>
@@ -57,7 +57,7 @@ public class RoutingOptionsTests
             AlwaysBaselineModel = "   "
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     /// <summary>
@@ -83,7 +83,7 @@ public class RoutingOptionsTests
             EmbeddingMemoryDatabasePath = "   "
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     /// <summary>
@@ -97,7 +97,7 @@ public class RoutingOptionsTests
             DefaultModel = "unknown-model"
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     /// <summary>
@@ -112,7 +112,6 @@ public class RoutingOptionsTests
             ExplorationRate = 0.2
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 }
-

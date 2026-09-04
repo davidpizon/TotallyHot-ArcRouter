@@ -1,4 +1,3 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using AwesomeAssertions;
 using Grpc.Core;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
@@ -23,7 +22,7 @@ public class RoutingModeAdminClientTests
         {
             OrchestratorEnabled = true,
             ExplorationEnabled = true,
-            ExplorationRate = 0.05,
+            ExplorationRate = 0.05
         };
         response.Voters.Add(new Contract.VoterMode { Name = "dim_best", Enabled = true, Weight = 0.9 });
         response.Voters.Add(new Contract.VoterMode { Name = "memory_kNN", Enabled = true, Weight = 0.57 });
@@ -36,8 +35,8 @@ public class RoutingModeAdminClientTests
         mode.ExplorationEnabled.Should().BeTrue();
         mode.ExplorationRate.Should().Be(0.05);
         mode.Voters.Should().HaveCount(2);
-        mode.Voters[0].Should().Be(new VoterMode("dim_best", true, 0.9));
-        mode.Voters[1].Should().Be(new VoterMode("memory_kNN", true, 0.57));
+        mode.Voters[0].Should().Be(new VoterMode(Name: "dim_best", true, 0.9));
+        mode.Voters[1].Should().Be(new VoterMode(Name: "memory_kNN", true, 0.57));
     }
 
     [Fact]
@@ -58,10 +57,12 @@ public class RoutingModeAdminClientTests
     [Fact]
     public async Task Unavailable_becomes_a_plain_language_message()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Unavailable, "failed to connect")) };
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new RoutingModeAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() => client.GetAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() =>
+            client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing mode: the router is not reachable.");
         ex.InnerException.Should().BeOfType<RpcException>();
@@ -71,10 +72,12 @@ public class RoutingModeAdminClientTests
     [Fact]
     public async Task A_rejection_keeps_the_servers_own_detail_and_is_not_flagged_unavailable()
     {
-        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.Internal, "boom")) };
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RoutingModeAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() => client.GetAsync(TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() =>
+            client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing mode: boom");
         ex.IsUnavailable.Should().BeFalse();
@@ -124,12 +127,16 @@ public class RoutingModeAdminClientTests
 
         public override AsyncUnaryCall<Contract.RoutingModeResponse> GetRoutingModeAsync(
             Contract.GetRoutingModeRequest request,
-            CallOptions options) =>
-            new(
-                Failure is null ? Task.FromResult(Response) : Task.FromException<Contract.RoutingModeResponse>(Failure),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => [],
-                () => { });
+            CallOptions options)
+        {
+            return new AsyncUnaryCall<Contract.RoutingModeResponse>(
+                responseAsync: Failure is null
+                    ? Task.FromResult(Response)
+                    : Task.FromException<Contract.RoutingModeResponse>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
     }
 }

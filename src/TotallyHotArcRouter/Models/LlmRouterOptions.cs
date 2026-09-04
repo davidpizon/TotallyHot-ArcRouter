@@ -123,25 +123,24 @@ public sealed class LlmRouterOptions
     /// <exception cref="ArgumentException">Thrown when a required URL is not an absolute URI.</exception>
     public void EnsureValid()
     {
-        EnsureAbsoluteUri(GenAiConfigUrl, nameof(GenAiConfigUrl));
-        EnsureAbsoluteUri(TokenizerJsonUrl, nameof(TokenizerJsonUrl));
-        EnsureAbsoluteUri(TokenizerConfigJsonUrl, nameof(TokenizerConfigJsonUrl));
-        EnsureAbsoluteUri(ModelOnnxUrl, nameof(ModelOnnxUrl));
+        EnsureAbsoluteUri(value: GenAiConfigUrl, propertyName: nameof(GenAiConfigUrl));
+        EnsureAbsoluteUri(value: TokenizerJsonUrl, propertyName: nameof(TokenizerJsonUrl));
+        EnsureAbsoluteUri(value: TokenizerConfigJsonUrl, propertyName: nameof(TokenizerConfigJsonUrl));
+        EnsureAbsoluteUri(value: ModelOnnxUrl, propertyName: nameof(ModelOnnxUrl));
 
         if (ModelOnnxDataUrl is not null)
-        {
-            EnsureAbsoluteUri(ModelOnnxDataUrl, nameof(ModelOnnxDataUrl));
-        }
+            EnsureAbsoluteUri(value: ModelOnnxDataUrl, propertyName: nameof(ModelOnnxDataUrl));
     }
 
-    /// <summary>Validates that <paramref name="value"/> is an absolute URI, naming <paramref name="propertyName"/> in the failure.</summary>
+    /// <summary>
+    /// Validates that <paramref name="value"/> is an absolute URI, naming <paramref name="propertyName"/> in the
+    /// failure.
+    /// </summary>
     /// <exception cref="ArgumentException"><paramref name="value"/> is not an absolute URI.</exception>
     private static void EnsureAbsoluteUri(string value, string propertyName)
     {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out _))
-        {
-            throw new ArgumentException($"'{propertyName}' must be an absolute URI.", propertyName);
-        }
+        if (!Uri.TryCreate(uriString: value, uriKind: UriKind.Absolute, result: out _))
+            throw new ArgumentException(message: $"'{propertyName}' must be an absolute URI.", paramName: propertyName);
     }
 
     /// <summary>
@@ -150,36 +149,43 @@ public sealed class LlmRouterOptions
     /// <see cref="EmbeddingOptions.ResolveModelCacheDirectory"/>'s handling of the same
     /// <c>%LOCALAPPDATA%</c> token.
     /// </summary>
-    public string ResolveModelCacheDirectory() => ResolvePath(ModelCacheDirectory);
+    public string ResolveModelCacheDirectory()
+    {
+        return ResolvePath(ModelCacheDirectory);
+    }
 
     /// <summary>
     /// Expands and returns the shared parent directory every llm_router model's cache directory lives
     /// under, mirroring <see cref="ResolveModelCacheDirectory"/>'s <c>%LOCALAPPDATA%</c> handling. A
     /// per-model override resolves its own cache directory as a subdirectory of this root.
     /// </summary>
-    public static string ResolveModelsRootDirectory() => ResolvePath(ModelsRootDirectory);
+    public static string ResolveModelsRootDirectory()
+    {
+        return ResolvePath(ModelsRootDirectory);
+    }
 
-    /// <summary>Expands the <c>%LOCALAPPDATA%</c> token (falling back to <see cref="AppContext.BaseDirectory"/> if unavailable) and any other environment variables in <paramref name="path"/>.</summary>
+    /// <summary>
+    /// Expands the <c>%LOCALAPPDATA%</c> token (falling back to <see cref="AppContext.BaseDirectory"/> if
+    /// unavailable) and any other environment variables in <paramref name="path"/>.
+    /// </summary>
     private static string ResolvePath(string path)
     {
         var expanded = Environment.ExpandEnvironmentVariables(path);
 
-        if (expanded.Contains(LocalAppDataToken, StringComparison.OrdinalIgnoreCase))
+        if (expanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(localAppData))
-            {
-                localAppData = AppContext.BaseDirectory;
-            }
+            if (string.IsNullOrEmpty(localAppData)) localAppData = AppContext.BaseDirectory;
 
             localAppData = localAppData.TrimEnd('/', '\\');
-            expanded = expanded.Replace(LocalAppDataToken, localAppData, StringComparison.OrdinalIgnoreCase);
+            expanded = expanded.Replace(oldValue: LocalAppDataToken, newValue: localAppData,
+                comparisonType: StringComparison.OrdinalIgnoreCase);
         }
 
-        expanded = expanded.Replace('\\', Path.DirectorySeparatorChar);
+        expanded = expanded.Replace('\\', newChar: Path.DirectorySeparatorChar);
 
         return Path.IsPathRooted(expanded)
             ? expanded
-            : Path.Combine(AppContext.BaseDirectory, expanded);
+            : Path.Combine(path1: AppContext.BaseDirectory, path2: expanded);
     }
 }

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Quality;
 
@@ -16,7 +18,7 @@ public static class CodeRouterBenchCsvReader
         {
             // The released CSVs use "algorithm"; the router's own vocabulary (research-doc §4.4) uses
             // "algorithm_design" - see RouterDimension.AlgorithmDesign.
-            ["algorithm"] = RouterDimension.AlgorithmDesign,
+            ["algorithm"] = RouterDimension.AlgorithmDesign
         };
 
     /// <summary>
@@ -45,44 +47,36 @@ public static class CodeRouterBenchCsvReader
         var headerLine = reader.ReadLine() ?? throw new FormatException($"'{sourceLabel}' has no header row.");
         var columns = SplitLine(headerLine);
 
-        var taskIdIndex = RequireColumn(columns, "task_id", sourceLabel);
-        var dimensionIndex = RequireColumn(columns, "dimension", sourceLabel);
-        var modelIndex = RequireColumn(columns, "model", sourceLabel);
-        var scoreIndex = RequireColumn(columns, "score", sourceLabel);
+        var taskIdIndex = RequireColumn(columns: columns, name: "task_id", csvPath: sourceLabel);
+        var dimensionIndex = RequireColumn(columns: columns, name: "dimension", csvPath: sourceLabel);
+        var modelIndex = RequireColumn(columns: columns, name: "model", csvPath: sourceLabel);
+        var scoreIndex = RequireColumn(columns: columns, name: "score", csvPath: sourceLabel);
         var requiredFieldCount = Math.Max(
-            Math.Max(taskIdIndex, dimensionIndex),
-            Math.Max(modelIndex, scoreIndex)) + 1;
+            val1: Math.Max(val1: taskIdIndex, val2: dimensionIndex),
+            val2: Math.Max(val1: modelIndex, val2: scoreIndex)) + 1;
 
         List<CodeRouterBenchResultRow> rows = [];
-        string? line;
         var rowNumber = 1;
-        while ((line = reader.ReadLine()) is not null)
+        while (reader.ReadLine() is { } line)
         {
             rowNumber++;
 
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(line)) continue;
 
             var fields = SplitLine(line);
             if (fields.Count < requiredFieldCount)
-            {
                 throw new FormatException(
                     $"'{sourceLabel}' row {rowNumber} has {fields.Count} columns but requires at least {requiredFieldCount}.");
-            }
 
             var rawScore = fields[scoreIndex];
-            if (!double.TryParse(rawScore, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var score))
-            {
-                throw new FormatException($"'{sourceLabel}' has a non-numeric score '{rawScore}' for task '{fields[taskIdIndex]}'.");
-            }
+            if (!double.TryParse(s: rawScore, style: NumberStyles.Float, provider: CultureInfo.InvariantCulture,
+                    result: out var score))
+                throw new FormatException(
+                    $"'{sourceLabel}' has a non-numeric score '{rawScore}' for task '{fields[taskIdIndex]}'.");
 
             var rawModel = fields[modelIndex];
             if (string.IsNullOrWhiteSpace(rawModel))
-            {
                 throw new FormatException($"'{sourceLabel}' row {rowNumber} has an empty model.");
-            }
 
             rows.Add(new CodeRouterBenchResultRow(
                 TaskId: fields[taskIdIndex],
@@ -98,8 +92,10 @@ public static class CodeRouterBenchCsvReader
     /// Maps a raw CSV <c>dimension</c> value onto <see cref="RouterDimension"/>'s vocabulary via
     /// <see cref="DimensionAliases"/>, or returns it unchanged when it already matches.
     /// </summary>
-    public static string NormalizeDimension(string rawDimension) =>
-        DimensionAliases.TryGetValue(rawDimension, out var normalized) ? normalized : rawDimension;
+    public static string NormalizeDimension(string rawDimension)
+    {
+        return DimensionAliases.TryGetValue(key: rawDimension, value: out var normalized) ? normalized : rawDimension;
+    }
 
     /// <summary>Finds a required column by name (case-insensitive), throwing when absent.</summary>
     /// <param name="columns">The header row's column names.</param>
@@ -110,12 +106,8 @@ public static class CodeRouterBenchCsvReader
     private static int RequireColumn(IReadOnlyList<string> columns, string name, string csvPath)
     {
         for (var i = 0; i < columns.Count; i++)
-        {
-            if (string.Equals(columns[i], name, StringComparison.OrdinalIgnoreCase))
-            {
+            if (string.Equals(a: columns[i], b: name, comparisonType: StringComparison.OrdinalIgnoreCase))
                 return i;
-            }
-        }
 
         throw new FormatException($"'{csvPath}' is missing the required '{name}' column.");
     }
@@ -130,7 +122,7 @@ public static class CodeRouterBenchCsvReader
     internal static List<string> SplitLine(string line)
     {
         List<string> fields = [];
-        var current = new System.Text.StringBuilder();
+        var current = new StringBuilder();
         var inQuotes = false;
 
         for (var i = 0; i < line.Length; i++)

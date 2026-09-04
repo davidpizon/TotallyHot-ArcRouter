@@ -34,10 +34,8 @@ public static class OodRegretTaskOutcomeLoader
         ArgumentNullException.ThrowIfNull(database);
 
         if (!File.Exists(database.DatabasePath))
-        {
             throw new InvalidOperationException(
                 $"The CodeRouterBench corpus database was not found at '{database.DatabasePath}' - is the corpus synced?");
-        }
 
         using var connection = database.OpenConnection();
 
@@ -53,10 +51,7 @@ public static class OodRegretTaskOutcomeLoader
                 taskDimension[taskId] = reader.GetString(1);
 
                 var text = LogRegTrainer.TryExtractPrompt(reader.GetString(2));
-                if (text is not null)
-                {
-                    taskText[taskId] = text;
-                }
+                if (text is not null) taskText[taskId] = text;
             }
         }
 
@@ -71,55 +66,48 @@ public static class OodRegretTaskOutcomeLoader
             while (reader.Read())
             {
                 if (reader.IsDBNull(3))
-                {
                     // No well-defined score for this cell - excluded rather than assigned an arbitrary one.
                     continue;
-                }
 
                 var taskId = reader.GetString(0);
-                if (!taskDimension.ContainsKey(taskId))
-                {
-                    taskDimension[taskId] = reader.GetString(1);
-                }
+                if (!taskDimension.ContainsKey(taskId)) taskDimension[taskId] = reader.GetString(1);
 
                 var model = ModelNameCanonicalizer.Canonicalize(reader.GetString(2));
                 var resolved = reader.GetInt32(3) != 0;
                 long? inTok = reader.IsDBNull(4) ? null : reader.GetInt64(4);
                 long? outTok = reader.IsDBNull(5) ? null : reader.GetInt64(5);
                 var costUsd = reader.IsDBNull(6)
-                    ? BenchmarkModelPricingLookup.ResolveFallbackCostUsd(model, inTok, outTok, modelPricing)
+                    ? BenchmarkModelPricingLookup.ResolveFallbackCostUsd(model: model, inputTokens: inTok,
+                        outputTokens: outTok, pricing: modelPricing)
                     : reader.GetDouble(6);
 
                 if (costUsd is null)
-                {
                     // Neither the row's own cost_usd nor benchmark_models pricing over its token counts
                     // resolved a cost - RegretOutcomeCell.CostUsd is never a raw-null passthrough, so this
                     // cell is excluded rather than assigned a misleading zero.
                     continue;
-                }
 
                 long? totalTokens = inTok is null && outTok is null ? null : (inTok ?? 0) + (outTok ?? 0);
 
-                if (!cellsByTask.TryGetValue(taskId, out var cells))
+                if (!cellsByTask.TryGetValue(key: taskId, value: out var cells))
                 {
                     cells = new Dictionary<string, RegretOutcomeCell>(StringComparer.Ordinal);
                     cellsByTask[taskId] = cells;
                 }
 
-                cells[model] = new RegretOutcomeCell(resolved ? 1.0 : 0.0, costUsd.Value, totalTokens);
+                cells[model] = new RegretOutcomeCell(Score: resolved ? 1.0 : 0.0, CostUsd: costUsd.Value,
+                    TotalTokens: totalTokens);
             }
         }
 
         var outcomes = new List<RegretTaskOutcome>(cellsByTask.Count);
         foreach (var (taskId, cells) in cellsByTask)
         {
-            if (cells.Count == 0)
-            {
-                continue;
-            }
+            if (cells.Count == 0) continue;
 
-            var dimension = taskDimension.TryGetValue(taskId, out var dim) ? dim : string.Empty;
-            outcomes.Add(new RegretTaskOutcome(taskId, dimension, cells, taskText.TryGetValue(taskId, out var text) ? text : null));
+            var dimension = taskDimension.TryGetValue(key: taskId, value: out var dim) ? dim : string.Empty;
+            outcomes.Add(new RegretTaskOutcome(TaskId: taskId, Dimension: dimension, Cells: cells,
+                TaskText: taskText.TryGetValue(key: taskId, value: out var text) ? text : null));
         }
 
         return outcomes;

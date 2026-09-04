@@ -25,14 +25,11 @@ public static class SparklineLayout
         IReadOnlyList<int> values, double width, double height, double padding = 1)
     {
         ArgumentNullException.ThrowIfNull(values);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(width, 0);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(height, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: width, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value: height, 0);
         ArgumentOutOfRangeException.ThrowIfNegative(padding);
 
-        if (values.Count == 0)
-        {
-            return [];
-        }
+        if (values.Count == 0) return [];
 
         if (values.Count == 1)
         {
@@ -43,18 +40,17 @@ public static class SparklineLayout
         var min = values.Min();
         var max = values.Max();
         var range = max - min;
-        var usableHeight = height - (padding * 2);
+        var usableHeight = height - padding * 2;
 
         var points = new List<(double X, double Y)>(values.Count);
         for (var i = 0; i < values.Count; i++)
         {
             var x = (double)i / (values.Count - 1) * width;
             var normalized = range == 0 ? 0.5 : (double)(values[i] - min) / range;
-            var y = height - padding - (normalized * usableHeight);
+            var y = height - padding - normalized * usableHeight;
             points.Add((x, y));
         }
 
         return points;
     }
 }
-

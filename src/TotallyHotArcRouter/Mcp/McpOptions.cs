@@ -20,4 +20,3 @@ public sealed class McpOptions
     /// </summary>
     public int Port { get; init; } = 5003;
 }
-

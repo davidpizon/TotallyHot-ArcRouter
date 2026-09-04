@@ -1,8 +1,8 @@
 using Grpc.Core;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -40,30 +40,49 @@ namespace TotallyHot.ArcRouter.Router;
 /// </remarks>
 public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdminService.RouterSettingsAdminServiceBase
 {
-    /// <summary>The inclusive lower bound <see cref="UpdateRouterSettings"/> enforces on <c>embedding_memory_capacity</c>, matching the GUI's own client-side minimum.</summary>
+    /// <summary>
+    /// The inclusive lower bound <see cref="UpdateRouterSettings"/> enforces on <c>embedding_memory_capacity</c>,
+    /// matching the GUI's own client-side minimum.
+    /// </summary>
     public const int MinEmbeddingMemoryCapacity = 500;
 
-    /// <summary>The inclusive upper bound <see cref="UpdateRouterSettings"/> enforces on <c>embedding_memory_capacity</c>, matching the GUI's own client-side maximum.</summary>
+    /// <summary>
+    /// The inclusive upper bound <see cref="UpdateRouterSettings"/> enforces on <c>embedding_memory_capacity</c>,
+    /// matching the GUI's own client-side maximum.
+    /// </summary>
     public const int MaxEmbeddingMemoryCapacity = 50_000;
 
-    private readonly RouterSettingsStore _store;
-    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
-    private readonly IOptionsMonitor<JudgeOptions> _judgeOptionsMonitor;
-    private readonly JudgeModelSelector _judgeModelSelector;
-    private readonly RouterSettingsReloadToken _reloadToken;
     private readonly EmbeddingMemory? _embeddingMemory;
-    private readonly IOptionsMonitor<Transcripts.TranscriptOptions> _transcriptOptionsMonitor;
-    private readonly Transcripts.ITranscriptStore _transcriptStore;
+    private readonly JudgeModelSelector _judgeModelSelector;
+    private readonly IOptionsMonitor<JudgeOptions> _judgeOptionsMonitor;
     private readonly ILogger<RouterSettingsAdminGrpcService> _logger;
+    private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
+    private readonly RouterSettingsReloadToken _reloadToken;
+
+    private readonly RouterSettingsStore _store;
+    private readonly IOptionsMonitor<TranscriptOptions> _transcriptOptionsMonitor;
+    private readonly ITranscriptStore _transcriptStore;
 
     /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminGrpcService"/> class.</summary>
     /// <param name="store">The settings store persisted mutations are written to.</param>
     /// <param name="optionsMonitor">Reports the currently effective values after precedence is applied.</param>
-    /// <param name="judgeOptionsMonitor">Reports the shadow judge's currently effective settings, the same way <paramref name="optionsMonitor"/> does for routing.</param>
-    /// <param name="judgeModelSelector">Supplies the eligible judge-backbone list, both to populate the dropdown and to validate a save against it.</param>
-    /// <param name="reloadToken">Triggered after a successful write so <paramref name="optionsMonitor"/> recomputes immediately.</param>
+    /// <param name="judgeOptionsMonitor">
+    /// Reports the shadow judge's currently effective settings, the same way
+    /// <paramref name="optionsMonitor"/> does for routing.
+    /// </param>
+    /// <param name="judgeModelSelector">
+    /// Supplies the eligible judge-backbone list, both to populate the dropdown and to
+    /// validate a save against it.
+    /// </param>
+    /// <param name="reloadToken">
+    /// Triggered after a successful write so <paramref name="optionsMonitor"/> recomputes
+    /// immediately.
+    /// </param>
     /// <param name="logger">The logger.</param>
-    /// <param name="transcriptOptionsMonitor">Reports the Transcription Capture toggle's currently effective value, the same way <paramref name="optionsMonitor"/> does for routing.</param>
+    /// <param name="transcriptOptionsMonitor">
+    /// Reports the Transcription Capture toggle's currently effective value, the same
+    /// way <paramref name="optionsMonitor"/> does for routing.
+    /// </param>
     /// <param name="transcriptStore">Backs <see cref="ClearTranscripts"/>.</param>
     /// <param name="embeddingMemory">
     /// Optional working set to trim synchronously when a save lowers the capacity. Optional only so this
@@ -79,8 +98,8 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         JudgeModelSelector judgeModelSelector,
         RouterSettingsReloadToken reloadToken,
         ILogger<RouterSettingsAdminGrpcService> logger,
-        IOptionsMonitor<Transcripts.TranscriptOptions> transcriptOptionsMonitor,
-        Transcripts.ITranscriptStore transcriptStore,
+        IOptionsMonitor<TranscriptOptions> transcriptOptionsMonitor,
+        ITranscriptStore transcriptStore,
         EmbeddingMemory? embeddingMemory = null)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -103,13 +122,15 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override Task<Contract.RouterSettingsResponse> GetRouterSettings(
         Contract.GetRouterSettingsRequest request,
-        ServerCallContext context) =>
-        Task.FromResult(BuildResponse());
+        ServerCallContext context)
+    {
+        return Task.FromResult(BuildResponse());
+    }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.RouterSettingsResponse> UpdateRouterSettings(
         Contract.UpdateRouterSettingsRequest request,
         ServerCallContext context)
@@ -117,11 +138,10 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         ArgumentNullException.ThrowIfNull(request);
 
         if (request.EmbeddingMemoryCapacity is < MinEmbeddingMemoryCapacity or > MaxEmbeddingMemoryCapacity)
-        {
             throw new RpcException(new Status(
-                StatusCode.InvalidArgument,
+                statusCode: StatusCode.InvalidArgument,
+                detail:
                 $"embedding_memory_capacity must be between {MinEmbeddingMemoryCapacity} and {MaxEmbeddingMemoryCapacity} (got {request.EmbeddingMemoryCapacity})."));
-        }
 
         // Rejected rather than silently coerced to automatic: saving a model the selector would not
         // actually call leaves the window showing a choice that is not in force, which is precisely the
@@ -129,21 +149,22 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         // the explicit "automatic" choice, not a missing one.
         var judgeModelName = request.JudgeModelName ?? string.Empty;
         if (!string.IsNullOrEmpty(judgeModelName) &&
-            !_judgeModelSelector.ListEligibleModels().Contains(judgeModelName, StringComparer.OrdinalIgnoreCase))
-        {
+            !_judgeModelSelector.ListEligibleModels()
+                .Contains(value: judgeModelName, comparer: StringComparer.OrdinalIgnoreCase))
             throw new RpcException(new Status(
-                StatusCode.InvalidArgument,
+                statusCode: StatusCode.InvalidArgument,
+                detail:
                 $"judge_model_name '{judgeModelName}' is not an eligible judge backbone. It must name a model on a free, enabled provider, or be empty for automatic selection."));
-        }
 
-        _store.SetBool(RouterSettingsStore.AdaptiveRoutingEnabledKey, request.AdaptiveRoutingEnabled);
-        _store.SetInt(RouterSettingsStore.EmbeddingMemoryCapacityKey, request.EmbeddingMemoryCapacity);
-        _store.SetBool(RouterSettingsStore.JudgeEnabledKey, request.JudgeEnabled);
-        _store.SetString(RouterSettingsStore.JudgeModelNameKey, judgeModelName);
-        _store.SetBool(RouterSettingsStore.TranscriptCaptureEnabledKey, request.TranscriptCaptureEnabled);
+        _store.SetBool(key: RouterSettingsStore.AdaptiveRoutingEnabledKey, value: request.AdaptiveRoutingEnabled);
+        _store.SetInt(key: RouterSettingsStore.EmbeddingMemoryCapacityKey, value: request.EmbeddingMemoryCapacity);
+        _store.SetBool(key: RouterSettingsStore.JudgeEnabledKey, value: request.JudgeEnabled);
+        _store.SetString(key: RouterSettingsStore.JudgeModelNameKey, value: judgeModelName);
+        _store.SetBool(key: RouterSettingsStore.TranscriptCaptureEnabledKey, value: request.TranscriptCaptureEnabled);
         _reloadToken.Trigger();
 
         _logger.LogInformation(
+            message:
             "Router settings updated: AdaptiveRoutingEnabled={AdaptiveRoutingEnabled} EmbeddingMemoryCapacity={EmbeddingMemoryCapacity} JudgeEnabled={JudgeEnabled} JudgeModelName={JudgeModelName} TranscriptCaptureEnabled={TranscriptCaptureEnabled}",
             request.AdaptiveRoutingEnabled,
             request.EmbeddingMemoryCapacity,
@@ -155,14 +176,12 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         // re-read below (and thus this response) reflects the trim's completion rather than racing it -
         // mirrors RetrainClusterModel/SyncBenchmarkData's "re-read the true post-mutation state" convention.
         if (_embeddingMemory is not null)
-        {
             await _embeddingMemory.TrimToCurrentCapacityAsync(context.CancellationToken).ConfigureAwait(false);
-        }
 
         return BuildResponse();
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public override async Task<Contract.ClearTranscriptsResponse> ClearTranscripts(
         Contract.ClearTranscriptsRequest request,
         ServerCallContext context)
@@ -171,12 +190,15 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
 
         var rowsDeleted = await _transcriptStore.DeleteAllAsync(context.CancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Transcript data cleared: RowsDeleted={RowsDeleted}", rowsDeleted);
+        _logger.LogInformation(message: "Transcript data cleared: RowsDeleted={RowsDeleted}", rowsDeleted);
 
         return new Contract.ClearTranscriptsResponse { RowsDeleted = rowsDeleted };
     }
 
-    /// <summary>Builds the response from the currently effective options - stored override, appsettings.json, or coded default, whichever precedence resolved to.</summary>
+    /// <summary>
+    /// Builds the response from the currently effective options - stored override, appsettings.json, or coded
+    /// default, whichever precedence resolved to.
+    /// </summary>
     private Contract.RouterSettingsResponse BuildResponse()
     {
         var options = _optionsMonitor.CurrentValue;
@@ -188,7 +210,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
             EmbeddingMemoryCapacity = options.EmbeddingMemoryCapacity,
             JudgeEnabled = judgeOptions.Enabled,
             JudgeModelName = judgeOptions.ModelName,
-            TranscriptCaptureEnabled = _transcriptOptionsMonitor.CurrentValue.Enabled,
+            TranscriptCaptureEnabled = _transcriptOptionsMonitor.CurrentValue.Enabled
         };
 
         // Recomputed on every read rather than cached: provider and model enablement change from the

@@ -13,7 +13,7 @@ public class IncrementalUsageScannerTests
     {
         var scanner = new IncrementalUsageScanner();
 
-        var result = scanner.TryExtractUsage("openai", isStreaming: true, _extractor, out _);
+        var result = scanner.TryExtractUsage(provider: "openai", true, extractor: _extractor, usage: out _);
 
         Assert.False(result);
     }
@@ -25,11 +25,11 @@ public class IncrementalUsageScannerTests
         var sse = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n";
         scanner.Append(Encoding.UTF8.GetBytes(sse));
 
-        var result = scanner.TryExtractUsage("openai", isStreaming: true, _extractor, out var usage);
+        var result = scanner.TryExtractUsage(provider: "openai", true, extractor: _extractor, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(10, usage.PromptTokens);
-        Assert.Equal(5, usage.CompletionTokens);
+        Assert.Equal(10, actual: usage.PromptTokens);
+        Assert.Equal(5, actual: usage.CompletionTokens);
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class IncrementalUsageScannerTests
 
         scanner.Append(Encoding.UTF8.GetBytes(usageEvent + trailingNoise));
 
-        var result = scanner.TryExtractUsage("openai", isStreaming: true, _extractor, out _);
+        var result = scanner.TryExtractUsage(provider: "openai", true, extractor: _extractor, usage: out _);
 
         Assert.False(result);
     }
@@ -57,11 +57,11 @@ public class IncrementalUsageScannerTests
 
         scanner.Append(Encoding.UTF8.GetBytes(leadingNoise + usageEvent));
 
-        var result = scanner.TryExtractUsage("openai", isStreaming: true, _extractor, out var usage);
+        var result = scanner.TryExtractUsage(provider: "openai", true, extractor: _extractor, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(10, usage.PromptTokens);
-        Assert.Equal(5, usage.CompletionTokens);
+        Assert.Equal(10, actual: usage.PromptTokens);
+        Assert.Equal(5, actual: usage.CompletionTokens);
     }
 
     [Fact]
@@ -71,22 +71,24 @@ public class IncrementalUsageScannerTests
         // usage - mirrors the real failure mode: a huge streamed answer whose trailing usage event would
         // otherwise fall outside a head-capped capture.
         var scanner = new IncrementalUsageScanner(maxTailBytes: 65_536);
-        var filler = Encoding.UTF8.GetBytes($"data: {{\"choices\":[{{\"delta\":{{\"content\":\"{new string('a', 200_000)}\"}}}}]}}\n\n");
+        var filler =
+            Encoding.UTF8.GetBytes(
+                $"data: {{\"choices\":[{{\"delta\":{{\"content\":\"{new string('a', 200_000)}\"}}}}]}}\n\n");
 
         const int chunkSize = 8192;
         for (var offset = 0; offset < filler.Length; offset += chunkSize)
         {
-            var length = Math.Min(chunkSize, filler.Length - offset);
-            scanner.Append(filler.AsSpan(offset, length));
+            var length = Math.Min(val1: chunkSize, val2: filler.Length - offset);
+            scanner.Append(filler.AsSpan(start: offset, length: length));
         }
 
-        scanner.Append(Encoding.UTF8.GetBytes("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"));
+        scanner.Append("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"u8);
 
-        var result = scanner.TryExtractUsage("openai", isStreaming: true, _extractor, out var usage);
+        var result = scanner.TryExtractUsage(provider: "openai", true, extractor: _extractor, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(10, usage.PromptTokens);
-        Assert.Equal(5, usage.CompletionTokens);
+        Assert.Equal(10, actual: usage.PromptTokens);
+        Assert.Equal(5, actual: usage.CompletionTokens);
     }
 
     [Fact]
@@ -100,18 +102,17 @@ public class IncrementalUsageScannerTests
         // out of the window.
         var scanner = new IncrementalUsageScanner(maxTailBytes: 128);
         var filler = "x\n"u8.ToArray();
-        for (var i = 0; i < 200; i++)
-        {
-            scanner.Append(filler);
-        }
+        for (var i = 0; i < 200; i++) scanner.Append(filler);
 
-        scanner.Append("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"u8.ToArray());
+        scanner.Append(
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"u8
+                .ToArray());
 
-        var result = scanner.TryExtractUsage("openai", isStreaming: true, _extractor, out var usage);
+        var result = scanner.TryExtractUsage(provider: "openai", true, extractor: _extractor, usage: out var usage);
 
         Assert.True(result);
-        Assert.Equal(10, usage.PromptTokens);
-        Assert.Equal(5, usage.CompletionTokens);
+        Assert.Equal(10, actual: usage.PromptTokens);
+        Assert.Equal(5, actual: usage.CompletionTokens);
     }
 
     [Fact]

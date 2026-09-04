@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -19,15 +18,19 @@ public sealed class CostReconciliationService
     /// </summary>
     public const int MaxCatchUpDays = 7;
 
-    private readonly IReadOnlyList<IProviderCostReconciler> _reconcilers;
-    private readonly Func<IReadOnlyList<IProviderCostReconciler>>? _reconcilerFactory;
-    private readonly IUsageLedger _usageLedger;
-    private readonly IProviderCostReconciliationStore _store;
-    private readonly ILogger<CostReconciliationService> _logger;
     private readonly decimal _deltaWarningPercent;
+    private readonly ILogger<CostReconciliationService> _logger;
+    private readonly Func<IReadOnlyList<IProviderCostReconciler>>? _reconcilerFactory;
+
+    private readonly IReadOnlyList<IProviderCostReconciler> _reconcilers;
+    private readonly IProviderCostReconciliationStore _store;
+    private readonly IUsageLedger _usageLedger;
 
     /// <summary>Initializes a new instance of the <see cref="CostReconciliationService"/> class.</summary>
-    /// <param name="reconcilers">The fixed reconciler list used when <paramref name="reconcilerFactory"/> is <see langword="null"/>.</param>
+    /// <param name="reconcilers">
+    /// The fixed reconciler list used when <paramref name="reconcilerFactory"/> is
+    /// <see langword="null"/>.
+    /// </param>
     /// <param name="usageLedger">The local usage ledger each reconciled day's estimated cost is summed from.</param>
     /// <param name="store">Persists reconciliation snapshots and each provider's checkpoint cursor.</param>
     /// <param name="options">Provides <see cref="CostReconciliationOptions.DeltaWarningPercent"/>.</param>
@@ -53,7 +56,7 @@ public sealed class CostReconciliationService
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _reconcilers = reconcilers.ToList();
+        _reconcilers = [.. reconcilers];
         _reconcilerFactory = reconcilerFactory;
         _usageLedger = usageLedger;
         _store = store;
@@ -73,7 +76,8 @@ public sealed class CostReconciliationService
         foreach (var reconciler in reconcilers)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await ReconcileProviderAsync(reconciler, cancellationToken).ConfigureAwait(false);
+            await ReconcileProviderAsync(reconciler: reconciler, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -93,16 +97,11 @@ public sealed class CostReconciliationService
         // immediately fire MaxCatchUpDays worth of billing-API calls for days it has no local data for.
         var startDay = checkpoint?.AddDays(1) ?? yesterday;
         if (startDay > yesterday)
-        {
             // Already caught up (a checkpoint from earlier today, before "yesterday" rolled forward).
             return;
-        }
 
         var earliestAllowed = yesterday.AddDays(-(MaxCatchUpDays - 1));
-        if (startDay < earliestAllowed)
-        {
-            startDay = earliestAllowed;
-        }
+        if (startDay < earliestAllowed) startDay = earliestAllowed;
 
         for (var day = startDay; day <= yesterday; day = day.AddDays(1))
         {
@@ -110,16 +109,17 @@ public sealed class CostReconciliationService
 
             try
             {
-                await ReconcileDayAsync(reconciler, day, cancellationToken).ConfigureAwait(false);
-                _store.SetLastReconciledDay(reconciler.Provider, day);
+                await ReconcileDayAsync(reconciler: reconciler, day: day, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                _store.SetLastReconciledDay(provider: reconciler.Provider, day: day);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Stop catching up further days until this one succeeds - advancing the checkpoint past a
                 // failed day would silently skip it forever, since the next cycle starts from the checkpoint.
                 _logger.LogWarning(
-                    ex,
-                    "Cost reconciliation failed for provider {Provider} on {Day}; will retry next cycle.",
+                    exception: ex,
+                    message: "Cost reconciliation failed for provider {Provider} on {Day}; will retry next cycle.",
                     reconciler.Provider,
                     day);
                 return;
@@ -131,11 +131,13 @@ public sealed class CostReconciliationService
     /// Fetches the provider-reported cost for <paramref name="day"/>, sums the local ledger's estimated
     /// cost over the same UTC day window, persists both as one reconciliation snapshot, and logs the delta.
     /// </summary>
-    private async Task ReconcileDayAsync(IProviderCostReconciler reconciler, DateOnly day, CancellationToken cancellationToken)
+    private async Task ReconcileDayAsync(IProviderCostReconciler reconciler, DateOnly day,
+        CancellationToken cancellationToken)
     {
-        var reportedCost = await reconciler.GetReportedCostAsync(day, cancellationToken).ConfigureAwait(false);
+        var reportedCost = await reconciler.GetReportedCostAsync(day: day, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
 
-        var windowStart = new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var windowStart = new DateTimeOffset(dateTime: day.ToDateTime(TimeOnly.MinValue), offset: TimeSpan.Zero);
         var windowEnd = windowStart.AddDays(1);
 
         // Sums usage_ledger directly over this exact UTC window, rather than IUsageRollupStore's
@@ -144,7 +146,8 @@ public sealed class CostReconciliationService
         // return nothing (localCost = 0) whenever that timezone isn't UTC - exactly the false "price table
         // is stale" signal the zero-localCost guard in LogDelta below exists to suppress, except here it'd
         // be a false positive from a mismatched query window, not a genuine no-traffic day.
-        var localCost = _usageLedger.SumEstimatedCostUsd(reconciler.Provider, windowStart, windowEnd);
+        var localCost =
+            _usageLedger.SumEstimatedCostUsd(provider: reconciler.Provider, fromUtc: windowStart, toUtc: windowEnd);
 
         _store.InsertReconciliation(new ProviderCostReconciliationEntry(
             Provider: reconciler.Provider,
@@ -153,11 +156,11 @@ public sealed class CostReconciliationService
             ProviderReportedCostUsd: reportedCost,
             LocalEstimatedCostUsd: localCost,
             ScopeNote: "Provider-reported cost is organization-wide (every key under the configured Admin " +
-                "API key); the local estimate reflects only requests routed through this proxy instance - " +
-                "a gap can be legitimate, not necessarily a pricing error.",
+                       "API key); the local estimate reflects only requests routed through this proxy instance - " +
+                       "a gap can be legitimate, not necessarily a pricing error.",
             FetchedAtUtc: DateTimeOffset.UtcNow));
 
-        LogDelta(reconciler.Provider, day, reportedCost, localCost);
+        LogDelta(provider: reconciler.Provider, day: day, reportedCost: reportedCost, localCost: localCost);
     }
 
     /// <summary>
@@ -176,6 +179,7 @@ public sealed class CostReconciliationService
             // compute to 100%, which would misread as "the local price table is stale/wrong" every time
             // this legitimate, expected gap occurs. Both cases get the same Debug-only treatment.
             _logger.LogDebug(
+                message:
                 "Cost reconciliation for provider {Provider} on {Day}: provider reported ${ReportedCost}, local estimate ${LocalCost}.",
                 provider, day, reportedCost, localCost);
             return;
@@ -183,19 +187,15 @@ public sealed class CostReconciliationService
 
         var deltaPercent = Math.Abs(reportedCost - localCost) / reportedCost * 100m;
         if (deltaPercent >= _deltaWarningPercent)
-        {
             _logger.LogWarning(
-                "Cost reconciliation for provider {Provider} on {Day}: local estimate ${LocalCost} vs " +
-                "provider-reported ${ReportedCost} ({DeltaPercent:F1}% difference) - the local price table " +
-                "may be stale or wrong for this provider's models.",
+                message: "Cost reconciliation for provider {Provider} on {Day}: local estimate ${LocalCost} vs " +
+                         "provider-reported ${ReportedCost} ({DeltaPercent:F1}% difference) - the local price table " +
+                         "may be stale or wrong for this provider's models.",
                 provider, day, localCost, reportedCost, deltaPercent);
-        }
         else
-        {
             _logger.LogDebug(
-                "Cost reconciliation for provider {Provider} on {Day}: local estimate ${LocalCost} vs " +
-                "provider-reported ${ReportedCost} ({DeltaPercent:F1}% difference).",
+                message: "Cost reconciliation for provider {Provider} on {Day}: local estimate ${LocalCost} vs " +
+                         "provider-reported ${ReportedCost} ({DeltaPercent:F1}% difference).",
                 provider, day, localCost, reportedCost, deltaPercent);
-        }
     }
 }

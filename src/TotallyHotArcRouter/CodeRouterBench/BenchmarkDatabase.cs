@@ -1,7 +1,6 @@
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
@@ -11,97 +10,98 @@ namespace TotallyHot.ArcRouter.CodeRouterBench;
 /// (docs/router/coderouterbench-sqlite-migration-plan.md). A dedicated <c>coderouterbench.db</c> file,
 /// separate from <see cref="PriceCatalogDatabase"/>'s <c>agent_telemetry.db</c> and
 /// <see cref="TotallyHot.ArcRouter.Router.RouterMemoryDatabase"/>'s file: the corpus is written only during explicit sync,
-/// bulk (~91k result rows), and freely re-downloadable from Hugging Face, so a sync (delete-and-replace) never contends for the
+/// bulk (~91k result rows), and freely re-downloadable from Hugging Face, so a sync (delete-and-replace) never contends
+/// for the
 /// price catalog's or router memory's WAL writer lock, and the corpus never bloats a backup of either
 /// operational database.
 /// </summary>
 public sealed class BenchmarkDatabase
 {
     private const string SchemaSql = """
-        CREATE TABLE IF NOT EXISTS benchmark_files (
-            file_name        TEXT    PRIMARY KEY,
-            published_oid    TEXT    NOT NULL,
-            size_bytes       INTEGER NOT NULL,
-            row_count        INTEGER NOT NULL,
-            repo_commit      TEXT    NOT NULL,
-            synced_at_utc    TEXT    NOT NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS benchmark_files (
+                                         file_name        TEXT    PRIMARY KEY,
+                                         published_oid    TEXT    NOT NULL,
+                                         size_bytes       INTEGER NOT NULL,
+                                         row_count        INTEGER NOT NULL,
+                                         repo_commit      TEXT    NOT NULL,
+                                         synced_at_utc    TEXT    NOT NULL
+                                     );
 
-        CREATE TABLE IF NOT EXISTS benchmark_id_results (
-            task_id          TEXT    NOT NULL,
-            split            TEXT    NOT NULL,
-            source_split     TEXT    NOT NULL,
-            dimension        TEXT    NOT NULL,
-            model            TEXT    NOT NULL,
-            score            REAL    NOT NULL,
-            cost_usd         REAL    NULL,
-            input_tokens     INTEGER NULL,
-            output_tokens    INTEGER NULL,
-            total_tokens     INTEGER NULL,
-            latency_ms       INTEGER NULL,
-            cost_source      TEXT    NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_benchmark_id_results_dimension_model
-            ON benchmark_id_results (dimension, model);
-        CREATE INDEX IF NOT EXISTS idx_benchmark_id_results_split
-            ON benchmark_id_results (split);
-        CREATE INDEX IF NOT EXISTS idx_benchmark_id_results_task_id
-            ON benchmark_id_results (task_id);
+                                     CREATE TABLE IF NOT EXISTS benchmark_id_results (
+                                         task_id          TEXT    NOT NULL,
+                                         split            TEXT    NOT NULL,
+                                         source_split     TEXT    NOT NULL,
+                                         dimension        TEXT    NOT NULL,
+                                         model            TEXT    NOT NULL,
+                                         score            REAL    NOT NULL,
+                                         cost_usd         REAL    NULL,
+                                         input_tokens     INTEGER NULL,
+                                         output_tokens    INTEGER NULL,
+                                         total_tokens     INTEGER NULL,
+                                         latency_ms       INTEGER NULL,
+                                         cost_source      TEXT    NULL
+                                     );
+                                     CREATE INDEX IF NOT EXISTS idx_benchmark_id_results_dimension_model
+                                         ON benchmark_id_results (dimension, model);
+                                     CREATE INDEX IF NOT EXISTS idx_benchmark_id_results_split
+                                         ON benchmark_id_results (split);
+                                     CREATE INDEX IF NOT EXISTS idx_benchmark_id_results_task_id
+                                         ON benchmark_id_results (task_id);
 
-        CREATE TABLE IF NOT EXISTS benchmark_ood_results (
-            task_id          TEXT    NOT NULL,
-            source_split     TEXT    NOT NULL,
-            bench            TEXT    NOT NULL,
-            original_task_id TEXT    NULL,
-            dimension        TEXT    NOT NULL,
-            model            TEXT    NOT NULL,
-            source_model     TEXT    NULL,
-            resolved         INTEGER NULL,
-            apply_ok         INTEGER NULL,
-            graded           INTEGER NULL,
-            in_tok           INTEGER NULL,
-            out_tok          INTEGER NULL,
-            calls            INTEGER NULL,
-            cost_usd         REAL    NULL,
-            source_status    TEXT    NULL,
-            cost_source      TEXT    NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_benchmark_ood_results_task_id
-            ON benchmark_ood_results (task_id);
+                                     CREATE TABLE IF NOT EXISTS benchmark_ood_results (
+                                         task_id          TEXT    NOT NULL,
+                                         source_split     TEXT    NOT NULL,
+                                         bench            TEXT    NOT NULL,
+                                         original_task_id TEXT    NULL,
+                                         dimension        TEXT    NOT NULL,
+                                         model            TEXT    NOT NULL,
+                                         source_model     TEXT    NULL,
+                                         resolved         INTEGER NULL,
+                                         apply_ok         INTEGER NULL,
+                                         graded           INTEGER NULL,
+                                         in_tok           INTEGER NULL,
+                                         out_tok          INTEGER NULL,
+                                         calls            INTEGER NULL,
+                                         cost_usd         REAL    NULL,
+                                         source_status    TEXT    NULL,
+                                         cost_source      TEXT    NULL
+                                     );
+                                     CREATE INDEX IF NOT EXISTS idx_benchmark_ood_results_task_id
+                                         ON benchmark_ood_results (task_id);
 
-        CREATE TABLE IF NOT EXISTS benchmark_id_tasks (
-            task_id          TEXT    PRIMARY KEY,
-            split            TEXT    NOT NULL,
-            source_split     TEXT    NOT NULL,
-            dimension        TEXT    NOT NULL,
-            raw_json         TEXT    NOT NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS benchmark_id_tasks (
+                                         task_id          TEXT    PRIMARY KEY,
+                                         split            TEXT    NOT NULL,
+                                         source_split     TEXT    NOT NULL,
+                                         dimension        TEXT    NOT NULL,
+                                         raw_json         TEXT    NOT NULL
+                                     );
 
-        CREATE TABLE IF NOT EXISTS benchmark_ood_tasks (
-            task_id          TEXT    PRIMARY KEY,
-            source_split     TEXT    NOT NULL,
-            bench            TEXT    NOT NULL,
-            dimension        TEXT    NOT NULL,
-            language         TEXT    NULL,
-            difficulty       TEXT    NULL,
-            raw_json         TEXT    NOT NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS benchmark_ood_tasks (
+                                         task_id          TEXT    PRIMARY KEY,
+                                         source_split     TEXT    NOT NULL,
+                                         bench            TEXT    NOT NULL,
+                                         dimension        TEXT    NOT NULL,
+                                         language         TEXT    NULL,
+                                         difficulty       TEXT    NULL,
+                                         raw_json         TEXT    NOT NULL
+                                     );
 
-        CREATE TABLE IF NOT EXISTS benchmark_models (
-            model            TEXT    PRIMARY KEY,
-            canonical_key    TEXT    NOT NULL,
-            provider         TEXT    NULL,
-            tier             TEXT    NULL,
-            input_per_1m     REAL    NULL,
-            output_per_1m    REAL    NULL,
-            raw_json         TEXT    NOT NULL
-        );
+                                     CREATE TABLE IF NOT EXISTS benchmark_models (
+                                         model            TEXT    PRIMARY KEY,
+                                         canonical_key    TEXT    NOT NULL,
+                                         provider         TEXT    NULL,
+                                         tier             TEXT    NULL,
+                                         input_per_1m     REAL    NULL,
+                                         output_per_1m    REAL    NULL,
+                                         raw_json         TEXT    NOT NULL
+                                     );
 
-        CREATE TABLE IF NOT EXISTS benchmark_summary (
-            key              TEXT    PRIMARY KEY,
-            raw_json         TEXT    NOT NULL
-        );
-        """;
+                                     CREATE TABLE IF NOT EXISTS benchmark_summary (
+                                         key              TEXT    PRIMARY KEY,
+                                         raw_json         TEXT    NOT NULL
+                                     );
+                                     """;
 
     private readonly string _databasePath;
     private readonly ILogger<BenchmarkDatabase>? _logger;
@@ -129,7 +129,7 @@ public sealed class BenchmarkDatabase
     private string ConnectionString => new SqliteConnectionStringBuilder
     {
         DataSource = _databasePath,
-        Mode = SqliteOpenMode.ReadWriteCreate,
+        Mode = SqliteOpenMode.ReadWriteCreate
     }.ToString();
 
     /// <summary>
@@ -153,10 +153,7 @@ public sealed class BenchmarkDatabase
     public bool EnsureCreated()
     {
         var directory = Path.GetDirectoryName(_databasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
         var alreadyExisted = File.Exists(_databasePath);
 
@@ -184,7 +181,8 @@ public sealed class BenchmarkDatabase
         }
         catch (Exception ex) when (ex is SqliteException or JsonException or InvalidOperationException)
         {
-            _logger?.LogWarning(ex, "Skipped the benchmark_models 'models' envelope repair after it failed.");
+            _logger?.LogWarning(exception: ex,
+                message: "Skipped the benchmark_models 'models' envelope repair after it failed.");
         }
 
         try
@@ -193,7 +191,8 @@ public sealed class BenchmarkDatabase
         }
         catch (Exception ex) when (ex is SqliteException or JsonException or InvalidOperationException)
         {
-            _logger?.LogWarning(ex, "Skipped the benchmark_id_tasks source_split repair after it failed.");
+            _logger?.LogWarning(exception: ex,
+                message: "Skipped the benchmark_id_tasks source_split repair after it failed.");
         }
 
         return alreadyExisted;
@@ -219,10 +218,7 @@ public sealed class BenchmarkDatabase
             rawJson = select.ExecuteScalar() as string;
         }
 
-        if (rawJson is null)
-        {
-            return;
-        }
+        if (rawJson is null) return;
 
         // The broken state this repairs has exactly one benchmark_models row - the garbage 'models' row -
         // per the class comment above. A model legitimately named 'models' alongside other rows
@@ -235,19 +231,18 @@ public sealed class BenchmarkDatabase
             totalRowCount = (long)count.ExecuteScalar()!;
         }
 
-        if (totalRowCount != 1)
-        {
-            return;
-        }
+        if (totalRowCount != 1) return;
 
         using var transaction = connection.BeginTransaction();
         // BenchmarkModelsJsonImporter.Import replaces every existing benchmark_models row; in the broken
         // state described above, the garbage 'models' row is the only row in the table, so this is exactly
         // the delete-and-reimport the repair needs.
-        var repairedCount = BenchmarkModelsJsonImporter.Import(rawJson, connection, transaction);
+        var repairedCount =
+            BenchmarkModelsJsonImporter.Import(json: rawJson, connection: connection, transaction: transaction);
         transaction.Commit();
 
         _logger?.LogInformation(
+            message:
             "Repaired the benchmark_models 'models' envelope defect: replaced 1 garbage row with {RepairedCount} model row(s).",
             repairedCount);
     }
@@ -275,39 +270,28 @@ public sealed class BenchmarkDatabase
                   AND json_extract(raw_json, '$.source_split') IS NOT NULL;
                 """;
             using var reader = select.ExecuteReader();
-            while (reader.Read())
-            {
-                badRows.Add((reader.GetString(0), reader.GetString(1)));
-            }
+            while (reader.Read()) badRows.Add((reader.GetString(0), reader.GetString(1)));
         }
 
-        if (badRows.Count == 0)
-        {
-            return;
-        }
+        if (badRows.Count == 0) return;
 
         using var transaction = connection.BeginTransaction();
         using var update = connection.CreateCommand();
         update.Transaction = transaction;
         update.CommandText = "UPDATE benchmark_id_tasks SET source_split = $sourceSplit WHERE task_id = $taskId;";
-        var sourceSplitParam = update.Parameters.Add("$sourceSplit", SqliteType.Text);
-        var taskIdParam = update.Parameters.Add("$taskId", SqliteType.Text);
+        var sourceSplitParam = update.Parameters.Add(parameterName: "$sourceSplit", type: SqliteType.Text);
+        var taskIdParam = update.Parameters.Add(parameterName: "$taskId", type: SqliteType.Text);
 
         var repairedCount = 0;
         foreach (var (taskId, rawJson) in badRows)
         {
             using var document = JsonDocument.Parse(rawJson);
-            if (!document.RootElement.TryGetProperty("source_split", out var sourceSplitElement) ||
+            if (!document.RootElement.TryGetProperty(propertyName: "source_split", value: out var sourceSplitElement) ||
                 sourceSplitElement.ValueKind != JsonValueKind.String)
-            {
                 continue;
-            }
 
             var sourceSplitValue = sourceSplitElement.GetString();
-            if (sourceSplitValue is not ("train" or "val" or "test"))
-            {
-                continue;
-            }
+            if (sourceSplitValue is not ("train" or "val" or "test")) continue;
 
             sourceSplitParam.Value = sourceSplitValue;
             taskIdParam.Value = taskId;
@@ -318,11 +302,10 @@ public sealed class BenchmarkDatabase
         transaction.Commit();
 
         if (repairedCount > 0)
-        {
             _logger?.LogInformation(
+                message:
                 "Repaired the benchmark_id_tasks source_split defect: corrected {RepairedCount} of {CandidateCount} affected row(s) from raw_json.",
                 repairedCount,
                 badRows.Count);
-        }
     }
 }

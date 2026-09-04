@@ -32,10 +32,12 @@ public static class WebViewUserData
     /// <param name="localApplicationDataPath">The per-user application-data root to place the folder under.</param>
     /// <param name="existingOverride">The value already present in the environment, if any.</param>
     /// <returns>The absolute path WebView2 should be pointed at.</returns>
-    public static string ResolveFolder(string localApplicationDataPath, string? existingOverride = null) =>
-        string.IsNullOrWhiteSpace(existingOverride)
-            ? Path.Combine(localApplicationDataPath, "TotallyHotArcRouter", "WebView2")
+    public static string ResolveFolder(string localApplicationDataPath, string? existingOverride = null)
+    {
+        return string.IsNullOrWhiteSpace(existingOverride)
+            ? Path.Combine(path1: localApplicationDataPath, path2: "TotallyHotArcRouter", path3: "WebView2")
             : existingOverride;
+    }
 
     /// <summary>
     /// Creates the resolved folder and publishes it to the current process' environment. Must run before
@@ -47,11 +49,11 @@ public static class WebViewUserData
     public static string Apply()
     {
         var folder = ResolveFolder(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            Environment.GetEnvironmentVariable(UserDataFolderVariable));
+            localApplicationDataPath: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            existingOverride: Environment.GetEnvironmentVariable(UserDataFolderVariable));
 
         Directory.CreateDirectory(folder);
-        Environment.SetEnvironmentVariable(UserDataFolderVariable, folder);
+        Environment.SetEnvironmentVariable(variable: UserDataFolderVariable, value: folder);
         return folder;
     }
 }

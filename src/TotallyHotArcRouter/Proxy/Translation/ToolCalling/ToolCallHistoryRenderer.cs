@@ -28,14 +28,13 @@ internal enum ToolCallHistoryStyle
     /// constrained decoding forces the model to emit. Used by
     /// <see cref="ToolCallDialectRegistry.Constrained"/>, which has no delimiters at all.
     /// </summary>
-    JsonEnvelope,
+    JsonEnvelope
 }
 
 /// <summary>
 /// Flattens a conversation's tool-calling history into plain text a model with no native tool support can
 /// read - the multi-turn half of both emulation (<c>docs/router/tool-call-normalization.md</c> Phase 5) and
 /// constrained decoding.
-///
 /// <para>
 /// <b>Shared between both rewriters on purpose.</b> Rewriting only the first request works exactly once.
 /// The turn after a tool runs, the client sends back an assistant message carrying <c>tool_calls</c> and a
@@ -52,7 +51,6 @@ internal static class ToolCallHistoryRenderer
     /// <summary>
     /// Returns a new message list with every tool-calling message rewritten into plain text the model can
     /// read. The caller swaps it in for the original.
-    ///
     /// <para>
     /// Two shapes are converted. An <c>assistant</c> message carrying <c>tool_calls</c> becomes the form
     /// named by <paramref name="style"/>, so its own previous turn reads back in the syntax it is being
@@ -60,7 +58,6 @@ internal static class ToolCallHistoryRenderer
     /// one role every chat template supports, where <c>tool</c> is exactly the role these models' templates
     /// do not know.
     /// </para>
-    ///
     /// <para>
     /// Consecutive tool results are merged into one <c>user</c> message. Several parallel calls return
     /// several results in a row, and many local templates require user and assistant turns to alternate -
@@ -98,36 +95,33 @@ internal static class ToolCallHistoryRenderer
                 // results are waiting to become one user message, and carrying them past this point would
                 // emit them after a node that came before them - reordering the conversation rather than
                 // just tolerating an oddity in it.
-                FlushPendingResults(rewritten, ref pendingResults);
+                FlushPendingResults(rewritten: rewritten, pendingResults: ref pendingResults);
                 rewritten.Add(node?.DeepClone());
                 continue;
             }
 
             var role = (message["role"] as JsonValue)?.TryGetValue<string>(out var r) == true ? r : null;
 
-            if (string.Equals(role, "tool", StringComparison.Ordinal))
+            if (string.Equals(a: role, b: "tool", comparisonType: StringComparison.Ordinal))
             {
                 pendingResults ??= new StringBuilder();
-                if (pendingResults.Length > 0)
-                {
-                    pendingResults.Append("\n\n");
-                }
+                if (pendingResults.Length > 0) pendingResults.Append("\n\n");
 
-                pendingResults.Append(RenderToolResult(message, nameByCallId));
+                pendingResults.Append(RenderToolResult(message: message, nameByCallId: nameByCallId));
                 continue;
             }
 
-            FlushPendingResults(rewritten, ref pendingResults);
+            FlushPendingResults(rewritten: rewritten, pendingResults: ref pendingResults);
 
-            if (string.Equals(role, "assistant", StringComparison.Ordinal) && message["tool_calls"] is JsonArray toolCalls)
-            {
-                RenderAssistantToolCalls(message, toolCalls, dialect, style, nameByCallId);
-            }
+            if (string.Equals(a: role, b: "assistant", comparisonType: StringComparison.Ordinal) &&
+                message["tool_calls"] is JsonArray toolCalls)
+                RenderAssistantToolCalls(message: message, toolCalls: toolCalls, dialect: dialect, style: style,
+                    nameByCallId: nameByCallId);
 
             rewritten.Add(message.DeepClone());
         }
 
-        FlushPendingResults(rewritten, ref pendingResults);
+        FlushPendingResults(rewritten: rewritten, pendingResults: ref pendingResults);
 
         return rewritten;
     }
@@ -135,15 +129,12 @@ internal static class ToolCallHistoryRenderer
     /// <summary>Emits any merged tool results as a single <c>user</c> message and resets the buffer.</summary>
     private static void FlushPendingResults(JsonArray rewritten, ref StringBuilder? pendingResults)
     {
-        if (pendingResults is null)
-        {
-            return;
-        }
+        if (pendingResults is null) return;
 
         rewritten.Add(new JsonObject
         {
             ["role"] = "user",
-            ["content"] = pendingResults.ToString(),
+            ["content"] = pendingResults.ToString()
         });
 
         pendingResults = null;
@@ -184,20 +175,15 @@ internal static class ToolCallHistoryRenderer
             case JsonArray parts:
                 var builder = new StringBuilder();
                 foreach (var part in parts)
-                {
                     if (part is JsonObject obj &&
                         obj["text"] is JsonValue textValue &&
                         textValue.TryGetValue<string>(out var partText) &&
                         !string.IsNullOrEmpty(partText))
                     {
-                        if (builder.Length > 0)
-                        {
-                            builder.Append('\n');
-                        }
+                        if (builder.Length > 0) builder.Append('\n');
 
                         builder.Append(partText);
                     }
-                }
 
                 // An array carrying no text at all (an image-only turn) serializes rather than vanishing,
                 // for the same preserve-over-drop reason as the default case.
@@ -221,7 +207,9 @@ internal static class ToolCallHistoryRenderer
         // is what the model actually needs, and a result with no label still answers the question.
         var name = (message["name"] as JsonValue)?.TryGetValue<string>(out var n) == true && !string.IsNullOrEmpty(n)
             ? n
-            : callId is not null && nameByCallId.TryGetValue(callId, out var mapped) ? mapped : null;
+            : callId is not null && nameByCallId.TryGetValue(key: callId, value: out var mapped)
+                ? mapped
+                : null;
 
         var content = RenderContentAsText(message["content"]);
 
@@ -246,33 +234,27 @@ internal static class ToolCallHistoryRenderer
 
         foreach (var node in toolCalls)
         {
-            if (node is not JsonObject call || call["function"] is not JsonObject function)
-            {
-                continue;
-            }
+            if (node is not JsonObject call || call["function"] is not JsonObject function) continue;
 
             // The incoming history is always OpenAI-shaped regardless of dialect - the client speaks OpenAI
             // and only the outgoing rendering below uses the dialect's own key names. Reading with
             // dialect.NameKey/ArgumentsKey here would silently lose a prior call's arguments for any dialect
             // whose ArgumentsKey differs from "arguments" (docs/router/backlog.md item 3).
-            if (function["name"] is not JsonValue nameValue || !nameValue.TryGetValue<string>(out var name) || string.IsNullOrEmpty(name))
-            {
-                continue;
-            }
+            if (function["name"] is not JsonValue nameValue || !nameValue.TryGetValue<string>(out var name) ||
+                string.IsNullOrEmpty(name)) continue;
 
             if ((call["id"] as JsonValue)?.TryGetValue<string>(out var callId) == true && !string.IsNullOrEmpty(callId))
-            {
                 nameByCallId[callId] = name;
-            }
 
             // OpenAI carries arguments as an already-serialized JSON string. Re-parsing it means the model
             // sees a real nested object - the exact shape it was taught to emit - rather than a string full
             // of escaped quotes, which is both harder to read and unlike its own prior output. A value that
             // does not parse is written through as a string so a malformed history is still forwarded.
-            var argumentsText = (function["arguments"] as JsonValue)?.TryGetValue<string>(out var raw) == true ? raw : null;
+            var argumentsText = (function["arguments"] as JsonValue)?.TryGetValue<string>(out var raw) == true
+                ? raw
+                : null;
             JsonNode? argumentsNode = null;
             if (argumentsText is not null)
-            {
                 try
                 {
                     argumentsNode = JsonNode.Parse(argumentsText);
@@ -281,19 +263,18 @@ internal static class ToolCallHistoryRenderer
                 {
                     argumentsNode = JsonValue.Create(argumentsText);
                 }
-            }
 
             payloads.Add(new JsonObject
             {
                 [dialect.NameKey] = name,
-                [dialect.ArgumentsKey] = argumentsNode ?? function["arguments"]?.DeepClone() ?? new JsonObject(),
+                [dialect.ArgumentsKey] = argumentsNode ?? function["arguments"]?.DeepClone() ?? new JsonObject()
             });
         }
 
         message["content"] = style switch
         {
-            ToolCallHistoryStyle.JsonEnvelope => RenderAsEnvelope(existing, payloads),
-            _ => RenderAsDelimited(existing, payloads, dialect),
+            ToolCallHistoryStyle.JsonEnvelope => RenderAsEnvelope(existing: existing, payloads: payloads),
+            _ => RenderAsDelimited(existing: existing, payloads: payloads, dialect: dialect)
         };
 
         message.Remove("tool_calls");
@@ -303,12 +284,14 @@ internal static class ToolCallHistoryRenderer
     /// Writes the calls as the same <c>{"content", "tool_calls"}</c> envelope constrained decoding forces,
     /// so the model's own prior turn is indistinguishable in shape from what it must produce next.
     /// </summary>
-    private static string RenderAsEnvelope(string existing, JsonArray payloads) =>
-        new JsonObject
+    private static string RenderAsEnvelope(string existing, JsonArray payloads)
+    {
+        return new JsonObject
         {
             ["content"] = existing,
-            ["tool_calls"] = payloads,
+            ["tool_calls"] = payloads
         }.ToJsonString(SerializerOptions);
+    }
 
     /// <summary>
     /// Writes each call wrapped in the dialect's first delimiter pair, appended after any prose the turn
@@ -321,10 +304,7 @@ internal static class ToolCallHistoryRenderer
 
         foreach (var payload in payloads)
         {
-            if (rendered.Length > 0)
-            {
-                rendered.Append('\n');
-            }
+            if (rendered.Length > 0) rendered.Append('\n');
 
             rendered.Append(delimiter.Open).Append(payload!.ToJsonString(SerializerOptions)).Append(delimiter.Close);
         }
@@ -332,4 +312,3 @@ internal static class ToolCallHistoryRenderer
         return rendered.ToString();
     }
 }
-

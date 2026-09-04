@@ -15,21 +15,32 @@ public interface IUsageExtractor
     /// <summary>
     /// Attempts to extract token usage for a completed request.
     /// </summary>
-    /// <param name="provider">The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"ollama"</c>, <c>"anthropic"</c>).</param>
+    /// <param name="provider">
+    /// The provider key the request was routed to (e.g. <c>"openai"</c>, <c>"ollama"</c>,
+    /// <c>"anthropic"</c>).
+    /// </param>
     /// <param name="isStreaming">Whether the response was a streaming (SSE) response.</param>
-    /// <param name="bufferedResponseBody">The captured response bytes (see the capture-cap note on the caller - may be truncated for very large responses).</param>
+    /// <param name="bufferedResponseBody">
+    /// The captured response bytes (see the capture-cap note on the caller - may be
+    /// truncated for very large responses).
+    /// </param>
     /// <param name="usage">The extracted usage, when this method returns <see langword="true"/>.</param>
-    /// <returns><see langword="true"/> if usage could be determined; otherwise <see langword="false"/> (unknown provider, malformed/truncated body, or the provider's response genuinely omitted usage).</returns>
-    bool TryExtractUsage(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out UsageInfo usage);
+    /// <returns>
+    /// <see langword="true"/> if usage could be determined; otherwise <see langword="false"/> (unknown provider,
+    /// malformed/truncated body, or the provider's response genuinely omitted usage).
+    /// </returns>
+    bool TryExtractUsage(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody,
+        out UsageInfo usage);
 }
 
-/// <inheritdoc cref="IUsageExtractor" />
+/// <inheritdoc cref="IUsageExtractor"/>
 public sealed class UsageExtractor : IUsageExtractor
 {
     // Cached rather than rebuilt per call: SupportsNativeShape is a static helper ProxyMiddleware calls
     // once per response, independent of any DI-constructed UsageExtractor instance, so it needs its own
     // copy of the default table rather than reading an instance field.
-    private static readonly IReadOnlyDictionary<string, ProviderRegistration> DefaultRegistrationsForStaticLookup = ProviderRegistrations.BuildDefault();
+    private static readonly IReadOnlyDictionary<string, ProviderRegistration> DefaultRegistrationsForStaticLookup =
+        ProviderRegistrations.BuildDefault();
 
     private readonly IReadOnlyDictionary<string, ProviderRegistration> _providerRegistrations;
 
@@ -51,7 +62,44 @@ public sealed class UsageExtractor : IUsageExtractor
     {
         _providerRegistrations = providerRegistrations is null
             ? ProviderRegistrations.BuildDefault()
-            : new Dictionary<string, ProviderRegistration>(providerRegistrations, StringComparer.OrdinalIgnoreCase);
+            : new Dictionary<string, ProviderRegistration>(collection: providerRegistrations,
+                comparer: StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <inheritdoc/>
+    public bool TryExtractUsage(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody,
+        out UsageInfo usage)
+    {
+        usage = default;
+
+        if (bufferedResponseBody.IsEmpty) return false;
+
+        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax), or a null/blank key: no
+        // registration, so no parser shape to dispatch on. Fail gracefully rather than guessing at an
+        // unverified response shape, or throwing on a Dictionary null-key lookup for a public method.
+        if (string.IsNullOrEmpty(provider) ||
+            !_providerRegistrations.TryGetValue(key: provider, value: out var registration)) return false;
+
+        string text;
+        try
+        {
+            text = Encoding.UTF8.GetString(bufferedResponseBody.Span);
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+
+        return registration.UsageParserShape switch
+        {
+            UsageParserShape.OpenAiCompatible => isStreaming
+                ? OpenAiUsageParser.TryExtractFromStreamingBuffer(sseText: text, usage: out usage)
+                : OpenAiUsageParser.TryExtractFromNonStreamingBody(json: text, usage: out usage),
+            UsageParserShape.Native => isStreaming
+                ? AnthropicUsageParser.TryExtractFromStreamingBuffer(sseText: text, usage: out usage)
+                : AnthropicUsageParser.TryExtractFromNonStreamingBody(json: text, usage: out usage),
+            _ => false
+        };
     }
 
     /// <summary>
@@ -70,48 +118,10 @@ public sealed class UsageExtractor : IUsageExtractor
     /// as an unrecognized one - this public hot-path helper fails closed rather than throwing, matching
     /// its pre-registry-table <c>string.Equals</c> behavior.
     /// </returns>
-    public static bool SupportsNativeShape(string provider) =>
-        !string.IsNullOrEmpty(provider)
-        && DefaultRegistrationsForStaticLookup.TryGetValue(provider, out var registration)
-        && registration.UsageParserShape == UsageParserShape.Native;
-
-    /// <inheritdoc />
-    public bool TryExtractUsage(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out UsageInfo usage)
+    public static bool SupportsNativeShape(string provider)
     {
-        usage = default;
-
-        if (bufferedResponseBody.IsEmpty)
-        {
-            return false;
-        }
-
-        // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax), or a null/blank key: no
-        // registration, so no parser shape to dispatch on. Fail gracefully rather than guessing at an
-        // unverified response shape, or throwing on a Dictionary null-key lookup for a public method.
-        if (string.IsNullOrEmpty(provider) || !_providerRegistrations.TryGetValue(provider, out var registration))
-        {
-            return false;
-        }
-
-        string text;
-        try
-        {
-            text = Encoding.UTF8.GetString(bufferedResponseBody.Span);
-        }
-        catch (DecoderFallbackException)
-        {
-            return false;
-        }
-
-        return registration.UsageParserShape switch
-        {
-            UsageParserShape.OpenAiCompatible => isStreaming
-                ? OpenAiUsageParser.TryExtractFromStreamingBuffer(text, out usage)
-                : OpenAiUsageParser.TryExtractFromNonStreamingBody(text, out usage),
-            UsageParserShape.Native => isStreaming
-                ? AnthropicUsageParser.TryExtractFromStreamingBuffer(text, out usage)
-                : AnthropicUsageParser.TryExtractFromNonStreamingBody(text, out usage),
-            _ => false,
-        };
+        return !string.IsNullOrEmpty(provider)
+               && DefaultRegistrationsForStaticLookup.TryGetValue(key: provider, value: out var registration)
+               && registration.UsageParserShape == UsageParserShape.Native;
     }
 }

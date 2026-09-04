@@ -19,25 +19,19 @@ public sealed class TruncationAnalyzer : IStaticAnalyzer
     private static readonly char[] ContinuationEnders =
         ['+', '-', '*', '/', '%', '=', '<', '>', '&', '|', '^', ',', '.', ':'];
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public string Name => "truncation";
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public StaticAnalysisFinding? Analyze(string code, CodeLanguage language)
     {
         ArgumentNullException.ThrowIfNull(code);
 
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(code)) return null;
 
         var notes = new List<string>();
 
-        if (HasUnterminatedBlockComment(code))
-        {
-            notes.Add("unterminated block comment");
-        }
+        if (HasUnterminatedBlockComment(code)) notes.Add("unterminated block comment");
 
         var lastLine = code
             .Split('\n')
@@ -51,34 +45,26 @@ public sealed class TruncationAnalyzer : IStaticAnalyzer
             // A colon ending the last line is how a Python block header legitimately looks, so it only
             // reads as truncation when the body that must follow it is missing - which it is, here, since
             // this is the final line of the snippet.
-            if (ContinuationEnders.Contains(last))
-            {
-                notes.Add($"final line ends on '{last}', mid-expression");
-            }
+            if (ContinuationEnders.Contains(last)) notes.Add($"final line ends on '{last}', mid-expression");
 
-            if (CountUnescaped(lastLine, '"') % 2 != 0 || CountUnescaped(lastLine, '\'') % 2 != 0)
-            {
+            if (CountUnescaped(line: lastLine, '"') % 2 != 0 || CountUnescaped(line: lastLine, '\'') % 2 != 0)
                 notes.Add("final line has an unterminated string literal");
-            }
         }
 
         // Nothing suspicious is a positive finding, not an abstention: "this does not look truncated" is
         // real evidence, and withholding it would drop the axis for every healthy snippet.
         return notes.Count == 0
-            ? new StaticAnalysisFinding(Name, 1.0, [])
-            : new StaticAnalysisFinding(Name, 0.0, notes);
+            ? new StaticAnalysisFinding(Analyzer: Name, 1.0, Notes: [])
+            : new StaticAnalysisFinding(Analyzer: Name, 0.0, Notes: notes);
     }
 
     /// <summary>Determines whether a C-style block comment was opened and never closed.</summary>
     private static bool HasUnterminatedBlockComment(string code)
     {
-        var open = code.LastIndexOf("/*", StringComparison.Ordinal);
-        if (open < 0)
-        {
-            return false;
-        }
+        var open = code.LastIndexOf(value: "/*", comparisonType: StringComparison.Ordinal);
+        if (open < 0) return false;
 
-        return code.IndexOf("*/", open, StringComparison.Ordinal) < 0;
+        return code.IndexOf(value: "*/", startIndex: open, comparisonType: StringComparison.Ordinal) < 0;
     }
 
     /// <summary>Counts occurrences of a quote character that are not backslash-escaped.</summary>
@@ -87,21 +73,12 @@ public sealed class TruncationAnalyzer : IStaticAnalyzer
         var count = 0;
         for (var i = 0; i < line.Length; i++)
         {
-            if (line[i] != quote)
-            {
-                continue;
-            }
+            if (line[i] != quote) continue;
 
             var backslashes = 0;
-            for (var j = i - 1; j >= 0 && line[j] == '\\'; j--)
-            {
-                backslashes++;
-            }
+            for (var j = i - 1; j >= 0 && line[j] == '\\'; j--) backslashes++;
 
-            if (backslashes % 2 == 0)
-            {
-                count++;
-            }
+            if (backslashes % 2 == 0) count++;
         }
 
         return count;

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -20,7 +19,8 @@ public interface ISpendTracker
     /// counts toward <see cref="SpendSummary.RequestCount"/>, just contributing zero cost/tokens.
     /// </summary>
     /// <returns>The updated running summary.</returns>
-    Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens, decimal? estimatedCostUsd, CancellationToken cancellationToken = default);
+    Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens, decimal? estimatedCostUsd,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Gets the current running total without recording a new request.</summary>
     SpendSummary GetSummary();
@@ -44,19 +44,19 @@ public readonly record struct SpendSummary(
     decimal TotalCostUsd,
     int UnpricedRequests = 0);
 
-/// <inheritdoc cref="ISpendTracker" />
+/// <inheritdoc cref="ISpendTracker"/>
 public sealed class SpendTracker : ISpendTracker
 {
     private readonly ILogger<SpendTracker> _logger;
     private readonly SpendTrackingOptions _options;
 
     // Guards the four running totals below (fast, synchronous - never held across an await).
-    private readonly object _totalsLock = new();
+    private readonly Lock _totalsLock = new();
 
     private int _requestCount;
-    private long _totalPromptTokens;
     private long _totalCompletionTokens;
     private decimal _totalCostUsd;
+    private long _totalPromptTokens;
     private int _unpricedRequests;
 
     /// <summary>
@@ -71,13 +71,11 @@ public sealed class SpendTracker : ISpendTracker
         _options = options.Value;
     }
 
-    /// <inheritdoc />
-    public Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens, decimal? estimatedCostUsd, CancellationToken cancellationToken = default)
+    /// <inheritdoc/>
+    public Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens,
+        decimal? estimatedCostUsd, CancellationToken cancellationToken = default)
     {
-        if (!_options.Enabled)
-        {
-            return Task.FromResult(GetSummary());
-        }
+        if (!_options.Enabled) return Task.FromResult(GetSummary());
 
         SpendSummary summary;
         lock (_totalsLock)
@@ -90,58 +88,56 @@ public sealed class SpendTracker : ISpendTracker
             // rather than folded in as 0 - the aggregate-level twin of ModelPrice never estimating from
             // unverified rates: an aggregate that silently sums only the priced subset is just as
             // misleading as a single request's null collapsing into a confident zero.
-            if (estimatedCostUsd is decimal knownCost)
-            {
+            if (estimatedCostUsd is { } knownCost)
                 _totalCostUsd += knownCost;
-            }
             else
-            {
                 _unpricedRequests++;
-            }
 
-            summary = new SpendSummary(_requestCount, _totalPromptTokens, _totalCompletionTokens, _totalCostUsd, _unpricedRequests);
+            summary = new SpendSummary(RequestCount: _requestCount, TotalPromptTokens: _totalPromptTokens,
+                TotalCompletionTokens: _totalCompletionTokens, TotalCostUsd: _totalCostUsd,
+                UnpricedRequests: _unpricedRequests);
         }
 
         // Logged as two separate calls (rather than pre-formatting the decimals to strings, e.g. via
         // ToString("F6")) so CostUsd/RunningTotalUsd stay structured decimal properties for any
         // sink that captures them, not culture-dependent, query-unfriendly strings - the ":F6" format
         // specifier only affects the rendered text, not the captured property value.
-        if (estimatedCostUsd is decimal cost)
-        {
+        if (estimatedCostUsd is { } cost)
             _logger.LogInformation(
+                message:
                 "[SPEND] model={Model} cost=${CostUsd:F6} runningTotal=${RunningTotalUsd:F6} requests={RequestCount}",
                 model,
                 cost,
                 summary.TotalCostUsd,
                 summary.RequestCount);
-        }
         else
-        {
             _logger.LogInformation(
+                message:
                 "[SPEND] model={Model} cost=unknown runningTotal=${RunningTotalUsd:F6} requests={RequestCount}",
                 model,
                 summary.TotalCostUsd,
                 summary.RequestCount);
-        }
 
         return Task.FromResult(summary);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public SpendSummary GetSummary()
     {
         lock (_totalsLock)
         {
-            return new SpendSummary(_requestCount, _totalPromptTokens, _totalCompletionTokens, _totalCostUsd, _unpricedRequests);
+            return new SpendSummary(RequestCount: _requestCount, TotalPromptTokens: _totalPromptTokens,
+                TotalCompletionTokens: _totalCompletionTokens, TotalCostUsd: _totalCostUsd,
+                UnpricedRequests: _unpricedRequests);
         }
     }
-
 }
 
 /// <summary>
 /// Safe no-op default for callers that don't opt into spend tracking (e.g. tests constructing
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyMiddleware"/> directly without a DI container) - mirrors the
-/// "fresh, private, harmless default" pattern every other optional <see cref="TotallyHot.ArcRouter.Proxy.ProxyMiddleware"/>
+/// "fresh, private, harmless default" pattern every other optional
+/// <see cref="TotallyHot.ArcRouter.Proxy.ProxyMiddleware"/>
 /// dependency already follows.
 /// </summary>
 public sealed class NullSpendTracker : ISpendTracker
@@ -154,11 +150,16 @@ public sealed class NullSpendTracker : ISpendTracker
     {
     }
 
-    /// <inheritdoc />
-    public Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens, decimal? estimatedCostUsd, CancellationToken cancellationToken = default) =>
-        Task.FromResult(default(SpendSummary));
+    /// <inheritdoc/>
+    public Task<SpendSummary> RecordAsync(string model, int? promptTokens, int? completionTokens,
+        decimal? estimatedCostUsd, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(default(SpendSummary));
+    }
 
-    /// <inheritdoc />
-    public SpendSummary GetSummary() => default;
+    /// <inheritdoc/>
+    public SpendSummary GetSummary()
+    {
+        return default;
+    }
 }
-

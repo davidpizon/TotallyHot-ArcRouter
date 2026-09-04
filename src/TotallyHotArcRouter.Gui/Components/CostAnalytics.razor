@@ -73,7 +73,7 @@
         else
         {
             <div class="flex-1 min-h-0">
-                <EChart ModelJson="@_modelJson" />
+                <EChart ModelJson="@_modelJson"/>
             </div>
 
             @* Model legend (shared color mapping across every metric). *@
@@ -94,11 +94,13 @@
 </div>
 
 @code {
+
     /// <summary>
     /// Live conversations from LiveDataStore (same source as the Live Stream tab). Their turns supply
     /// real tokens/cost/TTFT/model/timestamp; MockData.BuildMetricHistory fills the rest.
     /// </summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public IReadOnlyList<Conversation> Conversations { get; set; } = [];
 
     /// <summary>
@@ -108,20 +110,23 @@
     [Parameter]
     public string? InitialSessionId { get; set; }
 
-    /// <summary>One metric pill's display definition: which <see cref="CostMetric"/> it selects, its button label, and its tooltip/subtitle description.</summary>
+    /// <summary>
+    /// One metric pill's display definition: which <see cref="CostMetric"/> it selects, its button label, and its
+    /// tooltip/subtitle description.
+    /// </summary>
     private sealed record MetricDef(CostMetric Metric, string Label, string Description);
 
     // Ranked by business priority (the order the pills appear in), matching the CostMetric enum. The
     // description doubles as the pill tooltip and the chart subtitle.
     private static readonly MetricDef[] MetricDefs =
     [
-        new(CostMetric.RoutingRoi, "Routing ROI", "Estimated savings vs. the frozen 9-dimension baseline: gains above 0, losses below"),
-        new(CostMetric.TotalTurnCost, "Turn Cost", "Stepped cumulative cost, area colored by the active model"),
-        new(CostMetric.Tokens, "Tokens", "Cumulative tokens with exponential-runaway detection"),
-        new(CostMetric.ToolExecutionSteps, "Tool Steps", "Per-turn step bars, segmented by the model that handled each stretch"),
-        new(CostMetric.CacheHitRate, "Cache Hit", "Stepped cache-hit-rate line with a gradient track"),
-        new(CostMetric.TimeToFirstToken, "TTFT", "Latency line over per-model background zones; spikes pinned"),
-        new(CostMetric.ContextBufferMargin, "Context", "Context-window fill with a 90% safety threshold"),
+        new(Metric: CostMetric.RoutingRoi, Label: "Routing ROI", Description: "Estimated savings vs. the frozen 9-dimension baseline: gains above 0, losses below"),
+        new(Metric: CostMetric.TotalTurnCost, Label: "Turn Cost", Description: "Stepped cumulative cost, area colored by the active model"),
+        new(Metric: CostMetric.Tokens, Label: "Tokens", Description: "Cumulative tokens with exponential-runaway detection"),
+        new(Metric: CostMetric.ToolExecutionSteps, Label: "Tool Steps", Description: "Per-turn step bars, segmented by the model that handled each stretch"),
+        new(Metric: CostMetric.CacheHitRate, Label: "Cache Hit", Description: "Stepped cache-hit-rate line with a gradient track"),
+        new(Metric: CostMetric.TimeToFirstToken, Label: "TTFT", Description: "Latency line over per-model background zones; spikes pinned"),
+        new(Metric: CostMetric.ContextBufferMargin, Label: "Context", Description: "Context-window fill with a 90% safety threshold")
     ];
 
     private static readonly (MetricRange Range, string Label)[] Ranges =
@@ -130,7 +135,7 @@
         (MetricRange.Day, "Day"),
         (MetricRange.Week, "Week"),
         (MetricRange.Month, "Month"),
-        (MetricRange.AllTime, "All"),
+        (MetricRange.AllTime, "All")
     ];
 
     private CostMetric _metric = CostMetric.RoutingRoi;
@@ -146,7 +151,7 @@
     private IReadOnlyList<MetricTurnPoint> _rollupHistory = [];
     private IReadOnlyList<MetricTurnPoint> _roiHistory = [];
     private Timer? _roiPollTimer;
-    private CostChartModel _model = new(CostChartKind.DualDirectionalBars, "Routing ROI", "$", "—", null, [], []);
+    private CostChartModel _model = new(Kind: CostChartKind.DualDirectionalBars, Title: "Routing ROI", Unit: "$", Headline: "—", null, Models: [], Points: []);
     private string _modelJson = "{}";
 
     /// <summary>The display definition for the currently selected metric.</summary>
@@ -173,29 +178,29 @@
         // day granularity and an in-progress bucket is always excluded (UsageRollupStore's
         // never-publish-the-in-progress-bucket rule), so an unaligned 'from' can land after the earliest
         // fully-elapsed day bucket's start and drop it from the range.
-        var todayStartUtc = new DateTimeOffset(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
-        var buckets = await UsageStore.LoadRollupAsync(todayStartUtc.AddDays(-370), todayStartUtc, "day", "day");
+        var todayStartUtc = new DateTimeOffset(dateTime: DateTimeOffset.UtcNow.Date, offset: TimeSpan.Zero);
+        var buckets = await UsageStore.LoadRollupAsync(from: todayStartUtc.AddDays(-370), to: todayStartUtc, width: "day", groupBy: "day");
         _rollupHistory = buckets
             .OrderBy(b => b.BucketStartUtc)
             .Select(b => new MetricTurnPoint(
                 TimestampUtc: b.BucketStartUtc,
                 SessionId: FormattableString.Invariant($"rollup:{b.BucketStartUtc:yyyy-MM-dd}"),
                 Model: string.Empty,
-                BaselineCostUsd: null,
+                null,
                 TotalCost: b.CostUsd,
-                PromptTokens: (int)Math.Min(b.PromptTokens, int.MaxValue),
-                CompletionTokens: (int)Math.Min(b.CompletionTokens, int.MaxValue),
-                ToolExecutionSteps: 0,
+                PromptTokens: (int)Math.Min(val1: b.PromptTokens, val2: int.MaxValue),
+                CompletionTokens: (int)Math.Min(val1: b.CompletionTokens, val2: int.MaxValue),
+                0,
                 CacheHitRate: CostChartBuilder.CacheHitRate(
-                    (int)Math.Min(b.PromptTokens, int.MaxValue),
-                    (int)Math.Min(b.CacheCreationTokens, int.MaxValue),
-                    (int)Math.Min(b.CacheReadTokens, int.MaxValue)),
-                TimeToFirstTokenMs: 0,
-                ContextBufferPercent: 0m))
+                    promptTokens: (int)Math.Min(val1: b.PromptTokens, val2: int.MaxValue),
+                    cacheCreationTokens: (int)Math.Min(val1: b.CacheCreationTokens, val2: int.MaxValue),
+                    cacheReadTokens: (int)Math.Min(val1: b.CacheReadTokens, val2: int.MaxValue)),
+                0,
+                0m))
             .ToList();
 
         await RefreshRoiAsync();
-        _roiPollTimer = new Timer(_ => _ = PollRoiAsync(), null, RoiPollInterval, RoiPollInterval);
+        _roiPollTimer = new Timer(callback: _ => _ = PollRoiAsync(), null, dueTime: RoiPollInterval, period: RoiPollInterval);
         Recompute();
     }
 
@@ -221,8 +226,8 @@
     /// </summary>
     private async Task RefreshRoiAsync()
     {
-        var todayStartUtc = new DateTimeOffset(DateTimeOffset.UtcNow.Date, TimeSpan.Zero);
-        var points = await UsageStore.LoadRoutingRoiAsync(todayStartUtc.AddDays(-370), todayStartUtc.AddDays(1));
+        var todayStartUtc = new DateTimeOffset(dateTime: DateTimeOffset.UtcNow.Date, offset: TimeSpan.Zero);
+        var points = await UsageStore.LoadRoutingRoiAsync(from: todayStartUtc.AddDays(-370), to: todayStartUtc.AddDays(1));
         _roiHistory = points
             .OrderBy(p => p.ComparedAtUtc)
             .Select(p => new MetricTurnPoint(
@@ -231,23 +236,29 @@
                 Model: p.RoutedModel,
                 BaselineCostUsd: p.BaselineEstimatedCostUsd,
                 TotalCost: p.ActualCostUsd ?? 0m,
-                PromptTokens: 0,
-                CompletionTokens: 0,
-                ToolExecutionSteps: 0,
-                CacheHitRate: 0m,
-                TimeToFirstTokenMs: 0,
-                ContextBufferPercent: 0m,
+                0,
+                0,
+                0,
+                0m,
+                0,
+                0m,
                 BaselineModel: p.BaselineModel,
                 IsExploratory: p.IsExploratory))
             .ToList();
     }
 
     /// <summary>Stops the Routing ROI poll timer when the tab is torn down.</summary>
-    public void Dispose() => _roiPollTimer?.Dispose();
+    public void Dispose()
+    {
+        _roiPollTimer?.Dispose();
+    }
 
     // Runs right after OnInitialized on first render, and again whenever the Dashboard re-renders on
     // LiveDataStore.Changed (new live telemetry) - keeps the chart auto-refreshing as new turns arrive.
-    protected override void OnParametersSet() => Recompute();
+    protected override void OnParametersSet()
+    {
+        Recompute();
+    }
 
     /// <summary>Switches the active metric pill and recomputes the chart.</summary>
     private void SelectMetric(CostMetric metric)
@@ -276,14 +287,17 @@
         var now = DateTimeOffset.UtcNow;
         _corpus = BuildCorpus(now);
         _model = CostChartBuilder.Build(
-            _corpus, _metric, _range, string.IsNullOrEmpty(_sessionScope) ? null : _sessionScope, now);
+            points: _corpus, metric: _metric, range: _range, sessionId: string.IsNullOrEmpty(_sessionScope) ? null : _sessionScope, now: now);
         _modelJson = ChartJson.Serialize(_model);
     }
 
     // Merges live turns (real data) with rollup-backed history (also real, and what survives a GUI
     // restart) on the same time axis; the session scope dropdown lets the user isolate one. MockData only
     // fills in when there is neither - the offline/no-proxy demo path.
-    /// <summary>Builds the point corpus the chart model is derived from, combining rollup history, live turns, and (as a last resort) mock data.</summary>
+    /// <summary>
+    /// Builds the point corpus the chart model is derived from, combining rollup history, live turns, and (as a last
+    /// resort) mock data.
+    /// </summary>
     private IReadOnlyList<MetricTurnPoint> BuildCorpus(DateTimeOffset now)
     {
         // Routing ROI has its own corpus: one point per compared routing decision, carrying the baseline
@@ -317,7 +331,7 @@
                     TimestampUtc: turn.TimestampUtc,
                     SessionId: conversation.Id,
                     Model: turn.Model,
-                    BaselineCostUsd: null,
+                    null,
                     TotalCost: turn.TotalCost,
                     PromptTokens: turn.PromptTokens,
                     CompletionTokens: turn.CompletionTokens,
@@ -348,9 +362,9 @@
             var liveIds = Conversations.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
             var demoIds = _corpus
                 .Select(p => p.SessionId)
-                .Where(id => !liveIds.Contains(id) && !id.StartsWith("rollup:", StringComparison.Ordinal))
+                .Where(id => !liveIds.Contains(id) && !id.StartsWith(value: "rollup:", comparisonType: StringComparison.Ordinal))
                 .Distinct(StringComparer.Ordinal)
-                .OrderBy(id => id, StringComparer.Ordinal);
+                .OrderBy(keySelector: id => id, comparer: StringComparer.Ordinal);
             var n = 1;
             foreach (var id in demoIds)
             {
@@ -366,6 +380,7 @@
         MetricRange.Day => "Past 24 hours",
         MetricRange.Week => "Past 7 days",
         MetricRange.Month => "Past 30 days",
-        _ => "All time",
+        _ => "All time"
     };
+
 }

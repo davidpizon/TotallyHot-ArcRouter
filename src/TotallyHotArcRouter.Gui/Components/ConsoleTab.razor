@@ -3,9 +3,8 @@
    global usings. Reads directly from LiveDataStore's own LogLinesChanged event (instead of a
    cascading parameter from Dashboard.razor) so a burst of log lines only re-renders this tab, not
    the whole dashboard. *@
-@using Microsoft.JSInterop
-@using Microsoft.Maui.ApplicationModel.DataTransfer
 @implements IDisposable
+@using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject LiveDataStore LiveDataStore
 @inject IJSRuntime Js
@@ -22,13 +21,13 @@
         <div class="flex items-center gap-2">
             <button @onclick="CopyAllToClipboard"
                     class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
-                <Icon Name="@(_justCopied ? "check-circle" : "copy")" Size="20" />
+                <Icon Name="@(_justCopied ? "check-circle" : "copy")" Size="20"/>
                 @(_justCopied ? "Copied!" : "Copy")
             </button>
 
             <button @onclick="ClearBuffer"
                     class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
-                <Icon Name="trash" Size="20" />
+                <Icon Name="trash" Size="20"/>
                 Clear Buffer
             </button>
         </div>
@@ -49,7 +48,9 @@
                    row removed, one added" rather than re-diffing every remaining row's content. *@
                 <div @key="@($"{line.TimestampUtc.Ticks}|{line.Level}|{line.Message}")"
                      class="ls-console-line"
-                     style="color:@LogLevelColorMapper.GetColor(line.Level)">@LogLineFormatter.Format(line)</div>
+                     style="color:@LogLevelColorMapper.GetColor(line.Level)">
+                    @LogLineFormatter.Format(line)
+                </div>
             }
         }
     </div>
@@ -81,7 +82,7 @@
         if (firstRender)
         {
             _dotNetRef = DotNetObjectReference.Create(this);
-            await Js.InvokeVoidAsync("consoleScroll.init", _viewport, _dotNetRef);
+            await Js.InvokeVoidAsync(identifier: "consoleScroll.init", _viewport, _dotNetRef);
         }
 
         // Only scroll when a line actually arrived (not on every unrelated re-render), and only
@@ -90,7 +91,7 @@
         if (_autoScroll && _pendingScroll)
         {
             _pendingScroll = false;
-            await Js.InvokeVoidAsync("consoleScroll.scrollToBottom", _viewport);
+            await Js.InvokeVoidAsync(identifier: "consoleScroll.scrollToBottom", _viewport);
         }
     }
 
@@ -114,12 +115,15 @@
         _autoScroll = !_autoScroll;
         if (_autoScroll)
         {
-            await Js.InvokeVoidAsync("consoleScroll.scrollToBottom", _viewport);
+            await Js.InvokeVoidAsync(identifier: "consoleScroll.scrollToBottom", _viewport);
         }
     }
 
     /// <summary>Empties the log buffer. Implements the toolbar's Clear Buffer button.</summary>
-    private void ClearBuffer() => LiveDataStore.ClearLogLines();
+    private void ClearBuffer()
+    {
+        LiveDataStore.ClearLogLines();
+    }
 
     // Uses MAUI's native Clipboard rather than the browser's navigator.clipboard via JS interop:
     // clipboard-write from inside a WebView2 page can be blocked by permission prompts/secure-context
@@ -144,7 +148,10 @@
     }
 
     /// <summary>Unsubscribes from <see cref="LiveDataStore.LogLinesChanged"/>.</summary>
-    public void Dispose() => LiveDataStore.LogLinesChanged -= HandleLogLinesChanged;
+    public void Dispose()
+    {
+        LiveDataStore.LogLinesChanged -= HandleLogLinesChanged;
+    }
 
     // Blazor prefers DisposeAsync() over Dispose() when a component implements both - it may never
     // call Dispose() at all. Call it explicitly here so the event unsubscription always happens
@@ -156,4 +163,5 @@
         _dotNetRef?.Dispose();
         return ValueTask.CompletedTask;
     }
+
 }

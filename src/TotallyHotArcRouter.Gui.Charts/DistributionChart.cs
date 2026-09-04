@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Linq;
 
 namespace TotallyHot.ArcRouter.Gui.Charts;
 
@@ -24,8 +23,9 @@ public sealed record GroupedBarsModel(
     IReadOnlyList<DistributionSeries> Series)
 {
     /// <summary>Creates a grouped-bars model with the <c>GroupedBars</c> renderer kind.</summary>
-    public GroupedBarsModel(string title, IReadOnlyList<string> categories, decimal? yMax, IReadOnlyList<DistributionSeries> series)
-        : this("GroupedBars", title, categories, yMax, series)
+    public GroupedBarsModel(string title, IReadOnlyList<string> categories, decimal? yMax,
+        IReadOnlyList<DistributionSeries> series)
+        : this(Kind: "GroupedBars", Title: title, Categories: categories, YMax: yMax, Series: series)
     {
     }
 
@@ -54,7 +54,7 @@ public sealed record DonutModel(string Kind, string Title, IReadOnlyList<Distrib
 {
     /// <summary>Creates a donut model with the <c>Donut</c> renderer kind.</summary>
     public DonutModel(string title, IReadOnlyList<DistributionSlice> slices)
-        : this("Donut", title, slices)
+        : this(Kind: "Donut", Title: title, Slices: slices)
     {
     }
 }
@@ -69,10 +69,12 @@ public static class ChartJson
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     /// <summary>Serializes a chart model to a JSON string for <c>echartsInterop.render</c>.</summary>
-    public static string Serialize<T>(T model) => JsonSerializer.Serialize(model, Options);
+    public static string Serialize<T>(T model)
+    {
+        return JsonSerializer.Serialize(value: model, options: Options);
+    }
 }
-

@@ -1,8 +1,8 @@
-using TotallyHot.ArcRouter.Proxy;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Integration;
 
@@ -10,7 +10,7 @@ namespace TotallyHot.ArcRouter.Tests.Integration;
 /// Covers end-to-end proxy interception behavior against a real local upstream endpoint.
 /// </summary>
 [Collection("ProxyLifecycle")]
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class ProxyInterceptionTests
 {
     [Fact(Skip = "Integration testing disabled")]
@@ -23,17 +23,21 @@ public class ProxyInterceptionTests
         upstream.Start();
 
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-        var upstreamTask = Task.Run(async () =>
+        var upstreamTask = Task.Run(function: async () =>
         {
             try
             {
+                // upstreamTask is awaited below, before this scope exits.
+                // ReSharper disable once AccessToDisposedClosure
                 var context = await upstream.GetContextAsync().WaitAsync(TestContext.Current.CancellationToken);
-                using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
-                var requestBody = await reader.ReadToEndAsync();
+                using var reader = new StreamReader(stream: context.Request.InputStream,
+                    encoding: context.Request.ContentEncoding);
+                var requestBody = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
 
                 context.Response.StatusCode = (int)HttpStatusCode.OK;
-                context.Response.Headers.Add("X-Upstream", "ok");
-                await using var writer = new StreamWriter(context.Response.OutputStream, Encoding.UTF8);
+                context.Response.Headers.Add(name: "X-Upstream", value: "ok");
+                await using var writer =
+                    new StreamWriter(stream: context.Response.OutputStream, encoding: Encoding.UTF8);
                 await writer.WriteAsync($"upstream:{requestBody}");
                 context.Response.Close();
             }
@@ -41,7 +45,7 @@ public class ProxyInterceptionTests
             {
                 // Timeout occurred; upstream listener was cancelled
             }
-        }, timeoutCts.Token);
+        }, cancellationToken: timeoutCts.Token);
 
         var host = Program.CreateHostBuilder([]).Build();
         await host.StartAsync(TestContext.Current.CancellationToken);
@@ -49,20 +53,23 @@ public class ProxyInterceptionTests
         try
         {
             var interceptor = host.Services.GetRequiredService<RequestInterceptor>();
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            using var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:5001/v1/chat/completions")
-            {
-                Content = new StringContent("payload", Encoding.UTF8, "text/plain")
-            };
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+            using var request = new HttpRequestMessage(method: HttpMethod.Post,
+                requestUri: "http://127.0.0.1:5001/v1/chat/completions");
+            request.Content =
+                new StringContent(content: "payload", encoding: Encoding.UTF8, mediaType: "text/plain");
 
             request.Headers.Host = $"127.0.0.1:{upstreamPort}";
 
-            var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+            var response = await client.SendAsync(request: request,
+                cancellationToken: TestContext.Current.CancellationToken);
             var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("ok", response.Headers.GetValues("X-Upstream").Single());
-            Assert.Contains("upstream:payload", responseBody, StringComparison.Ordinal);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: response.StatusCode);
+            Assert.Equal(expected: "ok", actual: response.Headers.GetValues("X-Upstream").Single());
+            Assert.Contains(expectedSubstring: "upstream:payload", actualString: responseBody,
+                comparisonType: StringComparison.Ordinal);
             Assert.True(interceptor.InterceptedRequestCount >= 1);
 
             await upstreamTask.WaitAsync(TestContext.Current.CancellationToken);
@@ -70,18 +77,17 @@ public class ProxyInterceptionTests
         finally
         {
             upstream.Stop();
-            timeoutCts.Cancel();
+            await timeoutCts.CancelAsync();
             await host.StopAsync(TestContext.Current.CancellationToken);
         }
     }
 
     private static int GetFreeTcpPort()
     {
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        var listener = new TcpListener(localaddr: IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
     }
 }
-

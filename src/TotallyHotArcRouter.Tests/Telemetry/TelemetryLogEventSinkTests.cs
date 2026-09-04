@@ -1,19 +1,22 @@
-using TotallyHot.ArcRouter.Telemetry;
 using Moq;
 using Serilog.Events;
 using Serilog.Parsing;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
 /// <summary>Covers <see cref="TelemetryLogEventSink"/>: the Serilog-to-Console-tab bridge.</summary>
 public class TelemetryLogEventSinkTests
 {
-    private static LogEvent SampleEvent(LogEventLevel level, string message, DateTimeOffset? timestamp = null) => new(
-        timestamp ?? DateTimeOffset.UtcNow,
-        level,
-        exception: null,
-        new MessageTemplateParser().Parse(message),
-        []);
+    private static LogEvent SampleEvent(LogEventLevel level, string message, DateTimeOffset? timestamp = null)
+    {
+        return new LogEvent(
+            timestamp: timestamp ?? DateTimeOffset.UtcNow,
+            level: level,
+            null,
+            messageTemplate: new MessageTemplateParser().Parse(message),
+            properties: []);
+    }
 
     [Fact]
     public void Constructor_NullPublisher_Throws()
@@ -40,11 +43,11 @@ public class TelemetryLogEventSinkTests
             .Returns(Task.CompletedTask);
 
         var sink = new TelemetryLogEventSink(publisherMock.Object);
-        sink.Emit(SampleEvent(LogEventLevel.Information, "Connected to database."));
+        sink.Emit(SampleEvent(level: LogEventLevel.Information, message: "Connected to database."));
 
         Assert.NotNull(published);
-        Assert.Equal("INFO", published!.Level);
-        Assert.Equal("Connected to database.", published.Message);
+        Assert.Equal(expected: "INFO", actual: published!.Level);
+        Assert.Equal(expected: "Connected to database.", actual: published.Message);
     }
 
     [Fact]
@@ -52,7 +55,7 @@ public class TelemetryLogEventSinkTests
     {
         // A non-UTC offset, so a bug reverting to DateTimeOffset.UtcNow (wrong point in time
         // entirely, not just wrong offset) would fail this even though both are "3 PM local".
-        var timestamp = new DateTimeOffset(2026, 7, 9, 15, 0, 0, TimeSpan.FromHours(-5));
+        var timestamp = new DateTimeOffset(2026, 7, 9, 15, 0, 0, offset: TimeSpan.FromHours(-5));
         LogLineEvent? published = null;
         var publisherMock = new Mock<ITelemetryPublisher>();
         publisherMock
@@ -61,11 +64,11 @@ public class TelemetryLogEventSinkTests
             .Returns(Task.CompletedTask);
 
         var sink = new TelemetryLogEventSink(publisherMock.Object);
-        sink.Emit(SampleEvent(LogEventLevel.Information, "hi", timestamp));
+        sink.Emit(SampleEvent(level: LogEventLevel.Information, message: "hi", timestamp: timestamp));
 
         Assert.NotNull(published);
-        Assert.Equal(timestamp.ToUniversalTime(), published!.TimestampUtc);
-        Assert.Equal(TimeSpan.Zero, published.TimestampUtc.Offset);
+        Assert.Equal(expected: timestamp.ToUniversalTime(), actual: published!.TimestampUtc);
+        Assert.Equal(expected: TimeSpan.Zero, actual: published.TimestampUtc.Offset);
     }
 
     [Theory]
@@ -77,7 +80,7 @@ public class TelemetryLogEventSinkTests
     [InlineData(LogEventLevel.Fatal, "FATAL")]
     public void NormalizeLevel_MapsToGuiExpectedShortForm(LogEventLevel level, string expected)
     {
-        Assert.Equal(expected, TelemetryLogEventSink.NormalizeLevel(level));
+        Assert.Equal(expected: expected, actual: TelemetryLogEventSink.NormalizeLevel(level));
     }
 
     [Fact]
@@ -93,7 +96,7 @@ public class TelemetryLogEventSinkTests
 
         var sink = new TelemetryLogEventSink(publisherMock.Object);
 
-        Assert.Throws<InvalidOperationException>(() => sink.Emit(SampleEvent(LogEventLevel.Information, "hi")));
+        Assert.Throws<InvalidOperationException>(() =>
+            sink.Emit(SampleEvent(level: LogEventLevel.Information, message: "hi")));
     }
 }
-

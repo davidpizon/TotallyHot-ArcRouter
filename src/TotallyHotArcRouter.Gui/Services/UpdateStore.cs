@@ -1,5 +1,6 @@
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 
@@ -13,16 +14,19 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// </summary>
 public sealed class UpdateStore : IDisposable
 {
-    private readonly IUpdateAdminClient _client;
     private readonly IMsiUpdateApplier _applier;
-    private readonly IDisposable? _ownedClient;
-    private readonly HttpClient? _ownedHttpClient;
+    private readonly IUpdateAdminClient _client;
     private readonly Action _exitApplication;
     private readonly ILogger<UpdateStore>? _logger;
+    private readonly IDisposable? _ownedClient;
+    private readonly HttpClient? _ownedHttpClient;
 
     /// <summary>Initializes a new instance of the <see cref="UpdateStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">The proxy's TLS gRPC endpoint; defaults to <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.</param>
+    /// <param name="serverAddress">
+    /// The proxy's TLS gRPC endpoint; defaults to
+    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// </param>
     public UpdateStore(
         ILogger<UpdateStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
@@ -34,7 +38,7 @@ public sealed class UpdateStore : IDisposable
 
         var httpClient = new HttpClient();
         _ownedHttpClient = httpClient;
-        _applier = new MsiUpdateApplier(httpClient, Microsoft.Extensions.Logging.Abstractions.NullLogger<MsiUpdateApplier>.Instance);
+        _applier = new MsiUpdateApplier(httpClient: httpClient, logger: NullLogger<MsiUpdateApplier>.Instance);
 
         _exitApplication = () => Environment.Exit(0);
     }
@@ -53,7 +57,8 @@ public sealed class UpdateStore : IDisposable
     /// called without ending the test process.
     /// </param>
     /// <param name="logger">Optional logger.</param>
-    public UpdateStore(IUpdateAdminClient client, IMsiUpdateApplier applier, Action? exitApplication = null, ILogger<UpdateStore>? logger = null)
+    public UpdateStore(IUpdateAdminClient client, IMsiUpdateApplier applier, Action? exitApplication = null,
+        ILogger<UpdateStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(applier);
@@ -83,16 +88,30 @@ public sealed class UpdateStore : IDisposable
     /// <summary>The outcome of the most recent apply attempt, or <see langword="null"/> before one has run.</summary>
     public MsiApplyResult? LastApplyOutcome { get; private set; }
 
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _ownedClient?.Dispose();
+        _ownedHttpClient?.Dispose();
+    }
+
     /// <summary>Raised after any of the above change.</summary>
     public event Action? Changed;
 
-    /// <summary>Loads the last-known update status. Failures are swallowed and surfaced via <see cref="IsReachable"/>/<see cref="LastError"/>.</summary>
-    public Task LoadAsync(CancellationToken cancellationToken = default) =>
-        RunAsync(() => _client.GetStatusAsync(cancellationToken), "load the update status");
+    /// <summary>
+    /// Loads the last-known update status. Failures are swallowed and surfaced via <see cref="IsReachable"/>/
+    /// <see cref="LastError"/>.
+    /// </summary>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
+    {
+        return RunAsync(operation: () => _client.GetStatusAsync(cancellationToken), action: "load the update status");
+    }
 
     /// <summary>Forces an immediate re-check - the "Check Now" button.</summary>
-    public Task CheckNowAsync(CancellationToken cancellationToken = default) =>
-        RunAsync(() => _client.CheckNowAsync(cancellationToken), "check for updates");
+    public Task CheckNowAsync(CancellationToken cancellationToken = default)
+    {
+        return RunAsync(operation: () => _client.CheckNowAsync(cancellationToken), action: "check for updates");
+    }
 
     /// <summary>
     /// Applies the currently-known-available update - the "Apply Update" button, which the panel is
@@ -103,26 +122,28 @@ public sealed class UpdateStore : IDisposable
     /// supplied at construction so this process releases its own files before the MSI tries to replace
     /// them.
     /// </summary>
-    /// <exception cref="InvalidOperationException">No update is currently known available (call <see cref="LoadAsync"/>/<see cref="CheckNowAsync"/> first).</exception>
+    /// <exception cref="InvalidOperationException">
+    /// No update is currently known available (call <see cref="LoadAsync"/>/
+    /// <see cref="CheckNowAsync"/> first).
+    /// </exception>
     public async Task ApplyAsync(CancellationToken cancellationToken = default)
     {
-        if (Status is not { UpdateAvailable: true, AssetDownloadUrl: { } assetDownloadUrl, AssetSha256: { } assetSha256 } status)
-        {
-            throw new InvalidOperationException("No verified update is currently known available. Call LoadAsync/CheckNowAsync first.");
-        }
+        if (Status is not
+            { UpdateAvailable: true, AssetDownloadUrl: { } assetDownloadUrl, AssetSha256: { } assetSha256 } status)
+            throw new InvalidOperationException(
+                "No verified update is currently known available. Call LoadAsync/CheckNowAsync first.");
 
         IsBusy = true;
         Changed?.Invoke();
 
         try
         {
-            await TryNotifyRouterAsync(status.LatestVersion, cancellationToken).ConfigureAwait(false);
+            await TryNotifyRouterAsync(latestVersion: status.LatestVersion, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
 
-            LastApplyOutcome = await _applier.ApplyAsync(assetDownloadUrl, assetSha256, status.LatestVersion, cancellationToken).ConfigureAwait(false);
-            if (LastApplyOutcome.Succeeded)
-            {
-                _exitApplication();
-            }
+            LastApplyOutcome = await _applier.ApplyAsync(assetDownloadUrl: assetDownloadUrl, assetSha256: assetSha256,
+                latestVersion: status.LatestVersion, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (LastApplyOutcome.Succeeded) _exitApplication();
         }
         finally
         {
@@ -140,15 +161,20 @@ public sealed class UpdateStore : IDisposable
     {
         try
         {
-            await _client.NotifyApplyStartingAsync(latestVersion, cancellationToken).ConfigureAwait(false);
+            await _client.NotifyApplyStartingAsync(version: latestVersion, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (UpdateAdminException ex)
         {
-            _logger?.LogWarning(ex, "Could not notify the router that an apply is starting; proceeding anyway.");
+            _logger?.LogWarning(exception: ex,
+                message: "Could not notify the router that an apply is starting; proceeding anyway.");
         }
     }
 
-    /// <summary>Runs one status-returning operation, updating the store's state and swallowing failures into <see cref="IsReachable"/>/<see cref="LastError"/>.</summary>
+    /// <summary>
+    /// Runs one status-returning operation, updating the store's state and swallowing failures into
+    /// <see cref="IsReachable"/>/<see cref="LastError"/>.
+    /// </summary>
     private async Task RunAsync(Func<Task<UpdateStatusInfo>> operation, string action)
     {
         IsBusy = true;
@@ -163,7 +189,7 @@ public sealed class UpdateStore : IDisposable
         catch (UpdateAdminException ex)
         {
             RecordFailure(ex);
-            _logger?.LogWarning(ex, "Failed to {Action} from the router.", action);
+            _logger?.LogWarning(exception: ex, message: "Failed to {Action} from the router.", action);
         }
         finally
         {
@@ -178,12 +204,5 @@ public sealed class UpdateStore : IDisposable
     {
         IsReachable = !ex.IsUnavailable;
         LastError = ex.Message;
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        _ownedClient?.Dispose();
-        _ownedHttpClient?.Dispose();
     }
 }

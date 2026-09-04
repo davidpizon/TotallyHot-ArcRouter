@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
@@ -34,16 +32,21 @@ public sealed class DeferredTelemetryPublisher : ITelemetryPublisher
     /// </summary>
     private ITelemetryPublisher Resolved => _resolved ??= _serviceProvider.GetRequiredService<ITelemetryPublisher>();
 
-    /// <inheritdoc />
-    public Task PublishAsync(RoutingTelemetryEvent telemetryEvent, CancellationToken cancellationToken = default) =>
-        Resolved.PublishAsync(telemetryEvent, cancellationToken);
+    /// <inheritdoc/>
+    public Task PublishAsync(RoutingTelemetryEvent telemetryEvent, CancellationToken cancellationToken = default)
+    {
+        return Resolved.PublishAsync(telemetryEvent: telemetryEvent, cancellationToken: cancellationToken);
+    }
 
-    /// <inheritdoc />
-    public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) =>
-        Resolved.PublishLogLineAsync(logLine, cancellationToken);
+    /// <inheritdoc/>
+    public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
+    {
+        return Resolved.PublishLogLineAsync(logLine: logLine, cancellationToken: cancellationToken);
+    }
 
-    /// <inheritdoc />
-    public Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default) =>
-        Resolved.PublishQualitySignalAsync(signal, cancellationToken);
+    /// <inheritdoc/>
+    public Task PublishQualitySignalAsync(QualitySignalEvent signal, CancellationToken cancellationToken = default)
+    {
+        return Resolved.PublishQualitySignalAsync(signal: signal, cancellationToken: cancellationToken);
+    }
 }
-

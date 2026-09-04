@@ -1,10 +1,10 @@
-using System.Text;
-using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Router;
-using TotallyHot.ArcRouter.Quality;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text;
+using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -16,7 +16,8 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 public class RequestInterceptorRoutingPolicyTests
 {
     private static readonly string DefaultLiveDimension =
-        RouterDimension.ToLiveKey(new QualityOptions().LiveMemoryPrefix, RouterDimension.CodeGeneration);
+        RouterDimension.ToLiveKey(liveMemoryPrefix: new QualityOptions().LiveMemoryPrefix,
+            dimension: RouterDimension.CodeGeneration);
 
     [Fact]
     public async Task ResolveModelRouteAsync_UnresolvedModel_WithRoutingPolicy_UsesPolicySelection()
@@ -26,19 +27,20 @@ public class RequestInterceptorRoutingPolicyTests
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var policy = new FakeRoutingPolicy("kimi-k2.5");
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             routingPolicy: policy);
         var context = CreateContextWithBody("""{"model":"agentic-router"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
         Assert.NotNull(policy.LastContext);
-        Assert.Equal(2, policy.LastContext!.Candidates.Count);
-        Assert.Contains(policy.LastContext.Candidates, c => c.ModelName == "gpt-5.4");
-        Assert.Contains(policy.LastContext.Candidates, c => c.ModelName == "kimi-k2.5");
+        Assert.Equal(2, actual: policy.LastContext!.Candidates.Count);
+        Assert.Contains(collection: policy.LastContext.Candidates, filter: c => c.ModelName == "gpt-5.4");
+        Assert.Contains(collection: policy.LastContext.Candidates, filter: c => c.ModelName == "kimi-k2.5");
     }
 
     [Fact]
@@ -49,15 +51,16 @@ public class RequestInterceptorRoutingPolicyTests
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var policy = new FakeRoutingPolicy("gpt-5.4");
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             routingPolicy: policy);
         var context = CreateContextWithBody("""{"model":"auto"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("gpt-5.4", result.Route!.ModelName);
+        Assert.Equal(expected: "gpt-5.4", actual: result.Route!.ModelName);
     }
 
     [Fact]
@@ -67,20 +70,21 @@ public class RequestInterceptorRoutingPolicyTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var memory = new RouterMemory();
-        await memory.AddScoreAsync(DefaultLiveDimension, "gpt-5.4", 0.1);
-        await memory.AddScoreAsync(DefaultLiveDimension, "kimi-k2.5", 0.9);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "gpt-5.4", 0.1);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "kimi-k2.5", 0.9);
         var policy = new FakeRoutingPolicy("not-a-configured-model");
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             routerMemory: memory,
             routingPolicy: policy);
         var context = CreateContextWithBody("""{"model":"agentic-router"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("kimi-k2.5", result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
     }
 
     [Fact]
@@ -91,35 +95,38 @@ public class RequestInterceptorRoutingPolicyTests
             ("unscored", "moonshot", "unscored"));
         var memory = new RouterMemory();
         // Below the 0.5 cold-start ranking prior (see RequestInterceptor.ColdStartRankingScore).
-        await memory.AddScoreAsync(DefaultLiveDimension, "low-scored", 0.1);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "low-scored", 0.1);
         var policy = new FakeRoutingPolicy("low-scored");
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             routerMemory: memory,
             routingPolicy: policy);
         var context = CreateContextWithBody("""{"model":"agentic-router"}""");
 
-        await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(policy.LastContext);
-        Assert.Equal("unscored", policy.LastContext!.Candidates[0].ModelName);
-        Assert.Equal("low-scored", policy.LastContext.Candidates[1].ModelName);
+        Assert.Equal(expected: "unscored", actual: policy.LastContext!.Candidates[0].ModelName);
+        Assert.Equal(expected: "low-scored", actual: policy.LastContext.Candidates[1].ModelName);
     }
 
     [Fact]
     public async Task ResolveModelRouteAsync_ForcedSingleModel_NeverConsultsRoutingPolicy()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4-2026-01", "https://api.openai.com");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
+            baseUrl: "https://api.openai.com");
         var policy = new FakeRoutingPolicy("gpt-5.4");
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = "gpt-5.4" },
             routingPolicy: policy);
         var context = CreateContextWithBody("""{"model":"whatever-the-client-sent"}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Null(policy.LastContext);
@@ -133,17 +140,18 @@ public class RequestInterceptorRoutingPolicyTests
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var policy = new SignalsCapturingRoutingPolicy("kimi-k2.5");
         var interceptor = new RequestInterceptor(
-            Mock.Of<ILogger<RequestInterceptor>>(),
-            resolver,
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
             routingPolicy: policy);
         var context = CreateContextWithBody(
             """{"model":"agentic-router","messages":[{"role":"user","content":"please refactor this function"}]}""");
 
-        var result = await interceptor.ResolveModelRouteAsync(context, TestContext.Current.CancellationToken);
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(policy.LastSignals);
-        Assert.Equal("please refactor this function", policy.LastSignals!.TaskText);
+        Assert.Equal(expected: "please refactor this function", actual: policy.LastSignals!.TaskText);
     }
 
     private static DefaultHttpContext CreateContextWithBody(string body)
@@ -176,10 +184,13 @@ public class RequestInterceptorRoutingPolicyTests
     {
         public RoutingSignals? LastSignals { get; private set; }
 
-        public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default) =>
-            SelectModelAsync(context, signals: null, cancellationToken);
+        public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
+        {
+            return SelectModelAsync(context: context, null, cancellationToken: cancellationToken);
+        }
 
-        public Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals, CancellationToken cancellationToken = default)
+        public Task<string> SelectModelAsync(RoutingContext context, RoutingSignals? signals,
+            CancellationToken cancellationToken = default)
         {
             LastSignals = signals;
             return Task.FromResult(selection);

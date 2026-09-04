@@ -24,8 +24,8 @@ public class PersistentConversationTurnTrackerTests
 
         var tracker = new PersistentConversationTurnTracker(ledger);
 
-        Assert.Equal(5, tracker.NextTurn("sess-1"));
-        Assert.Equal(6, tracker.NextTurn("sess-1"));
+        Assert.Equal(5, actual: tracker.NextTurn("sess-1"));
+        Assert.Equal(6, actual: tracker.NextTurn("sess-1"));
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public class PersistentConversationTurnTrackerTests
     {
         var tracker = new PersistentConversationTurnTracker(new StubLedger());
 
-        Assert.Equal(1, tracker.NextTurn("sess-fresh"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-fresh"));
     }
 
     [Fact]
@@ -47,8 +47,8 @@ public class PersistentConversationTurnTrackerTests
         ledger.MaxTurnBySession["sess-1"] = 999; // a later restart would seed differently
         var next = tracker.NextTurn("sess-1"); // must count in memory, not reconsult
 
-        Assert.Equal(6, next);
-        Assert.Equal(1, ledger.CallCount);
+        Assert.Equal(6, actual: next);
+        Assert.Equal(1, actual: ledger.CallCount);
     }
 
     [Fact]
@@ -56,10 +56,10 @@ public class PersistentConversationTurnTrackerTests
     {
         var tracker = new PersistentConversationTurnTracker(new StubLedger());
 
-        Assert.Equal(1, tracker.NextTurn("sess-a"));
-        Assert.Equal(1, tracker.NextTurn("sess-b"));
-        Assert.Equal(2, tracker.NextTurn("sess-a"));
-        Assert.Equal(2, tracker.NextTurn("sess-b"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-a"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-b"));
+        Assert.Equal(2, actual: tracker.NextTurn("sess-a"));
+        Assert.Equal(2, actual: tracker.NextTurn("sess-b"));
     }
 
     [Fact]
@@ -67,9 +67,9 @@ public class PersistentConversationTurnTrackerTests
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var ledger = new StubLedger();
-        var tracker = new PersistentConversationTurnTracker(ledger, clock);
+        var tracker = new PersistentConversationTurnTracker(ledger: ledger, timeProvider: clock);
 
-        Assert.Equal(1, tracker.NextTurn("sess-1"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-1"));
 
         // The tracker recorded turn 1 in memory. Advance the ledger independently (as if a different
         // process instance recorded turns 2 and 3 for this session while this tracker's entry went idle)
@@ -79,7 +79,7 @@ public class PersistentConversationTurnTrackerTests
 
         var resumed = tracker.NextTurn("sess-1");
 
-        Assert.Equal(4, resumed);
+        Assert.Equal(4, actual: resumed);
     }
 
     [Fact]
@@ -87,14 +87,14 @@ public class PersistentConversationTurnTrackerTests
     {
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var ledger = new StubLedger();
-        var tracker = new PersistentConversationTurnTracker(ledger, clock);
+        var tracker = new PersistentConversationTurnTracker(ledger: ledger, timeProvider: clock);
 
-        Assert.Equal(1, tracker.NextTurn("sess-1"));
+        Assert.Equal(1, actual: tracker.NextTurn("sess-1"));
 
         ledger.MaxTurnBySession["sess-1"] = 999; // would change the outcome if re-seeded
         clock.Advance(TimeSpan.FromHours(11));
 
-        Assert.Equal(2, tracker.NextTurn("sess-1"));
+        Assert.Equal(2, actual: tracker.NextTurn("sess-1"));
     }
 
     [Fact]
@@ -103,15 +103,15 @@ public class PersistentConversationTurnTrackerTests
         var tracker = new PersistentConversationTurnTracker(new StubLedger());
         const int callCount = 200;
 
-        var tasks = Enumerable.Range(0, callCount)
+        var tasks = Enumerable.Range(0, count: callCount)
             .Select(_ => Task.Run(() => tracker.NextTurn("sess-concurrent")))
             .ToArray();
 
         await Task.WhenAll(tasks);
 
         var results = tasks.Select(t => t.Result).OrderBy(v => v).ToArray();
-        var expected = Enumerable.Range(1, callCount).ToArray();
-        Assert.Equal(expected, results);
+        var expected = Enumerable.Range(1, count: callCount).ToArray();
+        Assert.Equal(expected: expected, actual: results);
     }
 
     private sealed class StubLedger : IUsageLedger
@@ -120,28 +120,40 @@ public class PersistentConversationTurnTrackerTests
 
         public int CallCount { get; private set; }
 
-        public Task RecordAsync(UsageLedgerEntry entry, CancellationToken cancellationToken = default) =>
+        public Task RecordAsync(UsageLedgerEntry entry, CancellationToken cancellationToken = default)
+        {
             throw new NotSupportedException("Not exercised by the turn tracker.");
+        }
 
         public int GetMaxTurnNumber(string sessionId)
         {
             CallCount++;
-            return MaxTurnBySession.GetValueOrDefault(sessionId, 0);
+            return MaxTurnBySession.GetValueOrDefault(key: sessionId, 0);
         }
 
-        public int DeleteOlderThan(DateTimeOffset cutoffUtc) =>
+        public int DeleteOlderThan(DateTimeOffset cutoffUtc)
+        {
             throw new NotSupportedException("Not exercised by the turn tracker.");
+        }
 
-        public decimal SumEstimatedCostUsd(string provider, DateTimeOffset fromUtc, DateTimeOffset toUtc) =>
+        public decimal SumEstimatedCostUsd(string provider, DateTimeOffset fromUtc, DateTimeOffset toUtc)
+        {
             throw new NotSupportedException("Not exercised by the turn tracker.");
+        }
     }
 
     private sealed class FakeTimeProvider(DateTimeOffset start) : TimeProvider
     {
         private DateTimeOffset _now = start;
 
-        public override DateTimeOffset GetUtcNow() => _now;
+        public override DateTimeOffset GetUtcNow()
+        {
+            return _now;
+        }
 
-        public void Advance(TimeSpan by) => _now += by;
+        public void Advance(TimeSpan by)
+        {
+            _now += by;
+        }
     }
 }

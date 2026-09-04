@@ -14,47 +14,49 @@ public class DimensionBestBaselineTests
         // Frozen probing-set prior: opus averages higher than sonnet on code_generation overall.
         var matrix = DimensionModelScoreMatrix.FromRows(
         [
-            new("p1", "code_generation", "claude-opus-4-6", 0.9),
-            new("p2", "code_generation", "claude-opus-4-6", 0.9),
-            new("p3", "code_generation", "claude-sonnet-4-5", 0.5),
+            new CodeRouterBenchResultRow(TaskId: "p1", Dimension: "code_generation", Model: "claude-opus-4-6", 0.9),
+            new CodeRouterBenchResultRow(TaskId: "p2", Dimension: "code_generation", Model: "claude-opus-4-6", 0.9),
+            new CodeRouterBenchResultRow(TaskId: "p3", Dimension: "code_generation", Model: "claude-sonnet-4-5", 0.5)
         ]);
         var baseline = new DimensionBestBaseline(matrix);
 
         // But on this specific task, sonnet actually wins - the frozen prior is wrong here.
         RegretTaskOutcome[] tasks =
         [
-            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["claude-opus-4-6"] = new(Score: 0.2, CostUsd: 0.0, TotalTokens: 100),
-                ["claude-sonnet-4-5"] = new(Score: 0.95, CostUsd: 0.0, TotalTokens: 100),
-            }),
+                ["claude-opus-4-6"] = new(0.2, 0.0, 100),
+                ["claude-sonnet-4-5"] = new(0.95, 0.0, 100)
+            })
         ];
 
-        var result = RegretReplayEngine.Replay(tasks, baseline, Weights);
+        var result = RegretReplayEngine.Replay(tasks: tasks, router: baseline, weights: Weights);
 
         // DimensionBest picks opus (frozen prior), oracle is sonnet -> nonzero regret.
         Assert.True(result.CumulativeRegret > 0d);
-        Assert.Equal(0.2, result.AvgPerf, precision: 6);
+        Assert.Equal(0.2, actual: result.AvgPerf, 6);
     }
 
     [Fact]
     public void Replay_FrozenPriorAgreesWithTruePerTaskWinner_RegretIsZero()
     {
-        var matrix = DimensionModelScoreMatrix.FromRows([new("p1", "code_generation", "claude-opus-4-6", 0.9)]);
+        var matrix = DimensionModelScoreMatrix.FromRows([
+            new CodeRouterBenchResultRow(TaskId: "p1", Dimension: "code_generation", Model: "claude-opus-4-6", 0.9)
+        ]);
         var baseline = new DimensionBestBaseline(matrix);
 
         RegretTaskOutcome[] tasks =
         [
-            new("t1", "code_generation", new Dictionary<string, RegretOutcomeCell>
+            new(TaskId: "t1", Dimension: "code_generation", Cells: new Dictionary<string, RegretOutcomeCell>
             {
-                ["claude-opus-4-6"] = new(Score: 1.0, CostUsd: 0.0, TotalTokens: 100),
-                ["claude-sonnet-4-5"] = new(Score: 0.1, CostUsd: 0.0, TotalTokens: 100),
-            }),
+                ["claude-opus-4-6"] = new(1.0, 0.0, 100),
+                ["claude-sonnet-4-5"] = new(0.1, 0.0, 100)
+            })
         ];
 
-        var result = RegretReplayEngine.Replay(tasks, baseline, Weights);
+        var result = RegretReplayEngine.Replay(tasks: tasks, router: baseline, weights: Weights);
 
-        Assert.Equal(0d, result.CumulativeRegret, precision: 9);
+        Assert.Equal(0d, actual: result.CumulativeRegret, 9);
     }
 
     [Fact]
@@ -62,7 +64,8 @@ public class DimensionBestBaselineTests
     {
         var matrix = DimensionModelScoreMatrix.FromRows([]);
         var baseline = new DimensionBestBaseline(matrix);
-        var context = new RegretReplayContext("t1", "code_generation", ["claude-opus-4-6"]);
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "code_generation",
+            CandidateModelIds: ["claude-opus-4-6"]);
 
         Assert.Null(baseline.Route(context));
     }
@@ -72,12 +75,13 @@ public class DimensionBestBaselineTests
     {
         var matrix = DimensionModelScoreMatrix.FromRows(
         [
-            new("p1", "code_generation", "claude-opus-4-6", 0.5),
-            new("p1", "code_generation", "claude-sonnet-4-5", 0.5),
+            new CodeRouterBenchResultRow(TaskId: "p1", Dimension: "code_generation", Model: "claude-opus-4-6", 0.5),
+            new CodeRouterBenchResultRow(TaskId: "p1", Dimension: "code_generation", Model: "claude-sonnet-4-5", 0.5)
         ]);
         var baseline = new DimensionBestBaseline(matrix);
-        var context = new RegretReplayContext("t1", "code_generation", ["claude-sonnet-4-5", "claude-opus-4-6"]);
+        var context = new RegretReplayContext(TaskId: "t1", Dimension: "code_generation",
+            CandidateModelIds: ["claude-sonnet-4-5", "claude-opus-4-6"]);
 
-        Assert.Equal("claude-opus-4-6", baseline.Route(context));
+        Assert.Equal(expected: "claude-opus-4-6", actual: baseline.Route(context));
     }
 }

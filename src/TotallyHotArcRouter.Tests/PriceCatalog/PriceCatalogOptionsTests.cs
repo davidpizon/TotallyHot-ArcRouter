@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.PriceCatalog;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
@@ -19,8 +19,8 @@ public class PriceCatalogOptionsTests
         {
             Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["litellm"] = new PriceSourceOptions { Url = "https://mirror.example/prices.json" },
-            },
+                ["litellm"] = new() { Url = "https://mirror.example/prices.json" }
+            }
         };
 
         options.EnsureValid();
@@ -34,7 +34,7 @@ public class PriceCatalogOptionsTests
     {
         var options = new PriceCatalogOptions { PollIntervalHours = pollIntervalHours };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -44,11 +44,11 @@ public class PriceCatalogOptionsTests
         {
             Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["litellmm"] = new PriceSourceOptions(),
-            },
+                ["litellmm"] = new()
+            }
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -60,8 +60,8 @@ public class PriceCatalogOptionsTests
         {
             Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openrouter"] = new PriceSourceOptions { Url = "https://mirror.example/models.json" },
-            },
+                ["openrouter"] = new() { Url = "https://mirror.example/models.json" }
+            }
         };
 
         options.EnsureValid();
@@ -77,11 +77,11 @@ public class PriceCatalogOptionsTests
         {
             Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openpipe"] = new PriceSourceOptions(),
-            },
+                ["openpipe"] = new()
+            }
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -97,11 +97,12 @@ public class PriceCatalogOptionsTests
         {
             Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["litellm"] = new PriceSourceOptions { Url = "https://mirror.example/prices.json" },
-            },
+                ["litellm"] = new() { Url = "https://mirror.example/prices.json" }
+            }
         };
 
-        Assert.Equal("https://mirror.example/prices.json", options.GetSourceUrl(PriceCatalogOptions.LiteLlmSourceName));
+        Assert.Equal(expected: "https://mirror.example/prices.json",
+            actual: options.GetSourceUrl(PriceCatalogOptions.LiteLlmSourceName));
     }
 
     [Fact]
@@ -111,8 +112,8 @@ public class PriceCatalogOptionsTests
         {
             Sources = new Dictionary<string, PriceSourceOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["litellm"] = new PriceSourceOptions { Url = "   " },
-            },
+                ["litellm"] = new() { Url = "   " }
+            }
         };
 
         Assert.Null(options.GetSourceUrl(PriceCatalogOptions.LiteLlmSourceName));
@@ -124,10 +125,10 @@ public class PriceCatalogOptionsTests
         // Seeding is driven by this list, and a seeded row is something the Governance panel offers to
         // switch on. A name here without a client would put a source in the UI that can never poll.
         var names = PriceCatalogOptions.KnownSources.Select(s => s.Name).ToList();
-        Assert.Equal(2, names.Count);
-        Assert.Contains(PriceCatalogOptions.LiteLlmSourceName, names);
-        Assert.Contains(PriceCatalogOptions.OpenRouterSourceName, names);
-        Assert.All(PriceCatalogOptions.KnownSources, s => Assert.True(s.DefaultEnabled));
+        Assert.Equal(2, actual: names.Count);
+        Assert.Contains(expected: PriceCatalogOptions.LiteLlmSourceName, collection: names);
+        Assert.Contains(expected: PriceCatalogOptions.OpenRouterSourceName, collection: names);
+        Assert.All(collection: PriceCatalogOptions.KnownSources, action: s => Assert.True(s.DefaultEnabled));
     }
 
     [Fact]
@@ -138,9 +139,9 @@ public class PriceCatalogOptionsTests
         // revisited. OpenRouter's default has to be strictly below 0, not equal to it, for that to hold
         // without a migration.
         var liteLlm = PriceCatalogOptions.KnownSources.Single(s => s.Name == PriceCatalogOptions.LiteLlmSourceName);
-        var openRouter = PriceCatalogOptions.KnownSources.Single(s => s.Name == PriceCatalogOptions.OpenRouterSourceName);
+        var openRouter =
+            PriceCatalogOptions.KnownSources.Single(s => s.Name == PriceCatalogOptions.OpenRouterSourceName);
 
         Assert.True(liteLlm.DefaultPriorityScore > openRouter.DefaultPriorityScore);
     }
 }
-

@@ -22,5 +22,5 @@ public enum BenchmarkFileKind
     ModelsJson,
 
     /// <summary>The summary document, imported into <c>benchmark_summary</c>.</summary>
-    SummaryJson,
+    SummaryJson
 }

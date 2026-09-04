@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.PriceCatalog;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -18,13 +17,14 @@ public sealed class AnthropicUsageReportClient
 {
     private const string BaseUrl = "https://api.anthropic.com/v1/organizations/usage_report/messages";
     private const string AnthropicVersion = "2023-06-01";
+    private readonly string _adminApiKey;
 
     private readonly HttpClient _httpClient;
-    private readonly string _adminApiKey;
     private readonly ILogger<AnthropicUsageReportClient>? _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AnthropicUsageReportClient"/> class.</summary>
-    public AnthropicUsageReportClient(HttpClient httpClient, string adminApiKey, ILogger<AnthropicUsageReportClient>? logger = null)
+    public AnthropicUsageReportClient(HttpClient httpClient, string adminApiKey,
+        ILogger<AnthropicUsageReportClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminApiKey);
@@ -43,67 +43,70 @@ public sealed class AnthropicUsageReportClient
     public async Task<IReadOnlyList<ReportedUsageRow>> GetUsageReportAsync(
         DateOnly startingDay, DateOnly endingDayExclusive, CancellationToken cancellationToken = default)
     {
-        var startingAt = new DateTimeOffset(startingDay.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToString("O", CultureInfo.InvariantCulture);
-        var endingAt = new DateTimeOffset(endingDayExclusive.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).ToString("O", CultureInfo.InvariantCulture);
+        var startingAt =
+            new DateTimeOffset(dateTime: startingDay.ToDateTime(TimeOnly.MinValue), offset: TimeSpan.Zero).ToString(
+                format: "O", formatProvider: CultureInfo.InvariantCulture);
+        var endingAt =
+            new DateTimeOffset(dateTime: endingDayExclusive.ToDateTime(TimeOnly.MinValue), offset: TimeSpan.Zero)
+                .ToString(format: "O", formatProvider: CultureInfo.InvariantCulture);
 
         var rows = new List<ReportedUsageRow>();
         string? page = null;
 
         do
         {
-            var uri = $"{BaseUrl}?starting_at={Uri.EscapeDataString(startingAt)}&ending_at={Uri.EscapeDataString(endingAt)}" +
+            var uri =
+                $"{BaseUrl}?starting_at={Uri.EscapeDataString(startingAt)}&ending_at={Uri.EscapeDataString(endingAt)}" +
                 $"&bucket_width=1d&group_by[]=model" +
                 (page is null ? string.Empty : $"&page={Uri.EscapeDataString(page)}");
 
             using var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-                _httpClient,
-                () => BuildRequest(uri),
+                httpClient: _httpClient,
+                requestFactory: () => BuildRequest(uri),
                 logger: _logger,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var root = JsonNode.Parse(body) as JsonObject
-                ?? throw new InvalidOperationException("Anthropic usage report response was not a JSON object.");
+                       ?? throw new InvalidOperationException("Anthropic usage report response was not a JSON object.");
 
             rows.AddRange(ParseBuckets(root));
 
             page = root["has_more"] is JsonValue hasMore && hasMore.TryGetValue<bool>(out var more) && more
                 ? root["next_page"]?.GetValue<string>()
                 : null;
-        }
-        while (page is not null);
+        } while (page is not null);
 
         return rows;
     }
 
-    /// <summary>Builds a GET request for <paramref name="uri"/> with the Admin API key and version headers this endpoint requires.</summary>
+    /// <summary>
+    /// Builds a GET request for <paramref name="uri"/> with the Admin API key and version headers this endpoint
+    /// requires.
+    /// </summary>
     private HttpRequestMessage BuildRequest(string uri)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Add("x-api-key", _adminApiKey);
-        request.Headers.Add("anthropic-version", AnthropicVersion);
+        var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: uri);
+        request.Headers.Add(name: "x-api-key", value: _adminApiKey);
+        request.Headers.Add(name: "anthropic-version", value: AnthropicVersion);
         return request;
     }
 
     /// <summary>Parses one page's <c>data[].results[]</c> into one <see cref="ReportedUsageRow"/> per (bucket day, model).</summary>
     private static IEnumerable<ReportedUsageRow> ParseBuckets(JsonObject root)
     {
-        if (root["data"] is not JsonArray buckets)
-        {
-            yield break;
-        }
+        if (root["data"] is not JsonArray buckets) yield break;
 
         foreach (var bucketNode in buckets)
         {
             if (bucketNode is not JsonObject bucket ||
                 bucket["starting_at"] is not JsonValue startingAtValue ||
                 !startingAtValue.TryGetValue<string>(out var startingAtText) ||
-                !DateTimeOffset.TryParse(startingAtText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var startingAt) ||
+                !DateTimeOffset.TryParse(input: startingAtText, formatProvider: CultureInfo.InvariantCulture,
+                    styles: DateTimeStyles.AssumeUniversal, result: out var startingAt) ||
                 bucket["results"] is not JsonArray results)
-            {
                 continue;
-            }
 
             var usageDay = DateOnly.FromDateTime(startingAt.UtcDateTime);
 
@@ -111,17 +114,15 @@ public sealed class AnthropicUsageReportClient
             {
                 if (resultNode is not JsonObject result || result["model"] is not JsonValue modelValue ||
                     !modelValue.TryGetValue<string>(out var model) || string.IsNullOrWhiteSpace(model))
-                {
                     continue;
-                }
 
                 yield return new ReportedUsageRow(
-                    usageDay,
-                    model,
-                    InputTokens: ReadLong(result, "uncached_input_tokens"),
-                    OutputTokens: ReadLong(result, "output_tokens"),
+                    UsageDay: usageDay,
+                    Model: model,
+                    InputTokens: ReadLong(result: result, propertyName: "uncached_input_tokens"),
+                    OutputTokens: ReadLong(result: result, propertyName: "output_tokens"),
                     CacheCreationTokens: ReadCacheCreationTokens(result),
-                    CacheReadTokens: ReadLong(result, "cache_read_input_tokens"));
+                    CacheReadTokens: ReadLong(result: result, propertyName: "cache_read_input_tokens"));
             }
         }
     }
@@ -139,20 +140,21 @@ public sealed class AnthropicUsageReportClient
         {
             long sum = 0;
             foreach (var property in nested)
-            {
                 if (property.Value is JsonValue value && value.TryGetValue<long>(out var tokens))
-                {
                     sum += tokens;
-                }
-            }
 
             return sum;
         }
 
-        return ReadLong(result, "cache_creation_input_tokens");
+        return ReadLong(result: result, propertyName: "cache_creation_input_tokens");
     }
 
-    /// <summary>Reads a named property from <paramref name="result"/> as a <see langword="long"/>, defaulting to 0 when absent or not numeric.</summary>
-    private static long ReadLong(JsonObject result, string propertyName) =>
-        result[propertyName] is JsonValue value && value.TryGetValue<long>(out var tokens) ? tokens : 0;
+    /// <summary>
+    /// Reads a named property from <paramref name="result"/> as a <see langword="long"/>, defaulting to 0 when absent
+    /// or not numeric.
+    /// </summary>
+    private static long ReadLong(JsonObject result, string propertyName)
+    {
+        return result[propertyName] is JsonValue value && value.TryGetValue<long>(out var tokens) ? tokens : 0;
+    }
 }

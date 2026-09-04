@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 
@@ -12,9 +14,9 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 public sealed class ProviderAdminClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly string? _adminToken;
 
     private readonly HttpClient _httpClient;
-    private readonly string? _adminToken;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class.
@@ -41,8 +43,9 @@ public sealed class ProviderAdminClient
     /// <exception cref="ProviderAdminException">The request failed or the proxy returned an error.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> GetProvidersAsync(CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "admin/providers");
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: "admin/providers");
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Adds or replaces a provider by key.</summary>
@@ -51,10 +54,13 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
     /// <exception cref="ProviderAdminException">The edit was rejected (e.g. validation) or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> UpsertProviderAsync(string key, ProviderWriteRequest body, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> UpsertProviderAsync(string key, ProviderWriteRequest body,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/providers/{Escape(key)}") { Content = JsonBody(body) };
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}");
+        request.Content = JsonBody(body);
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Removes a provider by key.</summary>
@@ -62,10 +68,13 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
     /// <exception cref="ProviderAdminException">The removal was rejected (e.g. the provider is unknown) or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> RemoveProviderAsync(string key, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> RemoveProviderAsync(string key,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Delete, $"admin/providers/{Escape(key)}");
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request =
+            new HttpRequestMessage(method: HttpMethod.Delete, requestUri: $"admin/providers/{Escape(key)}");
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Adds or replaces a model under a provider.</summary>
@@ -75,10 +84,15 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
     /// <exception cref="ProviderAdminException">The edit was rejected or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> UpsertModelAsync(string key, string modelName, ModelWriteRequest body, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> UpsertModelAsync(string key, string modelName,
+        ModelWriteRequest body, CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/providers/{Escape(key)}/models/{Escape(modelName)}") { Content = JsonBody(body) };
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request =
+            new HttpRequestMessage(method: HttpMethod.Put,
+                    requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}");
+        request.Content = JsonBody(body);
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Removes a model under a provider.</summary>
@@ -87,10 +101,13 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
     /// <exception cref="ProviderAdminException">The removal was rejected or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> RemoveModelAsync(string key, string modelName, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> RemoveModelAsync(string key, string modelName,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Delete, $"admin/providers/{Escape(key)}/models/{Escape(modelName)}");
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Delete,
+            requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}");
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Switches a model on or off - the per-model twin of <see cref="SetEnabledAsync"/>.</summary>
@@ -100,10 +117,14 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the new state.</returns>
     /// <exception cref="ProviderAdminException">The model is unknown or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> SetModelEnabledAsync(string key, string modelName, ModelEnabledWriteRequest body, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> SetModelEnabledAsync(string key, string modelName,
+        ModelEnabledWriteRequest body, CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/enabled") { Content = JsonBody(body) };
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Put,
+                requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/enabled");
+        request.Content = JsonBody(body);
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -116,10 +137,14 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the pinned dialect.</returns>
     /// <exception cref="ProviderAdminException">The model is unknown, the dialect is unrecognized, or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> SetModelToolDialectAsync(string key, string modelName, ModelToolDialectWriteRequest body, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> SetModelToolDialectAsync(string key, string modelName,
+        ModelToolDialectWriteRequest body, CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/tool-dialect") { Content = JsonBody(body) };
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Put,
+                requestUri: $"admin/providers/{Escape(key)}/models/{Escape(modelName)}/tool-dialect");
+        request.Content = JsonBody(body);
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Sets or clears a provider's monthly budget caps.</summary>
@@ -128,10 +153,14 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the new caps and current-month spend.</returns>
     /// <exception cref="ProviderAdminException">The edit was rejected (e.g. a negative cap) or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> SetBudgetAsync(string key, ProviderBudgetWriteRequest body, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> SetBudgetAsync(string key, ProviderBudgetWriteRequest body,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/providers/{Escape(key)}/budget") { Content = JsonBody(body) };
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request =
+            new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}/budget");
+        request.Content = JsonBody(body);
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Switches a provider on or off.</summary>
@@ -140,21 +169,31 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the new state.</returns>
     /// <exception cref="ProviderAdminException">The provider is unknown or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> SetEnabledAsync(string key, ProviderEnabledWriteRequest body, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> SetEnabledAsync(string key, ProviderEnabledWriteRequest body,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/providers/{Escape(key)}/enabled") { Content = JsonBody(body) };
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request =
+            new HttpRequestMessage(method: HttpMethod.Put, requestUri: $"admin/providers/{Escape(key)}/enabled");
+        request.Content = JsonBody(body);
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Queries a provider's own model list (live discovery).</summary>
     /// <param name="key">The provider key.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <returns>The discovery result (which reports <see cref="DiscoverModelsResult.Supported"/> when the provider has no OpenAI-shaped endpoint).</returns>
+    /// <returns>
+    /// The discovery result (which reports <see cref="DiscoverModelsResult.Supported"/> when the provider has no
+    /// OpenAI-shaped endpoint).
+    /// </returns>
     /// <exception cref="ProviderAdminException">The request itself failed (e.g. unknown provider, transport error).</exception>
-    public async Task<DiscoverModelsResult> DiscoverModelsAsync(string key, CancellationToken cancellationToken = default)
+    public async Task<DiscoverModelsResult> DiscoverModelsAsync(string key,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"admin/providers/{Escape(key)}/discover-models");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Post,
+            requestUri: $"admin/providers/{Escape(key)}/discover-models");
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<DiscoverModelsResult>(body);
     }
@@ -173,10 +212,13 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>Which API flavors the endpoint answered, and when the scan ran.</returns>
     /// <exception cref="ProviderAdminException">The provider is unknown, scanning is unavailable, or the request failed.</exception>
-    public async Task<ProviderEndpointCapabilitiesView> ScanCapabilitiesAsync(string key, CancellationToken cancellationToken = default)
+    public async Task<ProviderEndpointCapabilitiesView> ScanCapabilitiesAsync(string key,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"admin/providers/{Escape(key)}/scan-capabilities");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Post,
+            requestUri: $"admin/providers/{Escape(key)}/scan-capabilities");
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<ProviderEndpointCapabilitiesView>(body);
     }
@@ -192,10 +234,13 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, carrying any newly-added/flagged models and refreshed capability data.</returns>
     /// <exception cref="ProviderAdminException">The provider is unknown or the request failed.</exception>
-    public async Task<IReadOnlyList<ProviderAdminView>> RefreshFromEndpointAsync(string key, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ProviderAdminView>> RefreshFromEndpointAsync(string key,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"admin/providers/{Escape(key)}/refresh-from-endpoint");
-        return await SendForProvidersAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Post,
+            requestUri: $"admin/providers/{Escape(key)}/refresh-from-endpoint");
+        return await SendForProvidersAsync(request: request, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -205,23 +250,31 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The configured overrides.</returns>
     /// <exception cref="ProviderAdminException">Overrides are unavailable or the request failed.</exception>
-    public async Task<IReadOnlyList<PriceOverrideView>> GetPriceOverridesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PriceOverrideView>> GetPriceOverridesAsync(
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "admin/price-overrides");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: "admin/price-overrides");
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<List<PriceOverrideView>>(body);
     }
 
     /// <summary>Adds or replaces a price override.</summary>
-    /// <param name="body">The override to write; <see cref="PriceOverrideWriteRequest.ModelName"/> must name an already-configured model.</param>
+    /// <param name="body">
+    /// The override to write; <see cref="PriceOverrideWriteRequest.ModelName"/> must name an
+    /// already-configured model.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated override list.</returns>
     /// <exception cref="ProviderAdminException">The edit was rejected (e.g. an unknown model) or the request failed.</exception>
-    public async Task<IReadOnlyList<PriceOverrideView>> SetPriceOverrideAsync(PriceOverrideWriteRequest body, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PriceOverrideView>> SetPriceOverrideAsync(PriceOverrideWriteRequest body,
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, "admin/price-overrides") { Content = JsonBody(body) };
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Put, requestUri: "admin/price-overrides");
+        request.Content = JsonBody(body);
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<List<PriceOverrideView>>(responseBody);
     }
@@ -232,12 +285,15 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated override list.</returns>
     /// <exception cref="ProviderAdminException">No override matched, overrides are unavailable, or the request failed.</exception>
-    public async Task<IReadOnlyList<PriceOverrideView>> RemovePriceOverrideAsync(string sourceName, string aggregatorModelKey, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PriceOverrideView>> RemovePriceOverrideAsync(string sourceName,
+        string aggregatorModelKey, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(
-            HttpMethod.Delete,
+            method: HttpMethod.Delete,
+            requestUri:
             $"admin/price-overrides?sourceName={Escape(sourceName)}&aggregatorModelKey={Escape(aggregatorModelKey)}");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<List<PriceOverrideView>>(body);
     }
@@ -249,10 +305,12 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The resolution state of every configured model.</returns>
     /// <exception cref="ProviderAdminException">The price catalog is unavailable or the request failed.</exception>
-    public async Task<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosisAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosisAsync(
+        CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "admin/price-resolution");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: "admin/price-resolution");
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<List<PriceResolutionDiagnosisView>>(body);
     }
@@ -266,12 +324,15 @@ public sealed class ProviderAdminClient
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The per-dimension history series.</returns>
     /// <exception cref="ProviderAdminException">The provider is unknown, history is unavailable, or the request failed.</exception>
-    public async Task<RateLimitHistoryResponseAdminView> GetRateLimitHistoryAsync(string key, double hours = 6.0, CancellationToken cancellationToken = default)
+    public async Task<RateLimitHistoryResponseAdminView> GetRateLimitHistoryAsync(string key, double hours = 6.0,
+        CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"admin/providers/{Escape(key)}/rate-limit-history?hours={hours.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+            method: HttpMethod.Get,
+            requestUri:
+            $"admin/providers/{Escape(key)}/rate-limit-history?hours={hours.ToString(CultureInfo.InvariantCulture)}");
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<RateLimitHistoryResponseAdminView>(body);
     }
@@ -287,30 +348,46 @@ public sealed class ProviderAdminClient
     /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
     public async Task SetAdminApiKeyAsync(string provider, string value, CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}")
-        {
-            Content = JsonBody(new SecretWriteRequest(value))
-        };
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Put,
+            requestUri: $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}");
+        request.Content = JsonBody(new SecretWriteRequest(value));
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Clears <paramref name="provider"/>'s stored reconciliation Admin API key, the counterpart to <see cref="SetAdminApiKeyAsync"/>.</summary>
+    /// <summary>
+    /// Clears <paramref name="provider"/>'s stored reconciliation Admin API key, the counterpart to
+    /// <see cref="SetAdminApiKeyAsync"/>.
+    /// </summary>
     /// <param name="provider">The reconciliation provider key (<c>openai</c> or <c>anthropic</c>).</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
     public async Task DeleteAdminApiKeyAsync(string provider, CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Delete, $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}");
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(method: HttpMethod.Delete,
+            requestUri: $"admin/secrets/{Escape(AdminApiKeySecretName(provider))}");
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>The protected-store name for a provider's reconciliation Admin API key, matching <c>ManagementFacade</c>'s naming convention (docs/router/secrets-at-rest-plan.md §3).</summary>
-    private static string AdminApiKeySecretName(string provider) => $"reconciliation:{provider}:admin-key";
-
-    /// <summary>Sends a request expected to return a provider snapshot and unwraps its <see cref="ProvidersSnapshot.Providers"/> list.</summary>
-    private async Task<IReadOnlyList<ProviderAdminView>> SendForProvidersAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    /// <summary>
+    /// The protected-store name for a provider's reconciliation Admin API key, matching <c>ManagementFacade</c>'s
+    /// naming convention (docs/router/secrets-at-rest-plan.md §3).
+    /// </summary>
+    private static string AdminApiKeySecretName(string provider)
     {
-        using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+        return $"reconciliation:{provider}:admin-key";
+    }
+
+    /// <summary>
+    /// Sends a request expected to return a provider snapshot and unwraps its
+    /// <see cref="ProvidersSnapshot.Providers"/> list.
+    /// </summary>
+    private async Task<IReadOnlyList<ProviderAdminView>> SendForProvidersAsync(HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using var response =
+            await SendAsync(request: request, cancellationToken: cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         return Deserialize<ProvidersSnapshot>(body).Providers;
     }
@@ -322,18 +399,18 @@ public sealed class ProviderAdminClient
     private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrEmpty(_adminToken))
-        {
-            request.Headers.TryAddWithoutValidation("X-Admin-Token", _adminToken);
-        }
+            request.Headers.TryAddWithoutValidation(name: "X-Admin-Token", value: _adminToken);
 
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (HttpRequestException ex)
         {
-            throw new ProviderAdminException($"Could not reach the proxy management API: {ex.Message}", ex);
+            throw new ProviderAdminException(message: $"Could not reach the proxy management API: {ex.Message}",
+                innerException: ex);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -341,27 +418,36 @@ public sealed class ProviderAdminClient
             var statusCode = response.StatusCode;
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             response.Dispose();
-            throw new ProviderAdminException(ExtractErrorMessage(errorBody, statusCode));
+            throw new ProviderAdminException(ExtractErrorMessage(body: errorBody, statusCode: statusCode));
         }
 
         return response;
     }
 
     /// <summary>Serializes a request body to a JSON <see cref="StringContent"/> using the client's web-JSON conventions.</summary>
-    private static StringContent JsonBody<T>(T value) =>
-        new(JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json");
+    private static StringContent JsonBody<T>(T value)
+    {
+        return new StringContent(content: JsonSerializer.Serialize(value: value, options: JsonOptions),
+            encoding: Encoding.UTF8,
+            mediaType: "application/json");
+    }
 
-    /// <summary>Deserializes a response body, translating an empty body or malformed JSON into a <see cref="ProviderAdminException"/> rather than letting a null-reference or raw <see cref="JsonException"/> surface to the caller.</summary>
+    /// <summary>
+    /// Deserializes a response body, translating an empty body or malformed JSON into a
+    /// <see cref="ProviderAdminException"/> rather than letting a null-reference or raw <see cref="JsonException"/> surface to
+    /// the caller.
+    /// </summary>
     private static T Deserialize<T>(string body)
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(body, JsonOptions)
-                ?? throw new ProviderAdminException("The proxy management API returned an empty response.");
+            return JsonSerializer.Deserialize<T>(json: body, options: JsonOptions)
+                   ?? throw new ProviderAdminException("The proxy management API returned an empty response.");
         }
         catch (JsonException ex)
         {
-            throw new ProviderAdminException($"The proxy management API returned an unreadable response: {ex.Message}", ex);
+            throw new ProviderAdminException(
+                message: $"The proxy management API returned an unreadable response: {ex.Message}", innerException: ex);
         }
     }
 
@@ -369,22 +455,19 @@ public sealed class ProviderAdminClient
     /// Pulls the <c>error.message</c> out of the proxy's error envelope
     /// (<c>{ "error": { "message": "..." } }</c>), falling back to the raw body or status code.
     /// </summary>
-    private static string ExtractErrorMessage(string body, System.Net.HttpStatusCode statusCode)
+    private static string ExtractErrorMessage(string body, HttpStatusCode statusCode)
     {
         if (!string.IsNullOrWhiteSpace(body))
         {
             try
             {
                 using var document = JsonDocument.Parse(body);
-                if (document.RootElement.TryGetProperty("error", out var error)
-                    && error.TryGetProperty("message", out var message)
+                if (document.RootElement.TryGetProperty(propertyName: "error", value: out var error)
+                    && error.TryGetProperty(propertyName: "message", value: out var message)
                     && message.ValueKind == JsonValueKind.String)
                 {
                     var text = message.GetString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        return text;
-                    }
+                    if (!string.IsNullOrWhiteSpace(text)) return text;
                 }
             }
             catch (JsonException)
@@ -399,6 +482,8 @@ public sealed class ProviderAdminClient
     }
 
     /// <summary>URL-escapes a path segment (e.g. a provider key) for safe inclusion in a request URI.</summary>
-    private static string Escape(string segment) => Uri.EscapeDataString(segment);
+    private static string Escape(string segment)
+    {
+        return Uri.EscapeDataString(segment);
+    }
 }
-

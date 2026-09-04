@@ -1,3 +1,4 @@
+using System.Globalization;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 
@@ -20,7 +21,10 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// </remarks>
 public static class PersistedSessionMapper
 {
-    /// <summary>Maps one <see cref="PersistedConversation"/> (and its turns) onto the dashboard's <see cref="Conversation"/> view model.</summary>
+    /// <summary>
+    /// Maps one <see cref="PersistedConversation"/> (and its turns) onto the dashboard's <see cref="Conversation"/>
+    /// view model.
+    /// </summary>
     public static Conversation ToModel(PersistedConversation conversation)
     {
         ArgumentNullException.ThrowIfNull(conversation);
@@ -33,12 +37,15 @@ public static class PersistedSessionMapper
             TotalCost: conversation.TotalCostUsd,
             TotalPromptTokens: conversation.TotalInputTokens,
             TotalCompletionTokens: conversation.TotalOutputTokens,
-            HasFallbackTurns: false,
-            Turns: conversation.Turns.Select(ToModel).ToList(),
+            false,
+            Turns: [.. conversation.Turns.Select(ToModel)],
             IsUsedForTraining: conversation.IsUsedForTraining);
     }
 
-    /// <summary>Maps one <see cref="PersistedConversationTurn"/> onto the dashboard's <see cref="ConversationTurn"/> view model.</summary>
+    /// <summary>
+    /// Maps one <see cref="PersistedConversationTurn"/> onto the dashboard's <see cref="ConversationTurn"/> view
+    /// model.
+    /// </summary>
     private static ConversationTurn ToModel(PersistedConversationTurn turn)
     {
         return new ConversationTurn(
@@ -48,31 +55,37 @@ public static class PersistedSessionMapper
             TurnNumber: turn.TurnNumber,
             PromptTokens: turn.InputTokens ?? 0,
             CompletionTokens: turn.OutputTokens ?? 0,
-            RoutingRoi: 0m,
+            0m,
             TotalCost: turn.CostUsd ?? 0m,
-            ToolExecutionSteps: 0,
-            CacheHitRate: 0m,
-            TimeToFirstTokenMs: 0,
-            ContextBufferPercent: 0m,
+            0,
+            0m,
+            0,
+            0m,
             Timestamp: FormatTimestamp(turn.TimestampUtc),
-            RoutingSteps: [new RoutingStep(StepStatus.Info, $"Route Confirmed: {turn.RoutedModel}")],
+            RoutingSteps: [new RoutingStep(Status: StepStatus.Info, Message: $"Route Confirmed: {turn.RoutedModel}")],
             RequestSummary: turn.PromptText,
             ResponseSummary: turn.ResponseText,
-            IsFallback: false,
             TimestampUtc: turn.TimestampUtc,
             RequestedModel: turn.RequestedModel,
             RoutedModel: turn.RoutedModel);
     }
 
     /// <summary>Builds the conversation card's display title for a persisted session.</summary>
-    private static string BuildTitle(PersistedConversation conversation) =>
-        $"Session {ShortId(conversation.SessionId)}";
+    private static string BuildTitle(PersistedConversation conversation)
+    {
+        return $"Session {ShortId(conversation.SessionId)}";
+    }
 
     /// <summary>Truncates a session id to its first 8 characters for compact display, leaving shorter ids untouched.</summary>
-    private static string ShortId(string sessionId) =>
-        sessionId.Length <= 8 ? sessionId : sessionId[..8];
+    private static string ShortId(string sessionId)
+    {
+        return sessionId.Length <= 8 ? sessionId : sessionId[..8];
+    }
 
     /// <summary>Formats a UTC timestamp as a local-time "HH:mm:ss" string for display.</summary>
-    private static string FormatTimestamp(DateTimeOffset timestamp) =>
-        timestamp.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+    private static string FormatTimestamp(DateTimeOffset timestamp)
+    {
+        return timestamp.ToLocalTime()
+            .ToString(format: "HH:mm:ss", formatProvider: CultureInfo.InvariantCulture);
+    }
 }

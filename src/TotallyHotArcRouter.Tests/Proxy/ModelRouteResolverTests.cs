@@ -1,7 +1,7 @@
-using TotallyHot.ArcRouter.Models;
-using TotallyHot.ArcRouter.Proxy;
 using Microsoft.Extensions.Options;
 using Moq;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -19,13 +19,13 @@ public class ModelRouteResolverTests
             baseUrl: "https://api.openai.com",
             authHeaderName: "Authorization");
 
-        var resolved = resolver.TryResolve("gpt-5.4", out var route);
+        var resolved = resolver.TryResolve(modelName: "gpt-5.4", route: out var route);
 
         Assert.True(resolved);
-        Assert.Equal("gpt-5.4", route!.ModelName);
-        Assert.Equal("gpt-5.4-2026-01", route.ProviderModelId);
-        Assert.Equal("https://api.openai.com/", route.UpstreamBaseUrl.ToString());
-        Assert.Equal("Authorization", route.AuthHeaderName);
+        Assert.Equal(expected: "gpt-5.4", actual: route!.ModelName);
+        Assert.Equal(expected: "gpt-5.4-2026-01", actual: route.ProviderModelId);
+        Assert.Equal(expected: "https://api.openai.com/", actual: route.UpstreamBaseUrl.ToString());
+        Assert.Equal(expected: "Authorization", actual: route.AuthHeaderName);
     }
 
     [Fact]
@@ -43,12 +43,12 @@ public class ModelRouteResolverTests
             headers: [new ProviderHeader { Name = "Authorization", ValueEnvVar = "MY_PROVIDER_API_KEY" }],
             environment: environment.Object);
 
-        var resolved = resolver.TryResolve("gpt-5.4", out var route);
+        var resolved = resolver.TryResolve(modelName: "gpt-5.4", route: out var route);
 
         Assert.True(resolved);
         var header = Assert.Single(route!.ExtraHeaders);
-        Assert.Equal("Authorization", header.Key);
-        Assert.Equal("Bearer resolved-from-env", header.Value);
+        Assert.Equal(expected: "Authorization", actual: header.Key);
+        Assert.Equal(expected: "Bearer resolved-from-env", actual: header.Value);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class ModelRouteResolverTests
             headers: [new ProviderHeader { Name = "Authorization", ValueEnvVar = "UNSET_PROVIDER_API_KEY" }],
             environment: Mock.Of<IEnvironmentVariableProvider>());
 
-        var resolved = resolver.TryResolve("gpt-5.4", out var route);
+        var resolved = resolver.TryResolve(modelName: "gpt-5.4", route: out var route);
 
         Assert.True(resolved);
         Assert.Empty(route!.ExtraHeaders);
@@ -85,7 +85,7 @@ public class ModelRouteResolverTests
             apiKey: null,
             headers: [new ProviderHeader { Name = "x-api-key", Value = "real-anthropic-key" }]);
 
-        var resolved = resolver.TryResolve("claude-sonnet-5", out var route);
+        var resolved = resolver.TryResolve(modelName: "claude-sonnet-5", route: out var route);
 
         Assert.True(resolved);
         Assert.True(route!.AuthHeaderConfigured);
@@ -100,7 +100,7 @@ public class ModelRouteResolverTests
             ProviderModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
             UpstreamBaseUrl: new Uri("https://bedrock-runtime.us-east-1.amazonaws.com"),
             AuthHeaderName: "Authorization",
-            ExtraHeaders: [new KeyValuePair<string, string>("x-api-key", "another-secret-value")],
+            ExtraHeaders: [new KeyValuePair<string, string>(key: "x-api-key", value: "another-secret-value")],
             AwsRegion: "us-east-1",
             AwsAccessKeyId: "AKIAEXAMPLE",
             AwsSecretAccessKey: "wJalrXUtnFEMI/EXAMPLESECRETKEY",
@@ -108,16 +108,16 @@ public class ModelRouteResolverTests
 
         var text = route.ToString();
 
-        Assert.DoesNotContain("another-secret-value", text);
-        Assert.DoesNotContain("wJalrXUtnFEMI/EXAMPLESECRETKEY", text);
-        Assert.DoesNotContain("FQoGZXIvYXdzEXAMPLESESSIONTOKEN", text);
+        Assert.DoesNotContain(expectedSubstring: "another-secret-value", actualString: text);
+        Assert.DoesNotContain(expectedSubstring: "wJalrXUtnFEMI/EXAMPLESECRETKEY", actualString: text);
+        Assert.DoesNotContain(expectedSubstring: "FQoGZXIvYXdzEXAMPLESESSIONTOKEN", actualString: text);
 
         // Non-secret identifying fields must still be there - this is a redaction, not a black hole.
-        Assert.Contains("claude-sonnet-bedrock", text);
-        Assert.Contains("bedrock-anthropic", text);
-        Assert.Contains("AKIAEXAMPLE", text);
-        Assert.Contains("us-east-1", text);
-        Assert.Contains("x-api-key", text);
+        Assert.Contains(expectedSubstring: "claude-sonnet-bedrock", actualString: text);
+        Assert.Contains(expectedSubstring: "bedrock-anthropic", actualString: text);
+        Assert.Contains(expectedSubstring: "AKIAEXAMPLE", actualString: text);
+        Assert.Contains(expectedSubstring: "us-east-1", actualString: text);
+        Assert.Contains(expectedSubstring: "x-api-key", actualString: text);
     }
 
     [Fact]
@@ -133,8 +133,8 @@ public class ModelRouteResolverTests
 
         var text = route.ToString();
 
-        Assert.Contains("AwsSecretAccessKey = <null>", text);
-        Assert.Contains("AwsSessionToken = <null>", text);
+        Assert.Contains(expectedSubstring: "AwsSecretAccessKey = <null>", actualString: text);
+        Assert.Contains(expectedSubstring: "AwsSessionToken = <null>", actualString: text);
     }
 
     // ProxyMiddleware reads IsFree off the resolved route to decide whether a request's cost is a known
@@ -149,8 +149,8 @@ public class ModelRouteResolverTests
             providerName: "ollama",
             isFree: true);
 
-        Assert.True(resolver.TryResolve("llama3", out var route));
-        Assert.True(route!.IsFree);
+        Assert.True(resolver.TryResolve(modelName: "llama3", route: out var route));
+        Assert.True(route.IsFree);
     }
 
     // A provider is paid unless the operator says otherwise - the default must never be "free," which
@@ -158,26 +158,29 @@ public class ModelRouteResolverTests
     [Fact]
     public void TryResolve_ProviderWithoutIsFree_ResolvesAsNotFree()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
 
-        Assert.True(resolver.TryResolve("gpt-5.4", out var route));
-        Assert.False(route!.IsFree);
+        Assert.True(resolver.TryResolve(modelName: "gpt-5.4", route: out var route));
+        Assert.False(route.IsFree);
     }
 
     [Fact]
     public void TryResolve_IsCaseInsensitiveOnModelName()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
 
-        Assert.True(resolver.TryResolve("GPT-5.4", out _));
+        Assert.True(resolver.TryResolve(modelName: "GPT-5.4", route: out _));
     }
 
     [Fact]
     public void TryResolve_UnknownModel_ReturnsFalse()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
 
-        var resolved = resolver.TryResolve("some-other-model", out var route);
+        var resolved = resolver.TryResolve(modelName: "some-other-model", route: out var route);
 
         Assert.False(resolved);
         Assert.Null(route);
@@ -189,9 +192,10 @@ public class ModelRouteResolverTests
     [InlineData("   ")]
     public void TryResolve_NullOrWhitespaceModelName_ReturnsFalse(string? modelName)
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com");
 
-        Assert.False(resolver.TryResolve(modelName, out var route));
+        Assert.False(resolver.TryResolve(modelName: modelName, route: out var route));
         Assert.Null(route);
     }
 
@@ -200,12 +204,16 @@ public class ModelRouteResolverTests
     {
         var options = new ModelRoutingOptions
         {
-            Providers = new Dictionary<string, ProviderOptions>(),
-            ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }]
+            Providers = [],
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
+            ]
         };
 
-        Assert.Throws<OptionsValidationException>(
-            () => new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>()));
+        Assert.Throws<OptionsValidationException>(() =>
+            new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+                environment: Mock.Of<IEnvironmentVariableProvider>()));
     }
 
     [Fact]
@@ -213,7 +221,7 @@ public class ModelRouteResolverTests
     {
         var resolver = ModelRouteResolverTestFactory.Empty();
 
-        Assert.False(resolver.TryResolve("anything", out _));
+        Assert.False(resolver.TryResolve(modelName: "anything", route: out _));
     }
 
     // Verifies that ListModels() surfaces every configured model with its provider key, in the same order
@@ -229,11 +237,12 @@ public class ModelRouteResolverTests
         var models = resolver.ListModels();
 
         Assert.Equal(
-        [
-            new AvailableModel("gpt-5.4", "openai"),
-            new AvailableModel("claude-opus-4.6", "anthropic"),
-            new AvailableModel("kimi-k2.5", "moonshot")
-        ], models);
+            expected:
+            [
+                new AvailableModel(ModelName: "gpt-5.4", Provider: "openai"),
+                new AvailableModel(ModelName: "claude-opus-4.6", Provider: "anthropic"),
+                new AvailableModel(ModelName: "kimi-k2.5", Provider: "moonshot")
+            ], actual: models);
     }
 
     // Verifies that an empty configuration yields an empty model list rather than throwing, so /v1/models
@@ -255,25 +264,26 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization" }
             },
             ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3" }]
         };
         var store = new InMemoryProviderConfigStore(options);
-        var resolver = new ModelRouteResolver(store, Mock.Of<IEnvironmentVariableProvider>());
+        var resolver = new ModelRouteResolver(store: store, environment: Mock.Of<IEnvironmentVariableProvider>());
 
-        Assert.True(resolver.TryResolve("llama3", out var before));
+        Assert.True(resolver.TryResolve(modelName: "llama3", route: out var before));
         // Uri only appends a trailing slash to authority-only URLs; one carrying a path (/v1) is
         // stringified verbatim. (Forwarding is unaffected either way - ProxyMiddleware TrimEnd('/')s it.)
-        Assert.Equal("http://localhost:11434/v1", before!.UpstreamBaseUrl.ToString());
+        Assert.Equal(expected: "http://localhost:11434/v1", actual: before.UpstreamBaseUrl.ToString());
 
         await store.UpsertProviderAsync(
-            "local",
-            new ProviderOptions { BaseUrl = "http://192.168.1.50:11434/v1", AuthHeaderName = "Authorization" },
-            TestContext.Current.CancellationToken);
+            key: "local",
+            provider: new ProviderOptions
+            { BaseUrl = "http://192.168.1.50:11434/v1", AuthHeaderName = "Authorization" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.True(resolver.TryResolve("llama3", out var after));
-        Assert.Equal("http://192.168.1.50:11434/v1", after!.UpstreamBaseUrl.ToString());
+        Assert.True(resolver.TryResolve(modelName: "llama3", route: out var after));
+        Assert.Equal(expected: "http://192.168.1.50:11434/v1", actual: after.UpstreamBaseUrl.ToString());
     }
 
     // Verifies a newly added model becomes routable (and shows up in ListModels) on the same resolver
@@ -285,21 +295,22 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization" }
             },
             ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3" }]
         };
         var store = new InMemoryProviderConfigStore(options);
-        var resolver = new ModelRouteResolver(store, Mock.Of<IEnvironmentVariableProvider>());
+        var resolver = new ModelRouteResolver(store: store, environment: Mock.Of<IEnvironmentVariableProvider>());
 
-        Assert.False(resolver.TryResolve("mistral", out _));
+        Assert.False(resolver.TryResolve(modelName: "mistral", route: out _));
 
         await store.UpsertModelAsync(
-            new ModelRouteEntry { ModelName = "mistral", Provider = "local", ProviderModelId = "mistral" },
-            TestContext.Current.CancellationToken);
+            entry: new ModelRouteEntry { ModelName = "mistral", Provider = "local", ProviderModelId = "mistral" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.True(resolver.TryResolve("mistral", out _));
-        Assert.Contains(new AvailableModel("mistral", "local"), resolver.ListModels());
+        Assert.True(resolver.TryResolve(modelName: "mistral", route: out _));
+        Assert.Contains(expected: new AvailableModel(ModelName: "mistral", Provider: "local"),
+            collection: resolver.ListModels());
     }
 
     // Governance > Providers' Stop/Play control writes ProviderOptions.Enabled; IsProviderEnabled is the
@@ -307,7 +318,8 @@ public class ModelRouteResolverTests
     [Fact]
     public void IsProviderEnabled_DefaultConfiguredProvider_ReturnsTrue()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com", providerName: "openai");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com", providerName: "openai");
 
         Assert.True(resolver.IsProviderEnabled("openai"));
     }
@@ -315,7 +327,8 @@ public class ModelRouteResolverTests
     [Fact]
     public void IsProviderEnabled_UnknownProviderKey_ReturnsTrue()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com", providerName: "openai");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com", providerName: "openai");
 
         Assert.True(resolver.IsProviderEnabled("does-not-exist"));
     }
@@ -327,11 +340,12 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1", Enabled = false }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1", Enabled = false }
             },
             ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3" }]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         Assert.False(resolver.IsProviderEnabled("local"));
     }
@@ -345,19 +359,19 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1" }
             },
             ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3" }]
         };
         var store = new InMemoryProviderConfigStore(options);
-        var resolver = new ModelRouteResolver(store, Mock.Of<IEnvironmentVariableProvider>());
+        var resolver = new ModelRouteResolver(store: store, environment: Mock.Of<IEnvironmentVariableProvider>());
 
         Assert.True(resolver.IsProviderEnabled("local"));
 
         await store.UpsertProviderAsync(
-            "local",
-            new ProviderOptions { BaseUrl = "http://localhost:11434/v1", Enabled = false },
-            TestContext.Current.CancellationToken);
+            key: "local",
+            provider: new ProviderOptions { BaseUrl = "http://localhost:11434/v1", Enabled = false },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(resolver.IsProviderEnabled("local"));
     }
@@ -368,7 +382,8 @@ public class ModelRouteResolverTests
     [Fact]
     public void IsModelEnabled_DefaultConfiguredModel_ReturnsTrue()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com", providerName: "openai");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com", providerName: "openai");
 
         Assert.True(resolver.IsModelEnabled("gpt-5.4"));
     }
@@ -376,7 +391,8 @@ public class ModelRouteResolverTests
     [Fact]
     public void IsModelEnabled_UnknownModelName_ReturnsTrue()
     {
-        var resolver = ModelRouteResolverTestFactory.Create("gpt-5.4", "gpt-5.4", "https://api.openai.com", providerName: "openai");
+        var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
+            baseUrl: "https://api.openai.com", providerName: "openai");
 
         Assert.True(resolver.IsModelEnabled("does-not-exist"));
     }
@@ -388,11 +404,16 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1" }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", Enabled = false }]
+            ModelList =
+            [
+                new ModelRouteEntry
+                    { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", Enabled = false }
+            ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         Assert.False(resolver.IsModelEnabled("llama3"));
     }
@@ -404,11 +425,16 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1" }
             },
-            ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", PresentUpstream = false }]
+            ModelList =
+            [
+                new ModelRouteEntry
+                    { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", PresentUpstream = false }
+            ]
         };
-        var resolver = new ModelRouteResolver(new InMemoryProviderConfigStore(options), Mock.Of<IEnvironmentVariableProvider>());
+        var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
+            environment: Mock.Of<IEnvironmentVariableProvider>());
 
         Assert.False(resolver.IsModelEnabled("llama3"));
     }
@@ -422,20 +448,20 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new ProviderOptions { BaseUrl = "http://localhost:11434/v1" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1" }
             },
             ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3" }]
         };
         var store = new InMemoryProviderConfigStore(options);
-        var resolver = new ModelRouteResolver(store, Mock.Of<IEnvironmentVariableProvider>());
+        var resolver = new ModelRouteResolver(store: store, environment: Mock.Of<IEnvironmentVariableProvider>());
 
         Assert.True(resolver.IsModelEnabled("llama3"));
 
         await store.UpsertModelAsync(
-            new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", Enabled = false },
-            TestContext.Current.CancellationToken);
+            entry: new ModelRouteEntry
+            { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3", Enabled = false },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(resolver.IsModelEnabled("llama3"));
     }
 }
-

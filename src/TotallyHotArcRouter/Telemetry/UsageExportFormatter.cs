@@ -12,8 +12,15 @@ public static class UsageExportFormatter
     private static readonly string[] CsvHeader =
     [
         "BucketStartUtc", "BucketWidth", "GroupKey", "Requests", "UnpricedRequests",
-        "PromptTokens", "CompletionTokens", "CacheCreationTokens", "CacheReadTokens", "CostUsd",
+        "PromptTokens", "CompletionTokens", "CacheCreationTokens", "CacheReadTokens", "CostUsd"
     ];
+
+    // Spreadsheet formula injection (OWASP CSV Injection): GroupKey ultimately comes from request/model/
+    // provider strings, so a crafted value starting with one of these characters would execute as a
+    // formula if an operator opens the export in Excel/Sheets. Prefixing with an apostrophe is the
+    // standard mitigation - it forces the cell to render as text without altering the field's real value
+    // for any other consumer (a CSV parser sees the literal leading apostrophe, same as any other char).
+    private static readonly char[] FormulaTriggerChars = ['=', '+', '-', '@', '\t', '\r'];
 
     /// <summary>
     /// Renders <paramref name="buckets"/> as RFC 4180 CSV: a header row, then one row per bucket, in the
@@ -26,13 +33,12 @@ public static class UsageExportFormatter
         ArgumentNullException.ThrowIfNull(buckets);
 
         var builder = new StringBuilder();
-        AppendRow(builder, CsvHeader);
+        AppendRow(builder: builder, fields: CsvHeader);
 
         foreach (var bucket in buckets)
-        {
             AppendRow(
-                builder,
-                bucket.BucketStartUtc.ToString("O", CultureInfo.InvariantCulture),
+                builder: builder,
+                bucket.BucketStartUtc.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture),
                 bucket.BucketWidth,
                 bucket.GroupKey,
                 bucket.Requests.ToString(CultureInfo.InvariantCulture),
@@ -42,7 +48,6 @@ public static class UsageExportFormatter
                 bucket.CacheCreationTokens.ToString(CultureInfo.InvariantCulture),
                 bucket.CacheReadTokens.ToString(CultureInfo.InvariantCulture),
                 bucket.CostUsd.ToString(CultureInfo.InvariantCulture));
-        }
 
         return builder.ToString();
     }
@@ -54,23 +59,13 @@ public static class UsageExportFormatter
     {
         for (var i = 0; i < fields.Length; i++)
         {
-            if (i > 0)
-            {
-                builder.Append(',');
-            }
+            if (i > 0) builder.Append(',');
 
             builder.Append(QuoteIfNeeded(fields[i]));
         }
 
         builder.Append("\r\n");
     }
-
-    // Spreadsheet formula injection (OWASP CSV Injection): GroupKey ultimately comes from request/model/
-    // provider strings, so a crafted value starting with one of these characters would execute as a
-    // formula if an operator opens the export in Excel/Sheets. Prefixing with an apostrophe is the
-    // standard mitigation - it forces the cell to render as text without altering the field's real value
-    // for any other consumer (a CSV parser sees the literal leading apostrophe, same as any other char).
-    private static readonly char[] FormulaTriggerChars = ['=', '+', '-', '@', '\t', '\r'];
 
     /// <summary>
     /// Quotes <paramref name="field"/> per RFC 4180 if it contains a comma, quote, or newline, and
@@ -86,21 +81,13 @@ public static class UsageExportFormatter
         // field[0], while still catching a field that leads with a trigger char directly (including tab/CR,
         // which are themselves in FormulaTriggerChars rather than being skipped over like plain spaces).
         var firstNonSpace = 0;
-        while (firstNonSpace < field.Length && field[firstNonSpace] == ' ')
-        {
-            firstNonSpace++;
-        }
+        while (firstNonSpace < field.Length && field[firstNonSpace] == ' ') firstNonSpace++;
 
-        if (firstNonSpace < field.Length && Array.IndexOf(FormulaTriggerChars, field[firstNonSpace]) >= 0)
-        {
+        if (firstNonSpace < field.Length && Array.IndexOf(array: FormulaTriggerChars, value: field[firstNonSpace]) >= 0)
             field = "'" + field;
-        }
 
-        if (field.IndexOfAny([',', '"', '\r', '\n']) < 0)
-        {
-            return field;
-        }
+        if (field.IndexOfAny([',', '"', '\r', '\n']) < 0) return field;
 
-        return "\"" + field.Replace("\"", "\"\"") + "\"";
+        return "\"" + field.Replace(oldValue: "\"", newValue: "\"\"") + "\"";
     }
 }

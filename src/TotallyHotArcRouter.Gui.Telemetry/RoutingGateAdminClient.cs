@@ -12,7 +12,7 @@ public sealed class RoutingGateAdminException : GrpcAdminException
 {
     /// <summary>Initializes a new instance of the <see cref="RoutingGateAdminException"/> class.</summary>
     public RoutingGateAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message, innerException, isUnavailable)
+        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
     {
     }
 }
@@ -24,14 +24,16 @@ public sealed class RoutingGateAdminException : GrpcAdminException
 /// </summary>
 public sealed class RoutingGateAdminClient
     : GrpcAdminClientBase<Contract.RoutingGateAdminService.RoutingGateAdminServiceClient, RoutingGateAdminException>,
-      IRoutingGateAdminClient
+        IRoutingGateAdminClient
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="RoutingGateAdminClient"/> class, creating and owning a
     /// channel to <paramref name="serverAddress"/>.
     /// </summary>
     public RoutingGateAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress, callInvoker => new Contract.RoutingGateAdminService.RoutingGateAdminServiceClient(callInvoker))
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.RoutingGateAdminService.RoutingGateAdminServiceClient(callInvoker))
     {
     }
 
@@ -45,41 +47,49 @@ public sealed class RoutingGateAdminClient
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<bool> GetAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .GetRoutingGateAsync(new Contract.GetRoutingGateRequest(), cancellationToken: cancellationToken)
+                .GetRoutingGateAsync(request: new Contract.GetRoutingGateRequest(),
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             return response.Enabled;
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not reach the router: the router is not reachable.", "Could not read the routing gate");
+            throw Wrap(ex: ex, unavailableMessage: "Could not reach the router: the router is not reachable.",
+                action: "Could not read the routing gate");
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<bool> SetAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         try
         {
             var response = await Client
-                .SetRoutingGateAsync(new Contract.SetRoutingGateRequest { Enabled = enabled }, cancellationToken: cancellationToken)
+                .SetRoutingGateAsync(request: new Contract.SetRoutingGateRequest { Enabled = enabled },
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
             return response.Enabled;
         }
         catch (RpcException ex)
         {
-            throw Wrap(ex, "Could not reach the router: the router is not reachable.", "Could not update the routing gate");
+            throw Wrap(ex: ex, unavailableMessage: "Could not reach the router: the router is not reachable.",
+                action: "Could not update the routing gate");
         }
     }
 
-    /// <inheritdoc />
-    protected override RoutingGateAdminException CreateException(string message, Exception? innerException, bool isUnavailable) =>
-        new(message, innerException, isUnavailable);
+    /// <inheritdoc/>
+    protected override RoutingGateAdminException CreateException(string message, Exception? innerException,
+        bool isUnavailable)
+    {
+        return new RoutingGateAdminException(message: message, innerException: innerException,
+            isUnavailable: isUnavailable);
+    }
 }

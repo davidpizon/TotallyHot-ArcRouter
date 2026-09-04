@@ -1,7 +1,6 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -41,10 +40,11 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
     /// </summary>
     private static readonly TimeSpan PriceFreshnessFloor = TimeSpan.FromHours(24);
 
-    private readonly IModelPriceCatalog _priceCatalog;
+    private readonly ILogger<UtilityRoutingPolicy> _logger;
     private readonly RouterMemory _memory;
     private readonly RoutingOptions _options;
-    private readonly ILogger<UtilityRoutingPolicy> _logger;
+
+    private readonly IModelPriceCatalog _priceCatalog;
 
     /// <param name="priceCatalog">Supplies the cost term κ, gated by <see cref="PriceFreshnessFloor"/>.</param>
     /// <param name="memory">Supplies the quality term s via <see cref="RouterMemory.GetAverageScore"/>.</param>
@@ -67,22 +67,20 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
         if (context.Candidates.Count == 0)
-        {
             throw new InvalidOperationException("UtilityRoutingPolicy requires at least one candidate.");
-        }
 
         var scored = context.Candidates
             .Select(candidate => new
             {
                 Candidate = candidate,
-                Quality = _memory.GetAverageScore(context.Dimension, candidate.ModelName),
+                Quality = _memory.GetAverageScore(dimension: context.Dimension, model: candidate.ModelName),
                 Cost = ResolveCost(candidate)
             })
             .ToList();
@@ -94,7 +92,7 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
 
         var qualityGated = scored
             // The quality gate (§B3.4): only an *observed* score below the floor is excluded.
-            .Where(x => x.Quality is not double q || q >= _options.UtilityMinQualityScore)
+            .Where(x => x.Quality is not { } q || q >= _options.UtilityMinQualityScore)
             .ToList();
 
         var pricedAndGated = qualityGated
@@ -105,7 +103,8 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
         if (pricedAndGated.Count > 0)
         {
             var selected = pricedAndGated
-                .OrderByDescending(x => (_options.Epsilon1 * (x.Quality ?? 0)) + (_options.Epsilon2 * (double)x.Cost!.Value))
+                .OrderByDescending(x =>
+                    _options.Epsilon1 * (x.Quality ?? 0) + _options.Epsilon2 * (double)x.Cost!.Value)
                 .First();
 
             return Task.FromResult(selected.Candidate.ModelName);
@@ -120,10 +119,11 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
         {
             var fallback = qualityGated
                 .OrderByDescending(x => x.Quality ?? 0)
-                .ThenBy(x => x.Candidate.ModelName, StringComparer.Ordinal)
+                .ThenBy(keySelector: x => x.Candidate.ModelName, comparer: StringComparer.Ordinal)
                 .First()
                 .Candidate.ModelName;
             _logger.LogWarning(
+                message:
                 "No priced utility candidate passed the quality gate for dimension '{Dimension}'; falling back to unpriced gate-passing model '{Model}'.",
                 context.Dimension,
                 fallback);
@@ -135,6 +135,7 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
         {
             var fallback = priced.OrderBy(x => x.Cost).First().Candidate.ModelName;
             _logger.LogWarning(
+                message:
                 "All utility candidates failed quality gate for dimension '{Dimension}'; falling back to cheapest priced model '{Model}'.",
                 context.Dimension,
                 fallback);
@@ -147,11 +148,12 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
         // worst-possible. A deterministic tie-break ensures the outcome never depends on input ordering.
         var unpricedFallback = scored
             .OrderByDescending(x => x.Quality ?? 0)
-            .ThenBy(x => x.Candidate.ModelName, StringComparer.Ordinal)
+            .ThenBy(keySelector: x => x.Candidate.ModelName, comparer: StringComparer.Ordinal)
             .First()
             .Candidate.ModelName;
 
         _logger.LogError(
+            message:
             "No utility candidates have pricing for dimension '{Dimension}'; falling back to best-observed-quality candidate '{Model}'.",
             context.Dimension,
             unpricedFallback);
@@ -165,13 +167,11 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
     /// </summary>
     private decimal? ResolveCost(RoutingCandidate candidate)
     {
-        if (candidate.IsFree)
-        {
-            return 0m;
-        }
+        if (candidate.IsFree) return 0m;
 
-        var key = new ModelKey(candidate.ModelName, candidate.Provider);
-        var price = _priceCatalog.GetFreshPriceForRouting(key, PriceContext.Standard, PriceFreshnessFloor);
+        var key = new ModelKey(ModelName: candidate.ModelName, Provider: candidate.Provider);
+        var price = _priceCatalog.GetFreshPriceForRouting(key: key, context: PriceContext.Standard,
+            maxAge: PriceFreshnessFloor);
         return price is null ? null : (price.InputPerMillionTokens + price.OutputPerMillionTokens) / 2m;
     }
 }

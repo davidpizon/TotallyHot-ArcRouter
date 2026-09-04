@@ -1,8 +1,8 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.PriceCatalog;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Options;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
@@ -13,10 +13,11 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 /// serialize it through <see cref="LogRegModelArtifactSerializer.Serialize"/>.
 /// Skips itself via <see cref="Assert.SkipUnless"/> when <c>benchmark_ood_results</c> has no <c>resolved = 1</c>
 /// rows - sync the corpus first (Governance -> Benchmark Data, the <c>sync_benchmark_data</c> MCP tool, or
-/// <c>--sync-benchmark-data</c>) - the same self-skip pattern <see cref="TotallyHot.ArcRouter.Tests.CodeRouterBench.CodeRouterBenchTable10ReconciliationTests"/>
+/// <c>--sync-benchmark-data</c>) - the same self-skip pattern
+/// <see cref="TotallyHot.ArcRouter.Tests.CodeRouterBench.CodeRouterBenchTable10ReconciliationTests"/>
 /// uses, since "data not synced" is an expected, non-broken state in CI and on most contributors' machines.
 /// </summary>
-[Trait("Category", "Integration")]
+[Trait(name: "Category", value: "Integration")]
 public class LogRegTrainerReconciliationTests
 {
     private const string SkipReason =
@@ -24,7 +25,10 @@ public class LogRegTrainerReconciliationTests
         "(Governance -> Benchmark Data, the sync_benchmark_data MCP tool, or --sync-benchmark-data). " +
         "The corpus is synced on demand, never populated automatically by CI.";
 
-    private static BenchmarkDatabase OpenRealDatabase() => new(Options.Create(new StorageOptions()));
+    private static BenchmarkDatabase OpenRealDatabase()
+    {
+        return new BenchmarkDatabase(Options.Create(new StorageOptions()));
+    }
 
     // Mirrors CodeRouterBenchTable10ReconciliationTests.ProbingSplitIsPopulated exactly - see its remarks
     // for why this deliberately never calls EnsureCreated against the real user database. Checks the exact
@@ -32,10 +36,7 @@ public class LogRegTrainerReconciliationTests
     // tables are non-empty - an OOD sync with zero resolves would otherwise still throw instead of skip.
     private static bool AtLeastOneOodResultIsResolved(BenchmarkDatabase database)
     {
-        if (!File.Exists(database.DatabasePath))
-        {
-            return false;
-        }
+        if (!File.Exists(database.DatabasePath)) return false;
 
         try
         {
@@ -59,7 +60,7 @@ public class LogRegTrainerReconciliationTests
     public void Train_OnRealCorpus_ProducesAUsableArtifact()
     {
         var database = OpenRealDatabase();
-        Assert.SkipUnless(AtLeastOneOodResultIsResolved(database), SkipReason);
+        Assert.SkipUnless(condition: AtLeastOneOodResultIsResolved(database), reason: SkipReason);
 
         var artifact = LogRegTrainer.Train(database);
 
@@ -67,9 +68,7 @@ public class LogRegTrainerReconciliationTests
         Assert.NotEmpty(artifact.Vocabulary);
         Assert.NotEmpty(artifact.ClassWeights);
         foreach (var weights in artifact.ClassWeights.Values)
-        {
-            Assert.Equal(artifact.Vocabulary.Count + 1, weights.Length);
-        }
+            Assert.Equal(expected: artifact.Vocabulary.Count + 1, actual: weights.Length);
 
         var artifactJson = LogRegModelArtifactSerializer.Serialize(artifact);
         Assert.False(string.IsNullOrWhiteSpace(artifactJson));

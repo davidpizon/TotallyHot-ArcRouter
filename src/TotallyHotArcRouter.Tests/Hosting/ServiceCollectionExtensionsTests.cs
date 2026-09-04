@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
@@ -5,9 +8,6 @@ using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tools;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 
@@ -23,18 +23,37 @@ public class ServiceCollectionExtensionsTests
 
         services.AddTotallyHotArcRouter();
 
-        Assert.Contains(services, d => d.ServiceType == typeof(IRouterMemoryStore) && d.ImplementationType == typeof(SqliteRouterMemoryStore) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(RouterMemory) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(AgentAsARouter) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(CheckSyntax) && d.Lifetime == ServiceLifetime.Transient);
-        Assert.Contains(services, d => d.ServiceType == typeof(IEnvironmentVariableProvider) && d.ImplementationType == typeof(EnvironmentVariableProvider) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(IModelRouteResolver) && d.ImplementationType == typeof(ModelRouteResolver) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(RequestInterceptor) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(ProxyMiddleware) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(IRoutingPolicy) && d.ImplementationType == typeof(CompositeRoutingPolicy) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(UtilityRoutingPolicy) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(AgentRouterPolicy) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(services, d => d.ServiceType == typeof(IHostedService));
+        Assert.Contains(collection: services,
+            filter: d =>
+                d.ServiceType == typeof(IRouterMemoryStore) &&
+                d.ImplementationType == typeof(SqliteRouterMemoryStore) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(RouterMemory) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(AgentAsARouter) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(CheckSyntax) && d.Lifetime == ServiceLifetime.Transient);
+        Assert.Contains(collection: services,
+            filter: d =>
+                d.ServiceType == typeof(IEnvironmentVariableProvider) &&
+                d.ImplementationType == typeof(EnvironmentVariableProvider) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d =>
+                d.ServiceType == typeof(IModelRouteResolver) && d.ImplementationType == typeof(ModelRouteResolver) &&
+                d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(RequestInterceptor) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(ProxyMiddleware) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d =>
+                d.ServiceType == typeof(IRoutingPolicy) && d.ImplementationType == typeof(CompositeRoutingPolicy) &&
+                d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(UtilityRoutingPolicy) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services,
+            filter: d => d.ServiceType == typeof(AgentRouterPolicy) && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(collection: services, filter: d => d.ServiceType == typeof(IHostedService));
     }
 
     [Fact]
@@ -95,8 +114,8 @@ public class ServiceCollectionExtensionsTests
 
         Assert.NotNull(capabilityStore);
         Assert.NotNull(contextWindowStore);
-        Assert.Same(capabilityStore, contextWindowStore);
-        Assert.Same(provider.GetRequiredService<ToolCallCapabilityStore>(), contextWindowStore);
+        Assert.Same(expected: capabilityStore, actual: contextWindowStore);
+        Assert.Same(expected: provider.GetRequiredService<ToolCallCapabilityStore>(), actual: contextWindowStore);
     }
 
     [Fact]
@@ -126,7 +145,7 @@ public class ServiceCollectionExtensionsTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["CostTracking:Reconciliation:Providers:openai:AdminApiKeyEnvVar"] = "TEST_OPENAI_ADMIN_KEY",
+                ["CostTracking:Reconciliation:Providers:openai:AdminApiKeyEnvVar"] = "TEST_OPENAI_ADMIN_KEY"
             })
             .Build();
         services.AddSingleton<IConfiguration>(configuration);
@@ -142,12 +161,15 @@ public class ServiceCollectionExtensionsTests
         var reconcilers = provider.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>();
 
         var reconciler = Assert.Single(reconcilers);
-        Assert.Equal("openai", reconciler.Provider);
+        Assert.Equal(expected: "openai", actual: reconciler.Provider);
     }
 
-    private sealed class StubEnvironmentVariableProvider(IReadOnlyDictionary<string, string> values) : IEnvironmentVariableProvider
+    private sealed class StubEnvironmentVariableProvider(IReadOnlyDictionary<string, string> values)
+        : IEnvironmentVariableProvider
     {
-        public string? GetVariable(string name) => values.GetValueOrDefault(name);
+        public string? GetVariable(string name)
+        {
+            return values.GetValueOrDefault(name);
+        }
     }
 }
-

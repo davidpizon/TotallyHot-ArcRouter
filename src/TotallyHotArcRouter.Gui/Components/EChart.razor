@@ -9,9 +9,9 @@
 <div id="@_elementId" class="w-full h-full"></div>
 
 @code {
+
     // The serialized CostChartModel / GroupedBarsModel / DonutModel to render. Changing it re-renders.
-    [Parameter, EditorRequired]
-    public string ModelJson { get; set; } = string.Empty;
+    [Parameter] [EditorRequired] public string ModelJson { get; set; } = string.Empty;
 
     private readonly string _elementId = "echart-" + Guid.NewGuid().ToString("N");
     private string? _rendered;
@@ -29,7 +29,7 @@
         _rendered = ModelJson;
         try
         {
-            await Js.InvokeVoidAsync("echartsInterop.render", _elementId, ModelJson);
+            await Js.InvokeVoidAsync(identifier: "echartsInterop.render", _elementId, ModelJson);
         }
         catch (JSDisconnectedException)
         {
@@ -42,7 +42,7 @@
         _disposed = true;
         try
         {
-            await Js.InvokeVoidAsync("echartsInterop.dispose", _elementId);
+            await Js.InvokeVoidAsync(identifier: "echartsInterop.dispose", _elementId);
         }
         catch (JSDisconnectedException)
         {
@@ -53,5 +53,5 @@
             // JS runtime disposed ahead of this component.
         }
     }
-}
 
+}

@@ -26,10 +26,7 @@ public static class ManagementTokenReader
         {
             var tokenPath = path ?? DefaultPath();
 
-            if (!File.Exists(tokenPath))
-            {
-                return null;
-            }
+            if (!File.Exists(tokenPath)) return null;
 
             var token = File.ReadAllText(tokenPath).Trim();
             return string.IsNullOrEmpty(token) ? null : token;
@@ -50,10 +47,11 @@ public static class ManagementTokenReader
     /// interactive user, so the per-user <c>%LOCALAPPDATA%</c> this used to read resolved to a different file
     /// than the one the router wrote. Must stay in step with <c>ManagementAccessToken.DefaultPath</c>.
     /// </summary>
-    private static string DefaultPath() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "TotallyHotArcRouter",
-            TokenFileName);
+    private static string DefaultPath()
+    {
+        return Path.Combine(
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: TokenFileName);
+    }
 }
-

@@ -1,16 +1,15 @@
+using Microsoft.Extensions.Logging;
+using Moq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using Microsoft.Extensions.Logging;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 
 /// <summary>
 /// Replays every recorded stream in <see cref="RecordedStreamTranscripts"/> through the shipped stream
 /// translator, one delta per <c>Push</c>, exactly as the deltas arrived.
-///
 /// <para>
 /// The buffered replay in <see cref="ToolCallEmulationReplayTests"/> cannot stand in for this. That path
 /// hands the scanner one complete string; this one hands it forty-three fragments and requires the same
@@ -18,7 +17,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// A model that emits <c>"```"</c>, <c>"json"</c>, <c>"\n"</c>, <c>"{\""</c> as four separate deltas is
 /// not an edge case here - it is every single recording.
 /// </para>
-///
 /// <para>
 /// <b>These all assert that nothing is extracted</b>, which is a weaker-sounding claim than it is. The
 /// recorded model frames its calls in shapes no dialect registers, so the correct behavior is to find
@@ -29,17 +27,6 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// </summary>
 public class ToolCallEmulationStreamReplayTests
 {
-    public static TheoryData<int> Cases()
-    {
-        var data = new TheoryData<int>();
-        for (var i = 0; i < RecordedStreamTranscripts.All.Count; i++)
-        {
-            data.Add(i);
-        }
-
-        return data;
-    }
-
     // The envelope fields LM Studio actually sent, copied from the recorded capture rather than reduced to
     // the ones the assertions read. ToolCallNormalizingStreamTranslator snapshots `id`, `created` and
     // `model` off the last parsed chunk so a call it synthesizes in Flush carries them, and a fixture that
@@ -48,6 +35,14 @@ public class ToolCallEmulationStreamReplayTests
     private const string ChunkId = "chatcmpl-sk3tcyjbacn9yw6gxp6q";
     private const long ChunkCreated = 1785505547;
     private const string ChunkModel = "deepseek-r1-distill-qwen-7b";
+
+    public static TheoryData<int> Cases()
+    {
+        var data = new TheoryData<int>();
+        for (var i = 0; i < RecordedStreamTranscripts.All.Count; i++) data.Add(i);
+
+        return data;
+    }
 
     /// <summary>Wraps one recorded content delta in the SSE event LM Studio sent it in.</summary>
     private static byte[] Chunk(string content)
@@ -66,9 +61,9 @@ public class ToolCallEmulationStreamReplayTests
                     ["index"] = 0,
                     ["delta"] = new JsonObject { ["content"] = content },
                     ["logprobs"] = null,
-                    ["finish_reason"] = null,
-                },
-            },
+                    ["finish_reason"] = null
+                }
+            }
         };
 
         return Encoding.UTF8.GetBytes($"data: {chunk.ToJsonString()}\n\n");
@@ -94,9 +89,9 @@ public class ToolCallEmulationStreamReplayTests
                     ["index"] = 0,
                     ["delta"] = new JsonObject(),
                     ["logprobs"] = null,
-                    ["finish_reason"] = "stop",
-                },
-            },
+                    ["finish_reason"] = "stop"
+                }
+            }
         };
 
         return Encoding.UTF8.GetBytes($"data: {chunk.ToJsonString()}\n\ndata: [DONE]\n\n");
@@ -113,17 +108,17 @@ public class ToolCallEmulationStreamReplayTests
         // request gets - so each recording is judged under the plan its own request would have produced.
         var plan = transcript.Emulated
             ? new ToolCallNormalizationPlan(
-                "replay", transcript.ModelName, [ToolCallDialectRegistry.Emulated], IsObserving: false, IsEmulating: true)
+                ProviderKey: "replay", ModelName: transcript.ModelName, Candidates: [ToolCallDialectRegistry.Emulated],
+                false, true)
             : new ToolCallNormalizationPlan(
-                "replay", transcript.ModelName, ToolCallDialectRegistry.ScannableDialects, IsObserving: false);
+                ProviderKey: "replay", ModelName: transcript.ModelName,
+                Candidates: ToolCallDialectRegistry.ScannableDialects, false);
 
-        var translator = new ToolCallNormalizingStreamTranslator(plan, capabilityStore: null, Mock.Of<ILogger>());
+        var translator = new ToolCallNormalizingStreamTranslator(plan: plan, null, logger: Mock.Of<ILogger>());
 
         var output = new StringBuilder();
         foreach (var delta in transcript.ContentDeltas)
-        {
             output.Append(Encoding.UTF8.GetString(translator.Push(Chunk(delta))));
-        }
 
         output.Append(Encoding.UTF8.GetString(translator.Push(StopChunk())));
         output.Append(Encoding.UTF8.GetString(translator.Flush()));
@@ -134,13 +129,14 @@ public class ToolCallEmulationStreamReplayTests
 
         // The load-bearing half. Every character the model produced must still reach the client, in order,
         // with nothing held back in a region that never closed.
-        Assert.Equal(string.Concat(transcript.ContentDeltas), content);
+        Assert.Equal(expected: string.Concat(transcript.ContentDeltas), actual: content);
 
         // And the envelope the client keys off must survive the rewrite. A translator that rebuilds chunks
         // has to carry id/created/model through unchanged - a client correlating a streamed response by id,
         // or reading `model` to learn what actually served it, breaks if a rewritten chunk drops them.
         Assert.NotEmpty(envelopes);
-        Assert.All(envelopes, e => Assert.Equal((ChunkId, ChunkCreated, ChunkModel), e));
+        Assert.All(collection: envelopes,
+            action: e => Assert.Equal(expected: (ChunkId, ChunkCreated, ChunkModel), actual: e));
     }
 
     [Fact]
@@ -150,7 +146,8 @@ public class ToolCallEmulationStreamReplayTests
         // omits the field entirely when streaming. ToolCallNormalizingStreamTranslator states this in a
         // comment as the reason its own empty-array check is count-guarded rather than null-guarded; these
         // ten recordings are the measurement behind that comment.
-        Assert.All(RecordedStreamTranscripts.All, t => Assert.Equal(0, t.ToolCallDeltaCount));
+        Assert.All(collection: RecordedStreamTranscripts.All,
+            action: t => Assert.Equal(0, actual: t.ToolCallDeltaCount));
     }
 
     [Fact]
@@ -169,9 +166,11 @@ public class ToolCallEmulationStreamReplayTests
         var streamed = string.Concat(
             RecordedStreamTranscripts.All.Single(t => t.Emulated && t.ScenarioName == "single").ContentDeltas);
 
-        Assert.NotEqual(buffered, streamed);
-        Assert.Contains("<function-call>", buffered, StringComparison.Ordinal);
-        Assert.DoesNotContain("<function-call>", streamed, StringComparison.Ordinal);
+        Assert.NotEqual(expected: buffered, actual: streamed);
+        Assert.Contains(expectedSubstring: "<function-call>", actualString: buffered,
+            comparisonType: StringComparison.Ordinal);
+        Assert.DoesNotContain(expectedSubstring: "<function-call>", actualString: streamed,
+            comparisonType: StringComparison.Ordinal);
     }
 
     [Fact]
@@ -180,49 +179,43 @@ public class ToolCallEmulationStreamReplayTests
         // Guards the same gap the buffered suite guards: a scenario recorded only natively would leave the
         // emulated stream untested while the list still looks complete.
         foreach (var emulated in new[] { true, false })
-        {
             Assert.Equal(
-                ToolCallEmulationScenarios.All.Select(s => s.Name).Order(),
-                RecordedStreamTranscripts.All.Where(t => t.Emulated == emulated).Select(t => t.ScenarioName).Order());
-        }
+                expected: ToolCallEmulationScenarios.All.Select(s => s.Name).Order(),
+                actual: RecordedStreamTranscripts.All.Where(t => t.Emulated == emulated).Select(t => t.ScenarioName)
+                    .Order());
     }
 
     /// <summary>Reads a translated SSE body back into the calls, the text, and each chunk's envelope.</summary>
-    private static (List<string> Calls, string Content, List<(string?, long?, string?)> Envelopes) ReadStream(string sse)
+    private static (List<string> Calls, string Content, List<(string?, long?, string?)> Envelopes)
+        ReadStream(string sse)
     {
         var calls = new List<string>();
         var content = new StringBuilder();
         var envelopes = new List<(string?, long?, string?)>();
 
-        foreach (var line in sse.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+        foreach (var line in sse.Split(separator: "\n\n", options: StringSplitOptions.RemoveEmptyEntries))
         {
             var payload = line["data: ".Length..].Trim();
-            if (payload == "[DONE]")
-            {
-                continue;
-            }
+            if (payload == "[DONE]") continue;
 
             var root = JsonDocument.Parse(payload).RootElement;
 
             envelopes.Add((
-                root.TryGetProperty("id", out var id) ? id.GetString() : null,
-                root.TryGetProperty("created", out var created) ? created.GetInt64() : null,
-                root.TryGetProperty("model", out var model) ? model.GetString() : null));
+                root.TryGetProperty(propertyName: "id", value: out var id) ? id.GetString() : null,
+                root.TryGetProperty(propertyName: "created", value: out var created) ? created.GetInt64() : null,
+                root.TryGetProperty(propertyName: "model", value: out var model) ? model.GetString() : null));
 
             var delta = root.GetProperty("choices")[0].GetProperty("delta");
 
-            if (delta.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
-            {
+            if (delta.TryGetProperty(propertyName: "content", value: out var c) && c.ValueKind == JsonValueKind.String)
                 content.Append(c.GetString());
-            }
 
-            if (delta.TryGetProperty("tool_calls", out var t) && t.ValueKind == JsonValueKind.Array)
-            {
-                calls.AddRange(t.EnumerateArray().Select(x => x.GetProperty("function").GetProperty("name").GetString()!));
-            }
+            if (delta.TryGetProperty(propertyName: "tool_calls", value: out var t) &&
+                t.ValueKind == JsonValueKind.Array)
+                calls.AddRange(t.EnumerateArray()
+                    .Select(x => x.GetProperty("function").GetProperty("name").GetString()!));
         }
 
         return (calls, content.ToString(), envelopes);
     }
 }
-

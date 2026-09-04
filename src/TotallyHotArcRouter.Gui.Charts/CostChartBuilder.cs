@@ -27,7 +27,7 @@ public enum CostMetric
     TimeToFirstToken,
 
     /// <summary>7. Context buffer margin - % of the context window used.</summary>
-    ContextBufferMargin,
+    ContextBufferMargin
 }
 
 /// <summary>The time window a metric series is scoped to.</summary>
@@ -46,7 +46,7 @@ public enum MetricRange
     Month,
 
     /// <summary>All history.</summary>
-    AllTime,
+    AllTime
 }
 
 /// <summary>
@@ -70,7 +70,10 @@ public enum MetricRange
 /// <param name="CacheHitRate">Prompt-cache hit rate for the turn (0-100).</param>
 /// <param name="TimeToFirstTokenMs">Latency to first token / response headers, in milliseconds.</param>
 /// <param name="ContextBufferPercent">Percentage of the model's context window used (0-100).</param>
-/// <param name="BaselineModel">The model the frozen baseline would have chosen, named in the ROI tooltip. <see langword="null"/> when it abstained.</param>
+/// <param name="BaselineModel">
+/// The model the frozen baseline would have chosen, named in the ROI tooltip.
+/// <see langword="null"/> when it abstained.
+/// </param>
 /// <param name="IsExploratory">
 /// Whether this turn was an epsilon-greedy probe rather than the ensemble's own pick. The ROI chart
 /// renders these in a muted tone so a deliberate probe is not misread as a routing miss, while still
@@ -186,6 +189,10 @@ public static class CostChartBuilder
     // The context-window fill percentage at which the safety threshold line sits.
     private const decimal ContextThresholdPercent = 90m;
 
+    // ---- shared helpers ----------------------------------------------------------
+
+    private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+
     /// <summary>
     /// Builds the chart model for <paramref name="metric"/> over the <paramref name="range"/> window
     /// measured back from <paramref name="now"/>, optionally scoped to a single
@@ -200,10 +207,11 @@ public static class CostChartBuilder
     {
         ArgumentNullException.ThrowIfNull(points);
 
-        var windowStart = WindowStart(range, now);
+        var windowStart = WindowStart(range: range, now: now);
         var turns = points
             .Where(p => p.TimestampUtc >= windowStart && p.TimestampUtc <= now)
-            .Where(p => string.IsNullOrEmpty(sessionId) || string.Equals(p.SessionId, sessionId, StringComparison.Ordinal))
+            .Where(p => string.IsNullOrEmpty(sessionId) ||
+                        string.Equals(a: p.SessionId, b: sessionId, comparisonType: StringComparison.Ordinal))
             .OrderBy(p => p.TimestampUtc)
             .ToList();
 
@@ -216,7 +224,7 @@ public static class CostChartBuilder
             CostMetric.CacheHitRate => BuildCache(turns),
             CostMetric.TimeToFirstToken => BuildLatency(turns),
             CostMetric.ContextBufferMargin => BuildContext(turns),
-            _ => Empty(CostChartKind.SteppedCumulativeArea, "Cost", "$"),
+            _ => Empty(kind: CostChartKind.SteppedCumulativeArea, title: "Cost", unit: "$")
         };
     }
 
@@ -245,15 +253,12 @@ public static class CostChartBuilder
     private static CostChartModel BuildRoi(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
-        decimal net = 0m;
+        var net = 0m;
 
         for (var i = 0; i < turns.Count; i++)
         {
             var t = turns[i];
-            if (t.BaselineCostUsd is not { } baseline)
-            {
-                continue;
-            }
+            if (t.BaselineCostUsd is not { } baseline) continue;
 
             var savings = baseline - t.TotalCost;
             net += savings;
@@ -267,25 +272,26 @@ public static class CostChartBuilder
                 savings >= 0m
                     ? $"Net saving: +{Money(savings)} — estimate"
                     : $"Net loss: -{Money(-savings)} — estimate",
-                t.IsExploratory ? "Exploratory probe (deliberate)" : "Ensemble pick",
+                t.IsExploratory ? "Exploratory probe (deliberate)" : "Ensemble pick"
             ];
 
             // Exploratory turns keep their bar - they are part of the all-in net position - but render
             // muted, so a probe that deliberately cost more is visually distinct from a routing miss.
             var color = t.IsExploratory ? Mute(Color(t.Model)) : Color(t.Model);
-            pts.Add(new CostChartPoint(Ms(t), Label(i, t), t.Model, color, Round(savings, 4), 0m, savings < 0m, tip));
+            pts.Add(new CostChartPoint(T: Ms(t), Label: Label(index: i, t: t), Model: t.Model, Color: color,
+                Value: Round(value: savings, 4), 0m, Flag: savings < 0m, Tip: tip));
         }
 
         return pts.Count == 0
-            ? Empty(CostChartKind.DualDirectionalBars, "Routing ROI (net savings)", "$")
+            ? Empty(kind: CostChartKind.DualDirectionalBars, title: "Routing ROI (net savings)", unit: "$")
             : new CostChartModel(
-                CostChartKind.DualDirectionalBars,
-                "Routing ROI (net savings, estimated)",
-                "$",
-                Money(net),
+                Kind: CostChartKind.DualDirectionalBars,
+                Title: "Routing ROI (net savings, estimated)",
+                Unit: "$",
+                Headline: Money(net),
                 null,
-                Models(turns),
-                pts);
+                Models: Models(turns),
+                Points: pts);
     }
 
     // 2. Total Turn Cost - stepped cumulative running total, area recolored per active model.
@@ -293,7 +299,7 @@ public static class CostChartBuilder
     private static CostChartModel BuildCost(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
-        decimal cumulative = 0m;
+        var cumulative = 0m;
 
         for (var i = 0; i < turns.Count; i++)
         {
@@ -303,21 +309,26 @@ public static class CostChartBuilder
             [
                 $"Model: {t.Model}",
                 $"Incremental Cost: +{Money(t.TotalCost)}",
-                $"Cumulative Total: {Money(cumulative)}",
+                $"Cumulative Total: {Money(cumulative)}"
             ];
-            pts.Add(new CostChartPoint(Ms(t), Label(i, t), t.Model, Color(t.Model), Round(t.TotalCost, 6), Round(cumulative, 6), false, tip));
+            pts.Add(new CostChartPoint(T: Ms(t), Label: Label(index: i, t: t), Model: t.Model, Color: Color(t.Model),
+                Value: Round(value: t.TotalCost, 6), Secondary: Round(value: cumulative, 6), false, Tip: tip));
         }
 
-        return new CostChartModel(CostChartKind.SteppedCumulativeArea, "Cumulative Turn Cost", "$", Money(cumulative), null, Models(turns), pts);
+        return new CostChartModel(Kind: CostChartKind.SteppedCumulativeArea, Title: "Cumulative Turn Cost", Unit: "$",
+            Headline: Money(cumulative), null, Models: Models(turns), Points: pts);
     }
 
     // 3. Prompt + Completion Tokens - cumulative stepped area with exponential-runaway detection.
-    /// <summary>Builds the Tokens chart: cumulative prompt + completion tokens with exponential-runaway detection flagged per turn.</summary>
+    /// <summary>
+    /// Builds the Tokens chart: cumulative prompt + completion tokens with exponential-runaway detection flagged per
+    /// turn.
+    /// </summary>
     private static CostChartModel BuildTokens(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
         long cumulative = 0;
-        int previousAdded = 0;
+        var previousAdded = 0;
 
         for (var i = 0; i < turns.Count; i++)
         {
@@ -331,25 +342,30 @@ public static class CostChartBuilder
                 [
                     $"Tokens Added: +{Int(added)} [RUNAWAY]",
                     $"Input: {Int(t.PromptTokens)} · Output: {Int(t.CompletionTokens)}",
-                    $"Cumulative: {Int(cumulative)}",
+                    $"Cumulative: {Int(cumulative)}"
                 ]
                 :
                 [
                     $"Tokens Added: +{Int(added)} (In: {Int(t.PromptTokens)}, Out: {Int(t.CompletionTokens)})",
-                    $"Cumulative: {Int(cumulative)}",
+                    $"Cumulative: {Int(cumulative)}"
                 ];
 
-            var label = runaway ? $"{Label(i, t)} [RUNAWAY ALERT]" : Label(i, t);
-            pts.Add(new CostChartPoint(Ms(t), label, t.Model, Color(t.Model), cumulative, added, runaway, tip));
+            var label = runaway ? $"{Label(index: i, t: t)} [RUNAWAY ALERT]" : Label(index: i, t: t);
+            pts.Add(new CostChartPoint(T: Ms(t), Label: label, Model: t.Model, Color: Color(t.Model), Value: cumulative,
+                Secondary: added, Flag: runaway, Tip: tip));
             previousAdded = added;
         }
 
-        return new CostChartModel(CostChartKind.RunawayArea, "Cumulative Tokens", "tok", Tokens(cumulative), null, Models(turns), pts);
+        return new CostChartModel(Kind: CostChartKind.RunawayArea, Title: "Cumulative Tokens", Unit: "tok",
+            Headline: Tokens(cumulative), null, Models: Models(turns), Points: pts);
     }
 
     // 4. Tool Execution Loop Count - a bar per turn split into per-model step segments. A turn that
     //    hands off from the previous turn's model is shown as two colored segments (planning vs. repair).
-    /// <summary>Builds the Tool Execution Steps chart: a bar per turn split into per-model step segments, splitting the bar when a turn hands off to a different model.</summary>
+    /// <summary>
+    /// Builds the Tool Execution Steps chart: a bar per turn split into per-model step segments, splitting the bar
+    /// when a turn hands off to a different model.
+    /// </summary>
     private static CostChartModel BuildSteps(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
@@ -359,46 +375,49 @@ public static class CostChartBuilder
         for (var i = 0; i < turns.Count; i++)
         {
             var t = turns[i];
-            var total = Math.Max(0, t.ToolExecutionSteps);
+            var total = Math.Max(0, val2: t.ToolExecutionSteps);
             lastTotal = total;
             var previousModel = i > 0 ? turns[i - 1].Model : null;
 
             List<CostChartSegment> segments;
-            if (total >= 2 && previousModel is not null && !string.Equals(previousModel, t.Model, StringComparison.Ordinal))
+            if (total >= 2 && previousModel is not null && !string.Equals(a: previousModel, b: t.Model,
+                    comparisonType: StringComparison.Ordinal))
             {
                 var planning = total / 2;
                 var repair = total - planning;
                 segments =
                 [
-                    new CostChartSegment(previousModel, Color(previousModel), planning),
-                    new CostChartSegment(t.Model, Color(t.Model), repair),
+                    new CostChartSegment(Model: previousModel, Color: Color(previousModel), Steps: planning),
+                    new CostChartSegment(Model: t.Model, Color: Color(t.Model), Steps: repair)
                 ];
             }
             else
             {
-                segments = [new CostChartSegment(t.Model, Color(t.Model), total)];
+                segments = [new CostChartSegment(Model: t.Model, Color: Color(t.Model), Steps: total)];
             }
 
-            foreach (var s in segments)
-            {
-                segmentModels.Add(s.Model);
-            }
+            foreach (var s in segments) segmentModels.Add(s.Model);
 
             var tip = segments.Select(s => $"{s.Model}: {s.Steps} step{(s.Steps == 1 ? "" : "s")}").ToList();
-            pts.Add(new CostChartPoint(Ms(t), $"{Label(i, t)} - {total} steps", t.Model, Color(t.Model), total, 0m, false, tip, segments));
+            pts.Add(new CostChartPoint(T: Ms(t), Label: $"{Label(index: i, t: t)} - {total} steps", Model: t.Model,
+                Color: Color(t.Model), Value: total, 0m, false, Tip: tip, Segments: segments));
         }
 
         // Legend must include every model that owns a segment, not just each turn's headline model.
         var models = segmentModels
-            .OrderBy(m => m, StringComparer.Ordinal)
-            .Select(m => new CostModelColor(m, Color(m)))
+            .OrderBy(keySelector: m => m, comparer: StringComparer.Ordinal)
+            .Select(m => new CostModelColor(Model: m, Color: Color(m)))
             .ToList();
 
-        return new CostChartModel(CostChartKind.SegmentedStepBars, "Tool Execution Steps", "steps", lastTotal.ToString(Inv), null, models, pts);
+        return new CostChartModel(Kind: CostChartKind.SegmentedStepBars, Title: "Tool Execution Steps", Unit: "steps",
+            Headline: lastTotal.ToString(Inv), null, Models: models, Points: pts);
     }
 
     // 5. Cache Hit Rate - stepped percentage line with a gradient track and per-model markers.
-    /// <summary>Builds the Cache Hit Rate chart: a stepped percentage line with per-model markers, plus the average rate as its headline.</summary>
+    /// <summary>
+    /// Builds the Cache Hit Rate chart: a stepped percentage line with per-model markers, plus the average rate as
+    /// its headline.
+    /// </summary>
     private static CostChartModel BuildCache(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
@@ -410,19 +429,24 @@ public static class CostChartBuilder
             var uncached = t.PromptTokens - cached;
             IReadOnlyList<string> tip =
             [
-                $"Cache Hit Rate: {t.CacheHitRate.ToString("F1", Inv)}%",
+                $"Cache Hit Rate: {t.CacheHitRate.ToString(format: "F1", provider: Inv)}%",
                 $"Cached: {Int(cached)} tok",
-                $"Uncached: {Int(uncached)} tok",
+                $"Uncached: {Int(uncached)} tok"
             ];
-            pts.Add(new CostChartPoint(Ms(t), Label(i, t), t.Model, Color(t.Model), Round(t.CacheHitRate, 1), 0m, false, tip));
+            pts.Add(new CostChartPoint(T: Ms(t), Label: Label(index: i, t: t), Model: t.Model, Color: Color(t.Model),
+                Value: Round(value: t.CacheHitRate, 1), 0m, false, Tip: tip));
         }
 
         var avg = turns.Count == 0 ? 0m : turns.Average(t => t.CacheHitRate);
-        return new CostChartModel(CostChartKind.CacheGradientLine, "Cache Hit Rate", "%", $"{avg.ToString("F0", Inv)}%", null, Models(turns), pts);
+        return new CostChartModel(Kind: CostChartKind.CacheGradientLine, Title: "Cache Hit Rate", Unit: "%",
+            Headline: $"{avg.ToString(format: "F0", provider: Inv)}%", null, Models: Models(turns), Points: pts);
     }
 
     // 6. TTFT / Routing Latency - stepped line over per-model background zones, spikes pinned.
-    /// <summary>Builds the Time to First Token chart: a stepped latency line that pins and annotates spikes above <see cref="LatencySpikeMs"/>.</summary>
+    /// <summary>
+    /// Builds the Time to First Token chart: a stepped latency line that pins and annotates spikes above
+    /// <see cref="LatencySpikeMs"/>.
+    /// </summary>
     private static CostChartModel BuildLatency(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
@@ -439,7 +463,7 @@ public static class CostChartBuilder
                 [
                     $"Total Routing Latency: {Int(t.TimeToFirstTokenMs)} ms [SPIKE]",
                     $"Model: {t.Model}",
-                    $"{routerOverhead} ms router + {t.TimeToFirstTokenMs - routerOverhead} ms upstream cold-start",
+                    $"{routerOverhead} ms router + {t.TimeToFirstTokenMs - routerOverhead} ms upstream cold-start"
                 ];
             }
             else
@@ -447,16 +471,21 @@ public static class CostChartBuilder
                 tip = [$"TTFT: {t.TimeToFirstTokenMs} ms", $"Model: {t.Model}"];
             }
 
-            var label = spike ? $"{Label(i, t)} - SPIKE" : Label(i, t);
-            pts.Add(new CostChartPoint(Ms(t), label, t.Model, Color(t.Model), t.TimeToFirstTokenMs, 0m, spike, tip));
+            var label = spike ? $"{Label(index: i, t: t)} - SPIKE" : Label(index: i, t: t);
+            pts.Add(new CostChartPoint(T: Ms(t), Label: label, Model: t.Model, Color: Color(t.Model),
+                Value: t.TimeToFirstTokenMs, 0m, Flag: spike, Tip: tip));
         }
 
         var avg = turns.Count == 0 ? 0 : (int)Math.Round(turns.Average(t => t.TimeToFirstTokenMs));
-        return new CostChartModel(CostChartKind.ZonedLatencyLine, "Time to First Token", "ms", $"{avg} ms", null, Models(turns), pts);
+        return new CostChartModel(Kind: CostChartKind.ZonedLatencyLine, Title: "Time to First Token", Unit: "ms",
+            Headline: $"{avg} ms", null, Models: Models(turns), Points: pts);
     }
 
     // 7. Context Buffer Margin - stepped % line with a fixed 90% red threshold and pulsing breaches.
-    /// <summary>Builds the Context Buffer Margin chart: a stepped percentage line with a fixed threshold breach flagged per turn.</summary>
+    /// <summary>
+    /// Builds the Context Buffer Margin chart: a stepped percentage line with a fixed threshold breach flagged per
+    /// turn.
+    /// </summary>
     private static CostChartModel BuildContext(IReadOnlyList<MetricTurnPoint> turns)
     {
         var pts = new List<CostChartPoint>(turns.Count);
@@ -470,48 +499,58 @@ public static class CostChartBuilder
             IReadOnlyList<string> tip = breach
                 ?
                 [
-                    $"Context Used: {t.ContextBufferPercent.ToString("F1", Inv)}% [WARNING]",
+                    $"Context Used: {t.ContextBufferPercent.ToString(format: "F1", provider: Inv)}% [WARNING]",
                     $"{Int(used)} / {Int(window)} tokens",
-                    "Automated context-pruning sweep queued",
+                    "Automated context-pruning sweep queued"
                 ]
                 :
                 [
-                    $"Context Used: {t.ContextBufferPercent.ToString("F1", Inv)}%",
-                    $"{Int(used)} / {Int(window)} tokens",
+                    $"Context Used: {t.ContextBufferPercent.ToString(format: "F1", provider: Inv)}%",
+                    $"{Int(used)} / {Int(window)} tokens"
                 ];
-            pts.Add(new CostChartPoint(Ms(t), Label(i, t), t.Model, Color(t.Model), Round(t.ContextBufferPercent, 1), 0m, breach, tip));
+            pts.Add(new CostChartPoint(T: Ms(t), Label: Label(index: i, t: t), Model: t.Model, Color: Color(t.Model),
+                Value: Round(value: t.ContextBufferPercent, 1), 0m, Flag: breach, Tip: tip));
         }
 
         var last = pts.Count > 0 ? pts[^1].Value : 0m;
-        return new CostChartModel(CostChartKind.ThresholdLine, "Context Buffer Margin", "%", $"{last.ToString("F1", Inv)}%", ContextThresholdPercent, Models(turns), pts);
+        return new CostChartModel(Kind: CostChartKind.ThresholdLine, Title: "Context Buffer Margin", Unit: "%",
+            Headline: $"{last.ToString(format: "F1", provider: Inv)}%", Threshold: ContextThresholdPercent,
+            Models: Models(turns), Points: pts);
     }
 
-    // ---- shared helpers ----------------------------------------------------------
-
-    private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-
     /// <summary>Builds a placeholder chart model with no data points, used when a metric has no matching turns.</summary>
-    private static CostChartModel Empty(string kind, string title, string unit) =>
-        new(kind, title, unit, "—", null, [], []);
+    private static CostChartModel Empty(string kind, string title, string unit)
+    {
+        return new CostChartModel(Kind: kind, Title: title, Unit: unit, Headline: "—", null, Models: [], Points: []);
+    }
 
     /// <summary>Builds the legend entries for every distinct model appearing in the given turns, sorted by name.</summary>
-    private static IReadOnlyList<CostModelColor> Models(IReadOnlyList<MetricTurnPoint> turns) =>
-        turns
+    private static IReadOnlyList<CostModelColor> Models(IReadOnlyList<MetricTurnPoint> turns)
+    {
+        return [.. turns
             .Select(t => t.Model)
             .Distinct(StringComparer.Ordinal)
-            .OrderBy(m => m, StringComparer.Ordinal)
-            .Select(m => new CostModelColor(m, Color(m)))
-            .ToList();
+            .OrderBy(keySelector: m => m, comparer: StringComparer.Ordinal)
+            .Select(m => new CostModelColor(Model: m, Color: Color(m)))];
+    }
 
     /// <summary>Formats a data point's display label from its 1-based turn number and timestamp.</summary>
-    private static string Label(int index, MetricTurnPoint t) =>
-        $"Turn #{index + 1} ({t.TimestampUtc.ToUniversalTime():HH:mm:ss})";
+    private static string Label(int index, MetricTurnPoint t)
+    {
+        return $"Turn #{index + 1} ({t.TimestampUtc.ToUniversalTime():HH:mm:ss})";
+    }
 
     /// <summary>Converts a turn's timestamp to Unix milliseconds for the chart's time axis.</summary>
-    private static long Ms(MetricTurnPoint t) => t.TimestampUtc.ToUnixTimeMilliseconds();
+    private static long Ms(MetricTurnPoint t)
+    {
+        return t.TimestampUtc.ToUnixTimeMilliseconds();
+    }
 
     /// <summary>Looks up the display color assigned to a model.</summary>
-    private static string Color(string model) => ChartPalette.ColorFor(model);
+    private static string Color(string model)
+    {
+        return ChartPalette.ColorFor(model);
+    }
 
     /// <summary>
     /// Desaturates a <c>#rrggbb</c> color toward mid-grey, keeping a model identifiable while marking its
@@ -522,25 +561,37 @@ public static class CostChartBuilder
     private static string Mute(string hex)
     {
         if (hex.Length != 7 || hex[0] != '#'
-            || !int.TryParse(hex.AsSpan(1), NumberStyles.HexNumber, Inv, out var rgb))
-        {
+                            || !int.TryParse(s: hex.AsSpan(1), style: NumberStyles.HexNumber, provider: Inv,
+                                result: out var rgb))
             return hex;
-        }
 
         // Blend 55% toward mid-grey: enough separation to read at a glance without losing the model's hue.
-        static int Blend(int channel) => (int)((channel * 0.45) + (128 * 0.55));
+        static int Blend(int channel)
+        {
+            return (int)(channel * 0.45 + 128 * 0.55);
+        }
+
         var muted = (Blend((rgb >> 16) & 0xFF) << 16) | (Blend((rgb >> 8) & 0xFF) << 8) | Blend(rgb & 0xFF);
-        return "#" + muted.ToString("x6", Inv);
+        return "#" + muted.ToString(format: "x6", provider: Inv);
     }
 
     /// <summary>Rounds a decimal value away from zero to the given number of digits.</summary>
-    private static decimal Round(decimal value, int digits) => Math.Round(value, digits, MidpointRounding.AwayFromZero);
+    private static decimal Round(decimal value, int digits)
+    {
+        return Math.Round(d: value, decimals: digits, mode: MidpointRounding.AwayFromZero);
+    }
 
     /// <summary>Formats a decimal value as a dollar-prefixed, two-decimal string.</summary>
-    private static string Money(decimal value) => "$" + value.ToString("F2", Inv);
+    private static string Money(decimal value)
+    {
+        return "$" + value.ToString(format: "F2", provider: Inv);
+    }
 
     /// <summary>Formats an integer value with thousands separators.</summary>
-    private static string Int(long value) => value.ToString("N0", Inv);
+    private static string Int(long value)
+    {
+        return value.ToString(format: "N0", provider: Inv);
+    }
 
     /// <summary>
     /// Computes a turn's prompt-cache hit rate (0-100): the percentage of its full input that was
@@ -555,15 +606,18 @@ public static class CostChartBuilder
         // Widened to long before summing: three int.MaxValue-range counts could overflow a 32-bit sum and
         // silently wrap into a wrong (possibly negative) denominator.
         var totalInputTokens = (long)promptTokens + cacheCreationTokens + cacheReadTokens;
-        return totalInputTokens <= 0 ? 0m : Round(cacheReadTokens / (decimal)totalInputTokens * 100m, 1);
+        return totalInputTokens <= 0 ? 0m : Round(value: cacheReadTokens / (decimal)totalInputTokens * 100m, 1);
     }
 
     /// <summary>Formats a token count using K/M abbreviations for large values.</summary>
-    private static string Tokens(long value) => value >= 1_000_000
-        ? (value / 1_000_000m).ToString("F1", Inv) + "M"
-        : value >= 1000
-            ? (value / 1000m).ToString("F0", Inv) + "K"
-            : value.ToString(Inv);
+    private static string Tokens(long value)
+    {
+        return value >= 1_000_000
+            ? (value / 1_000_000m).ToString(format: "F1", provider: Inv) + "M"
+            : value >= 1000
+                ? (value / 1000m).ToString(format: "F0", provider: Inv) + "K"
+                : value.ToString(Inv);
+    }
 
     /// <summary>Approximate context-window size (tokens) for a model, keyed off its name.</summary>
     private static int ContextWindowTokens(string model)
@@ -577,14 +631,16 @@ public static class CostChartBuilder
     }
 
     /// <summary>The earliest instant included in a range window measured back from <paramref name="now"/>.</summary>
-    private static DateTimeOffset WindowStart(MetricRange range, DateTimeOffset now) => range switch
+    private static DateTimeOffset WindowStart(MetricRange range, DateTimeOffset now)
     {
-        MetricRange.Hour => now.AddHours(-1),
-        MetricRange.Day => now.AddDays(-1),
-        MetricRange.Week => now.AddDays(-7),
-        MetricRange.Month => now.AddDays(-30),
-        MetricRange.AllTime => DateTimeOffset.MinValue,
-        _ => DateTimeOffset.MinValue,
-    };
+        return range switch
+        {
+            MetricRange.Hour => now.AddHours(-1),
+            MetricRange.Day => now.AddDays(-1),
+            MetricRange.Week => now.AddDays(-7),
+            MetricRange.Month => now.AddDays(-30),
+            MetricRange.AllTime => DateTimeOffset.MinValue,
+            _ => DateTimeOffset.MinValue
+        };
+    }
 }
-

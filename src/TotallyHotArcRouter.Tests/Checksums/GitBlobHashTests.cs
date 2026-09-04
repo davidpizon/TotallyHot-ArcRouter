@@ -16,7 +16,7 @@ public class GitBlobHashTests
         // universally known SHA-1 of an empty git blob - a stable vector with no external dependency.
         var hash = GitBlobHash.Compute([]);
 
-        Assert.Equal("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", hash);
+        Assert.Equal(expected: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", actual: hash);
     }
 
     [Fact]
@@ -24,27 +24,27 @@ public class GitBlobHashTests
     {
         // git hash-object -t blob --stdin <<< "hello" (a single "hello\n" line) => a well-known vector
         // used across git tooling documentation.
-        var hash = GitBlobHash.Compute(Encoding.UTF8.GetBytes("hello\n"));
+        var hash = GitBlobHash.Compute("hello\n"u8.ToArray());
 
-        Assert.Equal("ce013625030ba8dba906f756967f9e9ca394464a", hash);
+        Assert.Equal(expected: "ce013625030ba8dba906f756967f9e9ca394464a", actual: hash);
     }
 
     [Fact]
     public void Compute_IsLowercaseHex()
     {
-        var hash = GitBlobHash.Compute(Encoding.UTF8.GetBytes("some content"));
+        var hash = GitBlobHash.Compute("some content"u8.ToArray());
 
-        Assert.Equal(40, hash.Length);
-        Assert.Equal(hash, hash.ToLowerInvariant(), StringComparer.Ordinal);
+        Assert.Equal(40, actual: hash.Length);
+        Assert.Equal(expected: hash, actual: hash.ToLowerInvariant(), comparer: StringComparer.Ordinal);
     }
 
     [Fact]
     public void Compute_DifferentContent_ProducesDifferentHashes()
     {
-        var a = GitBlobHash.Compute(Encoding.UTF8.GetBytes("a"));
-        var b = GitBlobHash.Compute(Encoding.UTF8.GetBytes("b"));
+        var a = GitBlobHash.Compute("a"u8.ToArray());
+        var b = GitBlobHash.Compute("b"u8.ToArray());
 
-        Assert.NotEqual(a, b);
+        Assert.NotEqual(expected: a, actual: b);
     }
 
     [Fact]
@@ -52,12 +52,13 @@ public class GitBlobHashTests
     {
         // The streaming overload exists purely so a large download doesn't have to be buffered into
         // memory first - it must produce byte-for-byte the same digest as the in-memory overload.
-        var content = Encoding.UTF8.GetBytes("hello\n");
+        var content = "hello\n"u8.ToArray();
         using var stream = new MemoryStream(content);
 
-        var streamed = GitBlobHash.Compute(stream, content.LongLength, TestContext.Current.CancellationToken);
+        var streamed = GitBlobHash.Compute(content: stream, length: content.LongLength,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(GitBlobHash.Compute(content), streamed);
+        Assert.Equal(expected: GitBlobHash.Compute(content), actual: streamed);
     }
 
     [Fact]
@@ -67,9 +68,10 @@ public class GitBlobHashTests
         var content = Encoding.UTF8.GetBytes(new string('x', 200_000));
         using var stream = new MemoryStream(content);
 
-        var streamed = GitBlobHash.Compute(stream, content.LongLength, TestContext.Current.CancellationToken);
+        var streamed = GitBlobHash.Compute(content: stream, length: content.LongLength,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(GitBlobHash.Compute(content), streamed);
+        Assert.Equal(expected: GitBlobHash.Compute(content), actual: streamed);
     }
 
     [Fact]
@@ -82,6 +84,7 @@ public class GitBlobHashTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        Assert.Throws<OperationCanceledException>(() => GitBlobHash.Compute(stream, content.LongLength, cts.Token));
+        Assert.Throws<OperationCanceledException>(() =>
+            GitBlobHash.Compute(content: stream, length: content.LongLength, cancellationToken: cts.Token));
     }
 }

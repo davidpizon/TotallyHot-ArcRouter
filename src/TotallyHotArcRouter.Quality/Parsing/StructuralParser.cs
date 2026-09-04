@@ -1,6 +1,7 @@
 using Acornima;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Quality.Parsing;
 
@@ -24,7 +25,7 @@ namespace TotallyHot.ArcRouter.Quality.Parsing;
 /// </remarks>
 public sealed class StructuralParser : IStructuralParser
 {
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public SyntaxVerdict Check(string code, CodeLanguage language)
     {
         ArgumentNullException.ThrowIfNull(code);
@@ -33,8 +34,8 @@ public sealed class StructuralParser : IStructuralParser
         {
             CodeLanguage.CSharp => CheckCSharp(code),
             CodeLanguage.JavaScript => CheckJavaScript(code),
-            CodeLanguage.Python or CodeLanguage.Shell => CheckHeuristic(code, language),
-            _ => CheckHeuristic(code, CodeLanguage.Unknown),
+            CodeLanguage.Python or CodeLanguage.Shell => CheckHeuristic(code: code, language: language),
+            _ => CheckHeuristic(code: code, language: CodeLanguage.Unknown)
         };
     }
 
@@ -44,12 +45,12 @@ public sealed class StructuralParser : IStructuralParser
         var tree = CSharpSyntaxTree.ParseText(code);
         var errors = tree.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .Select(d => d.GetMessage(System.Globalization.CultureInfo.InvariantCulture))
+            .Select(d => d.GetMessage(CultureInfo.InvariantCulture))
             .ToList();
 
         return errors.Count == 0
-            ? SyntaxVerdict.Valid(CodeLanguage.CSharp, isAuthoritative: true)
-            : SyntaxVerdict.Invalid(CodeLanguage.CSharp, isAuthoritative: true, errors);
+            ? SyntaxVerdict.Valid(language: CodeLanguage.CSharp, true)
+            : SyntaxVerdict.Invalid(language: CodeLanguage.CSharp, true, errors: errors);
     }
 
     /// <summary>
@@ -69,37 +70,38 @@ public sealed class StructuralParser : IStructuralParser
         try
         {
             parser.ParseModule(code);
-            return SyntaxVerdict.Valid(CodeLanguage.JavaScript, isAuthoritative: true);
+            return SyntaxVerdict.Valid(language: CodeLanguage.JavaScript, true);
         }
         catch (ParseErrorException moduleError)
         {
             try
             {
                 parser.ParseScript(code);
-                return SyntaxVerdict.Valid(CodeLanguage.JavaScript, isAuthoritative: true);
+                return SyntaxVerdict.Valid(language: CodeLanguage.JavaScript, true);
             }
             catch (ParseErrorException scriptError)
             {
                 // Report the script-grammar message: it is the more permissive of the two, so its
                 // complaint is the one describing a genuine syntax problem rather than a module-only rule.
                 return SyntaxVerdict.Invalid(
-                    CodeLanguage.JavaScript,
-                    isAuthoritative: true,
-                    [scriptError.Message, moduleError.Message]);
+                    language: CodeLanguage.JavaScript,
+                    true,
+                    errors: [scriptError.Message, moduleError.Message]);
             }
         }
     }
 
-    /// <summary>Non-authoritatively checks a language with no managed parser by rejecting empty snippets and otherwise delegating to the delimiter-balance heuristic.</summary>
+    /// <summary>
+    /// Non-authoritatively checks a language with no managed parser by rejecting empty snippets and otherwise
+    /// delegating to the delimiter-balance heuristic.
+    /// </summary>
     private static SyntaxVerdict CheckHeuristic(string code, CodeLanguage language)
     {
         if (string.IsNullOrWhiteSpace(code))
-        {
-            return SyntaxVerdict.Invalid(language, isAuthoritative: false, ["Snippet is empty."]);
-        }
+            return SyntaxVerdict.Invalid(language: language, false, errors: ["Snippet is empty."]);
 
-        return DelimiterBalance.IsBalanced(code, out var error)
-            ? SyntaxVerdict.Valid(language, isAuthoritative: false)
-            : SyntaxVerdict.Invalid(language, isAuthoritative: false, [error!]);
+        return DelimiterBalance.IsBalanced(code: code, error: out var error)
+            ? SyntaxVerdict.Valid(language: language, false)
+            : SyntaxVerdict.Invalid(language: language, false, errors: [error!]);
     }
 }

@@ -14,14 +14,27 @@ namespace TotallyHot.ArcRouter.Tests.Transcripts;
 /// </summary>
 public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
 {
-    private readonly string _tempDirectory;
     private readonly string _dbPath;
+    private readonly string _tempDirectory;
 
     public SqliteTaxonomyComparisonStoreTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
+            path3: Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
-        _dbPath = Path.Combine(_tempDirectory, "transcripts.db");
+        _dbPath = Path.Combine(path1: _tempDirectory, path2: "transcripts.db");
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_tempDirectory)) Directory.Delete(path: _tempDirectory, true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
+        }
     }
 
     [Fact]
@@ -30,13 +43,13 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
         var store = CreateStore();
 
         await store.UpsertAsync(
-            MakeRecord(1) with { BaselinePredictedScore = 0.62, EstimatedRegret = -0.135 },
-            TestContext.Current.CancellationToken);
+            record: MakeRecord(1) with { BaselinePredictedScore = 0.62, EstimatedRegret = -0.135 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var row = Assert.Single(await store.LoadSinceAsync(
-            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal(0.62, row.BaselinePredictedScore);
-        Assert.Equal(-0.135, row.EstimatedRegret);
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0.62, actual: row.BaselinePredictedScore);
+        Assert.Equal(-0.135, actual: row.EstimatedRegret);
     }
 
     [Fact]
@@ -45,11 +58,11 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
         var store = CreateStore();
 
         await store.UpsertAsync(
-            MakeRecord(1) with { BaselinePredictedScore = null, EstimatedRegret = null },
-            TestContext.Current.CancellationToken);
+            record: MakeRecord(1) with { BaselinePredictedScore = null, EstimatedRegret = null },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var row = Assert.Single(await store.LoadSinceAsync(
-            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Null(row.BaselinePredictedScore);
         Assert.Null(row.EstimatedRegret);
     }
@@ -64,13 +77,13 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
 
         var store = CreateStore();
         await store.UpsertAsync(
-            MakeRecord(1) with { BaselinePredictedScore = 0.4, EstimatedRegret = 0.2 },
-            TestContext.Current.CancellationToken);
+            record: MakeRecord(1) with { BaselinePredictedScore = 0.4, EstimatedRegret = 0.2 },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var row = Assert.Single(await store.LoadSinceAsync(
-            DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal(0.4, row.BaselinePredictedScore);
-        Assert.Equal(0.2, row.EstimatedRegret);
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0.4, actual: row.BaselinePredictedScore);
+        Assert.Equal(0.2, actual: row.EstimatedRegret);
     }
 
     [Fact]
@@ -78,24 +91,30 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
     {
         var options = Options.Create(new TranscriptOptions { Enabled = true });
         var database = CreateDatabase();
-        var transcriptStore = new SqliteTranscriptStore(database, new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
-        var comparisonStore = new SqliteTaxonomyComparisonStore(database, options);
+        var transcriptStore = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        var comparisonStore = new SqliteTaxonomyComparisonStore(database: database, options: options);
         var token = TestContext.Current.CancellationToken;
 
-        var dimensionless = await SeedScoredLinkedTranscriptAsync(transcriptStore, "corr-1", dimension: null, token);
-        var ready = await SeedScoredLinkedTranscriptAsync(transcriptStore, "corr-2", dimension: "code_generation", token);
+        var dimensionless =
+            await SeedScoredLinkedTranscriptAsync(store: transcriptStore, correlationId: "corr-1", null, token: token);
+        var ready = await SeedScoredLinkedTranscriptAsync(store: transcriptStore, correlationId: "corr-2",
+            dimension: "code_generation", token: token);
 
-        var pending = await comparisonStore.LoadPendingComparisonsAsync(10, token);
+        var pending = await comparisonStore.LoadPendingComparisonsAsync(10, cancellationToken: token);
 
         // The dimensionless row satisfies every other readiness condition but can never be compared, so
         // admitting it would park it at the head of the oldest-first queue forever.
-        Assert.Equal([ready], pending);
-        Assert.DoesNotContain(dimensionless, pending);
+        Assert.Equal(expected: [ready], actual: pending);
+        Assert.DoesNotContain(expected: dimensionless, collection: pending);
     }
 
     /// <summary>Creates the store over a freshly-migrated database at <see cref="_dbPath"/>.</summary>
-    private SqliteTaxonomyComparisonStore CreateStore() =>
-        new(CreateDatabase(), Options.Create(new TranscriptOptions { Enabled = true }));
+    private SqliteTaxonomyComparisonStore CreateStore()
+    {
+        return new SqliteTaxonomyComparisonStore(database: CreateDatabase(),
+            options: Options.Create(new TranscriptOptions { Enabled = true }));
+    }
 
     /// <summary>Creates (or migrates) the transcript database file and returns its handle.</summary>
     private TranscriptDatabase CreateDatabase()
@@ -110,52 +129,54 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
         SqliteTranscriptStore store, string correlationId, string? dimension, CancellationToken token)
     {
         var id = await store.InsertAsync(
-            new TranscriptRecord(
-                Id: 0,
+            record: new TranscriptRecord(
+                0,
                 CorrelationId: correlationId,
                 CreatedAtUtc: DateTimeOffset.UtcNow,
                 RequestedModel: "auto",
                 RoutedModel: "model-a",
                 Dimension: dimension,
-                Difficulty: null,
-                Language: null,
-                IsUtility: false,
+                null,
+                null,
+                false,
                 PromptText: "p",
                 ResponseText: "r",
-                Score: null,
-                Cost: 0.01m,
-                IsExploratory: false,
-                Propensity: 1.0,
-                InputTokens: 10,
-                OutputTokens: 5,
-                MemoryEntryId: null,
+                null,
+                0.01m,
+                false,
+                1.0,
+                10,
+                5,
+                null,
                 DimBestModel: "model-b"),
-            token);
-        await store.LinkMemoryEntryAsync(id!.Value, memoryEntryId: 1, token);
-        await store.UpdateOutcomeAsync(correlationId, 0.8, token);
+            cancellationToken: token);
+        await store.LinkMemoryEntryAsync(transcriptId: id!.Value, 1, cancellationToken: token);
+        await store.UpdateOutcomeAsync(correlationId: correlationId, 0.8, cancellationToken: token);
         return id.Value;
     }
 
     /// <summary>A minimal but fully-populated comparison row for round-trip assertions.</summary>
-    private static TaxonomyComparisonRecord MakeRecord(long transcriptId) =>
-        new(
+    private static TaxonomyComparisonRecord MakeRecord(long transcriptId)
+    {
+        return new TaxonomyComparisonRecord(
             TranscriptId: transcriptId,
             ComparedAtUtc: DateTimeOffset.UtcNow,
             SessionId: "session-1",
-            ObservedScore: 0.8,
-            DimensionPredictedScore: 0.7,
-            ClusterPredictedScore: null,
-            DimensionAbsoluteError: 0.1,
-            ClusterAbsoluteError: null,
-            IsClustered: false,
-            IsExploratory: false,
+            0.8,
+            0.7,
+            null,
+            0.1,
+            null,
+            false,
+            false,
             RoutedModel: "model-a",
             BaselineModel: "model-b",
-            ActualCostUsd: 0.01m,
-            BaselineEstimatedCostUsd: 0.03m,
-            EstimatedNetSavingsUsd: 0.02m,
-            BaselinePredictedScore: null,
-            EstimatedRegret: null);
+            0.01m,
+            0.03m,
+            0.02m,
+            null,
+            null);
+    }
 
     /// <summary>
     /// Writes a database file with the exact table shapes a pre-regret (Phase T4) build created, so the
@@ -167,61 +188,46 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            CREATE TABLE request_transcripts (
-                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                correlation_id     TEXT    NOT NULL,
-                created_at_utc     TEXT    NOT NULL,
-                requested_model    TEXT    NOT NULL,
-                routed_model       TEXT    NOT NULL,
-                dimension          TEXT    NULL,
-                difficulty         TEXT    NULL,
-                language           TEXT    NULL,
-                is_utility         INTEGER NOT NULL,
-                prompt_text        TEXT    NULL,
-                response_text      TEXT    NULL,
-                score              REAL    NULL,
-                cost               REAL    NULL,
-                is_exploratory     INTEGER NOT NULL,
-                propensity         REAL    NOT NULL,
-                input_tokens       INTEGER NULL,
-                output_tokens      INTEGER NULL,
-                memory_entry_id    INTEGER NULL,
-                dim_best_model     TEXT    NULL
-            );
+                              CREATE TABLE request_transcripts (
+                                  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  correlation_id     TEXT    NOT NULL,
+                                  created_at_utc     TEXT    NOT NULL,
+                                  requested_model    TEXT    NOT NULL,
+                                  routed_model       TEXT    NOT NULL,
+                                  dimension          TEXT    NULL,
+                                  difficulty         TEXT    NULL,
+                                  language           TEXT    NULL,
+                                  is_utility         INTEGER NOT NULL,
+                                  prompt_text        TEXT    NULL,
+                                  response_text      TEXT    NULL,
+                                  score              REAL    NULL,
+                                  cost               REAL    NULL,
+                                  is_exploratory     INTEGER NOT NULL,
+                                  propensity         REAL    NOT NULL,
+                                  input_tokens       INTEGER NULL,
+                                  output_tokens      INTEGER NULL,
+                                  memory_entry_id    INTEGER NULL,
+                                  dim_best_model     TEXT    NULL
+                              );
 
-            CREATE TABLE taxonomy_comparisons (
-                transcript_id             INTEGER PRIMARY KEY,
-                compared_at_utc           TEXT    NOT NULL,
-                session_id                TEXT    NOT NULL,
-                observed_score            REAL    NOT NULL,
-                dimension_predicted_score REAL    NULL,
-                cluster_predicted_score   REAL    NULL,
-                dimension_abs_error       REAL    NULL,
-                cluster_abs_error         REAL    NULL,
-                is_clustered              INTEGER NOT NULL,
-                is_exploratory            INTEGER NOT NULL,
-                routed_model              TEXT    NOT NULL,
-                baseline_model            TEXT    NULL,
-                actual_cost_usd           REAL    NULL,
-                baseline_estimated_cost_usd REAL  NULL,
-                estimated_net_savings_usd REAL    NULL
-            );
-            """;
+                              CREATE TABLE taxonomy_comparisons (
+                                  transcript_id             INTEGER PRIMARY KEY,
+                                  compared_at_utc           TEXT    NOT NULL,
+                                  session_id                TEXT    NOT NULL,
+                                  observed_score            REAL    NOT NULL,
+                                  dimension_predicted_score REAL    NULL,
+                                  cluster_predicted_score   REAL    NULL,
+                                  dimension_abs_error       REAL    NULL,
+                                  cluster_abs_error         REAL    NULL,
+                                  is_clustered              INTEGER NOT NULL,
+                                  is_exploratory            INTEGER NOT NULL,
+                                  routed_model              TEXT    NOT NULL,
+                                  baseline_model            TEXT    NULL,
+                                  actual_cost_usd           REAL    NULL,
+                                  baseline_estimated_cost_usd REAL  NULL,
+                                  estimated_net_savings_usd REAL    NULL
+                              );
+                              """;
         command.ExecuteNonQuery();
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_tempDirectory))
-            {
-                Directory.Delete(_tempDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
-        }
     }
 }

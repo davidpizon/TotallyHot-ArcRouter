@@ -1,8 +1,7 @@
+using AwesomeAssertions;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using TotallyHot.ArcRouter.Gui.Telemetry;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 
@@ -20,7 +19,7 @@ public class TelemetryChannelFactoryTests
     [Fact]
     public void Rejects_a_null_certificate()
     {
-        Validate(certificate: null, requestUri: "https://localhost:5002").Should().BeFalse();
+        Validate(null, requestUri: "https://localhost:5002").Should().BeFalse();
     }
 
     [Fact]
@@ -30,7 +29,8 @@ public class TelemetryChannelFactoryTests
 
         // Chain-trust errors are expected and normal here: it is self-signed, and no CA issues certificates
         // for a loopback address.
-        Validate(certificate, "https://localhost:5002", SslPolicyErrors.RemoteCertificateChainErrors)
+        Validate(certificate: certificate, requestUri: "https://localhost:5002",
+                errors: SslPolicyErrors.RemoteCertificateChainErrors)
             .Should().BeTrue();
     }
 
@@ -41,7 +41,7 @@ public class TelemetryChannelFactoryTests
     {
         using var certificate = SelfSigned("CN=localhost");
 
-        Validate(certificate, requestUri).Should().BeTrue();
+        Validate(certificate: certificate, requestUri: requestUri).Should().BeTrue();
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public class TelemetryChannelFactoryTests
         // "localhost.evil.com" must not be accepted just because its subject begins with the right word.
         using var certificate = SelfSigned("CN=localhost.evil");
 
-        Validate(certificate, "https://localhost:5002").Should().BeFalse();
+        Validate(certificate: certificate, requestUri: "https://localhost:5002").Should().BeFalse();
     }
 
     [Theory]
@@ -61,7 +61,7 @@ public class TelemetryChannelFactoryTests
     {
         using var certificate = SelfSigned(subject);
 
-        Validate(certificate, "https://localhost:5002").Should().BeFalse();
+        Validate(certificate: certificate, requestUri: "https://localhost:5002").Should().BeFalse();
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class TelemetryChannelFactoryTests
         // host is not the proxy, whatever it claims - so the host check has to gate the subject check.
         using var certificate = SelfSigned("CN=localhost");
 
-        Validate(certificate, "https://telemetry.example.com:5002").Should().BeFalse();
+        Validate(certificate: certificate, requestUri: "https://telemetry.example.com:5002").Should().BeFalse();
     }
 
     [Fact]
@@ -111,18 +111,21 @@ public class TelemetryChannelFactoryTests
     private static bool Validate(
         X509Certificate2? certificate,
         string requestUri,
-        SslPolicyErrors errors = SslPolicyErrors.None) =>
-        TelemetryChannelFactory.ValidateLoopbackCertificate(
-            new HttpRequestMessage(HttpMethod.Post, requestUri),
-            certificate,
-            chain: null,
-            errors);
+        SslPolicyErrors errors = SslPolicyErrors.None)
+    {
+        return TelemetryChannelFactory.ValidateLoopbackCertificate(
+            requestMessage: new HttpRequestMessage(method: HttpMethod.Post, requestUri: requestUri),
+            certificate: certificate,
+            null,
+            sslPolicyErrors: errors);
+    }
 
     private static X509Certificate2 SelfSigned(string subject)
     {
         using var key = RSA.Create(2048);
-        var request = new CertificateRequest(subject, key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var request = new CertificateRequest(subjectName: subject, key: key, hashAlgorithm: HashAlgorithmName.SHA256,
+            padding: RSASignaturePadding.Pkcs1);
+        return request.CreateSelfSigned(notBefore: DateTimeOffset.UtcNow.AddDays(-1),
+            notAfter: DateTimeOffset.UtcNow.AddDays(1));
     }
 }
-

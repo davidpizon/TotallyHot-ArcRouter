@@ -1,6 +1,6 @@
-using TotallyHot.ArcRouter.Gui.Components;
-using Bunit;
 using AwesomeAssertions;
+using Bunit;
+using TotallyHot.ArcRouter.Gui.Components;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -14,11 +14,11 @@ public sealed class EChartTests
     [Fact]
     public void Renders_a_host_div_with_a_unique_element_id()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        var first = ctx.Render<EChart>(p => p.Add(c => c.ModelJson, "{}"));
-        var second = ctx.Render<EChart>(p => p.Add(c => c.ModelJson, "{}"));
+        var first = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));
+        var second = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));
 
         var firstId = first.Find("div").Id;
         var secondId = second.Find("div").Id;
@@ -31,23 +31,24 @@ public sealed class EChartTests
     [Fact]
     public void Invokes_render_after_first_render_with_the_supplied_json()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        var cut = ctx.Render<EChart>(p => p.Add(c => c.ModelJson, "{\"a\":1}"));
+        var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{\"a\":1}"));
 
-        var invocation = ctx.JSInterop.Invocations.Should().ContainSingle(i => i.Identifier == "echartsInterop.render").Subject;
+        var invocation = ctx.JSInterop.Invocations.Should().ContainSingle(i => i.Identifier == "echartsInterop.render")
+            .Subject;
         invocation.Arguments[1].Should().Be("{\"a\":1}");
     }
 
     [Fact]
     public void Does_not_re_render_when_the_json_is_unchanged()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        var cut = ctx.Render<EChart>(p => p.Add(c => c.ModelJson, "{}"));
-        cut.Render(p => p.Add(c => c.ModelJson, "{}"));
+        var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));
+        cut.Render(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));
 
         ctx.JSInterop.Invocations.Count(i => i.Identifier == "echartsInterop.render").Should().Be(1);
     }
@@ -55,11 +56,11 @@ public sealed class EChartTests
     [Fact]
     public void Re_renders_when_the_json_changes()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        var cut = ctx.Render<EChart>(p => p.Add(c => c.ModelJson, "{}"));
-        cut.Render(p => p.Add(c => c.ModelJson, "{\"changed\":true}"));
+        var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));
+        cut.Render(p => p.Add(parameterSelector: c => c.ModelJson, value: "{\"changed\":true}"));
 
         ctx.JSInterop.Invocations.Count(i => i.Identifier == "echartsInterop.render").Should().Be(2);
     }
@@ -67,10 +68,10 @@ public sealed class EChartTests
     [Fact]
     public void Disposing_calls_the_JS_dispose_hook()
     {
-        using var ctx = new Bunit.BunitContext();
+        using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        var cut = ctx.Render<EChart>(p => p.Add(c => c.ModelJson, "{}"));
+        var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));
         cut.Instance.Should().NotBeNull();
 
         ctx.Dispose();
@@ -80,4 +81,3 @@ public sealed class EChartTests
         // handling in EChart.razor) without throwing.
     }
 }
-

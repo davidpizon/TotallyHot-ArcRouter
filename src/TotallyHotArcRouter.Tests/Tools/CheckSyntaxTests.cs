@@ -1,5 +1,5 @@
-using TotallyHot.ArcRouter.Tools;
 using Microsoft.CodeAnalysis;
+using TotallyHot.ArcRouter.Tools;
 
 namespace TotallyHot.ArcRouter.Tests.Tools;
 
@@ -20,7 +20,7 @@ public class MyClass
     }
 }";
 
-        var diagnostics = checkSyntax.Check(code);
+        var diagnostics = checkSyntax.Check(code).ToList();
 
         Assert.Empty(diagnostics);
     }
@@ -37,10 +37,11 @@ public class MyClass
         // Missing closing brace
     ";
 
-        var diagnostics = checkSyntax.Check(code);
+        var diagnostics = checkSyntax.Check(code).ToList();
 
         Assert.NotEmpty(diagnostics);
-        Assert.All(diagnostics, d => Assert.Equal(DiagnosticSeverity.Error, d.Severity));
+        Assert.All(collection: diagnostics,
+            action: d => Assert.Equal(expected: DiagnosticSeverity.Error, actual: d.Severity));
     }
 
     [Fact]
@@ -61,4 +62,3 @@ public class MyClass
         Assert.Throws<ArgumentNullException>(() => checkSyntax.Check(null!));
     }
 }
-

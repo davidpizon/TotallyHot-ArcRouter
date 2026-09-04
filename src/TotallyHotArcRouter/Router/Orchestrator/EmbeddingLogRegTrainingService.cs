@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Router.Embeddings;
 
 namespace TotallyHot.ArcRouter.Router.Orchestrator;
 
@@ -17,14 +17,14 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingService
 {
     private readonly OodBootstrapSampleSource _bootstrapSource;
-    private readonly IMemoryEntryStore _memoryEntryStore;
-    private readonly Embeddings.IEmbeddingClient _embeddingClient;
-    private readonly LogRegVoter _voter;
-    private readonly RoutingOptions _routingOptions;
+    private readonly IEmbeddingClient _embeddingClient;
     private readonly EmbeddingOptions _embeddingOptions;
-    private readonly string _modelPath;
-    private readonly ILogger<EmbeddingLogRegTrainingService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ILogger<EmbeddingLogRegTrainingService> _logger;
+    private readonly IMemoryEntryStore _memoryEntryStore;
+    private readonly string _modelPath;
+    private readonly RoutingOptions _routingOptions;
+    private readonly LogRegVoter _voter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EmbeddingLogRegTrainingService"/> class.
@@ -44,7 +44,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
     public EmbeddingLogRegTrainingService(
         OodBootstrapSampleSource bootstrapSource,
         IMemoryEntryStore memoryEntryStore,
-        Embeddings.IEmbeddingClient embeddingClient,
+        IEmbeddingClient embeddingClient,
         LogRegVoter voter,
         IOptions<RoutingOptions> routingOptions,
         IOptions<EmbeddingOptions> embeddingOptions,
@@ -70,21 +70,22 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task<LogRegTrainingOutcome> RetrainAsync(
         IProgress<int>? bootstrapProgress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        if (!await _gate.WaitAsync(0, cancellationToken: cancellationToken).ConfigureAwait(false))
         {
             _logger.LogInformation("logreg retrain requested while another retrain is already in progress; skipping.");
-            return new LogRegTrainingOutcome(LogRegTrainingResultKind.AlreadyRunning,
-                "A retrain was already in progress.", 0, 0, 0, 0);
+            return new LogRegTrainingOutcome(Kind: LogRegTrainingResultKind.AlreadyRunning,
+                Message: "A retrain was already in progress.", 0, 0, 0, 0);
         }
 
         try
         {
-            return await RetrainCoreAsync(bootstrapProgress, cancellationToken).ConfigureAwait(false);
+            return await RetrainCoreAsync(bootstrapProgress: bootstrapProgress, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -103,7 +104,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
         try
         {
             var (bootstrapSamples, taskCount) = await _bootstrapSource
-                .LoadAsync(bootstrapProgress, cancellationToken).ConfigureAwait(false);
+                .LoadAsync(progress: bootstrapProgress, cancellationToken: cancellationToken).ConfigureAwait(false);
             samples.AddRange(bootstrapSamples);
             bootstrapTaskCount = taskCount;
         }
@@ -111,7 +112,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
         {
             // Unsynced corpus is an expected, non-broken state (data/README.md) - degrade to live-only
             // training rather than failing the whole retrain.
-            _logger.LogInformation(ex, "logreg retrain proceeding without an OOD bootstrap.");
+            _logger.LogInformation(exception: ex, message: "logreg retrain proceeding without an OOD bootstrap.");
         }
 
         var modelIdentity = _embeddingClient.ModelIdentity;
@@ -126,6 +127,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
                 // invalidates older entries for training purposes - skip rather than let the trainer
                 // choke on a ragged embedding length. LogRegVoter applies the same guard at scoring time.
                 _logger.LogWarning(
+                    message:
                     "Skipping a memory entry with a {ActualDimension}-dimensional embedding; expected {ExpectedDimension}.",
                     entry.TaskEmbedding.Length,
                     dimension);
@@ -145,31 +147,32 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
             }
 
             samples.Add(new LogRegTrainingSample(
-                entry.TaskEmbedding,
-                ModelNameCanonicalizer.Canonicalize(entry.ChosenModel),
-                entry.Score,
-                _routingOptions.LogRegLiveSampleWeight));
+                Embedding: entry.TaskEmbedding,
+                ModelKey: ModelNameCanonicalizer.Canonicalize(entry.ChosenModel),
+                Score: entry.Score,
+                Weight: _routingOptions.LogRegLiveSampleWeight));
             memoryEntryCount++;
         }
 
         if (skippedForModelMismatch > 0)
-        {
             _logger.LogWarning(
+                message:
                 "Skipped {SkippedCount} memory entry/entries produced by a different embedding model than the current {ModelIdentity}; they are retained in the store but cannot be trained on.",
                 skippedForModelMismatch,
                 modelIdentity);
-        }
 
         var modelsRepresented = samples.Select(s => s.ModelKey).Distinct(StringComparer.Ordinal).Count();
 
-        if (samples.Count < _routingOptions.LogRegMinTrainingRows || modelsRepresented < _routingOptions.LogRegMinModelsRepresented)
+        if (samples.Count < _routingOptions.LogRegMinTrainingRows ||
+            modelsRepresented < _routingOptions.LogRegMinModelsRepresented)
         {
             var message =
                 $"Declined: {samples.Count} sample(s) across {modelsRepresented} model(s) - " +
                 $"below the configured minimum ({_routingOptions.LogRegMinTrainingRows} rows, {_routingOptions.LogRegMinModelsRepresented} models).";
-            _logger.LogWarning("logreg retrain {Message}", message);
+            _logger.LogWarning(message: "logreg retrain {Message}", message);
             return new LogRegTrainingOutcome(
-                LogRegTrainingResultKind.Declined, message, bootstrapTaskCount, memoryEntryCount, samples.Count, modelsRepresented);
+                Kind: LogRegTrainingResultKind.Declined, Message: message, BootstrapTaskCount: bootstrapTaskCount,
+                MemoryEntryCount: memoryEntryCount, SampleCount: samples.Count, ModelsRepresented: modelsRepresented);
         }
 
         var trainedFrom =
@@ -178,20 +181,23 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
             $"models={modelsRepresented}, trained {DateTimeOffset.UtcNow:O}";
 
         var artifact = EmbeddingLogRegTrainer.Train(
-            samples, dimension, trainedFrom, bootstrapTaskCount, memoryEntryCount, modelIdentity);
+            samples: samples, embeddingDimension: dimension, trainedFrom: trainedFrom,
+            bootstrapTaskCount: bootstrapTaskCount, memoryEntryCount: memoryEntryCount, embeddingModel: modelIdentity);
         EmbeddingLogRegModelArtifactSerializer.Validate(artifact);
 
-        await WriteArtifactAtomicallyAsync(artifact, cancellationToken).ConfigureAwait(false);
+        await WriteArtifactAtomicallyAsync(artifact: artifact, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
         _voter.Reload();
 
         var trainedMessage =
             $"Trained from {bootstrapTaskCount} bootstrap task(s) and {memoryEntryCount} live memory entry/entries " +
             $"({samples.Count} sample(s), {modelsRepresented} model(s)).";
         _logger.LogInformation(
-            "logreg retrain wrote a new artifact to {Path}: {Message}", _modelPath, trainedMessage);
+            message: "logreg retrain wrote a new artifact to {Path}: {Message}", _modelPath, trainedMessage);
 
         return new LogRegTrainingOutcome(
-            LogRegTrainingResultKind.Trained, trainedMessage, bootstrapTaskCount, memoryEntryCount, samples.Count, modelsRepresented);
+            Kind: LogRegTrainingResultKind.Trained, Message: trainedMessage, BootstrapTaskCount: bootstrapTaskCount,
+            MemoryEntryCount: memoryEntryCount, SampleCount: samples.Count, ModelsRepresented: modelsRepresented);
     }
 
     /// <summary>
@@ -199,17 +205,16 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
     /// atomically renames it into place, so a crash mid-write never leaves <see cref="LogRegVoter"/> a
     /// truncated JSON document to fail on.
     /// </summary>
-    private async Task WriteArtifactAtomicallyAsync(EmbeddingLogRegModelArtifact artifact, CancellationToken cancellationToken)
+    private async Task WriteArtifactAtomicallyAsync(EmbeddingLogRegModelArtifact artifact,
+        CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(_modelPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
         var json = EmbeddingLogRegModelArtifactSerializer.Serialize(artifact);
         var tempPath = $"{_modelPath}.{Guid.NewGuid():N}.tmp";
-        await File.WriteAllTextAsync(tempPath, json, cancellationToken).ConfigureAwait(false);
-        File.Move(tempPath, _modelPath, overwrite: true);
+        await File.WriteAllTextAsync(path: tempPath, contents: json, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        File.Move(sourceFileName: tempPath, destFileName: _modelPath, true);
     }
 }

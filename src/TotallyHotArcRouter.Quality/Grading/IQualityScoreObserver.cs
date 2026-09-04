@@ -17,4 +17,3 @@ public interface IQualityScoreObserver
     /// <returns>A task that completes when the observation is recorded.</returns>
     Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default);
 }
-

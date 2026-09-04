@@ -1,5 +1,5 @@
-using System.Globalization;
 using Microsoft.Data.Sqlite;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
@@ -29,21 +29,30 @@ public abstract class PriceCatalogRepositoryBase
     }
 
     /// <summary>Opens a new connection against the shared price-catalog database.</summary>
-    private protected SqliteConnection OpenConnection() => _database.OpenConnection();
+    private protected SqliteConnection OpenConnection()
+    {
+        return _database.OpenConnection();
+    }
 
     /// <summary>
     /// Formats the UTC timestamp that is <paramref name="maxAge"/> before now, for use as a freshness cutoff
     /// in a SQL comparison.
     /// </summary>
-    private protected static string FormatCutoff(TimeSpan maxAge) =>
-        (DateTimeOffset.UtcNow - maxAge).UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+    private protected static string FormatCutoff(TimeSpan maxAge)
+    {
+        return (DateTimeOffset.UtcNow - maxAge).UtcDateTime.ToString(format: TimestampFormat,
+            provider: CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// Parses a round-trip UTC timestamp written in <see cref="TimestampFormat"/> back into a
     /// <see cref="DateTimeOffset"/>.
     /// </summary>
-    private protected static DateTimeOffset ParseTimestamp(string value) =>
-        new(
-            DateTime.ParseExact(value, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
-            TimeSpan.Zero);
+    private protected static DateTimeOffset ParseTimestamp(string value)
+    {
+        return new DateTimeOffset(
+            dateTime: DateTime.ParseExact(s: value, format: TimestampFormat, provider: CultureInfo.InvariantCulture,
+                style: DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
+            offset: TimeSpan.Zero);
+    }
 }

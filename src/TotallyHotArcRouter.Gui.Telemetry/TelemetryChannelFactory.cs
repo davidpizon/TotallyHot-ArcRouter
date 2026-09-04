@@ -1,9 +1,8 @@
-using System.Net.Http;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
@@ -37,14 +36,14 @@ public static class TelemetryChannelFactory
     {
         var handler = new HttpClientHandler
         {
-            ServerCertificateCustomValidationCallback = ValidateLoopbackCertificate,
+            ServerCertificateCustomValidationCallback = ValidateLoopbackCertificate
         };
 
         // DisposeHttpClient: GrpcChannel doesn't own a caller-supplied HttpHandler by default, so without
         // this the handler would outlive the channel's disposal.
         return GrpcChannel.ForAddress(
-            serverAddress,
-            new GrpcChannelOptions { HttpHandler = handler, DisposeHttpClient = true });
+            address: serverAddress,
+            channelOptions: new GrpcChannelOptions { HttpHandler = handler, DisposeHttpClient = true });
     }
 
     /// <summary>
@@ -52,8 +51,10 @@ public static class TelemetryChannelFactory
     /// made through the returned <see cref="CallInvoker"/> presents the shared management token. Callers
     /// still own and dispose <paramref name="channel"/> itself - intercepting doesn't change ownership.
     /// </summary>
-    public static CallInvoker Authenticated(GrpcChannel channel) =>
-        channel.Intercept(new TelemetryAuthClientInterceptor());
+    public static CallInvoker Authenticated(GrpcChannel channel)
+    {
+        return channel.Intercept(new TelemetryAuthClientInterceptor());
+    }
 
     /// <summary>
     /// Trusts a certificate only if its subject is exactly <c>CN=localhost</c> and the request targets a
@@ -72,16 +73,10 @@ public static class TelemetryChannelFactory
         X509Chain? chain,
         SslPolicyErrors sslPolicyErrors)
     {
-        if (certificate is null)
-        {
-            return false;
-        }
+        if (certificate is null) return false;
 
         // Exact match, not a substring: "CN=localhost.evil" must not pass.
-        if (certificate.Subject != "CN=localhost")
-        {
-            return false;
-        }
+        if (certificate.Subject != "CN=localhost") return false;
 
         // The request's host must match the certificate's subject, so a local process cannot impersonate the
         // telemetry server by presenting a CN=localhost certificate on some other address.
@@ -89,4 +84,3 @@ public static class TelemetryChannelFactory
         return targetHost is "localhost" or "127.0.0.1" or "::1";
     }
 }
-

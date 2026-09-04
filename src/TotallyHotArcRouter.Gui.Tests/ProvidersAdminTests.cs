@@ -1,7 +1,7 @@
+using AwesomeAssertions;
+using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
-using Bunit;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -13,9 +13,9 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class ProvidersAdminTests
 {
-    private static Bunit.BunitContext NewContext()
+    private static BunitContext NewContext()
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59995"));
         return ctx;
     }
@@ -37,7 +37,8 @@ public sealed class ProvidersAdminTests
 
         var cut = ctx.Render<ProvidersAdmin>();
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Proxy management API unreachable"), TimeSpan.FromSeconds(4));
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Proxy management API unreachable"),
+            timeout: TimeSpan.FromSeconds(4));
         cut.Markup.Should().Contain(ProviderAdminStore.DefaultManagementAddress);
     }
 
@@ -47,12 +48,14 @@ public sealed class ProvidersAdminTests
         using var ctx = NewContext();
 
         var cut = ctx.Render<ProvidersAdmin>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Proxy management API unreachable"), TimeSpan.FromSeconds(4));
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Proxy management API unreachable"),
+            timeout: TimeSpan.FromSeconds(4));
 
         var act = () => cut.Find("button").Click();
         act.Should().NotThrow();
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Proxy management API unreachable"), TimeSpan.FromSeconds(4));
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Proxy management API unreachable"),
+            timeout: TimeSpan.FromSeconds(4));
     }
 
     [Fact]
@@ -60,10 +63,10 @@ public sealed class ProvidersAdminTests
     {
         using var ctx = NewContext();
         var cut = ctx.Render<ProvidersAdmin>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Proxy management API unreachable"), TimeSpan.FromSeconds(4));
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Proxy management API unreachable"),
+            timeout: TimeSpan.FromSeconds(4));
 
-        var act = () => cut.Dispose();
+        var act = cut.Dispose;
         act.Should().NotThrow();
     }
 }
-

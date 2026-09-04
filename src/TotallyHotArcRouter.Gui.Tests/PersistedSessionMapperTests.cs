@@ -1,6 +1,6 @@
+using AwesomeAssertions;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -24,13 +24,13 @@ public sealed class PersistedSessionMapperTests
     {
         var conversation = new PersistedConversation(
             SessionId: "session-abcdef123",
-            FirstTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero),
-            LastTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 5, 0, TimeSpan.Zero),
-            TotalCostUsd: 1.5m,
-            TotalInputTokens: 100,
-            TotalOutputTokens: 50,
+            FirstTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 0, 0, offset: TimeSpan.Zero),
+            LastTimestampUtc: new DateTimeOffset(2026, 7, 16, 10, 5, 0, offset: TimeSpan.Zero),
+            1.5m,
+            100,
+            50,
             Turns: [],
-            IsUsedForTraining: true);
+            true);
 
         var model = PersistedSessionMapper.ToModel(conversation);
 
@@ -51,11 +51,11 @@ public sealed class PersistedSessionMapperTests
             SessionId: "abc",
             FirstTimestampUtc: DateTimeOffset.UtcNow,
             LastTimestampUtc: DateTimeOffset.UtcNow,
-            TotalCostUsd: 0,
-            TotalInputTokens: 0,
-            TotalOutputTokens: 0,
+            0,
+            0,
+            0,
             Turns: [],
-            IsUsedForTraining: false);
+            false);
 
         var model = PersistedSessionMapper.ToModel(conversation);
 
@@ -69,16 +69,16 @@ public sealed class PersistedSessionMapperTests
     {
         var turn = new PersistedConversationTurn(
             CorrelationId: "s1:3",
-            TurnNumber: 3,
+            3,
             RequestedModel: "gpt-5.4",
             RoutedModel: "kimi-k2.5",
             PromptText: "Hello",
             ResponseText: "Hi there",
-            CostUsd: 0.05m,
-            InputTokens: 200,
-            OutputTokens: 80,
-            TimestampUtc: new DateTimeOffset(2026, 7, 16, 9, 30, 15, TimeSpan.Zero),
-            MemoryEntryId: null);
+            0.05m,
+            200,
+            80,
+            TimestampUtc: new DateTimeOffset(2026, 7, 16, 9, 30, 15, offset: TimeSpan.Zero),
+            null);
 
         var conversation = new PersistedConversation(
             SessionId: "s1",
@@ -88,7 +88,7 @@ public sealed class PersistedSessionMapperTests
             TotalInputTokens: turn.InputTokens!.Value,
             TotalOutputTokens: turn.OutputTokens!.Value,
             Turns: [turn],
-            IsUsedForTraining: false);
+            false);
 
         var model = PersistedSessionMapper.ToModel(conversation);
         var mappedTurn = model.Turns.Should().ContainSingle().Subject;
@@ -119,26 +119,26 @@ public sealed class PersistedSessionMapperTests
     {
         var turn = new PersistedConversationTurn(
             CorrelationId: "s1:1",
-            TurnNumber: 1,
+            1,
             RequestedModel: "gpt-5.4",
             RoutedModel: "gpt-5.4",
-            PromptText: null,
-            ResponseText: null,
-            CostUsd: null,
-            InputTokens: null,
-            OutputTokens: null,
+            null,
+            null,
+            null,
+            null,
+            null,
             TimestampUtc: DateTimeOffset.UtcNow,
-            MemoryEntryId: null);
+            null);
 
         var conversation = new PersistedConversation(
             SessionId: "s1",
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
-            TotalCostUsd: 0,
-            TotalInputTokens: 0,
-            TotalOutputTokens: 0,
+            0,
+            0,
+            0,
             Turns: [turn],
-            IsUsedForTraining: false);
+            false);
 
         var model = PersistedSessionMapper.ToModel(conversation);
         var mappedTurn = model.Turns.Should().ContainSingle().Subject;

@@ -1,9 +1,9 @@
+using AwesomeAssertions;
+using Bunit;
 using System.Runtime.CompilerServices;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using Bunit;
-using AwesomeAssertions;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -13,42 +13,48 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class ClusterModelAdminTests
 {
-    private static Bunit.BunitContext NewContext(IClusterModelAdminClient client)
+    private static BunitContext NewContext(IClusterModelAdminClient client)
     {
-        var ctx = new Bunit.BunitContext();
+        var ctx = new BunitContext();
         ctx.Services.AddSingleton(new ClusterModelAdminStore(client));
         return ctx;
     }
 
-    private static ClusterModelStatusInfo NoArtifact(int entriesSinceLastRetrain = 7) => new(
-        ArtifactPresent: false,
-        ChosenK: 0,
-        TrainedAtUtc: null,
-        TrainedFrom: string.Empty,
-        Clusters: [],
-        BootstrapTaskCount: 0,
-        MemoryEntryCount: 0,
-        EntriesSinceLastRetrain: entriesSinceLastRetrain,
-        RetentionDays: 30,
-        MaxTranscriptRows: 50_000,
-        CurrentTranscriptRowCount: 42);
+    private static ClusterModelStatusInfo NoArtifact(int entriesSinceLastRetrain = 7)
+    {
+        return new ClusterModelStatusInfo(
+            false,
+            0,
+            null,
+            TrainedFrom: string.Empty,
+            Clusters: [],
+            0,
+            0,
+            EntriesSinceLastRetrain: entriesSinceLastRetrain,
+            30,
+            50_000,
+            42);
+    }
 
-    private static ClusterModelStatusInfo WithArtifact() => new(
-        ArtifactPresent: true,
-        ChosenK: 2,
-        TrainedAtUtc: new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero),
-        TrainedFrom: "bootstrap_tasks=20, memory_entries=5, samples=25",
-        Clusters:
-        [
-            new ClusterInfo(10, "mostly bug_fixing: sql, migration"),
-            new ClusterInfo(15, "mostly test_generation"),
-        ],
-        BootstrapTaskCount: 20,
-        MemoryEntryCount: 5,
-        EntriesSinceLastRetrain: 3,
-        RetentionDays: 30,
-        MaxTranscriptRows: 50_000,
-        CurrentTranscriptRowCount: 8);
+    private static ClusterModelStatusInfo WithArtifact()
+    {
+        return new ClusterModelStatusInfo(
+            true,
+            2,
+            TrainedAtUtc: new DateTimeOffset(2026, 7, 16, 12, 0, 0, offset: TimeSpan.Zero),
+            TrainedFrom: "bootstrap_tasks=20, memory_entries=5, samples=25",
+            Clusters:
+            [
+                new ClusterInfo(10, Name: "mostly bug_fixing: sql, migration"),
+                new ClusterInfo(15, Name: "mostly test_generation")
+            ],
+            20,
+            5,
+            3,
+            30,
+            50_000,
+            8);
+    }
 
     [Fact]
     public void No_artifact_renders_the_train_button_and_no_cluster_when_untrained()
@@ -91,7 +97,8 @@ public sealed class ClusterModelAdminTests
     [Fact]
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
-        using var ctx = NewContext(new FakeClient { Error = new ClusterModelAdminException("nope", isUnavailable: true) });
+        using var ctx = NewContext(new FakeClient
+        { Error = new ClusterModelAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<ClusterModelAdmin>();
 
@@ -102,7 +109,7 @@ public sealed class ClusterModelAdminTests
     [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
-        var client = new FakeClient { Error = new ClusterModelAdminException("nope", isUnavailable: true) };
+        var client = new FakeClient { Error = new ClusterModelAdminException(message: "nope", isUnavailable: true) };
         using var ctx = NewContext(client);
         var cut = ctx.Render<ClusterModelAdmin>();
         cut.Markup.Should().Contain("Router unreachable");
@@ -121,11 +128,12 @@ public sealed class ClusterModelAdminTests
         {
             RetrainEvents =
             [
-                new ClusterRetrainEvent(new ClusterRetrainBootstrapProgressInfo(5), Result: null),
+                new ClusterRetrainEvent(BootstrapProgress: new ClusterRetrainBootstrapProgressInfo(5), null),
                 new ClusterRetrainEvent(
-                    BootstrapProgress: null,
-                    new ClusterRetrainResultInfo(ClusterRetrainResultKindInfo.Trained, "Trained 2 clusters.", WithArtifact())),
-            ],
+                    null,
+                    Result: new ClusterRetrainResultInfo(Kind: ClusterRetrainResultKindInfo.Trained,
+                        Message: "Trained 2 clusters.", Status: WithArtifact()))
+            ]
         };
         using var ctx = NewContext(client);
         var cut = ctx.Render<ClusterModelAdmin>();
@@ -147,11 +155,12 @@ public sealed class ClusterModelAdminTests
             Gate = gate,
             RetrainEvents =
             [
-                new ClusterRetrainEvent(new ClusterRetrainBootstrapProgressInfo(5), Result: null),
+                new ClusterRetrainEvent(BootstrapProgress: new ClusterRetrainBootstrapProgressInfo(5), null),
                 new ClusterRetrainEvent(
-                    BootstrapProgress: null,
-                    new ClusterRetrainResultInfo(ClusterRetrainResultKindInfo.Trained, "Trained.", WithArtifact())),
-            ],
+                    null,
+                    Result: new ClusterRetrainResultInfo(Kind: ClusterRetrainResultKindInfo.Trained,
+                        Message: "Trained.", Status: WithArtifact()))
+            ]
         };
         using var ctx = NewContext(client);
         var cut = ctx.Render<ClusterModelAdmin>();
@@ -181,25 +190,21 @@ public sealed class ClusterModelAdminTests
         /// </summary>
         public TaskCompletionSource<bool>? Gate { get; set; }
 
-        public Task<ClusterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default) =>
-            Error is not null
+        public Task<ClusterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
+        {
+            return Error is not null
                 ? Task.FromException<ClusterModelStatusInfo>(Error)
                 : Task.FromResult(Status!);
+        }
 
         public async IAsyncEnumerable<ClusterRetrainEvent> RetrainAsync(
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            if (Error is not null)
-            {
-                throw Error;
-            }
+            if (Error is not null) throw Error;
 
             foreach (var retrainEvent in RetrainEvents)
             {
-                if (retrainEvent.Result is not null && Gate is not null)
-                {
-                    await Gate.Task;
-                }
+                if (retrainEvent.Result is not null && Gate is not null) await Gate.Task;
 
                 yield return retrainEvent;
             }

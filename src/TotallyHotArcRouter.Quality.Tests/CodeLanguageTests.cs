@@ -1,5 +1,3 @@
-using TotallyHot.ArcRouter.Quality;
-
 namespace TotallyHot.ArcRouter.Quality.Tests;
 
 /// <summary>Covers language-hint mapping and which languages a real parser backs.</summary>
@@ -19,7 +17,7 @@ public class CodeLanguagesTests
     [InlineData(null, CodeLanguage.Unknown)]
     public void FromHint_MapsKnownHints(string? hint, CodeLanguage expected)
     {
-        Assert.Equal(expected, CodeLanguages.FromHint(hint));
+        Assert.Equal(expected: expected, actual: CodeLanguages.FromHint(hint));
     }
 
     [Theory]
@@ -30,7 +28,6 @@ public class CodeLanguagesTests
     [InlineData(CodeLanguage.Unknown, false)]
     public void HasAuthoritativeParser_ReportsWhichLanguagesAreReallyParsed(CodeLanguage language, bool expected)
     {
-        Assert.Equal(expected, CodeLanguages.HasAuthoritativeParser(language));
+        Assert.Equal(expected: expected, actual: CodeLanguages.HasAuthoritativeParser(language));
     }
 }
-

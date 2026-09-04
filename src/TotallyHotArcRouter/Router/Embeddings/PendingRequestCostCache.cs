@@ -19,21 +19,20 @@ namespace TotallyHot.ArcRouter.Router.Embeddings;
 /// </summary>
 public sealed class PendingRequestCostCache
 {
-    /// <summary>A single cached cost awaiting its verifier score, with the absolute time it expires.</summary>
-    /// <param name="Cost">The request's estimated dollar cost.</param>
-    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
-    private sealed record Entry(decimal Cost, DateTimeOffset ExpiresAtUtc);
+    private readonly int _capacity;
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Queue<string> _insertionOrder = new();
     private readonly object _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _ttl;
-    private readonly int _capacity;
 
     /// <summary>Initializes a new instance of the <see cref="PendingRequestCostCache"/> class.</summary>
     /// <param name="options">Supplies the capacity and TTL bounds (shared with <see cref="PendingTaskEmbeddingCache"/>).</param>
-    /// <param name="timeProvider">Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for deterministic tests.</param>
+    /// <param name="timeProvider">
+    /// Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
+    /// deterministic tests.
+    /// </param>
     public PendingRequestCostCache(IOptions<RoutingOptions> options, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -67,12 +66,9 @@ public sealed class PendingRequestCostCache
         {
             EvictExpiredAndStale();
 
-            if (!_entries.ContainsKey(correlationId))
-            {
-                _insertionOrder.Enqueue(correlationId);
-            }
+            if (!_entries.ContainsKey(correlationId)) _insertionOrder.Enqueue(correlationId);
 
-            _entries[correlationId] = new Entry(cost, _timeProvider.GetUtcNow() + _ttl);
+            _entries[correlationId] = new Entry(Cost: cost, ExpiresAtUtc: _timeProvider.GetUtcNow() + _ttl);
 
             while (_entries.Count > _capacity && _insertionOrder.Count > 0)
             {
@@ -96,7 +92,7 @@ public sealed class PendingRequestCostCache
             // EvictExpiredAndStale performs a full sweep, so no remaining entry is expired afterward.
             EvictExpiredAndStale();
 
-            if (_entries.Remove(correlationId, out var entry))
+            if (_entries.Remove(key: correlationId, value: out var entry))
             {
                 cost = entry.Cost;
                 return true;
@@ -121,10 +117,7 @@ public sealed class PendingRequestCostCache
         for (var i = 0; i < remaining; i++)
         {
             var key = _insertionOrder.Dequeue();
-            if (!_entries.TryGetValue(key, out var entry))
-            {
-                continue;
-            }
+            if (!_entries.TryGetValue(key: key, value: out var entry)) continue;
 
             if (entry.ExpiresAtUtc > now)
             {
@@ -135,4 +128,9 @@ public sealed class PendingRequestCostCache
             _entries.Remove(key);
         }
     }
+
+    /// <summary>A single cached cost awaiting its verifier score, with the absolute time it expires.</summary>
+    /// <param name="Cost">The request's estimated dollar cost.</param>
+    /// <param name="ExpiresAtUtc">The UTC instant after which this entry is treated as evicted.</param>
+    private sealed record Entry(decimal Cost, DateTimeOffset ExpiresAtUtc);
 }

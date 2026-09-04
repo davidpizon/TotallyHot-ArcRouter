@@ -1,10 +1,10 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using TotallyHot.ArcRouter.Mcp.Tools;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.PriceCatalog.Sources;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp.Tools;
 
@@ -15,13 +15,13 @@ public sealed class PriceSourceMcpToolsTests
     public void ListPriceSources_ReturnsStoreState()
     {
         using var temp = new TempDatabase();
-        temp.SeedExtraSource("openrouter", enabled: true, priorityScore: 5);
+        temp.SeedExtraSource(name: "openrouter", true, 5);
         var toggleStore = temp.CreateToggleStore();
-        var tools = CreateTools(temp, toggleStore);
+        var tools = CreateTools(temp: temp, toggleStore: toggleStore);
 
         var sources = tools.ListPriceSources();
 
-        Assert.Contains(sources, s => s.Name == "openrouter");
+        Assert.Contains(collection: sources, filter: s => s.Name == "openrouter");
     }
 
     [Fact]
@@ -29,40 +29,41 @@ public sealed class PriceSourceMcpToolsTests
     {
         using var temp = new TempDatabase();
         var toggleStore = temp.CreateToggleStore();
-        var tools = CreateTools(temp, toggleStore);
+        var tools = CreateTools(temp: temp, toggleStore: toggleStore);
 
-        var result = tools.SetPriceSourceEnabled("litellm", false);
+        var result = tools.SetPriceSourceEnabled(sourceName: "litellm", false);
 
         Assert.False(toggleStore.IsEnabled("litellm"));
         var successProperty = result.GetType().GetProperty("success");
         Assert.NotNull(successProperty);
-        Assert.Equal(true, successProperty!.GetValue(result));
+        Assert.Equal(true, actual: successProperty.GetValue(result));
     }
 
     [Fact]
     public void SetPriceSourceEnabled_UnknownSource_ReturnsError()
     {
         using var temp = new TempDatabase();
-        var tools = CreateTools(temp, temp.CreateToggleStore());
+        var tools = CreateTools(temp: temp, toggleStore: temp.CreateToggleStore());
 
-        var result = tools.SetPriceSourceEnabled("does-not-exist", true);
+        var result = tools.SetPriceSourceEnabled(sourceName: "does-not-exist", true);
 
         var errorProperty = result.GetType().GetProperty("error");
         Assert.NotNull(errorProperty);
-        Assert.NotNull(errorProperty!.GetValue(result));
+        Assert.NotNull(errorProperty.GetValue(result));
     }
 
     [Fact]
     public async Task ReorderPriceSourcesAsync_InvalidNameSet_ReturnsError()
     {
         using var temp = new TempDatabase();
-        var tools = CreateTools(temp, temp.CreateToggleStore());
+        var tools = CreateTools(temp: temp, toggleStore: temp.CreateToggleStore());
 
-        var result = await tools.ReorderPriceSourcesAsync(["not-a-real-source"], TestContext.Current.CancellationToken);
+        var result = await tools.ReorderPriceSourcesAsync(namesInPriorityOrder: ["not-a-real-source"],
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var errorProperty = result.GetType().GetProperty("error");
         Assert.NotNull(errorProperty);
-        Assert.NotNull(errorProperty!.GetValue(result));
+        Assert.NotNull(errorProperty.GetValue(result));
     }
 
     [Fact]
@@ -72,33 +73,47 @@ public sealed class PriceSourceMcpToolsTests
         // contested cell's winner using only stored observations, with no fetch in between - parity with
         // the Governance panel's drag-to-reorder.
         using var temp = new TempDatabase();
-        temp.SeedExtraSource("openrouter", enabled: true, priorityScore: 5);
+        temp.SeedExtraSource(name: "openrouter", true, 5);
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         var toggleStore = temp.CreateToggleStore(sourceRepository);
 
         // litellm (priority 0, seeded default) starts behind openrouter (priority 5).
-        repository.UpsertPrices("litellm", 0, [Price("gpt-4o", "openai", 2.00m, 8.00m)], DateTimeOffset.UtcNow);
-        repository.UpsertPrices("openrouter", 5, [Price("gpt-4o", "openai", 3.00m, 12.00m)], DateTimeOffset.UtcNow);
+        repository.UpsertPrices(sourceName: "litellm", 0,
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.00m, 8.00m)], asOfUtc: DateTimeOffset.UtcNow);
+        repository.UpsertPrices(sourceName: "openrouter", 5,
+            prices: [Price(model: "gpt-4o", provider: "openai", 3.00m, 12.00m)], asOfUtc: DateTimeOffset.UtcNow);
 
-        Assert.Equal(3.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+        Assert.Equal(3.00m,
+            actual: repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
+                maxAge: TimeSpan.FromHours(24))!.InputPerMillionTokens);
 
         var registry = Mock.Of<IPriceSourceRegistry>();
-        var ingestionService = new PriceCatalogIngestionService(registry, repository, sourceRepository, toggleStore, NullLogger<PriceCatalogIngestionService>.Instance);
-        var tools = new PriceSourceMcpTools(toggleStore, ingestionService, Mock.Of<IModelPriceLookup>());
+        var ingestionService = new PriceCatalogIngestionService(registry: registry, repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore,
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
+        var tools = new PriceSourceMcpTools(toggleStore: toggleStore, ingestionService: ingestionService,
+            priceLookup: Mock.Of<IModelPriceLookup>());
 
-        var result = await tools.ReorderPriceSourcesAsync(["litellm", "openrouter"], TestContext.Current.CancellationToken);
+        var result = await tools.ReorderPriceSourcesAsync(namesInPriorityOrder: ["litellm", "openrouter"],
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var successProperty = result.GetType().GetProperty("success");
         Assert.NotNull(successProperty);
-        Assert.Equal(true, successProperty!.GetValue(result));
+        Assert.Equal(true, actual: successProperty.GetValue(result));
         // litellm now outranks openrouter, and its own stored observation was never re-fetched - this
         // value can only have come from model_price_observations.
-        Assert.Equal(2.00m, repository.GetFreshPrice(new ModelKey("gpt-4o", "openai"), TimeSpan.FromHours(24))!.InputPerMillionTokens);
+        Assert.Equal(2.00m,
+            actual: repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
+                maxAge: TimeSpan.FromHours(24))!.InputPerMillionTokens);
     }
 
-    private static NormalizedPrice Price(string model, string provider, decimal input, decimal output) =>
-        new(model, provider, input, output, null, null, null);
+    private static NormalizedPrice Price(string model, string provider, decimal input, decimal output)
+    {
+        return new NormalizedPrice(ModelIdentifier: model, Provider: provider, StandardInputPrice: input,
+            StandardOutputPrice: output,
+            null, null, null);
+    }
 
     [Fact]
     public async Task RefreshPriceSourcesAsync_NoEnabledSources_ReturnsSummaryWithNoOutcomes()
@@ -109,8 +124,11 @@ public sealed class PriceSourceMcpToolsTests
         var toggleStore = temp.CreateToggleStore(sourceRepository);
         var registry = new Mock<IPriceSourceRegistry>();
         registry.Setup(r => r.EnabledClients).Returns([]);
-        var ingestionService = new PriceCatalogIngestionService(registry.Object, repository, sourceRepository, toggleStore, NullLogger<PriceCatalogIngestionService>.Instance);
-        var tools = new PriceSourceMcpTools(toggleStore, ingestionService, Mock.Of<IModelPriceLookup>());
+        var ingestionService = new PriceCatalogIngestionService(registry: registry.Object, repository: repository,
+            sourceRepository: sourceRepository, toggleStore: toggleStore,
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
+        var tools = new PriceSourceMcpTools(toggleStore: toggleStore, ingestionService: ingestionService,
+            priceLookup: Mock.Of<IModelPriceLookup>());
 
         var summary = await tools.RefreshPriceSourcesAsync(TestContext.Current.CancellationToken);
 
@@ -125,18 +143,21 @@ public sealed class PriceSourceMcpToolsTests
         var expected = new ModelPrice(1.5m, 2.5m);
         var priceLookup = new Mock<IModelPriceLookup>();
         priceLookup.Setup(p => p.TryGetPrice(new ModelKey("gpt-5.4", "openai"))).Returns(expected);
-        var tools = CreateTools(temp, toggleStore, priceLookup.Object);
+        var tools = CreateTools(temp: temp, toggleStore: toggleStore, priceLookup: priceLookup.Object);
 
-        var price = tools.GetModelPrice("gpt-5.4", "openai");
+        var price = tools.GetModelPrice(modelName: "gpt-5.4", provider: "openai");
 
-        Assert.Equal(expected, price);
+        Assert.Equal(expected: expected, actual: price);
     }
 
-    private static PriceSourceMcpTools CreateTools(TempDatabase temp, PriceSourceToggleStore toggleStore, IModelPriceLookup? priceLookup = null)
+    private static PriceSourceMcpTools CreateTools(TempDatabase temp, PriceSourceToggleStore toggleStore,
+        IModelPriceLookup? priceLookup = null)
     {
         var registry = Mock.Of<IPriceSourceRegistry>();
-        var ingestionService = new PriceCatalogIngestionService(registry, temp.CreateRepository(), temp.CreateSourceRepository(), toggleStore, NullLogger<PriceCatalogIngestionService>.Instance);
-        return new PriceSourceMcpTools(toggleStore, ingestionService, priceLookup ?? Mock.Of<IModelPriceLookup>());
+        var ingestionService = new PriceCatalogIngestionService(registry: registry, repository: temp.CreateRepository(),
+            sourceRepository: temp.CreateSourceRepository(), toggleStore: toggleStore,
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
+        return new PriceSourceMcpTools(toggleStore: toggleStore, ingestionService: ingestionService,
+            priceLookup: priceLookup ?? Mock.Of<IModelPriceLookup>());
     }
 }
-

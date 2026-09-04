@@ -1,8 +1,8 @@
+@using Microsoft.JSInterop
 @* Sessions tab (formerly "Live Stream"): a full-width, oldest-first list of session cards.
    Double-clicking a card opens a split view - session details (left) and a chat-style reproduction
    of the conversation (right) - separated by a draggable divider (wwwroot/js/split-pane.js). The
    left pane's back button collapses the split back to the full-width list. *@
-@using Microsoft.JSInterop
 @inject IJSRuntime Js
 
 @if (Conversations.Count == 0)
@@ -15,12 +15,12 @@
 
 <div class="h-full flex flex-col min-h-0">
     <div class="relative shrink-0 mb-2">
-        <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+        <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
         <input type="text"
                placeholder="Search conversations, agents, models..."
                value="@_search"
                @oninput="e => _search = (string?)e.Value ?? string.Empty"
-               class="w-full pl-8 pr-3 py-2 text-xs font-mono ds-input ds-input-secondary" />
+               class="w-full pl-8 pr-3 py-2 text-xs font-mono ds-input ds-input-secondary"/>
     </div>
 
     @if (opened is null)
@@ -33,9 +33,9 @@
                 <ConversationCard @key="conversation.Id"
                                   Conversation="conversation"
                                   IsSelected="SelectedId == conversation.Id"
-                                  StaggerIndex="_listHasRendered ? 0 : Math.Min(staggerIndex++, 8)"
+                                  StaggerIndex="_listHasRendered ? 0 : Math.Min(val1: staggerIndex++, 8)"
                                   OnSelect="OnSelect"
-                                  OnDoubleClick="OpenSessionAsync" />
+                                  OnDoubleClick="OpenSessionAsync"/>
             }
         </div>
     }
@@ -47,10 +47,10 @@
                 <button @onclick="CloseSession"
                         aria-label="Back to the sessions list"
                         class="ls-sessions-back-btn flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors shrink-0">
-                    <Icon Name="x" Size="16" />
+                    <Icon Name="x" Size="16"/>
                     <span>Back to Sessions</span>
                 </button>
-                <ConversationSummary Conversation="opened" />
+                <ConversationSummary Conversation="opened"/>
             </div>
 
             @* Draggable divider *@
@@ -58,15 +58,17 @@
 
             @* Right panel: chat-style conversation reproduction *@
             <div class="flex flex-col min-h-0 flex-1 ls-livestream-right-panel">
-                <SessionConversationPane Conversation="opened" />
+                <SessionConversationPane Conversation="opened"/>
             </div>
         </div>
     }
 </div>
 
 @code {
+
     /// <summary>All conversations shown in the session list.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public IReadOnlyList<Conversation> Conversations { get; set; } = [];
 
     /// <summary>
@@ -74,7 +76,8 @@
     /// Analytics tab's initial-session behavior). Updated when a card is double-clicked to open the
     /// split view - see <see cref="OpenSessionAsync"/>.
     /// </summary>
-    [Parameter, EditorRequired]
+    [Parameter]
+    [EditorRequired]
     public string SelectedId { get; set; } = string.Empty;
 
     /// <summary>Invoked with a conversation's id when its card is double-clicked and the split view opens.</summary>
@@ -102,21 +105,29 @@
     private IEnumerable<Conversation> Filtered =>
         Conversations
             .Where(c => string.IsNullOrEmpty(_search)
-                || c.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)
-                || c.Id.Contains(_search, StringComparison.OrdinalIgnoreCase)
-                || c.Turns.Any(t => t.Agent.Contains(_search, StringComparison.OrdinalIgnoreCase)
-                    || t.Model.Contains(_search, StringComparison.OrdinalIgnoreCase)))
+                        || c.Title.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)
+                        || c.Id.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)
+                        || c.Turns.Any(t => t.Agent.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)
+                                            || t.Model.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)))
             .OrderBy(FirstTurnTimestampUtc);
 
     // Conversation carries no aggregate UTC instant of its own (FirstTimestamp/LastTimestamp are
     // display-only "HH:mm:ss" strings, unreliable to sort by across a day boundary) - each turn's
     // real TimestampUtc is, so the earliest turn's instant is the sort key. A conversation with no
     // turns (shouldn't happen in practice) sorts last rather than first.
-    /// <summary>The real UTC instant of <paramref name="conversation"/>'s earliest turn, used to sort the session list oldest-first.</summary>
-    private static DateTimeOffset FirstTurnTimestampUtc(Conversation conversation) =>
-        conversation.Turns.Count == 0 ? DateTimeOffset.MaxValue : conversation.Turns.Min(t => t.TimestampUtc);
+    /// <summary>
+    /// The real UTC instant of <paramref name="conversation"/>'s earliest turn, used to sort the session list
+    /// oldest-first.
+    /// </summary>
+    private static DateTimeOffset FirstTurnTimestampUtc(Conversation conversation)
+    {
+        return conversation.Turns.Count == 0 ? DateTimeOffset.MaxValue : conversation.Turns.Min(t => t.TimestampUtc);
+    }
 
-    /// <summary>The conversation currently opened into the split view, or <see langword="null"/> when the full-width list is showing.</summary>
+    /// <summary>
+    /// The conversation currently opened into the split view, or <see langword="null"/> when the full-width list is
+    /// showing.
+    /// </summary>
     private Conversation? OpenedConversation =>
         _openedConversationId is null ? null : Conversations.FirstOrDefault(c => c.Id == _openedConversationId);
 
@@ -128,7 +139,10 @@
     }
 
     /// <summary>Collapses the split view back to the full-width session list.</summary>
-    private void CloseSession() => _openedConversationId = null;
+    private void CloseSession()
+    {
+        _openedConversationId = null;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -141,7 +155,8 @@
 
         if (OpenedConversation is not null)
         {
-            await Js.InvokeVoidAsync("splitPane.init", _container, _divider, _leftPanel);
+            await Js.InvokeVoidAsync(identifier: "splitPane.init", _container, _divider, _leftPanel);
         }
     }
+
 }

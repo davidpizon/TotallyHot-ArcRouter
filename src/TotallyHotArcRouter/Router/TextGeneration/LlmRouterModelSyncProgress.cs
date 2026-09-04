@@ -1,6 +1,9 @@
 namespace TotallyHot.ArcRouter.Router.TextGeneration;
 
-/// <summary>One file's sync stage, mirroring <see cref="CodeRouterBench.BenchmarkSyncStage"/>'s shape minus the Importing stage - this pipeline has no import step.</summary>
+/// <summary>
+/// One file's sync stage, mirroring <see cref="CodeRouterBench.BenchmarkSyncStage"/>'s shape minus the Importing
+/// stage - this pipeline has no import step.
+/// </summary>
 public enum LlmRouterModelSyncStage
 {
     /// <summary>Bytes are being downloaded from the model's base URL.</summary>
@@ -13,7 +16,7 @@ public enum LlmRouterModelSyncStage
     Completed,
 
     /// <summary>The file's sync failed; any previously cached copy of this file is untouched.</summary>
-    Failed,
+    Failed
 }
 
 /// <summary>One file's progress update during a sync.</summary>
@@ -44,8 +47,14 @@ public sealed record LlmRouterModelSyncPlan(IReadOnlyList<LlmRouterModelSyncPlan
 /// <summary>One file's final outcome after a sync attempt.</summary>
 /// <param name="FileName">The file this outcome is about.</param>
 /// <param name="Succeeded">Whether the file is present and usable in the cache directory after this sync.</param>
-/// <param name="ChecksumVerified">Whether <paramref name="Succeeded"/> was confirmed against a published checksum, as opposed to presence-only.</param>
-/// <param name="ErrorMessage">The failure reason when <paramref name="Succeeded"/> is <see langword="false"/>; otherwise <see langword="null"/>.</param>
+/// <param name="ChecksumVerified">
+/// Whether <paramref name="Succeeded"/> was confirmed against a published checksum, as
+/// opposed to presence-only.
+/// </param>
+/// <param name="ErrorMessage">
+/// The failure reason when <paramref name="Succeeded"/> is <see langword="false"/>; otherwise
+/// <see langword="null"/>.
+/// </param>
 public sealed record LlmRouterModelFileSyncOutcome(
     string FileName,
     bool Succeeded,

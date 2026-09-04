@@ -1,6 +1,5 @@
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
-using Microsoft.Extensions.Logging;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -14,13 +13,14 @@ namespace TotallyHot.ArcRouter.Router;
 /// </summary>
 public sealed class CompositeRouterScoreObserver : IQualityScoreObserver
 {
-    private readonly IReadOnlyList<IQualityScoreObserver> _observers;
     private readonly ILogger<CompositeRouterScoreObserver> _logger;
+    private readonly IReadOnlyList<IQualityScoreObserver> _observers;
 
     /// <summary>Initializes a new instance of the <see cref="CompositeRouterScoreObserver"/> class.</summary>
     /// <param name="observers">The observers to fan out to, in invocation order.</param>
     /// <param name="logger">The logger.</param>
-    public CompositeRouterScoreObserver(IReadOnlyList<IQualityScoreObserver> observers, ILogger<CompositeRouterScoreObserver> logger)
+    public CompositeRouterScoreObserver(IReadOnlyList<IQualityScoreObserver> observers,
+        ILogger<CompositeRouterScoreObserver> logger)
     {
         ArgumentNullException.ThrowIfNull(observers);
         ArgumentNullException.ThrowIfNull(logger);
@@ -29,24 +29,23 @@ public sealed class CompositeRouterScoreObserver : IQualityScoreObserver
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc/>
     public async Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         foreach (var observer in _observers)
-        {
             try
             {
-                await observer.ObserveAsync(result, cancellationToken).ConfigureAwait(false);
+                await observer.ObserveAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(
-                    ex,
+                    exception: ex,
+                    message:
                     "Router score observer {ObserverType} threw while observing a quality result; continuing with the remaining observers.",
                     observer.GetType().Name);
             }
-        }
     }
 }
