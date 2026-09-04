@@ -335,9 +335,8 @@ collapsed/expanded disclosure, and the unreachable state.
 - `DimensionModelScoreMatrix` gains a database-backed source; `CodeRouterBenchCsvReader`'s file-path
   entry point is removed once nothing calls it.
 - `CodeRouterBenchTable10ReconciliationTests` changes its skip trigger from "`data/coderouterbench/` is
-  absent" to "the benchmark tables are empty", preserving the self-skipping contract that
-  `Integration/LiteLlmParityTests.cs` established. It reads the probing split as
-  `WHERE split='probing'`.
+  absent" to "the benchmark tables are empty", preserving its self-skipping contract. It reads the
+  probing split as `WHERE split='probing'`.
 - **MCP tool** — `Mcp/Tools/BenchmarkDataMcpTools.cs`, alongside `PriceSourceMcpTools` and
   `TelemetryMcpTools`: report sync state and trigger a sync.
 - **CLI** — a `--sync-benchmark-data` flag on the existing host, following the `--model` extraction
