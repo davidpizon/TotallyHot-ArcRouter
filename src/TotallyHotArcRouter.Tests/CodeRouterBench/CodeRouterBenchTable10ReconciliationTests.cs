@@ -12,9 +12,8 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 /// docs/router/coderouterbench-sqlite-migration-plan.md Phase 6). Skips itself via
 /// <see cref="Assert.SkipUnless"/> when <c>benchmark_id_results</c> has no <c>probing</c>-split rows -
 /// sync the corpus first (Governance → Benchmark Data, the <c>sync_benchmark_data</c> MCP tool, or
-/// <c>--sync-benchmark-data</c>) - the same pattern <see cref="Integration.LiteLlmParityTests"/> uses for
-/// its sidecar dependency, since "data not synced" is an expected, non-broken state in CI and on most
-/// contributors' machines.
+/// <c>--sync-benchmark-data</c>) - since "data not synced" is an expected, non-broken state in CI and
+/// on most contributors' machines.
 /// </summary>
 /// <remarks>
 /// <para>

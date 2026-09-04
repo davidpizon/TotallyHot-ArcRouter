@@ -53,8 +53,8 @@ differently from the router's own `ModelRouting:ModelList` configuration (`MiniM
 (on read) canonicalize onto the same comparison key, so a query in any spelling resolves.
 `CodeRouterBenchTable10ReconciliationTests` (in `TotallyHotArcRouter.Tests/CodeRouterBench/`) checks a
 matrix built from the real, synced probing split against the published Table 10; it skips itself when
-`benchmark_id_results` has no `probing`-split rows yet, matching the pattern
-`Integration/LiteLlmParityTests.cs` uses for its sidecar dependency.
+`benchmark_id_results` has no `probing`-split rows yet, so an unsynced checkout reports "data not
+synced" rather than a failure.
 
 **Known data-fidelity limit (Phase K settled deferral, unaffected by the database migration):**
 per-model row averages (AvgPerf) reproduce Table 10 to within 0.05 for every one of the eight backend

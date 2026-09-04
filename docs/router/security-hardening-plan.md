@@ -362,8 +362,8 @@ is what makes [T-03](#t-03--host-header-is-unvalidated-dns-rebinding) severe.
   in the OpenAI error envelope shape already used by `ProviderAdminEndpoints.Error`.
 - With `RequireClientAuth: false`, items (2) and (3) still apply.
 
-**Tests.** New `InferencePathAuthTests`; extend `LiteLlmParityTests` to assert the opt-out path
-preserves existing client compatibility.
+**Tests.** New `InferencePathAuthTests`; extend `ProxyInterceptionTests`' real-socket `HttpListener`
+harness to assert the opt-out path preserves existing client compatibility.
 
 ---
 
@@ -615,7 +615,8 @@ correct and should be preserved by any fix here.
 
 - A request carrying `OpenAI-Organization: attacker` does not forward that header.
 - A request carrying `anthropic-version: 2020-01-01` forwards the operator-configured value.
-- Existing `LiteLlmParityTests` still pass, confirming real SDK clients are unaffected.
+- The existing `ProxyInterceptionTests` real-socket suite still passes, confirming real SDK clients
+  are unaffected.
 
 ---
 
@@ -1151,7 +1152,6 @@ visible rather than an apparent gap, and so a later pass has a starting list:
   `appsettings.json`) with no integrity verification. This is a code-execution-adjacent supply
   chain risk and is a strong candidate for the next pass.
 - **`scripts/fetch-coderouterbench.sh`** — data fetch and verification.
-- **`litellm-sidecar/`** — `docker-compose.yml` and `config.yaml`.
 - **GUI** — the MAUI Blazor Hybrid WebView, CSP, and render-mode configuration in
   `src/TotallyHotArcRouter.Gui/`.
 
