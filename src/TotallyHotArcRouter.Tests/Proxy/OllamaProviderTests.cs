@@ -219,14 +219,9 @@ public class OllamaProviderTests
     /// Simulates an upstream body delivered across several discrete reads (one per constructor argument), unlike
     /// <see cref="StringContent"/> which always hands back its whole payload in a single read.
     /// </summary>
-    private sealed class MultiChunkContent : HttpContent
+    private sealed class MultiChunkContent(params string[] chunks) : HttpContent
     {
-        private readonly byte[][] _chunks;
-
-        public MultiChunkContent(params string[] chunks)
-        {
-            _chunks = [.. chunks.Select(Encoding.UTF8.GetBytes)];
-        }
+        private readonly byte[][] _chunks = [.. chunks.Select(Encoding.UTF8.GetBytes)];
 
         protected override Task<Stream> CreateContentReadStreamAsync()
         {
@@ -357,14 +352,9 @@ public class OllamaProviderTests
         }
     }
 
-    private sealed class DelegatingHandlerStub : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
-
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
-        {
-            _handler = handler;
-        }
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler = handler;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)

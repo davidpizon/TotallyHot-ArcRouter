@@ -65,14 +65,9 @@ public class JudgeShadowScoreRetentionServiceTests
             }));
     }
 
-    private sealed class FakeJudgeShadowScoreStore : IJudgeShadowScoreStore
+    private sealed class FakeJudgeShadowScoreStore(int rowCount) : IJudgeShadowScoreStore
     {
-        private readonly int _rowCount;
-
-        public FakeJudgeShadowScoreStore(int rowCount)
-        {
-            _rowCount = rowCount;
-        }
+        private readonly int _rowCount = rowCount;
 
         public int DeleteOldestCount { get; private set; }
         public int LastDeleteOldestArgument { get; private set; }

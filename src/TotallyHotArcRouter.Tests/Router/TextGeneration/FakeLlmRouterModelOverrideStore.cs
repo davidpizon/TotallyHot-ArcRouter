@@ -6,14 +6,9 @@ namespace TotallyHot.ArcRouter.Tests.Router.TextGeneration;
 /// A fixed, never-changing override, for tests that don't exercise
 /// <see cref="ILlmRouterModelOverrideStore.SetBaseUrlAsync"/>.
 /// </summary>
-internal sealed class FakeLlmRouterModelOverrideStore : ILlmRouterModelOverrideStore
+internal sealed class FakeLlmRouterModelOverrideStore(LlmRouterModelOverride overrideValue) : ILlmRouterModelOverrideStore
 {
-    public FakeLlmRouterModelOverrideStore(LlmRouterModelOverride overrideValue)
-    {
-        Snapshot = new LlmRouterModelSnapshot(Override: overrideValue, 0);
-    }
-
-    public LlmRouterModelSnapshot Snapshot { get; }
+    public LlmRouterModelSnapshot Snapshot { get; } = new LlmRouterModelSnapshot(Override: overrideValue, 0);
 
     public event Action? Changed
     {

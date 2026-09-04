@@ -136,16 +136,10 @@ public class JudgeShadowScoreDrainServiceTests
             0.6);
     }
 
-    private sealed class FakeJudgeClient : IJudgeClient
+    private sealed class FakeJudgeClient(JudgeScoreResult? result = null, Exception? exception = null) : IJudgeClient
     {
-        private readonly Exception? _exception;
-        private readonly JudgeScoreResult? _result;
-
-        public FakeJudgeClient(JudgeScoreResult? result = null, Exception? exception = null)
-        {
-            _result = result;
-            _exception = exception;
-        }
+        private readonly Exception? _exception = exception;
+        private readonly JudgeScoreResult? _result = result;
 
         public bool WasCalled { get; private set; }
 

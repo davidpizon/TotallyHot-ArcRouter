@@ -204,16 +204,10 @@ public class LlmRouterVoterTests
             logger: NullLogger<LlmRouterVoter>.Instance);
     }
 
-    private sealed class FakeTextGenerationClient : ITextGenerationClient
+    private sealed class FakeTextGenerationClient(string? response = null, Exception? exception = null) : ITextGenerationClient
     {
-        private readonly Exception? _exception;
-        private readonly string? _response;
-
-        public FakeTextGenerationClient(string? response = null, Exception? exception = null)
-        {
-            _response = response;
-            _exception = exception;
-        }
+        private readonly Exception? _exception = exception;
+        private readonly string? _response = response;
 
         public bool WasCalled { get; private set; }
 

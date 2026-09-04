@@ -677,14 +677,9 @@ public class BedrockProviderTests
         return crc ^ 0xFFFFFFFFu;
     }
 
-    private sealed class FakeBedrockRuntimeClientFactory : IBedrockRuntimeClientFactory
+    private sealed class FakeBedrockRuntimeClientFactory(IAmazonBedrockRuntime client) : IBedrockRuntimeClientFactory
     {
-        private readonly IAmazonBedrockRuntime _client;
-
-        public FakeBedrockRuntimeClientFactory(IAmazonBedrockRuntime client)
-        {
-            _client = client;
-        }
+        private readonly IAmazonBedrockRuntime _client = client;
 
         public IAmazonBedrockRuntime Create(ResolvedModelRoute route)
         {

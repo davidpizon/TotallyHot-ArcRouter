@@ -103,16 +103,10 @@ public class EmbeddingBackfillServiceTests
             { EnableEmbeddingBackfill = backfillEnabled, Enabled = captureEnabled }));
     }
 
-    private sealed class FakeTranscriptStore : ITranscriptStore
+    private sealed class FakeTranscriptStore(IReadOnlyList<long> unembeddedIds, TranscriptRecord? getTranscriptResult = null) : ITranscriptStore
     {
-        private readonly TranscriptRecord? _getTranscriptResult;
-        private readonly IReadOnlyList<long> _unembeddedIds;
-
-        public FakeTranscriptStore(IReadOnlyList<long> unembeddedIds, TranscriptRecord? getTranscriptResult = null)
-        {
-            _unembeddedIds = unembeddedIds;
-            _getTranscriptResult = getTranscriptResult;
-        }
+        private readonly TranscriptRecord? _getTranscriptResult = getTranscriptResult;
+        private readonly IReadOnlyList<long> _unembeddedIds = unembeddedIds;
 
         public Dictionary<long, long> LinkedEntries { get; } = [];
 
@@ -190,14 +184,9 @@ public class EmbeddingBackfillServiceTests
         }
     }
 
-    private sealed class FakeEmbeddingClient : IEmbeddingClient
+    private sealed class FakeEmbeddingClient(float[]? embedding = null) : IEmbeddingClient
     {
-        private readonly float[] _defaultEmbedding;
-
-        public FakeEmbeddingClient(float[]? embedding = null)
-        {
-            _defaultEmbedding = embedding ?? [0.1f, 0.2f, 0.3f];
-        }
+        private readonly float[] _defaultEmbedding = embedding ?? [0.1f, 0.2f, 0.3f];
 
         public int EmbedCallCount { get; private set; }
         public string? LastEmbeddedText { get; private set; }

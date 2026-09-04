@@ -376,14 +376,9 @@ public sealed class ModelDialectDetectionTests : IDisposable
         Assert.Null(capabilities.GetModelContextWindow(providerKey: "ollama", modelName: "qwen2.5-coder:7b"));
     }
 
-    private sealed class DelegatingHandlerStub : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
-
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
-        {
-            _handler = handler;
-        }
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler = handler;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)

@@ -1708,15 +1708,10 @@ public class ProxyMiddlewareTests
     /// Yields one chunk of bytes on its first read, then throws the exact IOException(SocketException) shape a
     /// mid-stream connection abort produces on every subsequent read.
     /// </summary>
-    private sealed class AbortsAfterFirstReadStream : Stream
+    private sealed class AbortsAfterFirstReadStream(byte[] firstChunk) : Stream
     {
-        private readonly byte[] _firstChunk;
+        private readonly byte[] _firstChunk = firstChunk;
         private bool _served;
-
-        public AbortsAfterFirstReadStream(byte[] firstChunk)
-        {
-            _firstChunk = firstChunk;
-        }
 
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -1770,14 +1765,9 @@ public class ProxyMiddlewareTests
         }
     }
 
-    private sealed class DelegatingHandlerStub : HttpMessageHandler
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
-
-        public DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
-        {
-            _handler = handler;
-        }
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler = handler;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)

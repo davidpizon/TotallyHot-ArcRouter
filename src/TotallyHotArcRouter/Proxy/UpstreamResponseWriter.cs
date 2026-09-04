@@ -451,17 +451,11 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// <see cref="TranslateAndCaptureStreamAsync"/>), so a capacity-exceeding chunk there doesn't pay for a
     /// scanner allocation nothing will ever read.
     /// </summary>
-    private sealed class ResponseCaptureAccumulator : IDisposable
+    private sealed class ResponseCaptureAccumulator(int captureCap, bool trackTail = true) : IDisposable
     {
         private readonly MemoryStream _capture = new();
-        private readonly int _captureCap;
-        private readonly bool _trackTail;
-
-        public ResponseCaptureAccumulator(int captureCap, bool trackTail = true)
-        {
-            _captureCap = captureCap;
-            _trackTail = trackTail;
-        }
+        private readonly int _captureCap = captureCap;
+        private readonly bool _trackTail = trackTail;
 
         /// <summary>
         /// The tail scanner allocated once a chunk first exceeded the cap, or <see langword="null"/> if none has (yet),

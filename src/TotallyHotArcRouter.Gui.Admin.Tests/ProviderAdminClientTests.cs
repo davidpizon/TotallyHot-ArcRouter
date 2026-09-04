@@ -570,14 +570,9 @@ public sealed class ProviderAdminClientTests
         { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json") };
     }
 
-    private sealed class StubHandler : HttpMessageHandler
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder;
-
-        public StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
-        {
-            _responder = responder;
-        }
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
 
         public HttpRequestMessage? LastRequest { get; private set; }
 
@@ -593,14 +588,9 @@ public sealed class ProviderAdminClientTests
     }
 
     /// <summary>A transport that always fails, standing in for a network-level failure (DNS, connection refused, etc.).</summary>
-    private sealed class ThrowingHandler : HttpMessageHandler
+    private sealed class ThrowingHandler(HttpRequestException exception) : HttpMessageHandler
     {
-        private readonly HttpRequestException _exception;
-
-        public ThrowingHandler(HttpRequestException exception)
-        {
-            _exception = exception;
-        }
+        private readonly HttpRequestException _exception = exception;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)

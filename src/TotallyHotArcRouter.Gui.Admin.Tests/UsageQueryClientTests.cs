@@ -358,14 +358,9 @@ public sealed class UsageQueryClientTests
         Assert.Throws<ArgumentNullException>(() => new UsageQueryClient(null!));
     }
 
-    private sealed class StubHandler : HttpMessageHandler
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder;
-
-        public StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
-        {
-            _responder = responder;
-        }
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
 
         public HttpRequestMessage? LastRequest { get; private set; }
 
@@ -377,14 +372,9 @@ public sealed class UsageQueryClientTests
         }
     }
 
-    private sealed class ThrowingHandler : HttpMessageHandler
+    private sealed class ThrowingHandler(HttpRequestException exception) : HttpMessageHandler
     {
-        private readonly HttpRequestException _exception;
-
-        public ThrowingHandler(HttpRequestException exception)
-        {
-            _exception = exception;
-        }
+        private readonly HttpRequestException _exception = exception;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)

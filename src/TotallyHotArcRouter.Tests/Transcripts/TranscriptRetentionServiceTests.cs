@@ -66,14 +66,9 @@ public class TranscriptRetentionServiceTests
             }));
     }
 
-    private sealed class FakeTranscriptStore : ITranscriptStore
+    private sealed class FakeTranscriptStore(int rowCount) : ITranscriptStore
     {
-        private readonly int _rowCount;
-
-        public FakeTranscriptStore(int rowCount)
-        {
-            _rowCount = rowCount;
-        }
+        private readonly int _rowCount = rowCount;
 
         public int DeleteOldestCount { get; private set; }
         public int LastDeleteOldestArgument { get; private set; }

@@ -56,14 +56,9 @@ public sealed class StaticOptionsMonitor<TOptions> : IOptionsMonitor<TOptions>
     /// Removes its owning listener from <see cref="_listeners"/> on disposal, mirroring the real
     /// <see cref="IOptionsMonitor{TOptions}.OnChange"/> subscription contract.
     /// </summary>
-    private sealed class Unsubscriber : IDisposable
+    private sealed class Unsubscriber(Action unsubscribe) : IDisposable
     {
-        private readonly Action _unsubscribe;
-
-        public Unsubscriber(Action unsubscribe)
-        {
-            _unsubscribe = unsubscribe;
-        }
+        private readonly Action _unsubscribe = unsubscribe;
 
         public void Dispose()
         {

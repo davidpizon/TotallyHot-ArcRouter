@@ -164,18 +164,13 @@ public class RequestInterceptorEmbeddingTests
         return context;
     }
 
-    private sealed class FakeEmbeddingClient : IEmbeddingClient
+    private sealed class FakeEmbeddingClient(Func<string, CancellationToken, Task<EmbeddingResult>> embed) : IEmbeddingClient
     {
-        private readonly Func<string, CancellationToken, Task<EmbeddingResult>> _embed;
+        private readonly Func<string, CancellationToken, Task<EmbeddingResult>> _embed = embed;
 
         public FakeEmbeddingClient(Func<string, float[]> embed) : this((text, _) =>
             Task.FromResult(new EmbeddingResult(Vector: embed(text), 0)))
         {
-        }
-
-        public FakeEmbeddingClient(Func<string, CancellationToken, Task<EmbeddingResult>> embed)
-        {
-            _embed = embed;
         }
 
         public int CallCount { get; private set; }
