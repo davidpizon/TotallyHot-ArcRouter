@@ -49,7 +49,7 @@ Decided via user clarification during planning (not inferred):
 | Providers in scope | Ollama, AWS Bedrock, Google Gemini, **and** retrofitting Anthropic to accept OpenAI-shaped requests |
 | Build order | Ollama (own PR) → **Gemini (own PR)** → **Anthropic retrofit (own PR)** → **Bedrock (own PR)**, actual shipped order. *Gemini and Bedrock were swapped from the plan's original order by user decision: Gemini is fully verifiable against a mock harness and exercises the whole translator seam first. Anthropic and Bedrock then swapped again from that revised order in practice — Anthropic shipped before Bedrock, which turned out to need its own architectural pivot mid-implementation (raw HTTP + hand-rolled SigV4 → the AWSSDK.BedrockRuntime client; see §4.2) once AWSSDK.Core's signer proved not to be the clean standalone utility it was assumed to be.* |
 | Streaming (SSE) | In scope for every provider, not deferred to a later pass |
-| Verification | Local mock/stub HTTP harness with real provider-shaped fixture payloads — either an in-process `HttpMessageHandler` stub (`ProxyMiddlewareTests`' `DelegatingHandlerStub` pattern) or a real-socket `HttpListener` mock upstream (`ProxyInterceptionTests`' pattern) — **not** a live provider or real credentials, mirroring why `litellm-sidecar/`'s Docker pull was never verified end-to-end in this environment |
+| Verification | Local mock/stub HTTP harness with real provider-shaped fixture payloads — either an in-process `HttpMessageHandler` stub (`ProxyMiddlewareTests`' `DelegatingHandlerStub` pattern) or a real-socket `HttpListener` mock upstream (`ProxyInterceptionTests`' pattern) — **not** a live provider or real credentials, mirroring why the since-removed `litellm-sidecar/`'s Docker pull was never verified end-to-end in this environment |
 
 Each provider gets its own PR, mirroring how Workstream A (Phase 8 sandbox hardening) shipped as
 four focused PRs rather than one, and how TODO 4's other pillars (spend tracking, single-model CLI)
@@ -285,7 +285,7 @@ streaming-chunk translators; an SDK-exception-to-502-error-envelope test; and a
 optional `awsRegion` parameter to support this.
 
 **Verification honesty, unchanged from the original plan's caveat:** no live Bedrock call or real AWS
-credentials were used in this environment (same class of limitation as `litellm-sidecar/`'s blocked
+credentials were used in this environment (same class of limitation as the parity sidecar's blocked
 Docker pull and Gemini's mock-only verification) — but unlike a pure JSON-shape mock, the streaming path
 specifically was verified against the actual installed AWS SDK's real binary-protocol decoder, not just
 against this codebase's own assumptions about what that decoder does.
@@ -295,8 +295,8 @@ against this codebase's own assumptions about what that decoder does.
 Added to scope during planning (not in this pillar's original wording, above). This is the **first
 provider that needed a real `IPayloadTranslator`** — Ollama (§4.1) turned out not to. Google AI Studio
 (`generativelanguage.googleapis.com`), not Vertex AI. Field mappings mirror LiteLLM's pinned
-`vertex_ai/gemini` transformation (read directly out of the running parity sidecar container, the same
-version the parity tests pin), scoped to the surface this pillar needs.
+`vertex_ai/gemini` transformation (read directly out of the parity sidecar container this workstream
+ran at the time), scoped to the surface this pillar needs.
 
 **What PR 3 did:**
 1. Added the `gemini` provider to `appsettings.json` (`https://generativelanguage.googleapis.com`,
@@ -360,7 +360,7 @@ request carrying those still translates — the unsupported parts are ignored ra
 faithful translation of them is future work, scoped honestly rather than over-claimed.
 
 **Verification:** mock harness only, per §2 — no live Gemini call or real `GEMINI_API_KEY` in this
-environment (same class of limitation as `litellm-sidecar/`'s and Bedrock's). The fixtures are real
+environment (same class of limitation as the parity sidecar's and Bedrock's). The fixtures are real
 Gemini response shapes traced from LiteLLM's transformation and Google's `generateContent` docs.
 
 ### 4.4 Anthropic retrofit (PR 4 — highest risk, implemented)
