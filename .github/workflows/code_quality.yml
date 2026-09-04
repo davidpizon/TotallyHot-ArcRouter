@@ -15,6 +15,7 @@ jobs:
             contents: write
             pull-requests: write
             checks: write
+            security-events: write  # required to upload the SARIF report to GitHub code scanning
         steps:
             - uses: actions/checkout@v4
               with:
@@ -26,3 +27,8 @@ jobs:
                   args: '--within-docker true'
               env:
                   QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
+            - name: 'Upload SARIF to GitHub code scanning'
+              uses: github/codeql-action/upload-sarif@v3
+              if: ${{ always() }}  # publish findings even when the scan trips its quality gate
+              with:
+                  sarif_file: ${{ runner.temp }}/qodana/results/qodana.sarif.json
