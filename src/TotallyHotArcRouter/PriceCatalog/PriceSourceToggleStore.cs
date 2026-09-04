@@ -208,14 +208,12 @@ public sealed class PriceSourceToggleStore : IDisposable
 
         lock (_gate)
         {
-            if (_disposed || !_sourceTokens.TryGetValue(key: sourceName, value: out toCancel)) return;
-
-            // Drop it from the map while holding the lock, so a concurrent GetSourceToken for a
+            // Dropped from the map while holding the lock, so a concurrent GetSourceToken for a
             // *re-enabled* source builds a fresh one instead of handing out this already-cancelled token.
             // A cancelled token never resets, so reusing it would leave the source permanently unfetchable -
             // the source would read as enabled in the panel and never poll again, which is exactly the kind
             // of silent lie the toggle exists to avoid.
-            _sourceTokens.Remove(sourceName);
+            if (_disposed || !_sourceTokens.Remove(key: sourceName, value: out toCancel)) return;
         }
 
         // Cancel outside the lock: continuations registered on the token run inline on Cancel(), and one

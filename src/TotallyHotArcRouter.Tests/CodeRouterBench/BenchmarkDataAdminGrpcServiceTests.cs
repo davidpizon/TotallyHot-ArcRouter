@@ -65,7 +65,7 @@ public class BenchmarkDataAdminGrpcServiceTests
     {
         using var temp = new TempBenchmarkDatabase();
         temp.CreateLedger(); // schema only, no rows synced yet
-        var (service, _) = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
+        var service = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
 
         var response = await service.GetBenchmarkStatus(request: new Contract.GetBenchmarkStatusRequest(),
             context: CreateContext(TestContext.Current.CancellationToken));
@@ -85,7 +85,7 @@ public class BenchmarkDataAdminGrpcServiceTests
         ledger.Upsert(new BenchmarkFileLedgerEntry(FileName: "models.json", PublishedOid: "oid-models", 42, 3,
             RepoCommit: "commit1", SyncedAtUtc: syncedAt));
 
-        var (service, _) = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
+        var service = CreateService(temp: temp, handler: FakeHttpMessageHandler.AlwaysFails());
 
         var response = await service.RecheckBenchmarkData(request: new Contract.RecheckBenchmarkDataRequest(),
             context: CreateContext(TestContext.Current.CancellationToken));
@@ -105,7 +105,7 @@ public class BenchmarkDataAdminGrpcServiceTests
     public async Task SyncBenchmarkData_AllFilesValid_StreamsCompletedProgressThenCurrentFinalStatus()
     {
         using var temp = new TempBenchmarkDatabase();
-        var (service, _) = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
+        var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
         await service.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(), responseStream: writer,
@@ -135,7 +135,7 @@ public class BenchmarkDataAdminGrpcServiceTests
         {
             ["models.json"] = """{ "tampered-after-checksum-was-published": {} }"""
         };
-        var (service, _) = CreateService(temp: temp, servedBodies: servedBodies, repoCommit: "commit123",
+        var service = CreateService(temp: temp, servedBodies: servedBodies, repoCommit: "commit123",
             publishedFixtures: Fixtures);
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
@@ -158,7 +158,7 @@ public class BenchmarkDataAdminGrpcServiceTests
     public async Task SyncBenchmarkData_AllFilesStale_StreamsThePlanFirstListingEveryStaleFile()
     {
         using var temp = new TempBenchmarkDatabase();
-        var (service, _) = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
+        var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
         await service.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(), responseStream: writer,
@@ -180,7 +180,7 @@ public class BenchmarkDataAdminGrpcServiceTests
         var publishedOid = GitBlobHash.Compute(Encoding.UTF8.GetBytes(Fixtures["models.json"]));
         ledger.Upsert(new BenchmarkFileLedgerEntry(FileName: "models.json", PublishedOid: publishedOid, 42, 1,
             RepoCommit: "old-commit", SyncedAtUtc: DateTimeOffset.UtcNow));
-        var (service, _) = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
+        var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
         var writer = new FakeServerStreamWriter<Contract.BenchmarkSyncStreamEvent>();
 
         await service.SyncBenchmarkData(request: new Contract.SyncBenchmarkDataRequest(), responseStream: writer,
@@ -202,7 +202,7 @@ public class BenchmarkDataAdminGrpcServiceTests
         Assert.Equal(expected: Contract.BenchmarkDataState.Current, actual: finalEvent.FinalStatus.State);
     }
 
-    private static (BenchmarkDataAdminGrpcService Service, BenchmarkSyncService SyncService) CreateService(
+    private static BenchmarkDataAdminGrpcService CreateService(
         TempBenchmarkDatabase temp,
         HttpMessageHandler handler)
     {
@@ -216,12 +216,11 @@ public class BenchmarkDataAdminGrpcServiceTests
             httpClientFactory: new FakeHttpClientFactory(handler), probe: probe, database: temp.Database,
             ledger: ledger, logger: NullLogger<BenchmarkSyncService>.Instance, fileSpecs: TestFileSpecs);
 
-        return (
-            new BenchmarkDataAdminGrpcService(statusService: statusService, ledger: ledger, syncService: syncService,
-                options: Options.Create(new BenchmarkSyncOptions())), syncService);
+        return new BenchmarkDataAdminGrpcService(statusService: statusService, ledger: ledger,
+            syncService: syncService, options: Options.Create(new BenchmarkSyncOptions()));
     }
 
-    private static (BenchmarkDataAdminGrpcService Service, BenchmarkSyncService SyncService) CreateService(
+    private static BenchmarkDataAdminGrpcService CreateService(
         TempBenchmarkDatabase temp,
         IReadOnlyDictionary<string, string> servedBodies,
         string repoCommit,

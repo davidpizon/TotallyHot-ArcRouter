@@ -136,9 +136,9 @@ internal static class ToolCallInstructionInjector
             SerializeSchemas(tools: tools, logger: logger, budgetChars: ComputeBudget(contextWindow));
         var instructions = $"{prompt.Preamble}{schemaText}{prompt.Postamble}";
 
-        for (var i = 0; i < messages.Count; i++)
+        foreach (var node in messages)
         {
-            if (messages[i] is not JsonObject message ||
+            if (node is not JsonObject message ||
                 (message["role"] as JsonValue)?.TryGetValue<string>(out var role) != true ||
                 !string.Equals(a: role, b: "system", comparisonType: StringComparison.Ordinal))
                 continue;
