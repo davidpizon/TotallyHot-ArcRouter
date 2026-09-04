@@ -34,7 +34,7 @@ internal sealed class ConstrainedToolCallStreamTranslator : IStreamTranslator
     private const int MaxEnvelopeChars = 256 * 1024;
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-    private static readonly byte[] DoneLine = Encoding.UTF8.GetBytes("data: [DONE]\n\n");
+    private static readonly byte[] DoneLine = "data: [DONE]\n\n"u8.ToArray();
     private readonly StringBuilder _envelope = new();
     private readonly ILogger _logger;
 

@@ -307,6 +307,6 @@ internal sealed class TitanStreamChunkTranslator : IBedrockStreamChunkTranslator
     /// <summary>Emits the terminal OpenAI-style <c>data: [DONE]</c> SSE marker once the stream ends.</summary>
     public byte[] Flush()
     {
-        return Encoding.UTF8.GetBytes("data: [DONE]\n\n");
+        return "data: [DONE]\n\n"u8.ToArray();
     }
 }

@@ -32,7 +32,7 @@ public sealed class ProviderInteractionStatusStoreTests
 
         var status = store.Get("openai");
         Assert.NotNull(status);
-        Assert.True(status!.Ok);
+        Assert.True(status.Ok);
         Assert.Equal(expected: "Refresh from endpoint", actual: status.Operation);
         Assert.Null(status.Message);
         Assert.Equal(expected: clock.GetUtcNow(), actual: status.AtUtc);
@@ -48,7 +48,7 @@ public sealed class ProviderInteractionStatusStoreTests
 
         var status = store.Get("openai");
         Assert.NotNull(status);
-        Assert.False(status!.Ok);
+        Assert.False(status.Ok);
         Assert.Equal(expected: "Refresh from endpoint", actual: status.Operation);
         Assert.Equal(expected: "Provider returned 401 for https://api.openai.com/v1/models.", actual: status.Message);
     }
@@ -103,7 +103,7 @@ public sealed class ProviderInteractionStatusStoreTests
 
         var status = store.GetLiveTraffic("openai");
         Assert.NotNull(status);
-        Assert.False(status!.Ok);
+        Assert.False(status.Ok);
         Assert.Equal(expected: "Live traffic", actual: status.Operation);
         Assert.Equal(expected: ProviderInteractionKind.OutOfCredits, actual: status.Kind);
         Assert.Equal(expected: "Your credit balance is too low.", actual: status.Message);
@@ -121,7 +121,7 @@ public sealed class ProviderInteractionStatusStoreTests
 
         var status = store.GetLiveTraffic("openai");
         Assert.NotNull(status);
-        Assert.True(status!.Ok);
+        Assert.True(status.Ok);
         Assert.Equal(expected: ProviderInteractionKind.None, actual: status.Kind);
     }
 

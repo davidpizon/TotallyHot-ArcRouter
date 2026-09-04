@@ -167,7 +167,7 @@ public class ConstrainedToolCallTests
     [Fact]
     public void Rewrite_ANonChatBody_IsForwardedUntouched()
     {
-        var body = Encoding.UTF8.GetBytes("""{"model":"m","prompt":"hi"}""");
+        var body = """{"model":"m","prompt":"hi"}"""u8.ToArray();
 
         Assert.Equal(expected: body,
             actual: ConstrainedToolCallRewriter.Rewrite(openAiShapedBody: body,

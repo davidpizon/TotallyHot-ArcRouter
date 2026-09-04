@@ -67,7 +67,7 @@ public class PriceCatalogDatabaseTests
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
             maxAge: TimeSpan.FromHours(24));
         Assert.NotNull(price);
-        Assert.Equal(2.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(2.50m, actual: price.InputPerMillionTokens);
     }
 
     [Fact]

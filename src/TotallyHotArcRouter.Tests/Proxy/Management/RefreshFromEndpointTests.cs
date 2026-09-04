@@ -315,7 +315,7 @@ public sealed class RefreshFromEndpointTests : IDisposable
 
         var status = interactionStatus.Get("lmstudio");
         Assert.NotNull(status);
-        Assert.False(status!.Ok);
+        Assert.False(status.Ok);
         Assert.Equal(expected: "Discover models", actual: status.Operation);
     }
 

@@ -77,8 +77,7 @@ public class ToolCallEmulationTests
         var store = Emulated();
         var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(route: Route(), true)!;
 
-        var response = translator.TranslateResponse(Encoding.UTF8.GetBytes(
-            """{"choices":[{"index":0,"message":{"role":"assistant","content":"<tools>{\"name\":\"get_time\",\"arguments\":{\"timezone\":\"Asia/Tokyo\"}}</tools>"},"finish_reason":"stop"}]}"""));
+        var response = translator.TranslateResponse("""{"choices":[{"index":0,"message":{"role":"assistant","content":"<tools>{\"name\":\"get_time\",\"arguments\":{\"timezone\":\"Asia/Tokyo\"}}</tools>"},"finish_reason":"stop"}]}"""u8.ToArray());
 
         using var parsed = JsonDocument.Parse(response);
         var call = parsed.RootElement.GetProperty("choices")[0].GetProperty("message")
@@ -155,7 +154,7 @@ public class ToolCallEmulationTests
     {
         // Fail-open: RequestInterceptor already parsed this body, so reaching here means something upstream
         // changed. The request may still work; throwing would turn a heuristic into an outage.
-        var original = Encoding.UTF8.GetBytes("not json at all");
+        var original = "not json at all"u8.ToArray();
         var result = ToolCallEmulationRewriter.Rewrite(openAiShapedBody: original,
             dialect: ToolCallDialectRegistry.Emulated, logger: Mock.Of<ILogger>());
 
@@ -602,8 +601,7 @@ public class ToolCallEmulationTests
         var store = Emulated();
         var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(route: Route(), true)!;
 
-        var response = translator.TranslateResponse(Encoding.UTF8.GetBytes(
-            """{"choices":[{"index":0,"message":{"role":"assistant","content":"<tool_call>{\"name\":\"get_time\",\"arguments\":{}}</tool_call>"},"finish_reason":"stop"}]}"""));
+        var response = translator.TranslateResponse("""{"choices":[{"index":0,"message":{"role":"assistant","content":"<tool_call>{\"name\":\"get_time\",\"arguments\":{}}</tool_call>"},"finish_reason":"stop"}]}"""u8.ToArray());
 
         // The call is still normalized - emulation works.
         using var parsed = JsonDocument.Parse(response);
@@ -623,8 +621,7 @@ public class ToolCallEmulationTests
         var store = Emulated();
         var translator = (ToolCallEmulatingTranslator)Factory(store).TryCreate(route: Route(), true)!;
 
-        translator.TranslateResponse(Encoding.UTF8.GetBytes(
-            """{"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_time","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"""));
+        translator.TranslateResponse("""{"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_time","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"""u8.ToArray());
 
         var recorded = Assert.Single(store.Recorded);
         Assert.Equal(expected: "openai-native", actual: recorded.Dialect);

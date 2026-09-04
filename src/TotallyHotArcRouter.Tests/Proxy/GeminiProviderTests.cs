@@ -428,7 +428,7 @@ public class GeminiProviderTests
         // ExtractDataPayload is private, so this reaches it directly via reflection rather than
         // round-tripping through JSON parsing, which is too whitespace-tolerant to reliably distinguish
         // "joined with \n" from "concatenated" for most realistic payload splits.
-        var eventBytes = Encoding.UTF8.GetBytes("data: line1\ndata: line2");
+        var eventBytes = "data: line1\ndata: line2"u8.ToArray();
         var method = typeof(GeminiStreamTranslator).GetMethod(name: "ExtractDataPayload",
             bindingAttr: BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method); // fails clearly if ExtractDataPayload is ever renamed/removed, rather than NRE-ing below

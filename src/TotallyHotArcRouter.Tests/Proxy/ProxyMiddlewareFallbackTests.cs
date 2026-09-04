@@ -580,7 +580,7 @@ public class ProxyMiddlewareFallbackTests
         Assert.True(circuitBreaker.IsProviderOpen("anthropic"));
         var liveTraffic = interactionStatus.GetLiveTraffic("anthropic");
         Assert.NotNull(liveTraffic);
-        Assert.False(liveTraffic!.Ok);
+        Assert.False(liveTraffic.Ok);
         Assert.Equal(expected: ProviderInteractionKind.OutOfCredits, actual: liveTraffic.Kind);
         Assert.Contains(expectedSubstring: "credit balance", actualString: liveTraffic.Message);
     }

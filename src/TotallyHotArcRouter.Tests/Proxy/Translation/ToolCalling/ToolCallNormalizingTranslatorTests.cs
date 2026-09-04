@@ -101,7 +101,7 @@ public class ToolCallNormalizingTranslatorTests
             chunks.FirstOrDefault(c => Delta(c).TryGetProperty(propertyName: "tool_calls", value: out _));
         Assert.NotNull(toolCallChunk);
 
-        var toolCall = Delta(toolCallChunk!).GetProperty("tool_calls")[0];
+        var toolCall = Delta(toolCallChunk).GetProperty("tool_calls")[0];
         Assert.Equal(expected: "get_time", actual: toolCall.GetProperty("function").GetProperty("name").GetString());
         Assert.Equal(expected: "tool_calls",
             actual: chunks[^1].RootElement.GetProperty("choices")[0].GetProperty("finish_reason").GetString());

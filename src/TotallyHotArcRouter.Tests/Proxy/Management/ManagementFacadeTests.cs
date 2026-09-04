@@ -671,8 +671,8 @@ public sealed class ManagementFacadeTests
 
         Assert.NotNull(first);
         Assert.NotNull(second);
-        Assert.Equal(expected: observedAt, actual: first!.ObservedAtUtc);
-        Assert.Equal(expected: observedAt, actual: second!.ObservedAtUtc);
+        Assert.Equal(expected: observedAt, actual: first.ObservedAtUtc);
+        Assert.Equal(expected: observedAt, actual: second.ObservedAtUtc);
         Assert.Equal(1000, actual: second.Snapshot.StandardDimensions["tokens"].Remaining);
     }
 

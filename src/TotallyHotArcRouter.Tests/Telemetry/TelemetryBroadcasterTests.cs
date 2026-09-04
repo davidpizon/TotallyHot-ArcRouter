@@ -71,7 +71,7 @@ public class TelemetryBroadcasterTests
         var read = await reader.WaitToReadAsync();
         Assert.True(read);
         Assert.True(reader.TryRead(out var item));
-        return item!;
+        return item;
     }
 
     [Fact]

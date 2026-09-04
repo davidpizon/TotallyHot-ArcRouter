@@ -48,7 +48,7 @@ public class ToolCallCapabilityStoreTests
         var stored = store.GetModelCapability(providerKey: "lmstudio", modelName: "qwen2.5.1-coder-7b-instruct");
 
         Assert.NotNull(stored);
-        Assert.Equal(expected: "hermes", actual: stored!.Dialect);
+        Assert.Equal(expected: "hermes", actual: stored.Dialect);
         Assert.Equal(expected: DetectionConfidence.Observed, actual: stored.Confidence);
         Assert.Equal(expected: "matched <tool_call>", actual: stored.Evidence);
         Assert.Equal(3, actual: stored.ObservationCount);
@@ -256,7 +256,7 @@ public class ToolCallCapabilityStoreTests
         // The rejection must have taught the cache about the pin, so the caller stops re-recording.
         var visible = running.GetModelCapability(providerKey: "lmstudio", modelName: "qwen2.5-coder");
         Assert.NotNull(visible);
-        Assert.Equal(expected: "openai-native", actual: visible!.Dialect);
+        Assert.Equal(expected: "openai-native", actual: visible.Dialect);
         Assert.Equal(expected: DetectionConfidence.Operator, actual: visible.Confidence);
     }
 
@@ -337,7 +337,7 @@ public class ToolCallCapabilityStoreTests
         var stored = store.GetProviderCapabilities("LMSTUDIO");
 
         Assert.NotNull(stored);
-        Assert.True(stored!.OpenAiCompatible);
+        Assert.True(stored.OpenAiCompatible);
         Assert.True(stored.LmStudioNative);
         Assert.False(stored.OllamaNative);
         Assert.False(stored.AnthropicCompatible);
@@ -522,7 +522,7 @@ public class ToolCallCapabilityStoreTests
 
             var stored = store.GetModelCapability(providerKey: "p", modelName: dialect.Name);
             Assert.NotNull(stored);
-            Assert.True(ToolCallDialectRegistry.TryGet(name: stored!.Dialect, dialect: out var resolved));
+            Assert.True(ToolCallDialectRegistry.TryGet(name: stored.Dialect, dialect: out var resolved));
             Assert.Equal(expected: dialect.Name, actual: resolved.Name);
         }
     }
@@ -552,7 +552,7 @@ public class ToolCallCapabilityStoreTests
         var stored = store.GetModelContextWindow(providerKey: "lmstudio", modelName: "qwen-local");
 
         Assert.NotNull(stored);
-        Assert.Equal(32768, actual: stored!.ContextLength);
+        Assert.Equal(32768, actual: stored.ContextLength);
         Assert.Equal(expected: "qwen2", actual: stored.Architecture);
         Assert.Equal(expected: "LM Studio /api/v0/models.", actual: stored.Evidence);
         Assert.Equal(expected: detectedAt, actual: stored.DetectedAtUtc);

@@ -36,7 +36,7 @@ public sealed class PriceSourceMcpToolsTests
         Assert.False(toggleStore.IsEnabled("litellm"));
         var successProperty = result.GetType().GetProperty("success");
         Assert.NotNull(successProperty);
-        Assert.Equal(true, actual: successProperty!.GetValue(result));
+        Assert.Equal(true, actual: successProperty.GetValue(result));
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public sealed class PriceSourceMcpToolsTests
 
         var errorProperty = result.GetType().GetProperty("error");
         Assert.NotNull(errorProperty);
-        Assert.NotNull(errorProperty!.GetValue(result));
+        Assert.NotNull(errorProperty.GetValue(result));
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public sealed class PriceSourceMcpToolsTests
 
         var errorProperty = result.GetType().GetProperty("error");
         Assert.NotNull(errorProperty);
-        Assert.NotNull(errorProperty!.GetValue(result));
+        Assert.NotNull(errorProperty.GetValue(result));
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class PriceSourceMcpToolsTests
 
         var successProperty = result.GetType().GetProperty("success");
         Assert.NotNull(successProperty);
-        Assert.Equal(true, actual: successProperty!.GetValue(result));
+        Assert.Equal(true, actual: successProperty.GetValue(result));
         // litellm now outranks openrouter, and its own stored observation was never re-fetched - this
         // value can only have come from model_price_observations.
         Assert.Equal(2.00m,

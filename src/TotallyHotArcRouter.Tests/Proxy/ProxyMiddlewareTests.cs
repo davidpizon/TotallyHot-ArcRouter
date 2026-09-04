@@ -62,7 +62,7 @@ public class ProxyMiddlewareTests
         context.Request.Path = "/chat";
         context.Request.QueryString = new QueryString("?x=1");
         context.Request.Headers["X-Trace"] = "abc";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -136,7 +136,7 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/messages";
         context.Request.Headers["Authorization"] = "Bearer client-placeholder-token";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"claude-sonnet-5"}""");
+        var requestBody = """{"model":"claude-sonnet-5"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -186,7 +186,7 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/messages";
         context.Request.Headers["x-api-key"] = "client-supplied-token";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"claude-sonnet-5"}""");
+        var requestBody = """{"model":"claude-sonnet-5"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -230,7 +230,7 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-api-key"] = "client-supplied-token";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"local-model"}""");
+        var requestBody = """{"model":"local-model"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -264,7 +264,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -312,7 +312,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"qwen3-coder"}""");
+        var requestBody = """{"model":"qwen3-coder"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -341,7 +341,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"totally-unknown-model"}""");
+        var requestBody = """{"model":"totally-unknown-model"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -395,7 +395,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"agentic-router"}""");
+        var requestBody = """{"model":"agentic-router"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -462,7 +462,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -495,7 +495,7 @@ public class ProxyMiddlewareTests
         context.Request.Headers["Connection"] = "X-Nominated";
         context.Request.Headers["X-Nominated"] = "should-be-stripped";
         context.Request.Headers["X-Kept"] = "should-be-forwarded";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -530,7 +530,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -562,7 +562,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/fail";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -747,7 +747,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/models";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -850,7 +850,7 @@ public class ProxyMiddlewareTests
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/show";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"totallyhot-arcrouter"}""");
+        var requestBody = """{"model":"totallyhot-arcrouter"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -900,7 +900,7 @@ public class ProxyMiddlewareTests
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/show";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -935,7 +935,7 @@ public class ProxyMiddlewareTests
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/show";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"deepseek-coder-6.7b-instruct"}""");
+        var requestBody = """{"model":"deepseek-coder-6.7b-instruct"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -985,7 +985,7 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-claude-code-session-id"] = "sess-42";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1050,7 +1050,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1110,7 +1110,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"llama3"}""");
+        var requestBody = """{"model":"llama3"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1173,7 +1173,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1421,7 +1421,7 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-claude-code-session-id"] = maliciousSessionId;
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1485,8 +1485,7 @@ public class ProxyMiddlewareTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         context.Request.Headers["x-claude-code-session-id"] = "sess-text";
-        var requestBody = Encoding.UTF8.GetBytes(
-            """{"model":"gpt-5.4","messages":[{"role":"system","content":"You are helpful."},{"role":"user","content":"What is the capital of France?"}]}""");
+        var requestBody = """{"model":"gpt-5.4","messages":[{"role":"system","content":"You are helpful."},{"role":"user","content":"What is the capital of France?"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1537,7 +1536,7 @@ public class ProxyMiddlewareTests
             context.Request.Host = new HostString("127.0.0.1:5001");
             context.Request.Path = "/chat";
             context.Request.Headers["x-claude-code-session-id"] = "sess-repeat";
-            var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+            var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
             context.Request.Body = new MemoryStream(requestBody);
             context.Request.ContentLength = requestBody.Length;
             context.Response.Body = new MemoryStream();
@@ -1589,7 +1588,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1639,7 +1638,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"gpt-5.4"}""");
+        var requestBody = """{"model":"gpt-5.4"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -1671,7 +1670,7 @@ public class ProxyMiddlewareTests
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StreamContent(new AbortsAfterFirstReadStream(Encoding.UTF8.GetBytes("partial-chunk")))
+            Content = new StreamContent(new AbortsAfterFirstReadStream("partial-chunk"u8.ToArray()))
         }));
 
         var loggerMock = new Mock<ILogger<ProxyMiddleware>>();
@@ -1683,7 +1682,7 @@ public class ProxyMiddlewareTests
         context.Request.Scheme = "https";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"llama3"}""");
+        var requestBody = """{"model":"llama3"}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();

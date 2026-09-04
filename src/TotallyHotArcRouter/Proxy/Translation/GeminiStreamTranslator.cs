@@ -21,7 +21,7 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 public sealed class GeminiStreamTranslator : IStreamTranslator
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-    private static readonly byte[] DoneLine = Encoding.UTF8.GetBytes("data: [DONE]\n\n");
+    private static readonly byte[] DoneLine = "data: [DONE]\n\n"u8.ToArray();
 
     // Raw upstream bytes not yet forming a complete SSE event. Carriage returns are stripped on
     // ingestion so the event delimiter is always "\n\n" (Gemini's compact JSON never contains a raw

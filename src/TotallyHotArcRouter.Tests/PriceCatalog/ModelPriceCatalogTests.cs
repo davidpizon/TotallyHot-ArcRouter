@@ -33,7 +33,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetBestPriceForModel(key: Key, context: PriceContext.Standard);
 
         Assert.NotNull(price);
-        Assert.Equal(15.00m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(15.00m, actual: price.InputPerMillionTokens);
         Assert.Equal(75.00m, actual: price.OutputPerMillionTokens);
     }
 
@@ -48,7 +48,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, false));
 
         Assert.NotNull(price);
-        Assert.Equal(7.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(7.50m, actual: price.InputPerMillionTokens);
         Assert.Equal(37.50m, actual: price.OutputPerMillionTokens);
     }
 
@@ -66,7 +66,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, false));
 
         Assert.NotNull(price);
-        Assert.Equal(15.00m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(15.00m, actual: price.InputPerMillionTokens);
         Assert.Equal(75.00m, actual: price.OutputPerMillionTokens);
     }
 
@@ -81,7 +81,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(false, true));
 
         Assert.NotNull(price);
-        Assert.Equal(1.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(1.50m, actual: price.InputPerMillionTokens);
 
         // Output is unaffected: caching discounts input tokens only, and a regression that discounted
         // generation too would silently halve every projected cost.
@@ -99,7 +99,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(false, true));
 
         Assert.NotNull(price);
-        Assert.Equal(15.00m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(15.00m, actual: price.InputPerMillionTokens);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, true));
 
         Assert.NotNull(price);
-        Assert.Equal(1.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(1.50m, actual: price.InputPerMillionTokens);
         Assert.Equal(37.50m, actual: price.OutputPerMillionTokens);
     }
 
@@ -134,7 +134,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetBestPriceForModel(key: Key, context: new PriceContext(true, true));
 
         Assert.NotNull(price);
-        Assert.Equal(1.50m, actual: price!.CacheReadPerMillionTokens);
+        Assert.Equal(1.50m, actual: price.CacheReadPerMillionTokens);
         Assert.Equal(18.75m, actual: price.CacheWritePerMillionTokens);
         Assert.Equal(7.50m, actual: price.BatchInputPerMillionTokens);
         Assert.Equal(37.50m, actual: price.BatchOutputPerMillionTokens);
@@ -165,7 +165,7 @@ public class ModelPriceCatalogTests
         var price = catalog.GetFreshPriceForRouting(key: Key, context: new PriceContext(true, false), maxAge: Floor);
 
         Assert.NotNull(price);
-        Assert.Equal(7.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(7.50m, actual: price.InputPerMillionTokens);
     }
 
     [Fact]

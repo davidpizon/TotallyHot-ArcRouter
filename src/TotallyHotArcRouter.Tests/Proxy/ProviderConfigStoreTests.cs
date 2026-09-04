@@ -310,7 +310,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
             cancellationToken: TestContext.Current.CancellationToken);
         var reloaded = JsonSerializer.Deserialize<ModelRoutingOptions>(json);
         Assert.NotNull(reloaded);
-        Assert.Single(reloaded!.Providers);
+        Assert.Single(reloaded.Providers);
         Assert.Single(reloaded.ModelList);
     }
 

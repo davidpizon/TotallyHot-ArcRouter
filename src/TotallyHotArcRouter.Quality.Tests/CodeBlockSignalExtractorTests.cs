@@ -46,7 +46,7 @@ public class CodeBlockSignalExtractorTests
         var request = extractor.Extract(Context(response));
 
         Assert.NotNull(request);
-        Assert.Equal(expected: CodeLanguage.Python, actual: request!.Language);
+        Assert.Equal(expected: CodeLanguage.Python, actual: request.Language);
         Assert.Contains(expectedSubstring: "print('hi')", actualString: request.Code,
             comparisonType: StringComparison.Ordinal);
         Assert.Equal(expected: "gpt-5.4", actual: request.Model);
@@ -62,7 +62,7 @@ public class CodeBlockSignalExtractorTests
         var request = extractor.Extract(Context(response));
 
         Assert.NotNull(request);
-        Assert.Equal(expected: CodeLanguage.JavaScript, actual: request!.Language);
+        Assert.Equal(expected: CodeLanguage.JavaScript, actual: request.Language);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class CodeBlockSignalExtractorTests
         var request = extractor.Extract(Context(response));
 
         Assert.NotNull(request);
-        Assert.Equal(5, actual: request!.Code.Length);
+        Assert.Equal(5, actual: request.Code.Length);
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public class CodeBlockSignalExtractorTests
         var request = extractor.Extract(Context(response));
 
         Assert.NotNull(request);
-        Assert.Equal(expected: CodeLanguage.Python, actual: request!.Language);
+        Assert.Equal(expected: CodeLanguage.Python, actual: request.Language);
         Assert.Contains(expectedSubstring: "print('hi')", actualString: request.Code,
             comparisonType: StringComparison.Ordinal);
     }
@@ -109,6 +109,6 @@ public class CodeBlockSignalExtractorTests
         var request = extractor.Extract(Context(responseText: response, prompt: "fix the bug in this code"));
 
         Assert.NotNull(request);
-        Assert.Equal(expected: "bug_fixing", actual: request!.Dimension);
+        Assert.Equal(expected: "bug_fixing", actual: request.Dimension);
     }
 }

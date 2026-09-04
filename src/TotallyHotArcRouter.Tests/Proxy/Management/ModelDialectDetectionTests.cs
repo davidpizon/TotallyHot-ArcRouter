@@ -335,7 +335,7 @@ public sealed class ModelDialectDetectionTests : IDisposable
 
         var window = capabilities.GetModelContextWindow(providerKey: "ollama", modelName: "qwen2.5-coder:7b");
         Assert.NotNull(window);
-        Assert.Equal(32768, actual: window!.ContextLength);
+        Assert.Equal(32768, actual: window.ContextLength);
         Assert.Equal(expected: "qwen2", actual: window.Architecture);
     }
 

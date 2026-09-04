@@ -266,8 +266,7 @@ public class BedrockProviderTests
             .ThrowsAsync(new AmazonBedrockRuntimeException("throttled"))
             .ReturnsAsync(new InvokeModelResponse
             {
-                Body = new MemoryStream(Encoding.UTF8.GetBytes(
-                    """{"id":"m","type":"message","role":"assistant","model":"x","content":[{"type":"text","text":"served by backup"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"""))
+                Body = new MemoryStream("""{"id":"m","type":"message","role":"assistant","model":"x","content":[{"type":"text","text":"served by backup"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"""u8.ToArray())
             });
 
         var translator = new AnthropicOnBedrockPayloadTranslator();
@@ -319,8 +318,7 @@ public class BedrockProviderTests
             })
             .ReturnsAsync(new InvokeModelResponse
             {
-                Body = new MemoryStream(Encoding.UTF8.GetBytes(
-                    """{"inputTextTokenCount":1,"results":[{"tokenCount":1,"outputText":"served by backup","completionReason":"FINISHED"}]}"""))
+                Body = new MemoryStream("""{"inputTextTokenCount":1,"results":[{"tokenCount":1,"outputText":"served by backup","completionReason":"FINISHED"}]}"""u8.ToArray())
             });
 
         var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
@@ -483,14 +481,14 @@ public class BedrockProviderTests
     [Fact]
     public void TitanTranslator_BuildsUserBotTranscript_WithToolResultLabeled()
     {
-        var translated = new TitanPayloadTranslator().TranslateRequest(Encoding.UTF8.GetBytes("""
+        var translated = new TitanPayloadTranslator().TranslateRequest("""
             {"model":"x","messages":[
                 {"role":"user","content":"weather?"},
                 {"role":"assistant","content":"checking"},
                 {"role":"tool","tool_call_id":"c1","content":"72F"},
                 {"role":"user","content":"thanks"}
             ]}
-            """));
+            """u8.ToArray());
 
         using var json = JsonDocument.Parse(translated);
         var inputText = json.RootElement.GetProperty("inputText").GetString()!;
@@ -505,9 +503,9 @@ public class BedrockProviderTests
     [Fact]
     public void LlamaTranslator_BuildsChatTemplatePrompt_WithSystemAndTrailingAssistantHeader()
     {
-        var translated = new LlamaPayloadTranslator().TranslateRequest(Encoding.UTF8.GetBytes("""
+        var translated = new LlamaPayloadTranslator().TranslateRequest("""
             {"model":"x","messages":[{"role":"system","content":"be terse"},{"role":"user","content":"hi"}],"max_tokens":100}
-            """));
+            """u8.ToArray());
 
         using var json = JsonDocument.Parse(translated);
         var prompt = json.RootElement.GetProperty("prompt").GetString()!;
@@ -526,9 +524,8 @@ public class BedrockProviderTests
     {
         var translator = new TitanStreamChunkTranslator("bedrock-titan");
 
-        var first = translator.TranslateChunk(Encoding.UTF8.GetBytes("""{"index":0,"outputText":"Hel"}"""));
-        var second = translator.TranslateChunk(Encoding.UTF8.GetBytes(
-            """{"index":1,"outputText":"lo","inputTextTokenCount":3,"totalOutputTextTokenCount":2,"completionReason":"FINISHED"}"""));
+        var first = translator.TranslateChunk("""{"index":0,"outputText":"Hel"}"""u8.ToArray());
+        var second = translator.TranslateChunk("""{"index":1,"outputText":"lo","inputTextTokenCount":3,"totalOutputTextTokenCount":2,"completionReason":"FINISHED"}"""u8.ToArray());
         var flush = translator.Flush();
 
         using var firstJson = JsonDocument.Parse(ExtractData(first));
@@ -550,9 +547,8 @@ public class BedrockProviderTests
     {
         var translator = new LlamaStreamChunkTranslator("bedrock-llama");
 
-        var first = translator.TranslateChunk(Encoding.UTF8.GetBytes("""{"generation":"Hel"}"""));
-        var second = translator.TranslateChunk(Encoding.UTF8.GetBytes(
-            """{"generation":"lo","prompt_token_count":4,"generation_token_count":2,"stop_reason":"stop"}"""));
+        var first = translator.TranslateChunk("""{"generation":"Hel"}"""u8.ToArray());
+        var second = translator.TranslateChunk("""{"generation":"lo","prompt_token_count":4,"generation_token_count":2,"stop_reason":"stop"}"""u8.ToArray());
 
         using var firstJson = JsonDocument.Parse(ExtractData(first));
         Assert.Equal(expected: "Hel",

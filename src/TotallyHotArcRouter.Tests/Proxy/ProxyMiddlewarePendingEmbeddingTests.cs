@@ -54,7 +54,7 @@ public class ProxyMiddlewarePendingEmbeddingTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         var requestBody =
-            Encoding.UTF8.GetBytes("""{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}""");
+            """{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -96,7 +96,7 @@ public class ProxyMiddlewarePendingEmbeddingTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat";
         var requestBody =
-            Encoding.UTF8.GetBytes("""{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}""");
+            """{"model":"gpt-5.4","messages":[{"role":"user","content":"hello there"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();

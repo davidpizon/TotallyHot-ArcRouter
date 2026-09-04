@@ -34,8 +34,8 @@ public class PriceRepositoryTests
 
         Assert.NotNull(groq);
         Assert.NotNull(together);
-        Assert.Equal(0.59m, actual: groq!.InputPerMillionTokens);
-        Assert.Equal(0.90m, actual: together!.InputPerMillionTokens);
+        Assert.Equal(0.59m, actual: groq.InputPerMillionTokens);
+        Assert.Equal(0.90m, actual: together.InputPerMillionTokens);
     }
 
     [Fact]
@@ -312,7 +312,7 @@ public class PriceRepositoryTests
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-5.4", Provider: "openai"),
             maxAge: TimeSpan.FromHours(24));
         Assert.NotNull(price);
-        Assert.Equal(2.50m, actual: price!.InputPerMillionTokens);
+        Assert.Equal(2.50m, actual: price.InputPerMillionTokens);
 
         // Nothing is stored under either raw source key anymore - both were resolved onto the one identity.
         Assert.Null(repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -415,7 +415,7 @@ public class PriceRepositoryTests
             maxAge: TimeSpan.FromHours(24));
 
         Assert.NotNull(price);
-        Assert.Equal(1.50m, actual: price!.CacheReadPerMillionTokens);
+        Assert.Equal(1.50m, actual: price.CacheReadPerMillionTokens);
         Assert.Equal(18.75m, actual: price.CacheWritePerMillionTokens);
     }
 
@@ -443,7 +443,7 @@ public class PriceRepositoryTests
             maxAge: TimeSpan.FromHours(24));
 
         Assert.NotNull(price);
-        Assert.Equal(1.25m, actual: price!.BatchInputPerMillionTokens);
+        Assert.Equal(1.25m, actual: price.BatchInputPerMillionTokens);
         Assert.Equal(5.00m, actual: price.BatchOutputPerMillionTokens);
     }
 
@@ -463,7 +463,7 @@ public class PriceRepositoryTests
             maxAge: TimeSpan.FromHours(24));
 
         Assert.NotNull(price);
-        Assert.Null(price!.BatchInputPerMillionTokens);
+        Assert.Null(price.BatchInputPerMillionTokens);
         Assert.Null(price.BatchOutputPerMillionTokens);
     }
 
@@ -485,7 +485,7 @@ public class PriceRepositoryTests
         var entry = repository.GetPriceEntry(new ModelKey(ModelName: "gpt-4o", Provider: "openai"));
 
         Assert.NotNull(entry);
-        Assert.Equal(2.50m, actual: entry!.Value.Price.InputPerMillionTokens);
+        Assert.Equal(2.50m, actual: entry.Value.Price.InputPerMillionTokens);
         Assert.Equal(expected: fetchedAt, actual: entry.Value.LastUpdatedUtc, precision: TimeSpan.FromSeconds(1));
     }
 
@@ -503,7 +503,7 @@ public class PriceRepositoryTests
             maxAge: TimeSpan.FromHours(24));
 
         Assert.NotNull(price);
-        Assert.Null(price!.CacheReadPerMillionTokens);
+        Assert.Null(price.CacheReadPerMillionTokens);
         Assert.Null(price.CacheWritePerMillionTokens);
     }
 

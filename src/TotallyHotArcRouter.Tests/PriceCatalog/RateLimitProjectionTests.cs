@@ -18,7 +18,7 @@ public class RateLimitProjectionTests
         var projection = RateLimitProjection.Project(earlier: earlier, later: later);
 
         Assert.NotNull(projection);
-        Assert.Equal(1000d, actual: projection!.BurnRatePerMinute, 3);
+        Assert.Equal(1000d, actual: projection.BurnRatePerMinute, 3);
         Assert.Equal(expected: TimeSpan.FromMinutes(50), actual: projection.TimeToExhaustion);
     }
 

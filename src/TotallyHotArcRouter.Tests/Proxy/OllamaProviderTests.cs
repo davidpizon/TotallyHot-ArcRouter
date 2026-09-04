@@ -88,7 +88,7 @@ public class OllamaProviderTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat/completions";
-        var requestBody = Encoding.UTF8.GetBytes("""{"model":"llama3","messages":[{"role":"user","content":"hi"}]}""");
+        var requestBody = """{"model":"llama3","messages":[{"role":"user","content":"hi"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -144,7 +144,7 @@ public class OllamaProviderTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat/completions";
         var requestBody =
-            Encoding.UTF8.GetBytes("""{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}""");
+            """{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         context.Response.Body = new MemoryStream();
@@ -203,7 +203,7 @@ public class OllamaProviderTests
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/chat/completions";
         var requestBody =
-            Encoding.UTF8.GetBytes("""{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}""");
+            """{"model":"llama3","messages":[{"role":"user","content":"hi"}],"stream":true}"""u8.ToArray();
         context.Request.Body = new MemoryStream(requestBody);
         context.Request.ContentLength = requestBody.Length;
         var flushCounting = new FlushCountingStream(new MemoryStream());

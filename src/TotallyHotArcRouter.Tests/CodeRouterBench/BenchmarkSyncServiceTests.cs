@@ -62,7 +62,7 @@ public class BenchmarkSyncServiceTests
         Assert.Equal(8, actual: ledger.GetAll().Count);
         var modelsEntry = ledger.TryGet("models.json");
         Assert.NotNull(modelsEntry);
-        Assert.Equal(expected: "commit123", actual: modelsEntry!.RepoCommit);
+        Assert.Equal(expected: "commit123", actual: modelsEntry.RepoCommit);
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public class BenchmarkSyncServiceTests
         var entry = ledger.TryGet("models.json");
         Assert.NotNull(entry);
         Assert.Equal(expected: ContentSha256Hash.Compute(Encoding.UTF8.GetBytes(Fixtures["models.json"])),
-            actual: entry!.PublishedOid);
+            actual: entry.PublishedOid);
     }
 
     [Fact]

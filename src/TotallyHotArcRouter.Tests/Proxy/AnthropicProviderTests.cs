@@ -271,13 +271,13 @@ public class AnthropicProviderTests
     public void TranslateRequest_ToolResultMessage_BecomesUserTurnToolResultBlock()
     {
         var translator = new AnthropicPayloadTranslator();
-        var translated = translator.TranslateRequest(Encoding.UTF8.GetBytes("""
+        var translated = translator.TranslateRequest("""
                                                                             {"model":"claude-sonnet-5","messages":[
                                                                                 {"role":"user","content":"weather in SF?"},
                                                                                 {"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"SF\"}"}}]},
                                                                                 {"role":"tool","tool_call_id":"call_1","content":"72F and sunny"}
                                                                             ]}
-                                                                            """));
+                                                                            """u8.ToArray());
 
         using var json = JsonDocument.Parse(translated);
         var messages = json.RootElement.GetProperty("messages");
@@ -307,12 +307,12 @@ public class AnthropicProviderTests
         // an empty id would produce an invalid upstream request Anthropic 400s on - this must fall back
         // to a plain text block instead.
         var translator = new AnthropicPayloadTranslator();
-        var translated = translator.TranslateRequest(Encoding.UTF8.GetBytes("""
+        var translated = translator.TranslateRequest("""
                                                                             {"model":"claude-sonnet-5","messages":[
                                                                                 {"role":"user","content":"weather in SF?"},
                                                                                 {"role":"function","name":"get_weather","content":"72F and sunny"}
                                                                             ]}
-                                                                            """));
+                                                                            """u8.ToArray());
 
         using var json = JsonDocument.Parse(translated);
         var messages = json.RootElement.GetProperty("messages");
@@ -585,12 +585,12 @@ public class AnthropicProviderTests
         // convention) must have the raw thinking_blocks - carrying the signature Anthropic requires -
         // placed first in that turn's content, ahead of any text/tool_use blocks.
         var translator = new AnthropicPayloadTranslator();
-        var translated = translator.TranslateRequest(Encoding.UTF8.GetBytes("""
+        var translated = translator.TranslateRequest("""
                                                                             {"model":"claude-sonnet-5","messages":[
                                                                                 {"role":"user","content":"what is 2+2?"},
                                                                                 {"role":"assistant","content":"4","thinking_blocks":[{"type":"thinking","thinking":"2+2=4","signature":"sig-xyz"}]}
                                                                             ]}
-                                                                            """));
+                                                                            """u8.ToArray());
 
         using var json = JsonDocument.Parse(translated);
         var assistantTurn = json.RootElement.GetProperty("messages")[1];
@@ -752,7 +752,7 @@ public class AnthropicProviderTests
         // ParseSseEvent is private, so this reaches it directly via reflection rather than round-tripping
         // through JSON parsing, which is too whitespace-tolerant to reliably distinguish "joined with \n"
         // from "concatenated" for most realistic payload splits.
-        var eventBytes = Encoding.UTF8.GetBytes("data: line1\ndata: line2");
+        var eventBytes = "data: line1\ndata: line2"u8.ToArray();
         var method = typeof(AnthropicStreamTranslator).GetMethod(name: "ParseSseEvent",
             bindingAttr: BindingFlags.NonPublic | BindingFlags.Static)!;
 

@@ -61,7 +61,7 @@ public sealed class ProviderMcpToolsTests
 
         var errorProperty = result.GetType().GetProperty("error");
         Assert.NotNull(errorProperty);
-        Assert.NotNull(errorProperty!.GetValue(result));
+        Assert.NotNull(errorProperty.GetValue(result));
     }
 
     [Fact]
@@ -73,6 +73,6 @@ public sealed class ProviderMcpToolsTests
 
         var typeProperty = result.GetType().GetProperty("type");
         Assert.NotNull(typeProperty);
-        Assert.Equal(expected: nameof(ManagementErrorType.Unavailable), actual: typeProperty!.GetValue(result));
+        Assert.Equal(expected: nameof(ManagementErrorType.Unavailable), actual: typeProperty.GetValue(result));
     }
 }

@@ -9,7 +9,7 @@ public class PublishedChecksumHasherTests
     [Fact]
     public void Compute_GitBlobSha1_MatchesGitBlobHash()
     {
-        var content = Encoding.UTF8.GetBytes("hello\n");
+        var content = "hello\n"u8.ToArray();
         using var stream = new MemoryStream(content);
 
         var hash = PublishedChecksumHasher.Compute(
@@ -22,7 +22,7 @@ public class PublishedChecksumHasherTests
     [Fact]
     public void Compute_LfsSha256_MatchesContentSha256Hash()
     {
-        var content = Encoding.UTF8.GetBytes("hello\n");
+        var content = "hello\n"u8.ToArray();
         using var stream = new MemoryStream(content);
 
         var hash = PublishedChecksumHasher.Compute(
@@ -37,7 +37,7 @@ public class PublishedChecksumHasherTests
     {
         // The bug this type exists to prevent: an LFS-tracked file's real content hash must never be
         // compared against a git blob SHA-1 (or vice versa) - the two must diverge for the same bytes.
-        var content = Encoding.UTF8.GetBytes("hello\n");
+        var content = "hello\n"u8.ToArray();
 
         var gitBlobSha1 = PublishedChecksumHasher.Compute(
             content: new MemoryStream(content), length: content.LongLength,

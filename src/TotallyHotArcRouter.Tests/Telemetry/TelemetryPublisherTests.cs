@@ -60,7 +60,7 @@ public class TelemetryPublisherTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(channel.Reader.TryRead(out var envelope));
-        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, actual: envelope!.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.RoutingTelemetry, actual: envelope.EventCase);
         Assert.Equal(expected: telemetryEvent.SessionId, actual: envelope.RoutingTelemetry.SessionId);
     }
 
@@ -103,7 +103,7 @@ public class TelemetryPublisherTests
         await publisher.PublishLogLineAsync(logLine: logLine, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(channel.Reader.TryRead(out var envelope));
-        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.LogLine, actual: envelope!.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.LogLine, actual: envelope.EventCase);
         Assert.Equal(expected: logLine.Message, actual: envelope.LogLine.Message);
     }
 
@@ -161,7 +161,7 @@ public class TelemetryPublisherTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(channel.Reader.TryRead(out var envelope));
-        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.QualitySignal, actual: envelope!.EventCase);
+        Assert.Equal(expected: Contract.TelemetryEvent.EventOneofCase.QualitySignal, actual: envelope.EventCase);
         Assert.Equal(expected: signal.CorrelationId, actual: envelope.QualitySignal.CorrelationId);
         Assert.Equal(expected: signal.Model, actual: envelope.QualitySignal.Model);
         Assert.Equal(expected: signal.UnifiedScore, actual: envelope.QualitySignal.UnifiedScore);

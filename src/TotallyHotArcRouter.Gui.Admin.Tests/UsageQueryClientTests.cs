@@ -245,7 +245,7 @@ public sealed class UsageQueryClientTests
         await client.GetSummaryAsync(window: "week", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(handler.LastRequest!.Headers.TryGetValues(name: "X-Admin-Token", values: out var values));
-        Assert.Equal(expected: "s3cret", actual: Assert.Single(values!));
+        Assert.Equal(expected: "s3cret", actual: Assert.Single(values));
     }
 
     [Fact]

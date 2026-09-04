@@ -89,8 +89,7 @@ public class UpstreamFailureClassifierTests
     [Fact]
     public void Classify_OutOfCreditsFromBodyRatherThanEmbeddedMessage_IsAlsoDetected()
     {
-        var body = Encoding.UTF8.GetBytes(
-            """{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota"}}""");
+        var body = """{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota"}}"""u8.ToArray();
 
         var verdict = Classify(429, preReadErrorBody: body);
 
@@ -221,7 +220,7 @@ public class UpstreamFailureClassifierTests
     {
         // Fails closed: misclassifying an ordinary client error would trip the provider-wide breaker for
         // every other model on that provider.
-        var verdict = Classify(400, preReadErrorBody: Encoding.UTF8.GetBytes("not json at all"));
+        var verdict = Classify(400, preReadErrorBody: "not json at all"u8.ToArray());
 
         Assert.False(verdict.IsOutOfCredits);
         Assert.Equal(expected: ProviderHealthSignal.TargetHealthy, actual: verdict.HealthSignal);

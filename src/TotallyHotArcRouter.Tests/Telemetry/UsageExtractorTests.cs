@@ -11,7 +11,7 @@ public class UsageExtractorTests
     [Fact]
     public void TryExtractUsage_OpenAiProvider_NonStreaming_DispatchesToOpenAiParser()
     {
-        var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":10,"completion_tokens":5}}""");
+        var body = """{"usage":{"prompt_tokens":10,"completion_tokens":5}}"""u8.ToArray();
 
         var result =
             _extractor.TryExtractUsage(provider: "openai", false, bufferedResponseBody: body, usage: out var usage);
@@ -24,7 +24,7 @@ public class UsageExtractorTests
     [Fact]
     public void TryExtractUsage_AnthropicProvider_NonStreaming_DispatchesToAnthropicParser()
     {
-        var body = Encoding.UTF8.GetBytes("""{"usage":{"input_tokens":20,"output_tokens":8}}""");
+        var body = """{"usage":{"input_tokens":20,"output_tokens":8}}"""u8.ToArray();
 
         var result = _extractor.TryExtractUsage(provider: "anthropic", false, bufferedResponseBody: body,
             usage: out var usage);
@@ -40,7 +40,7 @@ public class UsageExtractorTests
     [InlineData("openai")]
     public void TryExtractUsage_ProviderKeyIsCaseInsensitive(string providerKey)
     {
-        var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":1,"completion_tokens":1}}""");
+        var body = """{"usage":{"prompt_tokens":1,"completion_tokens":1}}"""u8.ToArray();
 
         var result = _extractor.TryExtractUsage(provider: providerKey, false, bufferedResponseBody: body, usage: out _);
 
@@ -57,7 +57,7 @@ public class UsageExtractorTests
         // AnthropicOnBedrockPayloadTranslator) convert AWS's native response into OpenAI's choices[]/usage
         // shape in TranslateResponse, so the bytes reaching this extractor for any of them are OpenAI-shaped
         // - this regression-tests the previously-missing dispatch branch for all three.
-        var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":7,"completion_tokens":3}}""");
+        var body = """{"usage":{"prompt_tokens":7,"completion_tokens":3}}"""u8.ToArray();
 
         var result = _extractor.TryExtractUsage(provider: providerKey, false, bufferedResponseBody: body,
             usage: out var usage);
@@ -70,7 +70,7 @@ public class UsageExtractorTests
     [Fact]
     public void TryExtractUsage_UnknownProvider_ReturnsFalse()
     {
-        var body = Encoding.UTF8.GetBytes("""{"usage":{"prompt_tokens":1,"completion_tokens":1}}""");
+        var body = """{"usage":{"prompt_tokens":1,"completion_tokens":1}}"""u8.ToArray();
 
         var result = _extractor.TryExtractUsage(provider: "alibaba", false, bufferedResponseBody: body, usage: out _);
 
@@ -89,8 +89,7 @@ public class UsageExtractorTests
     [Fact]
     public void TryExtractUsage_StreamingFlag_UsesStreamingParsePath()
     {
-        var sse = Encoding.UTF8.GetBytes(
-            "data: {\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n");
+        var sse = "data: {\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n"u8.ToArray();
 
         var result =
             _extractor.TryExtractUsage(provider: "openai", true, bufferedResponseBody: sse, usage: out var usage);
@@ -117,7 +116,7 @@ public class UsageExtractorTests
     [Fact]
     public void TryExtractUsage_NullProvider_FailsClosedInsteadOfThrowing()
     {
-        var body = Encoding.UTF8.GetBytes("{\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
+        var body = "{\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"u8.ToArray();
 
         var result =
             _extractor.TryExtractUsage(provider: null!, false, bufferedResponseBody: body, usage: out var usage);

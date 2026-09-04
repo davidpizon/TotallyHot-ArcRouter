@@ -36,8 +36,8 @@ public class RequestTelemetryPublisherTests
         // Native (pre-translation) Anthropic bytes carry usage; the translated/client-shape capture
         // deliberately carries none, so a passing test proves the native bytes were actually the ones
         // consulted rather than incidentally falling through to the fallback path.
-        var nativeBytes = Encoding.UTF8.GetBytes("""{"usage":{"input_tokens":11,"output_tokens":22}}""");
-        var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[]}""");
+        var nativeBytes = """{"usage":{"input_tokens":11,"output_tokens":22}}"""u8.ToArray();
+        var clientShapeBytes = """{"choices":[]}"""u8.ToArray();
 
         await publisher.PublishAsync(
             context: context,
@@ -45,7 +45,7 @@ public class RequestTelemetryPublisherTests
             requestedModelName: "primary",
             false,
             telemetryShapeProvider: "openai",
-            rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
+            rewrittenRequestBody: "{}"u8.ToArray(),
             capturedResponseBytes: clientShapeBytes,
             nativeResponseBytes: nativeBytes,
             false,
@@ -73,9 +73,9 @@ public class RequestTelemetryPublisherTests
         // Native bytes are non-empty but not valid usage-bearing JSON for the anthropic parser, so the
         // native attempt fails; the client-shape (openai-translated) bytes do carry usage and should be
         // what the fallback recovers.
-        var nativeBytes = Encoding.UTF8.GetBytes("""{"not":"usage"}""");
+        var nativeBytes = """{"not":"usage"}"""u8.ToArray();
         var clientShapeBytes =
-            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7}}""");
+            """{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7}}"""u8.ToArray();
 
         await publisher.PublishAsync(
             context: context,
@@ -83,7 +83,7 @@ public class RequestTelemetryPublisherTests
             requestedModelName: "primary",
             false,
             telemetryShapeProvider: "openai",
-            rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
+            rewrittenRequestBody: "{}"u8.ToArray(),
             capturedResponseBytes: clientShapeBytes,
             nativeResponseBytes: nativeBytes,
             false,
@@ -109,10 +109,10 @@ public class RequestTelemetryPublisherTests
         // Neither the (absent) native capture nor the head-capped client-shape capture carries usage -
         // simulating a large streamed response whose trailing usage event was cut off by the capture cap
         // - while the independently-retained tail window does.
-        var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[]}""");
+        var clientShapeBytes = """{"choices":[]}"""u8.ToArray();
         var tailScanner = new IncrementalUsageScanner();
         tailScanner.Append(
-            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4}}"""));
+            """{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4}}"""u8);
 
         await publisher.PublishAsync(
             context: context,
@@ -120,7 +120,7 @@ public class RequestTelemetryPublisherTests
             requestedModelName: "primary",
             false,
             telemetryShapeProvider: "openai",
-            rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
+            rewrittenRequestBody: "{}"u8.ToArray(),
             capturedResponseBytes: clientShapeBytes,
             null,
             false,
@@ -146,7 +146,7 @@ public class RequestTelemetryPublisherTests
         var context = CreateContext(sessionId: "session-no-usage");
 
         // No usage block anywhere: no native bytes, no tail scanner, and a client-shape body with none.
-        var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[]}""");
+        var clientShapeBytes = """{"choices":[]}"""u8.ToArray();
 
         await publisher.PublishAsync(
             context: context,
@@ -154,7 +154,7 @@ public class RequestTelemetryPublisherTests
             requestedModelName: "primary",
             false,
             telemetryShapeProvider: "openai",
-            rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
+            rewrittenRequestBody: "{}"u8.ToArray(),
             capturedResponseBytes: clientShapeBytes,
             null,
             false,
@@ -181,7 +181,7 @@ public class RequestTelemetryPublisherTests
         var context = CreateContext(sessionId: "session-budget");
 
         var clientShapeBytes =
-            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}""");
+            """{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}"""u8.ToArray();
 
         await publisher.PublishAsync(
             context: context,
@@ -189,7 +189,7 @@ public class RequestTelemetryPublisherTests
             requestedModelName: "primary",
             false,
             telemetryShapeProvider: "openai",
-            rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
+            rewrittenRequestBody: "{}"u8.ToArray(),
             capturedResponseBytes: clientShapeBytes,
             null,
             false,
@@ -219,7 +219,7 @@ public class RequestTelemetryPublisherTests
         var route = CreateRoute(provider: "openai", true);
         var context = CreateContext(sessionId: "session-transcript");
 
-        var clientShapeBytes = Encoding.UTF8.GetBytes("""{"choices":[]}""");
+        var clientShapeBytes = """{"choices":[]}"""u8.ToArray();
 
         // The transcript-store failure must not propagate out of PublishAsync - it is wrapped in its own
         // try/catch, matching every other best-effort telemetry side-effect on this path.
@@ -229,7 +229,7 @@ public class RequestTelemetryPublisherTests
             requestedModelName: "primary",
             false,
             telemetryShapeProvider: "openai",
-            rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
+            rewrittenRequestBody: "{}"u8.ToArray(),
             capturedResponseBytes: clientShapeBytes,
             null,
             false,
@@ -254,7 +254,7 @@ public class RequestTelemetryPublisherTests
         var context = CreateContext(sessionId: "session-shape");
 
         var clientShapeBytes =
-            Encoding.UTF8.GetBytes("""{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50}}""");
+            """{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50}}"""u8.ToArray();
 
         await publisher.PublishAsync(
             context: context,
@@ -262,7 +262,7 @@ public class RequestTelemetryPublisherTests
             requestedModelName: "requested-model",
             false,
             telemetryShapeProvider: "openai",
-            rewrittenRequestBody: Encoding.UTF8.GetBytes("{}"),
+            rewrittenRequestBody: "{}"u8.ToArray(),
             capturedResponseBytes: clientShapeBytes,
             null,
             false,

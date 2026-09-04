@@ -29,7 +29,7 @@ namespace TotallyHot.ArcRouter.Proxy.Translation;
 public sealed class AnthropicStreamTranslator : IStreamTranslator
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-    private static readonly byte[] DoneLine = Encoding.UTF8.GetBytes("data: [DONE]\n\n");
+    private static readonly byte[] DoneLine = "data: [DONE]\n\n"u8.ToArray();
 
     // Per-content-block-index state, keyed by Anthropic's own content_block index (not necessarily
     // contiguous with the OpenAI tool_calls index, since text/thinking blocks share the same index space).

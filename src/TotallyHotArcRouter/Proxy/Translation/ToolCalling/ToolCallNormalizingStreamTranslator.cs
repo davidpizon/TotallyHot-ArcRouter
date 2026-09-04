@@ -45,7 +45,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
     private const int MaxBufferedRegionChars = 64 * 1024;
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-    private static readonly byte[] DoneLine = Encoding.UTF8.GetBytes("data: [DONE]\n\n");
+    private static readonly byte[] DoneLine = "data: [DONE]\n\n"u8.ToArray();
     private readonly ILogger _logger;
     private readonly IReadOnlyList<string> _openerTokens;
 

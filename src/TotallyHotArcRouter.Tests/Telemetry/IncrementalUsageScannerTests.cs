@@ -82,8 +82,7 @@ public class IncrementalUsageScannerTests
             scanner.Append(filler.AsSpan(start: offset, length: length));
         }
 
-        scanner.Append(Encoding.UTF8.GetBytes(
-            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"));
+        scanner.Append("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"u8);
 
         var result = scanner.TryExtractUsage(provider: "openai", true, extractor: _extractor, usage: out var usage);
 

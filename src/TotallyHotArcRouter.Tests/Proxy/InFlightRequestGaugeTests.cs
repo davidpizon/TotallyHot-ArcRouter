@@ -128,7 +128,7 @@ public class InFlightRequestGaugeTests
         context.Request.Scheme = "http";
         context.Request.Host = new HostString("127.0.0.1:5001");
         context.Request.Path = "/v1/chat/completions";
-        var body = Encoding.UTF8.GetBytes("""{"model":"model-a","messages":[{"role":"user","content":"hi"}]}""");
+        var body = """{"model":"model-a","messages":[{"role":"user","content":"hi"}]}"""u8.ToArray();
         context.Request.Body = new MemoryStream(body);
         context.Request.ContentLength = body.Length;
         context.Response.Body = new MemoryStream();

@@ -282,7 +282,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
         Assert.True(result.Success);
         var stored = capabilities.GetProviderCapabilities("lmstudio");
         Assert.NotNull(stored);
-        Assert.False(stored!.OpenAiCompatible);
+        Assert.False(stored.OpenAiCompatible);
         Assert.False(string.IsNullOrWhiteSpace(stored.ScanError));
     }
 
@@ -311,7 +311,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
 
         var status = interactionStatus.Get("lmstudio");
         Assert.NotNull(status);
-        Assert.False(status!.Ok);
+        Assert.False(status.Ok);
         Assert.Equal(expected: "Scan capabilities", actual: status.Operation);
     }
 
@@ -331,7 +331,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
         Assert.True(interactionStatus.Get("lmstudio")!.Ok);
         var liveTraffic = interactionStatus.GetLiveTraffic("lmstudio");
         Assert.NotNull(liveTraffic);
-        Assert.False(liveTraffic!.Ok);
+        Assert.False(liveTraffic.Ok);
     }
 
     // ----- The best-effort scan on provider save -----

@@ -150,7 +150,7 @@ public class ModelRouteResolverTests
             isFree: true);
 
         Assert.True(resolver.TryResolve(modelName: "llama3", route: out var route));
-        Assert.True(route!.IsFree);
+        Assert.True(route.IsFree);
     }
 
     // A provider is paid unless the operator says otherwise - the default must never be "free," which
@@ -162,7 +162,7 @@ public class ModelRouteResolverTests
             baseUrl: "https://api.openai.com");
 
         Assert.True(resolver.TryResolve(modelName: "gpt-5.4", route: out var route));
-        Assert.False(route!.IsFree);
+        Assert.False(route.IsFree);
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public class ModelRouteResolverTests
         Assert.True(resolver.TryResolve(modelName: "llama3", route: out var before));
         // Uri only appends a trailing slash to authority-only URLs; one carrying a path (/v1) is
         // stringified verbatim. (Forwarding is unaffected either way - ProxyMiddleware TrimEnd('/')s it.)
-        Assert.Equal(expected: "http://localhost:11434/v1", actual: before!.UpstreamBaseUrl.ToString());
+        Assert.Equal(expected: "http://localhost:11434/v1", actual: before.UpstreamBaseUrl.ToString());
 
         await store.UpsertProviderAsync(
             key: "local",
@@ -283,7 +283,7 @@ public class ModelRouteResolverTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(resolver.TryResolve(modelName: "llama3", route: out var after));
-        Assert.Equal(expected: "http://192.168.1.50:11434/v1", actual: after!.UpstreamBaseUrl.ToString());
+        Assert.Equal(expected: "http://192.168.1.50:11434/v1", actual: after.UpstreamBaseUrl.ToString());
     }
 
     // Verifies a newly added model becomes routable (and shows up in ListModels) on the same resolver

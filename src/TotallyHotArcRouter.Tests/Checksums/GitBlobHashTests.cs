@@ -24,7 +24,7 @@ public class GitBlobHashTests
     {
         // git hash-object -t blob --stdin <<< "hello" (a single "hello\n" line) => a well-known vector
         // used across git tooling documentation.
-        var hash = GitBlobHash.Compute(Encoding.UTF8.GetBytes("hello\n"));
+        var hash = GitBlobHash.Compute("hello\n"u8.ToArray());
 
         Assert.Equal(expected: "ce013625030ba8dba906f756967f9e9ca394464a", actual: hash);
     }
@@ -32,7 +32,7 @@ public class GitBlobHashTests
     [Fact]
     public void Compute_IsLowercaseHex()
     {
-        var hash = GitBlobHash.Compute(Encoding.UTF8.GetBytes("some content"));
+        var hash = GitBlobHash.Compute("some content"u8.ToArray());
 
         Assert.Equal(40, actual: hash.Length);
         Assert.Equal(expected: hash, actual: hash.ToLowerInvariant(), comparer: StringComparer.Ordinal);
@@ -41,8 +41,8 @@ public class GitBlobHashTests
     [Fact]
     public void Compute_DifferentContent_ProducesDifferentHashes()
     {
-        var a = GitBlobHash.Compute(Encoding.UTF8.GetBytes("a"));
-        var b = GitBlobHash.Compute(Encoding.UTF8.GetBytes("b"));
+        var a = GitBlobHash.Compute("a"u8.ToArray());
+        var b = GitBlobHash.Compute("b"u8.ToArray());
 
         Assert.NotEqual(expected: a, actual: b);
     }
@@ -52,7 +52,7 @@ public class GitBlobHashTests
     {
         // The streaming overload exists purely so a large download doesn't have to be buffered into
         // memory first - it must produce byte-for-byte the same digest as the in-memory overload.
-        var content = Encoding.UTF8.GetBytes("hello\n");
+        var content = "hello\n"u8.ToArray();
         using var stream = new MemoryStream(content);
 
         var streamed = GitBlobHash.Compute(content: stream, length: content.LongLength,

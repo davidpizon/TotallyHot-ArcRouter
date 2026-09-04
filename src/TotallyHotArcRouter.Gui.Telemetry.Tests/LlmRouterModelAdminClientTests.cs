@@ -196,7 +196,7 @@ public class LlmRouterModelAdminClientTests
 
         var plan = events.Single().Plan;
         plan.Should().NotBeNull();
-        plan!.TotalBytes.Should().Be(50);
+        plan.TotalBytes.Should().Be(50);
         plan.Files.Should().HaveCount(2);
         plan.Files[0].FileName.Should().Be("model.onnx");
         plan.Files[0].SizeBytes.Should().Be(42);
