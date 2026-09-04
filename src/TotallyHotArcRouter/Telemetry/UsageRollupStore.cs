@@ -676,8 +676,8 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
     /// <param name="CostUsd">Summed estimated USD cost.</param>
     // BucketStartUtc deliberately matches both the outer BucketStartUtc(...) helper that computes it and
     // UsageRollupBucket's property that carries it onward; one concept keeps one name across all three.
-    // ReSharper disable once MemberHidesStaticFromOuterClass
     private readonly record struct RawRow(
+        // ReSharper disable once MemberHidesStaticFromOuterClass
         DateTimeOffset BucketStartUtc,
         string Provider,
         string Model,

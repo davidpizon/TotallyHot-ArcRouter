@@ -178,7 +178,7 @@ public class TelemetryAuthInterceptorTests
         var context = CreateContext([new Metadata.Entry(key: TokenHeaderName, value: "expected-token")]);
         var invoked = false;
 
-        await interceptor.DuplexStreamingServerHandler<string, string>(
+        await interceptor.DuplexStreamingServerHandler(
             requestStream: new FakeAsyncStreamReader<string>(),
             responseStream: new FakeServerStreamWriter<string>(),
             context: context,
@@ -199,7 +199,7 @@ public class TelemetryAuthInterceptorTests
         var invoked = false;
 
         var exception = await Assert.ThrowsAsync<RpcException>(() =>
-            interceptor.DuplexStreamingServerHandler<string, string>(
+            interceptor.DuplexStreamingServerHandler(
                 requestStream: new FakeAsyncStreamReader<string>(),
                 responseStream: new FakeServerStreamWriter<string>(),
                 context: context,
