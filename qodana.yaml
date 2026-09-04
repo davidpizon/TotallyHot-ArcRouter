@@ -1,5 +1,15 @@
+####################################################################################################################
+# WARNING: Do not store sensitive information in this file, as its contents will be included in the Qodana report. #
+####################################################################################################################
+
 version: "1.0"
 image: jetbrains/qodana-cdnet:2026.2
+
+profile:
+  name: qodana.recommended
+
+include:
+  - name: CheckDependencyLicenses
 
 dotnet:
   solution: src/TotallyHotArcRouter.Qodana.slnx
