@@ -20,7 +20,7 @@ public class BenchmarkChecksumProbeTests
     [Fact]
     public async Task FetchAsync_ParsesFileEntries_KeyedByPath()
     {
-        var probe = CreateProbe(request =>
+        var probe = CreateProbe(_ =>
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {

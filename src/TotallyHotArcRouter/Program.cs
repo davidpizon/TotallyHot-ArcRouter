@@ -109,7 +109,7 @@ public static class Program
                 // here) avoids a circular dependency on the logging system itself being built - see its
                 // remarks for why that circularity silently breaks every sink, not just this one.
                 .WriteTo.Sink(new TelemetryLogEventSink(new DeferredTelemetryPublisher(services))))
-            .ConfigureServices((hostContext, services) =>
+            .ConfigureServices((_, services) =>
             {
                 services.AddTotallyHotArcRouter();
 

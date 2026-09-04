@@ -152,7 +152,7 @@ public class EmbeddingLogRegTrainingServiceTests
     {
         temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
         var bootstrapSource = new OodBootstrapSampleSource(
-            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0]),
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0]),
             logger: NullLogger<OodBootstrapSampleSource>.Instance);
 
         return new EmbeddingLogRegTrainingService(

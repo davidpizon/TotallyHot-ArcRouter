@@ -26,7 +26,7 @@ public class OodBootstrapSampleSourceTests
         InsertResult(database: temp.Database, taskId: "t1", model: "model-b", false);
 
         var source = new OodBootstrapSampleSource(
-            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0, 0]),
             logger: NullLogger<OodBootstrapSampleSource>.Instance);
 
         var (samples, taskCount) = await source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -47,7 +47,7 @@ public class OodBootstrapSampleSourceTests
         InsertResult(database: temp.Database, taskId: "t1", model: "model-a", true);
 
         var source = new OodBootstrapSampleSource(
-            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0, 0]),
             logger: NullLogger<OodBootstrapSampleSource>.Instance);
 
         var (samples, taskCount) = await source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -64,7 +64,7 @@ public class OodBootstrapSampleSourceTests
         InsertTask(database: temp.Database, taskId: "t1", prompt: "fix the bug");
 
         var source = new OodBootstrapSampleSource(
-            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0, 0]),
             logger: NullLogger<OodBootstrapSampleSource>.Instance);
 
         var (samples, taskCount) = await source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -84,7 +84,7 @@ public class OodBootstrapSampleSourceTests
                 { BenchmarkDatabasePath = Path.Combine(path1: directory, path2: "coderouterbench.db") }));
 
         var source = new OodBootstrapSampleSource(
-            database: database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            database: database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0, 0]),
             logger: NullLogger<OodBootstrapSampleSource>.Instance);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>

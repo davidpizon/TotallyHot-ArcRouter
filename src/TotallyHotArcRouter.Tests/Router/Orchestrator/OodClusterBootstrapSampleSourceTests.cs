@@ -24,7 +24,7 @@ public class OodClusterBootstrapSampleSourceTests
         InsertTask(database: temp.Database, taskId: "t2", prompt: "write a proof");
 
         var source = new OodClusterBootstrapSampleSource(
-            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0, 0]),
             logger: NullLogger<OodClusterBootstrapSampleSource>.Instance);
 
         var samples = await source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -42,7 +42,7 @@ public class OodClusterBootstrapSampleSourceTests
         InsertTaskWithRawJson(database: temp.Database, taskId: "t1", """{"task_id":"t1"}""");
 
         var source = new OodClusterBootstrapSampleSource(
-            database: temp.Database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0, 0]),
             logger: NullLogger<OodClusterBootstrapSampleSource>.Instance);
 
         var samples = await source.LoadAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -61,7 +61,7 @@ public class OodClusterBootstrapSampleSourceTests
                 { BenchmarkDatabasePath = Path.Combine(path1: directory, path2: "coderouterbench.db") }));
 
         var source = new OodClusterBootstrapSampleSource(
-            database: database, embeddingClient: new FakeEmbeddingClient(text => [1, 0, 0]),
+            database: database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0, 0]),
             logger: NullLogger<OodClusterBootstrapSampleSource>.Instance);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>

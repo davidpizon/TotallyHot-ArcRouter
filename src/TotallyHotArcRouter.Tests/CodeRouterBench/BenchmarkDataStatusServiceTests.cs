@@ -103,7 +103,7 @@ public class BenchmarkDataStatusServiceTests
 
         // A probe that succeeds once, then fails - simulating Hugging Face going unreachable between checks.
         var callCount = 0;
-        var handler = new FakeHttpMessageHandler(request =>
+        var handler = new FakeHttpMessageHandler(_ =>
         {
             callCount++;
             return callCount == 1
