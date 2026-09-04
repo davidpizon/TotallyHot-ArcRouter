@@ -52,4 +52,30 @@
   -->
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MergeIntoPattern/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
+  <!--
+    "This return type can be made non-nullable."
+
+    Six of the seven are test doubles implementing a production interface whose own signature is
+    nullable - IRegretBaselineRouter.Route returns null to mean "this router abstains on this task",
+    IModelPriceLookup returns null for an unpriced model, IStaticAnalyzer returns null for clean
+    code. A stub that happens never to return null in one test is not evidence about the contract,
+    and narrowing the stub makes it stop mirroring the interface it exists to stand in for.
+
+    The seventh was production (AnthropicStreamTranslator.HandleMessageStop) and has been applied.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ReturnTypeCanBeNotNullable/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This null check is always false / this ?. qualifier is never null."
+
+    Both pairs are defensive checks the nullable annotations declare unnecessary, at boundaries where
+    the annotation is a claim rather than a guarantee: InMemoryProviderConfigStore guards an options
+    object filled by the configuration binder, which writes nulls through non-nullable properties by
+    reflection, and the Moq sites index into an object[] of captured invocation arguments. Deleting
+    a guard because an annotation promises it cannot fire is how the annotation's being wrong turns
+    into a NullReferenceException.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConditionalAccessQualifierIsNonNullableAccordingToAPIContract/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
 </wpf:ResourceDictionary>

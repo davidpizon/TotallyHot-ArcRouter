@@ -363,7 +363,7 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
     /// Handles the terminal <c>message_stop</c> event by emitting the final chunk carrying the accumulated finish
     /// reason and usage, sending the role delta first if it was never sent.
     /// </summary>
-    private byte[]? HandleMessageStop()
+    private byte[] HandleMessageStop()
     {
         var delta = new JsonObject();
         if (!_roleSent)
