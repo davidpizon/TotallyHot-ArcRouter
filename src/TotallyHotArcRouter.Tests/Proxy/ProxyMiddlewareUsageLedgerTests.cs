@@ -75,16 +75,16 @@ public class ProxyMiddlewareUsageLedgerTests
         using var temp = new TempDatabase();
         var ledger = temp.CreateUsageLedger();
 
-        const string PrimaryHost = "primary-failover.test";
+        const string FailoverPrimaryHost = "primary-failover.test";
         const string BackupHost = "backup-failover.test";
         // Distinct provider keys so ModelRouteResolverTestFactory.CreateWithModels gives each its own
         // BaseUrl - "ollama" is OpenAI-shaped for usage-parsing purposes (UsageExtractor), so both
         // candidates' responses are still extractable.
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
-            ("primary", "openai", "primary-upstream", $"https://{PrimaryHost}"),
+            ("primary", "openai", "primary-upstream", $"https://{FailoverPrimaryHost}"),
             ("backup", "ollama", "backup-upstream", $"https://{BackupHost}"));
 
-        var handler = new RoutingHandlerStub(request => request.RequestUri!.Host == PrimaryHost
+        var handler = new RoutingHandlerStub(request => request.RequestUri!.Host == FailoverPrimaryHost
             ? throw new HttpRequestException("connection refused")
             : OpenAiUsageResponse());
 

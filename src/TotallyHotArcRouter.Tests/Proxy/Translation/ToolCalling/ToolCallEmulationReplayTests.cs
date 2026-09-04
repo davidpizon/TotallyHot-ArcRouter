@@ -83,7 +83,7 @@ public class ToolCallEmulationReplayTests
 
         var actual = message.TryGetProperty(propertyName: "tool_calls", value: out var calls) &&
                      calls.ValueKind == JsonValueKind.Array
-            ? calls.EnumerateArray().Select(c => c.GetProperty("function").GetProperty("name").GetString()!).ToArray()
+            ? calls.EnumerateArray().Select(call => call.GetProperty("function").GetProperty("name").GetString()!).ToArray()
             : [];
 
         var said = message.TryGetProperty(propertyName: "content", value: out var c) &&

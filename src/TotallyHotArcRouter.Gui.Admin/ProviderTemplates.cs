@@ -167,6 +167,10 @@ public static class ProviderTemplates
         /// "OpenAI / Groq / DeepSeek" so operators recognize their own provider in the list, while the
         /// persisted value stays the member name.
         /// </summary>
+        // Deliberately the same name as the outer ProviderTemplates.DisplayName(ProviderType) lookup,
+        // which exists to return exactly this property. Renaming either half would break that pairing,
+        // and this one is required public API the provider editor binds to.
+        // ReSharper disable once MemberHidesStaticFromOuterClass
         public required string DisplayName { get; init; }
 
         /// <summary>

@@ -237,7 +237,7 @@ public class QualityRescanServiceTests
             return Task.FromResult(record);
         }
 
-        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
+        public Task<long?> InsertAsync(TranscriptRecord transcript, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }

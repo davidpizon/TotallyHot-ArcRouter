@@ -13,7 +13,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// <summary>
 /// Covers docs/router/live-feedback-learning-plan.md Phase 2c's request-path half: once
 /// <see cref="RequestInterceptor"/> has computed a task embedding, a completed request must populate
-/// <see cref="PendingTaskEmbeddingCache"/> so <see cref="Router.EmbeddingMemoryScoreObserver"/> can later
+/// <see cref="PendingTaskEmbeddingCache"/> so <see cref="TotallyHot.ArcRouter.Router.EmbeddingMemoryScoreObserver"/> can later
 /// claim it by correlation id.
 /// </summary>
 public class ProxyMiddlewarePendingEmbeddingTests

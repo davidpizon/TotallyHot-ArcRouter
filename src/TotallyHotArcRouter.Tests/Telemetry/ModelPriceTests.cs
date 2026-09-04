@@ -2,7 +2,7 @@ using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
-/// <summary>Covers <see cref="ModelPrice.EstimateCost"/>.</summary>
+/// <summary>Covers <see cref="ModelPrice.EstimateCost(UsageInfo)"/>.</summary>
 public class ModelPriceTests
 {
     [Fact]

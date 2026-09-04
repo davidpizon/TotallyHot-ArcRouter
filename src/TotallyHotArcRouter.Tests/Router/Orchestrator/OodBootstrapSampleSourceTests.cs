@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 /// <summary>
 /// Covers <see cref="OodBootstrapSampleSource.LoadAsync"/> (docs/router/live-feedback-learning-plan.md
 /// Phase 4a) against a small synthetic <see cref="BenchmarkDatabase"/>, mirroring
-/// <see cref="Tests.CodeRouterBench.LogRegTrainerTests"/>'s fixture-insertion helpers rather than the
+/// <see cref="TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation.LogRegTrainerTests"/>'s fixture-insertion helpers rather than the
 /// real, multi-hundred-MB synced corpus.
 /// </summary>
 public class OodBootstrapSampleSourceTests

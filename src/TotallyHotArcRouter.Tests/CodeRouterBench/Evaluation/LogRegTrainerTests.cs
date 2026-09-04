@@ -10,7 +10,7 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 /// verify the tokenize -> vocabulary -> TF-IDF -> gradient-descent -> argmax pipeline produces a usable
 /// <see cref="LogRegModelArtifact"/> without depending on the real, multi-hundred-MB synced corpus (see
 /// <see cref="LogRegTrainerReconciliationTests"/> for that). Scores the artifact directly rather than
-/// through <see cref="Router.Orchestrator.LogRegVoter"/> - docs/router/live-feedback-learning-plan.md
+/// through <see cref="TotallyHot.ArcRouter.Router.Orchestrator.LogRegVoter"/> - docs/router/live-feedback-learning-plan.md
 /// Phase 3 repurposed that voter to score embeddings; <see cref="LogRegModelArtifact"/>'s TF-IDF shape now
 /// only feeds the Phase N static comparison baseline this trainer produces, trained from the OOD split -
 /// the only split CodeRouterBench publishes task text for (see <see cref="LogRegTrainer"/>'s remarks).

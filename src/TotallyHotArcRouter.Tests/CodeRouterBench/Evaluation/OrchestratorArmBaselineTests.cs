@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// Covers <see cref="OrchestratorArmBaseline.Route"/>'s wiring into the real
-/// <see cref="OrchestratorRoutingPolicy"/>: building <see cref="RoutingCandidate"/>s from
+/// <see cref="OrchestratorRoutingPolicy"/>: building <see cref="TotallyHot.ArcRouter.Router.RoutingCandidate"/>s from
 /// <see cref="RegretReplayContext.CandidateModelIds"/>, looking up a query task's precomputed embedding by
 /// id (or passing <see langword="null"/> when the task has none), forwarding
 /// <see cref="RegretReplayContext.TaskText"/>, and treating an all-abstain fallback decision as

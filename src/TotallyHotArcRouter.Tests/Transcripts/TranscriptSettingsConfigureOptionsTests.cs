@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Tests.Transcripts;
 
 /// <summary>
 /// Covers <see cref="TranscriptSettingsConfigureOptions"/>'s precedence contract, mirroring
-/// <see cref="RouterSettingsConfigureOptionsTests"/> for <see cref="RoutingOptions"/>: a stored override
+/// <see cref="TotallyHot.ArcRouter.Tests.Router.RouterSettingsConfigureOptionsTests"/> for <see cref="RoutingOptions"/>: a stored override
 /// beats whatever <c>appsettings.json</c>/the coded default already produced, and an absent stored value
 /// leaves that prior value untouched rather than re-asserting the coded default a second time.
 /// </summary>

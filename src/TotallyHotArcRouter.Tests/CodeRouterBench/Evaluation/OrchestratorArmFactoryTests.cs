@@ -6,9 +6,9 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
 /// <summary>
 /// Covers <see cref="OrchestratorArmFactory.Build"/>'s wiring: the frozen probing-split prior reaches
-/// <c>dim_best</c> through a real, isolated <see cref="Router.Orchestrator.DimBestVoter"/> and empty
-/// <see cref="Router.RouterMemory"/>; <c>logreg</c> is trained (via the real
-/// <see cref="Router.Orchestrator.EmbeddingLogRegTrainer"/>) and wired only when at least one OOD outcome's
+/// <c>dim_best</c> through a real, isolated <see cref="TotallyHot.ArcRouter.Router.Orchestrator.DimBestVoter"/> and empty
+/// <see cref="TotallyHot.ArcRouter.Router.RouterMemory"/>; <c>logreg</c> is trained (via the real
+/// <see cref="TotallyHot.ArcRouter.Router.Orchestrator.EmbeddingLogRegTrainer"/>) and wired only when at least one OOD outcome's
 /// task id has a precomputed embedding; and the resulting <see cref="OrchestratorArmBaseline"/> actually
 /// routes end to end.
 /// </summary>

@@ -5,7 +5,7 @@ namespace TotallyHot.ArcRouter.Tests.Router.Orchestrator;
 /// <summary>
 /// Covers <see cref="EmbeddingLogRegTrainer.Train"/>'s per-model regression-head fit
 /// (docs/router/live-feedback-learning-plan.md Phase 4) against small, synthetic, clearly-separable
-/// samples - not the real corpus (see <see cref="Tests.CodeRouterBench.LogRegTrainerReconciliationTests"/>-style
+/// samples - not the real corpus (see <see cref="TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation.LogRegTrainerReconciliationTests"/>-style
 /// integration coverage for that, once wired).
 /// </summary>
 public class EmbeddingLogRegTrainerTests

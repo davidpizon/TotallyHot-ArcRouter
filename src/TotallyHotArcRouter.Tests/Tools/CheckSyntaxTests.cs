@@ -20,7 +20,7 @@ public class MyClass
     }
 }";
 
-        var diagnostics = checkSyntax.Check(code);
+        var diagnostics = checkSyntax.Check(code).ToList();
 
         Assert.Empty(diagnostics);
     }
@@ -37,7 +37,7 @@ public class MyClass
         // Missing closing brace
     ";
 
-        var diagnostics = checkSyntax.Check(code);
+        var diagnostics = checkSyntax.Check(code).ToList();
 
         Assert.NotEmpty(diagnostics);
         Assert.All(collection: diagnostics,

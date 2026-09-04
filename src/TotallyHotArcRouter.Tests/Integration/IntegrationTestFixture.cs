@@ -20,7 +20,6 @@ public sealed class IntegrationTestFixture : IDisposable
                 // Best-effort cleanup for test temp directories.
             }
 
-        GC.SuppressFinalize(this);
     }
 
     /// <summary>

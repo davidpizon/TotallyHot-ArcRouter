@@ -137,7 +137,7 @@ public class EmbeddingMemoryTests
     /// <see cref="RoutingOptions.EmbeddingMemoryCapacity"/> at runtime (i.e. without a new
     /// <see cref="EmbeddingMemory"/> instance) must trim the working set and delete the evicted rows from
     /// the store, mirroring <see cref="AddEntryAsync_OverCapacity_EvictsOldestEntriesFirst"/> but driven by
-    /// an <see cref="IOptionsMonitor{TOptions}.OnChange"/> notification instead of a new append.
+    /// an <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}.OnChange"/> notification instead of a new append.
     /// </summary>
     [Fact]
     public async Task OptionsMonitorChange_CapacityLowered_TrimsWorkingSetAndDeletesFromStore()

@@ -45,7 +45,6 @@ public sealed class PersistenceRegressionTests : IDisposable
             // Best-effort cleanup; a locked file on a busy CI box is not a test failure.
         }
 
-        GC.SuppressFinalize(this);
     }
 
     [Fact]

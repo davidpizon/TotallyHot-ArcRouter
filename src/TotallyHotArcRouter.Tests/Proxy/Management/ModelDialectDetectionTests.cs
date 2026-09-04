@@ -14,7 +14,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// (<c>docs/router/tool-call-normalization.md</c> Phase 3): the sweep over a provider's models on an
 /// explicit capability scan, and the single-model classification when a model is added.
 /// <para>
-/// <see cref="ModelDialectResolverTests"/> owns the detection logic itself. What is tested here is the
+/// <see cref="TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling.ModelDialectResolverTests"/> owns the detection logic itself. What is tested here is the
 /// wiring around it, and the guarantee that matters is the same one Phase 2's scan carries: detection is an
 /// optimization over Phase 4's live observation, so a failure must cost one request's worth of scanning and
 /// never the save that triggered it.
