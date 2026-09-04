@@ -25,8 +25,130 @@ jobs:
               uses: JetBrains/qodana-action@v2026.2
               with:
                   args: '--within-docker true'
+                  # The action publishes its check-run annotations from inside this step, before the
+                  # normalization below can run, so they carry the linter's own unusable paths and
+                  # anchor to nothing. Code scanning is the channel that can be fixed, and once fixed
+                  # it renders the same findings inline on the PR - correctly anchored - so this is
+                  # turned off rather than left duplicating them at broken paths. `post-pr-comment` is
+                  # unaffected and still posts the summary table with the per-inspection breakdown.
+                  use-annotations: false
               env:
                   QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
+            # The cdnet linter reports paths relative to the analyzed solution, and qodana.yaml points
+            # it at src/TotallyHotArcRouter.Qodana.slnx - so a finding arrives as
+            # "TotallyHotArcRouter/Proxy/Foo.cs", missing the "src/" that would make it
+            # repository-relative. GitHub accepts that and does create alerts, which is why the
+            # integration has always looked healthy: run 33837464200 produced 1081 of them. But not one
+            # names a path this repository contains, so no alert anchors to code and none appears
+            # inline on the PR. Rewriting the paths here is what makes the findings navigable.
+            - name: 'Normalize SARIF paths'
+              if: ${{ always() }}
+              run: |
+                  set -euo pipefail
+                  python3 - "${{ runner.temp }}/qodana/results/qodana.sarif.json" "${{ github.workspace }}" <<'PY'
+                  import json
+                  import os
+                  import sys
+                  import urllib.parse
+
+                  sarif_path = sys.argv[1]
+                  workspace = sys.argv[2].replace(os.sep, "/").rstrip("/")
+
+                  # Covers the same linter emitting a container path instead - the project is
+                  # bind-mounted at /data/project under `--within-docker true` - and the native-mode
+                  # workspace path, so this keeps holding if the scan mode ever changes.
+                  ROOTS = (
+                      "file:///data/project/",
+                      "/data/project/",
+                      "file://" + workspace + "/",
+                      workspace + "/",
+                  )
+
+                  # Tried in order against the real checkout; the first that names an existing file
+                  # wins. "" first, so a path that is already repository-relative is left as it is.
+                  PREFIXES = ("", "src/")
+
+                  rewritten = 0
+                  unresolved = {}
+                  resolved_cache = {}
+
+
+                  def strip_root(uri):
+                      for root in ROOTS:
+                          if uri.startswith(root):
+                              return uri[len(root):]
+                      return uri
+
+
+                  def resolve(uri):
+                      """Map a SARIF uri onto a path that exists in the checkout, or None."""
+                      if uri in resolved_cache:
+                          return resolved_cache[uri]
+
+                      candidate = strip_root(uri)
+                      # Qodana percent-encodes spaces and other reserved characters in the uri.
+                      decoded = urllib.parse.unquote(candidate)
+
+                      result = None
+                      for prefix in PREFIXES:
+                          probe = prefix + decoded
+                          if os.path.isfile(os.path.join(workspace, probe)):
+                              result = probe
+                              break
+
+                      resolved_cache[uri] = result
+                      return result
+
+
+                  def walk(node):
+                      """Rewrite every project-local `uri` in the document.
+
+                      Any dict carrying a string `uri` is a SARIF artifactLocation (or an artifact's
+                      `location`); tool and rule metadata URIs are `https://` and never resolve to a
+                      file in the checkout, so they are left alone.
+                      """
+                      global rewritten
+                      if isinstance(node, dict):
+                          uri = node.get("uri")
+                          if isinstance(uri, str) and not uri.startswith(("http://", "https://")):
+                              resolved = resolve(uri)
+                              if resolved is None:
+                                  unresolved[uri] = unresolved.get(uri, 0) + 1
+                              elif resolved != uri:
+                                  node["uri"] = resolved
+                                  # A relative `uri` with no `uriBaseId` resolves against the
+                                  # repository root, which is exactly what the path now is. A stale
+                                  # base id would send GitHub looking for a base this file never
+                                  # defines in `originalUriBaseIds`.
+                                  node.pop("uriBaseId", None)
+                                  rewritten += 1
+                          for value in node.values():
+                              walk(value)
+                      elif isinstance(node, list):
+                          for item in node:
+                              walk(item)
+
+
+                  with open(sarif_path, encoding="utf-8") as handle:
+                      sarif = json.load(handle)
+
+                  walk(sarif)
+
+                  # Fail loudly rather than upload findings that point at nothing. Silence is what let
+                  # the original defect survive for so long: GitHub reported "Successfully uploaded
+                  # results" and created an alert for every finding, none of them anchored to a file.
+                  if unresolved:
+                      print("::error::{0} SARIF path(s) do not name a file in the checkout; "
+                            "their alerts would not anchor to any code.".format(len(unresolved)))
+                      for uri in sorted(unresolved)[:10]:
+                          print("::error::  " + uri)
+                      sys.exit(1)
+
+                  with open(sarif_path, "w", encoding="utf-8") as handle:
+                      json.dump(sarif, handle)
+
+                  print("Rewrote {0} SARIF path(s); all now name files in the checkout.".format(rewritten))
+                  PY
             - name: 'Upload SARIF to GitHub code scanning'
               uses: github/codeql-action/upload-sarif@v4
               if: ${{ always() }}  # publish findings even when the scan trips its quality gate
