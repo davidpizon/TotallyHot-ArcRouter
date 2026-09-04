@@ -37,7 +37,7 @@ public sealed class McpHostedServiceTests
             services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
             services.AddTotallyHotArcRouter();
 
-            using var provider = services.BuildServiceProvider();
+            await using var provider = services.BuildServiceProvider();
 
             var loggerMock = new Mock<ILogger<McpHostedService>>();
             await using var hostedService = ActivatorUtilities.CreateInstance<McpHostedService>(

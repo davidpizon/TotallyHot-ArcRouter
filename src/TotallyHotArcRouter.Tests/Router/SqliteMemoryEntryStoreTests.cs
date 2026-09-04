@@ -114,7 +114,7 @@ public class SqliteMemoryEntryStoreTests : IDisposable
     [Fact]
     public async Task EnsureCreated_PreExistingDatabaseWithoutProvenanceColumns_MigratesWithDefaults()
     {
-        using var connection = _database.OpenConnection();
+        await using var connection = _database.OpenConnection();
         using (var drop = connection.CreateCommand())
         {
             // Simulate a pre-migration database: recreate memory_entries without the two new columns,

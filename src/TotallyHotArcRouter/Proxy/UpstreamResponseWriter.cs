@@ -132,7 +132,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
                 IsStreaming: isStreaming);
         }
 
-        using var upstreamBody = await responseMessage.Content.ReadAsStreamAsync(context.RequestAborted);
+        await using var upstreamBody = await responseMessage.Content.ReadAsStreamAsync(context.RequestAborted);
         try
         {
             if (translator is null)

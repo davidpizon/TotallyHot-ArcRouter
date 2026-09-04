@@ -206,11 +206,11 @@ public class CostReconciliationServiceTests
 
         await service.RunCycleAsync(Ct);
 
-        using var connection = temp.Database.OpenConnection();
-        using var command = connection.CreateCommand();
+        await using var connection = temp.Database.OpenConnection();
+        await using var command = connection.CreateCommand();
         command.CommandText =
             "SELECT provider, provider_reported_cost_usd, local_estimated_cost_usd FROM provider_cost_reconciliation;";
-        using var reader = command.ExecuteReader();
+        await using var reader = command.ExecuteReader();
         Assert.True(reader.Read());
         Assert.Equal(expected: "openai", actual: reader.GetString(0));
         Assert.Equal(expected: "42", actual: reader.GetString(1));
@@ -277,10 +277,10 @@ public class CostReconciliationServiceTests
 
         await service.RunCycleAsync(Ct);
 
-        using var connection = temp.Database.OpenConnection();
-        using var command = connection.CreateCommand();
+        await using var connection = temp.Database.OpenConnection();
+        await using var command = connection.CreateCommand();
         command.CommandText = "SELECT local_estimated_cost_usd FROM provider_cost_reconciliation;";
-        using var reader = command.ExecuteReader();
+        await using var reader = command.ExecuteReader();
         Assert.True(reader.Read());
         Assert.Equal(expected: "7.5", actual: reader.GetString(0));
     }

@@ -157,7 +157,7 @@ public class SqliteTranscriptStoreTests : IDisposable
         using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
         {
             connection.Open();
-            using var create = connection.CreateCommand();
+            await using var create = connection.CreateCommand();
             create.CommandText = """
                                  CREATE TABLE request_transcripts (
                                      id INTEGER PRIMARY KEY AUTOINCREMENT, correlation_id TEXT NOT NULL,

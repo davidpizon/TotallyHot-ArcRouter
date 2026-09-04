@@ -71,13 +71,13 @@ public sealed class OodBootstrapSampleSource
         Dictionary<string, List<(string Model, bool Resolved)>> taskResults;
         try
         {
-            using var connection = _database.OpenConnection();
+            await using var connection = _database.OpenConnection();
 
             taskPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
-            using (var tasksCommand = connection.CreateCommand())
+            await using (var tasksCommand = connection.CreateCommand())
             {
                 tasksCommand.CommandText = "SELECT task_id, raw_json FROM benchmark_ood_tasks;";
-                using var reader = tasksCommand.ExecuteReader();
+                await using var reader = tasksCommand.ExecuteReader();
                 while (reader.Read())
                 {
                     var taskId = reader.GetString(0);
@@ -87,10 +87,10 @@ public sealed class OodBootstrapSampleSource
             }
 
             taskResults = new Dictionary<string, List<(string, bool)>>(StringComparer.Ordinal);
-            using (var resultsCommand = connection.CreateCommand())
+            await using (var resultsCommand = connection.CreateCommand())
             {
                 resultsCommand.CommandText = "SELECT task_id, model, resolved FROM benchmark_ood_results;";
-                using var reader = resultsCommand.ExecuteReader();
+                await using var reader = resultsCommand.ExecuteReader();
                 while (reader.Read())
                 {
                     var taskId = reader.GetString(0);

@@ -108,8 +108,8 @@ public class BenchmarkSyncServiceTests
         Assert.Contains(expectedSubstring: "data row", actualString: outcome.ErrorMessage,
             comparisonType: StringComparison.OrdinalIgnoreCase);
 
-        using var connection = temp.Database.OpenConnection();
-        using var command = connection.CreateCommand();
+        await using var connection = temp.Database.OpenConnection();
+        await using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM benchmark_id_results WHERE split = 'probing';";
         Assert.Equal(0, actual: Convert.ToInt32(command.ExecuteScalar()));
 

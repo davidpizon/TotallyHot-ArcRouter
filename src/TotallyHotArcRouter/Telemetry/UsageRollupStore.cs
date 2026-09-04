@@ -141,7 +141,7 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         await _rollForwardMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var connection = _database.OpenConnection();
+            await using var connection = _database.OpenConnection();
             PinTimezoneIfMissing(connection);
 
             var checkpoint = ReadCheckpoint(connection);

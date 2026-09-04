@@ -72,7 +72,7 @@ public sealed class UsageAdminEndpointsTests
     public async Task GetSummary_NoRollupStoreWired_Returns503()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(Ct);
         try
         {
@@ -102,7 +102,7 @@ public sealed class UsageAdminEndpointsTests
             cancellationToken: Ct);
 
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
@@ -124,7 +124,7 @@ public sealed class UsageAdminEndpointsTests
     {
         using var temp = new TempDatabase();
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, rollupStore: temp.CreateRollupStore());
+        await using var server = BuildServer(store: store, rollupStore: temp.CreateRollupStore());
         await server.StartAsync(Ct);
         try
         {
@@ -157,7 +157,7 @@ public sealed class UsageAdminEndpointsTests
             cancellationToken: Ct);
 
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
@@ -193,7 +193,7 @@ public sealed class UsageAdminEndpointsTests
             cancellationToken: Ct);
 
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
@@ -224,7 +224,7 @@ public sealed class UsageAdminEndpointsTests
         using var temp = new TempDatabase();
         var rollup = temp.CreateRollupStore();
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, rollupStore: rollup);
+        await using var server = BuildServer(store: store, rollupStore: rollup);
         await server.StartAsync(Ct);
         try
         {
@@ -248,7 +248,7 @@ public sealed class UsageAdminEndpointsTests
     {
         using var temp = new TempDatabase();
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, rollupStore: temp.CreateRollupStore());
+        await using var server = BuildServer(store: store, rollupStore: temp.CreateRollupStore());
         await server.StartAsync(Ct);
         try
         {
@@ -270,7 +270,7 @@ public sealed class UsageAdminEndpointsTests
     public async Task GetSummary_WithManagementToken_RequiresToken()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, managementToken: "secret-token");
+        await using var server = BuildServer(store: store, managementToken: "secret-token");
         await server.StartAsync(Ct);
         try
         {

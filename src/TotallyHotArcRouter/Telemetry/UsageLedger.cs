@@ -126,8 +126,8 @@ public sealed class UsageLedger : IUsageLedger
                 entry.OccurredAtUtc.UtcDateTime.ToString(format: TimestampFormat,
                     provider: CultureInfo.InvariantCulture);
 
-            using var connection = _database.OpenConnection();
-            using var command = connection.CreateCommand();
+            await using var connection = _database.OpenConnection();
+            await using var command = connection.CreateCommand();
             command.CommandText = """
                                   INSERT INTO usage_ledger (
                                       dedup_key, session_id, turn_number, provider, requested_model, resolved_model,

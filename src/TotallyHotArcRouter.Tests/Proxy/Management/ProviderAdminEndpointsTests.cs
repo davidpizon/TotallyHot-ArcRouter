@@ -75,7 +75,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task GetProviders_ReturnsProvidersWithModels()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -101,7 +101,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task GetRateLimitHistory_NoPriceCatalogRepository_ReturnsServiceUnavailable()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -122,7 +122,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task GetRateLimitHistory_UnknownProvider_ReturnsNotFound()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -143,7 +143,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutProvider_ThenPutModel_IsReflectedLiveInModelsEndpoint()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -180,7 +180,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutProvider_SetsAndClearsIsFree_AndSurfacesItOnGet()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -220,7 +220,7 @@ public sealed class ProviderAdminEndpointsTests
         var seed = SeedOptions();
         seed.Providers["openai"] = new ProviderOptions { BaseUrl = "https://api.openai.com", IsFree = true };
         var store = new InMemoryProviderConfigStore(seed);
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -248,7 +248,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutProvider_StoresReplacesAndKeepsCustomHeaders()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -309,7 +309,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutProvider_BlankKey_ReturnsBadRequestNotServerError()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -337,7 +337,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task DeleteProvider_StillReferencedByModel_CascadesAndSucceeds()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -374,7 +374,7 @@ public sealed class ProviderAdminEndpointsTests
             });
         });
 
-        using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
+        await using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -405,7 +405,7 @@ public sealed class ProviderAdminEndpointsTests
         var stub = new DelegatingHandlerStub(_ =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
 
-        using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
+        await using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -462,7 +462,7 @@ public sealed class ProviderAdminEndpointsTests
             });
         });
 
-        using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
+        await using var server = BuildServer(store: store, managementHttpClient: new HttpClient(stub));
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -490,7 +490,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task ManagementToken_WhenConfigured_GatesAdminRequests()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, managementToken: "s3cret");
+        await using var server = BuildServer(store: store, managementToken: "s3cret");
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -522,7 +522,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task ManagementToken_WhitespaceOnly_IsTreatedAsNotConfigured()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, managementToken: "   ");
+        await using var server = BuildServer(store: store, managementToken: "   ");
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -545,7 +545,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task ManagementToken_WhenConfigured_DoesNotGateForwardingEndpoints()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store: store, managementToken: "s3cret");
+        await using var server = BuildServer(store: store, managementToken: "s3cret");
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -586,7 +586,7 @@ public sealed class ProviderAdminEndpointsTests
             ModelList = []
         };
         var store = new InMemoryProviderConfigStore(options);
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -614,7 +614,7 @@ public sealed class ProviderAdminEndpointsTests
         var store = new InMemoryProviderConfigStore(SeedOptions());
         using var temp = new TempDatabase();
         var budgetStore = temp.CreateBudgetStore();
-        using var server = BuildServer(store: store, budgetStore: budgetStore);
+        await using var server = BuildServer(store: store, budgetStore: budgetStore);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -652,7 +652,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutEnabled_TogglesFlag_AndGetSurfacesIt()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -710,7 +710,7 @@ public sealed class ProviderAdminEndpointsTests
         };
 
         var store = new InMemoryProviderConfigStore(options);
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -742,7 +742,7 @@ public sealed class ProviderAdminEndpointsTests
     public async Task PutEnabled_UnknownProvider_ReturnsNotFound()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -767,7 +767,7 @@ public sealed class ProviderAdminEndpointsTests
         // A partial write through the generic upsert route must not silently restart a stopped provider,
         // the same rule IsFree follows.
         var store = new InMemoryProviderConfigStore(SeedOptions());
-        using var server = BuildServer(store);
+        await using var server = BuildServer(store);
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -810,7 +810,7 @@ public sealed class ProviderAdminEndpointsTests
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
         using var temp = new TempDatabase();
-        using var server = BuildServer(store: store, budgetStore: temp.CreateBudgetStore());
+        await using var server = BuildServer(store: store, budgetStore: temp.CreateBudgetStore());
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -834,7 +834,7 @@ public sealed class ProviderAdminEndpointsTests
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
         using var temp = new TempDatabase();
-        using var server = BuildServer(store: store, budgetStore: temp.CreateBudgetStore());
+        await using var server = BuildServer(store: store, budgetStore: temp.CreateBudgetStore());
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {

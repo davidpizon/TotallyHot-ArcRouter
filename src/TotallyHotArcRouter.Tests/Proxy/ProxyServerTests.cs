@@ -23,7 +23,7 @@ public class ProxyServerTests
         // port (ProxyServer.DefaultGrpcPort) even in this ephemeral-port test, defeating the point of
         // port: 0 (test-to-test port-conflict flakiness) and generating/persisting a real self-signed
         // certificate under %LOCALAPPDATA% on every test run.
-        using var server =
+        await using var server =
             new ProxyServer(logger: new NullLogger<ProxyServer>(), proxyMiddleware: proxyMiddleware, 0, 0);
 
         await server.StartAsync(TestContext.Current.CancellationToken);
