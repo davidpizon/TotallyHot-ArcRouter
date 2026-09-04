@@ -17,7 +17,7 @@ internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore, IM
     private readonly Dictionary<ModelCapabilityKey, ModelContextWindow> _contextWindows = [];
 
     private readonly Dictionary<string, ProviderEndpointCapabilities>
-        _providers = [with(StringComparer.OrdinalIgnoreCase)];
+        _providers = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Dictionary<ModelCapabilityKey, ModelToolCapability> _rows = [];
 

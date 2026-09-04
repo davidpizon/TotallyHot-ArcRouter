@@ -52,7 +52,7 @@ public sealed record RoutingDecision
         Propensity = propensity;
 
         var copiedScores = candidateScores is null
-            ? [with(StringComparer.OrdinalIgnoreCase)]
+            ? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, double>(collection: candidateScores, comparer: StringComparer.OrdinalIgnoreCase);
 
         CandidateScores = new ReadOnlyDictionary<string, double>(copiedScores);

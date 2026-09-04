@@ -164,16 +164,16 @@ public sealed class ModelRouteResolver : IModelRouteResolver
     private readonly ISecretReader? _secretReader;
     private readonly IProviderConfigStore _store;
     private volatile int _cachedVersion = -1;
-    private volatile Dictionary<string, bool> _modelEnabled = [with(StringComparer.OrdinalIgnoreCase)];
+    private volatile Dictionary<string, bool> _modelEnabled = new(StringComparer.OrdinalIgnoreCase);
     private volatile IReadOnlyList<ModelRouteEntry> _orderedEntries = [];
-    private volatile Dictionary<string, bool> _providerEnabled = [with(StringComparer.OrdinalIgnoreCase)];
+    private volatile Dictionary<string, bool> _providerEnabled = new(StringComparer.OrdinalIgnoreCase);
 
     // The lookup + ordered list cached from the store snapshot that produced them. The reference fields
     // are volatile and always assigned a brand-new (never mutated) collection under _rebuildLock, so the
     // hot path (TryResolve on every proxied request) reads them without locking. _cachedVersion is
     // volatile so a fresh version written under the lock is visible to the lock-free fast-path check.
     private volatile Dictionary<string, (ModelRouteEntry Entry, ProviderOptions Provider)> _routes =
-        [with(StringComparer.OrdinalIgnoreCase)];
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ModelRouteResolver"/> class.

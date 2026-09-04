@@ -18,7 +18,7 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 public abstract class CategoricalContextBanditBaselineBase : IOnlineRegretBaselineRouter
 {
     private readonly double _lambda;
-    private readonly Dictionary<string, Dictionary<string, ArmDimensionStat>> _stats = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<string, Dictionary<string, ArmDimensionStat>> _stats = new(StringComparer.Ordinal);
 
     /// <summary>Initializes the shared ridge prior.</summary>
     /// <param name="lambda">λ, the ridge prior weight added to every (arm, dimension) pair's pull count.</param>
@@ -111,7 +111,7 @@ public abstract class CategoricalContextBanditBaselineBase : IOnlineRegretBaseli
     {
         if (!_stats.TryGetValue(key: modelId, value: out var perDimension))
         {
-            perDimension = [with(StringComparer.Ordinal)];
+            perDimension = new Dictionary<string, ArmDimensionStat>(StringComparer.Ordinal);
             _stats[modelId] = perDimension;
         }
 

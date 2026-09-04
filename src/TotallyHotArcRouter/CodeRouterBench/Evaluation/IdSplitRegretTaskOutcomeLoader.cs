@@ -75,7 +75,7 @@ public static class IdSplitRegretTaskOutcomeLoader
 
                 if (!cellsByTask.TryGetValue(key: taskId, value: out var cells))
                 {
-                    cells = [with(StringComparer.Ordinal)];
+                    cells = new Dictionary<string, RegretOutcomeCell>(StringComparer.Ordinal);
                     cellsByTask[taskId] = cells;
                 }
 

@@ -69,7 +69,7 @@ public sealed class QualityOptions
 
     /// <summary>Per-dimension scoring weights, keyed by dimension name.</summary>
     public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; set; } =
-        [with(StringComparer.OrdinalIgnoreCase)];
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Resolves the scoring weights for a dimension, falling back to a balanced default.</summary>
     /// <param name="dimension">The dimension whose weights to resolve.</param>

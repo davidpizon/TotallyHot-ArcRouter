@@ -21,7 +21,7 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
     private readonly IUsageLedger _ledger;
 
     private readonly Lock _lock = new();
-    private readonly Dictionary<string, TrackedSession> _sessions = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<string, TrackedSession> _sessions = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;
 
     /// <summary>

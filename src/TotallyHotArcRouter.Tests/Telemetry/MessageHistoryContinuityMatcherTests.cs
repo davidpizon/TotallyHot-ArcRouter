@@ -20,7 +20,7 @@ public class MessageHistoryContinuityMatcherTests
 
     private static JsonArray Messages(params JsonObject[] messages)
     {
-        return [with(messages)];
+        return new JsonArray(messages);
     }
 
     [Fact]

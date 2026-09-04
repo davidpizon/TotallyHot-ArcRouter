@@ -188,7 +188,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         var clusterSizes = new int[trainResult.ChosenK];
         var histograms = new Dictionary<string, int>[trainResult.ChosenK];
         for (var c = 0; c < trainResult.ChosenK; c++)
-            histograms[c] = [with(StringComparer.Ordinal)];
+            histograms[c] = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var i = 0; i < samples.Count; i++)
         {
