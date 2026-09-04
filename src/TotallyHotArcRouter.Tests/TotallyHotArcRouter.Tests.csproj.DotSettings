@@ -101,16 +101,4 @@
   -->
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ParameterOnlyUsedForPreconditionCheck_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
-  <!--
-    "This collection is only updated, never queried" / "this member can be private."
-
-    Both pairs are JudgeShadowScoreDrainServiceTests' fake store recording MarkCompleted and
-    MarkAbandoned into Completed and Abandoned. The inspection is correct that no test reads them,
-    and the honest fix is a test that asserts the drain service marks each job - not deleting the
-    recording or hiding it behind `private`, either of which would remove the affordance a future
-    test needs. Left public and noted; see the PR discussion.
-  -->
-  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=CollectionNeverQueried_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
-  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBePrivate_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
-
 </wpf:ResourceDictionary>

@@ -32,7 +32,8 @@ public class ClusterTrainingServiceTests
         }
 
         var modelPath = TempModelPath();
-        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 100, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 100, temp: temp);
 
         try
         {
@@ -61,7 +62,8 @@ public class ClusterTrainingServiceTests
         memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, dimension: "bug_fixing");
 
         var modelPath = TempModelPath();
-        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 200, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 200, temp: temp);
 
         try
         {
@@ -86,7 +88,8 @@ public class ClusterTrainingServiceTests
             null); // 3-dim, doesn't match the 2-dim fixture below
 
         var modelPath = TempModelPath();
-        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 50, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 50, temp: temp);
 
         try
         {
@@ -109,7 +112,8 @@ public class ClusterTrainingServiceTests
             memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, dimension: "bug_fixing");
 
         var modelPath = TempModelPath();
-        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 100, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 100, temp: temp);
 
         try
         {
@@ -130,9 +134,8 @@ public class ClusterTrainingServiceTests
     }
 
     private static ClusterTrainingService CreateService(
-        IMemoryEntryStore memoryStore, string modelPath, int minTrainingRows, out TempBenchmarkDatabase temp)
+        IMemoryEntryStore memoryStore, string modelPath, int minTrainingRows, TempBenchmarkDatabase temp)
     {
-        temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
         var bootstrapSource = new OodClusterBootstrapSampleSource(
             database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0]),
             logger: NullLogger<OodClusterBootstrapSampleSource>.Instance);

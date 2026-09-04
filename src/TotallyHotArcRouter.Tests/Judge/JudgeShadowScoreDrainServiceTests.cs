@@ -11,7 +11,8 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 /// Covers <see cref="JudgeShadowScoreDrainService.ProcessAsync"/> directly (mirroring
 /// <see cref="TotallyHot.ArcRouter.Transcripts.TranscriptRetentionService.CheckAndPurgeAsync"/>'s
 /// internal-for-test-access convention) - the exit criteria that matter most: the pending response text
-/// is always consumed, and a scored job produces at most one shadow row.
+/// is always consumed, a scored job produces at most one shadow row, and every path settles the quality
+/// join rather than leaving a held verdict to expire.
 /// </summary>
 public class JudgeShadowScoreDrainServiceTests
 {
@@ -104,6 +105,83 @@ public class JudgeShadowScoreDrainServiceTests
         Assert.False(judgeClient.WasCalled);
         Assert.Empty(store.Inserted);
         Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
+    }
+
+    /// <summary>
+    /// The point of shadow scoring: a judge grade must actually reach the aggregator, which is what
+    /// releases the held verdict and lets the score influence routing. Writing the shadow row without
+    /// completing the join would leave the verdict to expire and the grade to be silently discarded.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_TextPresent_CompletesTheQualityJoinWithTheJudgeScore()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            aggregator: aggregator);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        var completed = Assert.Single(aggregator.Completed);
+        Assert.Equal(expected: "corr-1", actual: completed.CorrelationId);
+        Assert.Equal(0.8, actual: completed.Score);
+        Assert.Empty(aggregator.Abandoned);
+    }
+
+    /// <summary>
+    /// Each of the three give-up paths abandons the join with its own reason, so an operator reading the
+    /// aggregator can tell a switched-off judge from an evicted response from a judge that abstained. The
+    /// reason strings are asserted literally because they are the diagnostic - a silent rename would leave
+    /// the three cases indistinguishable.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true, true, "judge-disabled")]
+    [InlineData(true, false, true, "judge-text-evicted")]
+    [InlineData(true, true, false, "judge-abstained")]
+    public async Task ProcessAsync_GiveUpPath_AbandonsTheQualityJoinWithItsOwnReason(
+        bool judgeEnabled, bool textCached, bool judgeReturnsScore, string expectedReason)
+    {
+        var cache = CreateCache();
+        if (textCached) cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(judgeReturnsScore
+            ? new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model")
+            : null);
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = judgeEnabled }),
+            aggregator: aggregator);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        var abandoned = Assert.Single(aggregator.Abandoned);
+        Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: expectedReason, actual: abandoned.Reason);
+        Assert.Empty(aggregator.Completed);
+    }
+
+    /// <summary>
+    /// The one path that deliberately settles nothing. A judge client that throws is caught and logged, and
+    /// the held verdict is left for <see cref="IQualityScoreAggregator.SweepExpiredAsync"/> rather than
+    /// abandoned inline - a backbone blip should not be recorded as the judge having declined to grade.
+    /// This asserts that on purpose, so adding an inline abandon here becomes a deliberate decision rather
+    /// than an accident.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_JudgeClientThrows_LeavesTheQualityJoinToTheExpirySweep()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(exception: new InvalidOperationException("backbone unreachable"));
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            aggregator: aggregator);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(aggregator.Completed);
+        Assert.Empty(aggregator.Abandoned);
     }
 
     private static PendingResponseTextCache CreateCache()

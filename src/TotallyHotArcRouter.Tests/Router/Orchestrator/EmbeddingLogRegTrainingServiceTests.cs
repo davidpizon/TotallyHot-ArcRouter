@@ -35,7 +35,8 @@ public class EmbeddingLogRegTrainingServiceTests
         var voter = new LogRegVoter(logger: NullLogger<LogRegVoter>.Instance,
             storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }),
             embeddingClient: new StubEmbeddingClient());
-        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: temp);
 
         try
         {
@@ -75,7 +76,8 @@ public class EmbeddingLogRegTrainingServiceTests
         var voter = new LogRegVoter(logger: NullLogger<LogRegVoter>.Instance,
             storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }),
             embeddingClient: new StubEmbeddingClient());
-        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: temp);
 
         try
         {
@@ -100,7 +102,8 @@ public class EmbeddingLogRegTrainingServiceTests
         var voter = new LogRegVoter(logger: NullLogger<LogRegVoter>.Instance,
             storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }),
             embeddingClient: new StubEmbeddingClient());
-        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: temp);
 
         try
         {
@@ -132,7 +135,8 @@ public class EmbeddingLogRegTrainingServiceTests
         var voter = new LogRegVoter(logger: NullLogger<LogRegVoter>.Instance,
             storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }),
             embeddingClient: new StubEmbeddingClient());
-        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: out _);
+        using var temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
+        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: temp);
 
         try
         {
@@ -148,9 +152,8 @@ public class EmbeddingLogRegTrainingServiceTests
     }
 
     private static EmbeddingLogRegTrainingService CreateService(
-        IMemoryEntryStore memoryStore, LogRegVoter voter, string modelPath, out TempBenchmarkDatabase temp)
+        IMemoryEntryStore memoryStore, LogRegVoter voter, string modelPath, TempBenchmarkDatabase temp)
     {
-        temp = new TempBenchmarkDatabase(); // never EnsureCreated() - the "not synced" path.
         var bootstrapSource = new OodBootstrapSampleSource(
             database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0]),
             logger: NullLogger<OodBootstrapSampleSource>.Instance);
