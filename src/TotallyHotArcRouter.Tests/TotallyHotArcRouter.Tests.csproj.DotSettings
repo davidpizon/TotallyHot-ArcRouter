@@ -20,4 +20,36 @@
   -->
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ShortLivedHttpClient/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
+  <!--
+    "Fold this into an object or collection initializer."
+
+    All 63 are arrange blocks in this project, and the rewrite makes them worse. A test that reads
+
+        var ledger = new StubLedger();
+        ledger.MaxTurnBySession["sess-1"] = 4;   // simulates a restart mid-conversation
+
+    becomes a nested-property initializer with nowhere to put that trailing comment, and the setup
+    stops reading as a sequence of arranged facts. Several others would collapse four separate
+    DefaultHttpContext.Request assignments into one nested initializer, which is harder to scan and
+    harder to diff when a single field changes.
+
+    Scoped to this project rather than turned off solution-wide, so the same finding in production
+    code is still reported.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UseObjectOrCollectionInitializer/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "Merge these checks into one pattern."
+
+    The seven production sites were read individually and four were applied - the genuinely better
+    ones, where `is JsonArray { Count: > 0 }` and `is > 0 and <= Ceiling` say what the conjunction
+    was spelling out. The seventeen here are assertions and arrange conditions, where merging buys
+    nothing: a test's `&&` chain is usually enumerating the conditions it means to check, and a
+    merged pattern hides that enumeration.
+
+    This is also what ADR-0008 asks for directly: score smells on production code, because "test
+    projects are the regression net, not the catalog". Production stays enabled.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MergeIntoPattern/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
 </wpf:ResourceDictionary>

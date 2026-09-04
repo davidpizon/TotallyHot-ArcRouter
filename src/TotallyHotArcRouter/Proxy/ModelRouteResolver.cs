@@ -291,6 +291,10 @@ public sealed class ModelRouteResolver : IModelRouteResolver
                 comparer: StringComparer.OrdinalIgnoreCase);
             _modelEnabled = value.ModelList.ToDictionary(
                 keySelector: entry => entry.ModelName,
+                // Two separate facts a route must satisfy - operator-enabled, and actually present
+                // upstream. `is { Enabled: true, PresentUpstream: true }` hides that they are checked
+                // for different reasons and change independently.
+                // ReSharper disable once MergeIntoPattern
                 elementSelector: entry => entry.Enabled && entry.PresentUpstream,
                 comparer: StringComparer.OrdinalIgnoreCase);
             _cachedVersion = snapshot.Version;

@@ -18,7 +18,7 @@ public class PriceSourceRepositoryTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(1, actual: sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
@@ -37,7 +37,7 @@ public class PriceSourceRepositoryTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
         sourceRepository.SetSourceEnabled(sourceName: "litellm", false);
 

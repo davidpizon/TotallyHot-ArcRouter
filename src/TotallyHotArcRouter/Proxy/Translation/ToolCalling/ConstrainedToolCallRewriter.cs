@@ -80,7 +80,7 @@ internal static class ConstrainedToolCallRewriter
         // A follow-up turn carrying history but no re-offered tools still needs its history re-rendered
         // above - the model must be able to read its own prior turn - but there is nothing to describe or
         // constrain, and a schema naming no tools would forbid every reply it could give.
-        if (root["tools"] is JsonArray tools && tools.Count > 0)
+        if (root["tools"] is JsonArray { Count: > 0 } tools)
         {
             // Instructions first, then a grammar over exactly what the instructions covered. Both halves are
             // load-bearing and neither substitutes for the other: the schema makes a malformed call

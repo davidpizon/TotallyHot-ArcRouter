@@ -484,6 +484,9 @@ public sealed class OrchestratorRoutingPolicy : IRoutingPolicy
             VoterNames.LlmRouter => Options.EnableLlmRouterVoter,
             // docs/router/self-organizing-classification-plan.md Phase T6: cluster_best is additionally
             // gated on the adaptive-routing master switch, on top of its own EnableClusterBestVoter flag.
+            // ReSharper disable once MergeIntoPattern
+            // The two flags are deliberately distinct gates, as the comment above records; merging them
+            // into one pattern would erase the "on top of" relationship that makes the gate correct.
             VoterNames.ClusterBest => Options.EnableClusterBestVoter && Options.EnableAdaptiveRouting,
             _ => true
         };

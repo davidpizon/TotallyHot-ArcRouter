@@ -134,12 +134,10 @@ public sealed class HeuristicRequestClassifier : IRequestClassifier
         var maxTokensNode = requestBody["max_tokens"] ?? requestBody["max_completion_tokens"];
         if (maxTokensNode is JsonValue maxTokensValue &&
             maxTokensValue.TryGetValue<int>(out var maxTokens) &&
-            maxTokens > 0 &&
-            maxTokens <= UtilityMaxTokensCeiling)
+            maxTokens is > 0 and <= UtilityMaxTokensCeiling)
             return true;
 
-        return prompt.Length > 0 &&
-               prompt.Length <= UtilityPromptLengthCeiling &&
+        return prompt.Length is > 0 and <= UtilityPromptLengthCeiling &&
                ContainsAny(haystack: prompt.ToLowerInvariant(), needles: UtilityPromptSignals);
     }
 

@@ -81,6 +81,10 @@ public sealed class BenchmarkDataAdminGrpcService : Contract.BenchmarkDataAdminS
         // supplemental event per failed file with the reason, so the panel can render it without a
         // second call. Skipped files never failed - they simply weren't downloaded - so they are
         // excluded here the same way a succeeded file is.
+        // Two independent exclusions, not one shape: a file is skipped for a different reason than it
+        // fails, and the comment above turns on that distinction. `is { Succeeded: false, Skipped: false }`
+        // would state the same condition while reading as a single property test.
+        // ReSharper disable once MergeIntoPattern
         foreach (var outcome in result.Files.Where(f => !f.Succeeded && !f.Skipped))
             await responseStream.WriteAsync(new Contract.BenchmarkSyncStreamEvent
             {

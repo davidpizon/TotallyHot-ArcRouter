@@ -18,11 +18,10 @@ public class PriceRepositoryTests
         var written = repository.UpsertPrices(
             sourceName: "litellm",
             0,
-            prices: new[]
-            {
+            prices: [
                 Price(model: "llama-3-70b", provider: "groq", 0.59m, 0.79m),
                 Price(model: "llama-3-70b", provider: "together", 0.90m, 0.90m)
-            },
+            ],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(2, actual: written);
@@ -47,10 +46,10 @@ public class PriceRepositoryTests
         var sourceRepository = new PriceSourceRepository(temp.Database);
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 3.00m, 12.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 3.00m, 12.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(1, actual: sourceRepository.CountFreshPrices(TimeSpan.FromHours(24)));
@@ -70,7 +69,7 @@ public class PriceRepositoryTests
         repository.UpsertPrices(
             sourceName: "litellm",
             0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow - TimeSpan.FromHours(48));
 
         Assert.Null(repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -102,8 +101,9 @@ public class PriceRepositoryTests
         repository.UpsertPrices(
             sourceName: "litellm",
             0,
-            prices: new[]
-                { new NormalizedPrice(ModelIdentifier: "odd-model", Provider: "openai", null, null, null, 1.0m, 2.0m) },
+            prices: [
+ new NormalizedPrice(ModelIdentifier: "odd-model", Provider: "openai", null, null, null, 1.0m, 2.0m)
+            ],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Null(repository.GetFreshPrice(key: new ModelKey(ModelName: "odd-model", Provider: "openai"),
@@ -121,7 +121,7 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.NotNull(repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -142,7 +142,7 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         sourceRepository.SetSourceEnabled(sourceName: "litellm", false);
@@ -163,7 +163,7 @@ public class PriceRepositoryTests
         var sourceRepository = temp.CreateSourceRepository();
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(7, actual: sourceRepository.GetSourceStates().Single(s => s.Name == "litellm").PriorityScore);
@@ -183,10 +183,10 @@ public class PriceRepositoryTests
 
         // The low-priority source writes SECOND, after the high-priority source.
         repository.UpsertPrices(sourceName: "high", 10,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
         var written = repository.UpsertPrices(sourceName: "low", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 999m, 999m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 999m, 999m)], asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(1, actual: written); // the observation is retained even though it does not win
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -203,9 +203,9 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
 
         repository.UpsertPrices(sourceName: "low", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 999m, 999m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 999m, 999m)], asOfUtc: DateTimeOffset.UtcNow);
         var written = repository.UpsertPrices(sourceName: "high", 10,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         // The higher-priority source arriving second must still win - "wins" cannot mean "wins only if it
@@ -225,10 +225,10 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
         var written = repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 3.00m, 12.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 3.00m, 12.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(1, actual: written);
@@ -247,7 +247,7 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
 
         var written = repository.UpsertPrices(sourceName: "low", -100,
-            prices: new[] { Price(model: "only-low-prices-this", provider: "openai", 1m, 2m) },
+            prices: [Price(model: "only-low-prices-this", provider: "openai", 1m, 2m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(1, actual: written);
@@ -267,10 +267,10 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         repository.UpsertPrices(sourceName: "high", 10,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
         repository.UpsertPrices(sourceName: "low", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 999m, 999m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 999m, 999m)], asOfUtc: DateTimeOffset.UtcNow);
         Assert.Equal(2.50m,
             actual: repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
                 maxAge: TimeSpan.FromHours(24))!.InputPerMillionTokens);
@@ -299,10 +299,10 @@ public class PriceRepositoryTests
         var repository = new PriceRepository(database: temp.Database, identityResolver: resolver);
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
         var written = repository.UpsertPrices(sourceName: "openrouter", -10,
-            prices: new[] { Price(model: "openai/gpt-4o", provider: "openai", 999m, 999m) },
+            prices: [Price(model: "openai/gpt-4o", provider: "openai", 999m, 999m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         // openrouter's observation is retained even though it does not win the now-shared cell.
@@ -331,7 +331,7 @@ public class PriceRepositoryTests
         var repository = new PriceRepository(database: temp.Database, identityResolver: new StubIdentityResolver(null));
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "mystery-model", provider: "openai", 1m, 2m) },
+            prices: [Price(model: "mystery-model", provider: "openai", 1m, 2m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.NotNull(repository.GetFreshPrice(key: new ModelKey(ModelName: "mystery-model", Provider: "openai"),
@@ -349,7 +349,7 @@ public class PriceRepositoryTests
         var repository = new PriceRepository(database: temp.Database, identityResolver: resolver);
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2m, 6m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 2m, 6m)], asOfUtc: DateTimeOffset.UtcNow);
 
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-5.4", Provider: "openai"),
             maxAge: TimeSpan.FromHours(24));
@@ -369,7 +369,7 @@ public class PriceRepositoryTests
         var repository = new PriceRepository(database: temp.Database, identityResolver: resolver);
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o-20250101", provider: "openai", 2m, 6m) },
+            prices: [Price(model: "gpt-4o-20250101", provider: "openai", 2m, 6m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-5.4", Provider: "openai"),
@@ -385,7 +385,7 @@ public class PriceRepositoryTests
         var repository = new PriceRepository(temp.Database);
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2m, 6m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 2m, 6m)], asOfUtc: DateTimeOffset.UtcNow);
 
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
             maxAge: TimeSpan.FromHours(24));
@@ -401,14 +401,13 @@ public class PriceRepositoryTests
         repository.UpsertPrices(
             sourceName: "litellm",
             0,
-            prices: new[]
-            {
+            prices: [
                 new NormalizedPrice(
                     ModelIdentifier: "claude-opus", Provider: "anthropic",
                     15.00m, 75.00m,
                     1.50m, null, null,
                     18.75m)
-            },
+            ],
             asOfUtc: DateTimeOffset.UtcNow);
 
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "claude-opus", Provider: "anthropic"),
@@ -430,13 +429,12 @@ public class PriceRepositoryTests
         repository.UpsertPrices(
             sourceName: "litellm",
             0,
-            prices: new[]
-            {
+            prices: [
                 new NormalizedPrice(
                     ModelIdentifier: "gpt-4o", Provider: "openai",
                     2.50m, 10.00m,
                     null, 1.25m, 5.00m)
-            },
+            ],
             asOfUtc: DateTimeOffset.UtcNow);
 
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -456,7 +454,7 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -477,7 +475,7 @@ public class PriceRepositoryTests
         var fetchedAt = DateTimeOffset.UtcNow.AddDays(-30);
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) }, asOfUtc: fetchedAt);
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)], asOfUtc: fetchedAt);
 
         Assert.Null(repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
             maxAge: TimeSpan.FromHours(24)));
@@ -496,7 +494,7 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
 
         var price = repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -518,11 +516,11 @@ public class PriceRepositoryTests
         var sourceRepository = temp.CreateSourceRepository();
 
         repository.UpsertPrices(sourceName: "a", 1,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 1.00m, 1.00m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 1.00m, 1.00m)], asOfUtc: DateTimeOffset.UtcNow);
         repository.UpsertPrices(sourceName: "b", 2,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.00m, 2.00m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.00m, 2.00m)], asOfUtc: DateTimeOffset.UtcNow);
         repository.UpsertPrices(sourceName: "c", 3,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 3.00m, 3.00m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 3.00m, 3.00m)], asOfUtc: DateTimeOffset.UtcNow);
 
         Assert.Equal(3.00m,
             actual: repository.GetFreshPrice(key: new ModelKey(ModelName: "gpt-4o", Provider: "openai"),
@@ -550,9 +548,9 @@ public class PriceRepositoryTests
         var sourceRepository = temp.CreateSourceRepository();
 
         repository.UpsertPrices(sourceName: "enabled-low", 1,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.00m, 2.00m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.00m, 2.00m)], asOfUtc: DateTimeOffset.UtcNow);
         repository.UpsertPrices(sourceName: "disabled-high", 100,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 999m, 999m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 999m, 999m)], asOfUtc: DateTimeOffset.UtcNow);
         sourceRepository.SetSourceEnabled(sourceName: "disabled-high", false);
 
         repository.RecomputeWinners();
@@ -573,7 +571,7 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
 
         repository.UpsertPrices(sourceName: "litellm", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.00m, 2.00m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.00m, 2.00m)], asOfUtc: DateTimeOffset.UtcNow);
 
         var changed = repository.RecomputeWinners();
 
@@ -594,10 +592,10 @@ public class PriceRepositoryTests
         var repository = temp.CreateRepository();
 
         repository.UpsertPrices(sourceName: "high", 10,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m) },
+            prices: [Price(model: "gpt-4o", provider: "openai", 2.50m, 10.00m)],
             asOfUtc: DateTimeOffset.UtcNow);
         repository.UpsertPrices(sourceName: "low", 0,
-            prices: new[] { Price(model: "gpt-4o", provider: "openai", 999m, 999m) }, asOfUtc: DateTimeOffset.UtcNow);
+            prices: [Price(model: "gpt-4o", provider: "openai", 999m, 999m)], asOfUtc: DateTimeOffset.UtcNow);
 
         using var connection = temp.Database.OpenConnection();
         using var command = connection.CreateCommand();

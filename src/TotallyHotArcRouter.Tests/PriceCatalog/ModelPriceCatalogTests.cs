@@ -267,8 +267,7 @@ public class ModelPriceCatalogTests
         repository.UpsertPrices(
             sourceName: "litellm",
             0,
-            prices: new[]
-            {
+            prices: [
                 new NormalizedPrice(
                     ModelIdentifier: "claude-opus",
                     Provider: "anthropic",
@@ -278,7 +277,7 @@ public class ModelPriceCatalogTests
                     BatchInputPrice: batchInput,
                     BatchOutputPrice: batchOutput,
                     18.75m)
-            },
+            ],
             asOfUtc: fetchedAt);
     }
 }

@@ -157,7 +157,7 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
         var contentText = new StringBuilder();
         JsonArray? toolCalls = null;
 
-        if (chunk["candidates"] is JsonArray candidates && candidates.Count > 0 &&
+        if (chunk["candidates"] is JsonArray { Count: > 0 } candidates &&
             candidates[0] is JsonObject candidate)
         {
             if (candidate["content"] is JsonObject content && content["parts"] is JsonArray parts)
