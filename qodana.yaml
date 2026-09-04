@@ -2,4 +2,4 @@ version: "1.0"
 linter: jetbrains/qodana-cdnet:2026.2
 
 dotnet:
-  solution: src/TotallyHotArcRouter.slnx
+  solution: src/TotallyHotArcRouter.Qodana.slnx
