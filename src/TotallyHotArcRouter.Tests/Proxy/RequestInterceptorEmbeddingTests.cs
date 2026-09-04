@@ -131,7 +131,7 @@ public class RequestInterceptorEmbeddingTests
     {
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://api.openai.com");
-        var client = new FakeEmbeddingClient(async (text, ct) =>
+        var client = new FakeEmbeddingClient(async (_, ct) =>
         {
             // Never completes on its own; only the budget's linked cancellation can end this call - the
             // very behavior under test.

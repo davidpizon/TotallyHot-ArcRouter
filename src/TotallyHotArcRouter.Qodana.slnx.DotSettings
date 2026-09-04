@@ -102,4 +102,65 @@
   -->
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MethodHasAsyncOverloadWithCancellation/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
+  <!--
+    "This if/else can be a ?: inside one call."
+
+    StartupHealthCheckHostedService's only site logs one of two messages depending on whether the
+    pricing database already existed. Taking the advice means selecting the message template with a
+    ternary inside the LogInformation call - and AGENTS.md requires the template to stay a static
+    string literal, never interpolated or computed, so structured-logging tools can group on it. The
+    inspection is asking for exactly what that rule forbids.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ConvertIfStatementToConditionalTernaryExpression/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This private field is always assigned before use and can be a local."
+
+    All three are readonly fields on RequestInterceptor, assigned once in its constructor. AGENTS.md
+    names RequestInterceptor as one of three hubs whose edits need a CodeGraph blast-radius pass
+    first, and there is nothing here to buy with that: converting a constructor-injected readonly
+    dependency into a local would mean constructing it per call instead.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=PrivateFieldCanBeConvertedToLocalVariable/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This parameter is unused / its return value is never used / this switch arm is redundant."
+
+    Three families that are each right about the code and wrong about what to do:
+
+      - UnusedParameter: ProviderAdminEndpoints' `key` parameters are bound from the route template
+        by ASP.NET and must keep their names; ProxyMiddleware.InvokeCoreAsync's `next` is the
+        middleware shape; TelemetryPublisher's and SpendTracker's `cancellationToken` and
+        IDimensionInferrer's `language` are interface contracts, and "no current implementation uses
+        it" is not a statement about the API.
+      - UnusedMethodReturnValue: AddUpdate, AddQualityAndObservability and AddBackgroundServices
+        return IServiceCollection because that is the fluent DI convention, whether or not today's
+        caller chains from it.
+      - RedundantSwitchExpressionArms: an explicit `MetricRange.AllTime => DateTimeOffset.MinValue`
+        alongside the default documents that AllTime is deliberately unbounded rather than falling
+        through by accident.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedParameter_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedParameter_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMethodReturnValue_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=RedundantSwitchExpressionArms/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "Replace this backing field with the `field` keyword."
+
+    DeferredTelemetryPublisher's _resolved cache. Declined for the same reason the `with` element was
+    reverted on this branch: `field` is brand-new syntax whose payoff is a saved declaration line,
+    and the cost is a reader who has to know it. Revisit when it is unremarkable.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ReplaceWithFieldKeyword/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "Simplify this string interpolation."
+
+    LogLineFormatter's only site would inline the named TimestampFormat constant as a literal format
+    specifier, because a specifier cannot reference a constant. Trading a named constant for a magic
+    string inside an interpolation is not a simplification.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=SimplifyStringInterpolation/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
 </wpf:ResourceDictionary>

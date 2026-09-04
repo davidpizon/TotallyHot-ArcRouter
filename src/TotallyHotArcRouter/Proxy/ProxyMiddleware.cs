@@ -571,9 +571,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // translator to ask, so its 400/429 rule stays here. Its error body is otherwise forwarded
             // byte-for-byte untouched, so reading it once for classification changes nothing about what the
             // client eventually receives; see the preReadErrorBody-is-not-null forwarding branch below.
-            var shouldPreReadErrorBody = translator is not null
-                ? translator.HandlesEmbeddedErrorAt(statusCode)
-                : statusCode is StatusCodes.Status400BadRequest or 429;
+            var shouldPreReadErrorBody = translator?.HandlesEmbeddedErrorAt(statusCode)
+                                         ?? statusCode is StatusCodes.Status400BadRequest or 429;
 
             if (shouldPreReadErrorBody)
             {

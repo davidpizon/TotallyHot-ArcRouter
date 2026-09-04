@@ -266,7 +266,8 @@ public class OllamaProviderTests
 
             public override int Read(byte[] buffer, int offset, int count)
             {
-                return ReadAsync(buffer: buffer, offset: offset, count: count, default).GetAwaiter().GetResult();
+                return ReadAsync(buffer: buffer, offset: offset, count: count, CancellationToken.None)
+                    .GetAwaiter().GetResult();
             }
 
             public override void Flush()

@@ -92,4 +92,25 @@
   -->
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MethodHasAsyncOverload/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
+  <!--
+    "This parameter is only used for a precondition check."
+
+    All five are lambda parameters inside Assert.All or a handler stub, used only in the assertion
+    that is the point of the test - `Assert.All(models, m => Assert.NotNull(m.Id))` uses `m` for
+    nothing else by design. The inspection is describing what a test assertion looks like.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ParameterOnlyUsedForPreconditionCheck_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
+  <!--
+    "This collection is only updated, never queried" / "this member can be private."
+
+    Both pairs are JudgeShadowScoreDrainServiceTests' fake store recording MarkCompleted and
+    MarkAbandoned into Completed and Abandoned. The inspection is correct that no test reads them,
+    and the honest fix is a test that asserts the drain service marks each job - not deleting the
+    recording or hiding it behind `private`, either of which would remove the affordance a future
+    test needs. Left public and noted; see the PR discussion.
+  -->
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=CollectionNeverQueried_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBePrivate_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
+
 </wpf:ResourceDictionary>

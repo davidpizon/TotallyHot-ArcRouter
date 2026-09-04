@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Tests.Router.TextGeneration;
 /// </summary>
 internal sealed class FakeLlmRouterModelOverrideStore(LlmRouterModelOverride overrideValue) : ILlmRouterModelOverrideStore
 {
-    public LlmRouterModelSnapshot Snapshot { get; } = new LlmRouterModelSnapshot(Override: overrideValue, 0);
+    public LlmRouterModelSnapshot Snapshot { get; } = new(Override: overrideValue, 0);
 
     public event Action? Changed
     {

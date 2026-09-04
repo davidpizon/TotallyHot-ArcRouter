@@ -240,9 +240,8 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
 
         // Gemini's functionResponse.response is an object; wrap a plain string result under a
         // conventional "content" key (a raw JSON object result is passed through as-is).
-        JsonNode responseValue = PayloadTranslationHelpers.TryParseJsonObject(responseText) is { } parsed
-            ? parsed
-            : new JsonObject { ["content"] = responseText };
+        JsonNode responseValue = PayloadTranslationHelpers.TryParseJsonObject(responseText)
+                                 ?? new JsonObject { ["content"] = responseText };
 
         var part = new JsonObject
         {
