@@ -92,7 +92,12 @@ jobs:
                       result = None
                       for prefix in PREFIXES:
                           probe = prefix + decoded
-                          if os.path.isfile(os.path.join(workspace, probe)):
+                          full = os.path.join(workspace, probe)
+                          # isdir as well as isfile: the report also carries a base-directory uri for
+                          # the analyzed root (`file:///data/project/src/`), which names a real
+                          # directory and no file. Rejecting it would fail the build over a uri that
+                          # is not a finding at all.
+                          if os.path.isfile(full) or (probe.endswith("/") and os.path.isdir(full)):
                               result = probe
                               break
 

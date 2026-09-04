@@ -126,49 +126,49 @@ public static class ClusterModelArtifactSerializer
     {
         /// <summary>Gets or sets the embedding dimension the artifact was trained at.</summary>
         [JsonPropertyName("embeddingDimension")]
-        public int EmbeddingDimension { get; set; }
+        public int EmbeddingDimension { get; init; }
 
         /// <summary>Gets or sets the unit-normalized cluster centroids.</summary>
         [JsonPropertyName("centroids")]
-        public List<float[]> Centroids { get; set; } = [];
+        public List<float[]> Centroids { get; init; } = [];
 
         /// <summary>Gets or sets the number of clusters the k-sweep selected.</summary>
         [JsonPropertyName("chosenK")]
-        public int ChosenK { get; set; }
+        public int ChosenK { get; init; }
 
         /// <summary>Gets or sets when this artifact was trained, in UTC.</summary>
         [JsonPropertyName("trainedAtUtc")]
-        public DateTimeOffset TrainedAtUtc { get; set; }
+        public DateTimeOffset TrainedAtUtc { get; init; }
 
         /// <summary>Gets or sets the per-cluster training sample counts.</summary>
         [JsonPropertyName("clusterSizes")]
-        public List<int> ClusterSizes { get; set; } = [];
+        public List<int> ClusterSizes { get; init; } = [];
 
         /// <summary>Gets or sets the per-cluster heuristic-dimension histograms.</summary>
         [JsonPropertyName("clusterDimensionHistograms")]
-        public List<Dictionary<string, int>> ClusterDimensionHistograms { get; set; } = [];
+        public List<Dictionary<string, int>> ClusterDimensionHistograms { get; init; } = [];
 
         /// <summary>Gets or sets the per-cluster top TF-IDF-distinguishing terms.</summary>
         [JsonPropertyName("clusterTopTerms")]
-        public List<List<string>> ClusterTopTerms { get; set; } = [];
+        public List<List<string>> ClusterTopTerms { get; init; } = [];
 
         /// <summary>Gets or sets the human-readable training provenance string.</summary>
         [JsonPropertyName("trainedFrom")]
-        public string TrainedFrom { get; set; } = string.Empty;
+        public string TrainedFrom { get; init; } = string.Empty;
 
         /// <summary>Gets or sets the number of OOD bootstrap tasks that contributed to training.</summary>
         [JsonPropertyName("bootstrapTaskCount")]
-        public int BootstrapTaskCount { get; set; }
+        public int BootstrapTaskCount { get; init; }
 
         /// <summary>Gets or sets the number of live memory entries that contributed to training.</summary>
         [JsonPropertyName("memoryEntryCount")]
-        public int MemoryEntryCount { get; set; }
+        public int MemoryEntryCount { get; init; }
 
         /// <summary>
         /// Gets or sets the identity of the embedding model this artifact was fitted against, or null for a
         /// pre-provenance artifact.
         /// </summary>
         [JsonPropertyName("embeddingModel")]
-        public string? EmbeddingModel { get; set; }
+        public string? EmbeddingModel { get; init; }
     }
 }

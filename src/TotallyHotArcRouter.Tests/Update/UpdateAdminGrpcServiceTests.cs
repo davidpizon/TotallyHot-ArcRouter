@@ -127,7 +127,7 @@ public sealed class UpdateAdminGrpcServiceTests
 
     private sealed class FakeReleaseCheckClient : IReleaseCheckClient
     {
-        public ReleaseCheckResult Result { get; set; } =
+        public ReleaseCheckResult Result { get; init; } =
             ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "1.0.0", false, null, null);
 
         public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default)

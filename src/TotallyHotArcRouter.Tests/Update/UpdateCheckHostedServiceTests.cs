@@ -109,7 +109,7 @@ public sealed class UpdateCheckHostedServiceTests
     {
         public int CallCount { get; private set; }
 
-        public Func<ReleaseCheckResult> ResultFactory { get; set; } = () =>
+        public Func<ReleaseCheckResult> ResultFactory { get; init; } = () =>
             ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "1.0.0", false, null, null);
 
         public Task<ReleaseCheckResult> CheckAsync(CancellationToken cancellationToken = default)

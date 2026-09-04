@@ -132,7 +132,7 @@ public sealed class MsiUpdateApplierTests
     private sealed class FakeLauncher : IElevatedProcessLauncher
     {
         public (string FileName, IReadOnlyList<string> Arguments)? LastCall { get; private set; }
-        public Exception? ThrowOnLaunch { get; set; }
+        public Exception? ThrowOnLaunch { get; init; }
 
         public void Launch(string fileName, IReadOnlyList<string> arguments)
         {

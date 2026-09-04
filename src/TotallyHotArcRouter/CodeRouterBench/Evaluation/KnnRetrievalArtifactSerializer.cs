@@ -115,19 +115,19 @@ public static class KnnRetrievalArtifactSerializer
     {
         /// <summary>Gets or sets the embedding dimension every entry's vector must match.</summary>
         [JsonPropertyName("embeddingDimension")]
-        public int EmbeddingDimension { get; set; }
+        public int EmbeddingDimension { get; init; }
 
         /// <summary>Gets or sets the identity of the embedding model that produced every entry's vector.</summary>
         [JsonPropertyName("embeddingModel")]
-        public string EmbeddingModel { get; set; } = string.Empty;
+        public string EmbeddingModel { get; init; } = string.Empty;
 
         /// <summary>Gets or sets the indexed OOD tasks.</summary>
         [JsonPropertyName("entries")]
-        public List<EntryDto> Entries { get; set; } = [];
+        public List<EntryDto> Entries { get; init; } = [];
 
         /// <summary>Gets or sets the human-readable build provenance string.</summary>
         [JsonPropertyName("trainedFrom")]
-        public string TrainedFrom { get; set; } = string.Empty;
+        public string TrainedFrom { get; init; } = string.Empty;
     }
 
     /// <summary>The wire shape for one <see cref="KnnRetrievalEntry"/>.</summary>
@@ -135,14 +135,14 @@ public static class KnnRetrievalArtifactSerializer
     {
         /// <summary>Gets or sets the corpus's <c>task_id</c>.</summary>
         [JsonPropertyName("taskId")]
-        public string TaskId { get; set; } = string.Empty;
+        public string TaskId { get; init; } = string.Empty;
 
         /// <summary>Gets or sets the task's unit-normalized embedding vector.</summary>
         [JsonPropertyName("embedding")]
-        public List<float> Embedding { get; set; } = [];
+        public List<float> Embedding { get; init; } = [];
 
         /// <summary>Gets or sets the canonicalized model id that resolved the task most cheaply.</summary>
         [JsonPropertyName("label")]
-        public string Label { get; set; } = string.Empty;
+        public string Label { get; init; } = string.Empty;
     }
 }

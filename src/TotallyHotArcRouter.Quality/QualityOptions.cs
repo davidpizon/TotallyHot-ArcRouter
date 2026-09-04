@@ -11,22 +11,22 @@ public sealed class QualityOptions
     public const string SectionName = "Quality";
 
     /// <summary>Whether the quality verifier is enabled. When false nothing is extracted, enqueued, or graded.</summary>
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; init; } = true;
 
     /// <summary>Fraction of eligible requests actually graded (0..1). 1.0 grades every eligible request.</summary>
-    public double SamplingRate { get; set; } = 1.0;
+    public double SamplingRate { get; init; } = 1.0;
 
     /// <summary>Maximum characters of extracted code analyzed from a single block.</summary>
-    public int MaxCodeBytes { get; set; } = 65536;
+    public int MaxCodeBytes { get; init; } = 65536;
 
     /// <summary>Maximum number of fenced code blocks scanned per response.</summary>
-    public int MaxCodeBlocks { get; set; } = 4;
+    public int MaxCodeBlocks { get; init; } = 4;
 
     /// <summary>Capacity of the bounded work queue. Enqueues beyond this are dropped from sampling.</summary>
-    public int QueueCapacity { get; set; } = 256;
+    public int QueueCapacity { get; init; } = 256;
 
     /// <summary>Maximum number of gradings processed concurrently by the worker.</summary>
-    public int WorkerConcurrency { get; set; } = 2;
+    public int WorkerConcurrency { get; init; } = 2;
 
     /// <summary>
     /// Prefix applied to dimension keys when observing live scores into router memory, keeping heuristic
@@ -37,7 +37,7 @@ public sealed class QualityOptions
     /// <c>(live:dimension, model)</c> score rows in router memory are keyed on this string, so altering it
     /// would orphan every score the router has already learned rather than migrating it.
     /// </remarks>
-    public string LiveMemoryPrefix { get; set; } = "live:";
+    public string LiveMemoryPrefix { get; init; } = "live:";
 
     /// <summary>
     /// How long the aggregator holds a completed static verdict waiting for the judge's grade before
@@ -45,14 +45,14 @@ public sealed class QualityOptions
     /// generous, because the wait is entirely off the routing hot path, but bounded so a wedged judge
     /// backbone cannot pin held results in memory indefinitely.
     /// </summary>
-    public int JudgeJoinTimeoutMs { get; set; } = 60_000;
+    public int JudgeJoinTimeoutMs { get; init; } = 60_000;
 
     /// <summary>
     /// Maximum number of static verdicts held awaiting a judge grade before the oldest are evicted (and
     /// written static-only). Defaults to 2,000, matching <c>JudgeOptions.CacheCapacity</c> so the two
     /// sides of the join are sized alike.
     /// </summary>
-    public int JudgeJoinCapacity { get; set; } = 2_000;
+    public int JudgeJoinCapacity { get; init; } = 2_000;
 
     /// <summary>
     /// Identifies the current scoring configuration, stamped onto each rescanned transcript row so the
@@ -65,7 +65,7 @@ public sealed class QualityOptions
     /// freezes the corpus at the old scorer's verdicts, and bumping it needlessly re-grades every row (and,
     /// once LLM graders are registered, pays for every one of them again).
     /// </remarks>
-    public string ScorerVersion { get; set; } = "2.0";
+    public string ScorerVersion { get; init; } = "2.0";
 
     /// <summary>Per-dimension scoring weights, keyed by dimension name.</summary>
     public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; set; } =
@@ -94,13 +94,13 @@ public sealed class DimensionWeightOptions
     public static DimensionWeightOptions Default { get; } = new() { Syntax = 0.4, Analysis = 0.2, Judge = 0.4 };
 
     /// <summary>Weight applied to the structural-validity signal (s_syntax): does the snippet parse?</summary>
-    public double Syntax { get; set; } = 0.4;
+    public double Syntax { get; init; } = 0.4;
 
     /// <summary>
     /// Weight applied to the composed static-analysis signal (s_analysis): diagnostic severity, placeholder
     /// and truncation detection, and complexity - everything provable about the code without running it.
     /// </summary>
-    public double Analysis { get; set; } = 0.2;
+    public double Analysis { get; init; } = 0.2;
 
     /// <summary>
     /// Weight applied to the G-Eval judge's grade (s_judge). Dropped from the normalization whenever the
@@ -108,5 +108,5 @@ public sealed class DimensionWeightOptions
     /// <see cref="QualityOptions.JudgeJoinTimeoutMs"/>, so a static-only score spans the full [0,1] range
     /// rather than being capped by an axis that could never be filled.
     /// </summary>
-    public double Judge { get; set; } = 0.4;
+    public double Judge { get; init; } = 0.4;
 }

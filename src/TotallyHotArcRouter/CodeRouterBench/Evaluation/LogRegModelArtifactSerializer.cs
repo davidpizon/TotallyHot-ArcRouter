@@ -122,22 +122,22 @@ public static class LogRegModelArtifactSerializer
     {
         /// <summary>Gets or sets the fixed TF-IDF vocabulary, in index order.</summary>
         [JsonPropertyName("vocabulary")]
-        public List<string> Vocabulary { get; set; } = [];
+        public List<string> Vocabulary { get; init; } = [];
 
         /// <summary>Gets or sets the per-term inverse document frequency weights, same index order as <see cref="Vocabulary"/>.</summary>
         [JsonPropertyName("inverseDocumentFrequency")]
-        public List<double> InverseDocumentFrequency { get; set; } = [];
+        public List<double> InverseDocumentFrequency { get; init; } = [];
 
         /// <summary>Gets or sets the per-class weight vectors, keyed by canonicalized model id.</summary>
         [JsonPropertyName("classWeights")]
-        public Dictionary<string, double[]> ClassWeights { get; set; } = [];
+        public Dictionary<string, double[]> ClassWeights { get; init; } = [];
 
         /// <summary>Gets or sets whether this artifact is a hand-built placeholder rather than a real training run.</summary>
         [JsonPropertyName("isPlaceholder")]
-        public bool IsPlaceholder { get; set; }
+        public bool IsPlaceholder { get; init; }
 
         /// <summary>Gets or sets the human-readable training provenance string.</summary>
         [JsonPropertyName("trainedFrom")]
-        public string TrainedFrom { get; set; } = string.Empty;
+        public string TrainedFrom { get; init; } = string.Empty;
     }
 }

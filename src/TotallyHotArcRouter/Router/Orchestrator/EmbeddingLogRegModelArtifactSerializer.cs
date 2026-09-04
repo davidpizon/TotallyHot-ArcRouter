@@ -113,29 +113,29 @@ public static class EmbeddingLogRegModelArtifactSerializer
     {
         /// <summary>Gets or sets the embedding dimension the artifact was trained at.</summary>
         [JsonPropertyName("embeddingDimension")]
-        public int EmbeddingDimension { get; set; }
+        public int EmbeddingDimension { get; init; }
 
         /// <summary>Gets or sets the per-class weight vectors, keyed by canonicalized model id.</summary>
         [JsonPropertyName("classWeights")]
-        public Dictionary<string, double[]> ClassWeights { get; set; } = [];
+        public Dictionary<string, double[]> ClassWeights { get; init; } = [];
 
         /// <summary>Gets or sets the human-readable training provenance string.</summary>
         [JsonPropertyName("trainedFrom")]
-        public string TrainedFrom { get; set; } = string.Empty;
+        public string TrainedFrom { get; init; } = string.Empty;
 
         /// <summary>Gets or sets the number of OOD bootstrap tasks that contributed to training.</summary>
         [JsonPropertyName("bootstrapTaskCount")]
-        public int BootstrapTaskCount { get; set; }
+        public int BootstrapTaskCount { get; init; }
 
         /// <summary>Gets or sets the number of live memory entries that contributed to training.</summary>
         [JsonPropertyName("memoryEntryCount")]
-        public int MemoryEntryCount { get; set; }
+        public int MemoryEntryCount { get; init; }
 
         /// <summary>
         /// Gets or sets the identity of the embedding model this artifact was fitted against, or null for a
         /// pre-provenance artifact.
         /// </summary>
         [JsonPropertyName("embeddingModel")]
-        public string? EmbeddingModel { get; set; }
+        public string? EmbeddingModel { get; init; }
     }
 }

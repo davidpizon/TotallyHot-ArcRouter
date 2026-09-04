@@ -56,5 +56,21 @@ exclude:
       - TotallyHotArcRouter.Gui.Console.Tests
       - TotallyHotArcRouter.Gui.Telemetry.Tests
 
+  # ------------------------------------------------------------------------------------------------
+  # "This property needs no setter."
+  #
+  # All 13 sites are places where the writer is not C# code the analyzer can follow:
+  #   - 11 are options classes bound with `configuration.GetSection(...).Bind(options)`. The binder
+  #     assigns through the property setter by reflection, so removing the setter does not fail the
+  #     build - it makes the option silently keep its default and ignore appsettings.json, which no
+  #     test would catch.
+  #   - 2 are DialectDelimiter's validating overrides of a positional record's properties. That file's
+  #     own comment records why `init` is load-bearing there: `with` copies set `init` properties
+  #     directly, bypassing the field initializer that performs the validation.
+  #
+  # PropertyCanBeMadeInitOnly stays enabled and has been applied - `init` keeps a setter, so binding
+  # and System.Text.Json both still work; it is only the setter's removal that breaks them.
+  - name: AutoPropertyCanBeMadeGetOnly.Global
+
 dotnet:
   solution: src/TotallyHotArcRouter.Qodana.slnx
