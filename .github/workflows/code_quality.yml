@@ -28,7 +28,7 @@ jobs:
               env:
                   QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
             - name: 'Upload SARIF to GitHub code scanning'
-              uses: github/codeql-action/upload-sarif@v3
+              uses: github/codeql-action/upload-sarif@v4
               if: ${{ always() }}  # publish findings even when the scan trips its quality gate
               with:
                   sarif_file: ${{ runner.temp }}/qodana/results/qodana.sarif.json
