@@ -70,7 +70,7 @@ public class TranscriptScoreObserverTests
         public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
+            return Task.FromResult<IReadOnlyList<long>>([]);
         }
 
         public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)

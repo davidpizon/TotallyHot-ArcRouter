@@ -42,7 +42,7 @@ internal sealed class ConstrainedToolCallStreamTranslator : IStreamTranslator
     private readonly ToolCallObservationRecorder _recorder;
     private readonly EnvelopeContentScanner _scanner = new();
 
-    private readonly List<byte> _sseBuffer = new();
+    private readonly List<byte> _sseBuffer = [];
     private bool _abandoned;
 
     private bool _disarmed;
@@ -146,7 +146,7 @@ internal sealed class ConstrainedToolCallStreamTranslator : IStreamTranslator
     private byte[]? ProcessEvent(byte[] eventBytes)
     {
         var payload = ExtractDataPayload(eventBytes);
-        if (payload is null || payload == "[DONE]") return null;
+        if (payload is null or "[DONE]") return null;
 
         JsonObject chunk;
         try
@@ -214,8 +214,8 @@ internal sealed class ConstrainedToolCallStreamTranslator : IStreamTranslator
         // Clone the original delta's other fields (role, or anything a future upstream adds) - only
         // "content" is ever replaced or removed.
         var outputDelta = originalDelta is not null
-            ? originalDelta.DeepClone() as JsonObject ?? new JsonObject()
-            : new JsonObject();
+            ? originalDelta.DeepClone() as JsonObject ?? []
+            : [];
         outputDelta.Remove("content");
 
         if (prose.Length > 0) outputDelta["content"] = prose;
@@ -346,7 +346,7 @@ internal sealed class ConstrainedToolCallStreamTranslator : IStreamTranslator
 
         if (choice["logprobs"] is { } logprobs) outputChoice["logprobs"] = logprobs.DeepClone();
 
-        var outputChunk = chunk.DeepClone() as JsonObject ?? new JsonObject();
+        var outputChunk = chunk.DeepClone() as JsonObject ?? [];
         outputChunk["choices"] = new JsonArray { outputChoice };
 
         var json = JsonSerializer.Serialize(value: outputChunk, options: SerializerOptions);

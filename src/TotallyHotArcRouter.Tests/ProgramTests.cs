@@ -111,7 +111,7 @@ public class ProgramTests
     {
         var host = BuildHostWithMinimalModelRouting(["--model", "not-a-real-model"]);
 
-        Assert.Throws<InvalidOperationException>(() => host.Services.GetRequiredService<RequestInterceptor>());
+        Assert.Throws<InvalidOperationException>(host.Services.GetRequiredService<RequestInterceptor>);
     }
 
     [Fact]

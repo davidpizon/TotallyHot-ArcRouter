@@ -37,7 +37,7 @@ public sealed class PriceSourceToggleStore : IDisposable
     private readonly PriceSourceRepository _repository;
 
     private readonly Dictionary<string, CancellationTokenSource> _sourceTokens =
-        new(StringComparer.OrdinalIgnoreCase);
+        [with(StringComparer.OrdinalIgnoreCase)];
 
     private bool _disposed;
 

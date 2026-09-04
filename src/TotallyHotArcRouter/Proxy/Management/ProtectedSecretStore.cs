@@ -234,13 +234,13 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     [SupportedOSPlatform("windows")]
     private Dictionary<string, string> LoadMapWindows()
     {
-        if (!File.Exists(_path)) return new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!File.Exists(_path)) return [with(StringComparer.Ordinal)];
 
         var encrypted = File.ReadAllBytes(_path);
         var json = ProtectedData.Unprotect(encryptedData: encrypted, optionalEntropy: Entropy,
             scope: DataProtectionScope.CurrentUser);
         return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
-               ?? new Dictionary<string, string>(StringComparer.Ordinal);
+               ?? [with(StringComparer.Ordinal)];
     }
 
     /// <summary>

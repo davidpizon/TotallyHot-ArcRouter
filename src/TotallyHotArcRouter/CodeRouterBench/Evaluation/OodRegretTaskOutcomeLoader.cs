@@ -91,7 +91,7 @@ public static class OodRegretTaskOutcomeLoader
 
                 if (!cellsByTask.TryGetValue(key: taskId, value: out var cells))
                 {
-                    cells = new Dictionary<string, RegretOutcomeCell>(StringComparer.Ordinal);
+                    cells = [with(StringComparer.Ordinal)];
                     cellsByTask[taskId] = cells;
                 }
 

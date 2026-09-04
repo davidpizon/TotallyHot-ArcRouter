@@ -69,7 +69,7 @@ public sealed class PriceCatalogOptions
     /// and is managed from Governance → Price Sources (D6). Recognized keys are <see cref="KnownSources"/>'
     /// names; naming any other is a hard error until its client exists (see <see cref="EnsureValid"/>).
     /// </summary>
-    public Dictionary<string, PriceSourceOptions> Sources { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, PriceSourceOptions> Sources { get; init; } = [with(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations, mirroring

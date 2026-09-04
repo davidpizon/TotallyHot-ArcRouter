@@ -114,7 +114,7 @@ public class EmbeddingBackfillServiceTests
             _getTranscriptResult = getTranscriptResult;
         }
 
-        public Dictionary<long, long> LinkedEntries { get; } = new();
+        public Dictionary<long, long> LinkedEntries { get; } = [];
 
         public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
         {

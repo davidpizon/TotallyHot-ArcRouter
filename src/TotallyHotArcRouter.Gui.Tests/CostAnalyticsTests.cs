@@ -56,7 +56,7 @@ public sealed class CostAnalyticsTests
         using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
-            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
+            p.Add(parameterSelector: c => c.Conversations, value: []));
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Routing ROI"), timeout: WaitTimeout);
     }
@@ -67,7 +67,7 @@ public sealed class CostAnalyticsTests
         using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
-            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
+            p.Add(parameterSelector: c => c.Conversations, value: []));
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click();
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Stepped cumulative cost"),
@@ -80,7 +80,7 @@ public sealed class CostAnalyticsTests
         using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
-            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
+            p.Add(parameterSelector: c => c.Conversations, value: []));
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Day").Click();
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Past 24 hours"), timeout: WaitTimeout);
@@ -131,7 +131,7 @@ public sealed class CostAnalyticsTests
         using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
-            p.Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>()));
+            p.Add(parameterSelector: c => c.Conversations, value: []));
 
         // MockData.BuildMetricHistory always fills the Week range (the default) once the (failed) rollup
         // load falls back to it, so a chart eventually renders.

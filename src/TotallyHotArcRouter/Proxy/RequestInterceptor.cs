@@ -280,10 +280,9 @@ public class RequestInterceptor
         var models = _modelRouteResolver.ListModels();
 
         if (_forcedModelName is not null)
-            return models
+            return [.. models
                 .Where(m => string.Equals(a: m.ModelName, b: _forcedModelName,
-                    comparisonType: StringComparison.OrdinalIgnoreCase))
-                .ToList();
+                    comparisonType: StringComparison.OrdinalIgnoreCase))];
 
         if (models.Count == 0) return models;
 
@@ -701,16 +700,14 @@ public class RequestInterceptor
     {
         var candidates = _routingCandidateBuilder.GetEligibleRoutes([]);
         if (_routerMemory is not null && candidates.Count > 0)
-            candidates = candidates
+            candidates = [.. candidates
                 .OrderByDescending(e =>
                     _routerMemory.GetAverageScore(dimension: liveDimension, model: e.ModelName) ??
-                    RoutingCandidateBuilder.ColdStartRankingScore)
-                .ToList();
+                    RoutingCandidateBuilder.ColdStartRankingScore)];
 
-        return candidates
+        return [.. candidates
             .Select(e =>
-                new RoutingCandidate(ModelName: e.Route.ModelName, Provider: e.Route.Provider, IsFree: e.Route.IsFree))
-            .ToList();
+                new RoutingCandidate(ModelName: e.Route.ModelName, Provider: e.Route.Provider, IsFree: e.Route.IsFree))];
     }
 
     /// <summary>

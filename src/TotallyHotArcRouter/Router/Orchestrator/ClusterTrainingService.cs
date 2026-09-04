@@ -188,7 +188,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         var clusterSizes = new int[trainResult.ChosenK];
         var histograms = new Dictionary<string, int>[trainResult.ChosenK];
         for (var c = 0; c < trainResult.ChosenK; c++)
-            histograms[c] = new Dictionary<string, int>(StringComparer.Ordinal);
+            histograms[c] = [with(StringComparer.Ordinal)];
 
         for (var i = 0; i < samples.Count; i++)
         {
@@ -252,7 +252,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         var promptTextByMemoryEntryId = await _transcriptStore.LoadPromptTextByMemoryEntryIdAsync(cancellationToken)
             .ConfigureAwait(false);
         if (promptTextByMemoryEntryId.Count == 0)
-            return [.. Enumerable.Repeat(element: (IReadOnlyList<string>)Array.Empty<string>(), count: chosenK)];
+            return [.. Enumerable.Repeat(element: (IReadOnlyList<string>)[], count: chosenK)];
 
         var clusterDocuments = new List<string>[chosenK];
         for (var c = 0; c < chosenK; c++) clusterDocuments[c] = [];

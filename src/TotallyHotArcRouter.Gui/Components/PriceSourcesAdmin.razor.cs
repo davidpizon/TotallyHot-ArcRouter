@@ -182,7 +182,7 @@ public partial class PriceSourcesAdmin
     {
         if (_dragName is null) return;
 
-        _order = Store.Sources.ToList();
+        _order = [.. Store.Sources];
         _dragActive = true;
         await InvokeAsync(StateHasChanged);
     }

@@ -758,7 +758,7 @@ public class ToolCallNormalizingTranslatorTests
     private static string AllContent(IEnumerable<JsonDocument> chunks)
     {
         return string.Concat(chunks
-            .Select(c => Delta(c))
+            .Select(Delta)
             .Where(d => d.TryGetProperty(propertyName: "content", value: out _))
             .Select(d => d.GetProperty("content").GetString()));
     }
@@ -768,7 +768,7 @@ public class ToolCallNormalizingTranslatorTests
         return
         [
             .. chunks
-                .Select(c => Delta(c))
+                .Select(Delta)
                 .Where(d => d.TryGetProperty(propertyName: "tool_calls", value: out _))
                 .SelectMany(d => d.GetProperty("tool_calls").EnumerateArray())
         ];

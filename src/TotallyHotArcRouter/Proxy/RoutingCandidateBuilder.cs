@@ -192,11 +192,10 @@ internal sealed class RoutingCandidateBuilder(
     public List<ResolvedModelRoute> RankEligibleModels(IReadOnlyCollection<string> excludeModelNames,
         string liveDimension)
     {
-        return GetEligibleRoutes(excludeModelNames)
+        return [.. GetEligibleRoutes(excludeModelNames)
             .OrderByDescending(e =>
                 routerMemory?.GetAverageScore(dimension: liveDimension, model: e.ModelName) ?? ColdStartRankingScore)
-            .Select(e => e.Route)
-            .ToList();
+            .Select(e => e.Route)];
     }
 
     /// <summary>

@@ -42,7 +42,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
 
     private readonly IQualityScoreObserver _observer;
 
-    private readonly Dictionary<string, Entry> _pending = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Entry> _pending = [with(StringComparer.Ordinal)];
     private readonly IQualityScorer _scorer;
     private readonly TimeProvider _timeProvider;
 

@@ -55,7 +55,7 @@ public sealed class AnthropicOnBedrockPayloadTranslator : IBedrockPayloadTransla
 
         var bedrock = new JsonObject { ["anthropic_version"] = BedrockAnthropicVersion };
 
-        var messages = root["messages"] as JsonArray ?? new JsonArray();
+        var messages = root["messages"] as JsonArray ?? [];
         var (system, translatedMessages) = AnthropicPayloadTranslator.TranslateMessages(messages);
 
         if (system is not null) bedrock["system"] = system;

@@ -21,7 +21,7 @@ public sealed class PendingRequestCostCache
 {
     private readonly int _capacity;
 
-    private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Entry> _entries = [with(StringComparer.Ordinal)];
     private readonly Queue<string> _insertionOrder = new();
     private readonly object _lock = new();
     private readonly TimeProvider _timeProvider;

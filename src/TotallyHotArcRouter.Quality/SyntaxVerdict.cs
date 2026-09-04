@@ -24,7 +24,7 @@ public sealed record SyntaxVerdict(
     public static SyntaxVerdict Valid(CodeLanguage language, bool isAuthoritative)
     {
         return new SyntaxVerdict(Language: language, true, IsAuthoritative: isAuthoritative,
-            Errors: Array.Empty<string>());
+            Errors: []);
     }
 
     /// <summary>Creates an invalid verdict carrying the supplied diagnostics.</summary>

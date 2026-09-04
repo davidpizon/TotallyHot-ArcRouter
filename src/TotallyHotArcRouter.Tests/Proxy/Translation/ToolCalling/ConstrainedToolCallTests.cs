@@ -532,7 +532,7 @@ public class ConstrainedToolCallTests
     private static List<JsonObject> CallBranches(JsonObject rewritten)
     {
         var items = rewritten["response_format"]!["json_schema"]!["schema"]!["properties"]!["tool_calls"]!["items"]!;
-        return [.. Assert.IsType<JsonArray>(items["oneOf"]).Select(b => Assert.IsType<JsonObject>(b))];
+        return [.. Assert.IsType<JsonArray>(items["oneOf"]).Select(Assert.IsType<JsonObject>)];
     }
 
     private static List<string> CallBranchNames(JsonObject rewritten)

@@ -33,15 +33,15 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
 
     // Per-content-block-index state, keyed by Anthropic's own content_block index (not necessarily
     // contiguous with the OpenAI tool_calls index, since text/thinking blocks share the same index space).
-    private readonly Dictionary<int, string> _blockTypes = new();
+    private readonly Dictionary<int, string> _blockTypes = [];
 
     // Raw upstream bytes not yet forming a complete SSE event. Carriage returns are stripped on
     // ingestion so the event delimiter is always "\n\n".
-    private readonly List<byte> _buffer = new();
+    private readonly List<byte> _buffer = [];
     private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-    private readonly Dictionary<int, StringBuilder> _thinkingSignature = new();
-    private readonly Dictionary<int, StringBuilder> _thinkingText = new();
-    private readonly Dictionary<int, int> _toolCallOpenAiIndex = new();
+    private readonly Dictionary<int, StringBuilder> _thinkingSignature = [];
+    private readonly Dictionary<int, StringBuilder> _thinkingText = [];
+    private readonly Dictionary<int, int> _toolCallOpenAiIndex = [];
     private string? _finishReason;
 
     // Stable across the whole stream, seeded from message_start.
@@ -350,7 +350,7 @@ public sealed class AnthropicStreamTranslator : IStreamTranslator
 
         if (evt["usage"] is JsonObject usage)
         {
-            _usage ??= new JsonObject();
+            _usage ??= [];
             foreach (var (key, value) in usage) _usage[key] = value?.DeepClone();
         }
 

@@ -180,26 +180,23 @@ public sealed class UsageRollupStore : IUsageRollupStore, IDisposable
         var rows = ReadRawBuckets(from: from, to: to, bucketWidth: bucketWidth);
 
         if (string.Equals(a: groupBy, b: "day", comparisonType: StringComparison.OrdinalIgnoreCase))
-            return rows
+            return [.. rows
                 .GroupBy(r => r.BucketStartUtc)
                 .OrderBy(g => g.Key)
                 .Select(g => Summarize(bucketStartUtc: g.Key, bucketWidth: bucketWidth,
-                    groupKey: g.Key.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture), rows: g))
-                .ToList();
+                    groupKey: g.Key.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture), rows: g))];
 
         if (string.Equals(a: groupBy, b: "model", comparisonType: StringComparison.OrdinalIgnoreCase))
-            return rows
+            return [.. rows
                 .GroupBy(r => r.Model)
                 .Select(g => Summarize(bucketStartUtc: from, bucketWidth: bucketWidth, groupKey: g.Key, rows: g))
-                .OrderByDescending(b => b.CostUsd)
-                .ToList();
+                .OrderByDescending(b => b.CostUsd)];
 
         if (string.Equals(a: groupBy, b: "provider", comparisonType: StringComparison.OrdinalIgnoreCase))
-            return rows
+            return [.. rows
                 .GroupBy(r => r.Provider)
                 .Select(g => Summarize(bucketStartUtc: from, bucketWidth: bucketWidth, groupKey: g.Key, rows: g))
-                .OrderByDescending(b => b.CostUsd)
-                .ToList();
+                .OrderByDescending(b => b.CostUsd)];
 
         throw new ArgumentOutOfRangeException(paramName: nameof(groupBy), actualValue: groupBy,
             message: "groupBy must be 'model', 'provider', or 'day'.");

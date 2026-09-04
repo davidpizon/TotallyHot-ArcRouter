@@ -73,11 +73,10 @@ public static class PersistedSessionAggregator
     {
         ArgumentNullException.ThrowIfNull(transcripts);
 
-        return transcripts
+        return [.. transcripts
             .GroupBy(keySelector: t => t.SessionId, comparer: StringComparer.Ordinal)
             .Select(BuildConversation)
-            .OrderByDescending(c => c.LastTimestampUtc)
-            .ToList();
+            .OrderByDescending(c => c.LastTimestampUtc)];
     }
 
     /// <summary>

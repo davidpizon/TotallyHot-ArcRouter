@@ -23,7 +23,7 @@ public class EmbeddingOptionsTests
     {
         var options = new EmbeddingOptions { ModelUrl = "not-a-url" };
 
-        Assert.Throws<ArgumentException>(() => options.EnsureValid());
+        Assert.Throws<ArgumentException>(options.EnsureValid);
     }
 
     [Fact]
@@ -31,7 +31,7 @@ public class EmbeddingOptionsTests
     {
         var options = new EmbeddingOptions { TokenizerJsonUrl = "not-a-url" };
 
-        Assert.Throws<ArgumentException>(() => options.EnsureValid());
+        Assert.Throws<ArgumentException>(options.EnsureValid);
     }
 
     [Fact]

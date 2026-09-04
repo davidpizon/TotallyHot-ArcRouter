@@ -98,9 +98,7 @@ public sealed class PersistedSessionStore : IDisposable
             var result = await _client.ListAsync(limit: RequestLimit, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             TranscriptCaptureEnabled = result.TranscriptCaptureEnabled;
-            Sessions = PersistedSessionAggregator.Aggregate(result.Transcripts)
-                .Select(PersistedSessionMapper.ToModel)
-                .ToList();
+            Sessions = [.. PersistedSessionAggregator.Aggregate(result.Transcripts).Select(PersistedSessionMapper.ToModel)];
             IsReachable = true;
         }
         catch (PersistedSessionsClientException ex)

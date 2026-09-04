@@ -78,7 +78,7 @@ public sealed class ConsoleTabTests
         var cut = ctx.Render<ConsoleTab>();
         cut.Markup.Should().Contain("Auto-Scroll: ON");
 
-        cut.InvokeAsync(() => cut.Instance.OnManualScrollUp());
+        cut.InvokeAsync(cut.Instance.OnManualScrollUp);
 
         cut.Markup.Should().Contain("Auto-Scroll: OFF");
     }
@@ -90,7 +90,7 @@ public sealed class ConsoleTabTests
 
         var cut = ctx.Render<ConsoleTab>();
 
-        var act = () => cut.Dispose();
+        var act = cut.Dispose;
         act.Should().NotThrow();
     }
 }

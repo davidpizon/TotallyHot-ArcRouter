@@ -68,7 +68,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         // body reaches here (see RequestInterceptor.ResolveModelRouteAsync) - copied through as-is.
         if (root["model"]?.GetValue<string>() is { Length: > 0 } model) anthropic["model"] = model;
 
-        var messages = root["messages"] as JsonArray ?? new JsonArray();
+        var messages = root["messages"] as JsonArray ?? [];
         var (system, translatedMessages) = TranslateMessages(messages);
 
         if (system is not null) anthropic["system"] = system;
@@ -159,12 +159,12 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
                     case "thinking":
                         if (block["thinking"]?.GetValue<string>() is { } thinking) reasoningText.Append(thinking);
 
-                        thinkingBlocks ??= new JsonArray();
+                        thinkingBlocks ??= [];
                         thinkingBlocks.Add(block.DeepClone());
                         break;
 
                     case "redacted_thinking":
-                        thinkingBlocks ??= new JsonArray();
+                        thinkingBlocks ??= [];
                         thinkingBlocks.Add(block.DeepClone());
                         break;
                 }
@@ -295,7 +295,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
         // own empty-contents guard.
         if (result.Count == 0)
             AppendMergedContent(messages: result, role: "user",
-                blocks: new JsonArray { new JsonObject { ["type"] = "text", ["text"] = " " } });
+                blocks: [new JsonObject { ["type"] = "text", ["text"] = " " }]);
 
         var system = systemParts.Count > 0 ? string.Join(separator: "\n\n", values: systemParts) : null;
         return (system, result);
@@ -309,7 +309,7 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
     {
         var text = PayloadTranslationHelpers.ExtractText(message["content"]);
         var block = new JsonObject { ["type"] = "text", ["text"] = string.IsNullOrEmpty(text) ? " " : text };
-        AppendMergedContent(messages: messages, role: "user", blocks: new JsonArray { block });
+        AppendMergedContent(messages: messages, role: "user", blocks: [block]);
     }
 
     /// <summary>
@@ -391,13 +391,13 @@ public sealed class AnthropicPayloadTranslator : IPayloadTranslator
                 ["content"] = content
             };
 
-            AppendMergedContent(messages: messages, role: "user", blocks: new JsonArray { block });
+            AppendMergedContent(messages: messages, role: "user", blocks: [block]);
             return;
         }
 
         if (content.Length > 0)
             AppendMergedContent(messages: messages, role: "user",
-                blocks: new JsonArray { new JsonObject { ["type"] = "text", ["text"] = $"Tool result: {content}" } });
+                blocks: [new JsonObject { ["type"] = "text", ["text"] = $"Tool result: {content}" }]);
     }
 
     /// <summary>

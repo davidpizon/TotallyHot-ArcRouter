@@ -48,7 +48,7 @@ public sealed class LiveStreamTests
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var cut = ctx.Render<LiveStream>(p => p
-            .Add(parameterSelector: c => c.Conversations, value: Array.Empty<Conversation>())
+            .Add(parameterSelector: c => c.Conversations, value: [])
             .Add(parameterSelector: c => c.SelectedId, value: string.Empty));
 
         cut.Markup.Should().Contain("No conversations yet.");

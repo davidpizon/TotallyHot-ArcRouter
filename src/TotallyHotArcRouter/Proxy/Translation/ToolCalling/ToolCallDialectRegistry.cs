@@ -224,11 +224,10 @@ internal static class ToolCallDialectRegistry
     /// rebuilt per request.
     /// </summary>
     public static char[] ScannableOpenerFirstChars { get; } =
-        ScannableDialects
+        [.. ScannableDialects
             .SelectMany(dialect => dialect.Delimiters)
             .Select(delimiter => delimiter.Open[0])
-            .Distinct()
-            .ToArray();
+            .Distinct()];
 
     // DeepSeek is deliberately absent. Its tool-call template uses special delimiter tokens built from
     // non-ASCII full-width characters, and registering a guessed spelling would be worse than

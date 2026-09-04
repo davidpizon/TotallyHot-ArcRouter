@@ -53,7 +53,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
 
         var gemini = new JsonObject();
 
-        var messages = root["messages"] as JsonArray ?? new JsonArray();
+        var messages = root["messages"] as JsonArray ?? [];
         var (systemInstruction, contents) = TranslateMessages(messages);
 
         if (systemInstruction is not null) gemini["system_instruction"] = systemInstruction;
@@ -254,7 +254,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
         };
 
         // Tool results are carried on a "user" turn in Gemini's alternation model.
-        AppendMergedContent(contents: contents, role: "user", parts: new JsonArray { part });
+        AppendMergedContent(contents: contents, role: "user", parts: [part]);
     }
 
     /// <summary>
@@ -321,7 +321,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
         }
 
         return declarations.Count > 0
-            ? new JsonArray { new JsonObject { ["functionDeclarations"] = declarations } }
+            ? [new JsonObject { ["functionDeclarations"] = declarations }]
             : null;
     }
 

@@ -57,7 +57,7 @@ public class RoutingOptionsTests
             AlwaysBaselineModel = "   "
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     /// <summary>
@@ -83,7 +83,7 @@ public class RoutingOptionsTests
             EmbeddingMemoryDatabasePath = "   "
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     /// <summary>
@@ -97,7 +97,7 @@ public class RoutingOptionsTests
             DefaultModel = "unknown-model"
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     /// <summary>
@@ -112,6 +112,6 @@ public class RoutingOptionsTests
             ExplorationRate = 0.2
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 }

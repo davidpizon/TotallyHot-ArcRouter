@@ -80,12 +80,12 @@ public class BudgetWindowTests
 
     public static TheoryData<BudgetWindow> WindowKinds()
     {
-        return new TheoryData<BudgetWindow>
-        {
+        return
+        [
             new BudgetWindow.Monthly(),
             new BudgetWindow.Weekly(),
             new BudgetWindow.RollingHours(5)
-        };
+        ];
     }
 
     [Theory]

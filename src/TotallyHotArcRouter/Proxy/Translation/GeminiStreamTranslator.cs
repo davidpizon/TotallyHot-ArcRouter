@@ -26,7 +26,7 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
     // Raw upstream bytes not yet forming a complete SSE event. Carriage returns are stripped on
     // ingestion so the event delimiter is always "\n\n" (Gemini's compact JSON never contains a raw
     // 0x0D byte - a CR inside a JSON string is the two-char escape \r, not a literal 0x0D).
-    private readonly List<byte> _buffer = new();
+    private readonly List<byte> _buffer = [];
     private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private bool _hasSeenToolCalls;
 
@@ -120,7 +120,7 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
     private byte[]? TranslateEvent(byte[] eventBytes)
     {
         var payload = ExtractDataPayload(eventBytes);
-        if (payload is null || payload == "[DONE]") return null;
+        if (payload is null or "[DONE]") return null;
 
         JsonObject chunk;
         try
@@ -171,7 +171,7 @@ public sealed class GeminiStreamTranslator : IStreamTranslator
                     }
                     else if (part["functionCall"] is JsonObject functionCall)
                     {
-                        toolCalls ??= new JsonArray();
+                        toolCalls ??= [];
                         toolCalls.Add(BuildToolCallDelta(functionCall));
                         _hasSeenToolCalls = true;
                     }

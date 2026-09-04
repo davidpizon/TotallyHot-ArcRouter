@@ -39,14 +39,14 @@ public class ModelRoutingOptionsTests
     {
         var options = new ModelRoutingOptions
         {
-            Providers = new Dictionary<string, ProviderOptions>(),
+            Providers = [],
             ModelList =
             [
                 new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }
             ]
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class ModelRoutingOptionsTests
             ]
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class ModelRoutingOptionsTests
             }
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class ModelRoutingOptionsTests
             ModelList = [new ModelRouteEntry { ModelName = "", Provider = "openai", ProviderModelId = "gpt-5.4" }]
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -108,6 +108,6 @@ public class ModelRoutingOptionsTests
             }
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 }

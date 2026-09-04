@@ -59,9 +59,8 @@ public static class TokenCompoundingSeries
     {
         ArgumentNullException.ThrowIfNull(turns);
 
-        return turns
+        return [.. turns
             .OrderBy(t => t.TurnNumber)
-            .Select(t => t.PromptTokens + t.CompletionTokens)
-            .ToList();
+            .Select(t => t.PromptTokens + t.CompletionTokens)];
     }
 }

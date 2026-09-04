@@ -159,7 +159,7 @@ public sealed class RouterSettingsAdminClient
             EmbeddingMemoryCapacity: response.EmbeddingMemoryCapacity,
             JudgeEnabled: response.JudgeEnabled,
             JudgeModelName: response.JudgeModelName,
-            EligibleJudgeModels: response.EligibleJudgeModels.ToList(),
+            EligibleJudgeModels: [.. response.EligibleJudgeModels],
             TranscriptCaptureEnabled: response.TranscriptCaptureEnabled);
     }
 

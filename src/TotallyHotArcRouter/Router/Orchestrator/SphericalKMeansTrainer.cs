@@ -60,7 +60,7 @@ public static class SphericalKMeansTrainer
                     paramName: nameof(embeddings));
 
         var unitEmbeddings = embeddings.Select(Normalize).ToArray();
-        var effectiveWeights = weights ?? Enumerable.Repeat(1.0, count: embeddings.Count).ToArray();
+        var effectiveWeights = weights ?? [.. Enumerable.Repeat(1.0, count: embeddings.Count)];
 
         // A k above the sample count cannot produce distinct non-empty clusters - cap the sweep to what's
         // achievable rather than throwing, since callers already gate on a minimum row count upstream.

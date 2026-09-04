@@ -69,7 +69,7 @@ public sealed class OodClusterBootstrapSampleSource
             command.CommandText = "SELECT task_id, raw_json FROM benchmark_ood_tasks;";
             using var reader = command.ExecuteReader();
 
-            taskPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
+            taskPrompts = [with(StringComparer.Ordinal)];
             while (reader.Read())
             {
                 var taskId = reader.GetString(0);

@@ -120,7 +120,7 @@ internal sealed class InMemoryProviderConfigStore : IProviderConfigStore
         return new ModelRoutingOptions
         {
             Providers = options.Providers is null
-                ? new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                ? [with(StringComparer.OrdinalIgnoreCase)]
                 : new Dictionary<string, ProviderOptions>(dictionary: options.Providers,
                     comparer: StringComparer.OrdinalIgnoreCase),
             ModelList = options.ModelList is null ? [] : [.. options.ModelList]

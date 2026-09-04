@@ -165,7 +165,7 @@ public static class Program
     /// </summary>
     private static string[] RemoveAt(string[] args, int index)
     {
-        return args.Where((_, i) => i != index).ToArray();
+        return [.. args.Where((_, i) => i != index)];
     }
 
     /// <summary>

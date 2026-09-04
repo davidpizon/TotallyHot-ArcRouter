@@ -26,7 +26,7 @@ public static class ClusterTermExtractor
 
         var totalDocumentCount = clusterDocuments.Sum(docs => docs.Count);
         if (totalDocumentCount == 0)
-            return clusterDocuments.Select(_ => (IReadOnlyList<string>)Array.Empty<string>()).ToList();
+            return [.. clusterDocuments.Select(_ => (IReadOnlyList<string>)[])];
 
         // Document frequency across every cluster, needed for the inverse-document-frequency weight below.
         var documentFrequency = new Dictionary<string, int>(StringComparer.Ordinal);

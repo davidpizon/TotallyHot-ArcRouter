@@ -300,7 +300,7 @@ public sealed class ProviderAdminModelsTests
         // never select - and one listed twice is a duplicated option.
         Assert.Equal(
             expected: Enum.GetValues<ProviderType>().OrderBy(t => t).ToList(),
-            actual: ProviderTemplates.Ordered.OrderBy(t => t).ToList());
+            actual: [.. ProviderTemplates.Ordered.OrderBy(t => t)]);
         Assert.Equal(expected: ProviderTemplates.Ordered.Count, actual: ProviderTemplates.Ordered.Distinct().Count());
     }
 

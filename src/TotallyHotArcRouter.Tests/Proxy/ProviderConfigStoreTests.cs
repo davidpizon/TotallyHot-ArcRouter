@@ -171,7 +171,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
 
         var invalid = new ModelRoutingOptions
         {
-            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase),
+            Providers = [with(StringComparer.OrdinalIgnoreCase)],
             // Model references a provider that doesn't exist -> EnsureValid rejects it.
             ModelList = [new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "nope", ProviderModelId = "gpt-5.4" }]
         };

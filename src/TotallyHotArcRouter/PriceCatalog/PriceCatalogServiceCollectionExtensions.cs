@@ -124,7 +124,7 @@ internal static class PriceCatalogServiceCollectionExtensions
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(CostReconciliationOptions.SectionName).Bind(options));
         services.AddSingleton<IProviderCostReconciliationStore, ProviderCostReconciliationStore>();
-        services.AddSingleton<IReadOnlyList<IProviderCostReconciler>>(sp => BuildCostReconcilers(sp));
+        services.AddSingleton<IReadOnlyList<IProviderCostReconciler>>(BuildCostReconcilers);
         services.AddSingleton<IEnumerable<IProviderCostReconciler>>(sp =>
             sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>());
         // Rebuilds the reconciler list from scratch on every reconciliation cycle

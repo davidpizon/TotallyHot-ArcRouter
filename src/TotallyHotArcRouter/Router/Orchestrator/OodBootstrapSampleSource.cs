@@ -73,7 +73,7 @@ public sealed class OodBootstrapSampleSource
         {
             using var connection = _database.OpenConnection();
 
-            taskPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
+            taskPrompts = [with(StringComparer.Ordinal)];
             using (var tasksCommand = connection.CreateCommand())
             {
                 tasksCommand.CommandText = "SELECT task_id, raw_json FROM benchmark_ood_tasks;";
@@ -86,7 +86,7 @@ public sealed class OodBootstrapSampleSource
                 }
             }
 
-            taskResults = new Dictionary<string, List<(string, bool)>>(StringComparer.Ordinal);
+            taskResults = [with(StringComparer.Ordinal)];
             using (var resultsCommand = connection.CreateCommand())
             {
                 resultsCommand.CommandText = "SELECT task_id, model, resolved FROM benchmark_ood_results;";

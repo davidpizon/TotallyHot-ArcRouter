@@ -163,7 +163,7 @@ public class SessionIdResolverTests
     [Fact]
     public void Resolve_EmptyBodyObject_ReturnsNull()
     {
-        var result = _resolver.Resolve(headers: EmptyHeaders(), body: new JsonObject());
+        var result = _resolver.Resolve(headers: EmptyHeaders(), body: []);
 
         Assert.Null(result);
     }

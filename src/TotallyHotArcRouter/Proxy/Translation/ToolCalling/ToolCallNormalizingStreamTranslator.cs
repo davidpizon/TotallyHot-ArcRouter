@@ -58,7 +58,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
     // Raw upstream bytes not yet forming a complete SSE event - the same "\n\n"-delimited framing every
     // stream translator here implements; CR stripped on ingestion.
-    private readonly List<byte> _sseBuffer = new();
+    private readonly List<byte> _sseBuffer = [];
     private DialectDelimiter? _activeDelimiter;
     private ToolCallDialect? _activeDialect;
 
@@ -204,7 +204,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
     private byte[]? ProcessEvent(byte[] eventBytes)
     {
         var payload = ExtractDataPayload(eventBytes);
-        if (payload is null || payload == "[DONE]") return null;
+        if (payload is null or "[DONE]") return null;
 
         JsonObject chunk;
         try
@@ -292,8 +292,8 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
         // Clone the original delta's other fields (role, or anything a future upstream adds) - only
         // "content" is ever replaced or removed.
         var outputDelta = originalDelta is not null
-            ? originalDelta.DeepClone() as JsonObject ?? new JsonObject()
-            : new JsonObject();
+            ? originalDelta.DeepClone() as JsonObject ?? []
+            : [];
         outputDelta.Remove("content");
 
         var emittedContent = emitted.ToString();
@@ -322,7 +322,7 @@ internal sealed class ToolCallNormalizingStreamTranslator : IStreamTranslator
 
         if (choice["logprobs"] is { } logprobs) outputChoice["logprobs"] = logprobs.DeepClone();
 
-        var outputChunk = chunk.DeepClone() as JsonObject ?? new JsonObject();
+        var outputChunk = chunk.DeepClone() as JsonObject ?? [];
         outputChunk["choices"] = new JsonArray { outputChoice };
 
         var json = JsonSerializer.Serialize(value: outputChunk, options: SerializerOptions);

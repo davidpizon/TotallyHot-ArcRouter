@@ -74,7 +74,7 @@ public sealed class JudgeModelSelector
     /// <returns>The eligible model names; empty when no free provider is configured or enabled.</returns>
     public IReadOnlyList<string> ListEligibleModels()
     {
-        return EnumerateEligible().Select(route => route.ModelName).ToList();
+        return [.. EnumerateEligible().Select(route => route.ModelName)];
     }
 
     /// <summary>

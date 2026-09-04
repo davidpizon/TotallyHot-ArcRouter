@@ -116,7 +116,7 @@ public class PersistentConversationTurnTrackerTests
 
     private sealed class StubLedger : IUsageLedger
     {
-        public Dictionary<string, int> MaxTurnBySession { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> MaxTurnBySession { get; } = [with(StringComparer.Ordinal)];
 
         public int CallCount { get; private set; }
 

@@ -128,6 +128,6 @@ public class RouterMemory
     {
         if (_scores.TryGetValue(key: dimension, value: out var dimensionScores)) return dimensionScores.Keys;
 
-        return Enumerable.Empty<string>();
+        return [];
     }
 }

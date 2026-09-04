@@ -67,25 +67,24 @@ public static class ServiceCollectionExtensions
             var observers = new List<IQualityScoreObserver>
             {
                 sp.GetRequiredService<RouterMemoryScoreObserver>(),
-                sp.GetRequiredService<EmbeddingMemoryScoreObserver>()
+                sp.GetRequiredService<EmbeddingMemoryScoreObserver>(),
+                // docs/router/self-organizing-classification-plan.md Phase T6: joins the fan-out
+                // unconditionally, like the judge observer below - TranscriptScoreObserver's own store call
+                // (SqliteTranscriptStore.UpdateOutcomeAsync) reads TranscriptOptions.Enabled live via
+                // IOptionsMonitor and no-ops when it is currently false, so a construction-time check here
+                // would only freeze the toggle in whatever state the process started in. The
+                // EnableAdaptiveRouting master switch still applies, but only at the insert site
+                // (ProxyMiddleware, gated live off IOptionsMonitor<RoutingOptions>) - a row that was never
+                // inserted has no correlation id for this backfill to match, so it naturally no-ops too.
+                sp.GetRequiredService<TranscriptScoreObserver>(),
+
+                // docs/router/geval-shadow-scoring-plan.md Phase G1: unlike the transcript observer above,
+                // this one joins the fan-out unconditionally and checks JudgeOptions.Enabled itself on every
+                // ObserveAsync. JudgeOptions.Enabled is operator-toggleable from System Settings, and this
+                // factory runs exactly once - a check here would freeze the judge in whatever state the
+                // process started in.
+                sp.GetRequiredService<JudgeShadowScoreObserver>()
             };
-
-            // docs/router/self-organizing-classification-plan.md Phase T6: joins the fan-out
-            // unconditionally, like the judge observer below - TranscriptScoreObserver's own store call
-            // (SqliteTranscriptStore.UpdateOutcomeAsync) reads TranscriptOptions.Enabled live via
-            // IOptionsMonitor and no-ops when it is currently false, so a construction-time check here
-            // would only freeze the toggle in whatever state the process started in. The
-            // EnableAdaptiveRouting master switch still applies, but only at the insert site
-            // (ProxyMiddleware, gated live off IOptionsMonitor<RoutingOptions>) - a row that was never
-            // inserted has no correlation id for this backfill to match, so it naturally no-ops too.
-            observers.Add(sp.GetRequiredService<TranscriptScoreObserver>());
-
-            // docs/router/geval-shadow-scoring-plan.md Phase G1: unlike the transcript observer above,
-            // this one joins the fan-out unconditionally and checks JudgeOptions.Enabled itself on every
-            // ObserveAsync. JudgeOptions.Enabled is operator-toggleable from System Settings, and this
-            // factory runs exactly once - a check here would freeze the judge in whatever state the
-            // process started in.
-            observers.Add(sp.GetRequiredService<JudgeShadowScoreObserver>());
 
             return new CompositeRouterScoreObserver(observers: observers,
                 logger: sp.GetRequiredService<ILogger<CompositeRouterScoreObserver>>());

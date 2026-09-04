@@ -53,7 +53,7 @@ public sealed class LogRegBaseline : IRegretBaselineRouter
             idf: _artifact.InverseDocumentFrequency);
 
         return context.CandidateModelIds
-            .Where(id => _artifact.ClassWeights.ContainsKey(id))
+            .Where(_artifact.ClassWeights.ContainsKey)
             .Select(id => (Model: id, Score: ScoreClass(weights: _artifact.ClassWeights[id], features: features)))
             .OrderByDescending(entry => entry.Score)
             .ThenBy(keySelector: entry => entry.Model, comparer: StringComparer.Ordinal)

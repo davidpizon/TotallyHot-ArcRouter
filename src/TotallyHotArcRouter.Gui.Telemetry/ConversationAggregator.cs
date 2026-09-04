@@ -85,11 +85,10 @@ public static class ConversationAggregator
     {
         ArgumentNullException.ThrowIfNull(events);
 
-        return events
+        return [.. events
             .GroupBy(keySelector: e => e.SessionId, comparer: StringComparer.Ordinal)
             .Select(BuildConversation)
-            .OrderByDescending(c => c.LastTimestampUtc)
-            .ToList();
+            .OrderByDescending(c => c.LastTimestampUtc)];
     }
 
     /// <summary>

@@ -114,7 +114,7 @@ public class AgentAsARouter
     /// <param name="score">The quality score of the model's response (0.0 to 1.0).</param>
     public async Task ObserveAsync(string dimension, string model, double score)
     {
-        if (score < 0.0 || score > 1.0)
+        if (score is < 0.0 or > 1.0)
             throw new ArgumentOutOfRangeException(paramName: nameof(score),
                 message: "Score must be between 0.0 and 1.0.");
 

@@ -469,7 +469,7 @@ public partial class ProvidersAdmin
 
         var model = new GroupedBarsModel(
             title: "Daily Token Usage",
-            categories: days.Select(d => d.ToString(format: "MM-dd", provider: CultureInfo.InvariantCulture)).ToList(),
+            categories: [.. days.Select(d => d.ToString(format: "MM-dd", provider: CultureInfo.InvariantCulture))],
             yMax: GroupedBarsModel.DynamicYMax(series.Select(s => s.Data)),
             series: series);
         return ChartJson.Serialize(model);
@@ -480,7 +480,7 @@ public partial class ProvidersAdmin
     {
         var model = RateLimitTrendChartBuilder.Build(
             dimensionName: dimensionName,
-            points: points.Select(p => (p.BucketUtc, p.Remaining, p.Limit)).ToList());
+            points: [.. points.Select(p => (p.BucketUtc, p.Remaining, p.Limit))]);
         return ChartJson.Serialize(model);
     }
 

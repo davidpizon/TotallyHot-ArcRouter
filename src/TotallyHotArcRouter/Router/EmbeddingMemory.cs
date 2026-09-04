@@ -279,13 +279,12 @@ public sealed class EmbeddingMemory : IDisposable
                 snapshot.Count,
                 modelIdentity);
 
-        return comparable
+        return [.. comparable
             .Select(entry => (Entry: entry,
                 Similarity: CosineSimilarity(left: queryEmbedding, right: entry.TaskEmbedding)))
             .Where(candidate => candidate.Similarity >= options.EmbeddingSimilarityThreshold)
             .OrderByDescending(candidate => candidate.Similarity)
-            .Take(options.MaxNeighborCount)
-            .ToList();
+            .Take(options.MaxNeighborCount)];
     }
 
     /// <summary>

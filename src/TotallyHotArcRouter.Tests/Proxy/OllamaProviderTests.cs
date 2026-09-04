@@ -225,7 +225,7 @@ public class OllamaProviderTests
 
         public MultiChunkContent(params string[] chunks)
         {
-            _chunks = chunks.Select(Encoding.UTF8.GetBytes).ToArray();
+            _chunks = [.. chunks.Select(Encoding.UTF8.GetBytes)];
         }
 
         protected override Task<Stream> CreateContentReadStreamAsync()

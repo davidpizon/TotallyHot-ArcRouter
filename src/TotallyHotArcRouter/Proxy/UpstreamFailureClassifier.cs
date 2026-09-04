@@ -189,7 +189,7 @@ public static class UpstreamFailureClassifier
     /// </summary>
     internal static bool IsOutageStatus(int statusCode)
     {
-        return statusCode is >= 500 and <= 599 || statusCode == 429 || statusCode == StatusCodes.Status404NotFound;
+        return statusCode is >= 500 and <= 599 or 429 or StatusCodes.Status404NotFound;
     }
 
     /// <summary>

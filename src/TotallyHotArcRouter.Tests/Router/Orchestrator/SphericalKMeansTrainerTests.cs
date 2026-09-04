@@ -80,7 +80,7 @@ public class SphericalKMeansTrainerTests
     [Fact]
     public void Train_EmptyEmbeddings_Throws()
     {
-        Assert.Throws<ArgumentException>(() => SphericalKMeansTrainer.Train(Array.Empty<float[]>()));
+        Assert.Throws<ArgumentException>(() => SphericalKMeansTrainer.Train([]));
     }
 
     [Fact]

@@ -320,9 +320,7 @@ public sealed class LiveDataStore : IAsyncDisposable
         lock (_lock)
         {
             _events.Add(dto);
-            _conversations = ConversationAggregator.Aggregate(_events)
-                .Select(LiveConversationMapper.ToModel)
-                .ToList();
+            _conversations = [.. ConversationAggregator.Aggregate(_events).Select(LiveConversationMapper.ToModel)];
         }
 
         Changed?.Invoke();

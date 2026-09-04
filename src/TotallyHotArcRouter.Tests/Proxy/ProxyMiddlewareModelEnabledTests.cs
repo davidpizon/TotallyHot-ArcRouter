@@ -110,7 +110,7 @@ public class ProxyMiddlewareModelEnabledTests
         var options = new ModelRoutingOptions
         {
             Providers = providers,
-            ModelList = models
+            ModelList = [.. models
                 .Select(m => new ModelRouteEntry
                 {
                     ModelName = m.ModelName,
@@ -118,8 +118,7 @@ public class ProxyMiddlewareModelEnabledTests
                     ProviderModelId = m.ProviderModelId,
                     Enabled = m.enabled,
                     PresentUpstream = m.presentUpstream
-                })
-                .ToList()
+                })]
         };
 
         return new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),

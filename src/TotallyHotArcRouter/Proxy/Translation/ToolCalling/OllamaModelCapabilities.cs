@@ -78,6 +78,6 @@ internal static class OllamaModelCapabilities
         // Filtered through the canonical order rather than emitted from the set, so ordering is fixed and a
         // capability from a newer build that this one does not know how to order cannot appear in an
         // arbitrary position.
-        return CanonicalOrder.Where(present.Contains).ToArray();
+        return [.. CanonicalOrder.Where(present.Contains)];
     }
 }

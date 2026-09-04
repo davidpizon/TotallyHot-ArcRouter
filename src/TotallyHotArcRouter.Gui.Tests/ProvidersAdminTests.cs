@@ -66,7 +66,7 @@ public sealed class ProvidersAdminTests
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Proxy management API unreachable"),
             timeout: TimeSpan.FromSeconds(4));
 
-        var act = () => cut.Dispose();
+        var act = cut.Dispose;
         act.Should().NotThrow();
     }
 }

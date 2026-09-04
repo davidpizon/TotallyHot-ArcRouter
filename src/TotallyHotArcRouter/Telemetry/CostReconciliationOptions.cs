@@ -28,7 +28,7 @@ public sealed class CostReconciliationOptions
     /// reconciler registered - reconciliation is optional per provider, per §5.8.
     /// </summary>
     public Dictionary<string, ProviderReconciliationOptions> Providers { get; init; } =
-        new(StringComparer.OrdinalIgnoreCase);
+        [with(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations, mirroring

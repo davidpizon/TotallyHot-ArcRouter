@@ -120,7 +120,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.CurrentValue.Enabled) return Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
+        if (!_options.CurrentValue.Enabled) return Task.FromResult<IReadOnlyList<long>>([]);
 
         EnsureSchema();
         using var connection = _database.OpenConnection();
@@ -150,7 +150,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_options.CurrentValue.Enabled) return Task.FromResult<IReadOnlyList<long>>(Array.Empty<long>());
+        if (!_options.CurrentValue.Enabled) return Task.FromResult<IReadOnlyList<long>>([]);
 
         EnsureSchema();
         using var connection = _database.OpenConnection();
@@ -358,7 +358,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         cancellationToken.ThrowIfCancellationRequested();
 
         if (!_options.CurrentValue.Enabled)
-            return Task.FromResult<IReadOnlyList<SessionTranscript>>(Array.Empty<SessionTranscript>());
+            return Task.FromResult<IReadOnlyList<SessionTranscript>>([]);
 
         EnsureSchema();
         using var connection = _database.OpenConnection();

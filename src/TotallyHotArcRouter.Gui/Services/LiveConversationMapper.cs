@@ -74,7 +74,7 @@ public static class LiveConversationMapper
             TotalPromptTokens: conversation.TotalPromptTokens,
             TotalCompletionTokens: conversation.TotalCompletionTokens,
             HasFallbackTurns: conversation.HasFallbackTurns,
-            Turns: conversation.Turns.Select(ToModel).ToList(),
+            Turns: [.. conversation.Turns.Select(ToModel)],
             UnpricedTurns: conversation.UnpricedTurns);
     }
 

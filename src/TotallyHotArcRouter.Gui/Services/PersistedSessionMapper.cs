@@ -38,7 +38,7 @@ public static class PersistedSessionMapper
             TotalPromptTokens: conversation.TotalInputTokens,
             TotalCompletionTokens: conversation.TotalOutputTokens,
             false,
-            Turns: conversation.Turns.Select(ToModel).ToList(),
+            Turns: [.. conversation.Turns.Select(ToModel)],
             IsUsedForTraining: conversation.IsUsedForTraining);
     }
 

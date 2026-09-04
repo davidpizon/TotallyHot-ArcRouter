@@ -189,7 +189,7 @@ public interface ITranscriptStore
     /// </remarks>
     Task<IReadOnlyList<SessionTranscript>> ListSessionsAsync(int limit, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult<IReadOnlyList<SessionTranscript>>(Array.Empty<SessionTranscript>());
+        return Task.FromResult<IReadOnlyList<SessionTranscript>>([]);
     }
 }
 

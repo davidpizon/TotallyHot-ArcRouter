@@ -172,7 +172,7 @@ internal static class UpstreamRequestBuilder
                     comparisonType: StringComparison.OrdinalIgnoreCase)))
                 continue;
 
-            requestMessage.Headers.TryAddWithoutValidation(name: header.Key, values: header.Value.ToArray());
+            requestMessage.Headers.TryAddWithoutValidation(name: header.Key, values: [.. header.Value]);
         }
     }
 }

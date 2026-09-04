@@ -16,7 +16,7 @@ public sealed class ModelRoutingOptions
     /// <summary>
     /// Gets the configured upstream providers, keyed by provider name.
     /// </summary>
-    public Dictionary<string, ProviderOptions> Providers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, ProviderOptions> Providers { get; init; } = [with(StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>
     /// Gets the allowlist of known models the proxy is permitted to route to.

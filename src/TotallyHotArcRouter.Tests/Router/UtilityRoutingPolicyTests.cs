@@ -195,8 +195,7 @@ public class UtilityRoutingPolicyTests
         return new RoutingContext(
             Dimension: Dimension,
             true,
-            Candidates: modelNames.Select(name => new RoutingCandidate(ModelName: name, Provider: "openai", false))
-                .ToList());
+            Candidates: [.. modelNames.Select(name => new RoutingCandidate(ModelName: name, Provider: "openai", false))]);
     }
 
     /// <summary>

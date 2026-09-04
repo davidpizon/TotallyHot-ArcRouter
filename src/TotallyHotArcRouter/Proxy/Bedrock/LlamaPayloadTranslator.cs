@@ -49,7 +49,7 @@ public sealed class LlamaPayloadTranslator : IBedrockPayloadTranslator
         var root = JsonNode.Parse(openAiShapedBody) as JsonObject
                    ?? throw new JsonException("Llama request translation expected a JSON object body.");
 
-        var messages = root["messages"] as JsonArray ?? new JsonArray();
+        var messages = root["messages"] as JsonArray ?? [];
 
         var llama = new JsonObject { ["prompt"] = BuildPrompt(messages) };
 

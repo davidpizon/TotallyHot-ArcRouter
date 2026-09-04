@@ -204,7 +204,7 @@ public class ModelRouteResolverTests
     {
         var options = new ModelRoutingOptions
         {
-            Providers = new Dictionary<string, ProviderOptions>(),
+            Providers = [],
             ModelList =
             [
                 new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4" }

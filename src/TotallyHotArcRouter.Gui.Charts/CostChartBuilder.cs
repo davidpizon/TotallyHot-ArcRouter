@@ -527,12 +527,11 @@ public static class CostChartBuilder
     /// <summary>Builds the legend entries for every distinct model appearing in the given turns, sorted by name.</summary>
     private static IReadOnlyList<CostModelColor> Models(IReadOnlyList<MetricTurnPoint> turns)
     {
-        return turns
+        return [.. turns
             .Select(t => t.Model)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(keySelector: m => m, comparer: StringComparer.Ordinal)
-            .Select(m => new CostModelColor(Model: m, Color: Color(m)))
-            .ToList();
+            .Select(m => new CostModelColor(Model: m, Color: Color(m)))];
     }
 
     /// <summary>Formats a data point's display label from its 1-based turn number and timestamp.</summary>

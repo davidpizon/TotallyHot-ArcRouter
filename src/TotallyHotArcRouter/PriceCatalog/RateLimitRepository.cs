@@ -189,9 +189,7 @@ public sealed class RateLimitRepository : PriceCatalogRepositoryBase
             }
         }
 
-        return buckets
-            .Select(b => new RateLimitHistoryBucket(BucketUtc: ParseMinuteBucket(b.Bucket), Headers: b.Headers))
-            .ToList();
+        return [.. buckets.Select(b => new RateLimitHistoryBucket(BucketUtc: ParseMinuteBucket(b.Bucket), Headers: b.Headers))];
     }
 
     // minute_bucket is stored as "yyyy-MM-ddTHH:mm" (see UpsertRateLimitHeaders); appending seconds and a

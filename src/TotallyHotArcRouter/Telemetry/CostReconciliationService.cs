@@ -56,7 +56,7 @@ public sealed class CostReconciliationService
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _reconcilers = reconcilers.ToList();
+        _reconcilers = [.. reconcilers];
         _reconcilerFactory = reconcilerFactory;
         _usageLedger = usageLedger;
         _store = store;

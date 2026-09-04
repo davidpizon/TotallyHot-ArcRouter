@@ -573,7 +573,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // client eventually receives; see the preReadErrorBody-is-not-null forwarding branch below.
             var shouldPreReadErrorBody = translator is not null
                 ? translator.HandlesEmbeddedErrorAt(statusCode)
-                : statusCode == StatusCodes.Status400BadRequest || statusCode == 429;
+                : statusCode is StatusCodes.Status400BadRequest or 429;
 
             if (shouldPreReadErrorBody)
             {

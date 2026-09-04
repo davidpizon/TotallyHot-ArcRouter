@@ -175,7 +175,7 @@ public class ClusterModelAdminGrpcServiceTests
                     .Select(_ => (IReadOnlyDictionary<string, int>)new Dictionary<string, int>())
             ],
             ClusterTopTerms:
-            [.. Enumerable.Range(0, count: chosenK).Select(_ => (IReadOnlyList<string>)Array.Empty<string>())],
+            [.. Enumerable.Range(0, count: chosenK).Select(_ => (IReadOnlyList<string>)[])],
             TrainedFrom: "bootstrap_tasks=20, memory_entries=5",
             BootstrapTaskCount: bootstrapTaskCount,
             MemoryEntryCount: memoryEntryCount);

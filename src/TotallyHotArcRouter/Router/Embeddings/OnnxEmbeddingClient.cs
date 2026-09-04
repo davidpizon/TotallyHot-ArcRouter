@@ -117,9 +117,9 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
             _tokenizer!.Encode(input: text, maximumTokens: _options.MaxTokens);
         var sequenceLength = inputIds.Length;
 
-        var inputIdsTensor = new DenseTensor<long>(new[] { 1, sequenceLength });
-        var attentionMaskTensor = new DenseTensor<long>(new[] { 1, sequenceLength });
-        var tokenTypeIdsTensor = new DenseTensor<long>(new[] { 1, sequenceLength });
+        var inputIdsTensor = new DenseTensor<long>([1, sequenceLength]);
+        var attentionMaskTensor = new DenseTensor<long>([1, sequenceLength]);
+        var tokenTypeIdsTensor = new DenseTensor<long>([1, sequenceLength]);
 
         for (var i = 0; i < sequenceLength; i++)
         {

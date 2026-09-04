@@ -34,7 +34,7 @@ public class PriceCatalogOptionsTests
     {
         var options = new PriceCatalogOptions { PollIntervalHours = pollIntervalHours };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public class PriceCatalogOptionsTests
             }
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class PriceCatalogOptionsTests
             }
         };
 
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     [Fact]

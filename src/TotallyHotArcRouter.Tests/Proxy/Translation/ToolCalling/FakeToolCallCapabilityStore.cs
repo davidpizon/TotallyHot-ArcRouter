@@ -14,12 +14,12 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
 /// </remarks>
 internal sealed class FakeToolCallCapabilityStore : IToolCallCapabilityStore, IModelContextWindowStore
 {
-    private readonly Dictionary<ModelCapabilityKey, ModelContextWindow> _contextWindows = new();
+    private readonly Dictionary<ModelCapabilityKey, ModelContextWindow> _contextWindows = [];
 
     private readonly Dictionary<string, ProviderEndpointCapabilities>
-        _providers = new(StringComparer.OrdinalIgnoreCase);
+        _providers = [with(StringComparer.OrdinalIgnoreCase)];
 
-    private readonly Dictionary<ModelCapabilityKey, ModelToolCapability> _rows = new();
+    private readonly Dictionary<ModelCapabilityKey, ModelToolCapability> _rows = [];
 
     /// <summary>Gets every capability written through <see cref="TryRecordModelCapability"/>, in order.</summary>
     public List<ModelToolCapability> Recorded { get; } = [];

@@ -53,7 +53,7 @@ public sealed class TitanPayloadTranslator : IBedrockPayloadTranslator
         var root = JsonNode.Parse(openAiShapedBody) as JsonObject
                    ?? throw new JsonException("Titan request translation expected a JSON object body.");
 
-        var messages = root["messages"] as JsonArray ?? new JsonArray();
+        var messages = root["messages"] as JsonArray ?? [];
 
         var titan = new JsonObject { ["inputText"] = BuildInputText(messages) };
 

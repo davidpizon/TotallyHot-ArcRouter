@@ -395,10 +395,9 @@ internal sealed class ProviderManagementService
     /// <summary>Every model route that forwards to <paramref name="providerKey"/>.</summary>
     private IReadOnlyList<ModelRouteEntry> ModelsFor(string providerKey)
     {
-        return _store.Snapshot.Options.ModelList
+        return [.. _store.Snapshot.Options.ModelList
             .Where(model => string.Equals(a: model.Provider, b: providerKey,
-                comparisonType: StringComparison.OrdinalIgnoreCase))
-            .ToList();
+                comparisonType: StringComparison.OrdinalIgnoreCase))];
     }
 
     /// <summary>
