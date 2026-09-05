@@ -72,7 +72,7 @@ internal sealed class SnapshotCache<T>
         lock (_gate)
         {
             var next = build() ?? throw new InvalidOperationException(
-                $"{nameof(SnapshotCache<T>)}<{typeof(T).Name}>.{nameof(Rebuild)}'s build callback returned null; a snapshot must never be null.");
+                $"{nameof(SnapshotCache<>)}<{typeof(T).Name}>.{nameof(Rebuild)}'s build callback returned null; a snapshot must never be null.");
             _current = next;
         }
     }

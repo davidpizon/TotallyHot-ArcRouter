@@ -67,7 +67,7 @@ public class RouterCompositionTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<IOptions<RoutingOptions>>(Options.Create(options));
+        services.AddSingleton(Options.Create(options));
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddTotallyHotArcRouter();
 

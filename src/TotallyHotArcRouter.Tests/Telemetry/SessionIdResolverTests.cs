@@ -72,7 +72,7 @@ public class SessionIdResolverTests
     {
         var headers = new HeaderDictionary
         {
-            ["x-claude-code-session-id"] = new StringValues("   "),
+            ["x-claude-code-session-id"] = "   ",
             ["x-claude-session-id"] = "sess-real"
         };
 
