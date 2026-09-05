@@ -101,6 +101,16 @@ public sealed record ProxyServerDependencies
     /// <see cref="ProxyMiddleware"/> checks) backs the service instead of the real one.
     /// </summary>
     public RoutingGateAdminDependencies? RoutingGateAdmin { get; init; }
+
+    /// <summary>
+    /// The Governance UI's Regret Harness panel API (docs/router/regret-evaluation-harness-plan.md N6).
+    /// Unlike the optional groups above but like <see cref="UpdateAdmin"/>/<see cref="RoutingGateAdmin"/>,
+    /// <c>RegretHarnessAdminGrpcService</c> is mapped <em>unconditionally</em> - its one dependency
+    /// (<c>IRegretHarnessRunner</c>) is never an optional feature the way the training services above are.
+    /// When omitted, a private <see cref="CodeRouterBench.Evaluation.NullRegretHarnessRunner"/> backs the
+    /// service instead of the real one, always declining a run.
+    /// </summary>
+    public RegretHarnessAdminDependencies? RegretHarnessAdmin { get; init; }
 }
 
 /// <summary>
@@ -335,3 +345,15 @@ public sealed record UpdateAdminDependencies(
 /// </summary>
 /// <param name="Gate">The routing kill switch this service reads and mutates.</param>
 public sealed record RoutingGateAdminDependencies(IRoutingGate Gate);
+
+/// <summary>
+/// Backs <see cref="CodeRouterBench.Evaluation.RegretHarnessAdminGrpcService"/>, the Governance UI's
+/// Regret Harness panel (docs/router/regret-evaluation-harness-plan.md N6). Required - the service needs
+/// the outer container's real <see cref="CodeRouterBench.Evaluation.IRegretHarnessRunner"/>, since it
+/// depends on the corpus database and embedding client that live there - and (like
+/// <see cref="ProxyServerDependencies.UpdateAdmin"/>/<see cref="ProxyServerDependencies.RoutingGateAdmin"/>)
+/// is mapped even when this whole group is <see langword="null"/>: see
+/// <see cref="ProxyServerDependencies.RegretHarnessAdmin"/>'s remarks.
+/// </summary>
+/// <param name="Runner">Reports the last run's result and performs a new run for the panel's Run button.</param>
+public sealed record RegretHarnessAdminDependencies(CodeRouterBench.Evaluation.IRegretHarnessRunner Runner);

@@ -1,0 +1,151 @@
+@* Governance > Regret Harness pane (docs/router/regret-evaluation-harness-plan.md N6): reports the last
+   completed run's comparison report and re-runs it on demand with streamed coarse stage progress.
+   Read-only and informational - unlike the Router Model/Cluster Model panes, a run never mutates a live
+   voter or writes an artifact the router depends on. Talks to the proxy's RegretHarnessAdminService gRPC
+   API via the injected RegretHarnessAdminStore. *@
+@implements IDisposable
+@inject RegretHarnessAdminStore Store
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading regret harness status…</div>
+    }
+    else if (!Store.IsReachable || Store.Status is null)
+    {
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="20"/> Router unreachable
+            </div>
+            <div class="text-xs text-slate-400">
+                Could not reach <span class="font-mono">@TelemetryChannelFactory.DefaultServerAddress</span>. Is the proxy running?
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload" class="btn btn-ghost">
+                Retry
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="flex items-center justify-between mb-3 gap-2">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Regret Harness</span>
+            <div class="flex items-center gap-2">
+                <button @onclick="Reload" disabled="@Store.IsRunning" class="btn btn-ghost flex items-center gap-1.5">
+                    <Icon Name="refresh" Size="20"/> Refresh
+                </button>
+                <button @onclick="Run" disabled="@Store.IsRunning" class="btn btn-secondary flex items-center gap-1.5">
+                    <Icon Name="play" Size="20"/>
+                    @(Store.IsRunning ? "Running…" : "Run")
+                </button>
+            </div>
+        </div>
+
+        @if (Store.IsRunning)
+        {
+            <div class="rounded-lg p-3 mb-3 text-xs text-slate-400 ds-surface-card">
+                @(Store.CurrentStage is { } stage ? StageLabel(stage) : "Starting…")
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(Store.LastRunMessage))
+        {
+            <div class="rounded-lg p-3 mb-3 text-xs text-slate-400 ds-surface-card">
+                @Store.LastRunMessage
+            </div>
+        }
+
+        @if (Store.Status is not { HasRun: true } status)
+        {
+            <div class="rounded-lg p-3 space-y-1 ds-surface-card">
+                <div class="text-sm font-semibold state-disabled">No run yet this session</div>
+                <div class="text-xs text-slate-500">
+                    Re-runs the N5 comparison report (Orchestrator arm vs. every baseline) over the synced
+                    CodeRouterBench corpus. Read-only - it never mutates a live voter or writes an artifact.
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="rounded-lg p-3 space-y-1 mb-3 ds-surface-card">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-sm font-semibold state-enabled">Last run</span>
+                    <span class="text-xs text-slate-500 font-mono">@status.RanAtUtc?.ToLocalTime().ToString(format: "g", formatProvider: CultureInfo.InvariantCulture)</span>
+                </div>
+                <div class="text-xs text-slate-500">@status.Message</div>
+            </div>
+
+            @foreach (var split in status.Splits)
+            {
+                <div class="rounded-lg p-3 space-y-1 mb-3 ds-surface-card">
+                    <span class="text-xs text-slate-500 uppercase tracking-widest">@split.SplitName</span>
+                    <pre class="text-xs text-slate-400 font-mono whitespace-pre overflow-x-auto">@split.MarkdownTable</pre>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await Store.LoadAsync();
+    }
+
+    /// <summary>Re-renders when the store's state changes.</summary>
+    private void OnStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Unsubscribes from <see cref="RegretHarnessAdminStore.Changed"/>.</summary>
+    public void Dispose()
+    {
+        Store.Changed -= OnStoreChanged;
+    }
+
+    /// <summary>
+    /// Reloads the status. Implements both the unreachable state's Retry button and the loaded state's
+    /// Refresh button.
+    /// </summary>
+    private Task Reload()
+    {
+        return Store.LoadAsync();
+    }
+
+    /// <summary>
+    /// Runs the harness. Errors are left to <see cref="RegretHarnessAdminStore.LastError"/>/
+    /// <see cref="RegretHarnessAdminStore.IsReachable"/> rather than surfaced here.
+    /// </summary>
+    private async Task Run()
+    {
+        try
+        {
+            await Store.RunAsync();
+        }
+        catch (RegretHarnessAdminException)
+        {
+            // Swallowed: the store already recorded IsReachable/LastError for the unreachable case, and a
+            // rejection's message is rendered from LastRunMessage/LastError by the markup above.
+        }
+    }
+
+    /// <summary>A short, human-readable label for each coarse stage while a run is in progress.</summary>
+    private static string StageLabel(RegretHarnessStageInfo stage)
+    {
+        return stage switch
+        {
+            RegretHarnessStageInfo.LoadingCorpus => "Loading corpus…",
+            RegretHarnessStageInfo.TrainingLogReg => "Training the standalone logreg baseline…",
+            RegretHarnessStageInfo.BuildingKnnIndex => "Embedding the OOD split to build the kNN index…",
+            RegretHarnessStageInfo.BuildingOrchestratorArm => "Building the Orchestrator arm…",
+            RegretHarnessStageInfo.BuildingReports => "Replaying every baseline and formatting the report…",
+            _ => "Running…"
+        };
+    }
+
+}

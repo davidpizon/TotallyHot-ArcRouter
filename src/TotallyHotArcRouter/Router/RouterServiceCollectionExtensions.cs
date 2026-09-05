@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Router.Orchestrator;
@@ -155,6 +156,12 @@ internal static class RouterServiceCollectionExtensions
         // going through it.
         services.AddSingleton<OodClusterBootstrapSampleSource>();
         services.AddSingleton<IClusterTrainingService, ClusterTrainingService>();
+
+        // docs/router/regret-evaluation-harness-plan.md N6: re-runs the N5 comparison report on demand.
+        // Program.cs's --run-regret-harness flag and the Governance UI's Regret Harness panel both
+        // resolve IRegretHarnessRunner directly - read-only and informational, so there is no hosted
+        // automatic trigger the way the retrains above have one.
+        services.AddSingleton<IRegretHarnessRunner, RegretHarnessRunner>();
 
         // Tools. RunVisibleTests (which shelled out to `dotnet test` in a caller-supplied directory) and
         // EstimateQuality (a placeholder length-and-comment heuristic) were removed along with the

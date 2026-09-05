@@ -54,7 +54,7 @@
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.11" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.4" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.5" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
     <PackageReference Include="Grpc.Tools" Version="2.83.0">
       <PrivateAssets>all</PrivateAssets>
@@ -82,7 +82,7 @@
          SQLitePCLRaw.lib.e_sqlite3 <= 2.1.10 carries GHSA-2m69-gcr7-jv3q, patched in 2.1.11+. This
          direct reference wins over the transitive 2.1.10 and clears the NuGet audit (NU1903). -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.80.0" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.80.1" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
     <PackageReference Include="Serilog" Version="4.4.0" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />

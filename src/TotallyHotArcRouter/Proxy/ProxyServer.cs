@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Options;
 using System.Net;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -105,6 +106,12 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         // is - so this always has something to register, falling back to a private, unpersisted gate
         // (not the instance ProxyMiddleware checks) when the caller didn't supply the real one.
         var routingGateAdmin = dependencies?.RoutingGateAdmin;
+
+        // The Governance UI's Regret Harness panel (docs/router/regret-evaluation-harness-plan.md N6) is
+        // mapped unconditionally, the same way UpdateAdminGrpcService/RoutingGateAdminGrpcService above
+        // are - so this always has something to register, falling back to a runner that always declines
+        // when the caller didn't supply the real one.
+        var regretHarnessAdmin = dependencies?.RegretHarnessAdmin;
 
         // Own (and later dispose) the management client only when the caller didn't supply one. Note this
         // runs whether or not the management API is enabled, exactly as before the parameter moved into
@@ -289,6 +296,10 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // The GUI system tray's routing kill switch API. Always registered - see the
                     // routingGateAdmin local's remarks above.
                     services.AddSingleton(routingGateAdmin?.Gate ?? new RoutingGateStore());
+
+                    // The Governance UI's Regret Harness panel API (Phase N6). Always registered - see
+                    // the regretHarnessAdmin local's remarks above.
+                    services.AddSingleton(regretHarnessAdmin?.Runner ?? new NullRegretHarnessRunner());
                 });
 
                 webBuilder.Configure(app =>
@@ -342,6 +353,11 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         // the telemetry stream and the other admin services. Always mapped - see the
                         // routingGateAdmin local's remarks above.
                         endpoints.MapGrpcService<RoutingGateAdminGrpcService>();
+
+                        // The Governance UI's Regret Harness panel API (Phase N6). Shares the TLS gRPC
+                        // port with the telemetry stream and the other admin services. Always mapped -
+                        // see the regretHarnessAdmin local's remarks above.
+                        endpoints.MapGrpcService<RegretHarnessAdminGrpcService>();
 
                         // The Governance UI's provider/credential/model management API. Only mapped
                         // when a writable store is supplied; shares this plain-HTTP loopback port with

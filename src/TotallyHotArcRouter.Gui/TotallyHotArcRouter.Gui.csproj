@@ -73,7 +73,7 @@
     <!-- Lets the tray read the real Windows service state (Platforms/Windows/TrayWindowManager.cs) instead
          of inferring it from whether a gRPC poll succeeded, which is what made it report a running service
          as stopped. Windows-only, which this project already is. -->
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.11" />
     <!-- Charts: Apache ECharts (echarts.min.js, Apache-2.0) is vendored under
          wwwroot/lib/echarts and driven by wwwroot/js/echarts-interop.js, so charts work offline in the
          BlazorWebView with no NuGet chart dependency. See docs/gui/cost-analytics-visualization-spec.md. -->
@@ -87,7 +87,7 @@
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <!-- Direct, though .NET MAUI already pulls this in transitively: GuiLogging reads appsettings.json
          through it, and a transitive dependency is not a contract this project should build on. -->
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>

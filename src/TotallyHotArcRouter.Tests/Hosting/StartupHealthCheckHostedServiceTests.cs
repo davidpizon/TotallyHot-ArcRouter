@@ -129,7 +129,7 @@ public class StartupHealthCheckHostedServiceTests
     public async Task StartAsync_EmbeddingClientConfigured_WarmsUpAndMarksStateWarm()
     {
         using var temp = new TempDatabase();
-        var service = CreateMinimalService(temp: temp, repository: out _,
+        var service = CreateMinimalService(temp: temp,
             embeddingClient: new FakeEmbeddingClient(succeed: true), warmupState: out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
@@ -142,7 +142,7 @@ public class StartupHealthCheckHostedServiceTests
     public async Task StartAsync_EmbeddingClientThrows_LeavesStateNotWarm_AndDoesNotThrow()
     {
         using var temp = new TempDatabase();
-        var service = CreateMinimalService(temp: temp, repository: out _,
+        var service = CreateMinimalService(temp: temp,
             embeddingClient: new FakeEmbeddingClient(succeed: false), warmupState: out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
@@ -155,7 +155,7 @@ public class StartupHealthCheckHostedServiceTests
     public async Task StartAsync_NoEmbeddingClientConfigured_DoesNotThrow()
     {
         using var temp = new TempDatabase();
-        var service = CreateMinimalService(temp: temp, repository: out _, null, warmupState: out var warmupState);
+        var service = CreateMinimalService(temp: temp, null, warmupState: out var warmupState);
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -169,11 +169,10 @@ public class StartupHealthCheckHostedServiceTests
     /// </summary>
     private static StartupHealthCheckHostedService CreateMinimalService(
         TempDatabase temp,
-        out PriceRepository repository,
         IEmbeddingClient? embeddingClient,
         out EmbeddingWarmupState? warmupState)
     {
-        repository = temp.CreateRepository();
+        var repository = temp.CreateRepository();
         var sourceRepository = temp.CreateSourceRepository();
         var ledger = temp.CreateUsageLedger();
         var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());

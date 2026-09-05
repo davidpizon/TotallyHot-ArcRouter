@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Mcp;
@@ -274,16 +275,15 @@ internal static class ProxyServiceCollectionExtensions
         // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
         // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
         // can never end up recursively constructing another ProxyHostedService.
+        // The /admin/* management API is served from the same host: pass the writable config store
+        // (edits reload the router live), the credential accessor for model discovery, and the
+        // always-present per-user management token (see ManagementAccessToken) that gates every
+        // /admin request by default - the same token the MCP endpoint requires, so both management
+        // surfaces are gated identically out of the box. The price catalog singletons are passed
+        // across for the same reason as the broadcaster: the inner host has its own container and
+        // cannot resolve them from this one. They back the Governance > Price Sources panel's gRPC API.
         services.AddHostedService(sp =>
-        {
-            // The /admin/* management API is served from the same host: pass the writable config store
-            // (edits reload the router live), the credential accessor for model discovery, and the
-            // always-present per-user management token (see ManagementAccessToken) that gates every
-            // /admin request by default - the same token the MCP endpoint requires, so both management
-            // surfaces are gated identically out of the box. The price catalog singletons are passed
-            // across for the same reason as the broadcaster: the inner host has its own container and
-            // cannot resolve them from this one. They back the Governance > Price Sources panel's gRPC API.
-            return new ProxyHostedService(
+            new ProxyHostedService(
                 logger: sp.GetRequiredService<ILogger<ProxyHostedService>>(),
                 proxyLogger: sp.GetRequiredService<ILogger<ProxyServer>>(),
                 proxyMiddleware: sp.GetRequiredService<ProxyMiddleware>(),
@@ -381,9 +381,11 @@ internal static class ProxyServiceCollectionExtensions
 
                     // Backs the GUI system tray's "Enable Routing"/"Disable Routing" gRPC API. The same
                     // singleton ProxyMiddleware checks, so a toggle from the tray takes effect immediately.
-                    RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>())
-                });
-        });
+                    RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>()),
+
+                    // Backs the Governance UI's Regret Harness panel gRPC API (Phase N6).
+                    RegretHarnessAdmin = new RegretHarnessAdminDependencies(sp.GetRequiredService<IRegretHarnessRunner>())
+                }));
 
         return services;
     }

@@ -94,6 +94,10 @@ public static class MauiProgram
         // singleton for the same reason, sharing the TLS gRPC port (5002) with the stores above. See
         // Services/LogRegModelAdminStore.cs.
         builder.Services.AddSingleton<LogRegModelAdminStore>();
+        // Backs the Governance tab's Regret Harness panel (docs/router/regret-evaluation-harness-plan.md
+        // N6). A singleton for the same reason, sharing the TLS gRPC port (5002) with the stores above.
+        // See Services/RegretHarnessAdminStore.cs.
+        builder.Services.AddSingleton<RegretHarnessAdminStore>();
         // Backs the System Settings window's Adaptive Routing row (Phase T6). A singleton for the same
         // reason, sharing the TLS gRPC port (5002) with the stores above. See Services/RouterSettingsAdminStore.cs.
         builder.Services.AddSingleton<RouterSettingsAdminStore>();
