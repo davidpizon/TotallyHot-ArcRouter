@@ -15,6 +15,7 @@ and this is the nearer of the two repos' doc folders to where the work is being 
 | [4](#4-add-test-coverage-for-zero-coverage-classes-in-TotallyHotArcRouter-and-TotallyHotArcRoutersandbox) | Open | ArcRouter | Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality` |
 | [5](#5-get-a-human-review-of-phase-5s-three-design-decisions) | Open | ArcRouter | Get a human review of Phase 5's three design decisions |
 | [6](#6-build-a-real-iprovidercostreconciler-for-gemini) | Open | ArcRouter | Build a real `IProviderCostReconciler` for Gemini |
+| [7](#7-move-the-remaining-adminusage-rest-endpoints-onto-grpc) | Open | ArcRouter | Move the remaining `/admin/*` and `/admin/usage/*` REST endpoints onto gRPC |
 
 ---
 
@@ -394,4 +395,64 @@ billing API to reconcile against at all. Neither should be revisited under this 
 client (there is no way to test against real GCP billing data in CI). Since this cannot be verified
 end-to-end without a real GCP billing export, the PR that adds it should say so explicitly rather than
 implying parity with the Anthropic/OpenAI reconcilers' live-tested confidence.
+
+---
+
+## #7 Move the remaining `/admin/*` and `/admin/usage/*` REST endpoints onto gRPC
+
+**Repo:** ArcRouter · **Status:** Open · **Filed:** 2026-09-04, from a conversational walkthrough of the
+proxy's HTTP surface
+
+### Why this is open
+
+[`grpc-migration.md`](grpc-migration.md) already settled the design question for internal,
+same-machine surfaces between components the project controls: "the RPC won" (§Scope). Every admin
+surface built since that migration — router settings, LLM router model, cluster/logreg models, regret
+harness, price source, benchmark data, update, routing gate — is already a gRPC service registered on
+the dedicated TLS port (`ProxyServer.DefaultGrpcPort`, 5002). Two files predate/were missed by that
+migration and still serve plain REST on the shared loopback proxy port (5001), alongside actual
+LLM-forwarding traffic:
+
+- `src/TotallyHotArcRouter/Proxy/Management/ProviderAdminEndpoints.cs` — `/admin/providers*`,
+  `/admin/price-overrides`, `/admin/secrets/*`, all backed by `ManagementFacade`.
+- `src/TotallyHotArcRouter/Proxy/Management/UsageAdminEndpoints.cs` — `/admin/usage/*` (`summary`,
+  `rollup`, `routing-roi`, `export`), backed by `ManagementReportingService`.
+
+Both are consumed only by the desktop GUI (`TotallyHot.ArcRouter.Gui.Admin`'s `ProviderAdminClient`
+and `UsageQueryClient`, plain `HttpClient` calls against `http://localhost:5001/admin/...`). The MCP
+tool surface (`ProviderMcpTools`) already calls the same `ManagementFacade` in-process, not over HTTP,
+so it is not a reason either endpoint has to stay REST. Nothing else depends on these two being
+REST specifically (no browser CORS need, no known third party hitting `/admin/*` directly).
+
+No observed cost currently forces this — it is unfinished migration work consistent with a decision
+already on record, not a fix for a bug or a blocker for a feature. Do not schedule it against a
+deadline; pick it up when someone is touching one of these two files anyway, or when a genuine reason
+to finish the migration shows up (e.g. wanting port 5001 to carry only LLM-forwarding traffic).
+
+### What to do
+
+1. Write `.proto` contracts for provider CRUD (list/upsert/remove provider, budget, enabled toggles,
+   model upsert/remove/enabled/tool-dialect, discover-models, scan-capabilities,
+   refresh-from-endpoint, price overrides, price resolution, rate-limit history, secrets) and for
+   usage queries (summary, rollup, routing-roi, export), mirroring the request/response shapes
+   `ManagementFacade`/`ManagementReportingService` already expose.
+2. Implement `ProviderAdminGrpcService` and `UsageAdminGrpcService`, following the pattern of
+   `RouterSettingsAdminGrpcService`/`LlmRouterModelAdminGrpcService`, and register them on the inner
+   gRPC host in `ProxyServer.cs` the way `routerSettingsAdmin` and friends already are.
+3. Handle the CSV export path: return CSV as a string field (or a byte stream for large exports)
+   rather than a raw HTTP `text/csv` response.
+4. Port `TotallyHot.ArcRouter.Gui.Admin`'s `ProviderAdminClient` and `UsageQueryClient` to gRPC
+   channels instead of `HttpClient`, keeping their existing public method signatures so
+   `ProviderAdminStore`/`UsageStore` in the GUI project don't need to change.
+5. Delete `ProviderAdminEndpoints.cs`, `UsageAdminEndpoints.cs`, their `X-Admin-Token` header-check
+   middleware, and their REST-specific tests, once the gRPC equivalents have parity coverage.
+6. Confirm the management token gating (`ManagementAccessToken`) carries over via a gRPC interceptor,
+   the same way `TelemetryAuthInterceptor` already gates the telemetry/price-source/admin gRPC
+   services on this port.
+
+### Acceptance
+
+Port 5001 (the plain-HTTP Kestrel listener) serves only LLM-forwarding proxy traffic and `/v1/models`
+— no `/admin/*` routes remain on it. The GUI's provider-management and usage-analytics panels work
+unchanged against the new gRPC services, with test coverage at parity with what the REST endpoints had.
 

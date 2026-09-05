@@ -291,6 +291,206 @@ public class StaticAnalyzerTests
         Assert.Equal(expected: ["fixed: something to say"], actual: report.Notes);
     }
 
+    // ---- RelevanceAnalyzer ----
+
+    [Fact]
+    public void Relevance_NoPrompt_Abstains()
+    {
+        var finding = new RelevanceAnalyzer().Analyze(code: "public int Add(int a, int b) => a + b;",
+            language: CodeLanguage.CSharp);
+
+        Assert.Null(finding);
+    }
+
+    [Fact]
+    public void Relevance_PromptTooShortForSignal_Abstains()
+    {
+        var finding = new RelevanceAnalyzer().Analyze(code: "public int Add(int a, int b) => a + b;",
+            language: CodeLanguage.CSharp, prompt: "fix this");
+
+        Assert.Null(finding);
+    }
+
+    [Fact]
+    public void Relevance_CodeAddressesThePrompt_ScoresHigh()
+    {
+        // The tokenizer matches whole words, not camelCase sub-words, so the prompt's salient terms are
+        // deliberately echoed as standalone words (in a comment) rather than relying on them appearing
+        // split out of an identifier like CalculateInvoiceTotal.
+        var finding = new RelevanceAnalyzer().Analyze(
+            code: """
+                  // Sums the invoice total across every line item.
+                  public double CalculateInvoiceTotal(List<LineItem> lineItems) => lineItems.Sum(i => i.Price);
+                  """,
+            language: CodeLanguage.CSharp,
+            prompt: "Write a function that calculates the invoice total from a list of line items.");
+
+        Assert.NotNull(finding);
+        Assert.Equal(1.0, actual: finding.Score);
+    }
+
+    [Fact]
+    public void Relevance_CodeAnswersADifferentQuestion_ScoresBelowFullMarks()
+    {
+        var finding = new RelevanceAnalyzer().Analyze(
+            code: "public void PrintGreeting() { Console.WriteLine(\"hello world\"); }",
+            language: CodeLanguage.CSharp,
+            prompt: "Write a function that calculates the invoice total from a list of line items.");
+
+        Assert.NotNull(finding);
+        Assert.True(condition: finding.Score < 1.0, userMessage: "an unrelated snippet must not score full relevance");
+    }
+
+    [Fact]
+    public void Relevance_NeverScoresBelowItsFloor()
+    {
+        var finding = new RelevanceAnalyzer().Analyze(
+            code: "public void PrintGreeting() { Console.WriteLine(\"hello world\"); }",
+            language: CodeLanguage.CSharp,
+            prompt: "quantum blockchain neural astrophysics distributed microservice orchestration cryptography");
+
+        Assert.NotNull(finding);
+        Assert.True(condition: finding.Score >= 0.3, userMessage: "relevance alone must never be able to zero a snippet");
+    }
+
+    // ---- SmellDensityAnalyzer ----
+
+    [Fact]
+    public void SmellDensity_TooFewLines_Abstains()
+    {
+        var finding = new SmellDensityAnalyzer().Analyze(code: "int x = 42;", language: CodeLanguage.CSharp);
+
+        Assert.Null(finding);
+    }
+
+    [Fact]
+    public void SmellDensity_CleanCode_ScoresOne()
+    {
+        const string code = """
+                             public int Add(int a, int b)
+                             {
+                                 var sum = a + b;
+                                 return sum;
+                             }
+                             """;
+
+        var finding = new SmellDensityAnalyzer().Analyze(code: code, language: CodeLanguage.CSharp);
+
+        Assert.NotNull(finding);
+        Assert.Equal(1.0, actual: finding.Score);
+        Assert.Empty(finding.Notes);
+    }
+
+    [Fact]
+    public void SmellDensity_MagicNumbers_LowersScore()
+    {
+        const string code = """
+                             public double ApplyDiscount(double price)
+                             {
+                                 var discounted = price * 0.8371;
+                                 var withFee = discounted + 4.99;
+                                 return withFee - 1.234;
+                             }
+                             """;
+
+        var finding = new SmellDensityAnalyzer().Analyze(code: code, language: CodeLanguage.CSharp);
+
+        Assert.NotNull(finding);
+        Assert.True(condition: finding.Score < 1.0);
+        Assert.Contains(collection: finding.Notes, filter: n => n.Contains("magic number"));
+    }
+
+    [Fact]
+    public void SmellDensity_EmptyCatchBlock_IsDetected()
+    {
+        const string code = """
+                             public void Risky()
+                             {
+                                 try
+                                 {
+                                     DoWork();
+                                 }
+                                 catch (Exception)
+                                 {
+                                 }
+                             }
+                             """;
+
+        var finding = new SmellDensityAnalyzer().Analyze(code: code, language: CodeLanguage.CSharp);
+
+        Assert.NotNull(finding);
+        Assert.Contains(collection: finding.Notes, filter: n => n.Contains("empty catch/except"));
+    }
+
+    [Fact]
+    public void SmellDensity_EmptyExceptBlock_IsDetectedForPython()
+    {
+        const string code = """
+                             def risky():
+                                 try:
+                                     do_work()
+                                     do_more_work()
+                                 except Exception:
+                                     pass
+                             """;
+
+        var finding = new SmellDensityAnalyzer().Analyze(code: code, language: CodeLanguage.Python);
+
+        Assert.NotNull(finding);
+        Assert.Contains(collection: finding.Notes, filter: n => n.Contains("empty catch/except"));
+    }
+
+    [Fact]
+    public void SmellDensity_LongParameterList_IsDetected()
+    {
+        const string code = """
+                             public void Configure(int a, int b, int c, int d, int e, int f)
+                             {
+                                 Apply(a, b, c, d, e, f);
+                             }
+                             """;
+
+        var finding = new SmellDensityAnalyzer().Analyze(code: code, language: CodeLanguage.CSharp);
+
+        Assert.NotNull(finding);
+        Assert.Contains(collection: finding.Notes, filter: n => n.Contains("parameter/argument list"));
+    }
+
+    [Fact]
+    public void SmellDensity_NeverScoresBelowItsFloor()
+    {
+        var lines = Enumerable.Range(0, 5).Select(i => $"var v{i} = {1000 + i} * {2000 + i} / {3000 + i};");
+        var code = string.Join(separator: '\n', values: lines);
+
+        var finding = new SmellDensityAnalyzer().Analyze(code: code, language: CodeLanguage.CSharp);
+
+        Assert.NotNull(finding);
+        Assert.True(condition: finding.Score >= 0.3, userMessage: "smell density alone must never be able to zero a snippet");
+    }
+
+    // ---- Composite prompt threading ----
+
+    // The relevance analyzer needs the prompt but the other analyzers do not; the composite must pass it
+    // through to whichever one asks for it without every analyzer needing to accept it.
+    [Fact]
+    public void Composite_PassesPromptThroughToAnalyzersThatWantIt()
+    {
+        var report = Composite(new RelevanceAnalyzer())
+            .Report(code: "public int CalculateTotal() => 0;", language: CodeLanguage.CSharp,
+                prompt: "calculate total invoice amount");
+
+        Assert.NotNull(report.Score);
+    }
+
+    [Fact]
+    public void Composite_NoPromptSupplied_AnalyzerNeedingOneAbstains()
+    {
+        var report = Composite(new RelevanceAnalyzer()).Report(code: "public int CalculateTotal() => 0;",
+            language: CodeLanguage.CSharp);
+
+        Assert.Null(report.Score);
+    }
+
     /// <summary>An analyzer that never has an opinion, used to exercise the abstention path.</summary>
     private sealed class AlwaysAbstains : IStaticAnalyzer
     {

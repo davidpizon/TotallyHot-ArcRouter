@@ -142,8 +142,10 @@ skipped rather than failing the grading.
 | `PlaceholderAnalyzer` | `TODO`, elision comments, `NotImplementedException`, bare `pass` | 1.0 → 0.1 | empty snippet |
 | `TruncationAnalyzer` | unterminated comment/string, final line mid-expression | 1.0 or 0.0 | empty snippet |
 | `ComplexityAnalyzer` | nesting depth, branch density | 1.0 → 0.5 | fewer than 5 lines |
+| `RelevanceAnalyzer` (Q2) | prompt/response token overlap | 1.0 → 0.3 | no prompt, or fewer than 3 salient prompt terms |
+| `SmellDensityAnalyzer` (Q2) | magic numbers, long lines, empty catch/except, long parameter lists per 100 lines | 1.0 → 0.3 | fewer than 3 non-blank lines |
 
-Two of these deserve their rationale stated:
+Four of these deserve their rationale stated:
 
 **Placeholder detection is the most valuable non-syntactic signal available.** A response that hands back
 a correct-looking skeleton whose body reads `// ... rest of the implementation ...` parses perfectly, and
@@ -154,6 +156,27 @@ that most separates weaker models from stronger ones.
 branch, and penalizing it for doing so would teach the router to prefer models that dodge hard problems.
 It reports 1.0 across the whole range a reasonable answer occupies, tapers only past a budget, and floors
 at 0.5 so it can never dominate a score.
+
+**Relevance is the analyzer that finally reads the question.** Every other analyzer here, and the judge
+before Q2, scored the response in isolation - a complete, warning-free answer to a *different* question
+graded identically to a correct one
+(docs/research/code-quality-metrics-assessment.md §1's first finding). `RelevanceAnalyzer` is a token-overlap
+heuristic, not a semantic check: salient words are extracted from `QualityRequest.Prompt` (a stop-word list
+and short tokens removed) and checked for whole-word presence anywhere in the code, scanned as text rather
+than parsed. It is reached through `IStaticAnalyzer`'s new three-argument `Analyze(code, language, prompt)`
+overload, added as a C# default interface method that falls back to the existing two-argument overload - so
+the other four analyzers, which have no use for the prompt, needed no change at all to keep implementing the
+interface.
+
+**Smell density follows Szych & Schwerk's ratio, not a borrowed catalog.** The paper supplies
+`(findings / linesOfCode) * 100`, not a list of what counts as a finding, so `SmellDensityAnalyzer` counts a
+small, self-contained catalog picked for being cheap to detect from text and structurally distinct from
+what the other analyzers already report: magic numbers, overlong lines, empty `catch`/`except` blocks, and
+long parameter/argument lists.
+
+Both are approximate by design, in the same spirit as the `DelimiterBalance` heuristic in §3.1: a token
+overlap or a regex-counted magic number is a proxy, not a compiler's verdict, and neither can zero a
+snippet on its own (both floor at 0.3).
 
 `DiagnosticSeverityAnalyzer` parses only — no `CSharpCompilation`, no reference resolution — so it never
 reports "type or namespace not found" for a snippet whose imports simply were not pasted along with it, a
@@ -197,13 +220,26 @@ for a bounded periodic sweep over saved transcript rows.
 ## 4. Scoring
 
 ```
-u = (w_syntax · s_syntax + w_analysis · s_analysis + w_judge · s_judge)
-    ─────────────────────────────────────────────────────────────────
-                  w_syntax + w_analysis + w_judge
+u = (w_syntax · s_syntax + w_analysis · s_analysis + w_judge · s_judge + Σ w_g · s_g)
+    ──────────────────────────────────────────────────────────────────────────────
+                  w_syntax + w_analysis + w_judge + Σ w_g
 ```
 
 Weights are per-dimension (`Quality:DimensionWeights` in `appsettings.json`) and **need not sum to 1** —
 the scorer normalizes by their total.
+
+> **Phase Q1 (shipped)** generalized the trailing `Σ w_g · s_g` term: `QualityResult.GraderScores` is a
+> keyed map for graders beyond the three built-in axes, matched against
+> `DimensionWeightOptions.ExtraWeights` by the same key. It is empty for every result today — Q1 registers
+> no new grader, only the plumbing — so the sum contributes nothing and the byte-identical-to-pre-Q1
+> exit criterion holds by construction rather than by re-deriving the math. Phase Q3 wires CodeJudge,
+> ICE-Score, and RACE through this map instead of adding named fields and touching `QualityScorer` again.
+> The aggregator's judge join was generalized the same way: `QualityScoreAggregator` holds a *set* of
+> pending grader keys per request (today populated with at most `GraderKeys.Judge` by `IJudgeAvailability`)
+> rather than an implicit single slot, and per-grader abstain/timeout/eviction reasons land in
+> `QualityResult.GraderDegradedReasons` alongside the legacy single `DegradedReason` field. A genuinely
+> concurrent multi-grader hold is exercised by construction, not by a test with two live async graders —
+> there is no second one to test against until Q3 lands.
 
 **The rule that matters: an axis that could not be measured is dropped from both numerator and
 denominator, never scored zero.** A missing judge grade and a judge grade of zero are different facts.
@@ -264,6 +300,15 @@ The held table follows the same Dictionary + Queue + `TimeProvider` shape as `Pe
 and the router's other pending caches. `QualityJoinSweepService` sweeps every 5 seconds — one periodic
 sweep rather than one timer per held result, so a fixed tiny cost never becomes a variable one that peaks
 when the system is busiest.
+
+**Q2: the judge is now prompt-aware.** `JudgeScoreRequest` carries an optional `Prompt` alongside
+`ResponseText`, recovered from `PendingPromptCache` — a second cache mirroring `PendingResponseTextCache`
+exactly (same TTL/capacity bounds, same in-process-only lifetime) and set at the same point in
+`RequestTelemetryPublisher` the response text is, gated on the same live `JudgeOptions.Enabled` check.
+`GEvalJudgeClient.BuildPrompt` weaves it into the G-Eval prompt as a "Task the response was written for"
+section, present only when a prompt was actually recovered — an empty prompt (never cached, or aged out
+faster than the queue drained) omits the section entirely rather than filling it with a placeholder, so the
+judge is never told a task existed when none could be recovered.
 
 ### 5.1 Judge enablement
 
@@ -354,6 +399,7 @@ learned rather than migrating it.
 | `QualityJoinSweepService` | Periodic timeout sweep. |
 | `IQualityScoreObserver` | Seam into the host's memory adapters. |
 | `QualityRescanService` | The saved-data source (§3.3). Lives in the host beside the transcript store, not in this assembly - it needs `ITranscriptStore`, which this library does not reference. Writes scores to transcript rows only, never to router memory. |
+| `PendingPromptCache` (Q2) | Mirrors `PendingResponseTextCache`: bridges the request's prompt to the judge's later-arriving job, in-process only. |
 
 The `IJudgeAvailability` and `IQualityScoreObserver` seams exist so `TotallyHot.ArcRouter.Quality` never
 references the core router or the judge subsystem. The host supplies `JudgeAvailability` and
@@ -378,7 +424,7 @@ current reader must not find a new meaning sitting on an old field.
 
 ## 9. Testing
 
-`src/TotallyHotArcRouter.Quality.Tests/` — 154 tests. The load-bearing ones:
+`src/TotallyHotArcRouter.Quality.Tests/` — 185 tests. The load-bearing ones:
 
 - **`QualityScoreAggregatorTests`** asserts the **count** of observations on every path, not just the
   value. That is the invariant the join exists to protect, and a double write is invisible in the

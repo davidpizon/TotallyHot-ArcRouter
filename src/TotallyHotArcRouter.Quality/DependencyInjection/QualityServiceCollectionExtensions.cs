@@ -49,13 +49,17 @@ public static class QualityServiceCollectionExtensions
         services.TryAddSingleton<IQualityIngress, QualityIngress>();
 
         // Order is the composition order of the analysis axis; each analyzer abstains on input it has no
-        // opinion about, so registering all four on every host costs nothing for a language one can't read.
+        // opinion about, so registering all six on every host costs nothing for a language one can't read.
+        // Phase Q2 adds RelevanceAnalyzer (needs the prompt; abstains without one) and SmellDensityAnalyzer
+        // (docs/research/code-quality-metrics-assessment.md §5.1) to the original four.
         services.TryAddEnumerable(
         [
             ServiceDescriptor.Singleton<IStaticAnalyzer, DiagnosticSeverityAnalyzer>(),
             ServiceDescriptor.Singleton<IStaticAnalyzer, PlaceholderAnalyzer>(),
             ServiceDescriptor.Singleton<IStaticAnalyzer, TruncationAnalyzer>(),
-            ServiceDescriptor.Singleton<IStaticAnalyzer, ComplexityAnalyzer>()
+            ServiceDescriptor.Singleton<IStaticAnalyzer, ComplexityAnalyzer>(),
+            ServiceDescriptor.Singleton<IStaticAnalyzer, RelevanceAnalyzer>(),
+            ServiceDescriptor.Singleton<IStaticAnalyzer, SmellDensityAnalyzer>()
         ]);
         services.TryAddSingleton<CompositeStaticAnalyzer>();
 

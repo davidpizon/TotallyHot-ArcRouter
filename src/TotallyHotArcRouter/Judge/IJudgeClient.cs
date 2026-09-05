@@ -24,7 +24,15 @@ public interface IJudgeClient
 /// <summary>One scoring request handed to <see cref="IJudgeClient.ScoreAsync"/>.</summary>
 /// <param name="Dimension">The task dimension whose G-Eval criteria should be applied (e.g. <c>algorithm</c>).</param>
 /// <param name="ResponseText">The agent's response text to score.</param>
-public sealed record JudgeScoreRequest(string Dimension, string ResponseText);
+/// <param name="Prompt">
+/// The user prompt <paramref name="ResponseText"/> was written to answer, recovered from
+/// <see cref="PendingPromptCache"/> the same way <paramref name="ResponseText"/> is recovered from
+/// <see cref="PendingResponseTextCache"/>, or an empty string when it was never cached or already aged out.
+/// Lets the judge grade the response <em>against its requirement</em>
+/// (docs/research/code-quality-metrics-assessment.md §1's first finding) instead of in isolation. Defaults
+/// to empty so existing two-argument call sites keep compiling.
+/// </param>
+public sealed record JudgeScoreRequest(string Dimension, string ResponseText, string Prompt = "");
 
 /// <summary>The result of one <see cref="IJudgeClient.ScoreAsync"/> call.</summary>
 /// <param name="Score">The judge's score, normalized to <c>[0, 1]</c>.</param>

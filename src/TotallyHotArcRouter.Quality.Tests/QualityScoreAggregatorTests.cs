@@ -194,6 +194,54 @@ public class QualityScoreAggregatorTests
         Assert.Null(observed.JudgeScore);
     }
 
+    // Phase Q1: the per-grader reasons map must record the judge's own reason independently of the
+    // single legacy field, which a later write could otherwise overwrite for a different cause.
+    [Fact]
+    public async Task AbandonJudgeAsync_StampsThePerGraderReasonAlongsideTheLegacyField()
+    {
+        var observer = new RecordingObserver();
+        var aggregator = Create(observer: observer, true);
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        await aggregator.AbandonJudgeAsync(correlationId: "corr-1", reason: "judge-disabled",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var observed = Assert.Single(observer.Observed);
+        Assert.True(observed.GraderDegradedReasons.TryGetValue(key: "judge", value: out var reason));
+        Assert.Equal(expected: "judge-disabled", actual: reason);
+    }
+
+    [Fact]
+    public async Task SweepExpiredAsync_ExpiredEntry_StampsThePerGraderTimeoutReason()
+    {
+        var observer = new RecordingObserver();
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var aggregator = Create(observer: observer, true, clock: clock, options: Options_(timeoutMs: 1_000));
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        await aggregator.SweepExpiredAsync(TestContext.Current.CancellationToken);
+
+        var observed = Assert.Single(observer.Observed);
+        Assert.True(observed.GraderDegradedReasons.TryGetValue(key: "judge", value: out var reason));
+        Assert.Equal(expected: "judge-join-timeout", actual: reason);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_BeyondCapacity_StampsThePerGraderEvictedReason()
+    {
+        var observer = new RecordingObserver();
+        var aggregator = Create(observer: observer, true, options: Options_(capacity: 1));
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+        await aggregator.SubmitAsync(result: Result("corr-2"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var evicted = Assert.Single(observer.Observed);
+        Assert.True(evicted.GraderDegradedReasons.TryGetValue(key: "judge", value: out var reason));
+        Assert.Equal(expected: "judge-join-evicted", actual: reason);
+    }
+
     [Fact]
     public async Task AbandonJudgeAsync_ThenJudgeArrives_StillOnlyOneObservation()
     {

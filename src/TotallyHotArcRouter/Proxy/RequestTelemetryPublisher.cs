@@ -27,6 +27,7 @@ internal sealed class RequestTelemetryPublisher
     private readonly IConversationContinuityMatcher _continuityMatcher;
     private readonly IOptionsMonitor<JudgeOptions>? _judgeOptionsMonitor;
     private readonly ILogger _logger;
+    private readonly PendingPromptCache? _pendingPromptCache;
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
     private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
     private readonly PendingResponseTextCache? _pendingResponseTextCache;
@@ -70,7 +71,8 @@ internal sealed class RequestTelemetryPublisher
         ITranscriptStore? transcriptStore,
         IOptionsMonitor<RoutingOptions>? routingOptionsMonitor,
         IOptionsMonitor<JudgeOptions>? judgeOptionsMonitor,
-        decimal selfHostedRouterPricePerMillionTokens)
+        decimal selfHostedRouterPricePerMillionTokens,
+        PendingPromptCache? pendingPromptCache = null)
     {
         _logger = logger;
         _sessionIdResolver = sessionIdResolver;
@@ -88,6 +90,7 @@ internal sealed class RequestTelemetryPublisher
         _pendingRequestCostCache = pendingRequestCostCache;
         _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
         _pendingResponseTextCache = pendingResponseTextCache;
+        _pendingPromptCache = pendingPromptCache;
         _transcriptStore = transcriptStore;
         _routingOptionsMonitor = routingOptionsMonitor;
         _judgeOptionsMonitor = judgeOptionsMonitor;
@@ -634,6 +637,14 @@ internal sealed class RequestTelemetryPublisher
         // has to stop retention immediately rather than at the next restart.
         if (responseSummary is not null && (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false))
             _pendingResponseTextCache?.Set(correlationId: correlationId, text: responseText);
+
+        // Mirrors the response-text retention immediately above, for the other half of the pair the judge
+        // needs to grade against a requirement rather than in isolation
+        // (docs/research/code-quality-metrics-assessment.md §1). Gated the same way: only when the judge is
+        // live right now, since that flag is what authorizes retaining raw request/response text in memory
+        // at all.
+        if (!string.IsNullOrEmpty(newestUserMessage) && (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false))
+            _pendingPromptCache?.Set(correlationId: correlationId, prompt: newestUserMessage);
 
         return (newestUserMessage, requestSummary, responseSummary, responseText, correlationId);
     }

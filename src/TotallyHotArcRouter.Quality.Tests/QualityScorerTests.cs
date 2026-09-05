@@ -148,6 +148,60 @@ public class QualityScorerTests
         Assert.InRange(actual: score, 0.0, 1.0);
     }
 
+    // Phase Q1: an extra grader beyond the three built-in axes contributes through GraderScores/
+    // ExtraWeights without this class special-casing its name.
+    [Fact]
+    public void Score_ExtraGraderWithConfiguredWeight_AddsWeightedAxis()
+    {
+        var scorer = CreateScorer(new QualityOptions
+        {
+            DimensionWeights =
+            {
+                ["d"] = new DimensionWeightOptions
+                {
+                    Syntax = 0.4,
+                    Analysis = 0.0,
+                    Judge = 0.0,
+                    ExtraWeights = new Dictionary<string, double> { ["codejudge"] = 0.6 }
+                }
+            }
+        });
+
+        var result = Authoritative(analysis: null, judge: null) with
+        {
+            GraderScores = new Dictionary<string, double> { ["codejudge"] = 0.0 }
+        };
+
+        // Syntax at weight 0.4 scores 1.0; the extra grader at weight 0.6 scores 0.0.
+        // (0.4*1 + 0.6*0) / 1.0 = 0.4.
+        Assert.Equal(0.4, actual: scorer.Score(result: result, dimension: "d"), 10);
+    }
+
+    [Fact]
+    public void Score_ExtraGraderWithNoConfiguredWeight_IsDroppedRatherThanScoredZero()
+    {
+        var scorer = CreateScorer(WithWeights(dimension: "d", 0.4, 0.0, 0.0));
+
+        var result = Authoritative(analysis: null, judge: null) with
+        {
+            GraderScores = new Dictionary<string, double> { ["unconfigured_grader"] = 0.0 }
+        };
+
+        // The unconfigured extra grader must not drag the score down: syntax alone still scores 1.0.
+        Assert.Equal(1.0, actual: scorer.Score(result: result, dimension: "d"));
+    }
+
+    [Fact]
+    public void Score_NoExtraGraders_MatchesPreQ1Blend()
+    {
+        // The default QualityResult carries an empty GraderScores map, so the loop over it is a no-op and
+        // the result is exactly the three-axis blend Q1 must not change.
+        var scorer = CreateScorer(WithWeights(dimension: "d", 0.4, 0.2, 0.4));
+
+        Assert.Equal(1.0, actual: scorer.Score(result: Authoritative(analysis: 1.0, judge: 1.0), dimension: "d"));
+        Assert.Empty(collection: new QualityResult().GraderScores);
+    }
+
     [Fact]
     public void Score_AlwaysWithinUnitInterval()
     {

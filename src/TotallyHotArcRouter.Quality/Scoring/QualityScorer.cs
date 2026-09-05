@@ -57,10 +57,24 @@ public sealed class QualityScorer : IQualityScorer
         else
             wJudge = 0.0;
 
-        var total = wSyntax + wAnalysis + wJudge;
-        if (total <= 0.0) return 0.0;
+        var weightedSum = wSyntax * sSyntax + wAnalysis * sAnalysis + wJudge * sJudge;
+        var totalWeight = wSyntax + wAnalysis + wJudge;
 
-        var u = (wSyntax * sSyntax + wAnalysis * sAnalysis + wJudge * sJudge) / total;
+        // Graders beyond the three built-in axes (Phase Q3+) contribute through this keyed extension
+        // point rather than a named local, so registering one never requires touching this method again.
+        // Empty for every result today, which is exactly what keeps this byte-identical to the pre-Q1 blend.
+        foreach (var (grader, score) in result.GraderScores)
+        {
+            var weight = weights.ResolveExtraWeight(graderKey: grader);
+            if (weight <= 0.0) continue;
+
+            weightedSum += weight * Math.Clamp(value: score, 0.0, 1.0);
+            totalWeight += weight;
+        }
+
+        if (totalWeight <= 0.0) return 0.0;
+
+        var u = weightedSum / totalWeight;
         return Math.Clamp(value: u, 0.0, 1.0);
     }
 }

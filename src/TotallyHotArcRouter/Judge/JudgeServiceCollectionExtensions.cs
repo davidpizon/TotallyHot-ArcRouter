@@ -39,6 +39,7 @@ internal static class JudgeServiceCollectionExtensions
         services.AddSingleton<IConfigureOptions<JudgeOptions>, JudgeSettingsConfigureOptions>();
         services.AddHttpClient(GEvalJudgeClient.HttpClientName);
         services.AddSingleton<PendingResponseTextCache>();
+        services.AddSingleton<PendingPromptCache>();
         services.AddSingleton<IJudgeShadowScoreQueue, JudgeShadowScoreQueue>();
         services.AddSingleton<JudgeModelSelector>();
         services.AddSingleton<IJudgeClient, GEvalJudgeClient>();

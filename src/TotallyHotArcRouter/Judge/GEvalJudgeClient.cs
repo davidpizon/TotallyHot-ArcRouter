@@ -123,7 +123,8 @@ public sealed class GEvalJudgeClient : IJudgeClient
         var route = _modelSelector.Resolve();
         if (route is null) return null;
 
-        var prompt = BuildPrompt(dimension: request.Dimension, responseText: request.ResponseText);
+        var prompt = BuildPrompt(dimension: request.Dimension, responseText: request.ResponseText,
+            taskPrompt: request.Prompt);
         var client = _httpClientFactory.CreateClient(HttpClientName);
         client.Timeout = TimeSpan.FromSeconds(_options.CurrentValue.RequestTimeoutSeconds);
 
@@ -187,10 +188,18 @@ public sealed class GEvalJudgeClient : IJudgeClient
     }
 
     /// <summary>
-    /// Composes the G-Eval-shaped prompt: task introduction, per-dimension criteria, evaluation steps, and
-    /// a form-filling cue asking for a single 1-5 digit.
+    /// Composes the G-Eval-shaped prompt: task introduction, the requirement the response was written for
+    /// (when known), per-dimension criteria, evaluation steps, and a form-filling cue asking for a single
+    /// 1-5 digit.
     /// </summary>
-    private static string BuildPrompt(string dimension, string responseText)
+    /// <remarks>
+    /// <paramref name="taskPrompt"/> closes the gap docs/research/code-quality-metrics-assessment.md §1
+    /// names first: without it, a complete, warning-free response to a <em>different</em> question than the
+    /// one asked would score identically to a correct answer to this one. Omitted from the prompt entirely
+    /// when unavailable (aged out of <see cref="PendingPromptCache"/>, or never cached) rather than filled
+    /// with a placeholder, so the judge is not told a task existed when none could be recovered.
+    /// </remarks>
+    private static string BuildPrompt(string dimension, string responseText, string taskPrompt)
     {
         // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
         // Nullable annotations are a compile-time contract, not a runtime guarantee - the dimension
@@ -199,15 +208,27 @@ public sealed class GEvalJudgeClient : IJudgeClient
             ? dimensionCriteria
             : DefaultCriteria;
 
+        var taskSection = string.IsNullOrWhiteSpace(taskPrompt)
+            ? string.Empty
+            : $"""
+
+               Task the response was written for:
+               ---
+               {taskPrompt}
+               ---
+
+               """;
+
         return $"""
                 You are an expert evaluator. Your task is to rate the quality of an AI assistant's response on a
                 scale of 1 (worst) to 5 (best), according to the following criterion:
 
                 {criteria}
-
+                {taskSection}
                 Evaluation steps:
                 1. Read the response carefully.
-                2. Judge it strictly against the criterion above, not against unrelated qualities.
+                2. Judge it strictly against the criterion above (and, when given, the task above), not against
+                   unrelated qualities.
                 3. Decide on a single integer score from 1 to 5.
 
                 Response to evaluate:

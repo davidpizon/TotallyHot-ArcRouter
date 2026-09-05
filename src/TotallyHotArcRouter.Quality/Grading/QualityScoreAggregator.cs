@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// The default <see cref="IQualityScoreAggregator"/>. Holds static verdicts in a bounded, TTL-evicting
 /// table keyed by correlation id - the same Dictionary-plus-Queue-plus-<see cref="TimeProvider"/> shape
 /// the router's other pending caches use - and writes each result exactly once, whether it was completed
-/// by the judge, aged out, or pushed out by capacity.
+/// by every pending grader, aged out, or pushed out by capacity.
 /// </summary>
 /// <remarks>
 /// <b>Exactly-once is enforced by removal, not by a flag.</b> Every path that writes must first win the
@@ -17,7 +17,17 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// <para>
 /// A capacity eviction still <em>writes</em> the static score rather than dropping it. Dropping would lose
 /// signal the verifier had already computed, and would do so precisely under load, when the router most
-/// needs evidence. Only the judge's contribution is forfeited.
+/// needs evidence. Only the pending grader's contribution is forfeited.
+/// </para>
+/// <para>
+/// <b>The join holds a set of pending grader keys per entry (<see cref="Entry.PendingGraderKeys"/>), not an
+/// implicit single slot.</b> A held result is written once that set is empty. The only producer of a
+/// pending key today is <see cref="IJudgeAvailability"/>, which contributes at most
+/// <see cref="GraderKeys.Judge"/> - so the set today only ever holds zero or one key - but the mechanism
+/// itself is not judge-specific: a future asynchronous grader (Phase Q3) joins through the same
+/// <see cref="CompleteGraderAsync"/>/<see cref="AbandonGraderAsync"/> path by adding its key to
+/// <see cref="DeterminePendingGraders"/>, without any change to <see cref="SubmitAsync"/>,
+/// <see cref="SweepExpiredAsync"/>, or the eviction path.
 /// </para>
 /// </remarks>
 public sealed class QualityScoreAggregator : IQualityScoreAggregator
@@ -96,9 +106,11 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     {
         ArgumentNullException.ThrowIfNull(result);
 
+        var pendingGraders = DeterminePendingGraders(result);
+
         // No correlation id means nothing could ever join to it, so holding it would only guarantee a
         // timeout later. Write it now.
-        if (string.IsNullOrEmpty(result.RequestCorrelationId) || !_judgeAvailability.WillJudge(result))
+        if (string.IsNullOrEmpty(result.RequestCorrelationId) || pendingGraders.Count == 0)
         {
             await WriteAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
             return;
@@ -110,8 +122,10 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             if (!_pending.ContainsKey(result.RequestCorrelationId))
                 _insertionOrder.Enqueue(result.RequestCorrelationId);
 
-            _pending[result.RequestCorrelationId] =
-                new Entry(Result: result, ExpiresAtUtc: _timeProvider.GetUtcNow() + _joinTimeout);
+            _pending[result.RequestCorrelationId] = new Entry(
+                Result: result,
+                PendingGraderKeys: pendingGraders,
+                ExpiresAtUtc: _timeProvider.GetUtcNow() + _joinTimeout);
             evicted = TrimToCapacityLocked();
         }
 
@@ -127,38 +141,25 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     }
 
     /// <inheritdoc/>
-    public async Task<bool> CompleteWithJudgeAsync(
+    public Task<bool> CompleteWithJudgeAsync(
         string correlationId,
         double judgeScore,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
 
-        QualityResult? held;
-        lock (_lock)
-        {
-            held = TakeLocked(correlationId);
-        }
-
-        if (held is null)
-        {
-            // Already written by a sweep or an eviction. Not an error: the judge simply lost the race, and
-            // the router already has an observation for this request.
-            _logger.LogDebug(
-                message: "Judge grade for correlation {CorrelationId} arrived after the join closed; discarding it.",
-                correlationId);
-            return false;
-        }
-
-        var blended = held with { JudgeScore = Math.Clamp(value: judgeScore, 0.0, 1.0) };
-        blended = blended with { UnifiedScore = _scorer.Score(result: blended, dimension: blended.Dimension) };
-
-        await WriteAsync(result: blended, cancellationToken: cancellationToken).ConfigureAwait(false);
-        return true;
+        var clamped = Math.Clamp(value: judgeScore, 0.0, 1.0);
+        return CompleteGraderAsync(
+            correlationId: correlationId,
+            graderKey: GraderKeys.Judge,
+            apply: held => held with { JudgeScore = clamped },
+            missingLogMessage:
+            "Judge grade for correlation {CorrelationId} arrived after the join closed; discarding it.",
+            cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc/>
-    public async Task<bool> AbandonJudgeAsync(
+    public Task<bool> AbandonJudgeAsync(
         string correlationId,
         string reason,
         CancellationToken cancellationToken = default)
@@ -166,21 +167,116 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
 
-        QualityResult? held;
+        return AbandonGraderAsync(
+            correlationId: correlationId,
+            graderKey: GraderKeys.Judge,
+            reason: reason,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Determines which grader keys a submitted result should be held open for. The only producer today is
+    /// <see cref="_judgeAvailability"/>, contributing at most <see cref="GraderKeys.Judge"/>; a future
+    /// asynchronous grader (Phase Q3) extends this set rather than requiring its own hold/join mechanism.
+    /// </summary>
+    private HashSet<string> DeterminePendingGraders(QualityResult result)
+    {
+        var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (_judgeAvailability.WillJudge(result)) pending.Add(GraderKeys.Judge);
+        return pending;
+    }
+
+    /// <summary>
+    /// Resolves one grader's contribution for a held entry: applies its score, removes the grader from the
+    /// entry's pending set, and - only once that set is empty - rescoring and writing exactly once. A
+    /// correlation id no longer held (already written by a sweep or an eviction) is not an error: the
+    /// grader simply lost the race, and the router already has an observation for this request.
+    /// </summary>
+    private async Task<bool> CompleteGraderAsync(
+        string correlationId,
+        string graderKey,
+        Func<QualityResult, QualityResult> apply,
+        string missingLogMessage,
+        CancellationToken cancellationToken)
+    {
+        QualityResult? toWrite = null;
+        var found = false;
+
         lock (_lock)
         {
-            held = TakeLocked(correlationId);
+            if (_pending.TryGetValue(correlationId, out var entry))
+            {
+                found = true;
+                var updated = apply(entry.Result);
+                entry.PendingGraderKeys.Remove(graderKey);
+
+                if (entry.PendingGraderKeys.Count == 0)
+                {
+                    _pending.Remove(correlationId);
+                    toWrite = updated with { UnifiedScore = _scorer.Score(result: updated, dimension: updated.Dimension) };
+                }
+                else
+                {
+                    _pending[correlationId] = entry with { Result = updated };
+                }
+            }
         }
 
-        if (held is null) return false;
+        if (!found)
+        {
+            _logger.LogDebug(message: missingLogMessage, correlationId);
+            return false;
+        }
+
+        if (toWrite is not null) await WriteAsync(result: toWrite, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Releases one grader's contribution for a held entry because it is known not to be coming, stamping
+    /// both the legacy single <see cref="QualityResult.DegradedReason"/> and this grader's own entry in
+    /// <see cref="QualityResult.GraderDegradedReasons"/> before checking whether every pending grader has
+    /// now resolved.
+    /// </summary>
+    private async Task<bool> AbandonGraderAsync(
+        string correlationId,
+        string graderKey,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        QualityResult? toWrite = null;
+        var found = false;
+
+        lock (_lock)
+        {
+            if (_pending.TryGetValue(correlationId, out var entry))
+            {
+                found = true;
+                var reasons = new Dictionary<string, string>(entry.Result.GraderDegradedReasons,
+                    StringComparer.OrdinalIgnoreCase) { [graderKey] = reason };
+                var updated = entry.Result with { DegradedReason = reason, GraderDegradedReasons = reasons };
+                entry.PendingGraderKeys.Remove(graderKey);
+
+                if (entry.PendingGraderKeys.Count == 0)
+                {
+                    _pending.Remove(correlationId);
+                    toWrite = updated;
+                }
+                else
+                {
+                    _pending[correlationId] = entry with { Result = updated };
+                }
+            }
+        }
+
+        if (!found) return false;
 
         _logger.LogDebug(
             message: "Releasing correlation {CorrelationId} with its static score alone: {Reason}.",
             correlationId,
             reason);
 
-        await WriteAsync(result: held with { DegradedReason = reason }, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        if (toWrite is not null) await WriteAsync(result: toWrite, cancellationToken: cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -194,8 +290,8 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         {
             expired = [];
             foreach (var key in _pending.Where(kv => kv.Value.ExpiresAtUtc <= now).Select(kv => kv.Key).ToList())
-                if (TakeLocked(key) is { } result)
-                    expired.Add(result);
+                if (TakeLocked(key) is { } entry)
+                    expired.Add(WithRemainingReasons(entry: entry, reason: "judge-join-timeout"));
         }
 
         foreach (var result in expired)
@@ -211,13 +307,27 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         return expired.Count;
     }
 
-    /// <summary>Removes an entry and returns its result, or null when nothing was held under that key.</summary>
-    /// <remarks>Must be called under <c>_lock</c>: winning this removal is what grants the right to write.</remarks>
-    private QualityResult? TakeLocked(string correlationId)
+    /// <summary>
+    /// Stamps <paramref name="reason"/> into <see cref="QualityResult.GraderDegradedReasons"/> for every
+    /// grader key that was still pending when an entry was taken off the table by a timeout or an eviction,
+    /// so that per-grader record is as complete as the single <see cref="QualityResult.DegradedReason"/>
+    /// field the caller stamps separately.
+    /// </summary>
+    private static QualityResult WithRemainingReasons(Entry entry, string reason)
     {
-        if (!_pending.Remove(key: correlationId, value: out var entry)) return null;
+        if (entry.PendingGraderKeys.Count == 0) return entry.Result;
 
-        return entry.Result;
+        var reasons = new Dictionary<string, string>(entry.Result.GraderDegradedReasons, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in entry.PendingGraderKeys) reasons[key] = reason;
+
+        return entry.Result with { GraderDegradedReasons = reasons };
+    }
+
+    /// <summary>Removes an entry and returns it, or null when nothing was held under that key.</summary>
+    /// <remarks>Must be called under <c>_lock</c>: winning this removal is what grants the right to write.</remarks>
+    private Entry? TakeLocked(string correlationId)
+    {
+        return _pending.Remove(key: correlationId, value: out var entry) ? entry : null;
     }
 
     /// <summary>Drops the oldest held results beyond capacity and returns them so the caller can still write them.</summary>
@@ -229,7 +339,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         while (_pending.Count > _capacity && _insertionOrder.Count > 0)
         {
             var oldest = _insertionOrder.Dequeue();
-            if (TakeLocked(oldest) is { } result) evicted.Add(result);
+            if (TakeLocked(oldest) is { } entry) evicted.Add(WithRemainingReasons(entry: entry, reason: "judge-join-evicted"));
         }
 
         return evicted;
@@ -252,8 +362,12 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         }
     }
 
-    /// <summary>One held static result and the instant its judge wait expires.</summary>
-    /// <param name="Result">The static result awaiting a judge grade.</param>
-    /// <param name="ExpiresAtUtc">The UTC instant after which the wait is abandoned.</param>
-    private sealed record Entry(QualityResult Result, DateTimeOffset ExpiresAtUtc);
+    /// <summary>One held static result and the grader keys it is still waiting on.</summary>
+    /// <param name="Result">The static result awaiting the remaining pending graders.</param>
+    /// <param name="PendingGraderKeys">
+    /// The grader keys not yet resolved. Mutated in place under <c>_lock</c> as each grader completes or is
+    /// abandoned; the entry is written and removed once this set is empty.
+    /// </param>
+    /// <param name="ExpiresAtUtc">The UTC instant after which the wait is abandoned regardless of what remains pending.</param>
+    private sealed record Entry(QualityResult Result, HashSet<string> PendingGraderKeys, DateTimeOffset ExpiresAtUtc);
 }

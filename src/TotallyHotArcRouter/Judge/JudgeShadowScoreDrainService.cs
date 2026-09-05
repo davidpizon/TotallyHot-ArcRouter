@@ -23,6 +23,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     private readonly IJudgeClient _judgeClient;
     private readonly ILogger<JudgeShadowScoreDrainService> _logger;
     private readonly IOptionsMonitor<JudgeOptions> _options;
+    private readonly PendingPromptCache _pendingPromptCache;
     private readonly PendingResponseTextCache _pendingResponseTextCache;
     private readonly IJudgeShadowScoreQueue _queue;
     private readonly IJudgeShadowScoreStore _store;
@@ -30,6 +31,11 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     /// <summary>Initializes a new instance of the <see cref="JudgeShadowScoreDrainService"/> class.</summary>
     /// <param name="queue">The work queue to drain.</param>
     /// <param name="pendingResponseTextCache">Supplies the response text for each job, keyed by correlation id.</param>
+    /// <param name="pendingPromptCache">
+    /// Supplies the prompt the response answered, keyed by the same correlation id. Best-effort: a miss
+    /// (aged out, or never cached) still lets the job proceed, just without a task section in the judge
+    /// prompt.
+    /// </param>
     /// <param name="judgeClient">The judge backbone client.</param>
     /// <param name="store">Where each scored job's row is persisted.</param>
     /// <param name="options">The judge options (live enabled gate, prompt version), read per job rather than captured.</param>
@@ -38,6 +44,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     public JudgeShadowScoreDrainService(
         IJudgeShadowScoreQueue queue,
         PendingResponseTextCache pendingResponseTextCache,
+        PendingPromptCache pendingPromptCache,
         IJudgeClient judgeClient,
         IJudgeShadowScoreStore store,
         IOptionsMonitor<JudgeOptions> options,
@@ -46,6 +53,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     {
         ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(pendingResponseTextCache);
+        ArgumentNullException.ThrowIfNull(pendingPromptCache);
         ArgumentNullException.ThrowIfNull(judgeClient);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
@@ -54,6 +62,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
 
         _queue = queue;
         _pendingResponseTextCache = pendingResponseTextCache;
+        _pendingPromptCache = pendingPromptCache;
         _judgeClient = judgeClient;
         _store = store;
         _options = options;
@@ -93,6 +102,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         if (!_options.CurrentValue.Enabled)
         {
             _pendingResponseTextCache.TryTake(correlationId: job.CorrelationId, text: out _);
+            _pendingPromptCache.TryTake(correlationId: job.CorrelationId, prompt: out _);
             await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-disabled",
                 cancellationToken: stoppingToken).ConfigureAwait(false);
             return;
@@ -101,6 +111,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         if (!_pendingResponseTextCache.TryTake(correlationId: job.CorrelationId, text: out var responseText) ||
             string.IsNullOrEmpty(responseText))
         {
+            _pendingPromptCache.TryTake(correlationId: job.CorrelationId, prompt: out _);
             _logger.LogDebug(
                 message: "No pending response text for correlation {CorrelationId}; skipping shadow-judge scoring.",
                 job.CorrelationId);
@@ -109,11 +120,17 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             return;
         }
 
+        // Best-effort: a miss just means the judge grades without a task section, same as an operator
+        // running with transcript-adjacent caching aged out faster than the queue could drain.
+        _pendingPromptCache.TryTake(correlationId: job.CorrelationId, prompt: out var prompt);
+
         var stopwatch = Stopwatch.StartNew();
         try
         {
             var result = await _judgeClient
-                .ScoreAsync(request: new JudgeScoreRequest(Dimension: job.Dimension, ResponseText: responseText),
+                .ScoreAsync(
+                    request: new JudgeScoreRequest(Dimension: job.Dimension, ResponseText: responseText,
+                        Prompt: prompt ?? string.Empty),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
             stopwatch.Stop();
 

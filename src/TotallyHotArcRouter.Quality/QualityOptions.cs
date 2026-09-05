@@ -109,4 +109,21 @@ public sealed class DimensionWeightOptions
     /// rather than being capped by an axis that could never be filled.
     /// </summary>
     public double Judge { get; init; } = 0.4;
+
+    /// <summary>
+    /// Weights for graders beyond the three built-in axes above, keyed by grader name and matched against
+    /// <see cref="QualityResult.GraderScores"/>. Empty by default: Phase Q1 generalizes the join and the
+    /// scorer's loop to support this, but registers no additional grader itself. A grader with no entry
+    /// here contributes nothing, the same drop-rather-than-zero treatment the three named axes get.
+    /// </summary>
+    public IReadOnlyDictionary<string, double> ExtraWeights { get; init; } =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Resolves the configured weight for an extra grader, or zero when it has none.</summary>
+    /// <param name="graderKey">The grader's key, matched against <see cref="QualityResult.GraderScores"/>.</param>
+    /// <returns>The configured weight, or <c>0.0</c> when the grader is unconfigured.</returns>
+    public double ResolveExtraWeight(string graderKey)
+    {
+        return ExtraWeights.TryGetValue(key: graderKey, value: out var weight) ? weight : 0.0;
+    }
 }

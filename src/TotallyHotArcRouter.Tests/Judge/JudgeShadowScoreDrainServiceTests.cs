@@ -184,6 +184,38 @@ public class JudgeShadowScoreDrainServiceTests
         Assert.Empty(aggregator.Abandoned);
     }
 
+    // Phase Q2: the judge grades against the requirement it was written for, recovered the same way the
+    // response text is - a separate best-effort cache, keyed by the same correlation id.
+    [Fact]
+    public async Task ProcessAsync_PromptCached_PassesItToTheJudgeRequest()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        promptCache.Set(correlationId: "corr-1", prompt: "write a function that adds two numbers");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            promptCache: promptCache);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "write a function that adds two numbers", actual: judgeClient.LastRequest?.Prompt);
+        Assert.False(promptCache.TryTake(correlationId: "corr-1", prompt: out _));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_NoPromptCached_StillScoresWithAnEmptyPrompt()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore());
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: string.Empty, actual: judgeClient.LastRequest?.Prompt);
+    }
+
     private static PendingResponseTextCache CreateCache()
     {
         return new PendingResponseTextCache(Options.Create(new JudgeOptions()));
@@ -194,12 +226,14 @@ public class JudgeShadowScoreDrainServiceTests
         IJudgeClient judgeClient,
         IJudgeShadowScoreStore store,
         StaticOptionsMonitor<JudgeOptions>? options = null,
-        IQualityScoreAggregator? aggregator = null)
+        IQualityScoreAggregator? aggregator = null,
+        PendingPromptCache? promptCache = null)
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         return new JudgeShadowScoreDrainService(
             queue: queue,
             pendingResponseTextCache: cache,
+            pendingPromptCache: promptCache ?? new PendingPromptCache(Options.Create(new JudgeOptions())),
             judgeClient: judgeClient,
             store: store,
             options: options ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions
@@ -219,10 +253,13 @@ public class JudgeShadowScoreDrainServiceTests
 
         public bool WasCalled { get; private set; }
 
+        public JudgeScoreRequest? LastRequest { get; private set; }
+
         public Task<JudgeScoreResult?> ScoreAsync(JudgeScoreRequest request,
             CancellationToken cancellationToken = default)
         {
             WasCalled = true;
+            LastRequest = request;
             return exception is not null
                 ? Task.FromException<JudgeScoreResult?>(exception)
                 : Task.FromResult(result);

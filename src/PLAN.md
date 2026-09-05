@@ -140,11 +140,27 @@ flowchart LR
 
 ## Remaining work, in order
 
-1. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). What remains:
-   **Q1** generalizes the scorer from two graders to N (`DimensionWeightOptions` keyed grader map,
-   per-grader contributions on `QualityResult`, a K-way join, per-grader `DegradedReason`) with the exit
-   criterion that a single configured judge produces a byte-identical `UnifiedScore`; **Q2** adds the free
-   `IStaticAnalyzer`s (prompt/response relevance, smell density) and makes the judge prompt-aware; **Q3**
+1. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). **Q1 shipped**: the
+   scorer generalizes from three named axes to N via a keyed extension — `DimensionWeightOptions.ExtraWeights`
+   and `QualityResult.GraderScores`/`GraderDegradedReasons`, matched by grader key, alongside (not replacing)
+   the three named fields — and `QualityScoreAggregator`'s judge join generalized from an implicit single
+   slot to a set of pending grader keys per request (`GraderKeys`). Exit criterion met by construction: the
+   new maps are empty for every result until a grader populates them, so today's blend is byte-identical to
+   pre-Q1, verified by `QualityScorerTests`/`QualityScoreAggregatorTests` rather than by re-deriving the math.
+   No new grader is registered by Q1 itself — that is Q3's job, and it now means adding one config entry
+   plus a job that calls `CompleteGraderAsync`'s public seam (`CompleteWithJudgeAsync`'s shape, generalized),
+   not touching `QualityScorer` or the aggregator's hold/write logic. The K-way join is exercised by
+   construction (a set, not a flag) rather than by a test holding two concurrent async graders — there is no
+   second one to test against until Q3 lands. Full design: `quality-verifier-architecture.md` §4/§5.
+   **Q2 shipped**: two new free `IStaticAnalyzer`s — `RelevanceAnalyzer` (prompt/response token overlap,
+   reached through a new `IStaticAnalyzer.Analyze(code, language, prompt)` default-interface-method overload
+   so the other four analyzers needed no change) and `SmellDensityAnalyzer` (Szych & Schwerk's
+   findings-per-100-lines ratio over a small self-contained smell catalog: magic numbers, long lines, empty
+   catch/except blocks, long parameter lists) — plus judge prompt-awareness: `JudgeScoreRequest.Prompt`,
+   recovered from a new `PendingPromptCache` mirroring `PendingResponseTextCache` exactly, woven into
+   `GEvalJudgeClient`'s prompt as an optional task section. Full design and rationale:
+   `quality-verifier-architecture.md` §3.2/§5, `code-quality-metrics-assessment.md` §5.1.
+   **Q3**
    registers the LLM grader portfolio — CodeJudge (correctness), ICE-Score `usefulness`, RACE
    readability/maintainability — each behind its own capability probe that abstains rather than fabricates;
    **Q4** measures per-dimension, per-grader reliability plus verbosity and self-preference skew before any
