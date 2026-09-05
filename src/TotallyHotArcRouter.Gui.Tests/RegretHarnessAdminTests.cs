@@ -73,6 +73,23 @@ public sealed class RegretHarnessAdminTests
     }
 
     [Fact]
+    public void Renders_an_error_state_when_the_load_fails_but_the_router_is_reachable()
+    {
+        // isUnavailable: false is the case a non-connectivity RPC failure (e.g. PermissionDenied, Internal)
+        // produces: IsReachable stays true because the router was reached, but Status is still null because
+        // the call itself failed. The panel must not fall through to "No run yet this session" here - that
+        // would hide LastError behind a state that claims nothing has gone wrong.
+        using var ctx = NewContext(new FakeClient
+        { Error = new RegretHarnessAdminException(message: "permission denied", isUnavailable: false) });
+
+        var cut = ctx.Render<RegretHarnessAdmin>();
+
+        cut.Markup.Should().Contain("Router unreachable");
+        cut.Markup.Should().Contain("permission denied");
+        cut.Markup.Should().NotContain("No run yet this session");
+    }
+
+    [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
         var client = new FakeClient { Error = new RegretHarnessAdminException(message: "nope", isUnavailable: true) };

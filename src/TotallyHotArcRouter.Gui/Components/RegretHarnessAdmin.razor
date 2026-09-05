@@ -11,7 +11,7 @@
     {
         <div class="text-sm text-slate-500 p-4">Loading regret harness status…</div>
     }
-    else if (!Store.IsReachable)
+    else if (!Store.IsReachable || Store.Status is null)
     {
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
