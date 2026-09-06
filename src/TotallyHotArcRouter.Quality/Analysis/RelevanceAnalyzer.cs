@@ -104,6 +104,6 @@ public sealed partial class RelevanceAnalyzer : IStaticAnalyzer
         return tokens;
     }
 
-    [GeneratedRegex(pattern: @"[A-Za-z][A-Za-z0-9_]*", options: RegexOptions.None, 1000)]
+    [GeneratedRegex(pattern: "[A-Za-z][A-Za-z0-9_]*", options: RegexOptions.None, 1000)]
     private static partial Regex Token();
 }

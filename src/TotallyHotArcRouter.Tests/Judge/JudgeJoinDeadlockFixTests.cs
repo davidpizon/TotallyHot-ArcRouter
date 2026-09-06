@@ -43,7 +43,7 @@ public class JudgeJoinDeadlockFixTests
         var drainService = CreateDrainService(responseTextCache: responseTextCache, aggregator: aggregator,
             judgeResult: new JudgeScoreResult(0.8, UsedLogprobs: true, JudgeModel: "free-judge-model"));
 
-        await drainService.ProcessAsync(job: job!, stoppingToken: TestContext.Current.CancellationToken);
+        await drainService.ProcessAsync(job: job, stoppingToken: TestContext.Current.CancellationToken);
 
         var written = Assert.Single(observer.Observed);
         Assert.Equal(0.8, actual: written.JudgeScore);
@@ -174,7 +174,7 @@ public class JudgeJoinDeadlockFixTests
 
     private sealed class FakeJudgeShadowScoreStore : IJudgeShadowScoreStore
     {
-        public List<JudgeShadowScoreRecord> Inserted { get; } = [];
+        private List<JudgeShadowScoreRecord> Inserted { get; } = [];
 
         public Task InsertAsync(JudgeShadowScoreRecord record, CancellationToken cancellationToken = default)
         {

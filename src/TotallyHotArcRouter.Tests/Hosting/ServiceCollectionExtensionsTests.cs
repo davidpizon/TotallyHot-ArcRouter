@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System.Linq;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
@@ -158,7 +157,7 @@ public class ServiceCollectionExtensionsTests
         // full expected membership, not just an absence, is what keeps this test meaningful rather than
         // tautological.
         Assert.Equal(
-            expected: new[] { typeof(RouterMemoryScoreObserver), typeof(EmbeddingMemoryScoreObserver), typeof(TranscriptScoreObserver) },
+            expected: [typeof(RouterMemoryScoreObserver), typeof(EmbeddingMemoryScoreObserver), typeof(TranscriptScoreObserver)],
             actual: composite.Observers.Select(o => o.GetType()));
     }
 

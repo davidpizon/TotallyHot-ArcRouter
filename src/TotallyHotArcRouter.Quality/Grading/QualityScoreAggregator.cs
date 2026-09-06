@@ -124,11 +124,20 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     {
         ArgumentNullException.ThrowIfNull(result);
 
+        // No correlation id means nothing could ever join to it, so holding it would only guarantee a
+        // timeout later. Checked before DeterminePendingGraders - not just before the write - because
+        // that call reaches IJudgeAvailability.WillJudge, which in the host resolves a judge backbone
+        // (JudgeModelSelector.Resolve). A result that can never be held has no use for that answer, so
+        // skip it entirely rather than pay for a resolution whose result is about to be discarded.
+        if (string.IsNullOrEmpty(result.RequestCorrelationId))
+        {
+            await WriteAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         var pendingGraders = DeterminePendingGraders(result);
 
-        // No correlation id means nothing could ever join to it, so holding it would only guarantee a
-        // timeout later. Write it now.
-        if (string.IsNullOrEmpty(result.RequestCorrelationId) || pendingGraders.Count == 0)
+        if (pendingGraders.Count == 0)
         {
             await WriteAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
             return;

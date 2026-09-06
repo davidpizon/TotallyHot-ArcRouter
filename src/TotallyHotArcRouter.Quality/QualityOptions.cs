@@ -124,6 +124,6 @@ public sealed class DimensionWeightOptions
     /// <returns>The configured weight, or <c>0.0</c> when the grader is unconfigured.</returns>
     public double ResolveExtraWeight(string graderKey)
     {
-        return ExtraWeights.TryGetValue(key: graderKey, value: out var weight) ? weight : 0.0;
+        return ExtraWeights.GetValueOrDefault(key: graderKey, defaultValue: 0.0);
     }
 }

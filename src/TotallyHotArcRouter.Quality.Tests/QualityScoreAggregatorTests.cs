@@ -328,7 +328,7 @@ public class QualityScoreAggregatorTests
     public async Task SubmitAsync_DispatcherThrows_WritesImmediatelyWithNotDispatchedReason()
     {
         var observer = new RecordingObserver();
-        var aggregator = Create(observer: observer, true, dispatcher: new StubDispatcher(throws: true));
+        var aggregator = Create(observer: observer, true, dispatcher: new ThrowingDispatcher());
 
         await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
 
@@ -406,22 +406,31 @@ public class QualityScoreAggregatorTests
 
     /// <summary>
     /// An <see cref="IAsyncGraderDispatcher"/> stub. Defaults to accepting every requested key (the
-    /// production dispatcher's ordinary path); construct with <c>acceptAll: false</c> to decline everything,
-    /// or <c>throws: true</c> to prove a throwing dispatcher degrades the same way a decline does.
+    /// production dispatcher's ordinary path); construct with <c>acceptAll: false</c> to decline everything.
     /// </summary>
-    private sealed class StubDispatcher(bool acceptAll = true, bool throws = false) : IAsyncGraderDispatcher
+    private sealed class StubDispatcher(bool acceptAll = true) : IAsyncGraderDispatcher
     {
         public Task<IReadOnlySet<string>> DispatchAsync(
             QualityResult result,
             IReadOnlySet<string> pendingGraderKeys,
             CancellationToken cancellationToken = default)
         {
-            if (throws) throw new InvalidOperationException("dispatcher is down");
-
             IReadOnlySet<string> accepted = acceptAll
                 ? new HashSet<string>(pendingGraderKeys, StringComparer.OrdinalIgnoreCase)
                 : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             return Task.FromResult(accepted);
+        }
+    }
+
+    /// <summary>A dispatcher that always throws, used to prove a throwing dispatcher degrades the same way a decline does.</summary>
+    private sealed class ThrowingDispatcher : IAsyncGraderDispatcher
+    {
+        public Task<IReadOnlySet<string>> DispatchAsync(
+            QualityResult result,
+            IReadOnlySet<string> pendingGraderKeys,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("dispatcher is down");
         }
     }
 

@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
