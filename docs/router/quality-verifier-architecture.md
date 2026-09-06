@@ -12,15 +12,21 @@
 The router learns which model is best at which kind of task by observing a quality score per served
 response. This document describes how that score is produced.
 
-The score comes from two independent graders, neither of which runs the model's code:
+The score comes from up to five independent graders, none of which runs the model's code:
 
 1. **Static analysis** — parse the extracted snippet and inspect it. Syntax validity, parse-level
    diagnostics, placeholder/stub detection, truncation detection, and complexity.
 2. **The G-Eval judge** — ask a free, operator-configured model to grade the response against the
    dimension's criteria.
+3. **CodeJudge** (Q3) — the same free backbone, judging correctness via a severity-weighted fault taxonomy.
+4. **ICE-Score** (Q3) — the same free backbone, judging usefulness.
+5. **RACE** (Q3) — the same free backbone, judging readability/maintainability.
 
-Their grades are joined by correlation id and blended into **one** unified score `u ∈ [0,1]`, written
-once into `RouterMemory` and `EmbeddingMemory` under the `live:` dimension namespace.
+The three Q3 graders are each independently operator-toggleable (off by default until a free backbone makes
+them default on, same as the judge) - "up to five" because an operator running with all three off is back to
+the original two. Every grader's contribution is joined by correlation id and blended into **one** unified
+score `u ∈ [0,1]`, written once into `RouterMemory` and `EmbeddingMemory` under the `live:` dimension
+namespace.
 
 ### 1.1 What changed, and why
 
@@ -230,16 +236,24 @@ the scorer normalizes by their total.
 
 > **Phase Q1 (shipped)** generalized the trailing `Σ w_g · s_g` term: `QualityResult.GraderScores` is a
 > keyed map for graders beyond the three built-in axes, matched against
-> `DimensionWeightOptions.ExtraWeights` by the same key. It is empty for every result today — Q1 registers
-> no new grader, only the plumbing — so the sum contributes nothing and the byte-identical-to-pre-Q1
-> exit criterion holds by construction rather than by re-deriving the math. Phase Q3 wires CodeJudge,
-> ICE-Score, and RACE through this map instead of adding named fields and touching `QualityScorer` again.
-> The aggregator's judge join was generalized the same way: `QualityScoreAggregator` holds a *set* of
-> pending grader keys per request (today populated with at most `GraderKeys.Judge` by `IJudgeAvailability`)
-> rather than an implicit single slot, and per-grader abstain/timeout/eviction reasons land in
-> `QualityResult.GraderDegradedReasons` alongside the legacy single `DegradedReason` field. A genuinely
-> concurrent multi-grader hold is exercised by construction, not by a test with two live async graders —
-> there is no second one to test against until Q3 lands.
+> `DimensionWeightOptions.ExtraWeights` by the same key. The aggregator's judge join was generalized the
+> same way: `QualityScoreAggregator` holds a *set* of pending grader keys per request rather than an
+> implicit single slot, and per-grader abstain/timeout/eviction reasons land in
+> `QualityResult.GraderDegradedReasons` alongside the legacy single `DegradedReason` field.
+>
+> **Phase Q3 (shipped)** is the first grader to actually populate that map: `CodeJudgeGraderClient`
+> (correctness, Tong & Zhang's severity-weighted fault taxonomy), `IceScoreGraderClient` (usefulness, ICE-
+> Score's aspect of that name), and `RaceGraderClient` (readability/maintainability) each contribute under
+> `GraderKeys.CodeJudge`/`IceScore`/`Race`, wired through `IQualityScoreAggregator.CompleteGraderAsync`/
+> `AbandonGraderAsync` — the generalized counterparts of `CompleteWithJudgeAsync`/`AbandonJudgeAsync` Q1 kept
+> judge-specific — without any change to `QualityScorer` itself. A new `IPortfolioGraderAvailability` seam
+> (deliberately separate from `IJudgeAvailability`, so the judge's own contract is undisturbed) supplies the
+> pending keys the aggregator unions with the judge's, and `CompositeAsyncGraderDispatcher` fans the
+> aggregator's single `IAsyncGraderDispatcher` seam out to both the judge's dispatcher and the portfolio's.
+> The genuinely concurrent multi-grader hold this was all built for is exercised for real now — a request
+> can be held open for the judge and any of the three portfolio graders simultaneously, resolved by whichever
+> arrives, in whichever order. Full design: §5's judge-join section (its description generalizes to every
+> grader, not just the judge) and the Q3 status note in [`../../src/PLAN.md`](../../src/PLAN.md).
 
 **The rule that matters: an axis that could not be measured is dropped from both numerator and
 denominator, never scored zero.** A missing judge grade and a judge grade of zero are different facts.
@@ -250,7 +264,8 @@ same applies when every analyzer abstains.
 A non-authoritative syntax verdict has its **weight halved** rather than its score reduced: a
 confident-but-cheap "this looks fine" should move the total less, not report a worse snippet than it saw.
 
-Defaults (`appsettings.json`):
+Defaults (`appsettings.json`), before Q3's `ExtraWeights` (each unconfigured dimension still gets the
+three-axis defaults below; `ExtraWeights` only apply to a portfolio grader an operator has actually enabled):
 
 | Dimension | Syntax | Analysis | Judge |
 |---|---|---|---|
@@ -267,6 +282,14 @@ Defaults (`appsettings.json`):
 `code_understanding` leans hardest on the judge because an explanation's quality is almost entirely
 outside what a parser can see. `code_completion` leans the other way: a completion is short, so syntax and
 placeholder detection say most of what there is to say.
+
+**Q3 lowered the three named weights slightly and added `ExtraWeights` per dimension** (`codejudge`/
+`icescore`/`race`) to make room for the portfolio without changing what a dimension with every portfolio
+grader switched off scores - each grader is dropped from the normalization the same drop-rather-than-zero
+way an absent judge grade already is, so a result with no `GraderScores` entries scores identically to
+before Q3. These starting weights are deliberately modest and not yet reliability-tuned; Q4 measures
+per-dimension, per-grader agreement before any re-weighting (docs/research/code-quality-metrics-assessment.md
+§5.1).
 
 ---
 
@@ -367,7 +390,7 @@ about to influence routing, so it must exist before the score does.
   "LiveMemoryPrefix": "live:",
   "JudgeJoinTimeoutMs": 60000,
   "JudgeJoinCapacity": 2000,
-  "ScorerVersion": "2.0",
+  "ScorerVersion": "2.1",
   "DimensionWeights": { /* see §4 */ }
 }
 ```
@@ -375,7 +398,14 @@ about to influence routing, so it must exist before the score does.
 `ScorerVersion` identifies the current scoring configuration and is stamped onto each rescanned
 transcript row. **Bump it whenever a change would produce a different score for the same response** — a
 new grader, a changed weight, a reworded judge prompt. Leaving it unchanged after a scoring change
-freezes the corpus at the old scorer's verdicts; bumping it needlessly re-grades every row.
+freezes the corpus at the old scorer's verdicts; bumping it needlessly re-grades every row. Bumped to
+`2.1` by Q3 for exactly this reason: registering CodeJudge/ICE-Score/RACE and adding their `ExtraWeights`
+changes the score of any response a portfolio grader contributes to.
+
+Each portfolio grader's own enablement is not in this section - like the judge's `Enabled`/`ModelName`, it
+is operator-facing state owned by `router_settings` and the System Settings window, not
+`appsettings.json`. See `Judge.PortfolioGraderOptions` and its three `router_settings` keys
+(`CodeJudgeEnabled`/`IceScoreEnabled`/`RaceEnabled`).
 
 The rescan's own settings live on the `Transcript` section, not here, because they govern a sweep over
 the transcript store. That section is absent from `appsettings.json` entirely — every value below is
@@ -413,12 +443,27 @@ learned rather than migrating it.
 | `QualityJoinSweepService` | Periodic timeout sweep. |
 | `IQualityScoreObserver` | Seam into the host's memory adapters. |
 | `QualityRescanService` | The saved-data source (§3.3). Lives in the host beside the transcript store, not in this assembly - it needs `ITranscriptStore`, which this library does not reference. Writes scores to transcript rows only, never to router memory. |
-| `PendingPromptCache` (Q2) | Mirrors `PendingResponseTextCache`: bridges the request's prompt to the judge's later-arriving job, in-process only. |
+| `PendingPromptCache` (Q2) | Mirrors `PendingResponseTextCache`: bridges the request's prompt to a later-arriving grading job, in-process only. Both caches gained a non-removing `TryPeek` in Q3 - see below. |
+| `IPortfolioGraderAvailability` (Q3) | Seam: "should this be held for a CodeJudge/ICE-Score/RACE grade?" - separate from `IJudgeAvailability`, unioned with it by the aggregator. |
+| `CodeJudgeGraderClient` / `IceScoreGraderClient` / `RaceGraderClient` (Q3) | The three portfolio graders, each built on `PortfolioGraderClientBase`'s shared HTTP plumbing over the judge's own `JudgeModelSelector` backbone. Live in the host, not this assembly. |
+| `PortfolioGraderDispatcher` / `PortfolioGraderDrainService` (Q3) | Mirror `JudgeShadowScoreDispatcher`/`JudgeShadowScoreDrainService`'s dispatch/drain shape for the three portfolio graders. Live in the host. |
+| `CompositeAsyncGraderDispatcher` (Q3) | Fans the aggregator's single `IAsyncGraderDispatcher` seam out to both the judge's dispatcher and the portfolio's, unioning their accepted keys. Lives in the host. |
 
-The `IJudgeAvailability` and `IQualityScoreObserver` seams exist so `TotallyHot.ArcRouter.Quality` never
-references the core router or the judge subsystem. The host supplies `JudgeAvailability` and
-`CompositeRouterScoreObserver`; the library's own defaults (`NoJudgeAvailability`,
-`NullQualityScoreObserver`) keep it usable standalone and in tests.
+The `IJudgeAvailability`, `IPortfolioGraderAvailability`, and `IQualityScoreObserver` seams exist so
+`TotallyHot.ArcRouter.Quality` never references the core router or the judge subsystem. The host supplies
+`JudgeAvailability`, `PortfolioGraderAvailability`, and `CompositeRouterScoreObserver`; the library's own
+defaults (`NoJudgeAvailability`, `NoPortfolioGraderAvailability`, `NullQualityScoreObserver`) keep it usable
+standalone and in tests.
+
+**Q3's cache change.** `PendingResponseTextCache`/`PendingPromptCache` were single-consumer before Q3 -
+`TryTake` removed an entry the instant the (sole) judge read it, which was both the privacy commitment
+("gone the moment it's taken") and the whole eviction mechanism. With up to four independent async graders
+now reading the same cached text for one request, that policy would starve every grader but whichever ran
+first. Both caches gained `TryPeek` (reads without removing), and every drain worker - the judge's included
+- switched to it; an entry is now bounded by `JudgeOptions.CacheTtlSeconds`/`CacheCapacity` alone rather than
+by an explicit take as well. Still in-memory-only and still bounded, just up to `CacheTtlSeconds` (default
+300s) longer-lived than before - a deliberate, narrow loosening of the retention guarantee, not a reversal
+of it.
 
 ---
 

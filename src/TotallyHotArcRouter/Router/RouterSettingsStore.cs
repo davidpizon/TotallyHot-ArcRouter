@@ -52,6 +52,24 @@ public sealed class RouterSettingsStore
     /// </summary>
     public const string TranscriptCaptureEnabledKey = "TranscriptCaptureEnabled";
 
+    /// <summary>
+    /// The <c>router_settings</c> key for <see cref="Judge.PortfolioGraderOptions.CodeJudgeEnabled"/>, stored
+    /// as <c>"0"</c>/<c>"1"</c>.
+    /// </summary>
+    public const string CodeJudgeEnabledKey = "CodeJudgeEnabled";
+
+    /// <summary>
+    /// The <c>router_settings</c> key for <see cref="Judge.PortfolioGraderOptions.IceScoreEnabled"/>, stored
+    /// as <c>"0"</c>/<c>"1"</c>.
+    /// </summary>
+    public const string IceScoreEnabledKey = "IceScoreEnabled";
+
+    /// <summary>
+    /// The <c>router_settings</c> key for <see cref="Judge.PortfolioGraderOptions.RaceEnabled"/>, stored as
+    /// <c>"0"</c>/<c>"1"</c>.
+    /// </summary>
+    public const string RaceEnabledKey = "RaceEnabled";
+
     private readonly RouterMemoryDatabase _database;
     private readonly ILogger<RouterSettingsStore> _logger;
 

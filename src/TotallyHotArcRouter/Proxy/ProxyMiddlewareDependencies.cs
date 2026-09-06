@@ -228,6 +228,15 @@ public sealed record ProxyMiddlewareDependencies
     public IOptionsMonitor<JudgeOptions>? JudgeOptionsMonitor { get; init; }
 
     /// <summary>
+    /// Optional live Phase Q3 portfolio-grader options monitor, consulted alongside
+    /// <see cref="JudgeOptionsMonitor"/> at the same response-text retention site: raw prompt/response text
+    /// is retained when the G-Eval judge <em>or</em> any of CodeJudge/ICE-Score/RACE is live, since all four
+    /// graders read the same cached text. Defaults to <see langword="null"/>, treated as no portfolio grader
+    /// being enabled, matching <see cref="Judge.PortfolioGraderOptions"/>'s own off-by-default coded values.
+    /// </summary>
+    public IOptionsMonitor<Judge.PortfolioGraderOptions>? PortfolioGraderOptionsMonitor { get; init; }
+
+    /// <summary>
     /// Optional runtime kill switch, toggled from the GUI system tray via
     /// <see cref="Router.RoutingGateAdminGrpcService"/>. When <see cref="Router.IRoutingGate.IsEnabled"/>
     /// is <see langword="false"/>, every LLM-forwarding request is rejected with 503 before routing is

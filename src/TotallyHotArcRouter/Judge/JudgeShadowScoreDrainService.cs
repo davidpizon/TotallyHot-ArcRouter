@@ -11,9 +11,11 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <c>TranscriptRetentionService</c>'s polling-timer shape - this drains a queue continuously, it does not
 /// poll on an interval. For each dequeued job it <see cref="PendingResponseTextCache.TryTake"/>s the
 /// response text, calls the configured <see cref="IJudgeClient"/>, and writes one row to
-/// <see cref="IJudgeShadowScoreStore"/>. Whether judging succeeds, fails, or the cache entry already aged
-/// out, the text is gone from <see cref="PendingResponseTextCache"/> afterward - <c>TryTake</c> always
-/// consumes the slot. Each job is a no-op while <see cref="JudgeOptions.Enabled"/> is
+/// <see cref="IJudgeShadowScoreStore"/>. Reads the cached text with <see cref="PendingResponseTextCache.TryPeek"/>
+/// rather than taking it: Phase Q3's CodeJudge/ICE-Score/RACE portfolio graders read the very same cached
+/// entry for the same request, so this worker no longer owns removing it - the cache's own TTL/capacity
+/// bounds do that instead (see <see cref="PendingResponseTextCache"/>'s remarks). Each job is a no-op while
+/// <see cref="JudgeOptions.Enabled"/> is
 /// <see langword="false"/>: the worker keeps running and re-reads the flag per job rather than exiting at
 /// startup, so the System Settings window's toggle resumes judging without a restart.
 /// </summary>
@@ -101,17 +103,14 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         // so a disabled judge still releases the retained response text rather than leaving it to age out.
         if (!_options.CurrentValue.Enabled)
         {
-            _pendingResponseTextCache.TryTake(correlationId: job.CorrelationId, text: out _);
-            _pendingPromptCache.TryTake(correlationId: job.CorrelationId, prompt: out _);
             await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-disabled",
                 cancellationToken: stoppingToken).ConfigureAwait(false);
             return;
         }
 
-        if (!_pendingResponseTextCache.TryTake(correlationId: job.CorrelationId, text: out var responseText) ||
+        if (!_pendingResponseTextCache.TryPeek(correlationId: job.CorrelationId, text: out var responseText) ||
             string.IsNullOrEmpty(responseText))
         {
-            _pendingPromptCache.TryTake(correlationId: job.CorrelationId, prompt: out _);
             _logger.LogDebug(
                 message: "No pending response text for correlation {CorrelationId}; skipping shadow-judge scoring.",
                 job.CorrelationId);
@@ -122,7 +121,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
 
         // Best-effort: a miss just means the judge grades without a task section, same as an operator
         // running with transcript-adjacent caching aged out faster than the queue could drain.
-        _pendingPromptCache.TryTake(correlationId: job.CorrelationId, prompt: out var prompt);
+        _pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt);
 
         var stopwatch = Stopwatch.StartNew();
         try

@@ -221,6 +221,7 @@ internal static class ProxyServiceCollectionExtensions
             InFlightGauge = sp.GetService<InFlightRequestGauge>(),
             RoutingOptionsMonitor = sp.GetService<IOptionsMonitor<RoutingOptions>>(),
             JudgeOptionsMonitor = sp.GetService<IOptionsMonitor<JudgeOptions>>(),
+            PortfolioGraderOptionsMonitor = sp.GetService<IOptionsMonitor<Judge.PortfolioGraderOptions>>(),
             RoutingGate = sp.GetService<IRoutingGate>(),
             CapabilityStore = sp.GetService<IToolCallCapabilityStore>(),
             ContextWindowStore = sp.GetService<IModelContextWindowStore>(),
@@ -371,7 +372,8 @@ internal static class ProxyServiceCollectionExtensions
                         TranscriptOptionsMonitor: sp.GetRequiredService<IOptionsMonitor<TranscriptOptions>>(),
                         TranscriptStore: sp.GetRequiredService<ITranscriptStore>())
                     {
-                        EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>()
+                        EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>(),
+                        PortfolioGraderOptionsMonitor = sp.GetRequiredService<IOptionsMonitor<Judge.PortfolioGraderOptions>>()
                     },
 
                     // Backs the Governance UI's System Settings window's "Software Update" section gRPC

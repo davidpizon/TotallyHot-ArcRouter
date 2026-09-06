@@ -237,7 +237,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             routingOptionsMonitor: dependencies?.RoutingOptionsMonitor,
             judgeOptionsMonitor: dependencies?.JudgeOptionsMonitor,
             selfHostedRouterPricePerMillionTokens: dependencies?.RoutingOptions?.Value
-                .SelfHostedRouterPricePerMillionTokens ?? new RoutingOptions().SelfHostedRouterPricePerMillionTokens);
+                .SelfHostedRouterPricePerMillionTokens ?? new RoutingOptions().SelfHostedRouterPricePerMillionTokens,
+            portfolioGraderOptionsMonitor: dependencies?.PortfolioGraderOptionsMonitor);
 
         if (dependencies?.BedrockClientFactory is null)
         {

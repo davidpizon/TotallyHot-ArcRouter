@@ -228,6 +228,45 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     }
 
     [Fact]
+    public async Task GetRouterSettings_ReportsThePortfolioGraderSettings()
+    {
+        var service = CreateService(
+            portfolioGraderMonitor: new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions
+            { CodeJudgeEnabled = true, IceScoreEnabled = false, RaceEnabled = true }));
+
+        var response = await service.GetRouterSettings(request: new Contract.GetRouterSettingsRequest(),
+            context: CreateContext());
+
+        response.CodeJudgeEnabled.Should().BeTrue();
+        response.IceScoreEnabled.Should().BeFalse();
+        response.RaceEnabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateRouterSettings_PersistsThePortfolioGraderSettings()
+    {
+        var store = CreateStore();
+        var service = CreateService(store: store);
+
+        await service.UpdateRouterSettings(
+            request: new Contract.UpdateRouterSettingsRequest
+            {
+                EmbeddingMemoryCapacity = 20_000,
+                CodeJudgeEnabled = true,
+                IceScoreEnabled = true,
+                RaceEnabled = false
+            },
+            context: CreateContext());
+
+        store.TryGetBool(key: RouterSettingsStore.CodeJudgeEnabledKey, value: out var codeJudge).Should().BeTrue();
+        codeJudge.Should().BeTrue();
+        store.TryGetBool(key: RouterSettingsStore.IceScoreEnabledKey, value: out var iceScore).Should().BeTrue();
+        iceScore.Should().BeTrue();
+        store.TryGetBool(key: RouterSettingsStore.RaceEnabledKey, value: out var race).Should().BeTrue();
+        race.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ClearTranscripts_DelegatesToTheStoreAndReportsTheDeletedCount()
     {
         var transcriptStore = new FakeTranscriptStore(rowsToDelete: 7);
@@ -251,7 +290,8 @@ public sealed class RouterSettingsAdminGrpcServiceTests
             reloadToken: new RouterSettingsReloadToken(),
             logger: NullLogger<RouterSettingsAdminGrpcService>.Instance,
             transcriptOptionsMonitor: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()),
-            transcriptStore: new FakeTranscriptStore());
+            transcriptStore: new FakeTranscriptStore(),
+            portfolioGraderOptionsMonitor: new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions()));
         act.Should().Throw<ArgumentNullException>();
     }
 
@@ -262,7 +302,8 @@ public sealed class RouterSettingsAdminGrpcServiceTests
         StaticOptionsMonitor<JudgeOptions>? judgeMonitor = null,
         JudgeModelSelector? judgeModelSelector = null,
         StaticOptionsMonitor<TranscriptOptions>? transcriptMonitor = null,
-        ITranscriptStore? transcriptStore = null)
+        ITranscriptStore? transcriptStore = null,
+        StaticOptionsMonitor<PortfolioGraderOptions>? portfolioGraderMonitor = null)
     {
         return new RouterSettingsAdminGrpcService(
             store: store ?? CreateStore(),
@@ -271,6 +312,8 @@ public sealed class RouterSettingsAdminGrpcServiceTests
             judgeModelSelector: judgeModelSelector ?? CreateJudgeModelSelector(),
             reloadToken: reloadToken ?? new RouterSettingsReloadToken(),
             logger: NullLogger<RouterSettingsAdminGrpcService>.Instance,
+            portfolioGraderOptionsMonitor: portfolioGraderMonitor ??
+                                           new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions()),
             transcriptOptionsMonitor: transcriptMonitor ??
                                       new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()),
             transcriptStore: transcriptStore ?? new FakeTranscriptStore());

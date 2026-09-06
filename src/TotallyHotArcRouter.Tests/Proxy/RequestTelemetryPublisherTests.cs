@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
@@ -283,13 +285,110 @@ public class RequestTelemetryPublisherTests
         Assert.Equal(expected: "session-shape:1", actual: published.CorrelationId);
     }
 
+    // -- Phase Q3: the retention gate is "any LLM grader is live", not just the judge -----------------
+
+    /// <summary>
+    /// Covers <c>RequestTelemetryPublisher.AnyLlmGraderEnabled</c> - the single authorization check for
+    /// retaining raw prompt/response text in <see cref="PendingResponseTextCache"/>/<see cref="PendingPromptCache"/>
+    /// at all. Before Phase Q3 this was <c>JudgeOptions.Enabled</c> alone; Q3's CodeJudge/ICE-Score/RACE
+    /// portfolio also needs that same cached text, so retention must now also fire when a portfolio grader
+    /// is live even if the G-Eval judge itself is off - and, symmetrically, stay suppressed only when
+    /// *neither* is live.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false, false, false, true)]
+    [InlineData(false, true, false, false, true)]
+    [InlineData(false, false, true, false, true)]
+    [InlineData(false, false, false, true, true)]
+    [InlineData(false, false, false, false, false)]
+    public async Task PublishAsync_RetentionGate_FiresWheneverAnyLlmGraderIsLive(
+        bool judgeEnabled, bool codeJudgeEnabled, bool iceScoreEnabled, bool raceEnabled, bool expectRetained)
+    {
+        var responseTextCache = new PendingResponseTextCache(Options.Create(new JudgeOptions()));
+        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        var publisher = CreatePublisher(
+            pendingResponseTextCache: responseTextCache,
+            pendingPromptCache: promptCache,
+            judgeOptionsMonitor: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = judgeEnabled }),
+            portfolioGraderOptionsMonitor: new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions
+            {
+                CodeJudgeEnabled = codeJudgeEnabled,
+                IceScoreEnabled = iceScoreEnabled,
+                RaceEnabled = raceEnabled
+            }));
+
+        var route = CreateRoute(provider: "openai", true);
+        var context = CreateContext(sessionId: "session-retention");
+        var requestBody = """{"messages":[{"role":"user","content":"the question"}]}"""u8.ToArray();
+        var responseBody = """{"choices":[{"message":{"content":"the answer"}}]}"""u8.ToArray();
+
+        await publisher.PublishAsync(
+            context: context,
+            route: route,
+            requestedModelName: "primary",
+            false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: requestBody,
+            capturedResponseBytes: responseBody,
+            null,
+            false,
+            10,
+            20,
+            200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Turn 1 of a freshly-tracked session, matching PublishAsync_RepresentativeCase's own correlation-id shape.
+        const string correlationId = "session-retention:1";
+        Assert.Equal(expected: expectRetained, actual: responseTextCache.TryPeek(correlationId: correlationId, text: out _));
+        Assert.Equal(expected: expectRetained, actual: promptCache.TryPeek(correlationId: correlationId, prompt: out _));
+    }
+
+    [Fact]
+    public async Task PublishAsync_NoOptionsMonitorsSupplied_DoesNotRetainResponseTextOrPrompt()
+    {
+        var responseTextCache = new PendingResponseTextCache(Options.Create(new JudgeOptions()));
+        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        // Neither judgeOptionsMonitor nor portfolioGraderOptionsMonitor supplied - both null, exactly as
+        // a host that has not wired either up would leave them (ProxyMiddlewareDependencies' documented
+        // "null means not enabled" default for both).
+        var publisher = CreatePublisher(pendingResponseTextCache: responseTextCache, pendingPromptCache: promptCache);
+
+        var route = CreateRoute(provider: "openai", true);
+        var context = CreateContext(sessionId: "session-no-monitors");
+        var requestBody = """{"messages":[{"role":"user","content":"the question"}]}"""u8.ToArray();
+        var responseBody = """{"choices":[{"message":{"content":"the answer"}}]}"""u8.ToArray();
+
+        await publisher.PublishAsync(
+            context: context,
+            route: route,
+            requestedModelName: "primary",
+            false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: requestBody,
+            capturedResponseBytes: responseBody,
+            null,
+            false,
+            10,
+            20,
+            200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        const string correlationId = "session-no-monitors:1";
+        Assert.False(responseTextCache.TryPeek(correlationId: correlationId, text: out _));
+        Assert.False(promptCache.TryPeek(correlationId: correlationId, prompt: out _));
+    }
+
     // -- helpers -------------------------------------------------------------
 
     private static RequestTelemetryPublisher CreatePublisher(
         FakeTelemetryPublisher? telemetryPublisher = null,
         IBudgetEnforcer? budgetStore = null,
         ITranscriptStore? transcriptStore = null,
-        StaticOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null)
+        StaticOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null,
+        PendingResponseTextCache? pendingResponseTextCache = null,
+        PendingPromptCache? pendingPromptCache = null,
+        IOptionsMonitor<JudgeOptions>? judgeOptionsMonitor = null,
+        IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null)
     {
         return new RequestTelemetryPublisher(
             logger: NullLogger.Instance,
@@ -299,19 +398,21 @@ public class RequestTelemetryPublisherTests
             usageExtractor: new UsageExtractor(),
             responseTextExtractor: new ResponseTextExtractor(),
             telemetryPublisher: telemetryPublisher ?? new FakeTelemetryPublisher(),
-            null,
+            qualityIngress: null,
             spendTracker: NullSpendTracker.Instance,
-            null,
+            priceLookup: null,
             budgetStore: budgetStore,
-            null,
-            null,
-            null,
-            null,
-            null,
+            usageLedger: null,
+            pendingTaskEmbeddingCache: null,
+            pendingRequestCostCache: null,
+            pendingRequestProvenanceCache: null,
+            pendingResponseTextCache: pendingResponseTextCache,
             transcriptStore: transcriptStore,
             routingOptionsMonitor: routingOptionsMonitor,
-            null,
-            0.054m);
+            judgeOptionsMonitor: judgeOptionsMonitor,
+            selfHostedRouterPricePerMillionTokens: 0.054m,
+            pendingPromptCache: pendingPromptCache,
+            portfolioGraderOptionsMonitor: portfolioGraderOptionsMonitor);
     }
 
     private static ResolvedModelRoute CreateRoute(string provider, bool isFree)
