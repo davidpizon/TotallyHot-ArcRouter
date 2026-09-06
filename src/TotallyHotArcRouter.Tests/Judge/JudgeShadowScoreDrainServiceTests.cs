@@ -162,14 +162,16 @@ public class JudgeShadowScoreDrainServiceTests
     }
 
     /// <summary>
-    /// The one path that deliberately settles nothing. A judge client that throws is caught and logged, and
-    /// the held verdict is left for <see cref="IQualityScoreAggregator.SweepExpiredAsync"/> rather than
-    /// abandoned inline - a backbone blip should not be recorded as the judge having declined to grade.
-    /// This asserts that on purpose, so adding an inline abandon here becomes a deliberate decision rather
-    /// than an accident.
+    /// A judge client that throws is caught and logged, and the held verdict is abandoned immediately with
+    /// reason <c>judge-failed</c> rather than left pinned for the full join timeout
+    /// (docs/router/judge-join-deadlock-fix-plan.md) - a backbone blip is released exactly as eagerly as a
+    /// disabled judge, an evicted cache entry, or an abstention, distinguished only by its own reason
+    /// string. This used to assert the opposite (leaving the join to the expiry sweep) as a deliberate
+    /// choice; that choice was the second half of the join deadlock this drain service otherwise helped
+    /// cause, and is no longer correct.
     /// </summary>
     [Fact]
-    public async Task ProcessAsync_JudgeClientThrows_LeavesTheQualityJoinToTheExpirySweep()
+    public async Task ProcessAsync_JudgeClientThrows_AbandonsTheQualityJoinAsFailed()
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
@@ -180,8 +182,42 @@ public class JudgeShadowScoreDrainServiceTests
 
         await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
+        var abandoned = Assert.Single(aggregator.Abandoned);
+        Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: "judge-failed", actual: abandoned.Reason);
         Assert.Empty(aggregator.Completed);
-        Assert.Empty(aggregator.Abandoned);
+    }
+
+    // Phase Q2: the judge grades against the requirement it was written for, recovered the same way the
+    // response text is - a separate best-effort cache, keyed by the same correlation id.
+    [Fact]
+    public async Task ProcessAsync_PromptCached_PassesItToTheJudgeRequest()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        promptCache.Set(correlationId: "corr-1", prompt: "write a function that adds two numbers");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            promptCache: promptCache);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "write a function that adds two numbers", actual: judgeClient.LastRequest?.Prompt);
+        Assert.False(promptCache.TryTake(correlationId: "corr-1", prompt: out _));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_NoPromptCached_StillScoresWithAnEmptyPrompt()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore());
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: string.Empty, actual: judgeClient.LastRequest?.Prompt);
     }
 
     private static PendingResponseTextCache CreateCache()
@@ -194,12 +230,14 @@ public class JudgeShadowScoreDrainServiceTests
         IJudgeClient judgeClient,
         IJudgeShadowScoreStore store,
         StaticOptionsMonitor<JudgeOptions>? options = null,
-        IQualityScoreAggregator? aggregator = null)
+        IQualityScoreAggregator? aggregator = null,
+        PendingPromptCache? promptCache = null)
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         return new JudgeShadowScoreDrainService(
             queue: queue,
             pendingResponseTextCache: cache,
+            pendingPromptCache: promptCache ?? new PendingPromptCache(Options.Create(new JudgeOptions())),
             judgeClient: judgeClient,
             store: store,
             options: options ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions
@@ -219,10 +257,13 @@ public class JudgeShadowScoreDrainServiceTests
 
         public bool WasCalled { get; private set; }
 
+        public JudgeScoreRequest? LastRequest { get; private set; }
+
         public Task<JudgeScoreResult?> ScoreAsync(JudgeScoreRequest request,
             CancellationToken cancellationToken = default)
         {
             WasCalled = true;
+            LastRequest = request;
             return exception is not null
                 ? Task.FromException<JudgeScoreResult?>(exception)
                 : Task.FromResult(result);

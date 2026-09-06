@@ -182,6 +182,15 @@ public sealed record ProxyMiddlewareDependencies
     public PendingResponseTextCache? PendingResponseTextCache { get; init; }
 
     /// <summary>
+    /// Optional bridge between this request's newest user message and the judge's later-arriving background
+    /// job, mirroring <see cref="PendingResponseTextCache"/>'s role exactly for the prompt half of the pair
+    /// instead of the response half. Populated at the same point the response text is, so the judge can
+    /// grade the response against the requirement it was written for. Defaults to <see langword="null"/> (no
+    /// entries recorded), so existing callers/tests are unaffected.
+    /// </summary>
+    public PendingPromptCache? PendingPromptCache { get; init; }
+
+    /// <summary>
     /// Optional opt-in transcript store (docs/router/self-organizing-classification-plan.md Phase
     /// T1a/T1b). When supplied and transcript capture is enabled, one row is inserted per served request
     /// with the prompt/response text, classification, cost, and provenance already in scope at this

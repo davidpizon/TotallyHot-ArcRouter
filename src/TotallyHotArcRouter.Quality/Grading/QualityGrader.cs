@@ -49,7 +49,7 @@ public sealed class QualityGrader : IQualityGrader
         cancellationToken.ThrowIfCancellationRequested();
 
         var syntax = _structuralParser.Check(code: request.Code, language: request.Language);
-        var analysis = _analyzer.Report(code: request.Code, language: request.Language);
+        var analysis = _analyzer.Report(code: request.Code, language: request.Language, prompt: request.Prompt);
 
         var result = new QualityResult
         {

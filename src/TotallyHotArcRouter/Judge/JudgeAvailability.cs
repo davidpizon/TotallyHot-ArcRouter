@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Judge;
 /// Both halves of that test matter, and for different reasons. <see cref="JudgeOptions.Enabled"/> is read
 /// live through <see cref="IOptionsMonitor{TOptions}"/> rather than captured, so toggling the judge in the
 /// System Settings window takes effect on the next request instead of the next restart - the same posture
-/// <see cref="JudgeShadowScoreObserver"/> takes. The backbone check then guards against the case that flag
+/// <see cref="JudgeShadowScoreDispatcher"/> takes. The backbone check then guards against the case that flag
 /// alone cannot see: the judge is enabled, but every free model has been switched off, stopped, or has
 /// disappeared upstream. Answering <see langword="true"/> there would make every score wait out the full
 /// join timeout before being written unjudged, so the honest answer is that no judge is coming.

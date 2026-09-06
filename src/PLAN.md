@@ -35,7 +35,8 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
 | Phases T1–T6 — transcript capture, self-organizing clustering, `cluster_best` voter, baseline comparison, Cluster Model admin pane, System Settings adaptive-routing toggle | [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
 | Phase N (N1–N6) — regret metrics core (`RegretReplayResult`), the no-leakage streaming replay engine (`RegretReplayEngine`), all six comparison baselines (Always-*m* / DimensionBest / LinUCB / LinTS / kNN Retrieval / LogReg), the Orchestrator arm + comparison report (measured; exit criterion not met — see below), and the on-demand CLI/GUI re-run surface (`IRegretHarnessRunner`, `--run-regret-harness`, the Regret Harness Governance panel) | [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) (N1–N6 status notes) |
 | Phase Q0 — quality rescan over saved task data (`QualityRescanService`, `scorer_version` column, `Quality:ScorerVersion`, prompt carried onto `QualityRequest`), off by default | [`../docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3, [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md) |
-| Phase G1 — shadow judge observer (`PendingResponseTextCache`, `JudgeShadowScoreObserver`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
+| Phase G1 — shadow judge dispatch (`PendingResponseTextCache`, `JudgeShadowScoreDispatcher`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
+| **Judge-join deadlock fix** — Phase N3's promotion of the judge to a real `QualityScoreAggregator` contributor never moved the judge's trigger off the write-time `IQualityScoreObserver` fan-out, so a held result could never start the judge that its own write was waiting on: every judged request silently degraded to the 60s join-timeout with no judge score ever reaching memory, while `judge_shadow_scores` kept filling and made the judge look healthy. Fixed by a new `IAsyncGraderDispatcher` seam, called at hold-time by `QualityScoreAggregator.SubmitAsync`; `JudgeShadowScoreObserver` renamed to `JudgeShadowScoreDispatcher` and moved off `IQualityScoreObserver` entirely; a second, related stall (a judge backbone throw leaving the join pinned) fixed in `JudgeShadowScoreDrainService.ProcessAsync` in the same change | [`../docs/router/judge-join-deadlock-fix-plan.md`](../docs/router/judge-join-deadlock-fix-plan.md) |
 | Auto-update Phases 0-1 — versioning source of truth, Windows Service hosting — plus update *detection* (`GitHubReleaseCheckClient`, `UpdateCheckHostedService`, `UpdateAdminService` gRPC surface) as originally shipped in Phase 2. Phase 2's *apply* mechanism (a separate `TotallyHotArcRouter.Updater` helper project) is superseded — the GUI now downloads/verifies/launches a single signed MSI installer instead | [`../docs/router/auto-update-plan.md`](../docs/router/auto-update-plan.md) (historical apply design), [`../docs/router/packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md) (current MSI design), [`../docs/router/version-compatibility.md`](../docs/router/version-compatibility.md) (current Router↔GUI versioning) |
 | Sessions tab shows persisted, training-linked transcripts — `request_transcripts.session_id` column + backfill, the `TelemetryService.ListPersistedSessions` RPC, GUI merge of live + persisted history, the `IsUsedForTraining` badge, and the full-width unselected-card-list CSS fix | [`../docs/router/sessions-tab-training-data-plan.md`](../docs/router/sessions-tab-training-data-plan.md) |
 
@@ -140,11 +141,27 @@ flowchart LR
 
 ## Remaining work, in order
 
-1. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). What remains:
-   **Q1** generalizes the scorer from two graders to N (`DimensionWeightOptions` keyed grader map,
-   per-grader contributions on `QualityResult`, a K-way join, per-grader `DegradedReason`) with the exit
-   criterion that a single configured judge produces a byte-identical `UnifiedScore`; **Q2** adds the free
-   `IStaticAnalyzer`s (prompt/response relevance, smell density) and makes the judge prompt-aware; **Q3**
+1. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). **Q1 shipped**: the
+   scorer generalizes from three named axes to N via a keyed extension — `DimensionWeightOptions.ExtraWeights`
+   and `QualityResult.GraderScores`/`GraderDegradedReasons`, matched by grader key, alongside (not replacing)
+   the three named fields — and `QualityScoreAggregator`'s judge join generalized from an implicit single
+   slot to a set of pending grader keys per request (`GraderKeys`). Exit criterion met by construction: the
+   new maps are empty for every result until a grader populates them, so today's blend is byte-identical to
+   pre-Q1, verified by `QualityScorerTests`/`QualityScoreAggregatorTests` rather than by re-deriving the math.
+   No new grader is registered by Q1 itself — that is Q3's job, and it now means adding one config entry
+   plus a job that calls `CompleteGraderAsync`'s public seam (`CompleteWithJudgeAsync`'s shape, generalized),
+   not touching `QualityScorer` or the aggregator's hold/write logic. The K-way join is exercised by
+   construction (a set, not a flag) rather than by a test holding two concurrent async graders — there is no
+   second one to test against until Q3 lands. Full design: `quality-verifier-architecture.md` §4/§5.
+   **Q2 shipped**: two new free `IStaticAnalyzer`s — `RelevanceAnalyzer` (prompt/response token overlap,
+   reached through a new `IStaticAnalyzer.Analyze(code, language, prompt)` default-interface-method overload
+   so the other four analyzers needed no change) and `SmellDensityAnalyzer` (Szych & Schwerk's
+   findings-per-100-lines ratio over a small self-contained smell catalog: magic numbers, long lines, empty
+   catch/except blocks, long parameter lists) — plus judge prompt-awareness: `JudgeScoreRequest.Prompt`,
+   recovered from a new `PendingPromptCache` mirroring `PendingResponseTextCache` exactly, woven into
+   `GEvalJudgeClient`'s prompt as an optional task section. Full design and rationale:
+   `quality-verifier-architecture.md` §3.2/§5, `code-quality-metrics-assessment.md` §5.1.
+   **Q3**
    registers the LLM grader portfolio — CodeJudge (correctness), ICE-Score `usefulness`, RACE
    readability/maintainability — each behind its own capability probe that abstains rather than fabricates;
    **Q4** measures per-dimension, per-grader reliability plus verbosity and self-preference skew before any
@@ -155,7 +172,11 @@ flowchart LR
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's
    agreement/calibration analysis runs once G1 has accumulated shadow data; G3 (the judge as scorer of
    record for non-executable dimensions only, with `is_judge_scored` provenance) is gated on G2's
-   criteria and never starts if the gate fails.
+   criteria and never starts if the gate fails. **Unaffected by the judge-join deadlock fix above:**
+   the drain worker wrote `judge_shadow_scores` rows regardless of whether the aggregator ever saw the
+   grade, so G2's `verifier_score`-vs-`judge_score` calibration data is intact. What the fix actually
+   changes for G3 is that `is_judge_scored`/routed judge grades now reach memory at all - before it, G3
+   would have promoted a scorer whose grades never once influenced a routed request.
 
 ### Phase N: roadmap-level scope and exit bar
 

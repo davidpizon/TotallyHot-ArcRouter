@@ -151,6 +151,46 @@ public class GEvalJudgeClientTests
     }
 
     /// <summary>
+    /// Phase Q2: a recovered prompt is woven into the judge prompt as a task section, so the judge can grade
+    /// the response against what it was actually asked to do
+    /// (docs/research/code-quality-metrics-assessment.md §1).
+    /// </summary>
+    [Fact]
+    public async Task ScoreAsync_PromptSupplied_IncludesTheTaskInTheJudgePrompt()
+    {
+        var client = CreateClient("""{ "choices": [ { "message": { "content": "4" } } ] }""",
+            captured: out var captured, resolver: FreeResolver());
+
+        await client.ScoreAsync(
+            request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response",
+                Prompt: "write a function that reverses a string"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var request = Assert.Single(captured);
+        Assert.Contains(expectedSubstring: "write a function that reverses a string", actualString: request.Body,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An empty prompt (never cached, or aged out) must not tell the judge a task existed when none could be
+    /// recovered - the task section is omitted entirely rather than filled with a placeholder.
+    /// </summary>
+    [Fact]
+    public async Task ScoreAsync_NoPromptSupplied_OmitsTheTaskSectionEntirely()
+    {
+        var client = CreateClient("""{ "choices": [ { "message": { "content": "4" } } ] }""",
+            captured: out var captured, resolver: FreeResolver());
+
+        await client.ScoreAsync(
+            request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var request = Assert.Single(captured);
+        Assert.DoesNotContain(expectedSubstring: "Task the response was written for", actualString: request.Body,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// No free provider configured is an abstention, not a failure: the client returns null and never makes
     /// an HTTP call, so the drain worker records nothing rather than a fabricated score.
     /// </summary>

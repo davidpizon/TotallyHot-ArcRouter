@@ -22,6 +22,29 @@ public interface IStaticAnalyzer
     /// mean rather than treating silence as a zero.
     /// </returns>
     StaticAnalysisFinding? Analyze(string code, CodeLanguage language);
+
+    /// <summary>
+    /// Analyzes a snippet with the prompt it was written to answer available, for an analyzer (e.g.
+    /// <see cref="RelevanceAnalyzer"/>) whose signal depends on the requirement rather than the code alone.
+    /// </summary>
+    /// <param name="code">The source code to analyze.</param>
+    /// <param name="language">The detected language of <paramref name="code"/>.</param>
+    /// <param name="prompt">
+    /// The user prompt <paramref name="code"/> was produced in answer to, or an empty string when it is
+    /// unavailable.
+    /// </param>
+    /// <returns>The finding, or <see langword="null"/> per the two-argument overload's contract.</returns>
+    /// <remarks>
+    /// Defaults to the two-argument overload, so the three analyzers that have no use for the prompt
+    /// (<see cref="DiagnosticSeverityAnalyzer"/>, <see cref="TruncationAnalyzer"/>,
+    /// <see cref="ComplexityAnalyzer"/>) and <see cref="PlaceholderAnalyzer"/> need no change at all to keep
+    /// implementing this interface - only an analyzer that actually reads <paramref name="prompt"/> overrides
+    /// this method.
+    /// </remarks>
+    StaticAnalysisFinding? Analyze(string code, CodeLanguage language, string prompt)
+    {
+        return Analyze(code: code, language: language);
+    }
 }
 
 /// <summary>One analyzer's verdict on a snippet.</summary>

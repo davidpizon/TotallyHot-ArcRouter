@@ -61,4 +61,23 @@ public sealed record QualityResult
 
     /// <summary>Why this result carries less signal than a full grading would, or null when it is complete.</summary>
     public string? DegradedReason { get; init; }
+
+    /// <summary>
+    /// Contributions from graders beyond the three built-in axes (<see cref="SyntaxValid"/>,
+    /// <see cref="AnalysisScore"/>, <see cref="JudgeScore"/>), keyed by grader name and empty until a future
+    /// grader (Phase Q3: CodeJudge, ICE-Score, RACE) populates it. <see cref="IQualityScorer"/> adds each
+    /// entry present here to its blend using <see cref="DimensionWeightOptions.ExtraWeights"/>, so a new
+    /// grader is wired in by registering it and adding one configuration entry, not by editing the scorer.
+    /// </summary>
+    public IReadOnlyDictionary<string, double> GraderScores { get; init; } =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Per-grader reasons an extra grader (see <see cref="GraderScores"/>) abstained or did not answer,
+    /// keyed by grader name. Distinct from the single <see cref="DegradedReason"/> field, which can only
+    /// ever hold one cause: a request can have its syntax verdict come from a heuristic *and* separately
+    /// have an extra grader time out, and both should be recoverable rather than one overwriting the other.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> GraderDegradedReasons { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }

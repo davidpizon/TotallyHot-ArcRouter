@@ -34,7 +34,13 @@ public sealed class CompositeStaticAnalyzer : IStaticAnalyzer
     /// <inheritdoc/>
     public StaticAnalysisFinding? Analyze(string code, CodeLanguage language)
     {
-        var report = Report(code: code, language: language);
+        return Analyze(code: code, language: language, prompt: string.Empty);
+    }
+
+    /// <inheritdoc/>
+    public StaticAnalysisFinding? Analyze(string code, CodeLanguage language, string prompt)
+    {
+        var report = Report(code: code, language: language, prompt: prompt);
         return report.Score is { } score
             ? new StaticAnalysisFinding(Analyzer: Name, Score: score, Notes: report.Notes)
             : null;
@@ -43,10 +49,16 @@ public sealed class CompositeStaticAnalyzer : IStaticAnalyzer
     /// <summary>Runs every analyzer and composes their findings into one report.</summary>
     /// <param name="code">The source code to analyze.</param>
     /// <param name="language">The detected language of <paramref name="code"/>.</param>
+    /// <param name="prompt">
+    /// The user prompt <paramref name="code"/> was produced in answer to, passed to each analyzer's
+    /// prompt-aware overload; empty when unavailable, which every analyzer that ignores it treats as
+    /// equivalent to not having it at all.
+    /// </param>
     /// <returns>The composed report; its score is null when every analyzer abstained.</returns>
-    public StaticAnalysisReport Report(string code, CodeLanguage language)
+    public StaticAnalysisReport Report(string code, CodeLanguage language, string prompt = "")
     {
         ArgumentNullException.ThrowIfNull(code);
+        ArgumentNullException.ThrowIfNull(prompt);
 
         var sum = 0.0;
         var count = 0;
@@ -57,7 +69,7 @@ public sealed class CompositeStaticAnalyzer : IStaticAnalyzer
             StaticAnalysisFinding? finding;
             try
             {
-                finding = analyzer.Analyze(code: code, language: language);
+                finding = analyzer.Analyze(code: code, language: language, prompt: prompt);
             }
             catch (Exception ex)
             {

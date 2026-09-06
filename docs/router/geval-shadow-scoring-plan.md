@@ -177,6 +177,16 @@ late that they can't.
 
 ## Phase G1 — Shadow judge observer
 
+> **Correction (see [`judge-join-deadlock-fix-plan.md`](judge-join-deadlock-fix-plan.md)):** the
+> "shipped" status block and §1c below describe `JudgeShadowScoreObserver` as an `IQualityScoreObserver`
+> triggered from the write-time observer fan-out. That trigger point deadlocked once
+> `QualityScoreAggregator` (Phase N3) started holding a result open for a judge grade instead of writing
+> it immediately: an observer that only fires once a held result is written can never start the judge
+> that write is waiting on. The type is now `JudgeShadowScoreDispatcher`, an `IAsyncGraderDispatcher`
+> started by `QualityScoreAggregator.SubmitAsync` at hold-time, and is no longer part of the observer
+> fan-out at all. The narrative below is left as written for history; treat every mention of
+> `JudgeShadowScoreObserver` as `JudgeShadowScoreDispatcher` under the corrected design.
+
 > **Status: shipped.** `TotallyHot.ArcRouter.Judge` (`src/TotallyHotArcRouter/Judge/`): `JudgeOptions`
 > (off by default; **not bound from `appsettings.json`** — see §1a), `JudgeModelSelector` (resolves a free
 > Providers-screen model per call), `PendingResponseTextCache`

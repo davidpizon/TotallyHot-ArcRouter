@@ -1,7 +1,7 @@
 namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
-/// The cheap fields <see cref="JudgeShadowScoreObserver.ObserveAsync"/> snapshots from a scored
+/// The cheap fields <see cref="JudgeShadowScoreDispatcher.DispatchAsync"/> snapshots from a scored
 /// <see cref="Quality.QualityResult"/> before enqueuing - the raw response text is not carried here; the
 /// drain worker recovers it separately from <see cref="PendingResponseTextCache"/>, keyed by
 /// <see cref="CorrelationId"/>, at the point it actually calls the judge.
