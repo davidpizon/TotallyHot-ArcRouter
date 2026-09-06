@@ -20,6 +20,9 @@ public interface IRouterSettingsAdminClient
     /// names a model that is not currently eligible.
     /// </param>
     /// <param name="transcriptCaptureEnabled">Whether the opt-in transcript store captures raw prompt/response text.</param>
+    /// <param name="codeJudgeEnabled">Whether Phase Q3's CodeJudge correctness grader is enabled.</param>
+    /// <param name="iceScoreEnabled">Whether Phase Q3's ICE-Score usefulness grader is enabled.</param>
+    /// <param name="raceEnabled">Whether Phase Q3's RACE readability/maintainability grader is enabled.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <exception cref="RouterSettingsAdminException">
     /// The call was rejected (e.g. an out-of-range capacity, or an ineligible
@@ -31,6 +34,9 @@ public interface IRouterSettingsAdminClient
         bool judgeEnabled,
         string judgeModelName,
         bool transcriptCaptureEnabled,
+        bool codeJudgeEnabled = false,
+        bool iceScoreEnabled = false,
+        bool raceEnabled = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>Deletes every captured transcript row - the Transcription Capture row's "Clear" action.</summary>

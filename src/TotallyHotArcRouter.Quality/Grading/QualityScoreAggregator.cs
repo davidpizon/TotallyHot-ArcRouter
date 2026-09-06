@@ -47,6 +47,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     private readonly Queue<string> _insertionOrder = new();
     private readonly TimeSpan _joinTimeout;
     private readonly IJudgeAvailability _judgeAvailability;
+    private readonly IPortfolioGraderAvailability _portfolioGraderAvailability;
 
     /// <summary>
     /// Guards <see cref="_pending"/> and <see cref="_insertionOrder"/>. All five public methods
@@ -77,6 +78,11 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// </param>
     /// <param name="options">Supplies the join timeout and held-result capacity.</param>
     /// <param name="logger">The logger.</param>
+    /// <param name="portfolioGraderAvailability">
+    /// Decides whether a result is held for any of Phase Q3's extra graders (CodeJudge/ICE-Score/RACE).
+    /// Defaults to <see cref="NoPortfolioGraderAvailability"/> when not supplied, so existing callers that
+    /// construct this type directly (tests, principally) keep compiling unchanged.
+    /// </param>
     /// <param name="timeProvider">
     /// Clock used for expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
     /// deterministic tests.
@@ -88,6 +94,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         IAsyncGraderDispatcher asyncGraderDispatcher,
         IOptions<QualityOptions> options,
         ILogger<QualityScoreAggregator> logger,
+        IPortfolioGraderAvailability? portfolioGraderAvailability = null,
         TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(observer);
@@ -102,6 +109,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         _judgeAvailability = judgeAvailability;
         _asyncGraderDispatcher = asyncGraderDispatcher;
         _logger = logger;
+        _portfolioGraderAvailability = portfolioGraderAvailability ?? new NoPortfolioGraderAvailability();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _joinTimeout = TimeSpan.FromMilliseconds(options.Value.JudgeJoinTimeoutMs);
         _capacity = options.Value.JudgeJoinCapacity;
@@ -238,12 +246,10 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
 
         var clamped = Math.Clamp(value: judgeScore, 0.0, 1.0);
-        return CompleteGraderAsync(
+        return JoinGraderAsync(
             correlationId: correlationId,
             graderKey: GraderKeys.Judge,
             apply: held => held with { JudgeScore = clamped },
-            missingLogMessage:
-            "Judge grade for correlation {CorrelationId} arrived after the join closed; discarding it.",
             cancellationToken: cancellationToken);
     }
 
@@ -263,15 +269,39 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             cancellationToken: cancellationToken);
     }
 
+    /// <inheritdoc/>
+    public Task<bool> CompleteGraderAsync(
+        string correlationId,
+        string graderKey,
+        double score,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(graderKey);
+
+        var clamped = Math.Clamp(value: score, 0.0, 1.0);
+        return JoinGraderAsync(
+            correlationId: correlationId,
+            graderKey: graderKey,
+            apply: held =>
+            {
+                var scores = new Dictionary<string, double>(held.GraderScores, StringComparer.OrdinalIgnoreCase)
+                { [graderKey] = clamped };
+                return held with { GraderScores = scores };
+            },
+            cancellationToken: cancellationToken);
+    }
+
     /// <summary>
-    /// Determines which grader keys a submitted result should be held open for. The only producer today is
-    /// <see cref="_judgeAvailability"/>, contributing at most <see cref="GraderKeys.Judge"/>; a future
-    /// asynchronous grader (Phase Q3) extends this set rather than requiring its own hold/join mechanism.
+    /// Determines which grader keys a submitted result should be held open for: <see cref="GraderKeys.Judge"/>
+    /// from <see cref="_judgeAvailability"/>, plus whatever <see cref="_portfolioGraderAvailability"/> adds
+    /// for Phase Q3's CodeJudge/ICE-Score/RACE portfolio.
     /// </summary>
     private HashSet<string> DeterminePendingGraders(QualityResult result)
     {
         var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (_judgeAvailability.WillJudge(result)) pending.Add(GraderKeys.Judge);
+        foreach (var key in _portfolioGraderAvailability.DetermineGraderKeys(result)) pending.Add(key);
         return pending;
     }
 
@@ -281,11 +311,10 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// correlation id no longer held (already written by a sweep or an eviction) is not an error: the
     /// grader simply lost the race, and the router already has an observation for this request.
     /// </summary>
-    private async Task<bool> CompleteGraderAsync(
+    private async Task<bool> JoinGraderAsync(
         string correlationId,
         string graderKey,
         Func<QualityResult, QualityResult> apply,
-        string missingLogMessage,
         CancellationToken cancellationToken)
     {
         QualityResult? toWrite = null;
@@ -313,7 +342,11 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
 
         if (!found)
         {
-            _logger.LogDebug(message: missingLogMessage, correlationId);
+            _logger.LogDebug(
+                message:
+                "Grade from grader {GraderKey} for correlation {CorrelationId} arrived after the join closed; discarding it.",
+                graderKey,
+                correlationId);
             return false;
         }
 
@@ -321,18 +354,24 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         return true;
     }
 
-    /// <summary>
+    /// <inheritdoc/>
+    /// <remarks>
     /// Releases one grader's contribution for a held entry because it is known not to be coming, stamping
     /// both the legacy single <see cref="QualityResult.DegradedReason"/> and this grader's own entry in
     /// <see cref="QualityResult.GraderDegradedReasons"/> before checking whether every pending grader has
-    /// now resolved.
-    /// </summary>
-    private async Task<bool> AbandonGraderAsync(
+    /// now resolved. Also called internally by <see cref="DispatchPendingGradersAsync"/> for a requested key
+    /// the dispatcher declined to accept.
+    /// </remarks>
+    public async Task<bool> AbandonGraderAsync(
         string correlationId,
         string graderKey,
         string reason,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(graderKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
         QualityResult? toWrite = null;
         var found = false;
 

@@ -11,13 +11,14 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 /// Covers <see cref="JudgeShadowScoreDrainService.ProcessAsync"/> directly (mirroring
 /// <see cref="TotallyHot.ArcRouter.Transcripts.TranscriptRetentionService.CheckAndPurgeAsync"/>'s
 /// internal-for-test-access convention) - the exit criteria that matter most: the pending response text
-/// is always consumed, a scored job produces at most one shadow row, and every path settles the quality
-/// join rather than leaving a held verdict to expire.
+/// survives processing for other concurrently-dispatched graders to read (Phase Q3), a scored job produces
+/// at most one shadow row, and every path settles the quality join rather than leaving a held verdict to
+/// expire.
 /// </summary>
 public class JudgeShadowScoreDrainServiceTests
 {
     [Fact]
-    public async Task ProcessAsync_TextPresent_WritesExactlyOneRowAndDrainsTheCache()
+    public async Task ProcessAsync_TextPresent_WritesExactlyOneRowAndLeavesTheCacheForOtherGraders()
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
@@ -33,7 +34,7 @@ public class JudgeShadowScoreDrainServiceTests
         Assert.True(record.UsedLogprobs);
         // The row names the model the client reported running, not a configured value.
         Assert.Equal(expected: "free-judge-model", actual: record.JudgeModel);
-        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
+        Assert.True(cache.TryPeek(correlationId: "corr-1", text: out _));
     }
 
     [Fact]
@@ -51,7 +52,7 @@ public class JudgeShadowScoreDrainServiceTests
     }
 
     [Fact]
-    public async Task ProcessAsync_JudgeClientThrows_TextIsStillDrainedAndNoRowWritten()
+    public async Task ProcessAsync_JudgeClientThrows_TextSurvivesAndNoRowWritten()
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
@@ -62,7 +63,7 @@ public class JudgeShadowScoreDrainServiceTests
         await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(store.Inserted);
-        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
+        Assert.True(cache.TryPeek(correlationId: "corr-1", text: out _));
     }
 
     /// <summary>
@@ -71,7 +72,7 @@ public class JudgeShadowScoreDrainServiceTests
     /// the Verifier.
     /// </summary>
     [Fact]
-    public async Task ProcessAsync_NoEligibleJudgeModel_WritesNoRowAndStillDrainsTheCache()
+    public async Task ProcessAsync_NoEligibleJudgeModel_WritesNoRowAndLeavesTheCache()
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
@@ -83,15 +84,17 @@ public class JudgeShadowScoreDrainServiceTests
 
         Assert.True(judgeClient.WasCalled);
         Assert.Empty(store.Inserted);
-        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
+        Assert.True(cache.TryPeek(correlationId: "corr-1", text: out _));
     }
 
     /// <summary>
     /// The judge toggle is live, so a job enqueued just before it was switched off must not still reach the
-    /// backbone - and the retained response text must be released rather than left to age out.
+    /// backbone. The retained response text is left alone rather than proactively released - Phase Q3's
+    /// other portfolio graders may still be dispatched for the same request and need to read it too; the
+    /// cache's own TTL bounds its lifetime regardless.
     /// </summary>
     [Fact]
-    public async Task ProcessAsync_JudgeDisabled_NeverCallsBackboneButStillReleasesTheText()
+    public async Task ProcessAsync_JudgeDisabled_NeverCallsBackboneAndLeavesTheTextForOtherGraders()
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
@@ -104,7 +107,7 @@ public class JudgeShadowScoreDrainServiceTests
 
         Assert.False(judgeClient.WasCalled);
         Assert.Empty(store.Inserted);
-        Assert.False(cache.TryTake(correlationId: "corr-1", text: out _));
+        Assert.True(cache.TryPeek(correlationId: "corr-1", text: out _));
     }
 
     /// <summary>
@@ -204,7 +207,7 @@ public class JudgeShadowScoreDrainServiceTests
         await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(expected: "write a function that adds two numbers", actual: judgeClient.LastRequest?.Prompt);
-        Assert.False(promptCache.TryTake(correlationId: "corr-1", prompt: out _));
+        Assert.True(promptCache.TryPeek(correlationId: "corr-1", prompt: out _));
     }
 
     [Fact]
@@ -324,6 +327,18 @@ public class JudgeShadowScoreDrainServiceTests
         {
             Abandoned.Add((correlationId, reason));
             return Task.FromResult(true);
+        }
+
+        public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<bool> AbandonGraderAsync(string correlationId, string graderKey, string reason,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
         }
 
         public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)

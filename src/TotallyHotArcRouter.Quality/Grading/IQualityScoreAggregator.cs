@@ -50,6 +50,33 @@ public interface IQualityScoreAggregator
     Task<bool> AbandonJudgeAsync(string correlationId, string reason, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Supplies an extra grader's score for a held result (Phase Q3: CodeJudge/ICE-Score/RACE), the
+    /// generalized counterpart of <see cref="CompleteWithJudgeAsync"/> for any grader key beyond
+    /// <see cref="GraderKeys.Judge"/>. The score lands in <see cref="QualityResult.GraderScores"/> keyed by
+    /// <paramref name="graderKey"/>. A correlation id that is not held - already timed out, evicted, or
+    /// never submitted - is ignored.
+    /// </summary>
+    /// <param name="correlationId">The correlation id identifying the held result.</param>
+    /// <param name="graderKey">The grader's key, e.g. <see cref="GraderKeys.CodeJudge"/>.</param>
+    /// <param name="score">The grader's score, normalized to [0,1].</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns><see langword="true"/> when a held result was completed by this call; otherwise <see langword="false"/>.</returns>
+    Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Releases one grader's contribution for a held result because it is known not to be coming, the
+    /// generalized counterpart of <see cref="AbandonJudgeAsync"/> for any grader key.
+    /// </summary>
+    /// <param name="correlationId">The correlation id identifying the held result.</param>
+    /// <param name="graderKey">The grader's key, e.g. <see cref="GraderKeys.CodeJudge"/>.</param>
+    /// <param name="reason">A short machine-readable reason, recorded in the result's per-grader degraded reasons.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns><see langword="true"/> when a held result was found (and, if it was the last pending grader, written); otherwise <see langword="false"/>.</returns>
+    Task<bool> AbandonGraderAsync(string correlationId, string graderKey, string reason,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Writes out every held result whose judge wait has expired, using its static score alone. Called
     /// periodically by <see cref="QualityJoinSweepService"/>, and directly by tests.
     /// </summary>

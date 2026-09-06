@@ -127,6 +127,9 @@ public class ServiceCollectionExtensionsTests
     /// at hold-time - and must be absent from the write-time <see cref="IQualityScoreObserver"/> fan-out it
     /// used to occupy. A regression back to registering it as an observer would leave both assertions below
     /// green individually but silently reintroduce the deadlock, which is why they are asserted together.
+    /// Phase Q3 wraps the single <see cref="IAsyncGraderDispatcher"/> in a
+    /// <see cref="CompositeAsyncGraderDispatcher"/> fanning out to both the judge's dispatcher and the
+    /// portfolio's, so this also pins that both component dispatchers remain reachable in their own right.
     /// </summary>
     [Fact]
     public async Task AddTotallyHotArcRouter_ResolvesJudgeDispatcher_AbsentFromObserverFanOut()
@@ -146,7 +149,9 @@ public class ServiceCollectionExtensionsTests
         await using var provider = services.BuildServiceProvider();
 
         var dispatcher = provider.GetRequiredService<IAsyncGraderDispatcher>();
-        Assert.IsType<JudgeShadowScoreDispatcher>(dispatcher);
+        Assert.IsType<CompositeAsyncGraderDispatcher>(dispatcher);
+        Assert.NotNull(provider.GetRequiredService<JudgeShadowScoreDispatcher>());
+        Assert.NotNull(provider.GetRequiredService<PortfolioGraderDispatcher>());
 
         var observer = provider.GetRequiredService<IQualityScoreObserver>();
         var composite = Assert.IsType<CompositeRouterScoreObserver>(observer);

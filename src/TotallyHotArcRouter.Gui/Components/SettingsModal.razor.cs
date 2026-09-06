@@ -36,11 +36,14 @@ public partial class SettingsModal
     private bool _clearTranscriptsFailed;
     private string? _clearTranscriptsMessage;
     private bool _clearingTranscripts;
+    private bool _codeJudgeEnabled;
     private ElementReference _confirmInput;
     private string _confirmText = string.Empty;
     private bool _confirmingApply;
     private bool _confirmingClearTranscripts;
     private IReadOnlyList<string> _eligibleJudgeModels = [];
+    private bool _iceScoreEnabled;
+    private bool _raceEnabled;
     private int _embeddingMemoryCapacity = RecommendedEmbeddingMemoryCapacity;
     private bool _focusPending;
     private bool _judgeEnabled;
@@ -136,6 +139,10 @@ public partial class SettingsModal
             _eligibleJudgeModels.Contains(value: settings.JudgeModelName, comparer: StringComparer.OrdinalIgnoreCase)
                 ? settings.JudgeModelName
                 : string.Empty;
+
+        _codeJudgeEnabled = settings.CodeJudgeEnabled;
+        _iceScoreEnabled = settings.IceScoreEnabled;
+        _raceEnabled = settings.RaceEnabled;
     }
 
     /// <summary>Updates the address field and clears any stale "Saved" confirmation from a previous save.</summary>
@@ -182,6 +189,27 @@ public partial class SettingsModal
     private Task OnJudgeModelChange(ChangeEventArgs e)
     {
         _judgeModelName = (string?)e.Value ?? string.Empty;
+        return SaveRouterSettingsNow();
+    }
+
+    /// <summary>Flips the CodeJudge grader toggle and saves it immediately.</summary>
+    private Task ToggleCodeJudgeEnabled()
+    {
+        _codeJudgeEnabled = !_codeJudgeEnabled;
+        return SaveRouterSettingsNow();
+    }
+
+    /// <summary>Flips the ICE-Score grader toggle and saves it immediately.</summary>
+    private Task ToggleIceScoreEnabled()
+    {
+        _iceScoreEnabled = !_iceScoreEnabled;
+        return SaveRouterSettingsNow();
+    }
+
+    /// <summary>Flips the RACE grader toggle and saves it immediately.</summary>
+    private Task ToggleRaceEnabled()
+    {
+        _raceEnabled = !_raceEnabled;
         return SaveRouterSettingsNow();
     }
 
@@ -291,7 +319,10 @@ public partial class SettingsModal
                 embeddingMemoryCapacity: _embeddingMemoryCapacity,
                 judgeEnabled: _judgeEnabled,
                 judgeModelName: _judgeModelName,
-                transcriptCaptureEnabled: _transcriptCaptureEnabled);
+                transcriptCaptureEnabled: _transcriptCaptureEnabled,
+                codeJudgeEnabled: _codeJudgeEnabled,
+                iceScoreEnabled: _iceScoreEnabled,
+                raceEnabled: _raceEnabled);
             _routerSettingsMessage = "Saved";
             _routerSettingsSaveFailed = false;
 

@@ -4,16 +4,12 @@ namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
 /// Bridges a request's prompt text - already extracted on the hot path for
-/// <see cref="Quality.Ingress.QualityIngestContext"/> - to the judge's later-arriving background job, keyed
-/// by the same correlation id <see cref="PendingResponseTextCache"/> uses. Mirrors
-/// <see cref="PendingResponseTextCache"/>'s design exactly (down to sharing its <see cref="JudgeOptions"/>
-/// bounds, since a prompt is no larger a retention concern than the response it produced): TTL-bounded,
-/// capacity-bounded, <see cref="Set"/>/<see cref="TryTake"/>, a <see cref="Dictionary{TKey,TValue}"/> plus a
-/// <see cref="Queue{T}"/> for insertion order, and an injectable <see cref="TimeProvider"/> for deterministic
-/// tests. Nothing is ever written to disk: whether judging succeeds, fails, or the entry ages out, the
-/// prompt is gone from process memory the moment it is taken or evicted - the same "the router's memory must
-/// not become a transcript store" rule <see cref="PendingResponseTextCache"/> follows
-/// (docs/router/live-feedback-learning-plan.md's standing decision).
+/// <see cref="Quality.Ingress.QualityIngestContext"/> - to every later-arriving background grading job (the
+/// G-Eval shadow judge, and Phase Q3's CodeJudge/ICE-Score/RACE portfolio), keyed by the same correlation id
+/// <see cref="PendingResponseTextCache"/> uses. Mirrors <see cref="PendingResponseTextCache"/>'s design
+/// exactly, including its Phase Q3 move from single-take to multi-read (see that type's remarks) - down to
+/// sharing its <see cref="JudgeOptions"/> bounds, since a prompt is no larger a retention concern than the
+/// response it produced.
 /// </summary>
 public sealed class PendingPromptCache
 {
@@ -97,6 +93,31 @@ public sealed class PendingPromptCache
             EvictExpiredAndStale();
 
             if (_entries.Remove(key: correlationId, value: out var entry))
+            {
+                prompt = entry.Text;
+                return true;
+            }
+        }
+
+        prompt = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Reads the prompt text recorded under <paramref name="correlationId"/>, if present and not yet
+    /// expired, without removing it - so another concurrently-dispatched grader for the same request can
+    /// still read it too. See <see cref="PendingResponseTextCache.TryPeek"/>'s remarks for why this exists.
+    /// </summary>
+    /// <returns><see langword="true"/> if an unexpired entry was found.</returns>
+    public bool TryPeek(string correlationId, out string? prompt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+
+        lock (_lock)
+        {
+            EvictExpiredAndStale();
+
+            if (_entries.TryGetValue(key: correlationId, value: out var entry))
             {
                 prompt = entry.Text;
                 return true;

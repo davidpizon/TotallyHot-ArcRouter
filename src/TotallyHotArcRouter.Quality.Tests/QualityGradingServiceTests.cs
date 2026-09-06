@@ -166,6 +166,18 @@ public class QualityGradingServiceTests
             return Task.FromResult(false);
         }
 
+        public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<bool> AbandonGraderAsync(string correlationId, string graderKey, string reason,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
         public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(0);

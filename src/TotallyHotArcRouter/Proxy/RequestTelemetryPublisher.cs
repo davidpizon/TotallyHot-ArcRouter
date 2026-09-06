@@ -26,6 +26,7 @@ internal sealed class RequestTelemetryPublisher
     private readonly IBudgetEnforcer? _budgetStore;
     private readonly IConversationContinuityMatcher _continuityMatcher;
     private readonly IOptionsMonitor<JudgeOptions>? _judgeOptionsMonitor;
+    private readonly IOptionsMonitor<PortfolioGraderOptions>? _portfolioGraderOptionsMonitor;
     private readonly ILogger _logger;
     private readonly PendingPromptCache? _pendingPromptCache;
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
@@ -72,7 +73,8 @@ internal sealed class RequestTelemetryPublisher
         IOptionsMonitor<RoutingOptions>? routingOptionsMonitor,
         IOptionsMonitor<JudgeOptions>? judgeOptionsMonitor,
         decimal selfHostedRouterPricePerMillionTokens,
-        PendingPromptCache? pendingPromptCache = null)
+        PendingPromptCache? pendingPromptCache = null,
+        IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null)
     {
         _logger = logger;
         _sessionIdResolver = sessionIdResolver;
@@ -94,6 +96,7 @@ internal sealed class RequestTelemetryPublisher
         _transcriptStore = transcriptStore;
         _routingOptionsMonitor = routingOptionsMonitor;
         _judgeOptionsMonitor = judgeOptionsMonitor;
+        _portfolioGraderOptionsMonitor = portfolioGraderOptionsMonitor;
         _selfHostedRouterPricePerMillionTokens = selfHostedRouterPricePerMillionTokens;
     }
 
@@ -629,24 +632,34 @@ internal sealed class RequestTelemetryPublisher
 
         // docs/router/geval-shadow-scoring-plan.md §Raw-text preservation: the response text is already in
         // hand from the TryExtractText call above (responseSummary's source) - this adds retention only,
-        // for JudgeShadowScoreDispatcher's later-arriving background job to recover by TryTake. Gated on
-        // extraction having actually succeeded (responseText is only assigned when TryExtractText returns
-        // true) and on the judge being switched on right now - read from the monitor, not captured once,
-        // exactly like the EnableAdaptiveRouting gate below. That live read is the whole point here: the
-        // judge toggle is what authorizes retaining raw response text in memory at all, so switching it off
-        // has to stop retention immediately rather than at the next restart.
-        if (responseSummary is not null && (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false))
+        // for the G-Eval judge's and Phase Q3's portfolio graders' later-arriving background jobs to recover
+        // by TryPeek. Gated on extraction having actually succeeded (responseText is only assigned when
+        // TryExtractText returns true) and on any LLM grader being switched on right now - read from the
+        // monitors, not captured once, exactly like the EnableAdaptiveRouting gate below. That live read is
+        // the whole point here: an LLM grader being live is what authorizes retaining raw response text in
+        // memory at all, so switching every one of them off has to stop retention immediately rather than at
+        // the next restart.
+        if (responseSummary is not null && AnyLlmGraderEnabled())
             _pendingResponseTextCache?.Set(correlationId: correlationId, text: responseText);
 
-        // Mirrors the response-text retention immediately above, for the other half of the pair the judge
-        // needs to grade against a requirement rather than in isolation
-        // (docs/research/code-quality-metrics-assessment.md §1). Gated the same way: only when the judge is
-        // live right now, since that flag is what authorizes retaining raw request/response text in memory
-        // at all.
-        if (!string.IsNullOrEmpty(newestUserMessage) && (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false))
+        // Mirrors the response-text retention immediately above, for the other half of the pair every LLM
+        // grader needs to grade against a requirement rather than in isolation
+        // (docs/research/code-quality-metrics-assessment.md §1). Gated the same way.
+        if (!string.IsNullOrEmpty(newestUserMessage) && AnyLlmGraderEnabled())
             _pendingPromptCache?.Set(correlationId: correlationId, prompt: newestUserMessage);
 
         return (newestUserMessage, requestSummary, responseSummary, responseText, correlationId);
+    }
+
+    /// <summary>
+    /// Whether any LLM grader that needs raw prompt/response text is currently live: the G-Eval judge, or
+    /// any of Phase Q3's CodeJudge/ICE-Score/RACE portfolio. The single authorization check for retaining
+    /// that text in <see cref="_pendingResponseTextCache"/>/<see cref="_pendingPromptCache"/> at all.
+    /// </summary>
+    private bool AnyLlmGraderEnabled()
+    {
+        return (_judgeOptionsMonitor?.CurrentValue.Enabled ?? false) ||
+               (_portfolioGraderOptionsMonitor?.CurrentValue.AnyEnabled ?? false);
     }
 
     /// <summary>

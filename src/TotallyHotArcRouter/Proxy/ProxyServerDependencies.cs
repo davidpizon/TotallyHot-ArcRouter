@@ -318,6 +318,14 @@ public sealed record RouterSettingsAdminDependencies(
     /// is not a mistake that can be expressed.
     /// </summary>
     public EmbeddingMemory? EmbeddingMemory { get; init; }
+
+    /// <summary>
+    /// Reports Phase Q3's CodeJudge/ICE-Score/RACE portfolio's currently effective values, the same way
+    /// <see cref="JudgeOptionsMonitor"/> does for the G-Eval judge. An init property rather than a positional
+    /// parameter so this group's existing constructor call sites need no change - but <see langword="required"/>,
+    /// since the System Settings window's Save action needs it to persist the three toggles.
+    /// </summary>
+    public required IOptionsMonitor<Judge.PortfolioGraderOptions> PortfolioGraderOptionsMonitor { get; init; }
 }
 
 /// <summary>

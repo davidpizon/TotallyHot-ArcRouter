@@ -280,6 +280,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         services.AddSingleton(routerSettingsAdmin.ReloadToken);
                         services.AddSingleton(routerSettingsAdmin.OptionsMonitor);
                         services.AddSingleton(routerSettingsAdmin.JudgeOptionsMonitor);
+                        services.AddSingleton(routerSettingsAdmin.PortfolioGraderOptionsMonitor);
                         services.AddSingleton(routerSettingsAdmin.JudgeModelSelector);
                         services.AddSingleton(routerSettingsAdmin.TranscriptOptionsMonitor);
                         services.AddSingleton(routerSettingsAdmin.TranscriptStore);

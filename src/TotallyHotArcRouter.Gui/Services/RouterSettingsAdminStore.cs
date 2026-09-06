@@ -107,6 +107,9 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// <param name="judgeEnabled">Whether the G-Eval shadow judge is enabled.</param>
     /// <param name="judgeModelName">The chosen judge backbone, or an empty string for automatic selection.</param>
     /// <param name="transcriptCaptureEnabled">Whether the opt-in transcript store captures raw prompt/response text.</param>
+    /// <param name="codeJudgeEnabled">Whether Phase Q3's CodeJudge correctness grader is enabled.</param>
+    /// <param name="iceScoreEnabled">Whether Phase Q3's ICE-Score usefulness grader is enabled.</param>
+    /// <param name="raceEnabled">Whether Phase Q3's RACE readability/maintainability grader is enabled.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <exception cref="RouterSettingsAdminException">The save was rejected or the router is unreachable.</exception>
     public async Task UpdateAsync(
@@ -115,6 +118,9 @@ public sealed class RouterSettingsAdminStore : IDisposable
         bool judgeEnabled,
         string judgeModelName,
         bool transcriptCaptureEnabled,
+        bool codeJudgeEnabled = false,
+        bool iceScoreEnabled = false,
+        bool raceEnabled = false,
         CancellationToken cancellationToken = default)
     {
         IsSaving = true;
@@ -126,6 +132,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
                 .UpdateAsync(adaptiveRoutingEnabled: adaptiveRoutingEnabled,
                     embeddingMemoryCapacity: embeddingMemoryCapacity, judgeEnabled: judgeEnabled,
                     judgeModelName: judgeModelName, transcriptCaptureEnabled: transcriptCaptureEnabled,
+                    codeJudgeEnabled: codeJudgeEnabled, iceScoreEnabled: iceScoreEnabled, raceEnabled: raceEnabled,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             IsReachable = true;
