@@ -301,6 +301,20 @@ and the router's other pending caches. `QualityJoinSweepService` sweeps every 5 
 sweep rather than one timer per held result, so a fixed tiny cost never becomes a variable one that peaks
 when the system is busiest.
 
+**Dispatching the judge: hold-time, not write-time.** `IAsyncGraderDispatcher.DispatchAsync` is called by
+`SubmitAsync` immediately after the entry is stored in the pending table — this is what actually starts
+grading, and it is the reason the table above has an outcome for every path *except* "judge grade in
+flight": that state exists only because dispatch already happened. `JudgeShadowScoreDispatcher` is the
+production implementation, enqueuing onto the drain worker's channel and returning immediately; a full
+channel, a judge switched off between `WillJudge` and dispatch, or a missing correlation id are all
+answered by returning an empty accepted set, which the aggregator turns into an immediate
+`judge-not-dispatched` release rather than a wasted wait for `JudgeJoinTimeoutMs`
+(`docs/router/judge-join-deadlock-fix-plan.md`). An earlier design fired the judge from
+`IQualityScoreObserver.ObserveAsync` — the write-time fan-out — which only runs once a held result is
+written; since a result needing judgment is never written until judged, that trigger could not fire until
+after the outcome it was meant to produce, and every judged request silently degraded to the
+`JudgeJoinTimeoutMs` row above instead of the "judge grade arrives" row.
+
 **Q2: the judge is now prompt-aware.** `JudgeScoreRequest` carries an optional `Prompt` alongside
 `ResponseText`, recovered from `PendingPromptCache` — a second cache mirroring `PendingResponseTextCache`
 exactly (same TTL/capacity bounds, same in-process-only lifetime) and set at the same point in

@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <c>request_transcripts</c> table. Every method reads <see cref="TranscriptOptions.Enabled"/> live off
 /// <see cref="IOptionsMonitor{TOptions}"/> and no-ops when capture is currently disabled, so a caller never
 /// needs its own enabled check and the System Settings window's Transcription Capture toggle takes effect
-/// immediately - the same live-gate posture <see cref="Judge.JudgeShadowScoreObserver"/> takes for
+/// immediately - the same live-gate posture <see cref="Judge.JudgeShadowScoreDispatcher"/> takes for
 /// <see cref="Judge.JudgeOptions.Enabled"/>.
 /// </summary>
 public sealed class SqliteTranscriptStore : ITranscriptStore

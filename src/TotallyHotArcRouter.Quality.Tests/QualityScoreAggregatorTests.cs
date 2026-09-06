@@ -31,13 +31,18 @@ public class QualityScoreAggregatorTests
         IQualityScoreObserver observer,
         bool willJudge,
         ManualTimeProvider? clock = null,
-        QualityOptions? options = null)
+        QualityOptions? options = null,
+        IAsyncGraderDispatcher? dispatcher = null)
     {
         var opts = options ?? Options_();
         return new QualityScoreAggregator(
             observer: observer,
             scorer: new QualityScorer(Options.Create(opts)),
             judgeAvailability: new StubJudge(willJudge),
+            // Accepts every requested key by default, matching every pre-existing test's expectation that
+            // a result nominally expecting a judge (StubJudge(true)) is actually held rather than written
+            // immediately with a "not dispatched" reason.
+            asyncGraderDispatcher: dispatcher ?? new StubDispatcher(),
             options: Options.Create(opts),
             logger: NullLogger<QualityScoreAggregator>.Instance,
             timeProvider: clock ?? new ManualTimeProvider(DateTimeOffset.UtcNow));
@@ -300,6 +305,57 @@ public class QualityScoreAggregatorTests
         await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
     }
 
+    // The bug this dispatch step exists to fix (docs/router/judge-join-deadlock-fix-plan.md): a judge that
+    // is expected but never actually started must not sit held for the full join timeout. A dispatcher
+    // that declines the key it was asked for is released exactly as eagerly as an explicit abandon.
+    [Fact]
+    public async Task SubmitAsync_DispatcherDeclines_WritesImmediatelyWithNotDispatchedReason()
+    {
+        var observer = new RecordingObserver();
+        var aggregator = Create(observer: observer, true, dispatcher: new StubDispatcher(acceptAll: false));
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var written = Assert.Single(observer.Observed);
+        Assert.Null(written.JudgeScore);
+        Assert.Equal(expected: "judge-not-dispatched", actual: written.DegradedReason);
+        Assert.Equal(0, actual: aggregator.PendingCount);
+    }
+
+    // A throwing dispatcher must degrade exactly like an explicit decline, never escape into
+    // QualityGradingService (mirroring SubmitAsync_ObserverThrows_DoesNotEscape for the write side).
+    [Fact]
+    public async Task SubmitAsync_DispatcherThrows_WritesImmediatelyWithNotDispatchedReason()
+    {
+        var observer = new RecordingObserver();
+        var aggregator = Create(observer: observer, true, dispatcher: new StubDispatcher(throws: true));
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(expected: "judge-not-dispatched", actual: written.DegradedReason);
+        Assert.Equal(0, actual: aggregator.PendingCount);
+    }
+
+    // The ordering SubmitAsync depends on: the entry must already be visible in the pending table before
+    // dispatch is called, so a dispatcher whose grader resolves synchronously (or races ahead of
+    // DispatchAsync returning) can complete the join rather than losing the race against its own creation.
+    [Fact]
+    public async Task SubmitAsync_DispatchesAfterEntryIsVisible_ReentrantCompletionSucceeds()
+    {
+        var observer = new RecordingObserver();
+        var reentrant = new ReentrantDispatcher();
+        var aggregator = Create(observer: observer, true, dispatcher: reentrant);
+        reentrant.Aggregator = aggregator;
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(reentrant.CompletedSynchronously);
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(0.4, actual: written.JudgeScore);
+        Assert.Equal(0, actual: aggregator.PendingCount);
+    }
+
     [Fact]
     public async Task ConcurrentCompletionAndSweep_StillWriteExactlyOnce()
     {
@@ -345,6 +401,52 @@ public class QualityScoreAggregatorTests
         public Task ObserveAsync(QualityResult result, CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("observer is down");
+        }
+    }
+
+    /// <summary>
+    /// An <see cref="IAsyncGraderDispatcher"/> stub. Defaults to accepting every requested key (the
+    /// production dispatcher's ordinary path); construct with <c>acceptAll: false</c> to decline everything,
+    /// or <c>throws: true</c> to prove a throwing dispatcher degrades the same way a decline does.
+    /// </summary>
+    private sealed class StubDispatcher(bool acceptAll = true, bool throws = false) : IAsyncGraderDispatcher
+    {
+        public Task<IReadOnlySet<string>> DispatchAsync(
+            QualityResult result,
+            IReadOnlySet<string> pendingGraderKeys,
+            CancellationToken cancellationToken = default)
+        {
+            if (throws) throw new InvalidOperationException("dispatcher is down");
+
+            IReadOnlySet<string> accepted = acceptAll
+                ? new HashSet<string>(pendingGraderKeys, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult(accepted);
+        }
+    }
+
+    /// <summary>
+    /// A dispatcher that calls back into <see cref="Aggregator"/>'s <see cref="QualityScoreAggregator.CompleteWithJudgeAsync"/>
+    /// synchronously, before returning its own accepted set - proving <see cref="QualityScoreAggregator.SubmitAsync"/>
+    /// makes the held entry visible before dispatching, since this callback would otherwise find nothing to
+    /// complete.
+    /// </summary>
+    private sealed class ReentrantDispatcher : IAsyncGraderDispatcher
+    {
+        public QualityScoreAggregator? Aggregator { get; set; }
+
+        public bool CompletedSynchronously { get; private set; }
+
+        public async Task<IReadOnlySet<string>> DispatchAsync(
+            QualityResult result,
+            IReadOnlySet<string> pendingGraderKeys,
+            CancellationToken cancellationToken = default)
+        {
+            CompletedSynchronously = Aggregator is not null && await Aggregator
+                .CompleteWithJudgeAsync(correlationId: result.RequestCorrelationId, 0.4,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return new HashSet<string>(pendingGraderKeys, StringComparer.OrdinalIgnoreCase);
         }
     }
 

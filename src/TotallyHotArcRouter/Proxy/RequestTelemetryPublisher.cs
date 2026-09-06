@@ -629,7 +629,7 @@ internal sealed class RequestTelemetryPublisher
 
         // docs/router/geval-shadow-scoring-plan.md §Raw-text preservation: the response text is already in
         // hand from the TryExtractText call above (responseSummary's source) - this adds retention only,
-        // for JudgeShadowScoreObserver's later-arriving background job to recover by TryTake. Gated on
+        // for JudgeShadowScoreDispatcher's later-arriving background job to recover by TryTake. Gated on
         // extraction having actually succeeded (responseText is only assigned when TryExtractText returns
         // true) and on the judge being switched on right now - read from the monitor, not captured once,
         // exactly like the EnableAdaptiveRouting gate below. That live read is the whole point here: the

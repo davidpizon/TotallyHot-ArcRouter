@@ -29,9 +29,20 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// <see cref="DeterminePendingGraders"/>, without any change to <see cref="SubmitAsync"/>,
 /// <see cref="SweepExpiredAsync"/>, or the eviction path.
 /// </para>
+/// <para>
+/// <b>Every pending grader is started at hold-time, not at write-time.</b> Once <see cref="SubmitAsync"/>
+/// has an entry visible in <see cref="_pending"/>, it hands the same pending-grader set to
+/// <see cref="_asyncGraderDispatcher"/> so grading can actually begin. An earlier design started the judge
+/// from <see cref="IQualityScoreObserver.ObserveAsync"/> instead - which only runs once a held result is
+/// written - so a result needing judgment was never written until judged, and never judged until written:
+/// a deadlock broken only by <see cref="SweepExpiredAsync"/>'s timeout
+/// (docs/router/judge-join-deadlock-fix-plan.md). A future asynchronous grader (Phase Q3) is started
+/// through this same <see cref="IAsyncGraderDispatcher"/> seam, not its own trigger.
+/// </para>
 /// </remarks>
 public sealed class QualityScoreAggregator : IQualityScoreAggregator
 {
+    private readonly IAsyncGraderDispatcher _asyncGraderDispatcher;
     private readonly int _capacity;
     private readonly Queue<string> _insertionOrder = new();
     private readonly TimeSpan _joinTimeout;
@@ -60,6 +71,10 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// <param name="observer">The observer that receives the single score per request.</param>
     /// <param name="scorer">The scorer, re-run once the judge axis is filled.</param>
     /// <param name="judgeAvailability">Decides whether a result is held for a judge grade.</param>
+    /// <param name="asyncGraderDispatcher">
+    /// Starts every asynchronous grader a held result is waiting on, at hold-time rather than at the
+    /// eventual write (docs/router/judge-join-deadlock-fix-plan.md).
+    /// </param>
     /// <param name="options">Supplies the join timeout and held-result capacity.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="timeProvider">
@@ -70,6 +85,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         IQualityScoreObserver observer,
         IQualityScorer scorer,
         IJudgeAvailability judgeAvailability,
+        IAsyncGraderDispatcher asyncGraderDispatcher,
         IOptions<QualityOptions> options,
         ILogger<QualityScoreAggregator> logger,
         TimeProvider? timeProvider = null)
@@ -77,12 +93,14 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         ArgumentNullException.ThrowIfNull(observer);
         ArgumentNullException.ThrowIfNull(scorer);
         ArgumentNullException.ThrowIfNull(judgeAvailability);
+        ArgumentNullException.ThrowIfNull(asyncGraderDispatcher);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _observer = observer;
         _scorer = scorer;
         _judgeAvailability = judgeAvailability;
+        _asyncGraderDispatcher = asyncGraderDispatcher;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _joinTimeout = TimeSpan.FromMilliseconds(options.Value.JudgeJoinTimeoutMs);
@@ -116,7 +134,14 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             return;
         }
 
+        // Snapshotted before the lock, and again before dispatch below: pendingGraders is the very
+        // HashSet instance stored in Entry.PendingGraderKeys, mutated in place under _lock by every
+        // completion/abandonment path. Handing the live instance to a dispatcher running outside the
+        // lock would race those mutations.
+        var requestedGraderKeys = new HashSet<string>(pendingGraders, StringComparer.OrdinalIgnoreCase);
+
         List<QualityResult> evicted;
+        bool stillHeld;
         lock (_lock)
         {
             if (!_pending.ContainsKey(result.RequestCorrelationId))
@@ -127,6 +152,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
                 PendingGraderKeys: pendingGraders,
                 ExpiresAtUtc: _timeProvider.GetUtcNow() + _joinTimeout);
             evicted = TrimToCapacityLocked();
+            stillHeld = _pending.ContainsKey(result.RequestCorrelationId);
         }
 
         foreach (var stale in evicted)
@@ -136,6 +162,60 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
                 "Judge join table at capacity; writing the static score for correlation {CorrelationId} without a judge grade.",
                 stale.RequestCorrelationId);
             await WriteAsync(result: stale with { DegradedReason = "judge-join-evicted" },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+
+        // Only dispatch for an entry this call itself still holds - if it was the one evicted above
+        // (only reachable at a tiny configured capacity), it was already written and nothing should be
+        // started for it.
+        if (stillHeld)
+            await DispatchPendingGradersAsync(result: result, correlationId: result.RequestCorrelationId,
+                requestedGraderKeys: requestedGraderKeys, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Starts every grader the just-opened hold is waiting on via <see cref="_asyncGraderDispatcher"/>, then
+    /// immediately abandons any requested key the dispatcher did not accept - a declined dispatch is
+    /// released the same way a judge that is known not to be coming is released, rather than left to
+    /// consume the full join timeout for a grade nobody will ever run
+    /// (docs/router/judge-join-deadlock-fix-plan.md). Called after the entry is already visible in
+    /// <see cref="_pending"/>, so a dispatcher whose grader resolves inline (or races ahead of this method
+    /// returning) can call <see cref="CompleteWithJudgeAsync"/> and find the entry rather than losing the
+    /// race against its own creation.
+    /// </summary>
+    private async Task DispatchPendingGradersAsync(
+        QualityResult result,
+        string correlationId,
+        IReadOnlySet<string> requestedGraderKeys,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlySet<string> accepted;
+        try
+        {
+            accepted = await _asyncGraderDispatcher
+                .DispatchAsync(result: result, pendingGraderKeys: requestedGraderKeys,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception: ex,
+                message:
+                "Dispatching asynchronous graders for correlation {CorrelationId} failed; treating every pending grader as not dispatched.",
+                correlationId);
+            accepted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        foreach (var key in requestedGraderKeys)
+        {
+            if (accepted.Contains(key)) continue;
+
+            await AbandonGraderAsync(
+                correlationId: correlationId,
+                graderKey: key,
+                reason: FormattableString.Invariant($"{key}-not-dispatched"),
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
     }

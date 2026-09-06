@@ -188,6 +188,13 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                 exception: ex,
                 message: "Shadow-judge scoring failed for correlation {CorrelationId}; dropping.",
                 job.CorrelationId);
+
+            // Without this, a backbone failure left the held result pinned for the full join timeout
+            // instead of releasing it immediately - the same stall this class exists to fix at the
+            // dispatch side (docs/router/judge-join-deadlock-fix-plan.md), just triggered by a throw
+            // here instead of a trigger that never fired at all.
+            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-failed",
+                cancellationToken: stoppingToken).ConfigureAwait(false);
         }
     }
 }

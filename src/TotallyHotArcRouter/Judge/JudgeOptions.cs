@@ -73,7 +73,7 @@ public sealed class JudgeOptions
     public int MaxCachedTextChars { get; init; } = 65_536;
 
     /// <summary>
-    /// Gets the capacity of the bounded background channel <see cref="JudgeShadowScoreObserver"/> enqueues
+    /// Gets the capacity of the bounded background channel <see cref="JudgeShadowScoreDispatcher"/> enqueues
     /// onto. A full channel sheds the newest job (logged and dropped) rather than blocking the caller.
     /// Defaults to 500.
     /// </summary>

@@ -129,6 +129,18 @@ coupling was observed; the earlier plan's acyclic reference graph still holds.
 **GUI stores** (14 files under `Gui/Services/*Store.cs`): still concrete singletons without
 interfaces — the existing plan's going-forward norm, not a dedicated pass.
 
+### Non-smell use: the CodeGraph step applied to a correctness bug
+
+Step 1 of this pipeline (map with CodeGraph first) is not exclusive to smell surveys — it is the
+same "trace the call graph before touching code" discipline this ADR mandates for any change to a
+catalog hub. It was applied on 2026-09-05 to a functional-correctness investigation rather than a
+smell audit: whether `JudgeShadowScoreObserver`'s write-time trigger could still fire under the
+hold-based `QualityScoreAggregator` introduced by Phase N3. The defect found (the judge could never
+be started once holding replaced write-time observation, silently degrading every judged request to
+the join timeout) was not a smell with a severity grade — it was a shipped feature contributing
+nothing — so it is tracked as its own fix plan rather than added to the smell catalog above:
+[`judge-join-deadlock-fix-plan.md`](../router/judge-join-deadlock-fix-plan.md).
+
 ## Decision Drivers
 
 - **Complement, don't fork** — one mechanical tracker; this ADR is the method and the current

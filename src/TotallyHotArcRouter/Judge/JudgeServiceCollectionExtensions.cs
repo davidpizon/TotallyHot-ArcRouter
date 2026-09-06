@@ -13,13 +13,13 @@ internal static class JudgeServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the geval shadow judge (docs/router/geval-shadow-scoring-plan.md Phase G1): its cache,
-    /// queue, client, store, observer, and the availability flag that promotes it from a shadow
-    /// observer to a real quality-aggregator contributor.
+    /// queue, client, store, dispatcher, and the availability flag that promotes it from a shadow
+    /// dispatcher to a real quality-aggregator contributor.
     /// </summary>
     internal static IServiceCollection AddJudge(this IServiceCollection services)
     {
         // docs/router/geval-shadow-scoring-plan.md Phase G1: the shadow judge. Every collaborator
-        // (cache, queue, client, store, observer) is registered unconditionally - PendingResponseTextCache
+        // (cache, queue, client, store, dispatcher) is registered unconditionally - PendingResponseTextCache
         // and JudgeShadowScoreQueue are inert until something writes to them, and
         // SqliteJudgeShadowScoreStore shares RouterMemoryDatabase's file/schema, already created
         // unconditionally above.
@@ -30,10 +30,10 @@ internal static class JudgeServiceCollectionExtensions
         // the System Settings window, and its backbone is whichever free model the operator set up in
         // the Providers screen (JudgeModelSelector), never a hardcoded endpoint.
         //
-        // Enabled is therefore a *live* flag, which is why the observer below joins the fan-out
-        // unconditionally and gates per call instead - a construction-time check could never see a
-        // later toggle. Same reasoning at the drain worker, the retention loop, and ProxyMiddleware's
-        // response-text retention site.
+        // Enabled is therefore a *live* flag, which is why JudgeShadowScoreDispatcher is started
+        // unconditionally by QualityScoreAggregator.SubmitAsync and gates per call instead - a
+        // construction-time check could never see a later toggle. Same reasoning at the drain worker,
+        // the retention loop, and ProxyMiddleware's response-text retention site.
         services.AddOptions<JudgeOptions>()
             .ValidateDataAnnotations();
         services.AddSingleton<IConfigureOptions<JudgeOptions>, JudgeSettingsConfigureOptions>();
@@ -44,7 +44,8 @@ internal static class JudgeServiceCollectionExtensions
         services.AddSingleton<JudgeModelSelector>();
         services.AddSingleton<IJudgeClient, GEvalJudgeClient>();
         services.AddSingleton<IJudgeShadowScoreStore, SqliteJudgeShadowScoreStore>();
-        services.AddSingleton<JudgeShadowScoreObserver>();
+        services.AddSingleton<JudgeShadowScoreDispatcher>();
+        services.AddSingleton<IAsyncGraderDispatcher>(sp => sp.GetRequiredService<JudgeShadowScoreDispatcher>());
 
         // Promotes the judge from a shadow observer to a real contributor: this is what tells the
         // quality aggregator to hold a static verdict open for a judge grade instead of writing it

@@ -1,13 +1,17 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using System.Linq;
 using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tools;
+using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 
@@ -116,6 +120,46 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(contextWindowStore);
         Assert.Same(expected: capabilityStore, actual: contextWindowStore);
         Assert.Same(expected: provider.GetRequiredService<ToolCallCapabilityStore>(), actual: contextWindowStore);
+    }
+
+    /// <summary>
+    /// docs/router/judge-join-deadlock-fix-plan.md: the judge dispatcher must be reachable through
+    /// <see cref="IAsyncGraderDispatcher"/> - the seam <see cref="QualityScoreAggregator"/> actually calls
+    /// at hold-time - and must be absent from the write-time <see cref="IQualityScoreObserver"/> fan-out it
+    /// used to occupy. A regression back to registering it as an observer would leave both assertions below
+    /// green individually but silently reintroduce the deadlock, which is why they are asserted together.
+    /// </summary>
+    [Fact]
+    public async Task AddTotallyHotArcRouter_ResolvesJudgeDispatcher_AbsentFromObserverFanOut()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.Configure<RoutingOptions>(_ => { });
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddTotallyHotArcRouter();
+
+        // await using, not using: resolving IAsyncGraderDispatcher/IQualityScoreObserver below pulls in
+        // the same singleton graph as AddTotallyHotArcRouter_ResolvesRegisteredServices_WithSupportingDependencies
+        // above, including OnnxEmbeddingClient, which implements only IAsyncDisposable - a synchronous
+        // Dispose() on this scope would throw when it reached that singleton.
+        await using var provider = services.BuildServiceProvider();
+
+        var dispatcher = provider.GetRequiredService<IAsyncGraderDispatcher>();
+        Assert.IsType<JudgeShadowScoreDispatcher>(dispatcher);
+
+        var observer = provider.GetRequiredService<IQualityScoreObserver>();
+        var composite = Assert.IsType<CompositeRouterScoreObserver>(observer);
+
+        // JudgeShadowScoreDispatcher no longer implements IQualityScoreObserver at all - the whole point
+        // of the seam split - so this checks the concrete type of every fanned-out observer rather than an
+        // "is JudgeShadowScoreDispatcher" pattern the compiler would reject as always false. Asserting the
+        // full expected membership, not just an absence, is what keeps this test meaningful rather than
+        // tautological.
+        Assert.Equal(
+            expected: new[] { typeof(RouterMemoryScoreObserver), typeof(EmbeddingMemoryScoreObserver), typeof(TranscriptScoreObserver) },
+            actual: composite.Observers.Select(o => o.GetType()));
     }
 
     [Fact]

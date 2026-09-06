@@ -44,7 +44,8 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers the quality-observation fan-out: the score-observer caches, the transcript store, the
     /// shadow judge, the composite <see cref="IQualityScoreObserver"/> that fans a scored result out to
-    /// all of them, and the static analyzers added by <see cref="QualityServiceCollectionExtensions.AddQuality"/>.
+    /// the write-time observers, and the static analyzers added by
+    /// <see cref="QualityServiceCollectionExtensions.AddQuality"/>.
     /// </summary>
     private static IServiceCollection AddQualityAndObservability(this IServiceCollection services)
     {
@@ -69,21 +70,22 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<RouterMemoryScoreObserver>(),
                 sp.GetRequiredService<EmbeddingMemoryScoreObserver>(),
                 // docs/router/self-organizing-classification-plan.md Phase T6: joins the fan-out
-                // unconditionally, like the judge observer below - TranscriptScoreObserver's own store call
+                // unconditionally - TranscriptScoreObserver's own store call
                 // (SqliteTranscriptStore.UpdateOutcomeAsync) reads TranscriptOptions.Enabled live via
                 // IOptionsMonitor and no-ops when it is currently false, so a construction-time check here
                 // would only freeze the toggle in whatever state the process started in. The
                 // EnableAdaptiveRouting master switch still applies, but only at the insert site
                 // (ProxyMiddleware, gated live off IOptionsMonitor<RoutingOptions>) - a row that was never
                 // inserted has no correlation id for this backfill to match, so it naturally no-ops too.
-                sp.GetRequiredService<TranscriptScoreObserver>(),
 
-                // docs/router/geval-shadow-scoring-plan.md Phase G1: unlike the transcript observer above,
-                // this one joins the fan-out unconditionally and checks JudgeOptions.Enabled itself on every
-                // ObserveAsync. JudgeOptions.Enabled is operator-toggleable from System Settings, and this
-                // factory runs exactly once - a check here would freeze the judge in whatever state the
-                // process started in.
-                sp.GetRequiredService<JudgeShadowScoreObserver>()
+                // The judge is intentionally NOT here. JudgeShadowScoreDispatcher is an
+                // IAsyncGraderDispatcher, started by QualityScoreAggregator.SubmitAsync at hold-time -
+                // registered by AddJudge() above, resolved through IAsyncGraderDispatcher, not this
+                // fan-out. It used to be an IQualityScoreObserver registered here, but that trigger only
+                // runs once a held result is written, and a result needing judgment is never written
+                // until the judge resolves it: a deadlock broken only by the 60s join-timeout sweep
+                // (docs/router/judge-join-deadlock-fix-plan.md).
+                sp.GetRequiredService<TranscriptScoreObserver>()
             };
 
             return new CompositeRouterScoreObserver(observers: observers,

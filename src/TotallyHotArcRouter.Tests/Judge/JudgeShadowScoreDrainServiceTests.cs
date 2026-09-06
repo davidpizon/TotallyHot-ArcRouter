@@ -162,14 +162,16 @@ public class JudgeShadowScoreDrainServiceTests
     }
 
     /// <summary>
-    /// The one path that deliberately settles nothing. A judge client that throws is caught and logged, and
-    /// the held verdict is left for <see cref="IQualityScoreAggregator.SweepExpiredAsync"/> rather than
-    /// abandoned inline - a backbone blip should not be recorded as the judge having declined to grade.
-    /// This asserts that on purpose, so adding an inline abandon here becomes a deliberate decision rather
-    /// than an accident.
+    /// A judge client that throws is caught and logged, and the held verdict is abandoned immediately with
+    /// reason <c>judge-failed</c> rather than left pinned for the full join timeout
+    /// (docs/router/judge-join-deadlock-fix-plan.md) - a backbone blip is released exactly as eagerly as a
+    /// disabled judge, an evicted cache entry, or an abstention, distinguished only by its own reason
+    /// string. This used to assert the opposite (leaving the join to the expiry sweep) as a deliberate
+    /// choice; that choice was the second half of the join deadlock this drain service otherwise helped
+    /// cause, and is no longer correct.
     /// </summary>
     [Fact]
-    public async Task ProcessAsync_JudgeClientThrows_LeavesTheQualityJoinToTheExpirySweep()
+    public async Task ProcessAsync_JudgeClientThrows_AbandonsTheQualityJoinAsFailed()
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
@@ -180,8 +182,10 @@ public class JudgeShadowScoreDrainServiceTests
 
         await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
+        var abandoned = Assert.Single(aggregator.Abandoned);
+        Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: "judge-failed", actual: abandoned.Reason);
         Assert.Empty(aggregator.Completed);
-        Assert.Empty(aggregator.Abandoned);
     }
 
     // Phase Q2: the judge grades against the requirement it was written for, recovered the same way the
