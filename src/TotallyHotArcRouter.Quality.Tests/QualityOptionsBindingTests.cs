@@ -6,7 +6,7 @@ namespace TotallyHot.ArcRouter.Quality.Tests;
 /// Confirms <see cref="DimensionWeightOptions.ExtraWeights"/> - an <see cref="IReadOnlyDictionary{TKey,TValue}"/>
 /// init property - actually binds from configuration the way the three named axes do (Phase Q3 relies on
 /// this to wire CodeJudge/ICE-Score/RACE weights from <c>appsettings.json</c> without touching
-/// <see cref="QualityScorer"/> again). The .NET config binder populates a dictionary-typed property by its
+/// <see cref="Scoring.QualityScorer"/> again). The .NET config binder populates a dictionary-typed property by its
 /// runtime type, not its declared type, so this is worth pinning explicitly rather than assuming.
 /// </summary>
 public sealed class QualityOptionsBindingTests

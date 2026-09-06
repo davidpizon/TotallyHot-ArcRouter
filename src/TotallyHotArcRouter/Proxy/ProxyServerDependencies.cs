@@ -325,7 +325,7 @@ public sealed record RouterSettingsAdminDependencies(
     /// parameter so this group's existing constructor call sites need no change - but <see langword="required"/>,
     /// since the System Settings window's Save action needs it to persist the three toggles.
     /// </summary>
-    public required IOptionsMonitor<Judge.PortfolioGraderOptions> PortfolioGraderOptionsMonitor { get; init; }
+    public required IOptionsMonitor<PortfolioGraderOptions> PortfolioGraderOptionsMonitor { get; init; }
 }
 
 /// <summary>

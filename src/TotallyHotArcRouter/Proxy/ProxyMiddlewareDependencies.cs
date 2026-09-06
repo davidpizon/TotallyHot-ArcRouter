@@ -232,9 +232,9 @@ public sealed record ProxyMiddlewareDependencies
     /// <see cref="JudgeOptionsMonitor"/> at the same response-text retention site: raw prompt/response text
     /// is retained when the G-Eval judge <em>or</em> any of CodeJudge/ICE-Score/RACE is live, since all four
     /// graders read the same cached text. Defaults to <see langword="null"/>, treated as no portfolio grader
-    /// being enabled, matching <see cref="Judge.PortfolioGraderOptions"/>'s own off-by-default coded values.
+    /// being enabled, matching <see cref="PortfolioGraderOptions"/>'s own off-by-default coded values.
     /// </summary>
-    public IOptionsMonitor<Judge.PortfolioGraderOptions>? PortfolioGraderOptionsMonitor { get; init; }
+    public IOptionsMonitor<PortfolioGraderOptions>? PortfolioGraderOptionsMonitor { get; init; }
 
     /// <summary>
     /// Optional runtime kill switch, toggled from the GUI system tray via
