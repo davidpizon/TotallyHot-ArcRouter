@@ -39,18 +39,28 @@ public sealed partial class RelevanceAnalyzer : IStaticAnalyzer
     /// <summary>The fewest salient prompt tokens needed before drift is worth scoring at all.</summary>
     private const int MinimumSalientTokens = 3;
 
-    /// <summary>
-    /// Common words and instruction verbs that carry no topical signal about the task, so they are dropped
-    /// before computing overlap rather than trivially "matching" almost any snippet.
-    /// </summary>
-    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
-    {
+    /// <summary>The raw stop-word list, kept separate from <see cref="StopWords"/> so the list itself can use collection-expression syntax.</summary>
+    private static readonly string[] StopWordList =
+    [
         "the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "for", "with", "that", "this", "these",
         "those", "is", "are", "was", "were", "be", "been", "it", "its", "as", "at", "by", "from", "into",
         "please", "can", "could", "you", "your", "write", "create", "implement", "add", "make", "fix", "update",
         "using", "use", "should", "would", "need", "needs", "want", "wants", "code", "function", "method",
         "class", "just", "also", "will", "than", "then", "have", "has", "had", "not", "any", "all", "some"
-    };
+    ];
+
+    /// <summary>
+    /// Common words and instruction verbs that carry no topical signal about the task, so they are dropped
+    /// before computing overlap rather than trivially "matching" almost any snippet.
+    /// </summary>
+    /// <remarks>
+    /// Built from <see cref="StopWordList"/> via the <c>(IEnumerable&lt;string&gt;, IEqualityComparer&lt;string&gt;)</c>
+    /// constructor rather than a <c>[...]</c> collection-expression initializer directly: a collection
+    /// expression targeting <see cref="HashSet{T}"/> has no syntax for supplying a comparer, so writing one
+    /// here would silently fall back to the ordinal (case-sensitive) default and start missing "The"/"Fix"/
+    /// capitalized instruction words the case-insensitive match below relies on.
+    /// </remarks>
+    private static readonly HashSet<string> StopWords = new(StopWordList, StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc/>
     public string Name => "relevance";
