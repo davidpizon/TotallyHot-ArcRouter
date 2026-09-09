@@ -139,7 +139,7 @@ public sealed class GEvalJudgeClient : IJudgeClient
             8);
 
         var url = ProviderUrlBuilder.BuildPassthroughUrl(baseUrl: route.UpstreamBaseUrl,
-            requestPath: ChatCompletionsPath, null);
+            requestPath: ChatCompletionsPath, queryString: null);
         using var httpRequest = new HttpRequestMessage(method: HttpMethod.Post, requestUri: url);
         httpRequest.Content = JsonContent.Create(inputValue: chatRequest,
             jsonTypeInfo: JudgeJsonContext.Default.ChatCompletionRequest);
