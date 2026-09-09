@@ -102,4 +102,22 @@ public sealed class JudgeOptions
     /// </summary>
     [Range(100, 1_000_000)]
     public int MaxRows { get; init; } = 50_000;
+
+    /// <summary>
+    /// Gets the maximum age in days for rows in <c>grader_scores</c>
+    /// (docs/router/grader-reliability-plan.md, Phase Q4) before they become eligible for deletion by the
+    /// retention purge, mirroring <see cref="RetentionDays"/>. Defaults to 30 days.
+    /// </summary>
+    [Range(1, 365)]
+    public int GraderScoreRetentionDays { get; init; } = 30;
+
+    /// <summary>
+    /// Gets the maximum number of rows <c>grader_scores</c> is allowed to hold before the oldest rows are
+    /// deleted to bring it back under this limit, mirroring <see cref="MaxRows"/>. Defaults to 200,000 -
+    /// four times <see cref="MaxRows"/>'s default, since a single request can write up to four
+    /// <c>grader_scores</c> rows (analysis, judge, and up to two of the Q3 portfolio graders) against
+    /// <c>judge_shadow_scores</c>'s one row per judged request.
+    /// </summary>
+    [Range(100, 4_000_000)]
+    public int GraderScoreMaxRows { get; init; } = 200_000;
 }

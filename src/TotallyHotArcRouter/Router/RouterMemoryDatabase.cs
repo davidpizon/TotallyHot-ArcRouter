@@ -70,6 +70,24 @@ public sealed class RouterMemoryDatabase
 
                                      CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_created_at
                                          ON judge_shadow_scores (created_at_utc);
+
+                                     CREATE TABLE IF NOT EXISTS grader_scores (
+                                         id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                                         correlation_id          TEXT    NOT NULL,
+                                         created_at_utc          TEXT    NOT NULL,
+                                         dimension               TEXT    NOT NULL,
+                                         model                   TEXT    NOT NULL,
+                                         grader_key              TEXT    NOT NULL,
+                                         score                   REAL    NOT NULL,
+                                         grader_backbone_model   TEXT    NULL,
+                                         response_length_chars   INTEGER NULL
+                                     );
+
+                                     CREATE INDEX IF NOT EXISTS ix_grader_scores_correlation_id
+                                         ON grader_scores (correlation_id);
+
+                                     CREATE INDEX IF NOT EXISTS ix_grader_scores_dimension_grader
+                                         ON grader_scores (dimension, grader_key);
                                      """;
 
     /// <summary>The resolved absolute path of the database file.</summary>

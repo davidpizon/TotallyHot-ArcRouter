@@ -133,6 +133,22 @@ public class JudgeShadowScoreDrainServiceTests
         Assert.Empty(aggregator.Abandoned);
     }
 
+    [Fact]
+    public async Task ProcessAsync_TextPresent_RecordsTheJudgeBackboneModel()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
+        var backboneCache = new PendingGraderBackboneCache(Options.Create(new JudgeOptions()));
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            backboneCache: backboneCache);
+
+        await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.True(backboneCache.TryTake(correlationId: "corr-1", backboneByGraderKey: out var recorded));
+        Assert.Equal(expected: "free-judge-model", actual: recorded[GraderKeys.Judge]);
+    }
+
     /// <summary>
     /// Each of the three give-up paths abandons the join with its own reason, so an operator reading the
     /// aggregator can tell a switched-off judge from an evicted response from a judge that abstained. The
@@ -234,13 +250,15 @@ public class JudgeShadowScoreDrainServiceTests
         IJudgeShadowScoreStore store,
         StaticOptionsMonitor<JudgeOptions>? options = null,
         IQualityScoreAggregator? aggregator = null,
-        PendingPromptCache? promptCache = null)
+        PendingPromptCache? promptCache = null,
+        PendingGraderBackboneCache? backboneCache = null)
     {
         var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         return new JudgeShadowScoreDrainService(
             queue: queue,
             pendingResponseTextCache: cache,
             pendingPromptCache: promptCache ?? new PendingPromptCache(Options.Create(new JudgeOptions())),
+            pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
             judgeClient: judgeClient,
             store: store,
             options: options ?? new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions

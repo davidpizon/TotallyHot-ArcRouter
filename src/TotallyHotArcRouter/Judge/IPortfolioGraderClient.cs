@@ -18,11 +18,12 @@ public interface IPortfolioGraderClient
     /// <param name="request">The dimension, response text, and originating prompt to score.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>
-    /// The grader's score in <c>[0,1]</c>, or <see langword="null"/> when no free model is currently
-    /// eligible to serve as the backbone. Null is an abstention, not a failure - the caller records nothing
-    /// rather than a fabricated score.
+    /// The grader's score and the backbone that produced it, or <see langword="null"/> when no free model
+    /// is currently eligible to serve as the backbone. Null is an abstention, not a failure - the caller
+    /// records nothing rather than a fabricated score.
     /// </returns>
-    Task<double?> ScoreAsync(PortfolioGraderScoreRequest request, CancellationToken cancellationToken = default);
+    Task<PortfolioGraderScoreResult?> ScoreAsync(PortfolioGraderScoreRequest request,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>One scoring request handed to <see cref="IPortfolioGraderClient.ScoreAsync"/>.</summary>
@@ -34,3 +35,14 @@ public interface IPortfolioGraderClient
 /// against, not just the answer in isolation).
 /// </param>
 public sealed record PortfolioGraderScoreRequest(string Dimension, string ResponseText, string Prompt);
+
+/// <summary>The result of one <see cref="IPortfolioGraderClient.ScoreAsync"/> call.</summary>
+/// <param name="Score">The grader's score, normalized to <c>[0, 1]</c>.</param>
+/// <param name="GraderModel">
+/// The client-facing name of the model that actually produced this score, mirroring
+/// <see cref="JudgeScoreResult.JudgeModel"/>'s reasoning exactly: reported by the client rather than read
+/// back from configuration because <see cref="JudgeModelSelector"/> may have substituted a fallback for an
+/// ineligible configured pick, and docs/router/grader-reliability-plan.md's self-preference-skew statistic
+/// needs to know what actually ran.
+/// </param>
+public sealed record PortfolioGraderScoreResult(double Score, string GraderModel);

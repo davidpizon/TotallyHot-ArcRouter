@@ -85,7 +85,12 @@ public static class ServiceCollectionExtensions
                 // runs once a held result is written, and a result needing judgment is never written
                 // until the judge resolves it: a deadlock broken only by the 60s join-timeout sweep
                 // (docs/router/judge-join-deadlock-fix-plan.md).
-                sp.GetRequiredService<TranscriptScoreObserver>()
+                sp.GetRequiredService<TranscriptScoreObserver>(),
+                // docs/router/grader-reliability-plan.md Phase Q4: joins the fan-out unconditionally,
+                // mirroring RouterMemoryScoreObserver above - it is as cheap and depends on no feature
+                // flag, since GraderKeys.Analysis always fires regardless of which (if any) LLM grader
+                // is live.
+                sp.GetRequiredService<GraderScoreRecordObserver>()
             };
 
             return new CompositeRouterScoreObserver(observers: observers,
@@ -159,6 +164,11 @@ public static class ServiceCollectionExtensions
         // so neither may exit at startup on reading it once.
         services.AddHostedService<JudgeShadowScoreDrainService>();
         services.AddHostedService<JudgeShadowScoreRetentionService>();
+
+        // docs/router/grader-reliability-plan.md Phase Q4: the per-grader score table's own retention
+        // purge. Unlike the shadow-judge one above, this has no enabled gate - see
+        // GraderScoreRetentionService's remarks for why.
+        services.AddHostedService<GraderScoreRetentionService>();
 
         // docs/router/self-organizing-classification-plan.md Phase T4: drains the comparison queue on a
         // timer. Deliberately off the request path - a comparison needs both a verifier score and a

@@ -101,6 +101,7 @@ public class JudgeJoinDeadlockFixTests
             queue: new JudgeShadowScoreQueue(Options.Create(JudgeOptions())),
             pendingResponseTextCache: responseTextCache,
             pendingPromptCache: new PendingPromptCache(Options.Create(JudgeOptions())),
+            pendingGraderBackboneCache: new PendingGraderBackboneCache(Options.Create(JudgeOptions())),
             judgeClient: new FakeJudgeClient(result: judgeResult),
             store: new FakeJudgeShadowScoreStore(),
             options: EnabledJudgeMonitor(),

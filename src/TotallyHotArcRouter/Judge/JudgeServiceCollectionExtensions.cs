@@ -47,6 +47,16 @@ internal static class JudgeServiceCollectionExtensions
         services.AddSingleton<IJudgeShadowScoreStore, SqliteJudgeShadowScoreStore>();
         services.AddSingleton<JudgeShadowScoreDispatcher>();
 
+        // docs/router/grader-reliability-plan.md Phase Q4: per-grader score persistence, generalizing
+        // judge_shadow_scores to the whole portfolio (plus the static analyzer). PendingResponseLengthCache
+        // and PendingGraderBackboneCache are inert until something writes to them, same posture as
+        // PendingResponseTextCache above.
+        services.AddSingleton<PendingResponseLengthCache>();
+        services.AddSingleton<PendingGraderBackboneCache>();
+        services.AddSingleton<IGraderScoreStore, SqliteGraderScoreStore>();
+        services.AddSingleton<GraderScoreRecordObserver>();
+        services.AddSingleton<IGraderReliabilityAnalyzer, GraderReliabilityAnalyzer>();
+
         // Promotes the judge from a shadow observer to a real contributor: this is what tells the
         // quality aggregator to hold a static verdict open for a judge grade instead of writing it
         // immediately. Registered before AddQuality so it wins that method's TryAddSingleton default.

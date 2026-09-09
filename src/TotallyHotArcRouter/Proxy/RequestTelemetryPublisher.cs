@@ -31,6 +31,7 @@ internal sealed class RequestTelemetryPublisher
     private readonly PendingPromptCache? _pendingPromptCache;
     private readonly PendingRequestCostCache? _pendingRequestCostCache;
     private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
+    private readonly PendingResponseLengthCache? _pendingResponseLengthCache;
     private readonly PendingResponseTextCache? _pendingResponseTextCache;
     private readonly PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
     private readonly IModelPriceLookup? _priceLookup;
@@ -74,7 +75,8 @@ internal sealed class RequestTelemetryPublisher
         IOptionsMonitor<JudgeOptions>? judgeOptionsMonitor,
         decimal selfHostedRouterPricePerMillionTokens,
         PendingPromptCache? pendingPromptCache = null,
-        IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null)
+        IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null,
+        PendingResponseLengthCache? pendingResponseLengthCache = null)
     {
         _logger = logger;
         _sessionIdResolver = sessionIdResolver;
@@ -92,6 +94,7 @@ internal sealed class RequestTelemetryPublisher
         _pendingRequestCostCache = pendingRequestCostCache;
         _pendingRequestProvenanceCache = pendingRequestProvenanceCache;
         _pendingResponseTextCache = pendingResponseTextCache;
+        _pendingResponseLengthCache = pendingResponseLengthCache;
         _pendingPromptCache = pendingPromptCache;
         _transcriptStore = transcriptStore;
         _routingOptionsMonitor = routingOptionsMonitor;
@@ -641,6 +644,13 @@ internal sealed class RequestTelemetryPublisher
         // the next restart.
         if (responseSummary is not null && AnyLlmGraderEnabled())
             _pendingResponseTextCache?.Set(correlationId: correlationId, text: responseText);
+
+        // docs/router/grader-reliability-plan.md, Phase Q4: unlike the raw text above, a character count
+        // cannot be used to reconstruct the response, so this is not gated on AnyLlmGraderEnabled - the
+        // static analyzer's GraderKeys.Analysis score always fires and deserves a verbosity-skew row too,
+        // regardless of whether any LLM grader is currently live.
+        if (responseSummary is not null)
+            _pendingResponseLengthCache?.Set(correlationId: correlationId, length: responseText.Length);
 
         // Mirrors the response-text retention immediately above, for the other half of the pair every LLM
         // grader needs to grade against a requirement rather than in isolation

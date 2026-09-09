@@ -19,6 +19,7 @@ public sealed class PortfolioGraderDrainService : BackgroundService
     private readonly IReadOnlyDictionary<string, IPortfolioGraderClient> _clientsByKey;
     private readonly ILogger<PortfolioGraderDrainService> _logger;
     private readonly IOptionsMonitor<PortfolioGraderOptions> _options;
+    private readonly PendingGraderBackboneCache _pendingGraderBackboneCache;
     private readonly PendingPromptCache _pendingPromptCache;
     private readonly PendingResponseTextCache _pendingResponseTextCache;
     private readonly IPortfolioGraderQueue _queue;
@@ -27,6 +28,11 @@ public sealed class PortfolioGraderDrainService : BackgroundService
     /// <param name="queue">The work queue to drain.</param>
     /// <param name="pendingResponseTextCache">Supplies the response text for each job, keyed by correlation id.</param>
     /// <param name="pendingPromptCache">Supplies the originating prompt for each job, best-effort.</param>
+    /// <param name="pendingGraderBackboneCache">
+    /// Records which backbone each successful score actually used
+    /// (docs/router/grader-reliability-plan.md, Phase Q4), for <see cref="GraderScoreRecordObserver"/>'s
+    /// later write.
+    /// </param>
     /// <param name="clients">Every registered portfolio grader client, indexed by <see cref="IPortfolioGraderClient.GraderKey"/>.</param>
     /// <param name="options">The live per-grader enabled gates, read per job rather than captured.</param>
     /// <param name="aggregator">The quality aggregator holding each job's static verdict open for this grader's score.</param>
@@ -35,6 +41,7 @@ public sealed class PortfolioGraderDrainService : BackgroundService
         IPortfolioGraderQueue queue,
         PendingResponseTextCache pendingResponseTextCache,
         PendingPromptCache pendingPromptCache,
+        PendingGraderBackboneCache pendingGraderBackboneCache,
         IEnumerable<IPortfolioGraderClient> clients,
         IOptionsMonitor<PortfolioGraderOptions> options,
         IQualityScoreAggregator aggregator,
@@ -43,6 +50,7 @@ public sealed class PortfolioGraderDrainService : BackgroundService
         ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(pendingResponseTextCache);
         ArgumentNullException.ThrowIfNull(pendingPromptCache);
+        ArgumentNullException.ThrowIfNull(pendingGraderBackboneCache);
         ArgumentNullException.ThrowIfNull(clients);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(aggregator);
@@ -51,6 +59,7 @@ public sealed class PortfolioGraderDrainService : BackgroundService
         _queue = queue;
         _pendingResponseTextCache = pendingResponseTextCache;
         _pendingPromptCache = pendingPromptCache;
+        _pendingGraderBackboneCache = pendingGraderBackboneCache;
         _clientsByKey = clients.ToDictionary(keySelector: c => c.GraderKey, comparer: StringComparer.OrdinalIgnoreCase);
         _options = options;
         _aggregator = aggregator;
@@ -115,13 +124,13 @@ public sealed class PortfolioGraderDrainService : BackgroundService
 
         try
         {
-            var score = await client
+            var result = await client
                 .ScoreAsync(
                     request: new PortfolioGraderScoreRequest(Dimension: job.Dimension, ResponseText: responseText,
                         Prompt: prompt ?? string.Empty),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
 
-            if (score is null)
+            if (result is null)
             {
                 _logger.LogDebug(
                     message: "No eligible free backbone for {GraderKey} (correlation {CorrelationId}); recorded no score.",
@@ -133,14 +142,20 @@ public sealed class PortfolioGraderDrainService : BackgroundService
                 return;
             }
 
+            // Recorded before the join completes, mirroring JudgeShadowScoreDrainService's own "audit trail
+            // before the score that depends on it" ordering: GraderScoreRecordObserver reads this cache when
+            // the aggregator's write fires immediately after, so the backbone must already be there.
+            _pendingGraderBackboneCache.Set(correlationId: job.CorrelationId, graderKey: job.GraderKey,
+                backboneModel: result.GraderModel);
+
             await _aggregator.CompleteGraderAsync(correlationId: job.CorrelationId, graderKey: job.GraderKey,
-                score: score.Value, cancellationToken: stoppingToken).ConfigureAwait(false);
+                score: result.Score, cancellationToken: stoppingToken).ConfigureAwait(false);
 
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug(
                     message: "Recorded {GraderKey} score {Score:F3} for correlation {CorrelationId}.",
                     job.GraderKey,
-                    score.Value,
+                    result.Score,
                     job.CorrelationId);
         }
         catch (OperationCanceledException)

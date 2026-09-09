@@ -3,6 +3,7 @@ using Serilog;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
@@ -48,8 +49,14 @@ public static class Program
             // docs/router/regret-evaluation-harness-plan.md N6: headless regret-harness run trigger,
             // stripped for the same reason - it must never reach the command-line configuration provider
             // as a stray "run-regret-harness" key.
-            var (runRegretHarness, remainingArgs) =
+            var (runRegretHarness, afterRegretHarnessFlag) =
                 ExtractFlag(args: afterClusterFlag, flagName: "--run-regret-harness");
+
+            // docs/router/grader-reliability-plan.md Phase Q4: headless grader-reliability report trigger,
+            // stripped for the same reason - it must never reach the command-line configuration provider
+            // as a stray "run-grader-reliability-report" key.
+            var (runGraderReliabilityReport, remainingArgs) =
+                ExtractFlag(args: afterRegretHarnessFlag, flagName: "--run-grader-reliability-report");
 
             // `using` (not a bare local) so the sync/retrain paths below, which return without ever calling
             // RunAsync, still dispose the container and everything singleton-scoped in it - SQLite
@@ -77,6 +84,12 @@ public static class Program
             if (runRegretHarness)
             {
                 await RunRegretHarnessAsync(host.Services);
+                return;
+            }
+
+            if (runGraderReliabilityReport)
+            {
+                await RunGraderReliabilityReportAsync(host.Services);
                 return;
             }
 
@@ -330,5 +343,61 @@ public static class Program
             Console.WriteLine(split.MarkdownTable);
             Console.WriteLine();
         }
+    }
+
+    /// <summary>
+    /// Runs one grader-reliability report pass (docs/router/grader-reliability-plan.md, Phase Q4),
+    /// following <see cref="RunRegretHarnessAsync"/>'s headless-CLI shape: resolved directly from the built
+    /// (but not started) host, no Kestrel, process exits once the report is printed. Purely a read over
+    /// already-collected <c>grader_scores</c> rows - no live API call, no weight ever changes.
+    /// </summary>
+    private static async Task RunGraderReliabilityReportAsync(IServiceProvider services)
+    {
+        var logger = services.GetRequiredService<ILogger<IGraderReliabilityAnalyzer>>();
+        var analyzer = services.GetRequiredService<IGraderReliabilityAnalyzer>();
+
+        var report = await analyzer.AnalyzeAsync(CancellationToken.None);
+
+        logger.LogInformation(
+            message: "Grader reliability report generated at {GeneratedAtUtc} from {TotalRows} grader_scores row(s).",
+            report.GeneratedAtUtc,
+            report.TotalRowsAnalyzed);
+
+        foreach (var dimension in report.Dimensions)
+        {
+            Console.WriteLine($"## {dimension.Dimension}");
+            Console.WriteLine();
+
+            Console.WriteLine("### Inter-grader agreement (Spearman)");
+            Console.WriteLine("| Grader A | Grader B | Correlation | N |");
+            Console.WriteLine("|---|---|---|---|");
+            foreach (var pair in dimension.PairAgreements)
+                Console.WriteLine(
+                    $"| {pair.GraderA} | {pair.GraderB} | {FormatNullableCorrelation(pair.Correlation)} | {pair.SampleSize} |");
+            Console.WriteLine();
+
+            Console.WriteLine("### Verbosity skew (score vs. response length, Spearman)");
+            Console.WriteLine("| Grader | Correlation | N |");
+            Console.WriteLine("|---|---|---|");
+            foreach (var skew in dimension.VerbositySkews)
+                Console.WriteLine($"| {skew.GraderKey} | {FormatNullableCorrelation(skew.Correlation)} | {skew.SampleSize} |");
+            Console.WriteLine();
+
+            Console.WriteLine("### Self-preference skew (own backbone vs. other candidates)");
+            Console.WriteLine("| Grader | Mean score delta | N (own) | N (other) |");
+            Console.WriteLine("|---|---|---|---|");
+            foreach (var skew in dimension.SelfPreferenceSkews)
+                Console.WriteLine(
+                    $"| {skew.GraderKey} | {(skew.MeanScoreDelta is { } delta ? delta.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "undefined")} | {skew.OwnModelSampleSize} | {skew.OtherModelSampleSize} |");
+            Console.WriteLine();
+        }
+    }
+
+    /// <summary>Formats a nullable correlation for console output, naming a suppressed value rather than showing a blank.</summary>
+    private static string FormatNullableCorrelation(double? correlation)
+    {
+        return correlation is { } value
+            ? value.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)
+            : "suppressed (N too small)";
     }
 }
