@@ -108,7 +108,7 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
             var paired = rows
                 .Where(r => string.Equals(r.GraderKey, graderKey, StringComparison.OrdinalIgnoreCase) &&
                             r.ResponseLengthChars is not null)
-                .Select(r => (Score: r.Score, Length: (double)r.ResponseLengthChars!.Value))
+                .Select(r => (r.Score, Length: (double)r.ResponseLengthChars!.Value))
                 .ToList();
 
             skews.Add(new GraderVerbositySkew(
@@ -178,7 +178,10 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
         while (i < indexed.Length)
         {
             var j = i;
-            while (j + 1 < indexed.Length && indexed[j + 1].value == indexed[i].value) j++;
+            // .Equals(), not ==: this is an intentional exact-tie check over already-computed scores
+            // (some of which are legitimately identical, e.g. a clamped 0.0/1.0 boundary), not a
+            // should-be-approximate comparison of independently computed floating-point results.
+            while (j + 1 < indexed.Length && indexed[j + 1].value.Equals(indexed[i].value)) j++;
 
             // 1-based ranks i+1..j+1, averaged across the tied run.
             var averageRank = ((i + 1) + (j + 1)) / 2.0;

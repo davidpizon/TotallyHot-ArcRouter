@@ -33,9 +33,9 @@ public class GraderScoreRecordObserverTests
         await observer.ObserveAsync(result, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, actual: store.Inserted.Count);
-        Assert.Contains(store.Inserted, r => r.GraderKey == GraderKeys.Analysis && r.Score == 0.9);
-        Assert.Contains(store.Inserted, r => r.GraderKey == GraderKeys.Judge && r.Score == 0.8);
-        Assert.Contains(store.Inserted, r => r.GraderKey == GraderKeys.CodeJudge && r.Score == 0.7);
+        Assert.Equal(0.9, actual: store.Inserted.Single(r => r.GraderKey == GraderKeys.Analysis).Score, 6);
+        Assert.Equal(0.8, actual: store.Inserted.Single(r => r.GraderKey == GraderKeys.Judge).Score, 6);
+        Assert.Equal(0.7, actual: store.Inserted.Single(r => r.GraderKey == GraderKeys.CodeJudge).Score, 6);
         Assert.All(store.Inserted, r => Assert.Equal(expected: "corr-1", actual: r.CorrelationId));
         Assert.All(store.Inserted, r => Assert.Equal(expected: "bug_fixing", actual: r.Dimension));
         Assert.All(store.Inserted, r => Assert.Equal(expected: "claude-opus-4-6", actual: r.Model));

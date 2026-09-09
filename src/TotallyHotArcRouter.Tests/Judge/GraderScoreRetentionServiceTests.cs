@@ -50,9 +50,9 @@ public class GraderScoreRetentionServiceTests
 
     private sealed class FakeGraderScoreStore(int rowCount) : IGraderScoreStore
     {
-        public int DeleteOldestCount { get; private set; }
+        private int DeleteOldestCount { get; set; }
         public int LastDeleteOldestArgument { get; private set; }
-        public int DeleteBeforeCount { get; private set; }
+        private int DeleteBeforeCount { get; set; }
         public bool DeleteOldestWasCalled => DeleteOldestCount > 0;
         public bool DeleteBeforeWasCalled => DeleteBeforeCount > 0;
 
