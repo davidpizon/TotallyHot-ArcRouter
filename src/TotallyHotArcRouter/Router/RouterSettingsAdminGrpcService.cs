@@ -171,10 +171,23 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         _store.SetBool(key: RouterSettingsStore.JudgeEnabledKey, value: request.JudgeEnabled);
         _store.SetString(key: RouterSettingsStore.JudgeModelNameKey, value: judgeModelName);
         _store.SetBool(key: RouterSettingsStore.TranscriptCaptureEnabledKey, value: request.TranscriptCaptureEnabled);
-        _store.SetBool(key: RouterSettingsStore.CodeJudgeEnabledKey, value: request.CodeJudgeEnabled);
-        _store.SetBool(key: RouterSettingsStore.IceScoreEnabledKey, value: request.IceScoreEnabled);
-        _store.SetBool(key: RouterSettingsStore.RaceEnabledKey, value: request.RaceEnabled);
+
+        // The three Q3 fields are `optional bool` (proto3 field presence), not plain bool, specifically so
+        // a client built before they existed - which sends no value for them at all - cannot silently
+        // disable every portfolio grader on every save. An absent field leaves the stored value untouched
+        // rather than being deserialized as an implicit false.
+        if (request.HasCodeJudgeEnabled)
+            _store.SetBool(key: RouterSettingsStore.CodeJudgeEnabledKey, value: request.CodeJudgeEnabled);
+        if (request.HasIceScoreEnabled)
+            _store.SetBool(key: RouterSettingsStore.IceScoreEnabledKey, value: request.IceScoreEnabled);
+        if (request.HasRaceEnabled)
+            _store.SetBool(key: RouterSettingsStore.RaceEnabledKey, value: request.RaceEnabled);
         _reloadToken.Trigger();
+
+        // Read after the reload token fires, so a portfolio field left unchanged (or just changed) is
+        // logged as the state that is actually now in force - not the raw request, which for an absent
+        // optional field would misreport it as an explicit false.
+        var effectivePortfolioGraderOptions = _portfolioGraderOptionsMonitor.CurrentValue;
 
         _logger.LogInformation(
             message:
@@ -184,9 +197,9 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
             request.JudgeEnabled,
             judgeModelName,
             request.TranscriptCaptureEnabled,
-            request.CodeJudgeEnabled,
-            request.IceScoreEnabled,
-            request.RaceEnabled);
+            effectivePortfolioGraderOptions.CodeJudgeEnabled,
+            effectivePortfolioGraderOptions.IceScoreEnabled,
+            effectivePortfolioGraderOptions.RaceEnabled);
 
         // Awaited directly rather than left to EmbeddingMemory's own OnChange subscription, so the
         // re-read below (and thus this response) reflects the trim's completion rather than racing it -

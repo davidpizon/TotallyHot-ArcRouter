@@ -266,6 +266,33 @@ public sealed class RouterSettingsAdminGrpcServiceTests
         race.Should().BeFalse();
     }
 
+    // The three portfolio fields are `optional bool` (proto3 field presence) specifically so a client
+    // built before they existed - which sends a request with no value at all for them - cannot silently
+    // disable every portfolio grader on every save. This pins that an omitted field leaves the store
+    // untouched rather than being deserialized as an implicit false and persisted as one.
+    [Fact]
+    public async Task UpdateRouterSettings_PortfolioGraderFieldsOmitted_LeavesStoredValuesUnchanged()
+    {
+        var store = CreateStore();
+        store.SetBool(key: RouterSettingsStore.CodeJudgeEnabledKey, true);
+        store.SetBool(key: RouterSettingsStore.IceScoreEnabledKey, true);
+        store.SetBool(key: RouterSettingsStore.RaceEnabledKey, true);
+        var service = CreateService(store: store);
+
+        // An older-client-shaped request: EmbeddingMemoryCapacity set (required to pass validation), the
+        // three Q3 fields never touched at all - not even set to false.
+        await service.UpdateRouterSettings(
+            request: new Contract.UpdateRouterSettingsRequest { EmbeddingMemoryCapacity = 20_000 },
+            context: CreateContext());
+
+        store.TryGetBool(key: RouterSettingsStore.CodeJudgeEnabledKey, value: out var codeJudge).Should().BeTrue();
+        codeJudge.Should().BeTrue("an absent optional field must leave the previously-stored value alone");
+        store.TryGetBool(key: RouterSettingsStore.IceScoreEnabledKey, value: out var iceScore).Should().BeTrue();
+        iceScore.Should().BeTrue();
+        store.TryGetBool(key: RouterSettingsStore.RaceEnabledKey, value: out var race).Should().BeTrue();
+        race.Should().BeTrue();
+    }
+
     [Fact]
     public async Task ClearTranscripts_DelegatesToTheStoreAndReportsTheDeletedCount()
     {

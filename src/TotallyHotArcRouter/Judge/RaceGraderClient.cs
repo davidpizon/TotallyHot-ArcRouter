@@ -21,7 +21,12 @@ public sealed class RaceGraderClient : PortfolioGraderClientBase
     private const int MinScore = 1;
 
     // ReSharper disable once RedundantVerbatimStringPrefix
-    private static readonly Regex ScoreDigitPattern = new(pattern: @"[1-5]", options: RegexOptions.Compiled);
+    // The lookbehind/lookahead reject a digit that is part of a larger number (e.g. "10") - without them,
+    // a malformed backbone reply like "the answer is 10" would silently parse as digit "1", turning a
+    // clearly-broken response into a plausible-looking score instead of the honest "no parseable score"
+    // this client's caller throws on.
+    private static readonly Regex ScoreDigitPattern =
+        new(pattern: @"(?<!\d)[1-5](?!\d)", options: RegexOptions.Compiled);
 
     /// <summary>Initializes a new instance of the <see cref="RaceGraderClient"/> class.</summary>
     public RaceGraderClient(
