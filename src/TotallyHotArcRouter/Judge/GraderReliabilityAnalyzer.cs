@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Quality.Grading;
+
 namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
@@ -62,13 +64,35 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
     /// actually scored (matched by correlation id) - never zero-filling a grader that did not score a given
     /// request.
     /// </summary>
+    /// <remarks>
+    /// Two defensive steps before pairing, neither of which the write path is expected to trigger today
+    /// (<see cref="IQualityScoreAggregator"/> guarantees exactly one final write per request) but
+    /// both of which would otherwise crash a re-run against once-corrupted or hand-edited data:
+    /// <list type="bullet">
+    /// <item>Rows with an empty <see cref="GraderScoreRecord.CorrelationId"/> are excluded from the join -
+    /// they cannot be paired across graders anyway (nothing ties one such row to another), and grouping them
+    /// together by their shared empty key would incorrectly treat unrelated requests as the same one.</item>
+    /// <item>Within a correlation id, more than one row for the same grader key collapses to the most
+    /// recent by <see cref="GraderScoreRecord.CreatedAtUtc"/> - <c>ToDictionary</c> throws on a duplicate
+    /// key, and a duplicate write (a retry, a manual edit) is data noise to collapse, not a reason to fail
+    /// the whole report.</item>
+    /// </list>
+    /// The write path is not expected to trigger either case today - the quality-aggregator's join
+    /// guarantees exactly one final write per request - but a re-run against once-corrupted or
+    /// hand-edited data should degrade gracefully rather than throw.
+    /// </remarks>
     private List<GraderPairAgreement> ComputePairAgreements(IReadOnlyList<GraderScoreRecord> rows,
         IReadOnlyList<string> graderKeys)
     {
         var byCorrelationThenGrader = rows
+            .Where(r => !string.IsNullOrEmpty(r.CorrelationId))
             .GroupBy(keySelector: r => r.CorrelationId, comparer: StringComparer.Ordinal)
-            .Select(g => g.ToDictionary(keySelector: r => r.GraderKey, elementSelector: r => r.Score,
-                comparer: StringComparer.OrdinalIgnoreCase))
+            .Select(g => g
+                .GroupBy(keySelector: r => r.GraderKey, comparer: StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    keySelector: gg => gg.Key,
+                    elementSelector: gg => gg.OrderByDescending(r => r.CreatedAtUtc).First().Score,
+                    comparer: StringComparer.OrdinalIgnoreCase))
             .ToList();
 
         List<GraderPairAgreement> agreements = [];

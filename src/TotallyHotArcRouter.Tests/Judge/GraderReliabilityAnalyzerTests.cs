@@ -99,6 +99,50 @@ public class GraderReliabilityAnalyzerTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_EmptyCorrelationIdRows_ExcludedFromPairAgreementRatherThanIncorrectlyGrouped()
+    {
+        // Two unrelated no-correlation-id requests, each graded by both graders. If these were grouped
+        // together by their shared empty CorrelationId, they would look like one request both graders
+        // scored twice - and ToDictionary would throw on the resulting duplicate GraderKey.
+        List<GraderScoreRecord> rows =
+        [
+            MakeRow(correlationId: string.Empty, dimension: "bug_fixing", graderKey: "judge", score: 0.9),
+            MakeRow(correlationId: string.Empty, dimension: "bug_fixing", graderKey: "codejudge", score: 0.1),
+            MakeRow(correlationId: string.Empty, dimension: "bug_fixing", graderKey: "judge", score: 0.2),
+            MakeRow(correlationId: string.Empty, dimension: "bug_fixing", graderKey: "codejudge", score: 0.8)
+        ];
+
+        var report = await Analyze(rows);
+
+        var pair = Assert.Single(Assert.Single(report.Dimensions).PairAgreements);
+        Assert.Equal(0, actual: pair.SampleSize);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_DuplicateRowsForSameGraderAndRequest_CollapsesToTheMostRecentRatherThanThrowing()
+    {
+        var older = MakeRow("corr-1", dimension: "bug_fixing", graderKey: "judge", score: 0.1) with
+        {
+            CreatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5)
+        };
+        var newer = MakeRow("corr-1", dimension: "bug_fixing", graderKey: "judge", score: 0.9) with
+        {
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+        List<GraderScoreRecord> rows =
+        [
+            older,
+            newer,
+            MakeRow("corr-1", dimension: "bug_fixing", graderKey: "codejudge", score: 0.9)
+        ];
+
+        var report = await Analyze(rows);
+
+        var pair = Assert.Single(Assert.Single(report.Dimensions).PairAgreements);
+        Assert.Equal(1, actual: pair.SampleSize);
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_ScoreTracksResponseLength_ReportsPositiveVerbositySkew()
     {
         List<GraderScoreRecord> rows = [];
