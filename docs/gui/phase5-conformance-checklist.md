@@ -10,8 +10,8 @@ verified rather than assumed.
 | Check | Status | Notes |
 | --- | --- | --- |
 | `dotnet build src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj` — zero warnings/errors | **Done** | Verified: `Build succeeded. 0 Warning(s). 0 Error(s).` |
-| `dotnet test src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj` — all pass | **Done** | Verified: `Passed! - Failed: 0, Passed: 161, Skipped: 0, Total: 161`. One test (`ModelDistributionTests`) was updated because it asserted the literal old `#38bdf8` chrome color on a button that is chrome, not data — not a masked regression. |
-| Code coverage ≥ 80% (AGENTS.md floor) | Not verified | `.github/workflows/dotnet-ci.yml` excludes the Gui project from CI (Windows-only MAUI); must be checked manually on a Windows dev box — this was true before adoption too, not a regression it introduced |
+| `dotnet test src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj` — all pass | **Done (as of this adoption pass)** | Verified at the time: `Passed! - Failed: 0, Passed: 161, Skipped: 0, Total: 161`. **That count is a snapshot of this pass, not a current figure** — the suite has grown substantially since (see [`../router/doc-code-reconciliation-plan.md`](../router/doc-code-reconciliation-plan.md)'s verification baseline). Re-run before citing a number. One test (`ModelDistributionTests`) was updated because it asserted the literal old `#38bdf8` chrome color on a button that is chrome, not data — not a masked regression. |
+| Code coverage ≥ 80% (AGENTS.md floor) | Not verified | `.github/workflows/dotnet-ci.yml` has a `windows-gui-build-and-test` job that would enforce this bar, but it is deliberately disabled (`if: false`), so the Gui project's coverage must be checked manually on a Windows dev box — this was true before adoption too, not a regression it introduced |
 
 ## Visual Design (aspirational-design.md §8)
 
@@ -75,7 +75,7 @@ verified rather than assumed.
 | Criterion | Status | Notes |
 | --- | --- | --- |
 | Five principles reflected in DESIGN.md/MOTION.md | Done | See both docs' new "Status" callouts |
-| No conflicting guidance between DESIGN.md, MOTION.md, tab docs | Done | DESIGN.md and MOTION.md reconciled; swept `cost-analytics-visualization-spec.md`, `console-tab-plan.md`, `dashboard.md`, `governance-model-cards.md`, `secret-field.md` for pre-adoption hex values — none remain. `console-tab-plan.md`'s log-level hex values (`#A0A0A0`/`#4CAF50`/etc.) match `LogLevelColorMapper.cs` exactly; they're an intentional log-level convention, not stale chrome. |
+| No conflicting guidance between DESIGN.md, MOTION.md, tab docs | Partial — **hex sweep only** | DESIGN.md and MOTION.md reconciled; swept `cost-analytics-visualization-spec.md`, `console-tab-plan.md`, `dashboard.md`, `governance-model-cards.md`, `secret-field.md` for pre-adoption **hex values** — none remain. That sweep was hex-only and did not check prose: a later doc-reconciliation pass found `dashboard.md` still naming Inter as the UI font (now `var(--font-ds)`), among other stale guidance. Treat this row as covering color literals, not the full guidance set. `console-tab-plan.md`'s log-level hex values (`#A0A0A0`/`#4CAF50`/etc.) match `LogLevelColorMapper.cs` exactly; they're an intentional log-level convention, not stale chrome. |
 | Component behavior documented with semantic triggers | Done | DESIGN.md §4.2, MOTION.md §6-7 |
 
 ## Sign-off

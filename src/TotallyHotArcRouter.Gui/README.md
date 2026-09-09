@@ -15,17 +15,32 @@ does not start, stop, or otherwise manage it.
   icon rather than minimizing to the taskbar or exiting the app.
 - Select **Exit** from the tray context menu to actually quit.
 
-## Current limitations
+## Current status
 
-The Live Stream tab and the Cost Analytics tab's Token Compounding chart connect to the running
-TotallyHotArcRouter proxy's telemetry hub (`Services/LiveDataStore.cs`, default
-`http://localhost:5001/telemetry/hub`, configurable via `GuiSettingsStore` and `SettingsModal.razor`)
-and show nothing until the proxy is
-reachable and has forwarded at least one request. The rest of the dashboard (Model Distribution,
-Governance, the header ticker, and Cost Analytics' other two charts) still reads from hard-coded
-mock data (`Models/DashboardData.cs`) - no telemetry source exists for that data yet. See
-[`docs/router/telemetry.md`](../../docs/router/telemetry.md) for the full pipeline and
-[`docs/gui/backlog.md`](../../docs/gui/backlog.md) for what's left.
+The **Sessions** and **Console** tabs are live-wired: `Services/LiveDataStore.cs` streams routing
+telemetry and log lines from the running TotallyHotArcRouter proxy over gRPC (default
+`https://localhost:5002`, a dedicated TLS port separate from the plain-HTTP proxy port 5001;
+configurable via `GuiSettingsStore` and `SettingsModal.razor`). Both show nothing until the proxy is
+reachable and has forwarded a request / emitted a log event, rather than falling back to mock data.
+Sessions additionally merges persisted history from the router's `request_transcripts` table
+(`Services/PersistedSessionStore.cs`), so a session survives a GUI restart.
+
+The rest of the dashboard is live with narrower gaps, not mock:
+
+- **Cost Analytics** plots live turns merged with rollup-backed history (`UsageStore`), falling back
+  to the deterministic `MockData` corpus only when there is neither. Routing ROI and Cache Hit Rate
+  are real; **Tool Steps** and **Context Buffer** still have no live source and are demonstrated by
+  the mock corpus only.
+- **Model Distribution** fetches real buckets through `UsageStore.LoadRollupAsync` on every filter
+  change, using `MockData` only as the offline/no-proxy fallback.
+- **Governance** — Providers, Price Sources, and Models are fully live against the proxy's
+  management API.
+- **Header ticker** — System Tokens is real (`UsageStore.LoadSummaryAsync`); Total Saved and Avg.
+  Cost Reduction are still mock and labelled "(demo)".
+
+See [`docs/router/telemetry.md`](../../docs/router/telemetry.md) for the full pipeline,
+[`docs/gui/dashboard.md`](../../docs/gui/dashboard.md) for the per-tab breakdown, and
+[`docs/gui/backlog.md`](../../docs/gui/backlog.md) for what is left.
 
 ## Project layout
 
@@ -42,12 +57,10 @@ mock data (`Models/DashboardData.cs`) - no telemetry source exists for that data
 
 ## Adding a new window
 
-New windows, modals, and dialogs match the **System Settings** window
-(`Components/SettingsModal.razor`): copy its backdrop/panel/header shell rather than styling new
-chrome, keep the `.overlay-backdrop`/`.overlay-panel` classes (they carry the entrance animation),
-and expose closing as an `EventCallback` parameter instead of self-closing.
-`Components/ProviderEditDialog.razor` is an existing example. The full contract - every class, size,
-and color - is in [`docs/gui/DESIGN.md`](../../docs/gui/DESIGN.md) §4.1.
+New windows, modals, and dialogs build on `Components/DialogShell.razor` - the shared implementation
+of the **System Settings** shell - rather than hand-rolling chrome. The full contract (its
+parameters, what it renders, and the one sanctioned way to deviate) is in
+[`docs/gui/DESIGN.md`](../../docs/gui/DESIGN.md) §4.1.
 
 Charts are rendered with [Apache ECharts](https://echarts.apache.org/) (Apache-2.0), vendored as
 `wwwroot/lib/echarts/echarts.min.js` and driven by `wwwroot/js/echarts-interop.js` through the reusable

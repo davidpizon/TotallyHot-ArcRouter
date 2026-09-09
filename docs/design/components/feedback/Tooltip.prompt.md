@@ -6,4 +6,4 @@ A hover tooltip for defining dense metric labels (ROI, TTFT, cache hit rate) inl
 </Tooltip>
 ```
 
-Used throughout the Live Stream tab's stat strips — every abbreviation gets one.
+Used throughout the Sessions tab's stat strips — every abbreviation gets one.

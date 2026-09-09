@@ -10,7 +10,7 @@ actually does today. Originally sourced from explicit statements in [`dashboard.
 
 ### 1. Extend live telemetry to the rest of the dashboard
 
-Live Stream and Cost Analytics' Token Compounding chart now read live data (see "Recently
+Sessions and Cost Analytics' Token Compounding chart now read live data (see "Recently
 completed" below and [`../router/telemetry.md`](../router/telemetry.md)); everything else still
 reads `MockData` because no telemetry source exists for it yet. Most of the items below (cache hit
 rate, Model Distribution, the header ticker, functional time filters) are scheduled with concrete
@@ -47,7 +47,7 @@ data sources in
   remediation rate for turns reporting no ROI. Every figure is labeled an estimate in its own tooltip,
   since the counterfactual model's real token count for a given request is never observed; a turn with
   no counterfactual is skipped rather than drawn at zero. Note this did **not** wire per-turn
-  `ConversationTurn.RoutingRoi` (the Live Stream turn card's percentage), which stays at 0 for live
+  `ConversationTurn.RoutingRoi` (the Sessions turn card's percentage), which stays at 0 for live
   turns — that surface reads a different, still-unsourced number.
 - ~~**Model Distribution** — real `TokenBucket`/`ModelShare` data.~~ **Done** (Phase 4 §5.15):
   `ModelDistribution.razor` fetches real buckets via `UsageStore.LoadRollupAsync`, grouped by day for
@@ -195,7 +195,7 @@ were removed); `TokenCompoundingSeries` still backs the `ConversationSummary` sp
 `CostAnalytics.razor` was rewritten from three fixed panels (mock Cumulative Savings line, mock
 ROI-by-Agent bar, live Token-Compounding line) into a **metric explorer**: a ranked selector for the
 seven Perf/$ metrics (Routing ROI → Context Buffer), a Hour/Day/Week/Month/All time-range control, and
-an `All Sessions`/per-session scope that defaults to the Live Stream tab's selection. (The combo chart
+an `All Sessions`/per-session scope that defaults to the Sessions tab's selection. (The combo chart
 this shipped with was later replaced by the bespoke per-metric charts above.) A real
 `DateTimeOffset TimestampUtc` was added to `ConversationTurn` (passed through by
 `LiveConversationMapper` from `LiveConversationTurn.TimestampUtc`) to place turns onto the time axis.
@@ -247,7 +247,7 @@ the dashboard.
 token usage (streaming and non-streaming), and estimated cost, and pushes each request as a
 `RoutingTelemetryEvent` over a gRPC stream (`TelemetryService.StreamEvents`) as soon as it's
 forwarded — no polling. `TotallyHot.ArcRouter.Gui`'s `Services/LiveDataStore.cs` consumes this live, and the
-Live Stream tab plus Cost Analytics' Token Compounding chart now render real conversations instead of
+Sessions tab plus Cost Analytics' Token Compounding chart now render real conversations instead of
 `MockData`. Full pipeline, field-by-field data provenance, and what's still honestly defaulted
 (Routing ROI, Tool Steps, Context Buffer) vs. real (Time to First Token, Cache Hit Rate,
 Request/Response text) is in [`../router/telemetry.md`](../router/telemetry.md). This closes out both
@@ -277,9 +277,9 @@ stays in the accessibility tree. Every `data-tip` element not nested inside a `<
 `tabindex="0"` and `aria-describedby="ls-tooltip"`. The handful nested inside a `<button>` (e.g. a
 `TurnCard` header's sub-badges) intentionally skip `tabindex` — nesting a focusable element inside a
 button is an ARIA anti-pattern — and the outer button carries a comprehensive `aria-label` instead.
-Smoke-tested against a standalone HTML harness with Playwright/Chromium (see `dashboard.md`'s
-"Verification limitation" note for why that, rather than a full app build, was the verification
-method available in this environment).
+Smoke-tested against a standalone HTML harness with Playwright/Chromium, since the behavior is pure
+JS and needs no MAUI host - see `dashboard.md`'s "Verification limitation" note for how the Gui
+project itself is built and tested.
 
 ## Minor / cosmetic (low priority)
 

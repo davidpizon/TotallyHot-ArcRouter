@@ -18,9 +18,13 @@ doc's Console tab section above for the log-line pipeline. Until the proxy is ru
 data rather than falling back to mock data. The **Cost Analytics** tab is **live + mock merged**: it
 plots live conversation turns when present, on top of a deterministic timestamped mock history
 (`MockData.BuildMetricHistory`) so every metric/range renders offline; the metrics that have no live
-source (ROI, tool steps, cache, context) are demonstrated by the mock history only. Model
-Distribution and the header ticker still read entirely from the hard-coded `MockData` class - no
-telemetry source exists for that data yet (see `../gui/backlog.md`). Governance's **Providers** and
+source (ROI, tool steps, cache, context) are demonstrated by the mock history only. **Model
+Distribution** fetches real rollup buckets through `UsageStore.LoadRollupAsync` on every filter
+change, falling back to the hard-coded `MockData` class only when there is no live data to show. The
+**header ticker** is partly real: System Tokens comes from `UsageStore.LoadSummaryAsync`, while Total
+Saved and Avg. Cost Reduction are still mock and labelled "(demo)". [`backlog.md`](backlog.md) is the
+authority for which surfaces are live and which are still mock - when the two disagree, that doc is
+the one being maintained against the code. Governance's **Providers** and
 **Price Sources** sub-views are fully live against the proxy; per-provider monthly budgets now live on
 each Providers card (real caps in SQLite, real current-month spend), replacing the former mock **Budgets**
 sub-view.
@@ -49,9 +53,11 @@ add plain CSS to `app.css`) - there is no Tailwind build to generate new utiliti
 
 ## Visual theme
 
-See [`DESIGN.md`](DESIGN.md) for the full design system (palette, typography, components, elevation,
-do's and don'ts). In short: dark theme only, fixed (no light mode / no theme toggle), Inter UI text
-with JetBrains Mono for all numeric/monospace values.
+[`DESIGN.md`](DESIGN.md) is the authority for the visual system - the surface ramp and accent (§2),
+typography and font tokens (§3), components (§4), layout (§5), and elevation (§6). This doc
+deliberately does not restate any of those values: a summary here is a second copy to keep in step,
+and the one that used to sit in this section drifted (it still named Inter as the UI font long after
+the app moved to `var(--font-ds)`).
 
 The whole app is a fixed-height, non-scrolling shell (`h-screen overflow-hidden`) with individual panels
 scrolling internally where their content can overflow.
@@ -78,8 +84,9 @@ flowchart TD
   - Any provider ≥ 80% and < 100%: amber "⚠️ N PROVIDER APPROACHING LIMIT".
   - Clicking the banner (when there's an alert) jumps to the **Governance** tab's Providers view.
 - **Settings** button (top right) opens the settings modal.
-- Ticker row: three mock aggregate stats (Total Saved, System Tokens, Avg. Cost Reduction) plus a `LIVE`
-  indicator with a pulsing dot.
+- Ticker row: three aggregate stats (Total Saved, System Tokens, Avg. Cost Reduction) plus a `LIVE`
+  indicator with a pulsing dot. System Tokens is real (`UsageStore.LoadSummaryAsync("all")`); the other
+  two are still mock and carry a "(demo)" label.
 
 ### Tabs
 
@@ -310,12 +317,11 @@ Linux CI/agent environment - see the note in "Known gaps" below about why the re
 
 These match the source design as received and are called out so they aren't mistaken for bugs:
 
-- Model Distribution's time-range filter buttons and From/To inputs don't actually refilter the charts.
 - Governance's per-provider budget caps are persisted to SQLite and enforced live in routing (breached
   providers are skipped; an all-breached request gets a 402). Spend is real per-provider, current-month.
-- Model Distribution's chart axis ranges (e.g. the 0-6M token scale) are pinned to fit the mock data;
-  they'll need to become dynamic when real telemetry is wired in. (Cost Analytics' explorer already
-  auto-scales its axes to whatever data is in range.)
+- Cost Analytics' $0-$160 savings scale is still pinned to the mock data's range. (Model
+  Distribution's token histogram now derives its ceiling from the rendered data via
+  `GroupedBarsModel.DynamicYMax`, and the Cost Analytics explorer auto-scales its axes.)
 - The chart tooltips are custom dark-themed HTML built in `wwwroot/js/echarts-interop.js` to match the
   card styling; minor visual differences from the original React implementation are expected there.
 - The telemetry gRPC server address (`https://localhost:5002` - a dedicated TLS port, separate from
@@ -327,14 +333,14 @@ These match the source design as received and are called out so they aren't mist
   Tool Steps, Cache Hit Rate, and Context Buffer. See [`../router/telemetry.md`](../router/telemetry.md)'s
   field table for why each one, and Time to First Token / Request+Response text for the turn-level
   fields that *are* real in live mode.
-- **Verification limitation**: this repo's Linux CI/agent environment has no .NET SDK and cannot
-  install one (network policy blocks the installer), so `TotallyHot.ArcRouter.Gui`'s Razor/C# changes are
-  necessarily review-verified rather than compiled or run. The exceptions: `TotallyHot.ArcRouter.Gui.Charts`
-  and `TotallyHot.ArcRouter.Gui.Telemetry` (plain `net10.0` libraries, unit-tested - see above and
-  `../router/telemetry.md`) and `wwwroot/js/tooltips.js`'s keyboard-focus behavior, which was
-  smoke-tested against a standalone HTML harness with Playwright/Chromium (both available in this
-  environment independent of the .NET toolchain). `Services/LiveDataStore.cs` and
-  `Services/LiveConversationMapper.cs` are Windows/MAUI-only glue and, like the Razor components,
-  are not unit-tested here for the same reason. A full build/run pass on a Windows machine (or CI
-  with the MAUI workload) is still needed before trusting any of this compiles clean.
+- **Verification limitation**: `TotallyHot.ArcRouter.Gui` targets `net10.0-windows` (MAUI), so it is not
+  built by `dotnet-ci.yml`'s Linux job. A `windows-gui-build-and-test` job that *does* build it, run
+  `TotallyHotArcRouter.Gui.Tests` (bUnit), and enforce AGENTS.md's 80% coverage bar exists in that
+  workflow but is **deliberately disabled** (`if: false`, the repo owner's decision) - re-enabling it is
+  a one-line revert. In practice that means the Razor components and the Windows/MAUI-only glue
+  (`Services/LiveDataStore.cs`, `Services/LiveConversationMapper.cs`) are built and tested on a Windows
+  dev box rather than on every push, and their coverage is not gated. The plain `net10.0` sibling
+  libraries - `TotallyHot.ArcRouter.Gui.Admin`, `.Charts`, `.Console`, `.Telemetry` - each have their own
+  test project on the Linux job and are fully covered there. `wwwroot/js/tooltips.js`'s keyboard-focus
+  behavior was additionally smoke-tested against a standalone HTML harness with Playwright/Chromium.
 

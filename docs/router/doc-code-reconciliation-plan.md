@@ -12,12 +12,18 @@ against source, not inferred from another document.
 | §2.2, §2.3, §2.5, §2.6 router-doc corrections | **Done.** |
 | §2.4 "four-voter" phrasing | **Done** — both `memory-persistence.md` and `src/PLAN.md`. |
 | §2.7 `docs/README.md` index | **Done** — rebuilt as an exhaustive, categorized index of all 38 router docs. The curated-vs-exhaustive question was settled in favour of exhaustive. |
+| Part 3 — the deferred `docs/gui/` + `docs/design/` pass | **Done (2026-09-09)** — 18 findings, all resolved, plus one missed gap inside Parts 1-2's own scope. See §3. |
 
 A subsequent pass over all 38 router docs also corrected five further gaps not in the original audit;
-they are recorded in §2.8 below.
+they are recorded in §2.8 below. A **second pass, on 2026-09-09**, closed this plan's remaining
+follow-up by auditing `docs/gui/` and `docs/design/` - the ~25 files this document deliberately left
+out of scope - and found one gap inside this plan's *own* scope that §2.8 had missed. Both are
+recorded in §3.
 
-**Scope:** `src/PLAN.md`, `docs/router/*.md`, `README.md`, `docs/HANDBOOK.md`, `data/README.md`. GUI and
-design docs (`docs/gui/`, `docs/design/`) are deliberately out of scope for this pass and unaudited.
+**Scope:** Parts 1-2 covered `src/PLAN.md`, `docs/router/*.md`, `README.md`, `docs/HANDBOOK.md`, and
+`data/README.md`, deliberately leaving the GUI and design docs (`docs/gui/`, `docs/design/`)
+out of scope and unaudited. **Part 3 (2026-09-09) covers those**, so the whole doc set has now been
+reconciled at least once.
 
 ## Context
 
@@ -169,7 +175,54 @@ Not in the original audit; surfaced by the full read-through and corrected in th
   `docs/gui/DESIGN.md` resolve from `.github/` and 404 when read at that path. Inherent to the
   single-source-file convention `AGENTS.md` deliberately adopts; fixing it means either root-absolute
   links or abandoning the symlink. Needs its own decision, not a drive-by change.
-- **`docs/gui/` and `docs/design/`** — roughly 25 files, unaudited. A second pass if wanted.
+- ~~**`docs/gui/` and `docs/design/`** — roughly 25 files, unaudited. A second pass if wanted.~~
+  **Done (2026-09-09)** — see §3.
+
+## Part 3 - The GUI/design pass (2026-09-09)
+
+The `docs/gui/` + `docs/design/` follow-up this plan deferred, run the same way: every claim checked
+against source (via CodeGraph) rather than against another document. **18 findings, all resolved.**
+
+Ordered by what they cost a reader:
+
+- **Three docs described shipped surfaces as mock.** `src/TotallyHotArcRouter.Gui/README.md`,
+  `dashboard.md`, and `docs/design/readme.md` all said Model Distribution and the header ticker read
+  only from `MockData`, while `backlog.md` marked both **Done** and `ModelDistribution.razor` fetches
+  real rollups through `UsageStore.LoadRollupAsync`. `dashboard.md` even cited `backlog.md` as its
+  authority while contradicting it. Corrected; `backlog.md` is now named as the single authority and
+  the other two defer to it rather than restating the breakdown.
+- **The Gui README named a transport deleted by `grpc-migration.md`** — `http://localhost:5001/telemetry/hub`,
+  the SignalR hub, long after the move to gRPC on `https://localhost:5002`.
+- **`AGENTS.md` still told agents to copy-paste modal chrome** from `SettingsModal.razor`, after
+  `DialogShell.razor` was extracted precisely to stop that. Rewritten around the shared shell.
+- **The Sessions tab was renamed in code and in `dashboard.md` only.** Nine other docs - including
+  `DESIGN.md` §4's and `MOTION.md` §2's descriptions of the *shipped* tab bar - still said "Live
+  Stream". Renamed in the docs that describe current behavior; written-history plans left alone with a
+  naming note.
+- **`secret-field.md` documented a "Credentials fieldset"** that `provider-management.md` and
+  `ProviderEditDialog.razor` both say does not exist, and **two docs described unlocking a secret field
+  as a two-click arm-then-confirm** when it opens `UnlockSecretFieldDialog`. The second made
+  `provider-management.md`'s manual step 4d unpassable as written.
+- **Three internal contradictions in `DESIGN.md`** - the dialog panel given two backgrounds (§4/§4.1
+  vs §6), a z-index inventory asserting "nothing sits above" `100` while §4.4 documents toasts at
+  `500`, and a duplicated `.panel-enter` paragraph in §5.5.
+- **Four stale claims in `docs/design/readme.md`/`SKILL.md`**, all traceable to the design system being
+  regenerated from a pre-adoption `app.css` snapshot: two different backdrop blur radii, "no entrance
+  choreography" against a documented entrance system, "no scale/shrink effect anywhere" against
+  `.btn:active{transform:scale(0.98)}`, and borders named "slate-700" after the recolor to `#4d4d4d`.
+- **The Linux-agent "no .NET SDK" claim survived in `dashboard.md`** and four docs citing it. The real
+  limitation is narrower and different: `dotnet-ci.yml`'s `windows-gui-build-and-test` job builds,
+  tests, and coverage-gates the Gui project, but is deliberately disabled (`if: false`).
+
+### 3.1 One gap inside this plan's own scope
+
+§2.8 rewrote `telemetry.md`'s stale "no .NET SDK" banner but never chased its **inbound references**.
+`grpc-migration.md` cited that banner twice as its authority for the same claim - *"see
+[`telemetry.md`](telemetry.md)'s own banner for why"* - so a reader following the link landed on a
+paragraph saying the opposite. Both passages are now past tense.
+
+**The transferable lesson:** correcting a claim is not finished until the docs that cite it as evidence
+are corrected too. `grep` for the corrected phrase, not just the corrected file.
 
 ## Verification
 
