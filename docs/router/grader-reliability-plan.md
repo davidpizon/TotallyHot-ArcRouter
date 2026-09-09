@@ -98,9 +98,11 @@ Two small additive pieces, mirroring shapes that already exist:
 
 1. **`PendingResponseLengthCache`** — same `Dictionary` + `Queue` + `TimeProvider` TTL/capacity shape as
    `PendingResponseTextCache`, storing an `int` character count instead of the text. Populated at the same
-   call site `PendingResponseTextCache` already is; read via `TryPeek` (Q3's non-removing peek convention)
-   by the new observer at write time. Storing a count instead of extending the text cache's own retention
-   keeps the "response text is ephemeral" guarantee exactly as tight as it is today.
+   call site `PendingResponseTextCache` already is; read via `TryTake` by the new observer at write time -
+   unlike the response text (peeked by up to four independent graders while scoring is still in flight),
+   the length is consumed exactly once, by the single final write, so a removing take is correct here.
+   Storing a count instead of extending the text cache's own retention keeps the "response text is
+   ephemeral" guarantee exactly as tight as it is today.
 2. **Grader backbone on the result.** `GEvalJudgeClient` and `PortfolioGraderClientBase` both already
    resolve a backbone via `JudgeModelSelector` per call (`SqliteJudgeShadowScoreStore`'s existing
    `judge_model` column proves the judge path already threads this through). Q4 needs the same identity
@@ -116,10 +118,11 @@ cheap as `RouterMemoryScoreObserver` and does not depend on transcript capture b
 final `QualityResult`, it writes one row per populated score:
 
 - `AnalysisScore` (when not null) → `grader_key = GraderKeys.Analysis`, `grader_backbone_model = null`.
-- `JudgeScore` (when not null) → `grader_key = GraderKeys.Judge`, backbone from `GraderBackboneModels["judge"]`.
-- Each `GraderScores` entry → same shape, backbone from the matching `GraderBackboneModels` entry.
+- `JudgeScore` (when not null) → `grader_key = GraderKeys.Judge`, backbone looked up from
+  `PendingGraderBackboneCache`'s accumulated map (see the deviation noted in the status block above).
+- Each `GraderScores` entry → same shape, backbone from the matching entry in that same map.
 
-`response_length_chars` is the same value on every row for a given `correlation_id` (one `TryPeek` per
+`response_length_chars` is the same value on every row for a given `correlation_id` (one `TryTake` per
 `ObserveAsync` call, not per grader) — duplicated across rows deliberately, so a query never needs a join
 back to a separate per-request table to compute the verbosity correlation.
 
@@ -130,7 +133,8 @@ flowchart LR
     CRSO --> EMSO[EmbeddingMemoryScoreObserver]
     CRSO --> TSO[TranscriptScoreObserver]
     CRSO --> GSRO["GraderScoreRecordObserver (new)"]
-    GSRO -->|"TryPeek length"| PRLC["PendingResponseLengthCache (new)"]
+    GSRO -->|"TryTake length"| PRLC["PendingResponseLengthCache (new)"]
+    GSRO -->|"TryTake backbones"| PGBC["PendingGraderBackboneCache (new)"]
     GSRO -->|"one row per populated grader"| DB[("grader_scores<br/>(RouterMemoryDatabase)")]
 ```
 

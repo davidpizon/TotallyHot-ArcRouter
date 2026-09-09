@@ -36,9 +36,11 @@ public sealed record GraderReliabilityDimensionReport(
 /// <param name="GraderA">The first grader key, in <see cref="GraderKeys"/> declaration order relative to <paramref name="GraderB"/>.</param>
 /// <param name="GraderB">The second grader key.</param>
 /// <param name="Correlation">
-/// The Spearman correlation in <c>[-1,1]</c>, or <see langword="null"/> when <see cref="SampleSize"/> is
-/// below <see cref="IGraderReliabilityAnalyzer.MinimumSampleSize"/> - suppressed, not zero-filled, because a
-/// correlation from too few paired observations is noise, not signal.
+/// The Spearman correlation in <c>[-1,1]</c>, or <see langword="null"/> when either
+/// <see cref="SampleSize"/> is below <see cref="IGraderReliabilityAnalyzer.MinimumSampleSize"/> (too few
+/// paired observations is noise, not signal) or one grader's scores have zero variance across the paired
+/// requests (a correlation against a constant series is mathematically undefined, not "no correlation") -
+/// suppressed rather than reported as a misleadingly precise 0.0 either way.
 /// </param>
 /// <param name="SampleSize">The number of requests both graders scored.</param>
 public sealed record GraderPairAgreement(string GraderA, string GraderB, double? Correlation, int SampleSize);
@@ -51,8 +53,11 @@ public sealed record GraderPairAgreement(string GraderA, string GraderB, double?
 /// </summary>
 /// <param name="GraderKey">The grader key.</param>
 /// <param name="Correlation">
-/// The Spearman correlation in <c>[-1,1]</c>, or <see langword="null"/> when <see cref="SampleSize"/> is
-/// below <see cref="IGraderReliabilityAnalyzer.MinimumSampleSize"/>.
+/// The Spearman correlation in <c>[-1,1]</c>, or <see langword="null"/> when either
+/// <see cref="SampleSize"/> is below <see cref="IGraderReliabilityAnalyzer.MinimumSampleSize"/> or the
+/// grader's scores (or the response lengths) have zero variance across the sample - see
+/// <see cref="GraderPairAgreement.Correlation"/>'s remarks for why both are suppressed rather than
+/// reported as 0.0.
 /// </param>
 /// <param name="SampleSize">The number of scored rows with a recorded response length.</param>
 public sealed record GraderVerbositySkew(string GraderKey, double? Correlation, int SampleSize);

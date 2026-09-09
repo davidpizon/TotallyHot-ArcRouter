@@ -68,6 +68,24 @@ public class GraderReliabilityAnalyzerTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_OneGraderAlwaysScoresTheSameValue_SuppressesTheCorrelationAsUndefined()
+    {
+        List<GraderScoreRecord> rows = [];
+        for (var i = 0; i < 30; i++)
+        {
+            var correlationId = $"corr-{i}";
+            rows.Add(MakeRow(correlationId, dimension: "bug_fixing", graderKey: "judge", score: 0.5));
+            rows.Add(MakeRow(correlationId, dimension: "bug_fixing", graderKey: "codejudge", score: i / 29.0));
+        }
+
+        var report = await Analyze(rows);
+
+        var pair = Assert.Single(Assert.Single(report.Dimensions).PairAgreements);
+        Assert.Equal(30, actual: pair.SampleSize);
+        Assert.Null(pair.Correlation);
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_GraderNeverScoresTheSameRequestAsAnother_ReportsNoPairAgreement()
     {
         List<GraderScoreRecord> rows =

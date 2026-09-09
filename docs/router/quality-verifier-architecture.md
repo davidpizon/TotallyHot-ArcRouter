@@ -289,8 +289,10 @@ grader switched off scores - each grader is dropped from the normalization the s
 way an absent judge grade already is, so a result with no `GraderScores` entries scores identically to
 before Q3. These starting weights are deliberately modest and not yet reliability-tuned; Q4 measures
 per-dimension, per-grader agreement before any re-weighting
-(docs/research/code-quality-metrics-assessment.md §5.1). Q4 is now scoped in
-[`grader-reliability-plan.md`](grader-reliability-plan.md) — design only, nothing implemented yet.
+(docs/research/code-quality-metrics-assessment.md §5.1). **Q4 has shipped its CLI surface** (persistence,
+capture, the analyzer, `--run-grader-reliability-report`) — the gRPC/Governance-panel surface is a
+deliberately deferred follow-up. Full status:
+[`grader-reliability-plan.md`](grader-reliability-plan.md).
 
 ---
 

@@ -159,9 +159,10 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
 
     /// <summary>
     /// Computes the Spearman rank correlation between two equal-length samples: ranks each sample
-    /// (averaging ranks across ties) and returns the Pearson correlation of the two rank sequences.
+    /// (averaging ranks across ties) and returns the Pearson correlation of the two rank sequences, or
+    /// <see langword="null"/> when one sample has zero variance (see <see cref="PearsonCorrelation"/>).
     /// </summary>
-    private static double SpearmanCorrelation(IReadOnlyList<double> x, IReadOnlyList<double> y)
+    private static double? SpearmanCorrelation(IReadOnlyList<double> x, IReadOnlyList<double> y)
     {
         var ranksX = Rank(x);
         var ranksY = Rank(y);
@@ -193,8 +194,14 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
         return ranks;
     }
 
-    /// <summary>Computes the Pearson correlation coefficient between two equal-length samples.</summary>
-    private static double PearsonCorrelation(IReadOnlyList<double> x, IReadOnlyList<double> y)
+    /// <summary>
+    /// Computes the Pearson correlation coefficient between two equal-length samples, or
+    /// <see langword="null"/> when either sample has zero variance (every value identical). Zero variance
+    /// makes the coefficient a literal 0/0 - mathematically undefined, not "no correlation" - so it is
+    /// suppressed the same way a too-small sample size already is, rather than reported as a misleadingly
+    /// precise 0.0.
+    /// </summary>
+    private static double? PearsonCorrelation(IReadOnlyList<double> x, IReadOnlyList<double> y)
     {
         var n = x.Count;
         var meanX = x.Average();
@@ -212,7 +219,7 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
             varianceY += dy * dy;
         }
 
-        if (varianceX == 0.0 || varianceY == 0.0) return 0.0;
+        if (varianceX == 0.0 || varianceY == 0.0) return null;
         return covariance / Math.Sqrt(varianceX * varianceY);
     }
 }

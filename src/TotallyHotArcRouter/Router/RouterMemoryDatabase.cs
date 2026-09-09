@@ -88,6 +88,9 @@ public sealed class RouterMemoryDatabase
 
                                      CREATE INDEX IF NOT EXISTS ix_grader_scores_dimension_grader
                                          ON grader_scores (dimension, grader_key);
+
+                                     CREATE INDEX IF NOT EXISTS ix_grader_scores_created_at
+                                         ON grader_scores (created_at_utc);
                                      """;
 
     /// <summary>The resolved absolute path of the database file.</summary>
