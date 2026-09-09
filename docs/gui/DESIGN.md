@@ -201,7 +201,7 @@ actually appear in `app.css`.
   click. **These dense per-row action buttons are the one deliberate exception to §4.2's pill/circular
   button geometry** — see §4.2 for why. See §4.3 for the icon standard behind every `Icon` referenced
   in this document.
-- **Inputs** (Live Stream conversation search, form fields) — `background: var(--surface-interactive)`
+- **Inputs** (Sessions conversation search, form fields) — `background: var(--surface-interactive)`
   (`#1f1f1f`), `border: 1px solid var(--border-light)`, `color: var(--text-primary)`; on focus the
   border becomes the accent `var(--accent)` with a green focus ring (150ms `border-color` transition).
   No pill inputs — search/text inputs are square-cornered via the shared input rule, not `.ls-*`.
@@ -209,9 +209,11 @@ actually appear in `app.css`.
   padlock toggle inside its right edge (`.ds-secret-field` / `.ds-secret-toggle*`; hand-authored
   because the compiled blob has no `right-*`/`pr-7` utilities, §5.1). Unlocked it is an ordinary text
   box with a muted open padlock; locked it renders as a password box with a `--color-warning-text`
-  closed padlock; armed for unlock it turns `--color-critical-text`, matching every other destructive
-  control. Full contract, including why unlocking clears the value: [`secret-field.md`](secret-field.md).
-- **Navigation** (5-tab bar: Live Stream / Cost Analytics / Model Distribution / Governance /
+  closed padlock. There are only those two states (`.ds-secret-toggle-unlocked` /
+  `-locked`): unlocking is destructive, so it opens the `UnlockSecretFieldDialog` confirmation rather
+  than arming the control in place. Full contract, including why unlocking clears the value:
+  [`secret-field.md`](secret-field.md).
+- **Navigation** (5-tab bar: Sessions / Cost Analytics / Model Distribution / Governance /
   Console) — the selected tab reads as a folder tab continuous with its panel: `var(--accent)`
   text, a `var(--surface-base)` fill, a `var(--border-button)` border on three sides, `6px 6px 0 0`
   radius, and a bottom edge painted `var(--surface-base)` that hides `.ds-toolbar`'s
@@ -351,7 +353,7 @@ site uses; only the glyph inside changed):
 
 | `Icon` name | Heroicons solid file | Notes |
 |---|---|---|
-| `activity` | `signal` | Live Stream tab |
+| `activity` | `signal` | Sessions tab |
 | `bar-chart` | `chart-bar` | Cost Analytics tab |
 | `trending-up` | `arrow-trending-up` | Model Distribution tab |
 | `shield-check` | `shield-check` | Governance tab |
@@ -404,14 +406,14 @@ a toast is visible regardless of which Governance sub-tab is active.
 - **Spacing scale**: Tailwind's default rem scale as used in `app.css` — `0`, `0.125rem` (0.5),
   `0.25rem` (1), `0.375rem` (1.5), `0.5rem` (2), `0.625rem` (2.5), `0.75rem` (3), `1rem` (4),
   `1.25rem` (5), `1.5rem` (6).
-- **Live Stream split pane** — draggable divider between the conversation list and turn detail
+- **Sessions split pane** — draggable divider between the conversation list and turn detail
   panels (`wwwroot/js/split-pane.js`); left panel defaults to 35% width (`.ls-left{width:35%}`),
   clamped 20–65% while dragging. The divider itself (`.ls-divider`) is 8px wide with a 4px `rounded`
   hit target and a 2px `rounded` grip mark.
 - **Scrollbars**: thin (4px) custom scrollbar, `var(--border-button)` (`#4d4d4d`) thumb on
   `var(--surface-base)` (`#121212`) track, `var(--border-light)` (`#7c7c7c`) on hover.
 - **`<main>`'s padding (`Dashboard.razor`) is the app's single content inset, shared by every tab** —
-  Live Stream, Cost Analytics, Model Distribution, Governance, Console — at the pre-existing
+  Sessions, Cost Analytics, Model Distribution, Governance, Console — at the pre-existing
   `p-3` (`0.75rem` all sides). **Define it in exactly one place** (`<main>` itself) and let every tab
   inherit it; do not give an individual pane its own separate outer margin. This was inflated to a
   percentage-based value at one point specifically to give `PriceSourcesAdmin`'s lifted card room to
@@ -667,7 +669,13 @@ state does **not** qualify; it is still part of the layout and §5.4 applies to 
   |---|---|---|
   | `10` | `.card-lifted` | Was a local claim inside the stack; once pinned it is **app-wide**. Must stay under 50. |
   | `50` | `.z-50` — all four modals | A drag can't start while a modal is open, but a modal opened another way must cover the card. |
-  | `100` | `.ls-tooltip`, `#blazor-error-ui` | Nothing sits above these. |
+  | `100` | `.ls-tooltip`, `#blazor-error-ui` | Floating UI anchored to a trigger. |
+  | `500` | `.ls-toast-host` (`ToastHost.razor`, §4.4) | The top layer. A toast reports a failure the operator must see even while a modal is open, so it deliberately clears the `50` tier. Nothing sits above it. |
+
+  The toast layer is in this inventory because it competes for the same stacking space, **not**
+  because it is a detached element in this section's sense: it is `position: fixed` but never leaves
+  a layout position it has to be measured back into, so the geometry rules above (measure the budget,
+  size growth in pixels, hold the old slot open) do not apply to it. Only the z-index claim does.
 
 - **Hold its old slot open, if it came out of a list.** A detached element leaves the flow, so whatever
   it vacated collapses. `.ds-card-slot` exists for this: it stays in flow and takes an explicit height
@@ -701,11 +709,6 @@ keyframe animates `transform: scale(0.995) → scale(1)`, so while running it **
 It fires only on tab switch, has no `animation-fill-mode`, and is finished ~200ms later, long before
 any drag can start — which is why it is safe today and why it should be left alone.
 
-`.panel-enter` (`Dashboard.razor:102`) is the live example to be careful around: its keyframe animates
-`transform: scale(0.995) → scale(1)`, so while running it **is** a containing block. It fires only on
-tab switch, has no `animation-fill-mode`, and is finished ~200ms later, long before any drag can
-start — which is why it's safe today and why it should be left alone.
-
 ## 6. Elevation & Depth
 
 Elevation is expressed sparingly, but the aspirational spec calls for heavier shadows than the
@@ -717,15 +720,17 @@ value, which remains the only surface that rises above floating UI:
 | --- | --- | --- |
 | Base | `var(--surface-base)` (`#121212`), no shadow | Page background |
 | Surface | `var(--surface-card)` (`#181818`), 1px `var(--border-button)`, no shadow | Cards, header, nav, panels |
-| Hover | Surface + `background-color: var(--surface-elevated-a)` and/or `--shadow-elevated` (`0 8px 8px rgba(0,0,0,0.3)`) | `.card-hover`/`.ds-card:hover` interactive cards |
+| Hover | Surface + `background-color: var(--surface-elevated-a)` (`#252525`) and/or `box-shadow: var(--shadow-elevated)` (`0 8px 8px rgba(0,0,0,0.3)`) | `.card-hover`/`.ds-card:hover` interactive cards |
 | Floating / elevated | Surface + `box-shadow: var(--shadow-lift)` (`0 4px 12px rgba(0,0,0,0.3)`) | Tooltips (`.ls-tooltip`), hover lift on `.btn-primary` |
-| Dialog | `#121212` + `box-shadow: var(--shadow-dialog)` (`0 8px 24px rgba(0,0,0,0.5)`) | Settings modal, Provider dialogs |
-| Dragging | Surface + `box-shadow: 0 12px 28px -12px rgba(0,0,0,.55)` + `.ds-source-border-lifted` accent border-color, plus a ~10px-per-side grow once `.card-pinned` detaches it and it starts following the cursor (§5.5). Not contained — it's out of the clip chain entirely | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
+| Dialog | `var(--surface-card)` (`#181818`, from `.overlay-panel`) + `box-shadow: var(--shadow-dialog)` (`0 8px 24px rgba(0,0,0,0.5)`) | Settings modal, Provider dialogs |
+| Dragging | Surface + `box-shadow: 0 12px 28px -12px rgba(0,0,0,.55)` (no token — declared inline on `.card-lifted`) + `.ds-source-border-lifted` accent border-color, plus a ~10px-per-side grow once `.card-pinned` detaches it and it starts following the cursor (§5.5). Not contained — it's out of the clip chain entirely | The lifted card in `PriceSourcesAdmin`'s drag-to-rank list |
 
 Floating/hover UI uses the lighter 0.3-opacity shadow; modals/dialogs use the heavier 0.5-opacity
 shadow — this two-tier split (rather than one shared value) is the one elevation change adoption
 introduced; new floating UI should pick whichever tier matches its role rather than inventing a third
-opacity. The drag-lift value is reserved for the card physically under the pointer and should not be
+opacity. **Every row above names the CSS token, not just a hex** — the one row that gave a raw value
+instead (`#121212` for the dialog panel) drifted out of step with `.overlay-panel` and §4/§4.1 before
+anyone noticed. The drag-lift value is reserved for the card physically under the pointer and should not be
 reused for static elevation.
 
 The drag-lift shadow's `-12px` spread is load-bearing, not a taste call: sideways reach is

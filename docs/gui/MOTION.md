@@ -75,7 +75,7 @@ Opacity is the only safe channel. This is a hard constraint, not a stylistic pre
 - **The primary axis is vertical.** Every scrollable region — conversation list, turn list, console
   log, payload blocks — scrolls vertically. New content therefore enters on the Y axis, moving a
   short distance *toward* its resting position (`translateY(-4px) → 0` for prepended rows).
-- **The tab bar is explicitly non-directional.** The five tabs (Live Stream / Cost Analytics / Model
+- **The tab bar is explicitly non-directional.** The five tabs (Sessions / Cost Analytics / Model
   Distribution / Governance / Console) are peers, not a sequence — there is no "next" tab, and
   Governance is not spatially to the right of Console in any meaningful sense. Sliding panels
   horizontally would assert an ordering the information architecture does not have. **Tab panels

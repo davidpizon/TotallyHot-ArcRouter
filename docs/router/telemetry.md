@@ -10,7 +10,7 @@
 
 `src/TotallyHotArcRouter/Telemetry/` captures per-request routing telemetry from the live traffic path
 and pushes it to connected clients (currently `TotallyHot.ArcRouter.Gui`) over gRPC, so the dashboard's
-Live Stream and Cost Analytics tabs can show real conversations instead of only `MockData`. See
+Sessions and Cost Analytics tabs can show real conversations instead of only `MockData`. See
 [`../gui/dashboard.md`](../gui/dashboard.md) for how the GUI consumes this, and
 [`../gui/backlog.md`](../gui/backlog.md) for the backlog items this closed out. The transport was
 SignalR until [`grpc-migration.md`](grpc-migration.md) shipped (see "Transport: gRPC" below) - that
@@ -201,7 +201,7 @@ in-memory buffer for parsing after the response has finished forwarding.
 
 ### Request/response text extraction
 
-Powers the Live Stream turn cards' Request/Response sections (`TurnCard.razor`).
+Powers the Sessions turn cards' Request/Response sections (`TurnCard.razor`).
 
 **Request text** (`RequestTextExtractor.ExtractNewestUserMessage`) scans the already-parsed request
 body's `messages` array from the end and returns the text of the most recent `role: "user"` message -
@@ -437,7 +437,7 @@ Razor components already render these defaults gracefully (e.g. `TurnCard.razor`
 zero ROI or cache rate, `ConversationSummary.razor`'s avg-ROI does the same), so no component
 changes were needed to consume live data safely.
 
-`Dashboard.razor` uses `LiveDataStore.Conversations` for the Live Stream tab and the Cost Analytics
+`Dashboard.razor` uses `LiveDataStore.Conversations` for the Sessions tab and the Cost Analytics
 tab's `Conversations` parameter (feeding its token-compounding chart); `CostData`, `AgentRoi`,
 `TokenBuckets`, `ModelShares`, and `Providers` remain `MockData` — those have no telemetry source at
 all yet (no cumulative-savings baseline, no per-agent ROI concept, no token-bucket/model-share

@@ -1,5 +1,10 @@
 # Live Stream Tab UI/UX Revision - Agentic Routing Dashboard
 
+> **Naming note.** This plan predates the tab's rename: what it calls "Live Stream" ships today as the
+> **Sessions** tab (`LiveStream.razor`, `Dashboard.razor`'s `(Tab.Live, "activity", "Sessions")`). The
+> old name is left in place below as written history - see [`dashboard.md`](dashboard.md) for the tab
+> as it stands.
+
 ## Context
 
 The current Live Stream screen displays individual routing decisions with cost-saving metrics. The revised design must support **conversation-level analysis** where each session contains multiple turns (multi-step agent workflows), allowing users to:

@@ -125,9 +125,12 @@ The **Custom Headers** section's value box is a secret field, defaulting to unlo
 carry a mix of public and private header data. See
 [`provider-management.md`](provider-management.md#custom-headers).
 
-The credential rows in the **Credentials** fieldset are *not* secret fields: a stored API key is
-unconditionally write-only and has no readable state to offer. Credential rows past the first are stored
-as custom headers, and the dialog always writes them locked.
+There is no separate Credentials fieldset - authentication is an ordinary custom header, so the
+credential row is a secret field like any other. It carries one exception to the unlocked default: on
+save, the literal header whose name matches the provider's `AuthHeaderName` is stored **locked**
+regardless of its padlock state in the dialog. That is why a freshly added `Authorization` or
+`x-api-key` row shows unlocked while you are typing it, then comes back blank and masked the next time
+the dialog opens - a credential is never left readable back through the management API.
 
 ## Adding a secret field elsewhere
 

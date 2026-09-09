@@ -1,4 +1,4 @@
-A small status tag — used for Governance budget status (OK/WARNING/CRITICAL) and the Live Stream fallback flag.
+A small status tag — used for Governance budget status (OK/WARNING/CRITICAL) and the Sessions fallback flag.
 
 ```jsx
 <Badge tone="warning">WARNING</Badge>

@@ -10,9 +10,10 @@
 > all, and neither has any existing SignalR-era behavior to port (no `GET /governance/model-spend`
 > endpoint, real or proposed-and-wired, and no model-list push ever shipped over the old hub - the GUI
 > still gets its model list from the proxy's separate `GET /v1/models` REST endpoint, unchanged). The
-> `.proto` below reflects this: it omits both. This repo's own environment has no .NET SDK (see
-> [`telemetry.md`](telemetry.md)'s own banner for why), so none of this was build-verified here - but
-> it has since been build-attempted on a real .NET 10 SDK/Visual Studio, which caught one real bug
+> `.proto` below reflects this: it omits both. This design was originally authored in an environment
+> with no .NET SDK, so none of it was build-verified as written (that constraint no longer applies -
+> see [`telemetry.md`](telemetry.md)'s banner). It was subsequently built on a real .NET 10
+> SDK/Visual Studio, which caught one real bug
 > this doc's original design didn't anticipate: **.NET MAUI's `SingleProject` build doesn't reliably
 > run Grpc.Tools' codegen**, so `TotallyHotArcRouter.Gui.csproj` originally compiling the `.proto` directly
 > (as section 4 originally described) failed with `CS0234` and no `protoc` output at all. Fixed by
@@ -501,8 +502,9 @@ that signal isn't wired to anything yet in this sketch).
   (`GrpcServices="Server"`) and `TotallyHotArcRouter.Gui.Telemetry.csproj` (`GrpcServices="Client"`) compile
   the same file independently.
 - **`.NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools' codegen** - discovered only
-  once this was actually built (this repo's own sandbox has no .NET SDK, so this genuinely wasn't
-  caught until a real build - see the status banner's caveat about that). `TotallyHotArcRouter.Gui.csproj`
+  once this was actually built. Review could not have caught it: the design was written in an SDK-less
+  environment (see the status banner), and the failure mode is a codegen target silently not running,
+  which no amount of reading the `.csproj` reveals. `TotallyHotArcRouter.Gui.csproj`
   originally compiled the `.proto` directly, per section 4's original design; that produced a
   `CS0234` ("the type or namespace name 'Telemetry' does not exist in the namespace 'TotallyHotArcRouter'")
   with zero `protoc`/`Grpc`/`Protobuf` output anywhere in the build log - the codegen target simply

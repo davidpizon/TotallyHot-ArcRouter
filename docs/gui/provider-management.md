@@ -126,8 +126,10 @@ A literal value's box is a [**secret field**](secret-field.md): an ordinary read
 padlock inside its right edge, **defaulting to unlocked**. Public configuration is therefore visible and
 directly editable, while a header that happens to carry a credential can be locked per header — at which
 point it masks to dots and the router stops returning its value to the GUI entirely. Unlocking clears
-the value, because a value that was never returned cannot be shown again; the padlock takes two clicks
-to unlock and says so first.
+the value, because a value that was never returned cannot be shown again; clicking the padlock on a
+locked field therefore opens a confirmation dialog (`UnlockSecretFieldDialog`) stating that consequence
+before anything changes, rather than toggling in place. Locking is one click - nothing is lost. See
+[`secret-field.md`](secret-field.md).
 
 Consequently a blank literal box means different things per header: under a locked padlock it preserves
 the stored value, and under an unlocked one it means the value is genuinely empty. Env-var-sourced
@@ -176,7 +178,8 @@ There is no `Management:Token` configuration key — the token is never entered 
 
 ## Manual verification (Windows / MAUI)
 
-The MAUI Gui project is Windows-only and excluded from CI, so the UI is verified manually; all
+The MAUI Gui project is Windows-only and its CI job is currently disabled (see `dashboard.md`'s
+verification note), so the UI is verified manually; all
 extractable logic (the `ProviderAdminClient` and the store/resolver) is covered by CI tests
 (`TotallyHot.ArcRouter.Gui.Admin.Tests`, `ProviderConfigStoreTests`, `ProviderAdminEndpointsTests`).
 
@@ -196,9 +199,10 @@ extractable logic (the `ProviderAdminClient` and the store/resolver) is covered 
 4d. **Custom headers, locked and unlocked.** Add a header with a literal value and save; reopen and
    confirm the value is shown in full (unlocked is the default). Click its padlock, save, reopen: the box
    must now be blank and masked with the `••••••••` placeholder, and `model-routing.json` must carry
-   `"Locked": true` beside the value. Click the padlock again — the first click must only turn it red
-   with a warning tooltip, the second must clear the box — then save and confirm the value is gone from
-   `model-routing.json` rather than silently preserved. Finally confirm an existing `anthropic-version`
+   `"Locked": true` beside the value. Click the padlock again — a confirmation dialog must open naming
+   the consequence; Cancel/Escape/backdrop must leave the value untouched, and Continue must clear the
+   box — then save and confirm the value is gone from `model-routing.json` rather than silently
+   preserved. Finally confirm an existing `anthropic-version`
    header still reads `2023-06-01` and switching a header to *Env var* removes its padlock.
 5. **Refresh from endpoint** on a running provider; confirm a newly-available model appears
    automatically (stopped, greyed out — click Start to activate it), a dialect badge (e.g. `hermes`,
