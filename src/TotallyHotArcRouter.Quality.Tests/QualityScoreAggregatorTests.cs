@@ -32,7 +32,8 @@ public class QualityScoreAggregatorTests
         bool willJudge,
         ManualTimeProvider? clock = null,
         QualityOptions? options = null,
-        IAsyncGraderDispatcher? dispatcher = null)
+        IAsyncGraderDispatcher? dispatcher = null,
+        IPortfolioGraderAvailability? portfolioAvailability = null)
     {
         var opts = options ?? Options_();
         return new QualityScoreAggregator(
@@ -45,6 +46,7 @@ public class QualityScoreAggregatorTests
             asyncGraderDispatcher: dispatcher ?? new StubDispatcher(),
             options: Options.Create(opts),
             logger: NullLogger<QualityScoreAggregator>.Instance,
+            portfolioGraderAvailability: portfolioAvailability,
             timeProvider: clock ?? new ManualTimeProvider(DateTimeOffset.UtcNow));
     }
 
@@ -146,6 +148,82 @@ public class QualityScoreAggregatorTests
 
         Assert.False(await aggregator.CompleteWithJudgeAsync(correlationId: "never-seen", 0.9,
             cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(observer.Observed);
+    }
+
+    // Phase Q3: DeterminePendingGraders unions IJudgeAvailability's answer with
+    // IPortfolioGraderAvailability's, so a result can be held for both the judge and an extra grader at
+    // once - neither writes until the other resolves too.
+    [Fact]
+    public async Task SubmitAsync_JudgeAndPortfolioGraderBothExpected_HoldsForBoth()
+    {
+        var observer = new RecordingObserver();
+        var portfolio = new StubPortfolioAvailability(new HashSet<string> { GraderKeys.CodeJudge });
+        var aggregator = Create(observer: observer, willJudge: true, portfolioAvailability: portfolio);
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(observer.Observed);
+        Assert.Equal(1, actual: aggregator.PendingCount);
+
+        await aggregator.CompleteWithJudgeAsync(correlationId: "corr-1", 0.5,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Empty(observer.Observed); // CodeJudge still pending.
+
+        await aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.CodeJudge, score: 0.8,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(0.5, actual: written.JudgeScore);
+        Assert.Equal(0.8, actual: written.GraderScores[GraderKeys.CodeJudge]);
+        Assert.Equal(0, actual: aggregator.PendingCount);
+    }
+
+    [Fact]
+    public async Task CompleteGraderAsync_PopulatesGraderScoresAndWritesExactlyOnce()
+    {
+        var observer = new RecordingObserver();
+        var portfolio = new StubPortfolioAvailability(new HashSet<string> { GraderKeys.Race });
+        var aggregator = Create(observer: observer, willJudge: false, portfolioAvailability: portfolio);
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Empty(observer.Observed);
+
+        var completed = await aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Race,
+            score: 0.6, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(completed);
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(0.6, actual: written.GraderScores[GraderKeys.Race]);
+        Assert.Equal(0, actual: aggregator.PendingCount);
+    }
+
+    [Fact]
+    public async Task AbandonGraderAsync_StampsThePerGraderReasonAndWritesTheStaticScore()
+    {
+        var observer = new RecordingObserver();
+        var portfolio = new StubPortfolioAvailability(new HashSet<string> { GraderKeys.IceScore });
+        var aggregator = Create(observer: observer, willJudge: false, portfolioAvailability: portfolio);
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var released = await aggregator.AbandonGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.IceScore,
+            reason: "icescore-abstained", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(released);
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(expected: "icescore-abstained", actual: written.GraderDegradedReasons[GraderKeys.IceScore]);
+        Assert.Equal(expected: "icescore-abstained", actual: written.DegradedReason);
+    }
+
+    [Fact]
+    public async Task CompleteGraderAsync_UnknownCorrelationId_WritesNothing()
+    {
+        var observer = new RecordingObserver();
+        var aggregator = Create(observer: observer, willJudge: false);
+
+        Assert.False(await aggregator.CompleteGraderAsync(correlationId: "never-seen", graderKey: GraderKeys.CodeJudge,
+            score: 0.5, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Empty(observer.Observed);
     }
 
@@ -392,6 +470,15 @@ public class QualityScoreAggregatorTests
         public bool WillJudge(QualityResult result)
         {
             return willJudge;
+        }
+    }
+
+    /// <summary>A portfolio-grader-availability stub with a fixed set of keys.</summary>
+    private sealed class StubPortfolioAvailability(IReadOnlySet<string> keys) : IPortfolioGraderAvailability
+    {
+        public IReadOnlySet<string> DetermineGraderKeys(QualityResult result)
+        {
+            return keys;
         }
     }
 

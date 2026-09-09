@@ -4,16 +4,26 @@ namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
 /// Bridges a request's raw response text - already extracted on the hot path by
-/// <see cref="Telemetry.ResponseTextExtractor"/> - to the shadow judge's later-arriving background job,
-/// keyed by the same correlation id <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> uses
-/// (docs/router/geval-shadow-scoring-plan.md §Raw-text preservation). Mirrors
-/// <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/>'s design exactly: TTL-bounded,
-/// capacity-bounded, <see cref="Set"/>/<see cref="TryTake"/>, a <see cref="Dictionary{TKey,TValue}"/> plus
-/// a <see cref="Queue{T}"/> for insertion order, and an injectable <see cref="TimeProvider"/> for
-/// deterministic tests. Nothing is ever written to disk: whether judging succeeds, fails, or the entry
-/// ages out, the text is gone from process memory the moment it is taken or evicted - the router's memory
-/// must not become a transcript store (docs/router/live-feedback-learning-plan.md's standing decision).
+/// <see cref="Telemetry.ResponseTextExtractor"/> - to every later-arriving background grading job (the
+/// G-Eval shadow judge, and Phase Q3's CodeJudge/ICE-Score/RACE portfolio), keyed by the same correlation id
+/// <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> uses (docs/router/geval-shadow-scoring-plan.md
+/// §Raw-text preservation). Mirrors <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/>'s design:
+/// TTL-bounded, capacity-bounded, a <see cref="Dictionary{TKey,TValue}"/> plus a <see cref="Queue{T}"/> for
+/// insertion order, and an injectable <see cref="TimeProvider"/> for deterministic tests. Nothing is ever
+/// written to disk: an entry is gone from process memory once its TTL elapses or it is evicted for capacity
+/// - the router's memory must not become a transcript store (docs/router/live-feedback-learning-plan.md's
+/// standing decision).
 /// </summary>
+/// <remarks>
+/// <b>Phase Q3 changed this from single-take to multi-read.</b> Before Q3, the G-Eval judge was the only
+/// consumer, so <see cref="TryTake"/> removed an entry the instant it was read - "gone the moment it is
+/// taken" was both the privacy commitment and the whole eviction mechanism. With up to four independent
+/// async graders now reading the same cached text for one request, a remove-on-first-read policy would
+/// starve every grader but whichever ran first. <see cref="TryPeek"/> reads without removing; entries are
+/// now bounded only by <see cref="JudgeOptions.CacheTtlSeconds"/> and <see cref="JudgeOptions.CacheCapacity"/>,
+/// the same bounds as before - just enforced by expiry/eviction alone rather than by an explicit take as
+/// well. <see cref="TryTake"/> is kept for callers that still want single-consumer removal.
+/// </remarks>
 public sealed class PendingResponseTextCache
 {
     private readonly int _capacity;
@@ -97,6 +107,32 @@ public sealed class PendingResponseTextCache
             EvictExpiredAndStale();
 
             if (_entries.Remove(key: correlationId, value: out var entry))
+            {
+                text = entry.Text;
+                return true;
+            }
+        }
+
+        text = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Reads the response text recorded under <paramref name="correlationId"/>, if present and not yet
+    /// expired, without removing it - so another concurrently-dispatched grader for the same request can
+    /// still read it too. The entry is removed only by TTL expiry or capacity eviction (both still enforced
+    /// here, via <see cref="EvictExpiredAndStale"/>), never by this call itself.
+    /// </summary>
+    /// <returns><see langword="true"/> if an unexpired entry was found.</returns>
+    public bool TryPeek(string correlationId, out string? text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+
+        lock (_lock)
+        {
+            EvictExpiredAndStale();
+
+            if (_entries.TryGetValue(key: correlationId, value: out var entry))
             {
                 text = entry.Text;
                 return true;

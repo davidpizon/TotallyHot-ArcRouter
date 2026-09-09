@@ -96,6 +96,18 @@ public class QualityJoinSweepServiceTests
         Assert.False(availability.WillJudge(new QualityResult { RequestCorrelationId = "corr-1", SyntaxValid = true }));
     }
 
+    // The library's standalone default for Phase Q3's extra graders: with no host-supplied availability,
+    // nothing is ever held for CodeJudge/ICE-Score/RACE either.
+    [Fact]
+    public void NoPortfolioGraderAvailability_NeverReturnsAnyGraderKey()
+    {
+        var availability = new NoPortfolioGraderAvailability();
+
+        Assert.Empty(availability.DetermineGraderKeys(new QualityResult()));
+        Assert.Empty(availability.DetermineGraderKeys(new QualityResult
+        { RequestCorrelationId = "corr-1", SyntaxValid = true }));
+    }
+
     /// <summary>Counts sweeps and can be told to throw, so the loop's fault isolation is observable.</summary>
     private sealed class CountingAggregator(bool throwOnSweep = false) : IQualityScoreAggregator
     {
@@ -118,6 +130,18 @@ public class QualityJoinSweepServiceTests
         }
 
         public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(false);
+        }
+
+        public Task<bool> AbandonGraderAsync(string correlationId, string graderKey, string reason,
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(false);

@@ -513,6 +513,13 @@ message UpdateRouterSettingsRequest {
   // (docs/router/self-organizing-classification-plan.md Phase T1). Takes effect immediately - no restart -
   // through the same router_settings reload token as the other three fields above.
   bool transcript_capture_enabled = 5;
+
+  // Phase Q3's LLM grader portfolio (docs/research/code-quality-metrics-assessment.md), each an independent
+  // toggle sharing the judge's own backbone (JudgeModelSelector). Takes effect immediately, same as every
+  // field above.
+  bool code_judge_enabled = 6;
+  bool ice_score_enabled = 7;
+  bool race_enabled = 8;
 }
 
 message RouterSettingsResponse {
@@ -531,6 +538,12 @@ message RouterSettingsResponse {
   repeated string eligible_judge_models = 5;
 
   bool transcript_capture_enabled = 6;
+
+  // Phase Q3's LLM grader portfolio, echoed back as the currently effective values - mirrors
+  // UpdateRouterSettingsRequest's fields of the same name.
+  bool code_judge_enabled = 7;
+  bool ice_score_enabled = 8;
+  bool race_enabled = 9;
 }
 
 message ClearTranscriptsRequest {}

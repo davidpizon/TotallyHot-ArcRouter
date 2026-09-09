@@ -44,13 +44,19 @@ public sealed class RouterSettingsAdminException : GrpcAdminException
 /// provider is configured, which is the honest "the judge has nothing to call" state rather than an error.
 /// </param>
 /// <param name="TranscriptCaptureEnabled">Whether the opt-in transcript store currently captures raw prompt/response text.</param>
+/// <param name="CodeJudgeEnabled">Whether Phase Q3's CodeJudge correctness grader is enabled.</param>
+/// <param name="IceScoreEnabled">Whether Phase Q3's ICE-Score usefulness grader is enabled.</param>
+/// <param name="RaceEnabled">Whether Phase Q3's RACE readability/maintainability grader is enabled.</param>
 public sealed record RouterSettingsInfo(
     bool AdaptiveRoutingEnabled,
     int EmbeddingMemoryCapacity,
     bool JudgeEnabled,
     string JudgeModelName,
     IReadOnlyList<string> EligibleJudgeModels,
-    bool TranscriptCaptureEnabled);
+    bool TranscriptCaptureEnabled,
+    bool CodeJudgeEnabled = false,
+    bool IceScoreEnabled = false,
+    bool RaceEnabled = false);
 
 /// <summary>
 /// Client for the proxy's <c>RouterSettingsAdminService</c> - the System Settings window's Adaptive Routing,
@@ -107,6 +113,9 @@ public sealed class RouterSettingsAdminClient
         bool judgeEnabled,
         string judgeModelName,
         bool transcriptCaptureEnabled,
+        bool codeJudgeEnabled = false,
+        bool iceScoreEnabled = false,
+        bool raceEnabled = false,
         CancellationToken cancellationToken = default)
     {
         try
@@ -122,7 +131,10 @@ public sealed class RouterSettingsAdminClient
                         // Nullable annotations are a compile-time contract, not a runtime guarantee across this
                         // admin call's public surface.
                         JudgeModelName = judgeModelName ?? string.Empty,
-                        TranscriptCaptureEnabled = transcriptCaptureEnabled
+                        TranscriptCaptureEnabled = transcriptCaptureEnabled,
+                        CodeJudgeEnabled = codeJudgeEnabled,
+                        IceScoreEnabled = iceScoreEnabled,
+                        RaceEnabled = raceEnabled
                     },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -160,7 +172,10 @@ public sealed class RouterSettingsAdminClient
             JudgeEnabled: response.JudgeEnabled,
             JudgeModelName: response.JudgeModelName,
             EligibleJudgeModels: [.. response.EligibleJudgeModels],
-            TranscriptCaptureEnabled: response.TranscriptCaptureEnabled);
+            TranscriptCaptureEnabled: response.TranscriptCaptureEnabled,
+            CodeJudgeEnabled: response.CodeJudgeEnabled,
+            IceScoreEnabled: response.IceScoreEnabled,
+            RaceEnabled: response.RaceEnabled);
     }
 
     /// <inheritdoc/>

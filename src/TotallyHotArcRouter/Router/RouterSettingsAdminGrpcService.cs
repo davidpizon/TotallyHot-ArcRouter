@@ -8,14 +8,16 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
-/// gRPC service backing the Governance UI's System Settings window's "Adaptive Routing", "Shadow Judge", and
-/// "Transcription Capture" rows (docs/router/self-organizing-classification-plan.md Phase T6;
-/// docs/router/geval-shadow-scoring-plan.md): reads and mutates every
+/// gRPC service backing the Governance UI's System Settings window's "Adaptive Routing", "Shadow Judge",
+/// "Transcription Capture", and Phase Q3's grader-portfolio rows (docs/router/self-organizing-classification-plan.md
+/// Phase T6; docs/router/geval-shadow-scoring-plan.md): reads and mutates every
 /// <see cref="RouterSettingsStore"/>-backed override - <see cref="RoutingOptions.EnableAdaptiveRouting"/>
 /// and <see cref="RoutingOptions.EmbeddingMemoryCapacity"/> on <see cref="RoutingOptions"/>,
 /// <see cref="JudgeOptions.Enabled"/> and <see cref="JudgeOptions.ModelName"/> on <see cref="JudgeOptions"/>,
-/// and <see cref="Transcripts.TranscriptOptions.Enabled"/> on <see cref="Transcripts.TranscriptOptions"/> -
-/// plus <see cref="ClearTranscripts"/>, the Transcription Capture row's "Clear" action. Mapped by
+/// <see cref="Transcripts.TranscriptOptions.Enabled"/> on <see cref="Transcripts.TranscriptOptions"/>, and
+/// <see cref="PortfolioGraderOptions.CodeJudgeEnabled"/>/<see cref="PortfolioGraderOptions.IceScoreEnabled"/>/
+/// <see cref="PortfolioGraderOptions.RaceEnabled"/> on <see cref="PortfolioGraderOptions"/> - plus
+/// <see cref="ClearTranscripts"/>, the Transcription Capture row's "Clear" action. Mapped by
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/> onto the same loopback TLS endpoint as
 /// <c>TelemetryService</c> and the other admin services.
 /// </summary>
@@ -57,6 +59,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     private readonly IOptionsMonitor<JudgeOptions> _judgeOptionsMonitor;
     private readonly ILogger<RouterSettingsAdminGrpcService> _logger;
     private readonly IOptionsMonitor<RoutingOptions> _optionsMonitor;
+    private readonly IOptionsMonitor<PortfolioGraderOptions> _portfolioGraderOptionsMonitor;
     private readonly RouterSettingsReloadToken _reloadToken;
 
     private readonly RouterSettingsStore _store;
@@ -91,6 +94,10 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     /// through <paramref name="optionsMonitor"/> independently) runs on its own schedule instead of being
     /// awaited here.
     /// </param>
+    /// <param name="portfolioGraderOptionsMonitor">
+    /// Reports Phase Q3's CodeJudge/ICE-Score/RACE portfolio's currently effective values, the same way
+    /// <paramref name="judgeOptionsMonitor"/> does for the G-Eval judge.
+    /// </param>
     public RouterSettingsAdminGrpcService(
         RouterSettingsStore store,
         IOptionsMonitor<RoutingOptions> optionsMonitor,
@@ -100,6 +107,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         ILogger<RouterSettingsAdminGrpcService> logger,
         IOptionsMonitor<TranscriptOptions> transcriptOptionsMonitor,
         ITranscriptStore transcriptStore,
+        IOptionsMonitor<PortfolioGraderOptions> portfolioGraderOptionsMonitor,
         EmbeddingMemory? embeddingMemory = null)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -110,6 +118,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(transcriptOptionsMonitor);
         ArgumentNullException.ThrowIfNull(transcriptStore);
+        ArgumentNullException.ThrowIfNull(portfolioGraderOptionsMonitor);
 
         _store = store;
         _optionsMonitor = optionsMonitor;
@@ -119,6 +128,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         _embeddingMemory = embeddingMemory;
         _transcriptOptionsMonitor = transcriptOptionsMonitor;
         _transcriptStore = transcriptStore;
+        _portfolioGraderOptionsMonitor = portfolioGraderOptionsMonitor;
         _logger = logger;
     }
 
@@ -161,16 +171,22 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         _store.SetBool(key: RouterSettingsStore.JudgeEnabledKey, value: request.JudgeEnabled);
         _store.SetString(key: RouterSettingsStore.JudgeModelNameKey, value: judgeModelName);
         _store.SetBool(key: RouterSettingsStore.TranscriptCaptureEnabledKey, value: request.TranscriptCaptureEnabled);
+        _store.SetBool(key: RouterSettingsStore.CodeJudgeEnabledKey, value: request.CodeJudgeEnabled);
+        _store.SetBool(key: RouterSettingsStore.IceScoreEnabledKey, value: request.IceScoreEnabled);
+        _store.SetBool(key: RouterSettingsStore.RaceEnabledKey, value: request.RaceEnabled);
         _reloadToken.Trigger();
 
         _logger.LogInformation(
             message:
-            "Router settings updated: AdaptiveRoutingEnabled={AdaptiveRoutingEnabled} EmbeddingMemoryCapacity={EmbeddingMemoryCapacity} JudgeEnabled={JudgeEnabled} JudgeModelName={JudgeModelName} TranscriptCaptureEnabled={TranscriptCaptureEnabled}",
+            "Router settings updated: AdaptiveRoutingEnabled={AdaptiveRoutingEnabled} EmbeddingMemoryCapacity={EmbeddingMemoryCapacity} JudgeEnabled={JudgeEnabled} JudgeModelName={JudgeModelName} TranscriptCaptureEnabled={TranscriptCaptureEnabled} CodeJudgeEnabled={CodeJudgeEnabled} IceScoreEnabled={IceScoreEnabled} RaceEnabled={RaceEnabled}",
             request.AdaptiveRoutingEnabled,
             request.EmbeddingMemoryCapacity,
             request.JudgeEnabled,
             judgeModelName,
-            request.TranscriptCaptureEnabled);
+            request.TranscriptCaptureEnabled,
+            request.CodeJudgeEnabled,
+            request.IceScoreEnabled,
+            request.RaceEnabled);
 
         // Awaited directly rather than left to EmbeddingMemory's own OnChange subscription, so the
         // re-read below (and thus this response) reflects the trim's completion rather than racing it -
@@ -204,13 +220,18 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         var options = _optionsMonitor.CurrentValue;
         var judgeOptions = _judgeOptionsMonitor.CurrentValue;
 
+        var portfolioGraderOptions = _portfolioGraderOptionsMonitor.CurrentValue;
+
         var response = new Contract.RouterSettingsResponse
         {
             AdaptiveRoutingEnabled = options.EnableAdaptiveRouting,
             EmbeddingMemoryCapacity = options.EmbeddingMemoryCapacity,
             JudgeEnabled = judgeOptions.Enabled,
             JudgeModelName = judgeOptions.ModelName,
-            TranscriptCaptureEnabled = _transcriptOptionsMonitor.CurrentValue.Enabled
+            TranscriptCaptureEnabled = _transcriptOptionsMonitor.CurrentValue.Enabled,
+            CodeJudgeEnabled = portfolioGraderOptions.CodeJudgeEnabled,
+            IceScoreEnabled = portfolioGraderOptions.IceScoreEnabled,
+            RaceEnabled = portfolioGraderOptions.RaceEnabled
         };
 
         // Recomputed on every read rather than cached: provider and model enablement change from the

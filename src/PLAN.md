@@ -161,13 +161,43 @@ flowchart LR
    recovered from a new `PendingPromptCache` mirroring `PendingResponseTextCache` exactly, woven into
    `GEvalJudgeClient`'s prompt as an optional task section. Full design and rationale:
    `quality-verifier-architecture.md` §3.2/§5, `code-quality-metrics-assessment.md` §5.1.
-   **Q3**
-   registers the LLM grader portfolio — CodeJudge (correctness), ICE-Score `usefulness`, RACE
-   readability/maintainability — each behind its own capability probe that abstains rather than fabricates;
-   **Q4** measures per-dimension, per-grader reliability plus verbosity and self-preference skew before any
-   re-weighting; **Q5** replaces `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware estimator,
-   accepted only if `RegretReplayEngine` shows `CumReg` improving. Rationale and per-source verdicts:
-   [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
+   **Q3 shipped**: the LLM grader portfolio — `CodeJudgeGraderClient` (Tong & Zhang's severity-weighted fault
+   taxonomy, computed deterministically from the backbone's per-fault severity classifications rather than
+   trusting it to sum deductions itself), `IceScoreGraderClient` (ICE-Score's `usefulness` aspect only —
+   its `functional correctness` aspect needs reference tests live traffic doesn't have), and
+   `RaceGraderClient` (readability/maintainability, RACE's rubric vocabulary as a single rating) — all three
+   sharing `JudgeModelSelector`'s free-backbone eligibility and a new `PortfolioGraderClientBase`'s HTTP
+   plumbing (single-sample parse only, no logprobs weighting — that is G-Eval-specific). Each grader's
+   capability probe is the same "flag on and a backbone resolves" test `JudgeAvailability` already used,
+   generalized behind a new `IPortfolioGraderAvailability` seam (kept separate from `IJudgeAvailability`
+   rather than replacing it, so the judge's own contract and tests are undisturbed) whose answer the
+   aggregator unions with the judge's. Each of the three is independently live-toggleable from System
+   Settings' new "Grader Portfolio" row, backed by `PortfolioGraderOptions`/
+   `PortfolioGraderSettingsConfigureOptions` and three new `router_settings` keys — mirroring
+   `JudgeOptions.Enabled`'s own computed-default-unless-explicit-override precedence, including defaulting
+   *on* once a free backbone exists (the same "half-strength verifier" reasoning that applies to the judge
+   now applies to a three-grader-richer verifier too). Dispatch fans through a new
+   `PortfolioGraderDispatcher`/`PortfolioGraderDrainService` pair mirroring the judge's own
+   dispatcher/drain-worker shape, and `CompositeAsyncGraderDispatcher` fans `QualityScoreAggregator`'s single
+   `IAsyncGraderDispatcher` seam out to both the judge's dispatcher and the portfolio's, unioning their
+   accepted keys, so registering a second async-grader family needed no change to the aggregator itself
+   beyond what Q1 had already generalized (`IQualityScoreAggregator.CompleteGraderAsync`/`AbandonGraderAsync`,
+   public counterparts of the judge-only `CompleteWithJudgeAsync`/`AbandonJudgeAsync`, added rather than
+   replacing them). **One real architectural change fell out of this**: `PendingResponseTextCache`/
+   `PendingPromptCache` were single-consumer (`TryTake` removed an entry the instant the judge read it) but
+   now serve up to four independent async graders reading the *same* cached text for one request, so both
+   caches gained a non-removing `TryPeek` and every drain worker (the judge's included) switched to it —
+   entries are now bounded by TTL/capacity eviction alone rather than by an explicit take as well, a
+   deliberate, documented loosening of the "gone the moment it's taken" retention guarantee (still
+   in-memory-only, still bounded, just up to `CacheTtlSeconds` longer-lived). Config: `Quality:ScorerVersion`
+   bumped to `2.1`, and `appsettings.json`'s `DimensionWeights` gained a modest, not-yet-reliability-tuned
+   `ExtraWeights` entry per dimension for `codejudge`/`icescore`/`race` — Q4's job is to replace these
+   starting points with measured weights, not to leave them unset. Exit criterion met: the three-grader
+   portfolio registers and scores without touching `QualityScorer` (Q1's keyed-extension design absorbed it
+   entirely). **Q4** measures per-dimension, per-grader reliability plus verbosity and self-preference skew
+   before any re-weighting; **Q5** replaces `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware
+   estimator, accepted only if `RegretReplayEngine` shows `CumReg` improving. Rationale and per-source
+   verdicts: [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
 2. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's
    agreement/calibration analysis runs once G1 has accumulated shadow data; G3 (the judge as scorer of

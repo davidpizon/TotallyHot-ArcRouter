@@ -115,6 +115,40 @@
     }
 </div>
 
+@* Grader Portfolio (Phase Q3): CodeJudge/ICE-Score/RACE, each an independent axis sharing the
+               Shadow Judge's own backbone. Saves instantly like every other toggle above. *@
+<div class="space-y-2">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Grader Portfolio
+    </label>
+    <div class="flex items-center gap-3 flex-wrap">
+        <button @onclick="ToggleCodeJudgeEnabled"
+                disabled="@_routerSettingsSaving"
+                aria-label="Toggle CodeJudge grader"
+                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_codeJudgeEnabled ? "toggle-enabled" : "toggle-disabled")">
+            <span class="w-1.5 h-1.5 rounded-full @(_codeJudgeEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+            CodeJudge
+        </button>
+        <button @onclick="ToggleIceScoreEnabled"
+                disabled="@_routerSettingsSaving"
+                aria-label="Toggle ICE-Score grader"
+                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_iceScoreEnabled ? "toggle-enabled" : "toggle-disabled")">
+            <span class="w-1.5 h-1.5 rounded-full @(_iceScoreEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+            ICE-Score
+        </button>
+        <button @onclick="ToggleRaceEnabled"
+                disabled="@_routerSettingsSaving"
+                aria-label="Toggle RACE grader"
+                class="shrink-0 flex items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold border transition-colors @(_raceEnabled ? "toggle-enabled" : "toggle-disabled")">
+            <span class="w-1.5 h-1.5 rounded-full @(_raceEnabled ? "toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+            RACE
+        </button>
+    </div>
+    <p class="text-xs text-slate-600">
+        Each shares the Shadow Judge's free-model backbone above.
+    </p>
+</div>
+
 @* Transcription Capture (docs/router/self-organizing-classification-plan.md Phase T1). Saves
                instantly like Adaptive Routing/Shadow Judge above. Clear is a separate, immediate action -
                it deletes real data, so it asks for a plain Yes/No confirmation rather than saving anything. *@

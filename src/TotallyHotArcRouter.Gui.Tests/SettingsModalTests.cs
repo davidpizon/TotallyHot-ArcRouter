@@ -477,6 +477,29 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
+    public void Toggling_each_portfolio_grader_saves_immediately()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        {
+            Settings = new RouterSettingsInfo(false, 20_000, false, JudgeModelName: "",
+                EligibleJudgeModels: ["free-a"], true, CodeJudgeEnabled: false, IceScoreEnabled: false,
+                RaceEnabled: false)
+        };
+        using var ctx = NewContext(liveDataStore: out _, settingsStore: out _,
+            routerSettingsStore: out var routerSettingsStore, routerSettingsClient: client);
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("button[aria-label='Toggle CodeJudge grader']").Click();
+        routerSettingsStore.Settings!.CodeJudgeEnabled.Should().BeTrue();
+
+        cut.Find("button[aria-label='Toggle ICE-Score grader']").Click();
+        routerSettingsStore.Settings!.IceScoreEnabled.Should().BeTrue();
+
+        cut.Find("button[aria-label='Toggle RACE grader']").Click();
+        routerSettingsStore.Settings!.RaceEnabled.Should().BeTrue();
+    }
+
+    [Fact]
     public void Leaving_the_sample_size_field_clamps_it_into_bounds()
     {
         using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _);
@@ -700,6 +723,9 @@ public sealed class SettingsModalTests
             bool judgeEnabled,
             string judgeModelName,
             bool transcriptCaptureEnabled,
+            bool codeJudgeEnabled = false,
+            bool iceScoreEnabled = false,
+            bool raceEnabled = false,
             CancellationToken cancellationToken = default)
         {
             if (Failure is not null) return Task.FromException<RouterSettingsInfo>(Failure);
@@ -710,7 +736,10 @@ public sealed class SettingsModalTests
                 JudgeEnabled: judgeEnabled,
                 JudgeModelName: judgeModelName,
                 EligibleJudgeModels: Settings.EligibleJudgeModels,
-                TranscriptCaptureEnabled: transcriptCaptureEnabled);
+                TranscriptCaptureEnabled: transcriptCaptureEnabled,
+                CodeJudgeEnabled: codeJudgeEnabled,
+                IceScoreEnabled: iceScoreEnabled,
+                RaceEnabled: raceEnabled);
             return Task.FromResult(Settings);
         }
 

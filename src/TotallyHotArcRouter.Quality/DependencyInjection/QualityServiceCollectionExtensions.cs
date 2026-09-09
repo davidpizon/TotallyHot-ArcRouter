@@ -66,9 +66,10 @@ public static class QualityServiceCollectionExtensions
         services.TryAddSingleton<IQualityScoreAggregator, QualityScoreAggregator>();
 
         // Safe defaults when the host has not supplied its own: no judge is expected (so every score is
-        // written from static analysis alone), no asynchronous grader is ever dispatched, and scores go
-        // nowhere.
+        // written from static analysis alone), no Q3 portfolio grader is expected either, no asynchronous
+        // grader is ever dispatched, and scores go nowhere.
         services.TryAddSingleton<IJudgeAvailability, NoJudgeAvailability>();
+        services.TryAddSingleton<IPortfolioGraderAvailability, NoPortfolioGraderAvailability>();
         services.TryAddSingleton<IAsyncGraderDispatcher, NoAsyncGraderDispatcher>();
         services.TryAddSingleton<IQualityScoreObserver, NullQualityScoreObserver>();
 
