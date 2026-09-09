@@ -194,10 +194,20 @@ flowchart LR
    `ExtraWeights` entry per dimension for `codejudge`/`icescore`/`race` — Q4's job is to replace these
    starting points with measured weights, not to leave them unset. Exit criterion met: the three-grader
    portfolio registers and scores without touching `QualityScorer` (Q1's keyed-extension design absorbed it
-   entirely). **Q4** measures per-dimension, per-grader reliability plus verbosity and self-preference skew
-   before any re-weighting; **Q5** replaces `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware
-   estimator, accepted only if `RegretReplayEngine` shows `CumReg` improving. Rationale and per-source
-   verdicts: [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
+   entirely). **Q4 shipped, CLI surface only**: new per-request, per-grader persistence (`grader_scores`,
+   generalizing `judge_shadow_scores` to the whole portfolio via `GraderScoreRecordObserver`, unconditional
+   in the observer fan-out) now backs `IGraderReliabilityAnalyzer`'s per-dimension inter-grader agreement
+   (Spearman), verbosity skew, and self-preference skew, re-runnable on demand via
+   `--run-grader-reliability-report` — no weight is read or written by any of it. The
+   `GraderReliabilityAdminService` gRPC surface and Governance panel tab from the design's "Surfacing it"
+   section are **deliberately deferred** as a separable follow-up with no additional measurement value over
+   the CLI (the analyzer has no live-provider dependency either way). Full design, what shipped vs.
+   deferred, and the backbone-capture implementation deviation (a side cache instead of extending
+   `QualityResult`):
+   [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md); **Q5** replaces
+   `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware estimator, accepted only if
+   `RegretReplayEngine` shows `CumReg` improving. Rationale and per-source verdicts:
+   [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
 2. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's
    agreement/calibration analysis runs once G1 has accumulated shadow data; G3 (the judge as scorer of
@@ -272,6 +282,12 @@ solve itself, but N never required them to complete.
 
 ## Settled deferrals (do not re-open without new evidence)
 
+- **Phase Q4's gRPC admin surface and Governance panel tab are deferred** — the CLI flag
+  (`--run-grader-reliability-report`) already exercises `IGraderReliabilityAnalyzer` end-to-end with no
+  live-provider dependency (it is pure SQL plus math over `grader_scores`), so the gRPC/GUI layer would add
+  a proto surface, a GUI client, and a Blazor panel with no additional measurement capability over the CLI.
+  A separable, independently-shippable follow-up, not a gap in Q4's own exit criterion. Rationale:
+  [`../docs/router/grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md)'s status note.
 - **The quality rescan does not write to router memory** — it grades saved transcript rows and stamps
   the score onto the row only. `IQualityScoreObserver`'s contract is that `QualityScoreAggregator` calls it
   exactly once per request, and `RouterMemory` accumulates a running sum and count, so a second writer

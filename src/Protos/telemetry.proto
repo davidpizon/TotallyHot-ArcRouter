@@ -516,10 +516,14 @@ message UpdateRouterSettingsRequest {
 
   // Phase Q3's LLM grader portfolio (docs/research/code-quality-metrics-assessment.md), each an independent
   // toggle sharing the judge's own backbone (JudgeModelSelector). Takes effect immediately, same as every
-  // field above.
-  bool code_judge_enabled = 6;
-  bool ice_score_enabled = 7;
-  bool race_enabled = 8;
+  // field above. `optional` (proto3 field presence) rather than a plain bool deliberately: without
+  // presence tracking, an older client built before these fields existed would send no value for them at
+  // all, and the server would deserialize that as an explicit `false` - silently disabling every portfolio
+  // grader on every save from that client. With presence, an absent field means "leave unchanged" instead,
+  // checked via HasCodeJudgeEnabled/HasIceScoreEnabled/HasRaceEnabled in RouterSettingsAdminGrpcService.
+  optional bool code_judge_enabled = 6;
+  optional bool ice_score_enabled = 7;
+  optional bool race_enabled = 8;
 }
 
 message RouterSettingsResponse {

@@ -57,7 +57,7 @@ public abstract class PortfolioGraderClientBase : IPortfolioGraderClient
     protected abstract string HttpClientName { get; }
 
     /// <inheritdoc/>
-    public async Task<double?> ScoreAsync(PortfolioGraderScoreRequest request,
+    public async Task<PortfolioGraderScoreResult?> ScoreAsync(PortfolioGraderScoreRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -108,7 +108,9 @@ public abstract class PortfolioGraderClientBase : IPortfolioGraderClient
                 $"Portfolio grader '{GraderKey}' backbone '{route.ModelName}' returned a response carrying no choices.");
 
         var score = TryParseScore(choice.Message?.Content);
-        if (score is { } parsedScore) return Math.Clamp(value: parsedScore, 0.0, 1.0);
+        if (score is { } parsedScore)
+            return new PortfolioGraderScoreResult(Score: Math.Clamp(value: parsedScore, 0.0, 1.0),
+                GraderModel: route.ModelName);
 
         throw new InvalidOperationException(
             $"Portfolio grader '{GraderKey}' backbone '{route.ModelName}' returned no parseable score.");

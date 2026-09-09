@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Primitives;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Telemetry;
 

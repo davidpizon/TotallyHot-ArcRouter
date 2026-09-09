@@ -35,6 +35,21 @@ public class PortfolioGraderDrainServiceTests
     }
 
     [Fact]
+    public async Task ProcessAsync_TextPresentAndEnabled_RecordsTheResolvedBackboneModel()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var backboneCache = new PendingGraderBackboneCache(Options.Create(new JudgeOptions()));
+        var client = new FakeClient(GraderKeys.CodeJudge, 0.8, backboneModel: "grader-backbone");
+        var service = CreateService(cache: cache, clients: [client], backboneCache: backboneCache);
+
+        await service.ProcessAsync(job: MakeJob(GraderKeys.CodeJudge), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.True(backboneCache.TryTake(correlationId: "corr-1", backboneByGraderKey: out var recorded));
+        Assert.Equal(expected: "grader-backbone", actual: recorded[GraderKeys.CodeJudge]);
+    }
+
+    [Fact]
     public async Task ProcessAsync_GraderDisabled_AbandonsWithDisabledReason()
     {
         var cache = CreateCache();
@@ -127,12 +142,14 @@ public class PortfolioGraderDrainServiceTests
         PendingResponseTextCache cache,
         IEnumerable<IPortfolioGraderClient> clients,
         IQualityScoreAggregator? aggregator = null,
-        StaticOptionsMonitor<PortfolioGraderOptions>? options = null)
+        StaticOptionsMonitor<PortfolioGraderOptions>? options = null,
+        PendingGraderBackboneCache? backboneCache = null)
     {
         return new PortfolioGraderDrainService(
             queue: new PortfolioGraderQueue(Options.Create(new JudgeOptions())),
             pendingResponseTextCache: cache,
             pendingPromptCache: new PendingPromptCache(Options.Create(new JudgeOptions())),
+            pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
             clients: clients,
             options: options ?? new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions
             { CodeJudgeEnabled = true, IceScoreEnabled = true, RaceEnabled = true }),
@@ -141,17 +158,22 @@ public class PortfolioGraderDrainServiceTests
     }
 
     /// <summary>A controllable <see cref="IPortfolioGraderClient"/> double.</summary>
-    private sealed class FakeClient(string graderKey, double? score = null, Exception? exception = null)
+    private sealed class FakeClient(string graderKey, double? score = null, Exception? exception = null,
+        string backboneModel = "free-model")
         : IPortfolioGraderClient
     {
         public bool WasCalled { get; private set; }
 
         public string GraderKey => graderKey;
 
-        public Task<double?> ScoreAsync(PortfolioGraderScoreRequest request, CancellationToken cancellationToken = default)
+        public Task<PortfolioGraderScoreResult?> ScoreAsync(PortfolioGraderScoreRequest request,
+            CancellationToken cancellationToken = default)
         {
             WasCalled = true;
-            return exception is not null ? Task.FromException<double?>(exception) : Task.FromResult(score);
+            if (exception is not null) return Task.FromException<PortfolioGraderScoreResult?>(exception);
+            return Task.FromResult(score is { } value
+                ? new PortfolioGraderScoreResult(Score: value, GraderModel: backboneModel)
+                : null);
         }
     }
 

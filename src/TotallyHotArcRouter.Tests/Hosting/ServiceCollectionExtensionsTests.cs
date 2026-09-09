@@ -162,7 +162,8 @@ public class ServiceCollectionExtensionsTests
         // full expected membership, not just an absence, is what keeps this test meaningful rather than
         // tautological.
         Assert.Equal(
-            expected: [typeof(RouterMemoryScoreObserver), typeof(EmbeddingMemoryScoreObserver), typeof(TranscriptScoreObserver)],
+            expected: [typeof(RouterMemoryScoreObserver), typeof(EmbeddingMemoryScoreObserver),
+                typeof(TranscriptScoreObserver), typeof(GraderScoreRecordObserver)],
             actual: composite.Observers.Select(o => o.GetType()));
     }
 

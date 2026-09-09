@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
 
 namespace TotallyHot.ArcRouter.Judge;
@@ -25,6 +26,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     private readonly IJudgeClient _judgeClient;
     private readonly ILogger<JudgeShadowScoreDrainService> _logger;
     private readonly IOptionsMonitor<JudgeOptions> _options;
+    private readonly PendingGraderBackboneCache _pendingGraderBackboneCache;
     private readonly PendingPromptCache _pendingPromptCache;
     private readonly PendingResponseTextCache _pendingResponseTextCache;
     private readonly IJudgeShadowScoreQueue _queue;
@@ -38,6 +40,10 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     /// (aged out, or never cached) still lets the job proceed, just without a task section in the judge
     /// prompt.
     /// </param>
+    /// <param name="pendingGraderBackboneCache">
+    /// Records which backbone actually judged this request (docs/router/grader-reliability-plan.md, Phase
+    /// Q4), for <see cref="GraderScoreRecordObserver"/>'s later write.
+    /// </param>
     /// <param name="judgeClient">The judge backbone client.</param>
     /// <param name="store">Where each scored job's row is persisted.</param>
     /// <param name="options">The judge options (live enabled gate, prompt version), read per job rather than captured.</param>
@@ -47,6 +53,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         IJudgeShadowScoreQueue queue,
         PendingResponseTextCache pendingResponseTextCache,
         PendingPromptCache pendingPromptCache,
+        PendingGraderBackboneCache pendingGraderBackboneCache,
         IJudgeClient judgeClient,
         IJudgeShadowScoreStore store,
         IOptionsMonitor<JudgeOptions> options,
@@ -56,6 +63,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(pendingResponseTextCache);
         ArgumentNullException.ThrowIfNull(pendingPromptCache);
+        ArgumentNullException.ThrowIfNull(pendingGraderBackboneCache);
         ArgumentNullException.ThrowIfNull(judgeClient);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
@@ -65,6 +73,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         _queue = queue;
         _pendingResponseTextCache = pendingResponseTextCache;
         _pendingPromptCache = pendingPromptCache;
+        _pendingGraderBackboneCache = pendingGraderBackboneCache;
         _judgeClient = judgeClient;
         _store = store;
         _options = options;
@@ -160,6 +169,12 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                     JudgeLatencyMs: stopwatch.ElapsedMilliseconds,
                     UsedLogprobs: result.UsedLogprobs),
                 cancellationToken: stoppingToken).ConfigureAwait(false);
+
+            // Recorded before the join completes, mirroring the shadow-row-before-join ordering immediately
+            // below: GraderScoreRecordObserver reads this cache when the aggregator's write fires, so the
+            // backbone must already be there by then.
+            _pendingGraderBackboneCache.Set(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
+                backboneModel: result.JudgeModel);
 
             // The shadow row is written first, then the join is completed. Order matters: the row is the
             // audit trail for a score that is about to influence routing, so it must exist before the score

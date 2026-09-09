@@ -38,7 +38,7 @@ public class PortfolioGraderClientTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(score);
-        Assert.Equal(expected, actual: score.Value, 6);
+        Assert.Equal(expected, actual: score.Score, 6);
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class PortfolioGraderClientTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(score);
-        Assert.Equal(expected, actual: score.Value, 6);
+        Assert.Equal(expected, actual: score.Score, 6);
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public class PortfolioGraderClientTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(score);
-        Assert.Equal(expected, actual: score.Value, 6);
+        Assert.Equal(expected, actual: score.Score, 6);
     }
 
     /// <summary>

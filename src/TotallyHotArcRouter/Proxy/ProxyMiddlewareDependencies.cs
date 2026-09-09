@@ -182,6 +182,16 @@ public sealed record ProxyMiddlewareDependencies
     public PendingResponseTextCache? PendingResponseTextCache { get; init; }
 
     /// <summary>
+    /// Optional bridge (docs/router/grader-reliability-plan.md, Phase Q4) between this request's
+    /// already-extracted response length and <see cref="Judge.GraderScoreRecordObserver"/>'s later write.
+    /// Unlike <see cref="PendingResponseTextCache"/>, this holds only a character count - never the
+    /// response text itself - so it is populated unconditionally on successful extraction, not gated on
+    /// any LLM grader being live. Defaults to <see langword="null"/> (no entries recorded), so existing
+    /// callers/tests are unaffected.
+    /// </summary>
+    public PendingResponseLengthCache? PendingResponseLengthCache { get; init; }
+
+    /// <summary>
     /// Optional bridge between this request's newest user message and the judge's later-arriving background
     /// job, mirroring <see cref="PendingResponseTextCache"/>'s role exactly for the prompt half of the pair
     /// instead of the response half. Populated at the same point the response text is, so the judge can
