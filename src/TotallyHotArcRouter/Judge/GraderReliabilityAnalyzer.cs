@@ -66,8 +66,8 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
     /// </summary>
     /// <remarks>
     /// Two defensive steps before pairing, neither of which the write path is expected to trigger today
-    /// (<see cref="IQualityScoreAggregator"/> guarantees exactly one final write per request) but
-    /// both of which would otherwise crash a re-run against once-corrupted or hand-edited data:
+    /// (<see cref="IQualityScoreAggregator"/> guarantees exactly one final write per request) but both of
+    /// which would otherwise crash a re-run against once-corrupted or hand-edited data:
     /// <list type="bullet">
     /// <item>Rows with an empty <see cref="GraderScoreRecord.CorrelationId"/> are excluded from the join -
     /// they cannot be paired across graders anyway (nothing ties one such row to another), and grouping them
@@ -77,9 +77,6 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
     /// key, and a duplicate write (a retry, a manual edit) is data noise to collapse, not a reason to fail
     /// the whole report.</item>
     /// </list>
-    /// The write path is not expected to trigger either case today - the quality-aggregator's join
-    /// guarantees exactly one final write per request - but a re-run against once-corrupted or
-    /// hand-edited data should degrade gracefully rather than throw.
     /// </remarks>
     private List<GraderPairAgreement> ComputePairAgreements(IReadOnlyList<GraderScoreRecord> rows,
         IReadOnlyList<string> graderKeys)
