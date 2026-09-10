@@ -17,7 +17,7 @@ public class TiktokenTokenCounterTests
     {
         var encoding = TiktokenTokenCounter.ResolveEncodingName(new ModelKey(ModelName: model, Provider: provider));
 
-        Assert.Equal(expected: TiktokenTokenCounter.O200kBaseEncoding, actual: encoding);
+        Assert.Equal(expected: TiktokenTokenCounter.O200KBaseEncoding, actual: encoding);
     }
 
     [Theory]
@@ -31,7 +31,7 @@ public class TiktokenTokenCounterTests
         // bias it carries is what CalibratedTokenCounter exists to correct.
         var encoding = TiktokenTokenCounter.ResolveEncodingName(new ModelKey(ModelName: model, Provider: provider));
 
-        Assert.Equal(expected: TiktokenTokenCounter.Cl100kBaseEncoding, actual: encoding);
+        Assert.Equal(expected: TiktokenTokenCounter.Cl100KBaseEncoding, actual: encoding);
     }
 
     [Fact]
@@ -84,10 +84,10 @@ public class TiktokenTokenCounterTests
     {
         var counter = new TiktokenTokenCounter();
         var key = new ModelKey(ModelName: "gpt-4", Provider: "openai");
-        const string Text = "Determinism matters: the ROI chart must not move when nothing changed.";
+        const string text = "Determinism matters: the ROI chart must not move when nothing changed.";
 
-        counter.TryCountPromptTokens(text: Text, key: key, tokens: out var first, source: out _);
-        counter.TryCountPromptTokens(text: Text, key: key, tokens: out var second, source: out _);
+        counter.TryCountPromptTokens(text: text, key: key, tokens: out var first, source: out _);
+        counter.TryCountPromptTokens(text: text, key: key, tokens: out var second, source: out _);
 
         Assert.Equal(expected: first, actual: second);
     }

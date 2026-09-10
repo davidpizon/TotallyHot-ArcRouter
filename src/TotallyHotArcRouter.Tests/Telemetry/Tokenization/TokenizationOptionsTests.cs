@@ -48,7 +48,7 @@ public class TokenizationOptionsTests
     {
         var options = new TokenizationOptions { CycleIntervalMinutes = minutes };
 
-        var exception = Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        var exception = Assert.Throws<OptionsValidationException>(options.EnsureValid);
 
         Assert.Contains(collection: exception.Failures, filter: f => f.Contains(
             value: "CycleIntervalMinutes", comparisonType: StringComparison.Ordinal));
@@ -59,7 +59,7 @@ public class TokenizationOptionsTests
     {
         var options = new TokenizationOptions { MaxSamplesPerCycle = 0 };
 
-        var exception = Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        var exception = Assert.Throws<OptionsValidationException>(options.EnsureValid);
 
         Assert.Contains(collection: exception.Failures, filter: f => f.Contains(
             value: "MaxSamplesPerCycle", comparisonType: StringComparison.Ordinal));
@@ -70,7 +70,7 @@ public class TokenizationOptionsTests
     {
         var options = new TokenizationOptions { MinSamplesForTrust = 0 };
 
-        var exception = Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        var exception = Assert.Throws<OptionsValidationException>(options.EnsureValid);
 
         Assert.Contains(collection: exception.Failures, filter: f => f.Contains(
             value: "MinSamplesForTrust", comparisonType: StringComparison.Ordinal));
@@ -88,7 +88,7 @@ public class TokenizationOptionsTests
         // corrupting every calibrated count rather than failing loudly.
         var options = new TokenizationOptions { SmoothingFactor = smoothing };
 
-        var exception = Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        var exception = Assert.Throws<OptionsValidationException>(options.EnsureValid);
 
         Assert.Contains(collection: exception.Failures, filter: f => f.Contains(
             value: "SmoothingFactor", comparisonType: StringComparison.Ordinal));
@@ -104,7 +104,7 @@ public class TokenizationOptionsTests
             SmoothingFactor = 3d
         };
 
-        var exception = Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
+        var exception = Assert.Throws<OptionsValidationException>(options.EnsureValid);
 
         Assert.Equal(expected: 3, actual: exception.Failures.Count());
     }

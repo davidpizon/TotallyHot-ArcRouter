@@ -31,20 +31,20 @@ namespace TotallyHot.ArcRouter.Telemetry.Tokenization;
 public sealed class TiktokenTokenCounter : ITokenCounter
 {
     /// <summary>The encoding used by the GPT-4o and later OpenAI reasoning families.</summary>
-    internal const string O200kBaseEncoding = "o200k_base";
+    internal const string O200KBaseEncoding = "o200k_base";
 
     /// <summary>The encoding used by GPT-4 and GPT-3.5-turbo, and the fallback proxy for other vendors.</summary>
-    internal const string Cl100kBaseEncoding = "cl100k_base";
+    internal const string Cl100KBaseEncoding = "cl100k_base";
 
     // Substrings that, in a canonicalized model id, indicate an o200k_base family. Checked against the
     // canonical form so every spelling of a model ("gpt-4o-2024-08-06", "openai/gpt-4o") lands the same way.
-    private static readonly string[] O200kMarkers = ["gpt-4o", "gpt-4.1", "gpt-5", "o1", "o3", "o4"];
+    private static readonly string[] O200KMarkers = ["gpt-4o", "gpt-4.1", "gpt-5", "o1", "o3", "o4"];
 
-    private static readonly Lazy<TiktokenTokenizer?> O200k =
-        new(() => TryCreate(O200kBaseEncoding), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<TiktokenTokenizer?> O200K =
+        new(() => TryCreate(O200KBaseEncoding), LazyThreadSafetyMode.ExecutionAndPublication);
 
-    private static readonly Lazy<TiktokenTokenizer?> Cl100k =
-        new(() => TryCreate(Cl100kBaseEncoding), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<TiktokenTokenizer?> Cl100K =
+        new(() => TryCreate(Cl100KBaseEncoding), LazyThreadSafetyMode.ExecutionAndPublication);
 
     /// <inheritdoc/>
     public bool TryCountPromptTokens(string? text, ModelKey key, out int tokens, out TokenCountSource source)
@@ -74,8 +74,8 @@ public sealed class TiktokenTokenCounter : ITokenCounter
     }
 
     /// <summary>
-    /// Chooses the tiktoken encoding name for <paramref name="key"/>: <see cref="O200kBaseEncoding"/> for
-    /// the GPT-4o-and-later OpenAI families, <see cref="Cl100kBaseEncoding"/> for everything else.
+    /// Chooses the tiktoken encoding name for <paramref name="key"/>: <see cref="O200KBaseEncoding"/> for
+    /// the GPT-4o-and-later OpenAI families, <see cref="Cl100KBaseEncoding"/> for everything else.
     /// </summary>
     /// <param name="key">The model and provider being counted for.</param>
     /// <returns>The encoding name, or <see langword="null"/> when the model id is unusable.</returns>
@@ -92,11 +92,11 @@ public sealed class TiktokenTokenCounter : ITokenCounter
             .Canonicalize(modelId: key.ModelName, provider: string.IsNullOrWhiteSpace(key.Provider) ? null : key.Provider)
             .ToLowerInvariant();
 
-        foreach (var marker in O200kMarkers)
+        foreach (var marker in O200KMarkers)
             if (canonical.Contains(value: marker, comparisonType: StringComparison.Ordinal))
-                return O200kBaseEncoding;
+                return O200KBaseEncoding;
 
-        return Cl100kBaseEncoding;
+        return Cl100KBaseEncoding;
     }
 
     /// <summary>Resolves the cached tokenizer instance for a model, or <see langword="null"/> when none applies.</summary>
@@ -106,8 +106,8 @@ public sealed class TiktokenTokenCounter : ITokenCounter
     {
         return ResolveEncodingName(key) switch
         {
-            O200kBaseEncoding => O200k.Value,
-            Cl100kBaseEncoding => Cl100k.Value,
+            O200KBaseEncoding => O200K.Value,
+            Cl100KBaseEncoding => Cl100K.Value,
             _ => null
         };
     }

@@ -5,7 +5,6 @@ using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Telemetry.Tokenization;
-using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;

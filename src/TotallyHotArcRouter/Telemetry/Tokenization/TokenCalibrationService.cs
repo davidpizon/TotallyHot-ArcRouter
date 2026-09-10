@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Telemetry.Tokenization;

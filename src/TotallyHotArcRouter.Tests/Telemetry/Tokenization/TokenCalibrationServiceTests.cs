@@ -109,9 +109,11 @@ public class TokenCalibrationServiceTests
         using var temp = new TempDatabase();
         temp.Database.EnsureCreated();
         var handler = new CountingHandler(500);
-        var rows = Enumerable.Range(start: 0, count: 20)
-            .Select(i => Row(model: "claude-opus-5", prompt: $"prompt number {i}"))
-            .ToList();
+        IReadOnlyList<SessionTranscript> rows =
+        [
+            .. Enumerable.Range(start: 0, count: 20)
+                .Select(i => Row(model: "claude-opus-5", prompt: $"prompt number {i}"))
+        ];
 
         var service = Build(temp: temp, store: BuildStore(temp), countClient: BuildClient(handler), rows: rows,
             maxSamplesPerCycle: 3);
@@ -275,13 +277,6 @@ public class TokenCalibrationServiceTests
 
         /// <inheritdoc/>
         public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        /// <inheritdoc/>
-        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(
-            IReadOnlyCollection<long> memoryEntryIds, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }
