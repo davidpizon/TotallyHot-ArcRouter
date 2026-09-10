@@ -122,10 +122,10 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
         // see that first column and stop, leaving inserts/reads broken forever; the per-column check must
         // add exactly the three still-missing columns.
         WritePreBaselineCostDatabase();
-        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
         {
             connection.Open();
-            using var alter = connection.CreateCommand();
+            await using var alter = connection.CreateCommand();
             alter.CommandText = "ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_input_tokens REAL NULL;";
             alter.ExecuteNonQuery();
         }
