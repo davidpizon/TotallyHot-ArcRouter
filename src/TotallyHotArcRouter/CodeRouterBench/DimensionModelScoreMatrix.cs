@@ -1,4 +1,3 @@
-using System.Linq;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;

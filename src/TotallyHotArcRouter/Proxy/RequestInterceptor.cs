@@ -681,7 +681,8 @@ public class RequestInterceptor
                         Propensity: decision.Propensity,
                         DimBestModel: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision,
                             voterName: VoterNames.DimBest),
-                        UntrainedBaselineModel: _untrainedBaselineSelector?.Select(dimension: liveDimension,
+                        UntrainedBaselineModel: _untrainedBaselineSelector?.Select(
+                            dimension: classification.Dimension,
                             candidateModelIds: candidates.Select(c => c.ModelName)));
                 }
                 else
@@ -703,7 +704,7 @@ public class RequestInterceptor
         return fallbackRoute is null
             ? null
             : new AgenticRouteResult(Route: fallbackRoute, false, 1.0,
-                UntrainedBaselineModel: _untrainedBaselineSelector?.Select(dimension: liveDimension,
+                UntrainedBaselineModel: _untrainedBaselineSelector?.Select(dimension: classification.Dimension,
                     candidateModelIds: eligibleRoutes.Select(r => r.ModelName)));
     }
 

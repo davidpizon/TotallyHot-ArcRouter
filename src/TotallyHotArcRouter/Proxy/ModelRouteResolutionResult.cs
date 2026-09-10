@@ -308,8 +308,8 @@ public sealed record ModelRouteResolutionResult
     /// <param name="classification">See <see cref="Classification"/>.</param>
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
-    /// <param name="untrainedBaselineModel">See <see cref="UntrainedBaselineModel"/>.</param>
     /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
+    /// <param name="untrainedBaselineModel">See <see cref="UntrainedBaselineModel"/>.</param>
     /// <exception cref="ArgumentException">
     /// <paramref name="candidates"/> is empty - a success must have at least the primary
     /// route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.
@@ -325,8 +325,8 @@ public sealed record ModelRouteResolutionResult
         RequestClassification? classification = null,
         string? taskText = null,
         string? dimBestModel = null,
-        string? untrainedBaselineModel = null,
-        string? explicitCircuitTripBlockMessage = null)
+        string? explicitCircuitTripBlockMessage = null,
+        string? untrainedBaselineModel = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)

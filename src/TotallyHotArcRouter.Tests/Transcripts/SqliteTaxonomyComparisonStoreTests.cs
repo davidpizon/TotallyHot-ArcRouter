@@ -87,6 +87,34 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task EnsureCreated_AddsTheBaselineCostColumnsToAPreCorrectionDatabase()
+    {
+        // A database exactly as the build right before the frozen-baseline correction left it: the
+        // taxonomy_comparisons table has the regret columns but none of the four baseline-cost-ingredient
+        // columns. EnsureCreated's additive migration must add them, after which writes and reads work
+        // against the old file.
+        WritePreBaselineCostDatabase();
+
+        var store = CreateStore();
+        await store.UpsertAsync(
+            record: MakeRecord(1) with
+            {
+                BaselineInputTokens = 120.5,
+                BaselineOutputTokens = 340.25,
+                BaselineInputPricePerMillion = 1.5m,
+                BaselineOutputPricePerMillion = 7.5m
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await store.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(120.5, actual: row.BaselineInputTokens);
+        Assert.Equal(340.25, actual: row.BaselineOutputTokens);
+        Assert.Equal(1.5m, actual: row.BaselineInputPricePerMillion);
+        Assert.Equal(7.5m, actual: row.BaselineOutputPricePerMillion);
+    }
+
+    [Fact]
     public async Task Upsert_RoundTripsTheBaselineCostIngredients()
     {
         var store = CreateStore();
@@ -313,6 +341,64 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
                                   actual_cost_usd           REAL    NULL,
                                   baseline_estimated_cost_usd REAL  NULL,
                                   estimated_net_savings_usd REAL    NULL
+                              );
+                              """;
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Writes a database file with the exact table shapes the build right before the frozen-baseline
+    /// correction (docs/router/routing-roi-regret-plan.md) created: <c>taxonomy_comparisons</c> has the
+    /// regret columns but none of the four baseline-cost-ingredient columns, so the migration test
+    /// exercises the real "old file, new code" path rather than a synthetic one.
+    /// </summary>
+    private void WritePreBaselineCostDatabase()
+    {
+        using var connection = new SqliteConnection($"Data Source={_dbPath}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              CREATE TABLE request_transcripts (
+                                  id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                                  correlation_id           TEXT    NOT NULL,
+                                  created_at_utc           TEXT    NOT NULL,
+                                  requested_model          TEXT    NOT NULL,
+                                  routed_model             TEXT    NOT NULL,
+                                  dimension                TEXT    NULL,
+                                  difficulty               TEXT    NULL,
+                                  language                 TEXT    NULL,
+                                  is_utility               INTEGER NOT NULL,
+                                  prompt_text              TEXT    NULL,
+                                  response_text            TEXT    NULL,
+                                  score                    REAL    NULL,
+                                  cost                     REAL    NULL,
+                                  is_exploratory           INTEGER NOT NULL,
+                                  propensity               REAL    NOT NULL,
+                                  input_tokens             INTEGER NULL,
+                                  output_tokens            INTEGER NULL,
+                                  memory_entry_id          INTEGER NULL,
+                                  dim_best_model           TEXT    NULL,
+                                  untrained_baseline_model TEXT    NULL
+                              );
+
+                              CREATE TABLE taxonomy_comparisons (
+                                  transcript_id             INTEGER PRIMARY KEY,
+                                  compared_at_utc           TEXT    NOT NULL,
+                                  session_id                TEXT    NOT NULL,
+                                  observed_score            REAL    NOT NULL,
+                                  dimension_predicted_score REAL    NULL,
+                                  cluster_predicted_score   REAL    NULL,
+                                  dimension_abs_error       REAL    NULL,
+                                  cluster_abs_error         REAL    NULL,
+                                  is_clustered              INTEGER NOT NULL,
+                                  is_exploratory            INTEGER NOT NULL,
+                                  routed_model              TEXT    NOT NULL,
+                                  baseline_model            TEXT    NULL,
+                                  actual_cost_usd           REAL    NULL,
+                                  baseline_estimated_cost_usd REAL  NULL,
+                                  estimated_net_savings_usd REAL    NULL,
+                                  baseline_predicted_score  REAL    NULL,
+                                  estimated_regret          REAL    NULL
                               );
                               """;
         command.ExecuteNonQuery();

@@ -31,7 +31,8 @@ public sealed class UntrainedBaselineSelector
     private readonly ILogger<UntrainedBaselineSelector> _logger;
     private readonly Lock _matrixLock = new();
     private DimensionModelScoreMatrix? _matrix;
-    private bool _matrixLoadAttempted;
+    private bool _matrixLoaded;
+    private DateTime _matrixStamp;
 
     /// <summary>Initializes a new instance of the <see cref="UntrainedBaselineSelector"/> class.</summary>
     /// <param name="database">The synced CodeRouterBench corpus.</param>
@@ -65,18 +66,23 @@ public sealed class UntrainedBaselineSelector
     }
 
     /// <summary>
-    /// Loads the probing-split matrix on first use, caching the outcome (including a failed load) for the
-    /// life of this instance - the corpus does not change without an explicit sync, which restarts the
-    /// process.
+    /// Loads the probing-split matrix, caching it keyed on the corpus file's last write time -
+    /// the same freshness check <see cref="Transcripts.TaxonomyComparisonService.LoadPriorMatrix"/> uses -
+    /// so an explicit benchmark sync while the process is running is picked up on the next request
+    /// instead of being masked forever by a cached miss or a stale matrix.
     /// </summary>
     private DimensionModelScoreMatrix? EnsureMatrixLoaded()
     {
         lock (_matrixLock)
         {
-            if (_matrixLoadAttempted) return _matrix;
+            var stamp = File.Exists(_database.DatabasePath)
+                ? File.GetLastWriteTimeUtc(_database.DatabasePath)
+                : DateTime.MinValue;
+            if (_matrixLoaded && stamp == _matrixStamp) return _matrix;
 
-            _matrixLoadAttempted = true;
-            _matrix = LoadMatrix();
+            _matrixStamp = stamp;
+            _matrixLoaded = true;
+            _matrix = LoadMatrix(stamp);
             return _matrix;
         }
     }
@@ -86,9 +92,13 @@ public sealed class UntrainedBaselineSelector
     /// when the corpus is not synced on this machine or cannot be read - the same degrade
     /// <see cref="Orchestrator.DimBestVoter.LoadPriorMatrix"/> performs.
     /// </summary>
-    private DimensionModelScoreMatrix? LoadMatrix()
+    /// <param name="stamp">
+    /// The corpus file's last write time as observed by <see cref="EnsureMatrixLoaded"/>, or
+    /// <see cref="DateTime.MinValue"/> when the corpus does not exist.
+    /// </param>
+    private DimensionModelScoreMatrix? LoadMatrix(DateTime stamp)
     {
-        if (!File.Exists(_database.DatabasePath))
+        if (stamp == DateTime.MinValue)
         {
             _logger.LogInformation(
                 message:

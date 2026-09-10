@@ -35,6 +35,14 @@ the delivered summary.
 
 ## Context
 
+> **Superseded by the frozen-baseline correction above.** This section, the decisions table below, and
+> §4's algorithm describe the counterfactual as it stood *before* 2026-09-09: the live `dim_best` judge
+> and `DimensionLedger`'s blend. That counterfactual no longer exists in the shipped code - it was
+> replaced by `UntrainedBaselineSelector` reading the frozen CodeRouterBench prior directly, with the
+> leave-one-out branch dropped entirely (a table-only prediction never absorbed the observation being
+> compared). Kept below for the historical record of *why* the drain/pause/caching/regret-formula work
+> was originally shaped this way; do not use it as the current counterfactual spec.
+
 The Routing ROI pipeline (Phase T4, `TaxonomyComparisonService`) compares each scored transcript's
 actual outcome against the counterfactual "what if the `dim_best` judge alone had picked the model."
 Today it records only the **expense** half (`ActualCostUsd` vs `BaselineEstimatedCostUsd` →
@@ -93,6 +101,11 @@ against the frozen taxonomy, which is precisely what readiness means here. Updat
 - `SqliteTaxonomyComparisonStore.UpsertAsync` / `LoadSinceAsync` / `Read`: carry the two columns.
 
 ### 4. `TaxonomyComparisonService` — regret, drain, pause, caching
+
+> **Regret in `Compare`/`EstimateCounterfactual` below is pre-correction.** `baselinePredictedScore` is
+> now read from the frozen prior matrix (`PredictBaselineScore`), never from `DimensionLedger`, and the
+> leave-one-out branch does not apply - see the frozen-baseline correction note at the top of this
+> document. The drain/pause/caching/regret-formula mechanics that follow are otherwise still accurate.
 
 **Cadence.** `CheckInterval`: 5 minutes → 1 minute. Still a `BackgroundService` on its own loop.
 

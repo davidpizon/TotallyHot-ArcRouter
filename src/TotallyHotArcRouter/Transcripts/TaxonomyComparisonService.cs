@@ -586,12 +586,14 @@ public sealed class TaxonomyComparisonService : BackgroundService
             : _priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider));
         if (price is null) return (null, null, null);
 
+        var roundedInputTokens = Math.Round(average.InputTokens);
+        var roundedOutputTokens = Math.Round(average.OutputTokens);
         var baselineCost = price.EstimateCost(
-            promptTokens: (int)Math.Round(average.InputTokens),
-            completionTokens: (int)Math.Round(average.OutputTokens));
+            promptTokens: (int)roundedInputTokens,
+            completionTokens: (int)roundedOutputTokens);
         var ingredients = new BaselineCostIngredients(
-            InputTokens: average.InputTokens,
-            OutputTokens: average.OutputTokens,
+            InputTokens: roundedInputTokens,
+            OutputTokens: roundedOutputTokens,
             InputPricePerMillion: price.InputPerMillionTokens,
             OutputPricePerMillion: price.OutputPerMillionTokens);
         return (baselineCost, baselineCost - actualCost, ingredients);

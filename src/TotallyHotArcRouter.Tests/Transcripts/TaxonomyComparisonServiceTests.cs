@@ -494,10 +494,10 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         if (priorRows is { Count: > 0 })
         {
             benchmarkDatabase.EnsureCreated();
-            using var connection = benchmarkDatabase.OpenConnection();
+            await using var connection = benchmarkDatabase.OpenConnection();
             foreach (var row in priorRows)
             {
-                using var command = connection.CreateCommand();
+                await using var command = connection.CreateCommand();
                 command.CommandText = """
                                       INSERT INTO benchmark_id_results (task_id, split, source_split, dimension, model, score)
                                       VALUES ($taskId, 'probing', 'probing', $dimension, $model, $score);
