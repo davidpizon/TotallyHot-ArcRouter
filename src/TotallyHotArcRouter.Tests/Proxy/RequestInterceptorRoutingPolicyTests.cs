@@ -1,10 +1,13 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Text;
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -132,6 +135,74 @@ public class RequestInterceptorRoutingPolicyTests
         Assert.Null(policy.LastContext);
     }
 
+    // Regression coverage for the request-path wiring of UntrainedBaselineModel (docs/router/routing-roi-
+    // regret-plan.md's frozen-baseline correction): a wiring bug here (e.g. the live-prefixed dimension key
+    // reaching the selector instead of the bare one) would leave every persisted transcript's baseline null
+    // while UntrainedBaselineSelectorTests and TaxonomyComparisonServiceTests - which construct the
+    // selector/service directly rather than going through ResolveModelRouteAsync - stay green.
+    [Fact]
+    public async Task ResolveModelRouteAsync_WithRoutingPolicy_PropagatesUntrainedBaselineModel()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertProbingRow(database: temp.Database, taskId: "task-1", dimension: RouterDimension.CodeGeneration,
+            model: "gpt-5.4", 0.2);
+        InsertProbingRow(database: temp.Database, taskId: "task-2", dimension: RouterDimension.CodeGeneration,
+            model: "kimi-k2.5", 0.8);
+        var selector = new UntrainedBaselineSelector(database: temp.Database,
+            logger: NullLogger<UntrainedBaselineSelector>.Instance);
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("gpt-5.4", "openai", "gpt-5.4"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5"));
+        var policy = new FakeRoutingPolicy("kimi-k2.5");
+        var interceptor = new RequestInterceptor(
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            routingPolicy: policy,
+            untrainedBaselineSelector: selector);
+        var context = CreateContextWithBody("""{"model":"agentic-router"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        // The policy's own pick ("kimi-k2.5") happens to coincide with the untrained baseline's pick here;
+        // the two fields are independently sourced (see ModelRouteResolutionResult's remarks), asserted
+        // separately so a regression that collapsed one into the other would still be caught.
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.UntrainedBaselineModel);
+    }
+
+    // Mirrors ResolveModelRouteAsync_WithRoutingPolicy_PropagatesUntrainedBaselineModel for the
+    // memory-ranking fallback branch (RequestInterceptor.ResolveAgenticRouteAsync's tail, reached when no
+    // policy is configured), which threads UntrainedBaselineModel through a separate call site.
+    [Fact]
+    public async Task ResolveModelRouteAsync_MemoryFallback_PropagatesUntrainedBaselineModel()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertProbingRow(database: temp.Database, taskId: "task-1", dimension: RouterDimension.CodeGeneration,
+            model: "gpt-5.4", 0.9);
+        InsertProbingRow(database: temp.Database, taskId: "task-2", dimension: RouterDimension.CodeGeneration,
+            model: "kimi-k2.5", 0.1);
+        var selector = new UntrainedBaselineSelector(database: temp.Database,
+            logger: NullLogger<UntrainedBaselineSelector>.Instance);
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("gpt-5.4", "openai", "gpt-5.4"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5"));
+        var interceptor = new RequestInterceptor(
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            untrainedBaselineSelector: selector);
+        var context = CreateContextWithBody("""{"model":"agentic-router"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected: "gpt-5.4", actual: result.UntrainedBaselineModel);
+    }
+
     [Fact]
     public async Task ResolveModelRouteAsync_PolicyOverridesSignalsOverload_ReceivesExtractedTaskText()
     {
@@ -152,6 +223,22 @@ public class RequestInterceptorRoutingPolicyTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(policy.LastSignals);
         Assert.Equal(expected: "please refactor this function", actual: policy.LastSignals!.TaskText);
+    }
+
+    private static void InsertProbingRow(BenchmarkDatabase database, string taskId, string dimension, string model,
+        double score)
+    {
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              INSERT INTO benchmark_id_results (task_id, split, source_split, dimension, model, score)
+                              VALUES ($taskId, 'probing', 'probing', $dimension, $model, $score);
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$taskId", value: taskId);
+        command.Parameters.AddWithValue(parameterName: "$dimension", value: dimension);
+        command.Parameters.AddWithValue(parameterName: "$model", value: model);
+        command.Parameters.AddWithValue(parameterName: "$score", value: score);
+        command.ExecuteNonQuery();
     }
 
     private static DefaultHttpContext CreateContextWithBody(string body)

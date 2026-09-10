@@ -649,14 +649,15 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <summary>
     /// Reads the probing-split prior, returning <see langword="null"/> when the CodeRouterBench corpus is
     /// not synced on this machine - the same degrade <see cref="DimBestVoter"/> already performs. Cached
-    /// across cycles keyed on the corpus file's last write time: the prior is offline data that only
-    /// changes on an explicit benchmark sync, so re-reading the whole split every cycle bought nothing.
+    /// across cycles keyed on <see cref="BenchmarkDatabase.GetContentStamp"/> - the same freshness check
+    /// <see cref="Router.UntrainedBaselineSelector"/> uses, so a sync is observed by both at the same
+    /// moment - the prior is offline data that only changes on an explicit benchmark sync, so re-reading
+    /// the whole split every cycle bought nothing.
     /// </summary>
     /// <returns>The probing matrix, or <see langword="null"/> when unavailable.</returns>
     private DimensionModelScoreMatrix? LoadPriorMatrix()
     {
-        var databasePath = _benchmarkDatabase.DatabasePath;
-        var stamp = File.Exists(databasePath) ? File.GetLastWriteTimeUtc(databasePath) : DateTime.MinValue;
+        var stamp = _benchmarkDatabase.GetContentStamp();
         if (_priorLoaded && stamp == _cachedPriorStamp) return _cachedPriorMatrix;
 
         _cachedPriorStamp = stamp;

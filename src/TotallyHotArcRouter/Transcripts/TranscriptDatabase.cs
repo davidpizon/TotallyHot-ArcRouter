@@ -350,29 +350,45 @@ public sealed class TranscriptDatabase
     /// </summary>
     /// <param name="connection">An open connection to the transcript database.</param>
     /// <remarks>
-    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. All four
-    /// columns are nullable with no backfill, for the same reason as
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>, but unlike
+    /// it - and unlike <see cref="MigrateTaxonomyComparisonRegretColumns"/>'s single-column sentinel over
+    /// its own two columns - each of the four columns here is checked and added independently inside one
+    /// transaction. A process that stopped after adding only some of the four columns (a crash between
+    /// sequential <c>ALTER TABLE</c> statements) would otherwise leave a one-column sentinel check
+    /// permanently satisfied while the remaining columns stayed absent, breaking every later insert/read.
+    /// All four columns are nullable with no backfill, for the same reason as
     /// <see cref="MigrateTaxonomyComparisonRegretColumns"/>: a row computed before these columns existed
     /// never recorded its ingredients, and recomputing them later would price against catalog rates and
     /// token averages that have since drifted - exactly the contamination this correction exists to
-    /// eliminate. The four columns travel together, so one existence check covers all of them.
+    /// eliminate.
     /// </remarks>
     private static void MigrateTaxonomyComparisonBaselineCostColumns(SqliteConnection connection)
     {
-        using (var pragma = connection.CreateCommand())
+        string[] columns =
+        [
+            "baseline_input_tokens", "baseline_output_tokens", "baseline_input_price_per_million",
+            "baseline_output_price_per_million"
+        ];
+
+        using var transaction = connection.BeginTransaction();
+        foreach (var column in columns)
         {
-            pragma.CommandText =
-                "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = 'baseline_input_tokens';";
-            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.Transaction = transaction;
+                pragma.CommandText =
+                    "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = $column;";
+                pragma.Parameters.AddWithValue(parameterName: "$column", value: column);
+                if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0)
+                    continue;
+            }
+
+            using var alter = connection.CreateCommand();
+            alter.Transaction = transaction;
+            alter.CommandText = $"ALTER TABLE taxonomy_comparisons ADD COLUMN {column} REAL NULL;";
+            alter.ExecuteNonQuery();
         }
 
-        using var alter = connection.CreateCommand();
-        alter.CommandText = """
-                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_input_tokens REAL NULL;
-                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_output_tokens REAL NULL;
-                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_input_price_per_million REAL NULL;
-                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_output_price_per_million REAL NULL;
-                            """;
-        alter.ExecuteNonQuery();
+        transaction.Commit();
     }
 }

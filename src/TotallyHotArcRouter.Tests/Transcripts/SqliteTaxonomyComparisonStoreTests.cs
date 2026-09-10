@@ -115,6 +115,41 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task EnsureCreated_FinishesAPartiallyAppliedBaselineCostMigration()
+    {
+        // Simulates a process that crashed after the first of the four sequential ALTER TABLE statements:
+        // baseline_input_tokens exists, but the other three do not. A single-column sentinel check would
+        // see that first column and stop, leaving inserts/reads broken forever; the per-column check must
+        // add exactly the three still-missing columns.
+        WritePreBaselineCostDatabase();
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_input_tokens REAL NULL;";
+            alter.ExecuteNonQuery();
+        }
+
+        var store = CreateStore();
+        await store.UpsertAsync(
+            record: MakeRecord(1) with
+            {
+                BaselineInputTokens = 120.5,
+                BaselineOutputTokens = 340.25,
+                BaselineInputPricePerMillion = 1.5m,
+                BaselineOutputPricePerMillion = 7.5m
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await store.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(120.5, actual: row.BaselineInputTokens);
+        Assert.Equal(340.25, actual: row.BaselineOutputTokens);
+        Assert.Equal(1.5m, actual: row.BaselineInputPricePerMillion);
+        Assert.Equal(7.5m, actual: row.BaselineOutputPricePerMillion);
+    }
+
+    [Fact]
     public async Task Upsert_RoundTripsTheBaselineCostIngredients()
     {
         var store = CreateStore();

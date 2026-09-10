@@ -66,7 +66,7 @@ public sealed class UntrainedBaselineSelector
     }
 
     /// <summary>
-    /// Loads the probing-split matrix, caching it keyed on the corpus file's last write time -
+    /// Loads the probing-split matrix, caching it keyed on <see cref="BenchmarkDatabase.GetContentStamp"/> -
     /// the same freshness check <see cref="Transcripts.TaxonomyComparisonService.LoadPriorMatrix"/> uses -
     /// so an explicit benchmark sync while the process is running is picked up on the next request
     /// instead of being masked forever by a cached miss or a stale matrix.
@@ -75,9 +75,7 @@ public sealed class UntrainedBaselineSelector
     {
         lock (_matrixLock)
         {
-            var stamp = File.Exists(_database.DatabasePath)
-                ? File.GetLastWriteTimeUtc(_database.DatabasePath)
-                : DateTime.MinValue;
+            var stamp = _database.GetContentStamp();
             if (_matrixLoaded && stamp == _matrixStamp) return _matrix;
 
             _matrixStamp = stamp;
