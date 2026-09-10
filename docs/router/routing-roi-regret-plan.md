@@ -32,6 +32,26 @@ the delivered summary.
 > `RegretReplayEngine`), which needed exactly this separation to exist - see
 > [`regret-evaluation-harness-plan.md`](regret-evaluation-harness-plan.md)'s Q5 status note for why Q5
 > itself remains blocked on real traffic even after this fix.
+>
+> **Frozen-baseline correction, second pass (2026-09-09).** The first pass above still let selection and
+> comparison read the prior at two different moments: `UntrainedBaselineSelector.Select` picked the
+> baseline model at request time, but `TaxonomyComparisonService.PredictBaselineScore` re-derived its
+> score later, from whatever prior `LoadPriorMatrix` had loaded when that comparison cycle ran. An
+> explicit CodeRouterBench sync landing in between could swap in a different snapshot, silently pairing
+> the request-time model with a comparison-time score - and first-write-wins would then make that
+> mismatched pair permanent. Two independent fixes close this: (1) `BenchmarkDatabase.GetContentStamp()`
+> now also considers the `-wal` sidecar's mtime (`EnsureCreated` runs this database in WAL mode, so a
+> sync's commits can land only in the WAL file and never touch the main file's mtime), and both
+> `UntrainedBaselineSelector` and `TaxonomyComparisonService.LoadPriorMatrix` key their cache off it, so a
+> sync is observed by both at the same moment; (2) `UntrainedBaselineSelector.SelectWithScore` now returns
+> the picked model's score from the exact same prior snapshot it was picked from, and
+> `RequestInterceptor` persists it into a new `request_transcripts.untrained_baseline_predicted_score`
+> column via `ModelRouteResolutionResult`/`RequestTelemetryPublisher`. `PredictBaselineScore` prefers this
+> persisted score over re-deriving one, falling back to `priorMatrix.AverageScore` only for a row written
+> before the column existed. The two fixes are complementary, not redundant: (1) narrows the window in
+> which selection and comparison could observe different snapshots at all; (2) makes the eventual answer
+> correct even within that window, since the model and its score now always travel together from the same
+> selection call.
 
 ## Context
 

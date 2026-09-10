@@ -480,22 +480,27 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
     /// <summary>
     /// Predicts the score the untrained baseline's pick would likely have achieved on this request - the
-    /// quality half of the regret estimate, read directly from the frozen CodeRouterBench probing-split
-    /// prior.
+    /// quality half of the regret estimate.
     /// </summary>
     /// <param name="transcript">The row being compared.</param>
     /// <param name="dimension">The row's captured heuristic dimension (bare, matching the prior's own keying).</param>
     /// <param name="priorMatrix">The frozen prior, or <see langword="null"/> when the corpus is unsynced.</param>
     /// <returns>
-    /// The predicted baseline score, or <see langword="null"/> when the baseline abstained, the corpus is
-    /// unsynced, or the prior has no cell for it.
+    /// The predicted baseline score, or <see langword="null"/> when the baseline abstained, no score is
+    /// available, or the corpus is unsynced.
     /// </returns>
     /// <remarks>
-    /// No leave-one-out correction, unlike the taxonomy-accuracy comparison above: this prediction never
-    /// reads live memory, so it never absorbed the observation being compared in the first place - there is
-    /// nothing to hold out. Reading live memory here (even leave-one-out) would reintroduce exactly the
-    /// contamination the frozen-baseline correction exists to eliminate, since the baseline would then move
-    /// as the router learns.
+    /// Prefers <see cref="TranscriptRecord.UntrainedBaselinePredictedScore"/> - the score
+    /// <c>RequestInterceptor</c> read from the exact prior snapshot the baseline was selected from, at
+    /// request time - over re-deriving it from <paramref name="priorMatrix"/> here. The two can disagree:
+    /// an explicit CodeRouterBench sync between selection and this comparison cycle swaps in a different
+    /// snapshot, and a fresh <see cref="DimensionModelScoreMatrix.AverageScore"/> lookup against it could
+    /// then pair the model with a score it was never actually picked on - exactly the inconsistent
+    /// counterfactual first-write-wins would make permanent
+    /// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction, second pass). Falling back to
+    /// <paramref name="priorMatrix"/> only covers a row captured before that column existed; no leave-one-out
+    /// correction either way, since this prediction never reads live memory and so never absorbed the
+    /// observation being compared - there is nothing to hold out.
     /// </remarks>
     private static double? PredictBaselineScore(
         TranscriptRecord transcript,
@@ -504,7 +509,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
     {
         if (transcript.UntrainedBaselineModel is not { } baselineModel) return null;
 
-        return priorMatrix?.AverageScore(dimension: dimension, model: baselineModel);
+        return transcript.UntrainedBaselinePredictedScore
+               ?? priorMatrix?.AverageScore(dimension: dimension, model: baselineModel);
     }
 
     /// <summary>

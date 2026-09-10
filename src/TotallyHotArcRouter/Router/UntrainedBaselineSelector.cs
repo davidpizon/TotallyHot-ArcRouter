@@ -56,13 +56,51 @@ public sealed class UntrainedBaselineSelector
     /// The untrained baseline's pick, or <see langword="null"/> when the corpus is unsynced/unreadable or
     /// has no average for any candidate.
     /// </returns>
+    /// <remarks>
+    /// A thin convenience over <see cref="SelectWithScore"/> for a caller that only needs the model, not
+    /// its predicted score.
+    /// </remarks>
     public string? Select(string dimension, IEnumerable<string> candidateModelIds)
+    {
+        return SelectWithScore(dimension: dimension, candidateModelIds: candidateModelIds)?.Model;
+    }
+
+    /// <summary>
+    /// Picks the untrained baseline's model for <paramref name="dimension"/> from
+    /// <paramref name="candidateModelIds"/>, together with the average score it was picked on.
+    /// </summary>
+    /// <param name="dimension">The request's dimension.</param>
+    /// <param name="candidateModelIds">The models actually available for this request.</param>
+    /// <returns>
+    /// The pick and its score, both read from the exact same prior snapshot loaded by this call - see
+    /// <see cref="EnsureMatrixLoaded"/> - or <see langword="null"/> when the corpus is unsynced/unreadable
+    /// or has no average for any candidate.
+    /// </returns>
+    /// <remarks>
+    /// The caller (<see cref="Proxy.RequestInterceptor"/>) persists this score alongside the model at
+    /// request time precisely so a later, separately-loaded prior snapshot - e.g. after an intervening
+    /// benchmark sync - can never pair the two from different snapshots
+    /// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction, second pass).
+    /// </remarks>
+    public UntrainedBaselineSelection? SelectWithScore(string dimension, IEnumerable<string> candidateModelIds)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dimension);
         ArgumentNullException.ThrowIfNull(candidateModelIds);
 
         var matrix = EnsureMatrixLoaded();
-        return matrix?.SelectBest(dimension: dimension, candidateModelIds: candidateModelIds);
+        if (matrix is null) return null;
+
+        var model = matrix.SelectBest(dimension: dimension, candidateModelIds: candidateModelIds);
+        if (model is null) return null;
+
+        var score = matrix.AverageScore(dimension: dimension, model: model);
+        // matrix is a specific, already-built DimensionModelScoreMatrix instance - immutable once
+        // returned from EnsureMatrixLoaded, which builds a new instance rather than mutating the old one
+        // on reload - so SelectBest and AverageScore above are guaranteed to see the same snapshot even
+        // if a concurrent call causes _matrix to be replaced in between. SelectBest only ever returns a
+        // model it just confirmed has an average in that snapshot, so score is never null here in practice
+        // - the null check is defensive, not a documented degrade path.
+        return score is null ? null : new UntrainedBaselineSelection(Model: model, Score: score.Value);
     }
 
     /// <summary>
@@ -118,3 +156,11 @@ public sealed class UntrainedBaselineSelector
         }
     }
 }
+
+/// <summary>
+/// <see cref="UntrainedBaselineSelector.SelectWithScore"/>'s result: the untrained baseline's pick and the
+/// average score it was picked on, both read from the same prior snapshot.
+/// </summary>
+/// <param name="Model">The picked model id, as supplied in the candidate list.</param>
+/// <param name="Score">The picked model's average score in the prior snapshot it was picked from.</param>
+public sealed record UntrainedBaselineSelection(string Model, double Score);

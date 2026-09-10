@@ -149,7 +149,8 @@ internal sealed class RequestTelemetryPublisher
         RequestClassification? classification = null,
         string? taskText = null,
         string? dimBestModel = null,
-        string? untrainedBaselineModel = null)
+        string? untrainedBaselineModel = null,
+        double? untrainedBaselinePredictedScore = null)
     {
         var (requestBody, sessionId, turnNumber, isSynthesized) =
             ResolveSessionAndTurn(context: context, rewrittenRequestBody: rewrittenRequestBody);
@@ -217,7 +218,8 @@ internal sealed class RequestTelemetryPublisher
             promptTokens: promptTokens,
             completionTokens: completionTokens,
             dimBestModel: dimBestModel,
-            untrainedBaselineModel: untrainedBaselineModel).ConfigureAwait(false);
+            untrainedBaselineModel: untrainedBaselineModel,
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore).ConfigureAwait(false);
 
         await PublishTelemetryEventAsync(
             sessionId: sessionId,
@@ -694,7 +696,8 @@ internal sealed class RequestTelemetryPublisher
         int? promptTokens,
         int? completionTokens,
         string? dimBestModel,
-        string? untrainedBaselineModel)
+        string? untrainedBaselineModel,
+        double? untrainedBaselinePredictedScore)
     {
         // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
         // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to
@@ -727,7 +730,8 @@ internal sealed class RequestTelemetryPublisher
                         OutputTokens: completionTokens,
                         null,
                         DimBestModel: dimBestModel,
-                        UntrainedBaselineModel: untrainedBaselineModel),
+                        UntrainedBaselineModel: untrainedBaselineModel,
+                        UntrainedBaselinePredictedScore: untrainedBaselinePredictedScore),
                     cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

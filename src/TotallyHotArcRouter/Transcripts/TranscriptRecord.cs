@@ -53,6 +53,15 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <see langword="null"/> when no selector was available, the corpus had no average for any candidate, or
 /// the row predates this column.
 /// </param>
+/// <param name="UntrainedBaselinePredictedScore">
+/// <see cref="UntrainedBaselineModel"/>'s average score, read from the exact same frozen-prior snapshot
+/// the selector picked it from, at request time. Captured here - rather than re-derived later from
+/// whatever prior snapshot happens to be loaded when the comparison cycle runs - because an explicit
+/// benchmark sync between those two moments can otherwise pair a model chosen from prior A with a score
+/// read from prior B, an inconsistent counterfactual that first-write-wins would then make permanent
+/// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction). <see langword="null"/> whenever
+/// <see cref="UntrainedBaselineModel"/> is, or the row predates this column.
+/// </param>
 public sealed record TranscriptRecord(
     long Id,
     string CorrelationId,
@@ -73,4 +82,5 @@ public sealed record TranscriptRecord(
     int? OutputTokens,
     long? MemoryEntryId,
     string? DimBestModel = null,
-    string? UntrainedBaselineModel = null);
+    string? UntrainedBaselineModel = null,
+    double? UntrainedBaselinePredictedScore = null);

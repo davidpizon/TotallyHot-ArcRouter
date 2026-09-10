@@ -432,6 +432,7 @@ public class RequestInterceptor
         var propensity = 1.0;
         string? dimBestModel = null;
         string? untrainedBaselineModel = null;
+        double? untrainedBaselinePredictedScore = null;
 
         if (isAutoSelectRequest)
         {
@@ -455,6 +456,7 @@ public class RequestInterceptor
             propensity = autoSelected.Propensity;
             dimBestModel = autoSelected.DimBestModel;
             untrainedBaselineModel = autoSelected.UntrainedBaselineModel;
+            untrainedBaselinePredictedScore = autoSelected.UntrainedBaselinePredictedScore;
             substitutionReason = RoutingSubstitutionReason.AutoSelect;
         }
         else if (!_modelRouteResolver.TryResolve(modelName: modelName, route: out route) ||
@@ -489,6 +491,7 @@ public class RequestInterceptor
                 propensity = agenticRoute.Propensity;
                 dimBestModel = agenticRoute.DimBestModel;
                 untrainedBaselineModel = agenticRoute.UntrainedBaselineModel;
+                untrainedBaselinePredictedScore = agenticRoute.UntrainedBaselinePredictedScore;
                 substitutionReason = wasResolved
                     ? RoutingSubstitutionReason.ModelStopped
                     : RoutingSubstitutionReason.UnresolvedName;
@@ -540,8 +543,9 @@ public class RequestInterceptor
             classification: classification,
             taskText: taskText,
             dimBestModel: dimBestModel,
+            explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage,
             untrainedBaselineModel: untrainedBaselineModel,
-            explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore);
     }
 
     /// <summary>
@@ -675,15 +679,17 @@ public class RequestInterceptor
                         SanitizeForLog(selectedName!),
                         SanitizeForLog(liveDimension),
                         classification.IsUtility);
+                    var policyPathBaseline = _untrainedBaselineSelector?.SelectWithScore(
+                        dimension: classification.Dimension,
+                        candidateModelIds: candidates.Select(c => c.ModelName));
                     return new AgenticRouteResult(
                         Route: selectedRoute,
                         IsExploratory: decision!.IsExploratory,
                         Propensity: decision.Propensity,
                         DimBestModel: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision,
                             voterName: VoterNames.DimBest),
-                        UntrainedBaselineModel: _untrainedBaselineSelector?.Select(
-                            dimension: classification.Dimension,
-                            candidateModelIds: candidates.Select(c => c.ModelName)));
+                        UntrainedBaselineModel: policyPathBaseline?.Model,
+                        UntrainedBaselinePredictedScore: policyPathBaseline?.Score);
                 }
                 else
                 {
@@ -701,11 +707,13 @@ public class RequestInterceptor
         var eligibleRoutes = _routingCandidateBuilder
             .RankEligibleModels(excludeModelNames: [], liveDimension: liveDimension);
         var fallbackRoute = eligibleRoutes.FirstOrDefault();
-        return fallbackRoute is null
-            ? null
-            : new AgenticRouteResult(Route: fallbackRoute, false, 1.0,
-                UntrainedBaselineModel: _untrainedBaselineSelector?.Select(dimension: classification.Dimension,
-                    candidateModelIds: eligibleRoutes.Select(r => r.ModelName)));
+        if (fallbackRoute is null) return null;
+
+        var fallbackPathBaseline = _untrainedBaselineSelector?.SelectWithScore(dimension: classification.Dimension,
+            candidateModelIds: eligibleRoutes.Select(r => r.ModelName));
+        return new AgenticRouteResult(Route: fallbackRoute, false, 1.0,
+            UntrainedBaselineModel: fallbackPathBaseline?.Model,
+            UntrainedBaselinePredictedScore: fallbackPathBaseline?.Score);
     }
 
     /// <summary>
@@ -775,10 +783,18 @@ public class RequestInterceptor
     /// <see langword="null"/> when no selector was supplied or the corpus has no average for any
     /// candidate.
     /// </param>
+    /// <param name="UntrainedBaselinePredictedScore">
+    /// <see cref="UntrainedBaselineModel"/>'s average score, read from the exact same prior snapshot it
+    /// was picked from (<see cref="Router.UntrainedBaselineSelector.SelectWithScore"/>) - captured here
+    /// rather than re-derived later so a benchmark sync between now and the comparison cycle can't pair
+    /// the model with a score from a different snapshot. <see langword="null"/> whenever
+    /// <see cref="UntrainedBaselineModel"/> is.
+    /// </param>
     private sealed record AgenticRouteResult(
         ResolvedModelRoute Route,
         bool IsExploratory,
         double Propensity,
         string? DimBestModel = null,
-        string? UntrainedBaselineModel = null);
+        string? UntrainedBaselineModel = null,
+        double? UntrainedBaselinePredictedScore = null);
 }

@@ -183,6 +183,42 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task InsertAsync_RoundTripsTheUntrainedBaselinePredictedScore()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+
+        var id = await store.InsertAsync(
+            record: MakeRecord("corr-untrained-score") with
+            {
+                UntrainedBaselineModel = "glm-5", UntrainedBaselinePredictedScore = 0.62
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(0.62, actual: row!.UntrainedBaselinePredictedScore);
+    }
+
+    [Fact]
+    public async Task InsertAsync_NoUntrainedBaselinePredictedScore_StaysNull()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+
+        var id = await store.InsertAsync(record: MakeRecord("corr-untrained-no-score"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Null(row!.UntrainedBaselinePredictedScore);
+    }
+
+    [Fact]
     public async Task EnsureCreated_DatabasePredatingTheFrozenBaselineCorrection_GainsTheUntrainedBaselineColumn()
     {
         // A transcript database written before docs/router/routing-roi-regret-plan.md's frozen-baseline
@@ -217,6 +253,49 @@ public class SqliteTranscriptStoreTests : IDisposable
         var row = await store.GetTranscriptAsync(id: id!.Value,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(expected: "glm-5", actual: row!.UntrainedBaselineModel);
+    }
+
+    [Fact]
+    public async Task EnsureCreated_DatabasePredatingTheSecondFrozenBaselineCorrection_GainsThePredictedScoreColumn()
+    {
+        // A transcript database written after untrained_baseline_model shipped but before its predicted
+        // score was added alongside it (docs/router/routing-roi-regret-plan.md's frozen-baseline
+        // correction, second pass) - without the explicit PRAGMA migration every read would fail with "no
+        // such column".
+        Directory.CreateDirectory(_tempDirectory);
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            await using var create = connection.CreateCommand();
+            create.CommandText = """
+                                 CREATE TABLE request_transcripts (
+                                     id INTEGER PRIMARY KEY AUTOINCREMENT, correlation_id TEXT NOT NULL,
+                                     created_at_utc TEXT NOT NULL, requested_model TEXT NOT NULL, routed_model TEXT NOT NULL,
+                                     dimension TEXT NULL, difficulty TEXT NULL, language TEXT NULL, is_utility INTEGER NOT NULL,
+                                     prompt_text TEXT NULL, response_text TEXT NULL, score REAL NULL, cost REAL NULL,
+                                     is_exploratory INTEGER NOT NULL, propensity REAL NOT NULL, input_tokens INTEGER NULL,
+                                     output_tokens INTEGER NULL, memory_entry_id INTEGER NULL, dim_best_model TEXT NULL,
+                                     untrained_baseline_model TEXT NULL);
+                                 """;
+            create.ExecuteNonQuery();
+        }
+
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+
+        var id = await store.InsertAsync(
+            record: MakeRecord("corr-untrained-score-migrated") with
+            {
+                UntrainedBaselineModel = "glm-5", UntrainedBaselinePredictedScore = 0.62
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(expected: "glm-5", actual: row!.UntrainedBaselineModel);
+        Assert.Equal(0.62, actual: row.UntrainedBaselinePredictedScore);
     }
 
     [Fact]

@@ -73,7 +73,8 @@ internal sealed class BedrockInvocationHandler
         RequestClassification? classification = null,
         string? taskText = null,
         string? dimBestModel = null,
-        string? untrainedBaselineModel = null)
+        string? untrainedBaselineModel = null,
+        double? untrainedBaselinePredictedScore = null)
     {
         var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
         var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
@@ -245,7 +246,8 @@ internal sealed class BedrockInvocationHandler
                 cancellationToken: context.RequestAborted, tailScanner: tailScanner, taskEmbedding: taskEmbedding,
                 routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory,
                 propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
-                untrainedBaselineModel: untrainedBaselineModel);
+                untrainedBaselineModel: untrainedBaselineModel,
+                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore);
         }
         catch (Exception ex)
         {

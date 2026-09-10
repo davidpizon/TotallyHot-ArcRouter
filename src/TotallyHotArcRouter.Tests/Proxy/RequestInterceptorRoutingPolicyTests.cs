@@ -171,6 +171,9 @@ public class RequestInterceptorRoutingPolicyTests
         // separately so a regression that collapsed one into the other would still be caught.
         Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
         Assert.Equal(expected: "kimi-k2.5", actual: result.UntrainedBaselineModel);
+        // The predicted score travels with the model, read from the same prior snapshot it was picked
+        // from - docs/router/routing-roi-regret-plan.md's frozen-baseline correction, second pass.
+        Assert.Equal(0.8, actual: result.UntrainedBaselinePredictedScore);
     }
 
     // Mirrors ResolveModelRouteAsync_WithRoutingPolicy_PropagatesUntrainedBaselineModel for the
@@ -201,6 +204,7 @@ public class RequestInterceptorRoutingPolicyTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(expected: "gpt-5.4", actual: result.UntrainedBaselineModel);
+        Assert.Equal(0.9, actual: result.UntrainedBaselinePredictedScore);
     }
 
     [Fact]

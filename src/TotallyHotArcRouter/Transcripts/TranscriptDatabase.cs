@@ -132,6 +132,7 @@ public sealed class TranscriptDatabase
         MigrateSessionIdColumn(connection);
         MigrateUntrainedBaselineModelColumn(connection);
         MigrateTaxonomyComparisonBaselineCostColumns(connection);
+        MigrateUntrainedBaselinePredictedScoreColumn(connection);
     }
 
     /// <summary>
@@ -390,5 +391,36 @@ public sealed class TranscriptDatabase
         }
 
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// Adds the <c>untrained_baseline_predicted_score</c> column to <c>request_transcripts</c> if it is
+    /// missing - the untrained baseline's average score, captured at request time from the exact prior
+    /// snapshot <c>untrained_baseline_model</c> was selected from (docs/router/routing-roi-regret-plan.md's
+    /// frozen-baseline correction, second pass). Without this column, <c>TaxonomyComparisonService</c> has
+    /// to re-derive the score later from whatever prior is loaded when its comparison cycle runs, which an
+    /// intervening benchmark sync can turn into a different snapshot than the one the model was actually
+    /// selected from.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. Nullable
+    /// with no backfill: a row captured before this column existed (or whose baseline selector abstained)
+    /// never recorded a request-time score, and re-deriving one now would reopen exactly the
+    /// prior-snapshot mismatch this column exists to close.
+    /// </remarks>
+    private static void MigrateUntrainedBaselinePredictedScoreColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'untrained_baseline_predicted_score';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText =
+            "ALTER TABLE request_transcripts ADD COLUMN untrained_baseline_predicted_score REAL NULL;";
+        alter.ExecuteNonQuery();
     }
 }

@@ -90,6 +90,7 @@ public sealed record ModelRouteResolutionResult
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
     /// <param name="untrainedBaselineModel">See <see cref="UntrainedBaselineModel"/>.</param>
+    /// <param name="untrainedBaselinePredictedScore">See <see cref="UntrainedBaselinePredictedScore"/>.</param>
     /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
     private ModelRouteResolutionResult(
         bool isSuccess,
@@ -105,6 +106,7 @@ public sealed record ModelRouteResolutionResult
         string? taskText,
         string? dimBestModel,
         string? untrainedBaselineModel,
+        double? untrainedBaselinePredictedScore,
         string? explicitCircuitTripBlockMessage)
     {
         IsSuccess = isSuccess;
@@ -120,6 +122,7 @@ public sealed record ModelRouteResolutionResult
         TaskText = taskText;
         DimBestModel = dimBestModel;
         UntrainedBaselineModel = untrainedBaselineModel;
+        UntrainedBaselinePredictedScore = untrainedBaselinePredictedScore;
         ExplicitCircuitTripBlockMessage = explicitCircuitTripBlockMessage;
     }
 
@@ -275,6 +278,22 @@ public sealed record ModelRouteResolutionResult
     public string? UntrainedBaselineModel { get; }
 
     /// <summary>
+    /// Gets <see cref="UntrainedBaselineModel"/>'s average score, read from the exact same frozen-prior
+    /// snapshot it was picked from (<see cref="Router.UntrainedBaselineSelector.SelectWithScore"/>).
+    /// <see langword="null"/> whenever <see cref="UntrainedBaselineModel"/> is.
+    /// </summary>
+    /// <remarks>
+    /// Captured here, alongside the model, for the same reason as <see cref="UntrainedBaselineModel"/>
+    /// itself - but unlike that field, this one *is* time-sensitive: an explicit CodeRouterBench sync
+    /// between this request and the later ROI comparison cycle can swap in a different prior snapshot, and
+    /// re-deriving the score from that new snapshot could pair it with a model chosen from the old one.
+    /// Persisting both together at selection time is what <c>TaxonomyComparisonService</c> reads instead
+    /// of recomputing, closing that mismatch window (docs/router/routing-roi-regret-plan.md's
+    /// frozen-baseline correction, second pass).
+    /// </remarks>
+    public double? UntrainedBaselinePredictedScore { get; }
+
+    /// <summary>
     /// Gets the client-facing message to synthesize directly - skipping any network call and any
     /// substitution - when this request explicitly named a model or provider whose circuit (target-level
     /// or provider-wide) is already open (docs/adr/0005-protect-explicit-provider-selections-from-silent-
@@ -310,6 +329,7 @@ public sealed record ModelRouteResolutionResult
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
     /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
     /// <param name="untrainedBaselineModel">See <see cref="UntrainedBaselineModel"/>.</param>
+    /// <param name="untrainedBaselinePredictedScore">See <see cref="UntrainedBaselinePredictedScore"/>.</param>
     /// <exception cref="ArgumentException">
     /// <paramref name="candidates"/> is empty - a success must have at least the primary
     /// route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.
@@ -326,7 +346,8 @@ public sealed record ModelRouteResolutionResult
         string? taskText = null,
         string? dimBestModel = null,
         string? explicitCircuitTripBlockMessage = null,
-        string? untrainedBaselineModel = null)
+        string? untrainedBaselineModel = null,
+        double? untrainedBaselinePredictedScore = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -339,6 +360,7 @@ public sealed record ModelRouteResolutionResult
             taskEmbedding: taskEmbedding, routerTokens: routerTokens, isExploratory: isExploratory,
             propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
             untrainedBaselineModel: untrainedBaselineModel,
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
             explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);
     }
 
@@ -354,6 +376,6 @@ public sealed record ModelRouteResolutionResult
     {
         return new ModelRouteResolutionResult(false, null, errorMessage: errorMessage, null,
             substitutionReason: RoutingSubstitutionReason.None,
-            null, 0, false, 1.0, null, null, null, null, null);
+            null, 0, false, 1.0, null, null, null, null, null, null);
     }
 }

@@ -281,10 +281,12 @@ public class RequestTelemetryPublisherTests
             20,
             200,
             cancellationToken: TestContext.Current.CancellationToken,
-            untrainedBaselineModel: "kimi-k2.5");
+            untrainedBaselineModel: "kimi-k2.5",
+            untrainedBaselinePredictedScore: 0.62);
 
         Assert.NotNull(transcriptStore.LastInserted);
         Assert.Equal(expected: "kimi-k2.5", actual: transcriptStore.LastInserted!.UntrainedBaselineModel);
+        Assert.Equal(0.62, actual: transcriptStore.LastInserted.UntrainedBaselinePredictedScore);
     }
 
     [Fact]

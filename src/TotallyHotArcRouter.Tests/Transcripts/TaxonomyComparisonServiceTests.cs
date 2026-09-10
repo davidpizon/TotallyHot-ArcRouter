@@ -255,6 +255,52 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             $"Routing beat the baseline on both axes; regret should be negative, got {routed.EstimatedRegret}.");
     }
 
+    // Regression coverage for docs/router/routing-roi-regret-plan.md's frozen-baseline correction, second
+    // pass: the transcript's own UntrainedBaselinePredictedScore (captured by RequestInterceptor from the
+    // prior snapshot in force at selection time) must win over priorMatrix even when a synced corpus is
+    // present and disagrees - simulating a benchmark sync that landed a different average for model-b
+    // between the request and this comparison cycle. Before that fix, PredictBaselineScore always
+    // re-derived the score from whatever prior this cycle loaded, silently pairing the request-time model
+    // with a comparison-time score.
+    [Fact]
+    public async Task RunCycle_PrefersTheTranscriptsOwnPredictedScore_OverAPriorThatHasSinceMoved()
+    {
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
+                UntrainedBaselinePredictedScore: 0.5)
+        ],
+        // A sync that landed after selection: the corpus now says model-b averages 0.9, not the 0.5 the
+        // transcript recorded at request time.
+        priorRows: [new PriorRow(Dimension: "code_generation", Model: "model-b", Score: 0.9)]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0.5, actual: row.BaselinePredictedScore!.Value, 10);
+    }
+
+    // Companion to the test above: a row written before this column existed (or whose selector abstained
+    // on the score) has no request-time score to prefer, so PredictBaselineScore must still fall back to
+    // priorMatrix rather than going permanently null.
+    [Fact]
+    public async Task RunCycle_FallsBackToThePriorMatrix_WhenTheTranscriptHasNoPredictedScoreOfItsOwn()
+    {
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
+                UntrainedBaselinePredictedScore: null)
+        ],
+        priorRows: [new PriorRow(Dimension: "code_generation", Model: "model-b", Score: 0.5)]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0.5, actual: row.BaselinePredictedScore!.Value, 10);
+    }
+
     [Fact]
     public async Task RunCycle_UnpriceableBaseline_RecordsNullRegretOnce()
     {
@@ -459,7 +505,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     100,
                     50,
                     null,
-                    UntrainedBaselineModel: sample.UntrainedBaselineModel),
+                    UntrainedBaselineModel: sample.UntrainedBaselineModel,
+                    UntrainedBaselinePredictedScore: sample.UntrainedBaselinePredictedScore),
                 cancellationToken: token);
 
             if (id is not null)
@@ -560,7 +607,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         bool IsExploratory = false,
         decimal? Cost = 0.05m,
         string? UntrainedBaselineModel = "model-b",
-        string? Dimension = "code_generation");
+        string? Dimension = "code_generation",
+        double? UntrainedBaselinePredictedScore = null);
 
     /// <summary>One row of a fixture's synced frozen probing-split prior.</summary>
     private sealed record PriorRow(string Dimension, string Model, double Score);

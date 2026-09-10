@@ -41,6 +41,44 @@ public class UntrainedBaselineSelectorTests
         Assert.Equal(expected: "model-b", actual: pick);
     }
 
+    // Regression coverage for docs/router/routing-roi-regret-plan.md's frozen-baseline correction, second
+    // pass: RequestInterceptor persists SelectWithScore's Score alongside its Model precisely so
+    // TaxonomyComparisonService never has to re-derive the score from a possibly-different, later-loaded
+    // prior snapshot. This asserts the two travel together and agree with the plain Select/AverageScore
+    // path.
+    [Fact]
+    public void SelectWithScore_ReturnsTheWinningModelAndItsOwnAverage()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertResultRow(database: temp.Database, taskId: "task-1", split: "probing", dimension: "code_generation",
+            model: "model-a", 0.2);
+        InsertResultRow(database: temp.Database, taskId: "task-2", split: "probing", dimension: "code_generation",
+            model: "model-b", 0.8);
+        var selector = new UntrainedBaselineSelector(database: temp.Database,
+            logger: NullLogger<UntrainedBaselineSelector>.Instance);
+
+        var selection = selector.SelectWithScore(dimension: "code_generation",
+            candidateModelIds: ["model-a", "model-b"]);
+
+        Assert.NotNull(selection);
+        Assert.Equal(expected: "model-b", actual: selection.Model);
+        Assert.Equal(0.8, actual: selection.Score);
+    }
+
+    [Fact]
+    public void SelectWithScore_NoAverageForAnyCandidate_ReturnsNull()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertResultRow(database: temp.Database, taskId: "task-1", split: "probing", dimension: "code_generation",
+            model: "model-a", 0.9);
+        var selector = new UntrainedBaselineSelector(database: temp.Database,
+            logger: NullLogger<UntrainedBaselineSelector>.Instance);
+
+        Assert.Null(selector.SelectWithScore(dimension: "code_generation", candidateModelIds: ["model-z"]));
+    }
+
     [Fact]
     public void Select_NoAverageForAnyCandidate_ReturnsNull()
     {
