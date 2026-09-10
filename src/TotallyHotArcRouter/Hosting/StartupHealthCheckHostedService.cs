@@ -38,6 +38,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly PriceCatalogIngestionService _ingestionService;
 
     private readonly ILogger<StartupHealthCheckHostedService> _logger;
+    private readonly ProbingPriorMatrixCache? _matrixCache;
     private readonly PriceSourceRepository _repository;
     private readonly IUsageRollupStore _rollupStore;
     private readonly RouterMemory _routerMemory;
@@ -73,7 +74,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ITranscriptStore transcriptStore,
         IOptions<TranscriptOptions> transcriptOptions,
         IEmbeddingClient? embeddingClient = null,
-        EmbeddingWarmupState? embeddingWarmupState = null)
+        EmbeddingWarmupState? embeddingWarmupState = null,
+        ProbingPriorMatrixCache? matrixCache = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(database);
@@ -114,6 +116,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _transcriptOptions = transcriptOptions.Value;
         _embeddingClient = embeddingClient;
         _embeddingWarmupState = embeddingWarmupState;
+        _matrixCache = matrixCache;
     }
 
     /// <summary>
@@ -322,6 +325,11 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         {
             _benchmarkDatabase.EnsureCreated();
             await _benchmarkStatusService.RecheckAsync(cancellationToken).ConfigureAwait(false);
+
+            // Forces the shared probing-prior cache (DimBestVoter/UntrainedBaselineSelector/
+            // TaxonomyComparisonService) to load here, off the request path, rather than leaving the
+            // first request after this process starts to pay that full-table scan inline.
+            _matrixCache?.GetMatrix();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

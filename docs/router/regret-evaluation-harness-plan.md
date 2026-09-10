@@ -453,3 +453,63 @@ Landed incrementally; each is independently testable and mergeable.
    ordering and the Orchestrator-vs-DimensionBest comparison, whichever way it comes out.
 5. Deferred items (TF-IDF+MLP, RouteLLM variants, Qwen3.5-FT, embedding-context bandits) are recorded here,
    not reopened without new evidence, per PLAN.md's "Settled deferrals" convention.
+
+## Phase Q5 — sample-size-aware `dim_best` estimator: blocked, with an evidence-based measurement design
+
+**Status: blocked on real traffic. Not started, not skipped for lack of value — the evidence below shows
+its own acceptance gate cannot fire today, on any data this repository currently holds.**
+
+`src/PLAN.md`'s Phase Q5 targets `DimBestVoter`'s argmax-over-raw-mean (`live ?? prior`, in
+`DimensionLedger.Predict`): the moment a `RouterMemory` cell holds even one observation, the ~780-
+observation-deep probing-split prior is discarded outright. Q5's stated acceptance bar is that
+`RegretReplayEngine` shows `CumReg` improving. On investigation (2026-09-09), every input that gate would
+read is empty on this machine, in both the dev checkout and the installed build:
+
+| Store | Rows |
+|---|---|
+| `dimension_scores` (live `RouterMemory`) | **0 cells, 0 observations** |
+| `memory_entries` | **0** |
+| `grader_scores` | **0** (table absent entirely in the installed build) |
+| `taxonomy_comparisons` | **0** |
+| `request_transcripts` | 156 (captured, never scored into memory) |
+
+**The offline harness cannot substitute, by design, not by oversight.** `OrchestratorArmFactory.Build`
+deliberately hands its `DimBestVoter` a fresh `RouterMemory()` (see "The Orchestrator arm" above) so an
+operator's real database can never leak into the N5 measurement. A live-vs-prior blend rule change is
+therefore invisible to that arm: every candidate looks up an always-empty live cell, falls back to the
+same frozen matrix every existing rule already reads, and `CumReg` comes back bit-for-bit identical
+whether the new estimator ships or not. This is not a bug in N5 — it is the same "isolated, offline
+harness with no live traffic to honestly back it" limitation this doc already documents for
+`memory_kNN`/`cluster_best`/`llm_router`, now also true of any *change* to `dim_best`'s live-memory
+behavior specifically (as opposed to its frozen-prior behavior, which the harness measures fine).
+
+**Prior-side shrinkage was considered and is also a no-op.** The probing split's 72 (dimension, model)
+cells sit at 764-805 observations each (median 781) - uniform to within 5%. `DimensionModelScoreMatrix`
+computes per-cell counts while aggregating and discards them (`FromRows`/`FromDatabase`); recovering them
+to shrink thin cells toward a dimension mean would move every cell by the same ~2.5% and essentially never
+flip an argmax. There are no thin prior cells to shrink.
+
+**The measurement design agreed for when real traffic exists** (paired online arms, not a change to the
+frozen `DimensionBestBaseline`): add two new arms, `dim_best_online_raw` (today's `live ?? prior`) and
+`dim_best_online_shrunk` (the candidate estimator), both implementing `IOnlineRegretBaselineRouter` and
+sharing one real `RouterMemory`-backed base fed via the same `Update` callback LinUCB/LinTS already use -
+after each pick, only the picked arm's revealed reward is folded in, preserving the engine's no-leakage
+property. Replayed over the **2,919-task ID-test split across all 9 dimensions** (`dim_best` needs no task
+text, so ID test is usable, unlike `logreg`/`knn_retrieval`): long enough for a thin-vs-thick difference to
+compound, broad enough that a result is not an artifact of one dimension. The frozen
+`DimensionBestBaseline` arm is left completely untouched, so N5's published numbers remain comparable.
+**Accepted limitation, carried forward from every other number in this doc:** the fed-back rewards are
+CodeRouterBench's own judge scores, not ArcRouter's verifier scores - real for the *ordering* the paired
+race decides, not necessarily for the *margin* a live verifier would show.
+
+**Why this is not "the corpus should replace itself faster."** This doc's "permanent infrastructure, not
+bootstrap data" decision (above) already settles that the **Prior** job — cold-start (dimension, model)
+estimates — is designed to age out via live traffic exactly as Q5 proposes, and does so today for `logreg`
+(`RoutingOptions.LogRegLiveSampleWeight`) and would for `dim_best` under Q5's own estimator. What blocks
+Q5 is not that job's design; it is that zero live observations exist yet to age anything out with, on
+either the live path or the one offline surface (a paired online arm) that could honestly stand in for it.
+
+**Re-open when:** `dimension_scores` holds real observations (live traffic, verifier scoring enabled), at
+which point Q5 becomes buildable exactly as designed above - or when an operator explicitly asks for the
+paired-arm harness change ahead of live data, accepting the CodeRouterBench-judge-score limitation as the
+price of an earlier, offline-only signal.

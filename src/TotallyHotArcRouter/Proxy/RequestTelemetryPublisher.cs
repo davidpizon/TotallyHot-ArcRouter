@@ -148,7 +148,9 @@ internal sealed class RequestTelemetryPublisher
         double propensity = 1.0,
         RequestClassification? classification = null,
         string? taskText = null,
-        string? dimBestModel = null)
+        string? dimBestModel = null,
+        string? untrainedBaselineModel = null,
+        double? untrainedBaselinePredictedScore = null)
     {
         var (requestBody, sessionId, turnNumber, isSynthesized) =
             ResolveSessionAndTurn(context: context, rewrittenRequestBody: rewrittenRequestBody);
@@ -215,7 +217,9 @@ internal sealed class RequestTelemetryPublisher
             propensity: propensity,
             promptTokens: promptTokens,
             completionTokens: completionTokens,
-            dimBestModel: dimBestModel).ConfigureAwait(false);
+            dimBestModel: dimBestModel,
+            untrainedBaselineModel: untrainedBaselineModel,
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore).ConfigureAwait(false);
 
         await PublishTelemetryEventAsync(
             sessionId: sessionId,
@@ -691,7 +695,9 @@ internal sealed class RequestTelemetryPublisher
         double propensity,
         int? promptTokens,
         int? completionTokens,
-        string? dimBestModel)
+        string? dimBestModel,
+        string? untrainedBaselineModel,
+        double? untrainedBaselinePredictedScore)
     {
         // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
         // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to
@@ -723,7 +729,9 @@ internal sealed class RequestTelemetryPublisher
                         InputTokens: promptTokens,
                         OutputTokens: completionTokens,
                         null,
-                        DimBestModel: dimBestModel),
+                        DimBestModel: dimBestModel,
+                        UntrainedBaselineModel: untrainedBaselineModel,
+                        UntrainedBaselinePredictedScore: untrainedBaselinePredictedScore),
                     cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

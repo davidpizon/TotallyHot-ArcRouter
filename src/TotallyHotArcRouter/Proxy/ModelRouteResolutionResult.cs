@@ -89,6 +89,8 @@ public sealed record ModelRouteResolutionResult
     /// <param name="classification">See <see cref="Classification"/>.</param>
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
+    /// <param name="untrainedBaselineModel">See <see cref="UntrainedBaselineModel"/>.</param>
+    /// <param name="untrainedBaselinePredictedScore">See <see cref="UntrainedBaselinePredictedScore"/>.</param>
     /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
     private ModelRouteResolutionResult(
         bool isSuccess,
@@ -103,6 +105,8 @@ public sealed record ModelRouteResolutionResult
         RequestClassification? classification,
         string? taskText,
         string? dimBestModel,
+        string? untrainedBaselineModel,
+        double? untrainedBaselinePredictedScore,
         string? explicitCircuitTripBlockMessage)
     {
         IsSuccess = isSuccess;
@@ -117,6 +121,8 @@ public sealed record ModelRouteResolutionResult
         Classification = classification;
         TaskText = taskText;
         DimBestModel = dimBestModel;
+        UntrainedBaselineModel = untrainedBaselineModel;
+        UntrainedBaselinePredictedScore = untrainedBaselinePredictedScore;
         ExplicitCircuitTripBlockMessage = explicitCircuitTripBlockMessage;
     }
 
@@ -230,19 +236,62 @@ public sealed record ModelRouteResolutionResult
     public string? TaskText { get; }
 
     /// <summary>
-    /// Gets the model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen for this
+    /// Gets the model the live, memory-preferring <c>dim_best</c> voter actually voted for on this
     /// request, or <see langword="null"/> when it abstained or no policy was consulted -
-    /// docs/router/self-organizing-classification-plan.md Phase T4's counterfactual baseline.
+    /// docs/router/self-organizing-classification-plan.md Phase T4's taxonomy-accuracy comparison target.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Despite its name, this is <em>not</em> a frozen baseline - <c>dim_best</c> blends the CodeRouterBench
+    /// prior with live <see cref="Router.RouterMemory"/>, preferring live the moment any observation
+    /// exists. For the ROI cost-savings yardstick's frozen counterfactual, see
+    /// <see cref="UntrainedBaselineModel"/> instead
+    /// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction).
+    /// </para>
+    /// <para>
     /// Captured here, at the moment the decision was made, rather than recomputed later: the ledgers
     /// <c>dim_best</c> votes from move with every subsequent observation, so a recomputation would answer
-    /// "what would <c>dim_best</c> pick now", which is a different question from the one the savings
-    /// estimate asks. Left <see langword="null"/> rather than defaulted to the served model - an abstention
-    /// means the baseline expressed no preference, and crediting the router with beating a choice nobody
-    /// made would manufacture savings out of nothing.
+    /// "what would <c>dim_best</c> pick now", which is a different question from the one this comparison
+    /// asks. Left <see langword="null"/> rather than defaulted to the served model - an abstention means
+    /// the voter expressed no preference, and crediting the router with beating a choice nobody made would
+    /// manufacture an accuracy result out of nothing.
+    /// </para>
     /// </remarks>
     public string? DimBestModel { get; }
+
+    /// <summary>
+    /// Gets the model an untrained router - one that has never read live memory - would have picked from
+    /// this request's actual candidate menu, using only the frozen CodeRouterBench probing-split prior
+    /// (<see cref="Router.UntrainedBaselineSelector"/>). This is the ROI cost-savings yardstick's frozen
+    /// "what if we hadn't routed" alternative (docs/router/routing-roi-regret-plan.md);
+    /// <see langword="null"/> when no selector was available or the corpus has no average for any
+    /// candidate.
+    /// </summary>
+    /// <remarks>
+    /// Captured here rather than recomputed later for the same reason as <see cref="DimBestModel"/>: the
+    /// candidate menu (which models were actually eligible) is known only at request time and is not
+    /// itself persisted, so a later recomputation could not honestly reconstruct it. Unlike
+    /// <see cref="DimBestModel"/>, this value never reads live memory, so it would answer the same
+    /// question if it *were* recomputed later - it is captured here purely because the menu would
+    /// otherwise be lost, not because the answer itself is time-sensitive.
+    /// </remarks>
+    public string? UntrainedBaselineModel { get; }
+
+    /// <summary>
+    /// Gets <see cref="UntrainedBaselineModel"/>'s average score, read from the exact same frozen-prior
+    /// snapshot it was picked from (<see cref="Router.UntrainedBaselineSelector.SelectWithScore"/>).
+    /// <see langword="null"/> whenever <see cref="UntrainedBaselineModel"/> is.
+    /// </summary>
+    /// <remarks>
+    /// Captured here, alongside the model, for the same reason as <see cref="UntrainedBaselineModel"/>
+    /// itself - but unlike that field, this one *is* time-sensitive: an explicit CodeRouterBench sync
+    /// between this request and the later ROI comparison cycle can swap in a different prior snapshot, and
+    /// re-deriving the score from that new snapshot could pair it with a model chosen from the old one.
+    /// Persisting both together at selection time is what <c>TaxonomyComparisonService</c> reads instead
+    /// of recomputing, closing that mismatch window (docs/router/routing-roi-regret-plan.md's
+    /// frozen-baseline correction, second pass).
+    /// </remarks>
+    public double? UntrainedBaselinePredictedScore { get; }
 
     /// <summary>
     /// Gets the client-facing message to synthesize directly - skipping any network call and any
@@ -279,6 +328,8 @@ public sealed record ModelRouteResolutionResult
     /// <param name="taskText">See <see cref="TaskText"/>.</param>
     /// <param name="dimBestModel">See <see cref="DimBestModel"/>.</param>
     /// <param name="explicitCircuitTripBlockMessage">See <see cref="ExplicitCircuitTripBlockMessage"/>.</param>
+    /// <param name="untrainedBaselineModel">See <see cref="UntrainedBaselineModel"/>.</param>
+    /// <param name="untrainedBaselinePredictedScore">See <see cref="UntrainedBaselinePredictedScore"/>.</param>
     /// <exception cref="ArgumentException">
     /// <paramref name="candidates"/> is empty - a success must have at least the primary
     /// route, since <see cref="Route"/>/<see cref="RewrittenBody"/> index the first candidate.
@@ -294,7 +345,9 @@ public sealed record ModelRouteResolutionResult
         RequestClassification? classification = null,
         string? taskText = null,
         string? dimBestModel = null,
-        string? explicitCircuitTripBlockMessage = null)
+        string? explicitCircuitTripBlockMessage = null,
+        string? untrainedBaselineModel = null,
+        double? untrainedBaselinePredictedScore = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -306,6 +359,8 @@ public sealed record ModelRouteResolutionResult
             requestedModelName: requestedModelName, substitutionReason: substitutionReason,
             taskEmbedding: taskEmbedding, routerTokens: routerTokens, isExploratory: isExploratory,
             propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
+            untrainedBaselineModel: untrainedBaselineModel,
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
             explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);
     }
 
@@ -321,6 +376,6 @@ public sealed record ModelRouteResolutionResult
     {
         return new ModelRouteResolutionResult(false, null, errorMessage: errorMessage, null,
             substitutionReason: RoutingSubstitutionReason.None,
-            null, 0, false, 1.0, null, null, null, null);
+            null, 0, false, 1.0, null, null, null, null, null, null);
     }
 }

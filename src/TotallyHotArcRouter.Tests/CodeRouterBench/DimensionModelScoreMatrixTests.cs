@@ -130,6 +130,52 @@ public class DimensionModelScoreMatrixTests
         Assert.Null(matrix.AverageScore(dimension: "code_generation", model: "claude-opus-4-6"));
     }
 
+    [Fact]
+    public void SelectBest_PicksHighestScoringCandidate()
+    {
+        var matrix = DimensionModelScoreMatrix.FromRows(
+        [
+            new CodeRouterBenchResultRow(TaskId: "t1", Dimension: "code_generation", Model: "claude-opus-4-6", 0.9),
+            new CodeRouterBenchResultRow(TaskId: "t2", Dimension: "code_generation", Model: "glm-5", 0.5)
+        ]);
+
+        Assert.Equal(expected: "claude-opus-4-6",
+            actual: matrix.SelectBest(dimension: "code_generation", candidateModelIds: ["glm-5", "claude-opus-4-6"]));
+    }
+
+    [Fact]
+    public void SelectBest_NoCandidateHasAnAverage_ReturnsNull()
+    {
+        var matrix = DimensionModelScoreMatrix.FromRows([]);
+
+        Assert.Null(matrix.SelectBest(dimension: "code_generation", candidateModelIds: ["claude-opus-4-6"]));
+    }
+
+    [Fact]
+    public void SelectBest_IgnoresCandidatesOutsideTheMatrix()
+    {
+        var matrix = DimensionModelScoreMatrix.FromRows([
+            new CodeRouterBenchResultRow(TaskId: "t1", Dimension: "code_generation", Model: "claude-opus-4-6", 0.9)
+        ]);
+
+        Assert.Equal(expected: "claude-opus-4-6",
+            actual: matrix.SelectBest(dimension: "code_generation", candidateModelIds: ["unknown-model", "claude-opus-4-6"]));
+    }
+
+    [Fact]
+    public void SelectBest_TiedAverages_BreaksTieByOrdinalModelName()
+    {
+        var matrix = DimensionModelScoreMatrix.FromRows(
+        [
+            new CodeRouterBenchResultRow(TaskId: "t1", Dimension: "code_generation", Model: "claude-opus-4-6", 0.5),
+            new CodeRouterBenchResultRow(TaskId: "t1", Dimension: "code_generation", Model: "claude-sonnet-4-5", 0.5)
+        ]);
+
+        Assert.Equal(expected: "claude-opus-4-6",
+            actual: matrix.SelectBest(dimension: "code_generation",
+                candidateModelIds: ["claude-sonnet-4-5", "claude-opus-4-6"]));
+    }
+
     private static void InsertResult(TempBenchmarkDatabase temp, string taskId, string split, string dimension,
         string model, double score)
     {

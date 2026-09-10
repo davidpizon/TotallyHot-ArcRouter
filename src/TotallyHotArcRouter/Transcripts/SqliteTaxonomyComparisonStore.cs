@@ -57,6 +57,14 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// First-write-wins: <c>ON CONFLICT(transcript_id) DO NOTHING</c> makes an existing row immutable.
+    /// The baseline model, its predicted score, and the four cost ingredients are all frozen-baseline
+    /// values that must not silently drift if this row is ever recomputed by a rescan or backfill
+    /// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction) - both the token averages
+    /// and the price catalog move as live traffic accumulates and prices refresh, so a later recomputation
+    /// would price against inputs that were not actually in force when the row was first compared.
+    /// </remarks>
     public Task UpsertAsync(TaxonomyComparisonRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -72,29 +80,17 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                                   cluster_predicted_score, dimension_abs_error, cluster_abs_error, is_clustered,
                                   is_exploratory, routed_model, baseline_model, actual_cost_usd,
                                   baseline_estimated_cost_usd, estimated_net_savings_usd,
-                                  baseline_predicted_score, estimated_regret)
+                                  baseline_predicted_score, estimated_regret, baseline_input_tokens,
+                                  baseline_output_tokens, baseline_input_price_per_million,
+                                  baseline_output_price_per_million)
                               VALUES (
                                   $transcriptId, $comparedAtUtc, $sessionId, $observedScore, $dimensionPredicted,
                                   $clusterPredicted, $dimensionError, $clusterError, $isClustered,
                                   $isExploratory, $routedModel, $baselineModel, $actualCost,
-                                  $baselineCost, $netSavings, $baselinePredicted, $estimatedRegret)
-                              ON CONFLICT(transcript_id) DO UPDATE SET
-                                  compared_at_utc = excluded.compared_at_utc,
-                                  session_id = excluded.session_id,
-                                  observed_score = excluded.observed_score,
-                                  dimension_predicted_score = excluded.dimension_predicted_score,
-                                  cluster_predicted_score = excluded.cluster_predicted_score,
-                                  dimension_abs_error = excluded.dimension_abs_error,
-                                  cluster_abs_error = excluded.cluster_abs_error,
-                                  is_clustered = excluded.is_clustered,
-                                  is_exploratory = excluded.is_exploratory,
-                                  routed_model = excluded.routed_model,
-                                  baseline_model = excluded.baseline_model,
-                                  actual_cost_usd = excluded.actual_cost_usd,
-                                  baseline_estimated_cost_usd = excluded.baseline_estimated_cost_usd,
-                                  estimated_net_savings_usd = excluded.estimated_net_savings_usd,
-                                  baseline_predicted_score = excluded.baseline_predicted_score,
-                                  estimated_regret = excluded.estimated_regret;
+                                  $baselineCost, $netSavings, $baselinePredicted, $estimatedRegret,
+                                  $baselineInputTokens, $baselineOutputTokens, $baselineInputPrice,
+                                  $baselineOutputPrice)
+                              ON CONFLICT(transcript_id) DO NOTHING;
                               """;
         command.Parameters.AddWithValue(parameterName: "$transcriptId", value: record.TranscriptId);
         command.Parameters.AddWithValue(parameterName: "$comparedAtUtc",
@@ -124,6 +120,14 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
             value: (object?)record.BaselinePredictedScore ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$estimatedRegret",
             value: (object?)record.EstimatedRegret ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$baselineInputTokens",
+            value: (object?)record.BaselineInputTokens ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$baselineOutputTokens",
+            value: (object?)record.BaselineOutputTokens ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$baselineInputPrice",
+            value: record.BaselineInputPricePerMillion is { } inputPrice ? (double)inputPrice : DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$baselineOutputPrice",
+            value: record.BaselineOutputPricePerMillion is { } outputPrice ? (double)outputPrice : DBNull.Value);
         command.ExecuteNonQuery();
 
         return Task.CompletedTask;
@@ -147,7 +151,9 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                                   cluster_predicted_score, dimension_abs_error, cluster_abs_error, is_clustered,
                                   is_exploratory, routed_model, baseline_model, actual_cost_usd,
                                   baseline_estimated_cost_usd, estimated_net_savings_usd,
-                                  baseline_predicted_score, estimated_regret
+                                  baseline_predicted_score, estimated_regret, baseline_input_tokens,
+                                  baseline_output_tokens, baseline_input_price_per_million,
+                                  baseline_output_price_per_million
                               FROM taxonomy_comparisons
                               WHERE compared_at_utc >= $since AND ($sessionId IS NULL OR session_id = $sessionId)
                               ORDER BY compared_at_utc ASC, transcript_id ASC;
@@ -186,6 +192,10 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
             BaselineEstimatedCostUsd: reader.IsDBNull(13) ? null : (decimal)reader.GetDouble(13),
             EstimatedNetSavingsUsd: reader.IsDBNull(14) ? null : (decimal)reader.GetDouble(14),
             BaselinePredictedScore: reader.IsDBNull(15) ? null : reader.GetDouble(15),
-            EstimatedRegret: reader.IsDBNull(16) ? null : reader.GetDouble(16));
+            EstimatedRegret: reader.IsDBNull(16) ? null : reader.GetDouble(16),
+            BaselineInputTokens: reader.IsDBNull(17) ? null : reader.GetDouble(17),
+            BaselineOutputTokens: reader.IsDBNull(18) ? null : reader.GetDouble(18),
+            BaselineInputPricePerMillion: reader.IsDBNull(19) ? null : (decimal)reader.GetDouble(19),
+            BaselineOutputPricePerMillion: reader.IsDBNull(20) ? null : (decimal)reader.GetDouble(20));
     }
 }

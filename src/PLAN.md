@@ -204,9 +204,20 @@ flowchart LR
    the CLI (the analyzer has no live-provider dependency either way). Full design, what shipped vs.
    deferred, and the backbone-capture implementation deviation (a side cache instead of extending
    `QualityResult`):
-   [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md); **Q5** replaces
+   [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md); **Q5** — replaces
    `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware estimator, accepted only if
-   `RegretReplayEngine` shows `CumReg` improving. Rationale and per-source verdicts:
+   `RegretReplayEngine` shows `CumReg` improving — **is evidence-blocked, not merely unstarted**: live
+   `RouterMemory` holds zero observations on this machine (dev and installed builds alike), and the
+   offline harness deliberately hands its `dim_best` arm an empty memory (`OrchestratorArmFactory.Build`),
+   so a live-vs-prior blend change is invisible to the one measurement surface that exists. A
+   *prerequisite* shipped in the same pass this was discovered: the ROI cost-savings yardstick was
+   silently reading the same live-preferring blend Q5 would have changed, so any Q5 estimator would have
+   moved its own measuring stick. That is now fixed — the yardstick reads a new, request-time-captured,
+   never-live-touching `UntrainedBaselineSelector` instead — which is necessary but not sufficient for
+   Q5 itself. Full evidence, the paired-online-arm measurement design agreed for when real traffic exists,
+   and the re-open condition:
+   [`regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)'s Q5 section.
+   Rationale and per-source verdicts for the estimator's shape:
    [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
 2. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
    [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's

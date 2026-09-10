@@ -34,7 +34,12 @@ public interface ITaxonomyComparisonStore
     /// </remarks>
     Task<IReadOnlyList<long>> LoadPendingComparisonsAsync(int limit, CancellationToken cancellationToken = default);
 
-    /// <summary>Persists one comparison row, replacing any existing row for the same transcript.</summary>
+    /// <summary>
+    /// Persists one comparison row. First-write-wins: if a row already exists for the same transcript, it
+    /// is left untouched rather than replaced - the baseline model, its predicted score, and the frozen
+    /// cost ingredients must not silently drift if this is ever called again for the same transcript by a
+    /// rescan or backfill (docs/router/routing-roi-regret-plan.md's frozen-baseline correction).
+    /// </summary>
     /// <param name="record">The comparison to persist.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     Task UpsertAsync(TaxonomyComparisonRecord record, CancellationToken cancellationToken = default);
