@@ -102,6 +102,15 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <see cref="BaselineModel"/>'s USD-per-million-output-token catalog rate at the moment this row was
 /// first compared.
 /// </param>
+/// <param name="BaselineTokenizerRatio">
+/// The baseline-to-routed tokenizer multiplier applied to this turn's observed input tokens, or
+/// <see langword="null"/> when no baseline cost was estimated.
+/// </param>
+/// <param name="BaselineTokenizerRatioMeasured">
+/// Whether <paramref name="BaselineTokenizerRatio"/> was measured against both models' real tokenizers, or
+/// assumed to be 1 because at least one was counted with a stand-in encoding. Recorded separately because a
+/// ratio of 1 reads identically in both cases, and only one of them is an observation.
+/// </param>
 /// <remarks>
 /// The four <c>Baseline*</c> cost ingredients (tokens and prices) are captured once, the first time a row
 /// is compared, and the row is then never rewritten: <c>SqliteTaxonomyComparisonStore.UpsertAsync</c> is
@@ -133,4 +142,6 @@ public sealed record TaxonomyComparisonRecord(
     double? BaselineInputTokens = null,
     double? BaselineOutputTokens = null,
     decimal? BaselineInputPricePerMillion = null,
-    decimal? BaselineOutputPricePerMillion = null);
+    decimal? BaselineOutputPricePerMillion = null,
+    double? BaselineTokenizerRatio = null,
+    bool? BaselineTokenizerRatioMeasured = null);

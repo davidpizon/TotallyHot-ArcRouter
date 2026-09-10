@@ -5,7 +5,7 @@ namespace TotallyHot.ArcRouter.Tests.Telemetry.Tokenization;
 
 /// <summary>
 /// Covers <see cref="TiktokenTokenCounter"/>: encoding selection per model family, and the counting
-/// contract (<see cref="TokenCountSource.LocalUncalibrated"/> on success, refusal on absent text).
+/// contract (<see cref="TokenCountSource.LocalProxy"/> on success, refusal on absent text).
 /// </summary>
 public class TiktokenTokenCounterTests
 {
@@ -43,7 +43,7 @@ public class TiktokenTokenCounterTests
     }
 
     [Fact]
-    public void TryCountPromptTokens_RealText_ReturnsPositiveCountLabelledUncalibrated()
+    public void TryCountPromptTokens_RealText_ReturnsPositiveCountLabelledWithItsProvenance()
     {
         var counter = new TiktokenTokenCounter();
 
@@ -55,7 +55,8 @@ public class TiktokenTokenCounterTests
 
         Assert.True(counted);
         Assert.True(tokens > 0);
-        Assert.Equal(expected: TokenCountSource.LocalUncalibrated, actual: source);
+        // gpt-4's real tokenizer *is* cl100k_base, so this count is native rather than a stand-in.
+        Assert.Equal(expected: TokenCountSource.LocalNative, actual: source);
     }
 
     [Theory]
@@ -77,6 +78,35 @@ public class TiktokenTokenCounterTests
         Assert.False(counted);
         Assert.Equal(expected: 0, actual: tokens);
         Assert.Equal(expected: TokenCountSource.Unavailable, actual: source);
+    }
+
+    [Theory]
+    [InlineData("gpt-4", "openai")]
+    [InlineData("gpt-4o", "openai")]
+    public void TryCountPromptTokens_ModelWhoseEncodingThisActuallyIs_ReportsNative(string model, string provider)
+    {
+        var counter = new TiktokenTokenCounter();
+
+        counter.TryCountPromptTokens(text: "some prompt",
+            key: new ModelKey(ModelName: model, Provider: provider), tokens: out _, source: out var source);
+
+        Assert.Equal(expected: TokenCountSource.LocalNative, actual: source);
+    }
+
+    [Theory]
+    [InlineData("claude-opus-5", "anthropic")]
+    [InlineData("gemini-2.5-pro", "gemini")]
+    [InlineData("mistral-large", "mistral")]
+    public void TryCountPromptTokens_ModelUsingAStandInEncoding_ReportsProxy(string model, string provider)
+    {
+        // These vendors have their own tokenizers; cl100k_base is standing in. Saying so is what stops a
+        // ratio between two of them from being mistaken for a measurement.
+        var counter = new TiktokenTokenCounter();
+
+        counter.TryCountPromptTokens(text: "some prompt",
+            key: new ModelKey(ModelName: model, Provider: provider), tokens: out _, source: out var source);
+
+        Assert.Equal(expected: TokenCountSource.LocalProxy, actual: source);
     }
 
     [Fact]

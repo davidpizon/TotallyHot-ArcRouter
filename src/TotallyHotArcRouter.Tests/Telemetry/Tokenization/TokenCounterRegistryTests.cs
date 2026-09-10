@@ -74,7 +74,7 @@ public class TokenCounterRegistryTests
 
         Assert.True(counted);
         Assert.True(tokens > 0);
-        Assert.Equal(expected: TokenCountSource.LocalUncalibrated, actual: source);
+        Assert.Equal(expected: TokenCountSource.LocalProxy, actual: source);
     }
 
     /// <summary>A counter that returns a fixed answer and records how often it was asked.</summary>

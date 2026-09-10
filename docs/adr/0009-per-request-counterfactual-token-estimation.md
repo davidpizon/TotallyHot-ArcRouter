@@ -92,6 +92,12 @@ Two supporting decisions fall out of the same reasoning:
   an ordinary inference API key named by its own `TokenizationOptions.ApiKeyEnvVar` setting rather
   than a key borrowed from routing, and never the Admin API key. It is disabled by default and gated
   behind `TokenizationOptions.CalibrationEnabled`.
+- Neutral, because a tokenizer ratio between two models that both fall back to the same stand-in encoding
+  is `1.0` by construction and says nothing about their real tokenizers. Rather than hide that, the count
+  ladder distinguishes a model's own tokenizer (`LocalNative`) from a stand-in (`LocalProxy`), and
+  `TokenizerRatio` marks a ratio measured only when both sides represent their model. The ratio and that
+  verdict are persisted, so a savings figure can be audited for whether a real comparison stands behind
+  it. Enabling calibration is what upgrades a proxied model into a comparable one.
 - Bad, because the counterfactual's output half remains an estimate however well conditioned, so the ROI
   figure can never become exact. This is inherent to counterfactuals, not to this design.
 - Neutral, because `ModelTokenAverage` is replaced by a conditioned type, which forces a signature change

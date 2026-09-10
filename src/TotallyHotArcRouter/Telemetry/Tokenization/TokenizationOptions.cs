@@ -25,7 +25,7 @@ public sealed class TokenizationOptions
     /// <c>count_tokens</c> endpoint is free). ADR-0009 adds a second outbound egress destination to a
     /// process that proxies other people's prompts, so it stays inert until an operator opts in. With it
     /// off, counts are still produced - reported as
-    /// <see cref="TokenCountSource.LocalUncalibrated"/> rather than
+    /// <see cref="TokenCountSource.LocalProxy"/> rather than
     /// <see cref="TokenCountSource.LocalCalibrated"/>.
     /// </remarks>
     public bool CalibrationEnabled { get; init; }

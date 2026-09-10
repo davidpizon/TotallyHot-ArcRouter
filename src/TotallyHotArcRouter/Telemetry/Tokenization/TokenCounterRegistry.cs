@@ -27,7 +27,7 @@ public sealed class TokenCounterRegistry : ITokenCounter
     /// <param name="calibration">
     /// The learned calibration factors, or <see langword="null"/> when calibration is disabled (the
     /// default) - in which case local counts are reported as
-    /// <see cref="TokenCountSource.LocalUncalibrated"/>.
+    /// <see cref="TokenCountSource.LocalProxy"/>.
     /// </param>
     public TokenCounterRegistry(ITokenCalibrationSource? calibration = null)
         : this(

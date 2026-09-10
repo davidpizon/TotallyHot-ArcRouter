@@ -189,6 +189,26 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunCycle_BothModelsOnAStandInEncoding_RecordsTheRatioAsUnmeasured()
+    {
+        // model-a and model-b both fall back to cl100k_base, so their ratio is 1.0 by construction. The row
+        // must say that was assumed, not measured - otherwise a reader cannot tell this apart from two
+        // models that genuinely share a tokenizer.
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b")
+        ], tokenCounter: new TokenCounterRegistry());
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = (await harness.ComparisonStore.LoadSinceAsync(since: DateTimeOffset.MinValue,
+            cancellationToken: TestContext.Current.CancellationToken)).Last(r => r.RoutedModel == "model-a");
+        Assert.Equal(expected: 1d, actual: row.BaselineTokenizerRatio!.Value, tolerance: 0.0001d);
+        Assert.False(row.BaselineTokenizerRatioMeasured);
+    }
+
+    [Fact]
     public async Task RunCycle_TurnWithNoRecordedUsage_StillPricesFromTheObservedAverage()
     {
         // The fallback path: a turn the provider reported no usage for keeps the previous behavior rather

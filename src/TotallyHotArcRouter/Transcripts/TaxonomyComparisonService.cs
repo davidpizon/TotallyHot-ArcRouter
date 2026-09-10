@@ -499,7 +499,9 @@ public sealed class TaxonomyComparisonService : BackgroundService
             BaselineInputTokens: baselineIngredients?.InputTokens,
             BaselineOutputTokens: baselineIngredients?.OutputTokens,
             BaselineInputPricePerMillion: baselineIngredients?.InputPricePerMillion,
-            BaselineOutputPricePerMillion: baselineIngredients?.OutputPricePerMillion);
+            BaselineOutputPricePerMillion: baselineIngredients?.OutputPricePerMillion,
+            BaselineTokenizerRatio: baselineIngredients?.TokenizerRatio,
+            BaselineTokenizerRatioMeasured: baselineIngredients?.TokenizerRatioMeasured);
     }
 
     /// <summary>
@@ -582,11 +584,23 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// inputs that have since drifted (docs/router/routing-roi-regret-plan.md's frozen-baseline
     /// correction).
     /// </summary>
+    /// <param name="InputTokens">The input token count the cost was computed from.</param>
+    /// <param name="OutputTokens">The output token count the cost was computed from.</param>
+    /// <param name="InputPricePerMillion">The input rate applied.</param>
+    /// <param name="OutputPricePerMillion">The output rate applied.</param>
+    /// <param name="TokenizerRatio">The baseline-to-routed tokenizer multiplier applied to the observed input.</param>
+    /// <param name="TokenizerRatioMeasured">
+    /// Whether that multiplier was measured against both models' real tokenizers, or assumed to be 1
+    /// because at least one of them was counted with a stand-in encoding. Persisted because a ratio of 1
+    /// otherwise reads identically in both cases - see <see cref="TotallyHot.ArcRouter.Telemetry.Tokenization.TokenizerRatio"/>.
+    /// </param>
     private sealed record BaselineCostIngredients(
         double InputTokens,
         double OutputTokens,
         decimal InputPricePerMillion,
-        decimal OutputPricePerMillion);
+        decimal OutputPricePerMillion,
+        double TokenizerRatio,
+        bool TokenizerRatioMeasured);
 
     /// <summary>
     /// Prices what the untrained baseline's pick would have cost, and the resulting net saving against what
@@ -644,8 +658,9 @@ public sealed class TaxonomyComparisonService : BackgroundService
         // Per-request rather than a global mean (ADR-0009), falling back to the observed mean when this
         // turn recorded no usage. The same figure feeds the frozen ingredients below: they exist to record
         // what actually produced this cost, so recording the average here would defeat them.
-        var inputTokens = EstimateBaselineInputTokens(transcript: transcript, baselineRoute: route)
-                          ?? (int)Math.Round(average.InputTokens);
+        var estimated = EstimateBaselineInputTokens(transcript: transcript, baselineRoute: route);
+        var inputTokens = estimated?.Tokens ?? (int)Math.Round(average.InputTokens);
+        var ratio = estimated?.Ratio ?? TokenizerRatio.Assumed;
         var roundedOutputTokens = Math.Round(average.OutputTokens);
 
         var baselineCost = price.EstimateCost(
@@ -655,7 +670,9 @@ public sealed class TaxonomyComparisonService : BackgroundService
             InputTokens: inputTokens,
             OutputTokens: roundedOutputTokens,
             InputPricePerMillion: price.InputPerMillionTokens,
-            OutputPricePerMillion: price.OutputPerMillionTokens);
+            OutputPricePerMillion: price.OutputPerMillionTokens,
+            TokenizerRatio: ratio.Value,
+            TokenizerRatioMeasured: ratio.IsMeasured);
         return (baselineCost, baselineCost - actualCost, ingredients);
     }
 
@@ -688,14 +705,15 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// an encoding and a bounded error otherwise.
     /// </para>
     /// </remarks>
-    private int? EstimateBaselineInputTokens(TranscriptRecord transcript, ResolvedModelRoute baselineRoute)
+    private (int Tokens, TokenizerRatio Ratio)? EstimateBaselineInputTokens(TranscriptRecord transcript,
+        ResolvedModelRoute baselineRoute)
     {
         if (transcript.InputTokens is not { } observedInputTokens || observedInputTokens <= 0) return null;
 
         var ratio = MeasureTokenizerRatio(promptText: transcript.PromptText, routedModel: transcript.RoutedModel,
             baselineRoute: baselineRoute);
 
-        return (int)Math.Max(1d, Math.Round(observedInputTokens * ratio));
+        return ((int)Math.Max(1d, Math.Round(observedInputTokens * ratio.Value)), ratio);
     }
 
     /// <summary>
@@ -706,22 +724,24 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="routedModel">The model that actually served the turn.</param>
     /// <param name="baselineRoute">The resolved baseline route.</param>
     /// <returns>The ratio, or <c>1</c> when it cannot be measured.</returns>
-    private double MeasureTokenizerRatio(string? promptText, string routedModel, ResolvedModelRoute baselineRoute)
+    private TokenizerRatio MeasureTokenizerRatio(string? promptText, string routedModel,
+        ResolvedModelRoute baselineRoute)
     {
-        if (_tokenCounter is null || string.IsNullOrWhiteSpace(promptText)) return 1d;
-        if (!_routeResolver.TryResolve(modelName: routedModel, route: out var routed)) return 1d;
+        if (_tokenCounter is null || string.IsNullOrWhiteSpace(promptText)) return TokenizerRatio.Assumed;
+        if (!_routeResolver.TryResolve(modelName: routedModel, route: out var routed)) return TokenizerRatio.Assumed;
 
         if (!_tokenCounter.TryCountPromptTokens(text: promptText,
                 key: new ModelKey(ModelName: baselineRoute.ModelName, Provider: baselineRoute.Provider),
-                tokens: out var baselineTokens, source: out _))
-            return 1d;
+                tokens: out var baselineTokens, source: out var baselineSource))
+            return TokenizerRatio.Assumed;
 
         if (!_tokenCounter.TryCountPromptTokens(text: promptText,
                 key: new ModelKey(ModelName: routed.ModelName, Provider: routed.Provider),
-                tokens: out var routedTokens, source: out _))
-            return 1d;
+                tokens: out var routedTokens, source: out var routedSource))
+            return TokenizerRatio.Assumed;
 
-        return routedTokens > 0 ? (double)baselineTokens / routedTokens : 1d;
+        return TokenizerRatio.Measure(baselineTokens: baselineTokens, baselineSource: baselineSource,
+            routedTokens: routedTokens, routedSource: routedSource);
     }
 
     /// <summary>

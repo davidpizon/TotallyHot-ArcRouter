@@ -10,11 +10,13 @@ namespace TotallyHot.ArcRouter.Telemetry.Tokenization;
 /// is the default.
 /// </summary>
 /// <remarks>
-/// Calibration is applied <em>only</em> to <see cref="TokenCountSource.LocalUncalibrated"/> counts. A
+/// Calibration is applied <em>only</em> to <see cref="TokenCountSource.LocalProxy"/> counts. A
 /// factor is learned by comparing the provider's count against <see cref="TiktokenTokenCounter"/>'s, so it
 /// is meaningful only against that same tokenizer; multiplying a
 /// <see cref="TokenCountSource.Heuristic"/> character-count guess by it would compose two unrelated
-/// approximations and dress the result up as the better of the two.
+/// approximations and dress the result up as the better of the two. A
+/// <see cref="TokenCountSource.LocalNative"/> count is left alone for the opposite reason: it is already
+/// the model's own tokenizer and has no bias to correct.
 /// </remarks>
 public sealed class CalibratedTokenCounter : ITokenCounter
 {
@@ -40,7 +42,7 @@ public sealed class CalibratedTokenCounter : ITokenCounter
         if (!_inner.TryCountPromptTokens(text: text, key: key, tokens: out tokens, source: out source))
             return false;
 
-        if (source != TokenCountSource.LocalUncalibrated) return true;
+        if (source != TokenCountSource.LocalProxy) return true;
         if (_calibration is null || !_calibration.TryGetTrustedFactor(key: key, factor: out var factor)) return true;
         if (!double.IsFinite(factor) || factor <= 0d) return true;
 

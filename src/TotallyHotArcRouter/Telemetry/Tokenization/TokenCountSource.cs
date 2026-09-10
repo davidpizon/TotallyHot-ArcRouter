@@ -37,18 +37,32 @@ public enum TokenCountSource
     Heuristic,
 
     /// <summary>
-    /// Counted by a real local tokenizer, but with no calibration factor applied - either because none has
-    /// been learned for this model yet, or because the one on record has too few samples to trust. Correct
-    /// for the OpenAI families whose encoding this actually is, and a systematic under-count for others
-    /// (notably Claude, by roughly 15-20% on prose and more on code).
+    /// Counted with a <em>foreign</em> encoding standing in for this model's real tokenizer, with no
+    /// calibration factor applied - either because none has been learned yet, or because the one on record
+    /// has too few samples to trust. A systematic under-count for Claude (roughly 15-20% on prose, more on
+    /// code) and an unquantified one for Gemini and Mistral.
     /// </summary>
-    LocalUncalibrated,
+    /// <remarks>
+    /// The important consequence is comparative, not absolute: two models that both land here share an
+    /// encoding by accident of fallback rather than by fact, so a ratio computed between them is
+    /// <c>1.0</c> by construction and says nothing about how their real tokenizers differ. That is why
+    /// <see cref="TokenizerRatio"/> refuses to call such a ratio measured.
+    /// </remarks>
+    LocalProxy,
 
     /// <summary>
-    /// Counted by a local tokenizer and scaled by a calibration factor learned from the provider's own
-    /// counting endpoint. The normal steady state for a model the calibration sampler has observed.
+    /// Counted with a foreign encoding, then scaled by a calibration factor learned from the provider's own
+    /// counting endpoint. The normal steady state for a model the calibration sampler has observed, and the
+    /// point at which a ratio against another model becomes meaningful again.
     /// </summary>
     LocalCalibrated,
+
+    /// <summary>
+    /// Counted with the model's <em>own</em> tokenizer - the OpenAI families whose tiktoken encoding this
+    /// genuinely is, rather than a stand-in. Ranks above <see cref="LocalCalibrated"/> because it needs no
+    /// correction: it is the real thing, short only of the provider's own message-framing overhead.
+    /// </summary>
+    LocalNative,
 
     /// <summary>
     /// Counted by the provider itself for this exact text and model. Reserved for the calibration sampler's

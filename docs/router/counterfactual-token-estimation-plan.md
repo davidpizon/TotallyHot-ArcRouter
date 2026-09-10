@@ -208,7 +208,7 @@ repository publishes no LICENSE file, so its code is not safely reusable regardl
 
 ## Deviations from the plan as written (recorded during implementation)
 
-Seven things turned out differently once the code was in front of us; two of them came out of PR review. All are deliberate; none change the
+Eight things turned out differently once the code was in front of us; three came out of PR review. All are deliberate; none change the
 decision recorded in ADR-0009.
 
 1. **No `ITranscriptStore` change was needed for Phase 3.** The plan called for a new
@@ -236,15 +236,29 @@ decision recorded in ADR-0009.
    full billable input) by the two models' tokenizer ratio, measured on the text the row does retain.
    Tokenization still does real work; it just supplies the model-to-model ratio rather than the scale.
 
-5. **Calibration re-checks the in-flight gauge every iteration.** Also from review: the original cycle
+5. **The tokenizer ratio carries its own provenance.** Raised after review: different models genuinely
+   tokenize the same text differently, but the counter only ships two tiktoken encodings, so Claude,
+   Gemini, and Mistral all fall back to `cl100k_base`. A ratio between any two of them is `1.0` *by
+   construction* — and `1.0` is indistinguishable from the correct answer for two models that really do
+   share a tokenizer. Anthropic's own Opus 4.7+ tokenizer runs roughly 1×–1.35× its predecessor, so even
+   a Claude-to-Claude ratio can be materially wrong while looking ordinary.
+
+   `TokenCountSource` now distinguishes `LocalNative` (the model's own tokenizer) from `LocalProxy` (a
+   stand-in), and `TokenizerRatio` calls a ratio *measured* only when both sides are `LocalCalibrated` or
+   better. The value and its provenance are persisted on `taxonomy_comparisons`
+   (`baseline_tokenizer_ratio`, `baseline_tokenizer_ratio_measured`), so a stored savings figure can be
+   audited for whether the two models were actually compared. Calibration remains the mechanism that
+   turns a proxy into something comparable — which is a further reason it is worth enabling.
+
+6. **Calibration re-checks the in-flight gauge every iteration.** Also from review: the original cycle
    checked once before the loop, so traffic arriving mid-cycle still met outbound calls. The hard pause is
    worth nothing if it only holds for the instant the cycle began.
 
-6. **Calibration takes its own credential.** Rather than borrowing a key the router already holds for
+7. **Calibration takes its own credential.** Rather than borrowing a key the router already holds for
    proxying, `TokenizationOptions.ApiKeyEnvVar` names the environment variable holding an ordinary
    inference key. Enabling the feature and naming the credential it may spend are two separate operator
    acts. ADR-0009's consequences section was updated to match.
-7. **A transitive vulnerability had to be pinned out.** `Microsoft.ML.Tokenizers` 2.0.0 pulls
+8. **A transitive vulnerability had to be pinned out.** `Microsoft.ML.Tokenizers` 2.0.0 pulls
    `Microsoft.Bcl.Memory` 9.0.4, which carries GHSA-73j8-2gch-69rq and fails the repo's `NU1903`
    warnings-as-errors audit. Resolved with a direct pin to 10.0.11, the same technique and comment style
    the existing `SQLitePCLRaw.bundle_e_sqlite3` pin uses.

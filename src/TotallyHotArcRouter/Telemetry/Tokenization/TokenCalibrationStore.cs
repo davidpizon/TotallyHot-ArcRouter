@@ -177,7 +177,7 @@ public sealed class TokenCalibrationStore : PriceCatalogRepositoryBase, ITokenCa
             }
             catch (Microsoft.Data.Sqlite.SqliteException ex)
             {
-                // An unreadable table degrades every model to LocalUncalibrated, which is exactly the
+                // An unreadable table degrades every proxied model to LocalProxy, which is exactly the
                 // pre-calibration behavior - correct, just less accurate. Do not fault the caller.
                 _logger?.LogWarning(exception: ex,
                     message: "[TOKEN-CALIBRATION] Could not read stored calibration factors; counting uncalibrated.");

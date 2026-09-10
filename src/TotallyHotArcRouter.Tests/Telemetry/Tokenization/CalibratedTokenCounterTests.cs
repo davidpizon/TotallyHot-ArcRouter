@@ -15,7 +15,7 @@ public class CalibratedTokenCounterTests
     [Fact]
     public void TryCountPromptTokens_TrustedFactor_ScalesAndRelabelsAsCalibrated()
     {
-        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalUncalibrated);
+        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalProxy);
         var counter = new CalibratedTokenCounter(inner: inner, calibration: new StubCalibration(1.20d));
 
         var counted = counter.TryCountPromptTokens(text: "anything", key: Claude, tokens: out var tokens,
@@ -43,25 +43,25 @@ public class CalibratedTokenCounterTests
     [Fact]
     public void TryCountPromptTokens_NoCalibrationSource_PassesThroughUncalibrated()
     {
-        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalUncalibrated);
+        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalProxy);
         var counter = new CalibratedTokenCounter(inner);
 
         counter.TryCountPromptTokens(text: "anything", key: Claude, tokens: out var tokens, source: out var source);
 
         Assert.Equal(expected: 100, actual: tokens);
-        Assert.Equal(expected: TokenCountSource.LocalUncalibrated, actual: source);
+        Assert.Equal(expected: TokenCountSource.LocalProxy, actual: source);
     }
 
     [Fact]
     public void TryCountPromptTokens_UntrustedFactor_PassesThroughUncalibrated()
     {
-        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalUncalibrated);
+        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalProxy);
         var counter = new CalibratedTokenCounter(inner: inner, calibration: new StubCalibration(factor: 1.20d, trusted: false));
 
         counter.TryCountPromptTokens(text: "anything", key: Claude, tokens: out var tokens, source: out var source);
 
         Assert.Equal(expected: 100, actual: tokens);
-        Assert.Equal(expected: TokenCountSource.LocalUncalibrated, actual: source);
+        Assert.Equal(expected: TokenCountSource.LocalProxy, actual: source);
     }
 
     [Theory]
@@ -71,20 +71,20 @@ public class CalibratedTokenCounterTests
     [InlineData(double.PositiveInfinity)]
     public void TryCountPromptTokens_NonsensicalFactor_IsIgnored(double factor)
     {
-        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalUncalibrated);
+        var inner = new StubCounter(tokens: 100, source: TokenCountSource.LocalProxy);
         var counter = new CalibratedTokenCounter(inner: inner, calibration: new StubCalibration(factor));
 
         counter.TryCountPromptTokens(text: "anything", key: Claude, tokens: out var tokens, source: out var source);
 
         Assert.Equal(expected: 100, actual: tokens);
-        Assert.Equal(expected: TokenCountSource.LocalUncalibrated, actual: source);
+        Assert.Equal(expected: TokenCountSource.LocalProxy, actual: source);
     }
 
     [Fact]
     public void TryCountPromptTokens_TinyFactorOnTinyCount_FloorsAtOneNotZero()
     {
         // Text that exists must never calibrate down to "no tokens" - that would read as a free request.
-        var inner = new StubCounter(tokens: 1, source: TokenCountSource.LocalUncalibrated);
+        var inner = new StubCounter(tokens: 1, source: TokenCountSource.LocalProxy);
         var counter = new CalibratedTokenCounter(inner: inner, calibration: new StubCalibration(0.01d));
 
         counter.TryCountPromptTokens(text: "x", key: Claude, tokens: out var tokens, source: out _);

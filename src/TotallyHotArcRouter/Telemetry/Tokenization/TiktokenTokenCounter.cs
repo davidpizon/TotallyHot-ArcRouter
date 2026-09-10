@@ -14,8 +14,9 @@ namespace TotallyHot.ArcRouter.Telemetry.Tokenization;
 /// <para>
 /// <b>The encoding is exact only for the OpenAI families it belongs to.</b> For Claude, Gemini, Mistral,
 /// and local models, a tiktoken encoding is a *proxy* - Anthropic documents that tiktoken under-counts
-/// Claude by roughly 15-20% on prose and considerably more on code. That is why this type reports
-/// <see cref="TokenCountSource.LocalUncalibrated"/> and never claims exactness: correcting the bias is
+/// Claude by roughly 15-20% on prose and considerably more on code. Which case applies is reported rather
+/// than assumed: <see cref="TokenCountSource.LocalNative"/> when the encoding is the model's own,
+/// <see cref="TokenCountSource.LocalProxy"/> when it is standing in. Correcting a proxy's bias is
 /// <see cref="CalibratedTokenCounter"/>'s job, and admitting to it when uncorrected is this one's.
 /// Deliberately counting a non-OpenAI model with a known-biased encoder is the accepted trade-off
 /// recorded in ADR-0009 for keeping the estimator offline-capable.
@@ -40,6 +41,11 @@ public sealed class TiktokenTokenCounter : ITokenCounter
     // canonical form so every spelling of a model ("gpt-4o-2024-08-06", "openai/gpt-4o") lands the same way.
     private static readonly string[] O200KMarkers = ["gpt-4o", "gpt-4.1", "gpt-5", "o1", "o3", "o4"];
 
+    // Models whose real tokenizer *is* a tiktoken encoding, so a count for them is native rather than a
+    // stand-in. Everything else (Claude, Gemini, Mistral, local models) is counted with a foreign encoding
+    // and must say so - that distinction is what lets a caller tell a measured ratio from an assumed one.
+    private static readonly string[] NativeTiktokenMarkers = ["gpt-", "o1", "o3", "o4", "text-embedding"];
+
     private static readonly Lazy<TiktokenTokenizer?> O200K =
         new(() => TryCreate(O200KBaseEncoding), LazyThreadSafetyMode.ExecutionAndPublication);
 
@@ -60,7 +66,7 @@ public sealed class TiktokenTokenCounter : ITokenCounter
         try
         {
             tokens = tokenizer.CountTokens(text);
-            source = TokenCountSource.LocalUncalibrated;
+            source = IsNativeEncoding(key) ? TokenCountSource.LocalNative : TokenCountSource.LocalProxy;
             return true;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -97,6 +103,34 @@ public sealed class TiktokenTokenCounter : ITokenCounter
                 return O200KBaseEncoding;
 
         return Cl100KBaseEncoding;
+    }
+
+    /// <summary>
+    /// Reports whether the encoding chosen for <paramref name="key"/> is that model's <em>own</em>
+    /// tokenizer rather than a stand-in.
+    /// </summary>
+    /// <param name="key">The model and provider being counted for.</param>
+    /// <returns><see langword="true"/> for the OpenAI families whose tiktoken encoding this genuinely is.</returns>
+    /// <remarks>
+    /// This is the distinction that keeps a ratio between two proxied models from being mistaken for a
+    /// measurement. Claude, Gemini, and Mistral all fall back to <see cref="Cl100KBaseEncoding"/>, so a
+    /// ratio between any two of them is <c>1.0</c> by construction - true of the stand-in, and silent about
+    /// their real tokenizers, which genuinely differ (Anthropic's own Opus 4.7+ tokenizer alone runs
+    /// roughly 1x-1.35x its predecessor).
+    /// </remarks>
+    internal static bool IsNativeEncoding(ModelKey key)
+    {
+        if (string.IsNullOrWhiteSpace(key.ModelName)) return false;
+
+        var canonical = ModelNameCanonicalizer
+            .Canonicalize(modelId: key.ModelName, provider: string.IsNullOrWhiteSpace(key.Provider) ? null : key.Provider)
+            .ToLowerInvariant();
+
+        foreach (var marker in NativeTiktokenMarkers)
+            if (canonical.Contains(value: marker, comparisonType: StringComparison.Ordinal))
+                return true;
+
+        return false;
     }
 
     /// <summary>Resolves the cached tokenizer instance for a model, or <see langword="null"/> when none applies.</summary>
