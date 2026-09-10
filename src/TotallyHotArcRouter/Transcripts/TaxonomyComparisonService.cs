@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Telemetry.Tokenization;
 
 namespace TotallyHot.ArcRouter.Transcripts;
 
@@ -80,6 +81,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     private readonly RoutingOptions _routingOptions;
     private readonly TranscriptOptions _transcriptOptions;
     private readonly ITranscriptStore _transcriptStore;
+    private readonly ITokenCounter? _tokenCounter;
     private ClusterModelArtifact? _cachedArtifact;
     private DateTime _cachedArtifactStamp;
 
@@ -112,6 +114,11 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// guarantee (see the class remarks) only exists when the gauge does. Defaults to
     /// <see langword="null"/> so existing direct constructions keep their behavior.
     /// </param>
+    /// <param name="tokenCounter">
+    /// Counts the baseline model's tokens for this turn's captured prompt (ADR-0009), or
+    /// <see langword="null"/> to fall back to the observed per-model average. Defaults to
+    /// <see langword="null"/> so existing direct constructions keep their behavior.
+    /// </param>
     public TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -125,13 +132,15 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<StorageOptions> storageOptions,
         IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup = null,
-        InFlightRequestGauge? inFlightGauge = null)
+        InFlightRequestGauge? inFlightGauge = null,
+        ITokenCounter? tokenCounter = null)
         : this(
             logger: logger, transcriptStore: transcriptStore, comparisonStore: comparisonStore,
             memoryEntryStore: memoryEntryStore, routerMemory: routerMemory, benchmarkDatabase: benchmarkDatabase,
             routeResolver: routeResolver, transcriptOptions: transcriptOptions, routingOptions: routingOptions,
             storageOptions: storageOptions, qualityOptions: qualityOptions, priceLookup: priceLookup,
-            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize)
+            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize,
+            tokenCounter: tokenCounter)
     {
     }
 
@@ -156,6 +165,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="priceLookup">Prices the counterfactual, or <see langword="null"/> when no catalog is configured.</param>
     /// <param name="inFlightGauge">The proxy's in-flight request gauge, or <see langword="null"/> to never pause.</param>
     /// <param name="comparisonBatchSize">The per-fetch batch size the drain loop uses. Must be positive.</param>
+    /// <param name="tokenCounter">
+    /// Counts the baseline model's tokens for a captured prompt, or <see langword="null"/> to fall back to
+    /// the observed per-model average (the pre-ADR-0009 behavior).
+    /// </param>
     internal TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -170,7 +183,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup,
         InFlightRequestGauge? inFlightGauge,
-        int comparisonBatchSize)
+        int comparisonBatchSize,
+        ITokenCounter? tokenCounter = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(comparisonBatchSize);
         ArgumentNullException.ThrowIfNull(logger);
@@ -198,6 +212,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _liveMemoryPrefix = qualityOptions.Value.LiveMemoryPrefix;
         _clusterModelPath = storageOptions.Value.ResolveClusterModelPath();
         _inFlightGauge = inFlightGauge;
+        _tokenCounter = tokenCounter;
         _comparisonBatchSize = comparisonBatchSize;
     }
 
@@ -544,9 +559,29 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="tokenAverages">Per-model observed token averages.</param>
     /// <returns>The estimated baseline cost and net saving, both <see langword="null"/> when no honest estimate exists.</returns>
     /// <remarks>
+    /// <para>
     /// Returns nulls rather than zeros whenever any input is missing - an abstaining baseline, an unpriced
     /// model, a model never yet observed, or an unknown actual cost. A zero here would read as "routing
     /// broke even", which is a measurement, not the absence of one.
+    /// </para>
+    /// <para>
+    /// <b>Input tokens are counted, not averaged</b> (ADR-0009). The prompt the baseline model would have
+    /// received is the one this transcript captured, so it is tokenized directly for that model rather than
+    /// read from a per-model mean. Before this, a 500-token turn and a 150,000-token turn produced the
+    /// identical baseline figure, which is what made the per-turn ROI bars uninformative. The observed
+    /// average remains the fallback for an install with prompt capture switched off.
+    /// </para>
+    /// <para>
+    /// <b>Output tokens remain an estimate</b>, because a model that never ran produced no output to count.
+    /// They stay sourced from the observed average here.
+    /// </para>
+    /// <para>
+    /// The counted figure is priced at the <em>standard</em> input rate, with no cache discount applied.
+    /// That is deliberate rather than an omission: the baseline model never served this session, so it
+    /// would have met a cold prompt cache on this turn. Modelling a warm one would require replaying the
+    /// whole session against the baseline, which is a materially different (and much larger) question than
+    /// the per-turn counterfactual this method answers.
+    /// </para>
     /// </remarks>
     private (decimal? BaselineCost, decimal? NetSavings) EstimateCounterfactual(
         TranscriptRecord transcript,
@@ -565,10 +600,37 @@ public sealed class TaxonomyComparisonService : BackgroundService
             : _priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider));
         if (price is null) return (null, null);
 
+        var promptTokens = CountBaselinePromptTokens(promptText: transcript.PromptText, route: route)
+                           ?? (int)Math.Round(average.InputTokens);
+
         var baselineCost = price.EstimateCost(
-            promptTokens: (int)Math.Round(average.InputTokens),
+            promptTokens: promptTokens,
             completionTokens: (int)Math.Round(average.OutputTokens));
         return (baselineCost, baselineCost - actualCost);
+    }
+
+    /// <summary>
+    /// Counts what <paramref name="route"/>'s model would have charged in input tokens for this turn's
+    /// captured prompt.
+    /// </summary>
+    /// <param name="promptText">The captured prompt, or <see langword="null"/> when capture is disabled.</param>
+    /// <param name="route">The resolved baseline route, supplying the model and provider to count for.</param>
+    /// <returns>
+    /// The per-request token count, or <see langword="null"/> when there is no prompt to count, no counter
+    /// configured, or no counter that can serve this model - in which case the caller falls back to the
+    /// observed average rather than fabricating a number.
+    /// </returns>
+    private int? CountBaselinePromptTokens(string? promptText, ResolvedModelRoute route)
+    {
+        if (_tokenCounter is null || string.IsNullOrWhiteSpace(promptText)) return null;
+
+        return _tokenCounter.TryCountPromptTokens(
+            text: promptText,
+            key: new ModelKey(ModelName: route.ModelName, Provider: route.Provider),
+            tokens: out var tokens,
+            source: out _)
+            ? tokens
+            : null;
     }
 
     /// <summary>

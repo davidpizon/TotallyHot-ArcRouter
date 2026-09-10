@@ -76,6 +76,19 @@
          local ONNX-hosted small instruct model (PLAN.md Phase L) - owns exactly the generation-loop
          complexity the plain Microsoft.ML.OnnxRuntime session above would otherwise require hand-rolling. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.15.2" />
+    <!-- Local tiktoken encodings for the counterfactual token estimator (ADR-0009). Encoding data is
+         embedded in the .Data.* packages, so unlike the ONNX artifacts there is no first-run download.
+         cl100k_base covers the GPT-4/3.5 family, o200k_base the GPT-4o family; Claude models are counted
+         locally through these and corrected by the calibration factor, never assumed exact. -->
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="2.0.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="2.0.0" />
+    <!-- Pin Microsoft.Bcl.Memory above the 9.0.4 that Microsoft.ML.Tokenizers 2.0.0 pulls transitively:
+         <= 9.0.13 and <= 10.0.3 carry GHSA-73j8-2gch-69rq (.NET denial of service), patched in 9.0.14 /
+         10.0.4. Same technique - and same reason - as the SQLitePCLRaw pin below: a direct reference wins
+         over the transitive one and clears the NuGet audit (NU1903). 10.0.11 matches the version every
+         other Microsoft.* package here is pinned to. -->
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.11" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <!-- Pin the native SQLite bundle above the version Microsoft.Data.Sqlite pulls transitively:

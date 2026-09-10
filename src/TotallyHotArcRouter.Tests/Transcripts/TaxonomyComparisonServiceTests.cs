@@ -11,6 +11,7 @@ using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
+using TotallyHot.ArcRouter.Telemetry.Tokenization;
 
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
 
@@ -153,6 +154,64 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Null(row.EstimatedNetSavingsUsd);
         Assert.Null(row.BaselineEstimatedCostUsd);
+    }
+
+    [Fact]
+    public async Task RunCycle_WithATokenCounter_PricesLargeAndSmallPromptsDifferently()
+    {
+        // ADR-0009's headline regression. The baseline model is identical and both turns cost the router
+        // the same; only the prompt size differs. Before the counter, both produced the *identical*
+        // baseline cost, because the estimate came from one all-time per-model average - which is exactly
+        // what made the per-turn ROI bars uninformative.
+        var small = await BaselineCostForPromptAsync(prompt: "hi", tokenCounter: new TokenCounterRegistry());
+        var large = await BaselineCostForPromptAsync(
+            prompt: string.Join(separator: " ", values: Enumerable.Repeat(element: "a much longer prompt", count: 500)),
+            tokenCounter: new TokenCounterRegistry());
+
+        Assert.NotNull(small);
+        Assert.NotNull(large);
+        Assert.True(condition: large > small * 10,
+            userMessage: $"expected the larger prompt to cost far more; got small={small} large={large}");
+    }
+
+    [Fact]
+    public async Task RunCycle_WithoutATokenCounter_StillPricesFromTheObservedAverage()
+    {
+        // The fallback path: an install with prompt capture off, or no counter wired, keeps the previous
+        // behavior rather than losing the estimate entirely - so prompt size makes no difference here.
+        var small = await BaselineCostForPromptAsync(prompt: "hi", tokenCounter: null);
+        var large = await BaselineCostForPromptAsync(
+            prompt: string.Join(separator: " ", values: Enumerable.Repeat(element: "a much longer prompt", count: 500)),
+            tokenCounter: null);
+
+        Assert.NotNull(small);
+        Assert.Equal(expected: small, actual: large);
+    }
+
+    /// <summary>
+    /// Runs one comparison cycle over a single routed turn carrying <paramref name="prompt"/> and returns
+    /// the baseline cost the counterfactual estimated for it.
+    /// </summary>
+    /// <param name="prompt">The captured prompt text for the routed turn.</param>
+    /// <param name="tokenCounter">The counter to wire, or <see langword="null"/> for the average fallback.</param>
+    /// <returns>The estimated baseline cost, or <see langword="null"/> when none was estimable.</returns>
+    private async Task<decimal?> BaselineCostForPromptAsync(string prompt, ITokenCounter? tokenCounter)
+    {
+        var harness = await BuildHarnessAsync(
+        [
+            // Seeds an observed token average for model-b, which the output half of the estimate still needs.
+            new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, DimBestModel: "model-b",
+                PromptText: prompt)
+        ], tokenCounter: tokenCounter);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        // Both scenarios in a test share this class instance's database, so rows accumulate across calls;
+        // the newest matching row (LoadSinceAsync returns oldest first) is this invocation's.
+        var rows = await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        return rows.Last(r => r.RoutedModel == "model-a").BaselineEstimatedCostUsd;
     }
 
     [Fact]
@@ -398,7 +457,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         bool transcriptsEnabled = true,
         InFlightRequestGauge? inFlightGauge = null,
         int batchSize = 200,
-        Func<InFlightRequestGauge, ITranscriptStore, ITranscriptStore>? wrapTranscriptStore = null)
+        Func<InFlightRequestGauge, ITranscriptStore, ITranscriptStore>? wrapTranscriptStore = null,
+        ITokenCounter? tokenCounter = null)
     {
         var storageOptions = Options.Create(new StorageOptions
         {
@@ -444,7 +504,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     Difficulty: "medium",
                     Language: "python",
                     false,
-                    PromptText: "write a function",
+                    PromptText: sample.PromptText,
                     ResponseText: "def f(): ...",
                     null,
                     Cost: sample.Cost,
@@ -497,7 +557,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             qualityOptions: Options.Create(new QualityOptions { LiveMemoryPrefix = Prefix }),
             priceLookup: new StubPriceLookup(),
             inFlightGauge: inFlightGauge,
-            comparisonBatchSize: batchSize);
+            comparisonBatchSize: batchSize,
+            tokenCounter: tokenCounter);
 
         return new Harness(Service: service, ComparisonStore: comparisonStore, Gauge: inFlightGauge);
     }
@@ -528,7 +589,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         bool IsExploratory = false,
         decimal? Cost = 0.05m,
         string? DimBestModel = "model-b",
-        string? Dimension = "code_generation");
+        string? Dimension = "code_generation",
+        string PromptText = "write a function");
 
     /// <summary>Everything one test needs to drive a cycle and inspect its output.</summary>
     private sealed record Harness(

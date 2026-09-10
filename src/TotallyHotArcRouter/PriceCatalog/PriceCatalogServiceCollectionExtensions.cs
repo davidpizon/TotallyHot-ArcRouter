@@ -4,6 +4,9 @@ using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Telemetry.Tokenization;
+using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
@@ -153,6 +156,27 @@ internal static class PriceCatalogServiceCollectionExtensions
                     : null;
             },
             logger: sp.GetRequiredService<ILogger<AnthropicUsageReportService>>()));
+        // Counterfactual token counting and its opt-in calibration loop (ADR-0009). Counting itself is
+        // local, offline, and always available - it is the ITokenCounter every estimator resolves. The
+        // calibration half is what reaches the network, and BuildTokenCountClient returns null (leaving the
+        // hosted service permanently inert) unless an operator both enables it and names the environment
+        // variable holding an ordinary inference key. Deliberately not the reconciliation Admin key above:
+        // count_tokens neither needs nor accepts it.
+        services.AddOptions<TokenizationOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(TokenizationOptions.SectionName).Bind(options));
+        services.AddSingleton<TokenCalibrationStore>();
+        services.AddSingleton<ITokenCalibrationSource>(sp => sp.GetRequiredService<TokenCalibrationStore>());
+        services.AddSingleton<ITokenCounter>(sp =>
+            new TokenCounterRegistry(sp.GetRequiredService<ITokenCalibrationSource>()));
+        services.AddHostedService(sp => new TokenCalibrationService(
+            logger: sp.GetRequiredService<ILogger<TokenCalibrationService>>(),
+            transcriptStore: sp.GetRequiredService<ITranscriptStore>(),
+            store: sp.GetRequiredService<TokenCalibrationStore>(),
+            routeResolver: sp.GetRequiredService<IModelRouteResolver>(),
+            options: sp.GetRequiredService<IOptionsMonitor<TokenizationOptions>>(),
+            countClient: BuildTokenCountClient(sp),
+            inFlightGauge: sp.GetService<InFlightRequestGauge>()));
         // Per-(provider, model) tool-call dialect capabilities (docs/router/tool-call-normalization.md
         // Phase 1). Shares agent_telemetry.db with the price catalog, so it has the same
         // empty-until-schema-ready lifecycle as the two stores above: StartupHealthCheckHostedService
@@ -205,6 +229,32 @@ internal static class PriceCatalogServiceCollectionExtensions
                 logger: sp.GetService<ILogger<AnthropicCostReconciler>>()));
 
         return reconcilers;
+    }
+
+    /// <summary>
+    /// Builds the Anthropic <c>count_tokens</c> client for the calibration sampler, or
+    /// <see langword="null"/> when calibration is switched off or no key is configured - in which case
+    /// <see cref="TokenCalibrationService"/> stays inert and opens no socket.
+    /// </summary>
+    /// <param name="sp">The provider to resolve configuration and transport from.</param>
+    /// <returns>The client, or <see langword="null"/> when calibration must not run.</returns>
+    /// <remarks>
+    /// Both conditions are required, and neither has a permissive default: ADR-0009 adds an egress
+    /// destination to a process that proxies other people's prompts, so enabling the feature and naming
+    /// the credential it may spend are two separate, deliberate operator acts.
+    /// </remarks>
+    private static AnthropicTokenCountClient? BuildTokenCountClient(IServiceProvider sp)
+    {
+        var options = sp.GetRequiredService<IOptions<TokenizationOptions>>().Value;
+        if (!options.CalibrationEnabled || string.IsNullOrWhiteSpace(options.ApiKeyEnvVar)) return null;
+
+        var key = sp.GetRequiredService<IEnvironmentVariableProvider>().GetVariable(options.ApiKeyEnvVar);
+        if (string.IsNullOrWhiteSpace(key)) return null;
+
+        return new AnthropicTokenCountClient(
+            httpClient: sp.GetRequiredService<HttpClient>(),
+            apiKey: key,
+            logger: sp.GetService<ILogger<AnthropicTokenCountClient>>());
     }
 
     /// <summary>
