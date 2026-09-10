@@ -157,52 +157,73 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RunCycle_WithATokenCounter_PricesLargeAndSmallPromptsDifferently()
+    public async Task RunCycle_PricesLargeAndSmallTurnsDifferently()
     {
-        // ADR-0009's headline regression. The baseline model is identical and both turns cost the router
-        // the same; only the prompt size differs. Before the counter, both produced the *identical*
-        // baseline cost, because the estimate came from one all-time per-model average - which is exactly
-        // what made the per-turn ROI bars uninformative.
-        var small = await BaselineCostForPromptAsync(prompt: "hi", tokenCounter: new TokenCounterRegistry());
-        var large = await BaselineCostForPromptAsync(
-            prompt: string.Join(separator: " ", values: Enumerable.Repeat(element: "a much longer prompt", count: 500)),
-            tokenCounter: new TokenCounterRegistry());
+        // ADR-0009's headline regression, stated the way the ADR states it: two turns with the same
+        // baseline model, differing only in how much input they actually consumed. Before this change both
+        // produced the *identical* baseline cost, because the estimate came from one all-time per-model
+        // average - which is exactly what made the per-turn ROI bars uninformative.
+        var small = await BaselineCostForTurnAsync(inputTokens: 500, tokenCounter: new TokenCounterRegistry());
+        var large = await BaselineCostForTurnAsync(inputTokens: 150_000, tokenCounter: new TokenCounterRegistry());
 
-        Assert.NotNull(small);
-        Assert.NotNull(large);
-        Assert.True(condition: large > small * 10,
-            userMessage: $"expected the larger prompt to cost far more; got small={small} large={large}");
+        // model-b is priced at $100/MTok both ways and averages 50 output tokens in this fixture, so the
+        // exact figures are pinned: the input half now tracks the turn while the output half does not.
+        Assert.Equal(expected: 0.055m, actual: small);   // 500/1e6*100 + 50/1e6*100
+        Assert.Equal(expected: 15.005m, actual: large);  // 150_000/1e6*100 + 50/1e6*100
     }
 
     [Fact]
-    public async Task RunCycle_WithoutATokenCounter_StillPricesFromTheObservedAverage()
+    public async Task RunCycle_ScalesTheBaselineFromTheTurnsOwnObservedInput_NotJustItsPromptText()
     {
-        // The fallback path: an install with prompt capture off, or no counter wired, keeps the previous
-        // behavior rather than losing the estimate entirely - so prompt size makes no difference here.
-        var small = await BaselineCostForPromptAsync(prompt: "hi", tokenCounter: null);
-        var large = await BaselineCostForPromptAsync(
-            prompt: string.Join(separator: " ", values: Enumerable.Repeat(element: "a much longer prompt", count: 500)),
-            tokenCounter: null);
+        // Guards the fix for the review finding that TranscriptRecord.PromptText is only the newest user
+        // message: two turns carrying the *same* short prompt text but very different real input usage must
+        // still price differently, or the estimate is being taken from the text fragment again.
+        var counter = new TokenCounterRegistry();
+        var small = await BaselineCostForTurnAsync(inputTokens: 1_000, tokenCounter: counter, prompt: "same text");
+        var large = await BaselineCostForTurnAsync(inputTokens: 100_000, tokenCounter: counter, prompt: "same text");
 
         Assert.NotNull(small);
-        Assert.Equal(expected: small, actual: large);
+        Assert.NotNull(large);
+        Assert.True(condition: large > small * 50,
+            userMessage: $"expected observed usage to drive the baseline; got small={small} large={large}");
+    }
+
+    [Fact]
+    public async Task RunCycle_TurnWithNoRecordedUsage_StillPricesFromTheObservedAverage()
+    {
+        // The fallback path: a turn the provider reported no usage for keeps the previous behavior rather
+        // than losing the estimate entirely.
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
+                InputTokens: 0)
+        ], tokenCounter: new TokenCounterRegistry());
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var rows = await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(rows.Last(r => r.RoutedModel == "model-a").BaselineEstimatedCostUsd);
     }
 
     /// <summary>
-    /// Runs one comparison cycle over a single routed turn carrying <paramref name="prompt"/> and returns
-    /// the baseline cost the counterfactual estimated for it.
+    /// Runs one comparison cycle over a single routed turn that consumed <paramref name="inputTokens"/> of
+    /// input, and returns the baseline cost the counterfactual estimated for it.
     /// </summary>
-    /// <param name="prompt">The captured prompt text for the routed turn.</param>
+    /// <param name="inputTokens">The turn's observed input token usage.</param>
     /// <param name="tokenCounter">The counter to wire, or <see langword="null"/> for the average fallback.</param>
+    /// <param name="prompt">The captured prompt text for the routed turn.</param>
     /// <returns>The estimated baseline cost, or <see langword="null"/> when none was estimable.</returns>
-    private async Task<decimal?> BaselineCostForPromptAsync(string prompt, ITokenCounter? tokenCounter)
+    private async Task<decimal?> BaselineCostForTurnAsync(int inputTokens, ITokenCounter? tokenCounter,
+        string prompt = "write a function")
     {
         var harness = await BuildHarnessAsync(
         [
             // Seeds an observed token average for model-b, which the output half of the estimate still needs.
             new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
             new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
-                PromptText: prompt)
+                PromptText: prompt, InputTokens: inputTokens)
         ], tokenCounter: tokenCounter);
 
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
@@ -562,7 +583,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     Cost: sample.Cost,
                     IsExploratory: sample.IsExploratory,
                     1.0,
-                    100,
+                    sample.InputTokens,
                     50,
                     null,
                     UntrainedBaselineModel: sample.UntrainedBaselineModel,
@@ -670,7 +691,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         string? UntrainedBaselineModel = "model-b",
         string? Dimension = "code_generation",
         double? UntrainedBaselinePredictedScore = null,
-        string PromptText = "write a function");
+        string PromptText = "write a function",
+        int InputTokens = 100);
 
     /// <summary>One row of a fixture's synced frozen probing-split prior.</summary>
     private sealed record PriorRow(string Dimension, string Model, double Score);

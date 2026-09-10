@@ -62,9 +62,14 @@ it is not.
 
 Two supporting decisions fall out of the same reasoning:
 
-1. **The estimator runs off the hot path.** `request_transcripts` already persists `prompt_text`,
-   `dimension`, and `input_tokens`, and `TaxonomyComparisonService` already drains in the background
+1. **The estimator runs off the hot path.** `request_transcripts` already persists `input_tokens`,
+   `dimension`, and `prompt_text`, and `TaxonomyComparisonService` already drains in the background
    under the `InFlightRequestGauge` hard pause. Counting therefore costs the proxy path nothing.
+   The per-request figure is anchored on the turn's own **observed** `input_tokens` — the provider's count
+   of the full billable input — scaled by the two models' tokenizer ratio. It is deliberately *not* taken
+   from `prompt_text`, which holds only the newest user message and would omit history, the system prompt,
+   tool definitions, and tool results; pricing that fragment as the whole input would bias every baseline
+   low and so overstate routing savings.
 2. **Counterfactual *output* tokens stay estimated, not counted, and are conditioned on
    `(dimension × prompt-size bucket)`.** A model that never ran produced no output, so its output length
    is unknowable in principle. Conditioning on prompt-size bucket recovers most of the per-request
@@ -75,8 +80,11 @@ Two supporting decisions fall out of the same reasoning:
 
 - Good, because the ROI bars become genuinely per-request on the input dimension, which is the larger
   and more variable half of most turns' cost.
-- Good, because cache-read and cache-creation tokens finally reach the baseline figure through the
-  cache-aware `EstimateCost(UsageInfo, out bool)` overload, removing a systematic under-estimate.
+- Neutral, because the baseline is priced at the **standard input rate with no cache discount**. This
+  was revised during implementation: an earlier draft of this ADR proposed carrying the actual turn's
+  cache tokens into the baseline, which would have been wrong — the baseline model never served this
+  session, so it would have met a cold prompt cache on this turn. Modelling a warm one requires replaying
+  the whole session against the baseline, a materially larger question left out of scope.
 - Good, because the CodeRouterBench prior gives never-routed baseline models an estimate for the first
   time, closing the cold-start hole.
 - Bad, because a second outbound egress destination (`api.anthropic.com/v1/messages/count_tokens`) now

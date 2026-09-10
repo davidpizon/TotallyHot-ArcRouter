@@ -150,6 +150,17 @@ public sealed class TokenCalibrationService : BackgroundService
         {
             if (recorded >= options.MaxSamplesPerCycle) break;
             if (cancellationToken.IsCancellationRequested) break;
+
+            // Re-checked every iteration, not just once before the loop: a cycle can start while idle and
+            // still be running when traffic arrives, and the hard pause this service documents is worth
+            // nothing if it only holds for the instant the cycle began.
+            if (_inFlightGauge is { Count: > 0 })
+            {
+                _logger.LogDebug("[TOKEN-CALIBRATION] Requests arrived mid-cycle; stopping after {SampleCount} samples.",
+                    recorded);
+                break;
+            }
+
             if (string.IsNullOrWhiteSpace(row.PromptText)) continue;
             if (!TryResolveCountableModel(row.RoutedModel, out var key)) continue;
 

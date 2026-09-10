@@ -605,11 +605,12 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// broke even", which is a measurement, not the absence of one.
     /// </para>
     /// <para>
-    /// <b>Input tokens are counted, not averaged</b> (ADR-0009). The prompt the baseline model would have
-    /// received is the one this transcript captured, so it is tokenized directly for that model rather than
-    /// read from a per-model mean. Before this, a 500-token turn and a 150,000-token turn produced the
-    /// identical baseline figure, which is what made the per-turn ROI bars uninformative. The observed
-    /// average remains the fallback for an install with prompt capture switched off.
+    /// <b>Input tokens are per-request, not averaged</b> (ADR-0009). The baseline model would have received
+    /// the same request, so this turn's own observed input usage sets the scale - see
+    /// <see cref="EstimateBaselineInputTokens"/> for why that is the anchor rather than the captured prompt
+    /// text. Before this, a 500-token turn and a 150,000-token turn produced the identical baseline figure,
+    /// which is what made the per-turn ROI bars uninformative. The observed average remains the fallback
+    /// for a turn that recorded no usage at all.
     /// </para>
     /// <para>
     /// <b>Output tokens remain an estimate</b>, because a model that never ran produced no output to count.
@@ -640,10 +641,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
             : _priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider));
         if (price is null) return (null, null, null);
 
-        // Counted from this turn's own prompt where possible (ADR-0009), falling back to the observed mean.
-        // The same figure feeds the frozen ingredients below: they exist to record what actually produced
-        // this cost, so recording the average here while pricing the counted value would defeat them.
-        var inputTokens = CountBaselinePromptTokens(promptText: transcript.PromptText, route: route)
+        // Per-request rather than a global mean (ADR-0009), falling back to the observed mean when this
+        // turn recorded no usage. The same figure feeds the frozen ingredients below: they exist to record
+        // what actually produced this cost, so recording the average here would defeat them.
+        var inputTokens = EstimateBaselineInputTokens(transcript: transcript, baselineRoute: route)
                           ?? (int)Math.Round(average.InputTokens);
         var roundedOutputTokens = Math.Round(average.OutputTokens);
 
@@ -659,27 +660,68 @@ public sealed class TaxonomyComparisonService : BackgroundService
     }
 
     /// <summary>
-    /// Counts what <paramref name="route"/>'s model would have charged in input tokens for this turn's
-    /// captured prompt.
+    /// Estimates the input tokens <paramref name="baselineRoute"/>'s model would have been billed for this
+    /// exact turn.
     /// </summary>
-    /// <param name="promptText">The captured prompt, or <see langword="null"/> when capture is disabled.</param>
-    /// <param name="route">The resolved baseline route, supplying the model and provider to count for.</param>
+    /// <param name="transcript">The row being compared, supplying the observed usage and captured text.</param>
+    /// <param name="baselineRoute">The resolved baseline route.</param>
     /// <returns>
-    /// The per-request token count, or <see langword="null"/> when there is no prompt to count, no counter
-    /// configured, or no counter that can serve this model - in which case the caller falls back to the
-    /// observed average rather than fabricating a number.
+    /// The per-request estimate, or <see langword="null"/> when this turn recorded no input usage - in
+    /// which case the caller falls back to the observed average rather than fabricating a number.
     /// </returns>
-    private int? CountBaselinePromptTokens(string? promptText, ResolvedModelRoute route)
+    /// <remarks>
+    /// <para>
+    /// <b>Anchored on the turn's own observed usage, not on captured text.</b> The baseline model would
+    /// have received the <em>same</em> request, so <see cref="TranscriptRecord.InputTokens"/> - the
+    /// provider's own count of the full billable input - is the correct scale. It is deliberately not
+    /// <see cref="TranscriptRecord.PromptText"/>: that field is only the newest user message
+    /// (<see cref="RequestTextExtractor.ExtractNewestUserMessage"/>), so pricing it as the whole input
+    /// would omit conversation history, the system prompt, tool definitions, and tool results. On the
+    /// agentic traffic this router proxies that is not a rounding error - it is most of the request - and
+    /// it would bias every baseline low, which systematically <em>overstates</em> routing savings.
+    /// </para>
+    /// <para>
+    /// The only thing the two models genuinely differ on for an identical request is their tokenizer, so
+    /// the observed count is scaled by the ratio between them, measured on the one piece of text this row
+    /// retains. When that ratio cannot be measured - no captured text, no counter, or a counter that
+    /// cannot serve one of the two models - the ratio is 1, which is exactly right for two models sharing
+    /// an encoding and a bounded error otherwise.
+    /// </para>
+    /// </remarks>
+    private int? EstimateBaselineInputTokens(TranscriptRecord transcript, ResolvedModelRoute baselineRoute)
     {
-        if (_tokenCounter is null || string.IsNullOrWhiteSpace(promptText)) return null;
+        if (transcript.InputTokens is not { } observedInputTokens || observedInputTokens <= 0) return null;
 
-        return _tokenCounter.TryCountPromptTokens(
-            text: promptText,
-            key: new ModelKey(ModelName: route.ModelName, Provider: route.Provider),
-            tokens: out var tokens,
-            source: out _)
-            ? tokens
-            : null;
+        var ratio = MeasureTokenizerRatio(promptText: transcript.PromptText, routedModel: transcript.RoutedModel,
+            baselineRoute: baselineRoute);
+
+        return (int)Math.Max(1d, Math.Round(observedInputTokens * ratio));
+    }
+
+    /// <summary>
+    /// Measures how many tokens the baseline model spends per token the routed model spent, by counting the
+    /// same text under both models' encodings.
+    /// </summary>
+    /// <param name="promptText">The captured text to measure on, or <see langword="null"/> when none was kept.</param>
+    /// <param name="routedModel">The model that actually served the turn.</param>
+    /// <param name="baselineRoute">The resolved baseline route.</param>
+    /// <returns>The ratio, or <c>1</c> when it cannot be measured.</returns>
+    private double MeasureTokenizerRatio(string? promptText, string routedModel, ResolvedModelRoute baselineRoute)
+    {
+        if (_tokenCounter is null || string.IsNullOrWhiteSpace(promptText)) return 1d;
+        if (!_routeResolver.TryResolve(modelName: routedModel, route: out var routed)) return 1d;
+
+        if (!_tokenCounter.TryCountPromptTokens(text: promptText,
+                key: new ModelKey(ModelName: baselineRoute.ModelName, Provider: baselineRoute.Provider),
+                tokens: out var baselineTokens, source: out _))
+            return 1d;
+
+        if (!_tokenCounter.TryCountPromptTokens(text: promptText,
+                key: new ModelKey(ModelName: routed.ModelName, Provider: routed.Provider),
+                tokens: out var routedTokens, source: out _))
+            return 1d;
+
+        return routedTokens > 0 ? (double)baselineTokens / routedTokens : 1d;
     }
 
     /// <summary>

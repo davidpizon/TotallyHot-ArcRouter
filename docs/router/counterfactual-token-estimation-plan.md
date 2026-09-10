@@ -125,13 +125,16 @@ The phase where the ROI number actually changes. Fixes defects 1 and 2.
 - Rewrite `EstimateCounterfactual` to count the **baseline model's own** tokenization of this
   transcript's prompt, replacing the global average on the input side.
 - Price through `ModelPrice.EstimateCost(UsageInfo, out bool usedCacheRateFallback)` — the cache-aware
-  overload — carrying the actual turn's `CacheReadTokens` and `CacheCreationTokens` through, since the
-  same prompt would have hit the same cache breakpoints. This alone fixes defect 2.
-- When no counter can serve the baseline model, return `(null, null)` exactly as today.
+  overload. **Superseded during implementation** — see deviation 3: the baseline model never served this
+  session, so it would have met a *cold* prompt cache, and the standard input rate is the correct
+  per-turn counterfactual. Cache usage is deliberately never passed to the baseline.
+- When the turn recorded no input usage at all, fall back to the observed average rather than returning
+  nothing.
 
-**Tests:** two transcripts with the same baseline model and prompts differing ~100× now produce
-materially different baselines — **write this test first and observe it fail**; cache tokens reach the
-priced figure; unknown baseline model still yields `null`; `usedCacheRateFallback` degrades confidence.
+**Tests:** two turns with the same baseline model whose observed input usage differs ~100× now produce
+materially different baselines; two turns with *identical* prompt text but different observed usage
+still price differently (guarding against re-anchoring on the text fragment); a turn with no recorded
+usage still prices from the average; unknown baseline model still yields `null`.
 
 ## Phase 4 — Conditioned output estimator
 
@@ -146,9 +149,12 @@ no output — but a far better conditioned one.
 - Widen the SQL to `GROUP BY routed_model, dimension, <bucket expression>` and add a recency window.
 - **Back-off ladder**, each rung degrading reported confidence:
 
-  ```
-  (model, dimension, bucket) → (model, dimension) → (model)
-    → CodeRouterBench prior (DimensionModelScoreMatrix / LoadPriorMatrix) → null
+  ```mermaid
+  flowchart LR
+      A["(model, dimension, bucket)"] -->|thin or absent| B["(model, dimension)"]
+      B -->|thin or absent| C["(model)"]
+      C -->|never routed to| D["CodeRouterBench prior<br/>DimensionModelScoreMatrix / LoadPriorMatrix"]
+      D -->|corpus not synced| E["null — no estimate"]
   ```
 
   The CodeRouterBench rung is the cold-start fix for defect 3.
@@ -202,7 +208,7 @@ repository publishes no LICENSE file, so its code is not safely reusable regardl
 
 ## Deviations from the plan as written (recorded during implementation)
 
-Five things turned out differently once the code was in front of us. All are deliberate; none change the
+Seven things turned out differently once the code was in front of us; two of them came out of PR review. All are deliberate; none change the
 decision recorded in ADR-0009.
 
 1. **No `ITranscriptStore` change was needed for Phase 3.** The plan called for a new
@@ -221,24 +227,41 @@ decision recorded in ADR-0009.
    `usage_ledger`, not `request_transcripts`, so they were never reachable from here anyway.) Modelling a
    warm baseline cache would mean replaying the whole session against the baseline — a materially larger
    question, deliberately not in scope. Documented in the method's own `<remarks>`.
-4. **Calibration takes its own credential.** Rather than borrowing a key the router already holds for
+4. **The per-request figure is anchored on observed usage, not on the captured prompt text.** Raised in
+   PR review: `TranscriptRecord.PromptText` holds only the newest user message
+   (`RequestTextExtractor.ExtractNewestUserMessage`), so pricing it as the whole input would omit
+   conversation history, the system prompt, tool definitions, and tool results — most of a request on the
+   agentic traffic this router proxies. That would bias every baseline low and so *overstate* routing
+   savings. The estimator now scales the turn's own observed `input_tokens` (the provider's count of the
+   full billable input) by the two models' tokenizer ratio, measured on the text the row does retain.
+   Tokenization still does real work; it just supplies the model-to-model ratio rather than the scale.
+
+5. **Calibration re-checks the in-flight gauge every iteration.** Also from review: the original cycle
+   checked once before the loop, so traffic arriving mid-cycle still met outbound calls. The hard pause is
+   worth nothing if it only holds for the instant the cycle began.
+
+6. **Calibration takes its own credential.** Rather than borrowing a key the router already holds for
    proxying, `TokenizationOptions.ApiKeyEnvVar` names the environment variable holding an ordinary
    inference key. Enabling the feature and naming the credential it may spend are two separate operator
    acts. ADR-0009's consequences section was updated to match.
-5. **A transitive vulnerability had to be pinned out.** `Microsoft.ML.Tokenizers` 2.0.0 pulls
+7. **A transitive vulnerability had to be pinned out.** `Microsoft.ML.Tokenizers` 2.0.0 pulls
    `Microsoft.Bcl.Memory` 9.0.4, which carries GHSA-73j8-2gch-69rq and fails the repo's `NU1903`
    warnings-as-errors audit. Resolved with a direct pin to 10.0.11, the same technique and comment style
    the existing `SQLitePCLRaw.bundle_e_sqlite3` pin uses.
 
 ### What Phase 3 actually changed, measured
 
-The acceptance test (`RunCycle_WithATokenCounter_PricesLargeAndSmallPromptsDifferently`) drives two turns
-that are identical except for prompt size, against the same baseline model:
+Two turns against the same baseline model, differing only in how much input they actually consumed
+(`model-b` priced at $100/MTok both ways, averaging 50 output tokens in the fixture):
 
-| | small prompt | large prompt |
+| | 500-token turn | 150,000-token turn |
 |---|---|---|
-| **Before** (observed average) | `$0.015` | `$0.015` |
-| **After** (counted per request) | `$0.0051` | `$0.205` |
+| **Before** (one global average) | `$0.015` | `$0.015` |
+| **After** (per-request) | `$0.055` | `$15.005` |
+
+Both rows are pinned by exact assertions in `RunCycle_PricesLargeAndSmallTurnsDifferently`. The residual
+`$0.005` in each "after" figure is the output half, which stays an average until Phase 4 — visible here
+as the part that does *not* move with the turn.
 
 ### Phase completion evidence (Phases 0-3)
 
