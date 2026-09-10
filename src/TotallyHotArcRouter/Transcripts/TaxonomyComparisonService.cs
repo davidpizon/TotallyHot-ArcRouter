@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Models;
@@ -15,7 +14,8 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// Background service implementing docs/router/self-organizing-classification-plan.md Phase T4's baseline
 /// comparison: for every scored, embedded request, it scores the frozen nine-dimension taxonomy and the
 /// learned cluster taxonomy against the same observation and records both, alongside an estimated
-/// token-cost saving versus what <c>dim_best</c> alone would have chosen.
+/// token-cost saving versus what an untrained router - one that has never read live memory - would have
+/// chosen (docs/router/routing-roi-regret-plan.md's frozen-baseline correction).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -49,11 +49,14 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// and a batch that makes no progress breaks the loop, so the drain provably terminates.
 /// </para>
 /// <para>
-/// <b>Heavy inputs are cached across cycles.</b> The memory-entry snapshot, cluster artifact,
-/// cluster ledger, and probing prior are rebuilt only when their cheap change stamps (max entry id,
-/// artifact/corpus file write times) move, not on every non-empty cycle. Within one cycle everything is
-/// loaded once - a row compared late in a long drain scores against the cycle-start snapshot, consistent
-/// with the per-cycle semantics this service always had.
+/// <b>Heavy inputs are cached across cycles.</b> The memory-entry snapshot and cluster artifact/ledger are
+/// rebuilt only when their cheap change stamps (max entry id, artifact file write time) move, not on every
+/// non-empty cycle. The probing prior is cached the same way, but in <see cref="ProbingPriorMatrixCache"/> -
+/// a shared cache also used by <see cref="Router.Orchestrator.DimBestVoter"/> and
+/// <see cref="Router.UntrainedBaselineSelector"/>, so the underlying full-table scan runs at most once per
+/// corpus sync across all three readers rather than once per reader. Within one cycle everything is loaded
+/// once - a row compared late in a long drain scores against the cycle-start snapshot, consistent with the
+/// per-cycle semantics this service always had.
 /// </para>
 /// </remarks>
 public sealed class TaxonomyComparisonService : BackgroundService
@@ -65,7 +68,6 @@ public sealed class TaxonomyComparisonService : BackgroundService
     private const int DefaultComparisonBatchSize = 200;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(1);
-    private readonly BenchmarkDatabase _benchmarkDatabase;
     private readonly string _clusterModelPath;
     private readonly int _comparisonBatchSize;
     private readonly ITaxonomyComparisonStore _comparisonStore;
@@ -90,9 +92,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     // single BackgroundService loop (or a test driving RunCycleAsync directly), so no locking is needed.
     private IReadOnlyDictionary<long, MemoryEntry> _cachedEntriesById = new Dictionary<long, MemoryEntry>();
     private long _cachedMaxEntryId = -1;
-    private DimensionModelScoreMatrix? _cachedPriorMatrix;
-    private DateTime _cachedPriorStamp;
-    private bool _priorLoaded;
+    private readonly ProbingPriorMatrixCache _matrixCache;
 
     /// <summary>Initializes a new instance of the <see cref="TaxonomyComparisonService"/> class.</summary>
     /// <param name="logger">The logger.</param>
@@ -112,6 +112,13 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// guarantee (see the class remarks) only exists when the gauge does. Defaults to
     /// <see langword="null"/> so existing direct constructions keep their behavior.
     /// </param>
+    /// <param name="matrixCache">
+    /// The shared probing-prior cache, also used by <see cref="Router.Orchestrator.DimBestVoter"/> and
+    /// <see cref="Router.UntrainedBaselineSelector"/> - see the class remarks. DI always supplies the
+    /// shared singleton; <see langword="null"/> (the default) falls back to a private instance over
+    /// <paramref name="benchmarkDatabase"/>/<paramref name="logger"/> so existing direct construction
+    /// (e.g. tests) keeps compiling and behaving exactly as before this cache existed.
+    /// </param>
     public TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -125,13 +132,14 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<StorageOptions> storageOptions,
         IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup = null,
-        InFlightRequestGauge? inFlightGauge = null)
+        InFlightRequestGauge? inFlightGauge = null,
+        ProbingPriorMatrixCache? matrixCache = null)
         : this(
             logger: logger, transcriptStore: transcriptStore, comparisonStore: comparisonStore,
             memoryEntryStore: memoryEntryStore, routerMemory: routerMemory, benchmarkDatabase: benchmarkDatabase,
             routeResolver: routeResolver, transcriptOptions: transcriptOptions, routingOptions: routingOptions,
             storageOptions: storageOptions, qualityOptions: qualityOptions, priceLookup: priceLookup,
-            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize)
+            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize, matrixCache: matrixCache)
     {
     }
 
@@ -156,6 +164,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="priceLookup">Prices the counterfactual, or <see langword="null"/> when no catalog is configured.</param>
     /// <param name="inFlightGauge">The proxy's in-flight request gauge, or <see langword="null"/> to never pause.</param>
     /// <param name="comparisonBatchSize">The per-fetch batch size the drain loop uses. Must be positive.</param>
+    /// <param name="matrixCache">See the public constructor's parameter of the same name.</param>
     internal TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -170,7 +179,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup,
         InFlightRequestGauge? inFlightGauge,
-        int comparisonBatchSize)
+        int comparisonBatchSize,
+        ProbingPriorMatrixCache? matrixCache = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(comparisonBatchSize);
         ArgumentNullException.ThrowIfNull(logger);
@@ -190,7 +200,6 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _comparisonStore = comparisonStore;
         _memoryEntryStore = memoryEntryStore;
         _routerMemory = routerMemory;
-        _benchmarkDatabase = benchmarkDatabase;
         _routeResolver = routeResolver;
         _priceLookup = priceLookup;
         _transcriptOptions = transcriptOptions.Value;
@@ -199,6 +208,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _clusterModelPath = storageOptions.Value.ResolveClusterModelPath();
         _inFlightGauge = inFlightGauge;
         _comparisonBatchSize = comparisonBatchSize;
+        _matrixCache = matrixCache ?? new ProbingPriorMatrixCache(database: benchmarkDatabase, logger: logger);
     }
 
     /// <inheritdoc/>
@@ -258,6 +268,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         ClusterModelArtifact? artifact = null;
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? clusterLedger = null;
         DimensionLedger? dimensionLedger = null;
+        DimensionModelScoreMatrix? priorMatrix = null;
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages = new Dictionary<string, ModelTokenAverage>();
 
         while (true)
@@ -276,7 +287,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
                 // the one-batch version had.
                 (entriesById, artifact, clusterLedger) =
                     await GetClusteringInputsAsync(cancellationToken).ConfigureAwait(false);
-                dimensionLedger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: LoadPriorMatrix(),
+                priorMatrix = LoadPriorMatrix();
+                dimensionLedger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: priorMatrix,
                     liveMemoryPrefix: _liveMemoryPrefix);
                 tokenAverages = await _transcriptStore.LoadObservedTokenAveragesAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -306,7 +318,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
                 var record = Compare(transcript: transcript, observedScore: observedScore, dimension: dimension,
                     entriesById: entriesById, artifact: artifact, clusterLedger: clusterLedger,
-                    dimensionLedger: dimensionLedger!, tokenAverages: tokenAverages);
+                    dimensionLedger: dimensionLedger!, priorMatrix: priorMatrix, tokenAverages: tokenAverages);
                 await _comparisonStore.UpsertAsync(record: record, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
                 comparedThisBatch++;
@@ -400,6 +412,11 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="artifact">The current cluster model, or <see langword="null"/> when none is trained.</param>
     /// <param name="clusterLedger">The ledger built from <paramref name="artifact"/>, or <see langword="null"/> alongside it.</param>
     /// <param name="dimensionLedger">The frozen taxonomy's ledger.</param>
+    /// <param name="priorMatrix">
+    /// The frozen CodeRouterBench probing-split prior, or <see langword="null"/> when the corpus is
+    /// unsynced - backs the untrained-baseline predicted score, which reads it directly rather than
+    /// through <paramref name="dimensionLedger"/>'s live-preferring blend.
+    /// </param>
     /// <param name="tokenAverages">Per-model observed token averages backing the counterfactual estimate.</param>
     /// <returns>The comparison to persist.</returns>
     private TaxonomyComparisonRecord Compare(
@@ -410,6 +427,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         ClusterModelArtifact? artifact,
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? clusterLedger,
         DimensionLedger dimensionLedger,
+        DimensionModelScoreMatrix? priorMatrix,
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages)
     {
         var liveKey = RouterDimension.ToLiveKey(liveMemoryPrefix: _liveMemoryPrefix, dimension: dimension);
@@ -438,9 +456,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
             }
         }
 
-        var (baselineCost, netSavings) = EstimateCounterfactual(transcript: transcript, tokenAverages: tokenAverages);
-        var baselinePredicted = PredictBaselineScore(transcript: transcript, liveKey: liveKey,
-            observedScore: observedScore, dimensionLedger: dimensionLedger);
+        var (baselineCost, netSavings, baselineIngredients) = EstimateCounterfactual(transcript: transcript,
+            tokenAverages: tokenAverages);
+        var baselinePredicted = PredictBaselineScore(transcript: transcript, dimension: dimension,
+            priorMatrix: priorMatrix);
         var regret = EstimateRegret(observedScore: observedScore, actualCost: transcript.Cost,
             baselinePredictedScore: baselinePredicted, baselineCost: baselineCost);
 
@@ -456,53 +475,59 @@ public sealed class TaxonomyComparisonService : BackgroundService
             IsClustered: isClustered,
             IsExploratory: transcript.IsExploratory,
             RoutedModel: transcript.RoutedModel,
-            BaselineModel: transcript.DimBestModel,
+            BaselineModel: transcript.UntrainedBaselineModel,
             ActualCostUsd: transcript.Cost,
             BaselineEstimatedCostUsd: baselineCost,
             EstimatedNetSavingsUsd: netSavings,
             BaselinePredictedScore: baselinePredicted,
-            EstimatedRegret: regret);
+            EstimatedRegret: regret,
+            BaselineInputTokens: baselineIngredients?.InputTokens,
+            BaselineOutputTokens: baselineIngredients?.OutputTokens,
+            BaselineInputPricePerMillion: baselineIngredients?.InputPricePerMillion,
+            BaselineOutputPricePerMillion: baselineIngredients?.OutputPricePerMillion);
     }
 
     /// <summary>
-    /// Predicts the score the <c>dim_best</c> baseline's pick would likely have achieved on this request -
-    /// the quality half of the regret estimate, from the same ledger blend <see cref="DimBestVoter"/>
-    /// votes on.
+    /// Predicts the score the untrained baseline's pick would likely have achieved on this request - the
+    /// quality half of the regret estimate.
     /// </summary>
     /// <param name="transcript">The row being compared.</param>
-    /// <param name="liveKey">The row's dimension as a live-memory key.</param>
-    /// <param name="observedScore">The verifier's score for the model that actually served the request.</param>
-    /// <param name="dimensionLedger">The frozen taxonomy's ledger.</param>
+    /// <param name="dimension">The row's captured heuristic dimension (bare, matching the prior's own keying).</param>
+    /// <param name="priorMatrix">The frozen prior, or <see langword="null"/> when the corpus is unsynced.</param>
     /// <returns>
-    /// The predicted baseline score, or <see langword="null"/> when the baseline abstained or neither ledger source
-    /// has the cell.
+    /// <see cref="TranscriptRecord.UntrainedBaselinePredictedScore"/> when the row carries one - in which
+    /// case this is <see langword="null"/> only when the baseline abstained, regardless of whether
+    /// <paramref name="priorMatrix"/> is currently unsynced or no longer has a cell for the model.
+    /// Otherwise (a legacy row predating that column), a fresh lookup against <paramref name="priorMatrix"/>,
+    /// <see langword="null"/> when the baseline abstained, the corpus is unsynced, or that lookup has no
+    /// average for it.
     /// </returns>
     /// <remarks>
-    /// When the routed model <em>is</em> the baseline's pick, the observation being compared has already
-    /// been folded into that very cell, so it is queried leave-one-out - the same self-contamination
-    /// rationale as the accuracy comparison above. When they differ, the observation lives in a different
-    /// model's cell and the plain blend is the honest prediction.
+    /// Prefers <see cref="TranscriptRecord.UntrainedBaselinePredictedScore"/> - the score
+    /// <c>RequestInterceptor</c> read from the exact prior snapshot the baseline was selected from, at
+    /// request time - over re-deriving it from <paramref name="priorMatrix"/> here. The two can disagree:
+    /// an explicit CodeRouterBench sync between selection and this comparison cycle swaps in a different
+    /// snapshot, and a fresh <see cref="DimensionModelScoreMatrix.AverageScore"/> lookup against it could
+    /// then pair the model with a score it was never actually picked on - exactly the inconsistent
+    /// counterfactual first-write-wins would make permanent
+    /// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction, second pass). Falling back to
+    /// <paramref name="priorMatrix"/> only covers a row captured before that column existed; no leave-one-out
+    /// correction either way, since this prediction never reads live memory and so never absorbed the
+    /// observation being compared - there is nothing to hold out.
     /// </remarks>
-    private double? PredictBaselineScore(
+    private static double? PredictBaselineScore(
         TranscriptRecord transcript,
-        string liveKey,
-        double observedScore,
-        DimensionLedger dimensionLedger)
+        string dimension,
+        DimensionModelScoreMatrix? priorMatrix)
     {
-        if (transcript.DimBestModel is not { } baselineModel) return null;
+        if (transcript.UntrainedBaselineModel is not { } baselineModel) return null;
 
-        var routedIsBaseline = string.Equals(
-            a: ModelNameCanonicalizer.Canonicalize(transcript.RoutedModel),
-            b: ModelNameCanonicalizer.Canonicalize(baselineModel),
-            comparisonType: StringComparison.Ordinal);
-
-        return routedIsBaseline
-            ? dimensionLedger.PredictLeaveOneOut(dimension: liveKey, model: baselineModel, observedScore: observedScore)
-            : dimensionLedger.Predict(dimension: liveKey, model: baselineModel);
+        return transcript.UntrainedBaselinePredictedScore
+               ?? priorMatrix?.AverageScore(dimension: dimension, model: baselineModel);
     }
 
     /// <summary>
-    /// Estimates the routing decision's regret against the <c>dim_best</c> baseline under the canonical
+    /// Estimates the routing decision's regret against the untrained baseline under the canonical
     /// reward <c>r = ε₁·s + ε₂·κ</c> (docs/router/routing-roi-regret-plan.md): the baseline's estimated
     /// reward minus the routed pick's observed reward, using the same
     /// <see cref="RoutingOptions.Epsilon1"/>/<see cref="RoutingOptions.Epsilon2"/> weights
@@ -537,38 +562,60 @@ public sealed class TaxonomyComparisonService : BackgroundService
     }
 
     /// <summary>
-    /// Prices what the frozen baseline's pick would have cost, and the resulting net saving against what
+    /// The ingredients behind one row's <see cref="TaxonomyComparisonRecord.BaselineEstimatedCostUsd"/>,
+    /// captured so they can be persisted alongside the answer rather than recomputed later against
+    /// inputs that have since drifted (docs/router/routing-roi-regret-plan.md's frozen-baseline
+    /// correction).
+    /// </summary>
+    private sealed record BaselineCostIngredients(
+        double InputTokens,
+        double OutputTokens,
+        decimal InputPricePerMillion,
+        decimal OutputPricePerMillion);
+
+    /// <summary>
+    /// Prices what the untrained baseline's pick would have cost, and the resulting net saving against what
     /// the router actually spent.
     /// </summary>
     /// <param name="transcript">The row being compared.</param>
     /// <param name="tokenAverages">Per-model observed token averages.</param>
-    /// <returns>The estimated baseline cost and net saving, both <see langword="null"/> when no honest estimate exists.</returns>
+    /// <returns>
+    /// The estimated baseline cost, net saving, and the ingredients behind the cost - all
+    /// <see langword="null"/> when no honest estimate exists.
+    /// </returns>
     /// <remarks>
     /// Returns nulls rather than zeros whenever any input is missing - an abstaining baseline, an unpriced
     /// model, a model never yet observed, or an unknown actual cost. A zero here would read as "routing
     /// broke even", which is a measurement, not the absence of one.
     /// </remarks>
-    private (decimal? BaselineCost, decimal? NetSavings) EstimateCounterfactual(
+    private (decimal? BaselineCost, decimal? NetSavings, BaselineCostIngredients? Ingredients) EstimateCounterfactual(
         TranscriptRecord transcript,
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages)
     {
-        if (transcript.DimBestModel is not { } baselineModel || transcript.Cost is not { } actualCost)
-            return (null, null);
+        if (transcript.UntrainedBaselineModel is not { } baselineModel || transcript.Cost is not { } actualCost)
+            return (null, null, null);
 
         if (!TryFindAverage(tokenAverages: tokenAverages, model: baselineModel, average: out var average))
-            return (null, null);
+            return (null, null, null);
 
-        if (!_routeResolver.TryResolve(modelName: baselineModel, route: out var route)) return (null, null);
+        if (!_routeResolver.TryResolve(modelName: baselineModel, route: out var route)) return (null, null, null);
 
         var price = route.IsFree
             ? ModelPrice.Free
             : _priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider));
-        if (price is null) return (null, null);
+        if (price is null) return (null, null, null);
 
+        var roundedInputTokens = Math.Round(average.InputTokens);
+        var roundedOutputTokens = Math.Round(average.OutputTokens);
         var baselineCost = price.EstimateCost(
-            promptTokens: (int)Math.Round(average.InputTokens),
-            completionTokens: (int)Math.Round(average.OutputTokens));
-        return (baselineCost, baselineCost - actualCost);
+            promptTokens: (int)roundedInputTokens,
+            completionTokens: (int)roundedOutputTokens);
+        var ingredients = new BaselineCostIngredients(
+            InputTokens: roundedInputTokens,
+            OutputTokens: roundedOutputTokens,
+            InputPricePerMillion: price.InputPerMillionTokens,
+            OutputPricePerMillion: price.OutputPerMillionTokens);
+        return (baselineCost, baselineCost - actualCost, ingredients);
     }
 
     /// <summary>
@@ -620,38 +667,13 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
     /// <summary>
     /// Reads the probing-split prior, returning <see langword="null"/> when the CodeRouterBench corpus is
-    /// not synced on this machine - the same degrade <see cref="DimBestVoter"/> already performs. Cached
-    /// across cycles keyed on the corpus file's last write time: the prior is offline data that only
-    /// changes on an explicit benchmark sync, so re-reading the whole split every cycle bought nothing.
+    /// not synced on this machine - the same degrade <see cref="DimBestVoter"/> already performs. A thin
+    /// delegation to the shared <see cref="ProbingPriorMatrixCache"/> (see the class remarks), which owns
+    /// the actual caching/freshness check.
     /// </summary>
     /// <returns>The probing matrix, or <see langword="null"/> when unavailable.</returns>
     private DimensionModelScoreMatrix? LoadPriorMatrix()
     {
-        var databasePath = _benchmarkDatabase.DatabasePath;
-        var stamp = File.Exists(databasePath) ? File.GetLastWriteTimeUtc(databasePath) : DateTime.MinValue;
-        if (_priorLoaded && stamp == _cachedPriorStamp) return _cachedPriorMatrix;
-
-        _cachedPriorStamp = stamp;
-        _priorLoaded = true;
-
-        if (stamp == DateTime.MinValue)
-        {
-            _cachedPriorMatrix = null;
-            return null;
-        }
-
-        try
-        {
-            _cachedPriorMatrix = DimensionModelScoreMatrix.FromDatabase(database: _benchmarkDatabase, split: "probing");
-        }
-        catch (SqliteException ex)
-        {
-            _logger.LogWarning(exception: ex,
-                message:
-                "[TAXONOMY-COMPARE] Could not read the CodeRouterBench corpus; comparing against live memory only.");
-            _cachedPriorMatrix = null;
-        }
-
-        return _cachedPriorMatrix;
+        return _matrixCache.GetMatrix();
     }
 }

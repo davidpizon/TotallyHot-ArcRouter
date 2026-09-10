@@ -140,6 +140,75 @@ public class DimBestVoterTests
         Assert.Equal(0.8, actual: vote.Confidence, 6);
     }
 
+    // Regression coverage for sharing ProbingPriorMatrixCache with UntrainedBaselineSelector
+    // (docs/router/routing-roi-regret-plan.md's frozen-baseline correction): both previously scanned the
+    // same "probing" split independently, and DimBestVoter additionally never refreshed its first-loaded
+    // prior for the rest of the process. Passing the same cache instance into both must (1) let them agree
+    // on the prior, and (2) let an explicit sync (observed by the cache) reach this voter's very next vote.
+    [Fact]
+    public async Task VoteAsync_SharedCacheWithUntrainedBaselineSelector_PicksUpASyncOnTheNextVote()
+    {
+        using var temp = new TempBenchmarkDatabase();
+        temp.Database.EnsureCreated();
+        InsertResultRow(database: temp.Database, taskId: "task-1", split: "probing", dimension: "code_generation",
+            model: "model-a", 0.5);
+        InsertResultRow(database: temp.Database, taskId: "task-2", split: "probing", dimension: "code_generation",
+            model: "model-b", 0.1);
+        RecordProbingSync(database: temp.Database, syncedAtUtc: DateTimeOffset.UtcNow);
+        var sharedCache = new ProbingPriorMatrixCache(database: temp.Database, logger: NullLogger.Instance);
+        var voter = new DimBestVoter(database: temp.Database, routerMemory: new RouterMemory(),
+            logger: NullLogger<DimBestVoter>.Instance, qualityOptions: Options.Create(new QualityOptions()),
+            matrixCache: sharedCache);
+        var selector = new UntrainedBaselineSelector(database: temp.Database,
+            logger: NullLogger<UntrainedBaselineSelector>.Instance, matrixCache: sharedCache);
+        var context = new VotingContext(
+            Dimension: "code_generation",
+            Candidates:
+            [
+                new RoutingCandidate(ModelName: "model-a", Provider: "openai", false),
+                new RoutingCandidate(ModelName: "model-b", Provider: "openai", false)
+            ]);
+
+        var voteBeforeSync =
+            await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
+        var baselineBeforeSync = selector.Select(dimension: "code_generation", candidateModelIds: ["model-a", "model-b"]);
+        Assert.Equal(expected: "model-a", actual: voteBeforeSync.ModelName);
+        Assert.Equal(expected: "model-a", actual: baselineBeforeSync);
+
+        // A sync that flips which model the prior favors - recording a new benchmark_files ledger row for
+        // the probing file, the way BenchmarkSyncService would, is what the shared cache's staleness check
+        // actually keys on (see ProbingPriorMatrixCache's remarks on why a filesystem timestamp alone is
+        // not reliable).
+        InsertResultRow(database: temp.Database, taskId: "task-3", split: "probing", dimension: "code_generation",
+            model: "model-b", 0.99);
+        RecordProbingSync(database: temp.Database, syncedAtUtc: DateTimeOffset.UtcNow.AddSeconds(5));
+
+        var voteAfterSync =
+            await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
+        var baselineAfterSync = selector.Select(dimension: "code_generation", candidateModelIds: ["model-a", "model-b"]);
+
+        // Before this fix, DimBestVoter cached its DimensionLedger forever after the first vote and would
+        // never have observed this sync at all.
+        Assert.Equal(expected: "model-b", actual: voteAfterSync.ModelName);
+        Assert.Equal(expected: "model-b", actual: baselineAfterSync);
+    }
+
+    /// <summary>
+    /// Records a <c>benchmark_files</c> ledger row for the probing split's source file, the way
+    /// <c>BenchmarkSyncService</c> would after a real sync - the freshness signal
+    /// <see cref="ProbingPriorMatrixCache"/> keys its cache on.
+    /// </summary>
+    private static void RecordProbingSync(BenchmarkDatabase database, DateTimeOffset syncedAtUtc)
+    {
+        new BenchmarkFileLedger(database).Upsert(new BenchmarkFileLedgerEntry(
+            FileName: "id_probing_results_long.csv",
+            PublishedOid: "test-oid",
+            SizeBytes: 0,
+            RowCount: 0,
+            RepoCommit: "test-commit",
+            SyncedAtUtc: syncedAtUtc));
+    }
+
     private static void InsertResultRow(
         BenchmarkDatabase database,
         string taskId,

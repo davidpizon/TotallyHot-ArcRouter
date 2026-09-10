@@ -130,6 +130,9 @@ public sealed class TranscriptDatabase
         MigrateTaxonomyComparisonRegretColumns(connection);
         MigrateScorerVersionColumn(connection);
         MigrateSessionIdColumn(connection);
+        MigrateUntrainedBaselineModelColumn(connection);
+        MigrateTaxonomyComparisonBaselineCostColumns(connection);
+        MigrateUntrainedBaselinePredictedScoreColumn(connection);
     }
 
     /// <summary>
@@ -309,6 +312,115 @@ public sealed class TranscriptDatabase
                             ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_predicted_score REAL NULL;
                             ALTER TABLE taxonomy_comparisons ADD COLUMN estimated_regret REAL NULL;
                             """;
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the <c>untrained_baseline_model</c> column to <c>request_transcripts</c> if it is missing -
+    /// docs/router/routing-roi-regret-plan.md's frozen-baseline correction. Captured at request time
+    /// (unlike <c>dim_best_model</c>, this value never reads live memory, but the request's candidate menu
+    /// - which models were actually eligible - exists nowhere else and would otherwise be lost).
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. Nullable
+    /// with no backfill: rows captured before this column existed never recorded what the untrained
+    /// baseline would have picked, and inventing a value for them would fabricate exactly the
+    /// counterfactual this column exists to measure honestly.
+    /// </remarks>
+    private static void MigrateUntrainedBaselineModelColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'untrained_baseline_model';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN untrained_baseline_model TEXT NULL;";
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the four baseline-cost-ingredient columns to <c>taxonomy_comparisons</c> if they are missing -
+    /// the token estimate and price rates <see cref="TaxonomyComparisonService"/> used to
+    /// compute <c>baseline_estimated_cost_usd</c>, recorded alongside the answer rather than only the
+    /// answer, so a stored savings figure is auditable and reproducible from its own row rather than
+    /// trusted blind (docs/router/routing-roi-regret-plan.md's frozen-baseline correction).
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>, but unlike
+    /// it - and unlike <see cref="MigrateTaxonomyComparisonRegretColumns"/>'s single-column sentinel over
+    /// its own two columns - each of the four columns here is checked and added independently inside one
+    /// transaction. A process that stopped after adding only some of the four columns (a crash between
+    /// sequential <c>ALTER TABLE</c> statements) would otherwise leave a one-column sentinel check
+    /// permanently satisfied while the remaining columns stayed absent, breaking every later insert/read.
+    /// All four columns are nullable with no backfill, for the same reason as
+    /// <see cref="MigrateTaxonomyComparisonRegretColumns"/>: a row computed before these columns existed
+    /// never recorded its ingredients, and recomputing them later would price against catalog rates and
+    /// token averages that have since drifted - exactly the contamination this correction exists to
+    /// eliminate.
+    /// </remarks>
+    private static void MigrateTaxonomyComparisonBaselineCostColumns(SqliteConnection connection)
+    {
+        string[] columns =
+        [
+            "baseline_input_tokens", "baseline_output_tokens", "baseline_input_price_per_million",
+            "baseline_output_price_per_million"
+        ];
+
+        using var transaction = connection.BeginTransaction();
+        foreach (var column in columns)
+        {
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.Transaction = transaction;
+                pragma.CommandText =
+                    "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = $column;";
+                pragma.Parameters.AddWithValue(parameterName: "$column", value: column);
+                if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0)
+                    continue;
+            }
+
+            using var alter = connection.CreateCommand();
+            alter.Transaction = transaction;
+            alter.CommandText = $"ALTER TABLE taxonomy_comparisons ADD COLUMN {column} REAL NULL;";
+            alter.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Adds the <c>untrained_baseline_predicted_score</c> column to <c>request_transcripts</c> if it is
+    /// missing - the untrained baseline's average score, captured at request time from the exact prior
+    /// snapshot <c>untrained_baseline_model</c> was selected from (docs/router/routing-roi-regret-plan.md's
+    /// frozen-baseline correction, second pass). Without this column, <c>TaxonomyComparisonService</c> has
+    /// to re-derive the score later from whatever prior is loaded when its comparison cycle runs, which an
+    /// intervening benchmark sync can turn into a different snapshot than the one the model was actually
+    /// selected from.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. Nullable
+    /// with no backfill: a row captured before this column existed (or whose baseline selector abstained)
+    /// never recorded a request-time score, and re-deriving one now would reopen exactly the
+    /// prior-snapshot mismatch this column exists to close.
+    /// </remarks>
+    private static void MigrateUntrainedBaselinePredictedScoreColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'untrained_baseline_predicted_score';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText =
+            "ALTER TABLE request_transcripts ADD COLUMN untrained_baseline_predicted_score REAL NULL;";
         alter.ExecuteNonQuery();
     }
 }

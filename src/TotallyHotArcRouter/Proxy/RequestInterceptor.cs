@@ -88,6 +88,7 @@ public class RequestInterceptor
     private readonly RoutingCandidateBuilder _routingCandidateBuilder;
 
     private readonly IRoutingPolicy? _routingPolicy;
+    private readonly UntrainedBaselineSelector? _untrainedBaselineSelector;
 
     /// <param name="logger">The logger.</param>
     /// <param name="modelRouteResolver">The known-model allowlist/resolver.</param>
@@ -160,6 +161,13 @@ public class RequestInterceptor
     /// <see cref="ProxyMiddleware"/> and <c>ManagementFacade</c> (see <c>ServiceCollectionExtensions</c>),
     /// the same sharing requirement <paramref name="circuitBreaker"/> already has.
     /// </param>
+    /// <param name="untrainedBaselineSelector">
+    /// Optional source of the ROI cost-savings yardstick's frozen "untrained router" pick
+    /// (docs/router/routing-roi-regret-plan.md) - the model the CodeRouterBench probing-split prior
+    /// alone would have chosen from this request's actual candidate menu, captured here because the
+    /// menu is only known at request time. <see langword="null"/> (the default) means no untrained-
+    /// baseline pick is recorded, matching pre-this-change behavior.
+    /// </param>
     public RequestInterceptor(
         ILogger<RequestInterceptor> logger,
         IModelRouteResolver modelRouteResolver,
@@ -173,7 +181,8 @@ public class RequestInterceptor
         IEmbeddingClient? embeddingClient = null,
         EmbeddingWarmupState? embeddingWarmupState = null,
         IOptions<RoutingOptions>? routingOptions = null,
-        IProviderInteractionStatusStore? interactionStatusStore = null)
+        IProviderInteractionStatusStore? interactionStatusStore = null,
+        UntrainedBaselineSelector? untrainedBaselineSelector = null)
     {
         _logger = logger;
         _modelRouteResolver = modelRouteResolver;
@@ -188,6 +197,7 @@ public class RequestInterceptor
         _embeddingWarmupState = embeddingWarmupState;
         _embeddingBudgetMs = routingOptions?.Value.EmbeddingBudgetMs ?? new RoutingOptions().EmbeddingBudgetMs;
         _interactionStatusStore = interactionStatusStore;
+        _untrainedBaselineSelector = untrainedBaselineSelector;
         _routingCandidateBuilder = new RoutingCandidateBuilder(
             circuitBreaker: _circuitBreaker, modelRouteResolver: _modelRouteResolver, routerMemory: _routerMemory,
             interactionStatusStore: _interactionStatusStore, logger: _logger);
@@ -421,6 +431,8 @@ public class RequestInterceptor
         var isExploratory = false;
         var propensity = 1.0;
         string? dimBestModel = null;
+        string? untrainedBaselineModel = null;
+        double? untrainedBaselinePredictedScore = null;
 
         if (isAutoSelectRequest)
         {
@@ -443,6 +455,8 @@ public class RequestInterceptor
             isExploratory = autoSelected.IsExploratory;
             propensity = autoSelected.Propensity;
             dimBestModel = autoSelected.DimBestModel;
+            untrainedBaselineModel = autoSelected.UntrainedBaselineModel;
+            untrainedBaselinePredictedScore = autoSelected.UntrainedBaselinePredictedScore;
             substitutionReason = RoutingSubstitutionReason.AutoSelect;
         }
         else if (!_modelRouteResolver.TryResolve(modelName: modelName, route: out route) ||
@@ -476,6 +490,8 @@ public class RequestInterceptor
                 isExploratory = agenticRoute.IsExploratory;
                 propensity = agenticRoute.Propensity;
                 dimBestModel = agenticRoute.DimBestModel;
+                untrainedBaselineModel = agenticRoute.UntrainedBaselineModel;
+                untrainedBaselinePredictedScore = agenticRoute.UntrainedBaselinePredictedScore;
                 substitutionReason = wasResolved
                     ? RoutingSubstitutionReason.ModelStopped
                     : RoutingSubstitutionReason.UnresolvedName;
@@ -527,7 +543,9 @@ public class RequestInterceptor
             classification: classification,
             taskText: taskText,
             dimBestModel: dimBestModel,
-            explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);
+            explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage,
+            untrainedBaselineModel: untrainedBaselineModel,
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore);
     }
 
     /// <summary>
@@ -661,12 +679,17 @@ public class RequestInterceptor
                         SanitizeForLog(selectedName!),
                         SanitizeForLog(liveDimension),
                         classification.IsUtility);
+                    var policyPathBaseline = _untrainedBaselineSelector?.SelectWithScore(
+                        dimension: classification.Dimension,
+                        candidateModelIds: candidates.Select(c => c.ModelName));
                     return new AgenticRouteResult(
                         Route: selectedRoute,
                         IsExploratory: decision!.IsExploratory,
                         Propensity: decision.Propensity,
                         DimBestModel: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision,
-                            voterName: VoterNames.DimBest));
+                            voterName: VoterNames.DimBest),
+                        UntrainedBaselineModel: policyPathBaseline?.Model,
+                        UntrainedBaselinePredictedScore: policyPathBaseline?.Score);
                 }
                 else
                 {
@@ -681,9 +704,16 @@ public class RequestInterceptor
         // The memory-ranking fallback below was never a policy pick - IsExploratory=false,
         // Propensity=1.0 (certain selection) is the correct provenance for it, matching the same
         // default IRoutingPolicy.DecideOutcomeAsync's default implementation reports.
-        var fallbackRoute = _routingCandidateBuilder
-            .RankEligibleModels(excludeModelNames: [], liveDimension: liveDimension).FirstOrDefault();
-        return fallbackRoute is null ? null : new AgenticRouteResult(Route: fallbackRoute, false, 1.0);
+        var eligibleRoutes = _routingCandidateBuilder
+            .RankEligibleModels(excludeModelNames: [], liveDimension: liveDimension);
+        var fallbackRoute = eligibleRoutes.FirstOrDefault();
+        if (fallbackRoute is null) return null;
+
+        var fallbackPathBaseline = _untrainedBaselineSelector?.SelectWithScore(dimension: classification.Dimension,
+            candidateModelIds: eligibleRoutes.Select(r => r.ModelName));
+        return new AgenticRouteResult(Route: fallbackRoute, false, 1.0,
+            UntrainedBaselineModel: fallbackPathBaseline?.Model,
+            UntrainedBaselinePredictedScore: fallbackPathBaseline?.Score);
     }
 
     /// <summary>
@@ -741,12 +771,30 @@ public class RequestInterceptor
     /// <param name="IsExploratory">Whether this was an epsilon-greedy exploratory pick.</param>
     /// <param name="Propensity">The propensity of the arm actually chosen.</param>
     /// <param name="DimBestModel">
-    /// The model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen, or
-    /// <see langword="null"/> when it abstained - Phase T4's counterfactual baseline.
+    /// The model the live, memory-preferring <c>dim_best</c> voter actually voted for, or
+    /// <see langword="null"/> when it abstained - Phase T4's taxonomy-accuracy comparison target. Despite
+    /// its name this is <em>not</em> the frozen baseline; see <see cref="UntrainedBaselineModel"/> for
+    /// that.
+    /// </param>
+    /// <param name="UntrainedBaselineModel">
+    /// The model an untrained router - one that has never read live memory - would have picked from this
+    /// request's actual candidate menu, via <see cref="Router.UntrainedBaselineSelector"/>. This is the
+    /// ROI cost-savings yardstick's frozen counterfactual (docs/router/routing-roi-regret-plan.md);
+    /// <see langword="null"/> when no selector was supplied or the corpus has no average for any
+    /// candidate.
+    /// </param>
+    /// <param name="UntrainedBaselinePredictedScore">
+    /// <see cref="UntrainedBaselineModel"/>'s average score, read from the exact same prior snapshot it
+    /// was picked from (<see cref="Router.UntrainedBaselineSelector.SelectWithScore"/>) - captured here
+    /// rather than re-derived later so a benchmark sync between now and the comparison cycle can't pair
+    /// the model with a score from a different snapshot. <see langword="null"/> whenever
+    /// <see cref="UntrainedBaselineModel"/> is.
     /// </param>
     private sealed record AgenticRouteResult(
         ResolvedModelRoute Route,
         bool IsExploratory,
         double Propensity,
-        string? DimBestModel = null);
+        string? DimBestModel = null,
+        string? UntrainedBaselineModel = null,
+        double? UntrainedBaselinePredictedScore = null);
 }

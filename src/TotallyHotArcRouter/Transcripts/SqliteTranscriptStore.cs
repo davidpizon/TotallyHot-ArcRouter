@@ -53,11 +53,13 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                               INSERT INTO request_transcripts (
                                   correlation_id, session_id, created_at_utc, requested_model, routed_model, dimension,
                                   difficulty, language, is_utility, prompt_text, response_text, score, cost, is_exploratory,
-                                  propensity, input_tokens, output_tokens, memory_entry_id, dim_best_model)
+                                  propensity, input_tokens, output_tokens, memory_entry_id, dim_best_model,
+                                  untrained_baseline_model, untrained_baseline_predicted_score)
                               VALUES (
                                   $correlationId, $sessionId, $createdAtUtc, $requestedModel, $routedModel, $dimension,
                                   $difficulty, $language, $isUtility, $promptText, $responseText, $score, $cost,
-                                  $isExploratory, $propensity, $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel);
+                                  $isExploratory, $propensity, $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel,
+                                  $untrainedBaselineModel, $untrainedBaselinePredictedScore);
                               SELECT last_insert_rowid();
                               """;
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: record.CorrelationId);
@@ -87,6 +89,10 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             value: (object?)record.MemoryEntryId ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$dimBestModel",
             value: (object?)record.DimBestModel ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$untrainedBaselineModel",
+            value: (object?)record.UntrainedBaselineModel ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$untrainedBaselinePredictedScore",
+            value: (object?)record.UntrainedBaselinePredictedScore ?? DBNull.Value);
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult<long?>(id);
@@ -219,7 +225,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                               SELECT
                                   id, correlation_id, created_at_utc, requested_model, routed_model, dimension, difficulty,
                                   language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
-                                  input_tokens, output_tokens, memory_entry_id, dim_best_model
+                                  input_tokens, output_tokens, memory_entry_id, dim_best_model, untrained_baseline_model,
+                                  untrained_baseline_predicted_score
                               FROM request_transcripts
                               WHERE id = $id;
                               """;
@@ -466,6 +473,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             InputTokens: reader.IsDBNull(15) ? null : reader.GetInt32(15),
             OutputTokens: reader.IsDBNull(16) ? null : reader.GetInt32(16),
             MemoryEntryId: reader.IsDBNull(17) ? null : reader.GetInt64(17),
-            DimBestModel: reader.IsDBNull(18) ? null : reader.GetString(18));
+            DimBestModel: reader.IsDBNull(18) ? null : reader.GetString(18),
+            UntrainedBaselineModel: reader.IsDBNull(19) ? null : reader.GetString(19),
+            UntrainedBaselinePredictedScore: reader.IsDBNull(20) ? null : reader.GetDouble(20));
     }
 }

@@ -26,21 +26,15 @@ public sealed class DimensionBestBaseline : IRegretBaselineRouter
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Ties are broken by ordinal model-id order, matching <see cref="Router.Orchestrator.OrchestratorRoutingPolicy"/>'s
-    /// own tie-break, so a fixture with a deliberate tie is reproducible rather than dependent on
-    /// dictionary enumeration order. Returns <see langword="null"/> when the frozen matrix has no average
-    /// for any of this task's candidates.
+    /// Delegates to <see cref="DimensionModelScoreMatrix.SelectBest"/> - the same argmax-and-tie-break
+    /// rule the live ROI yardstick (<see cref="Router.UntrainedBaselineSelector"/>) now shares, so this
+    /// baseline and the production "untrained router" comparison can never quietly diverge. Returns
+    /// <see langword="null"/> when the frozen matrix has no average for any of this task's candidates.
     /// </remarks>
     public string? Route(RegretReplayContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return context.CandidateModelIds
-            .Select(id => (Model: id, Score: _matrix.AverageScore(dimension: context.Dimension, model: id)))
-            .Where(entry => entry.Score is not null)
-            .OrderByDescending(entry => entry.Score!.Value)
-            .ThenBy(keySelector: entry => entry.Model, comparer: StringComparer.Ordinal)
-            .Select(entry => (string?)entry.Model)
-            .FirstOrDefault();
+        return _matrix.SelectBest(dimension: context.Dimension, candidateModelIds: context.CandidateModelIds);
     }
 }

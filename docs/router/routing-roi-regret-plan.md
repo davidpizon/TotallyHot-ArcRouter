@@ -4,7 +4,95 @@
 the delivered summary.
 **Builds on:** [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T4 (shipped).
 
+> **Frozen-baseline correction (2026-09-09).** This plan's original "Not changing" list froze
+> `DimensionLedger`'s blend rule wholesale to keep the ROI savings figure's finish line from moving as the
+> router learns. That froze the wrong thing: the blend rule is *also* `DimBestVoter`'s live production
+> picking rule, so freezing it entirely would have blocked ever improving that rule (`src/PLAN.md` Phase
+> Q5). Worse, the frozen rule was never actually a fixed yardstick — it prefers the live
+> `RouterMemory` average the instant any observation exists, so the "untrained" counterfactual it priced
+> was learning right alongside the router it was measured against, holding their gap constant and
+> understating (or hiding) any real improvement.
+>
+> **What changed.** The counterfactual now comes from a new `UntrainedBaselineSelector`
+> (`src/TotallyHotArcRouter/Router/UntrainedBaselineSelector.cs`), which reads only the frozen
+> CodeRouterBench probing-split prior via `DimensionModelScoreMatrix.SelectBest` - never
+> `RouterMemory` - captured at request time (the candidate menu is only known then) into a new
+> `request_transcripts.untrained_baseline_model` column, alongside (not replacing) `dim_best_model`.
+> `TaxonomyComparisonService.PredictBaselineScore` reads the same frozen matrix directly instead of
+> `DimensionLedger`'s blend, dropping the leave-one-out correction for the baseline half entirely (a
+> table-only prediction never absorbed the observation being compared, so there is nothing to hold out).
+> The four cost ingredients behind `BaselineEstimatedCostUsd` (token averages, catalog prices) are now
+> persisted alongside the answer, and `SqliteTaxonomyComparisonStore.UpsertAsync` is first-write-wins
+> (`ON CONFLICT DO NOTHING`) so a later rescan can never silently reprice an already-published row against
+> drifted inputs. `DimBestVoter`'s own live-preferring blend is untouched - this correction is scoped to
+> the ROI yardstick, not the production voter. Zero rows existed in `taxonomy_comparisons` when this
+> shipped, so no historical savings figures needed reconciling.
+>
+> This unblocks Phase Q5's acceptance gate (a sample-size-aware `dim_best` estimator, evaluated by
+> `RegretReplayEngine`), which needed exactly this separation to exist - see
+> [`regret-evaluation-harness-plan.md`](regret-evaluation-harness-plan.md)'s Q5 status note for why Q5
+> itself remains blocked on real traffic even after this fix.
+>
+> **Frozen-baseline correction, second pass (2026-09-09).** The first pass above still let selection and
+> comparison read the prior at two different moments: `UntrainedBaselineSelector.Select` picked the
+> baseline model at request time, but `TaxonomyComparisonService.PredictBaselineScore` re-derived its
+> score later, from whatever prior `LoadPriorMatrix` had loaded when that comparison cycle ran. An
+> explicit CodeRouterBench sync landing in between could swap in a different snapshot, silently pairing
+> the request-time model with a comparison-time score - and first-write-wins would then make that
+> mismatched pair permanent. Two independent fixes close this: (1) `BenchmarkDatabase.GetContentStamp()`
+> now also considers the `-wal` sidecar's mtime (`EnsureCreated` runs this database in WAL mode, so a
+> sync's commits can land only in the WAL file and never touch the main file's mtime), and both
+> `UntrainedBaselineSelector` and `TaxonomyComparisonService.LoadPriorMatrix` key their cache off it, so a
+> sync is observed by both at the same moment; (2) `UntrainedBaselineSelector.SelectWithScore` now returns
+> the picked model's score from the exact same prior snapshot it was picked from, and
+> `RequestInterceptor` persists it into a new `request_transcripts.untrained_baseline_predicted_score`
+> column via `ModelRouteResolutionResult`/`RequestTelemetryPublisher`. `PredictBaselineScore` prefers this
+> persisted score over re-deriving one, falling back to `priorMatrix.AverageScore` only for a row written
+> before the column existed. The two fixes are complementary, not redundant: (1) narrows the window in
+> which selection and comparison could observe different snapshots at all; (2) makes the eventual answer
+> correct even within that window, since the model and its score now always travel together from the same
+> selection call.
+>
+> **Shared probing-prior cache (2026-09-10).** `DimBestVoter`, `UntrainedBaselineSelector`, and
+> `TaxonomyComparisonService.LoadPriorMatrix` each independently scanned the same frozen "probing" split
+> from `BenchmarkDatabase` and kept their own private copy. On a live request, `OrchestratorRoutingPolicy`
+> votes through `DimBestVoter` and `RequestInterceptor` separately consults `UntrainedBaselineSelector` for
+> the ROI baseline, both within the same request's call stack - so whichever singleton's first request
+> happened to arrive first paid a synchronous full-table scan, and the other paid it again independently.
+> A new `ProbingPriorMatrixCache` (`src/TotallyHotArcRouter/CodeRouterBench/ProbingPriorMatrixCache.cs`) is
+> now injected into all three (DI-registered singleton, with each constructor also accepting an optional
+> override defaulting to a private instance so existing direct construction, e.g. tests, is unaffected);
+> the scan now runs at most once per corpus sync process-wide. This also incidentally fixes a gap the note
+> above about `DimBestVoter`'s blend rule being "untouched" no longer fully describes: `DimBestVoter` used
+> to cache its `DimensionLedger` - and the prior snapshot inside it - for the process's entire lifetime,
+> silently ignoring every later benchmark sync; it now builds a fresh, cheap-to-construct `DimensionLedger`
+> around the shared cache's current matrix on every vote, so an explicit sync reaches its very next vote.
+> The blend rule itself (live-memory-preferred, prior as fallback) is unchanged.
+>
+> **Shared probing-prior cache, second pass (2026-09-10).** Two follow-up findings on the cache above.
+> (1) Its freshness stamp was `BenchmarkDatabase.GetContentStamp()` - a filesystem-mtime check (main file,
+> newer of it or its `-wal` sidecar) - which the second-pass note further up also relied on before this
+> cache existed. Both were replaced: `GetContentStamp()` is deleted, and `ProbingPriorMatrixCache` now keys
+> freshness on the probing file's own `benchmark_files.synced_at_utc` ledger row instead, because a
+> filesystem timestamp can retain an identical value across two rapid writes on some filesystems - a false
+> negative that would mask a real sync indefinitely, exactly the failure both mechanisms existed to
+> prevent. The ledger row has no such gap: `BenchmarkSyncService` writes it transactionally alongside the
+> actual imported rows, only when content actually changed. (2) `GetMatrix()` is still a synchronous
+> full-table scan on a cold cache, and `RequestInterceptor` reaches it during live request resolution -
+> so an unwarmed cache would add that scan's latency to whichever request arrived first. Two callers now
+> warm it off the request path: `StartupHealthCheckHostedService` loads it once before Kestrel binds
+> (covers the first request after process start), and `BenchmarkSyncService` forces a reload at the end of
+> every sync (covers the first request after each sync) - see `ProbingPriorMatrixCache`'s remarks for both.
+
 ## Context
+
+> **Superseded by the frozen-baseline correction above.** This section, the decisions table below, and
+> §4's algorithm describe the counterfactual as it stood *before* 2026-09-09: the live `dim_best` judge
+> and `DimensionLedger`'s blend. That counterfactual no longer exists in the shipped code - it was
+> replaced by `UntrainedBaselineSelector` reading the frozen CodeRouterBench prior directly, with the
+> leave-one-out branch dropped entirely (a table-only prediction never absorbed the observation being
+> compared). Kept below for the historical record of *why* the drain/pause/caching/regret-formula work
+> was originally shaped this way; do not use it as the current counterfactual spec.
 
 The Routing ROI pipeline (Phase T4, `TaxonomyComparisonService`) compares each scored transcript's
 actual outcome against the counterfactual "what if the `dim_best` judge alone had picked the model."
@@ -64,6 +152,11 @@ against the frozen taxonomy, which is precisely what readiness means here. Updat
 - `SqliteTaxonomyComparisonStore.UpsertAsync` / `LoadSinceAsync` / `Read`: carry the two columns.
 
 ### 4. `TaxonomyComparisonService` — regret, drain, pause, caching
+
+> **Regret in `Compare`/`EstimateCounterfactual` below is pre-correction.** `baselinePredictedScore` is
+> now read from the frozen prior matrix (`PredictBaselineScore`), never from `DimensionLedger`, and the
+> leave-one-out branch does not apply - see the frozen-baseline correction note at the top of this
+> document. The drain/pause/caching/regret-formula mechanics that follow are otherwise still accurate.
 
 **Cadence.** `CheckInterval`: 5 minutes → 1 minute. Still a `BackgroundService` on its own loop.
 
@@ -162,10 +255,16 @@ MAE-ordering tests (the accuracy machinery is retained).
 
 ## Not changing
 
-`RoutingRoiPoint`, `RoutingRoiPointView`, `ManagementFacade.GetRoutingRoiAsync`, the
-`/admin/usage/routing-roi` JSON contract, the GUI Cost Analytics chart, the `request_transcripts`
-schema (`dim_best_model` stays), `DimBestVoter`, `DimensionLedger`'s blend rule (frozen-baseline
-constraint), and the cluster/dimension accuracy fields.
+`RoutingRoiPointView`, `ManagementFacade.GetRoutingRoiAsync`, the `/admin/usage/routing-roi` JSON
+contract, `DimBestVoter`'s own live-preferring blend, and the cluster/dimension accuracy fields.
+`request_transcripts.dim_best_model` stays exactly as it was - it feeds the dashboard's
+requested-vs-routed telemetry, not the ROI yardstick.
+
+**Superseded by the frozen-baseline correction above:** `RoutingRoiPoint` and the GUI Cost Analytics
+chart's *doc comments* now describe the untrained-baseline counterfactual rather than `dim_best`'s live
+pick (no field or contract shape changed); `DimensionLedger`'s blend rule was originally frozen wholesale
+here to protect the savings yardstick, but that block was replaced by `UntrainedBaselineSelector` reading
+the prior directly - the blend rule itself is unchanged and remains `DimBestVoter`'s to evolve (Phase Q5).
 
 ## Verification
 

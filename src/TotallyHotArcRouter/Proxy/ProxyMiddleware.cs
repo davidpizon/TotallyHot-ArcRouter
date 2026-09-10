@@ -474,7 +474,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         taskEmbedding: resolution.TaskEmbedding, routerTokens: resolution.RouterTokens,
                         resolutionReason: resolution.SubstitutionReason, isExploratory: resolution.IsExploratory,
                         propensity: resolution.Propensity, classification: resolution.Classification,
-                        taskText: resolution.TaskText, dimBestModel: resolution.DimBestModel)) return;
+                        taskText: resolution.TaskText, dimBestModel: resolution.DimBestModel,
+                        untrainedBaselineModel: resolution.UntrainedBaselineModel,
+                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore)) return;
 
                 continue;
             }
@@ -677,7 +679,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         routerTokens: resolution.RouterTokens, resolutionReason: resolution.SubstitutionReason,
                         isExploratory: resolution.IsExploratory, propensity: resolution.Propensity,
                         classification: resolution.Classification, taskText: resolution.TaskText,
-                        dimBestModel: resolution.DimBestModel);
+                        dimBestModel: resolution.DimBestModel,
+                        untrainedBaselineModel: resolution.UntrainedBaselineModel,
+                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore);
                 }
                 catch (Exception ex)
                 {

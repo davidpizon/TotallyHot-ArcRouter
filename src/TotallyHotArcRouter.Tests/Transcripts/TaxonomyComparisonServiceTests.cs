@@ -142,10 +142,10 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     [Fact]
     public async Task RunCycle_BaselineAbstained_RecordsNoSavingsRatherThanBreakEven()
     {
-        // dim_best abstaining means the frozen baseline expressed no preference; a $0 saving would read as
+        // The untrained baseline abstaining means it expressed no preference; a $0 saving would read as
         // "routing broke even", which is a measurement rather than the absence of one.
         var harness = await BuildHarnessAsync(
-            [new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, DimBestModel: null)]);
+            [new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, UntrainedBaselineModel: null)]);
 
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
 
@@ -158,12 +158,12 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     [Fact]
     public async Task RunCycle_CheaperRoutedModel_RecordsAPositiveEstimatedSaving()
     {
-        // The router served model-a; dim_best would have served the pricier model-b. Both have observed
-        // token averages, so the counterfactual is estimable.
+        // The router served model-a; the untrained baseline would have served the pricier model-b. Both
+        // have observed token averages, so the counterfactual is estimable.
         var harness = await BuildHarnessAsync(
         [
             new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
-            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, DimBestModel: "model-b")
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b")
         ]);
 
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
@@ -222,17 +222,19 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RunCycle_RecordsRegretFromLedgerPredictionAndRewardWeights()
+    public async Task RunCycle_RecordsRegretFromFrozenPriorAndRewardWeights()
     {
-        // model-b's one prior observation (0.5) is the ledger cell the baseline prediction reads; the
-        // routed row scored 0.9 at $0.01 against a much pricier counterfactual, so regret must be negative
-        // (dim_best would likely have done worse AND cost more) and exactly the reward difference under
-        // the default (ε₁, ε₂) = (1, -0.1) weights.
+        // model-b's frozen probing-prior average (0.5) is what the untrained baseline predicts - read
+        // directly from the synced corpus, never from live memory; the routed row scored 0.9 at $0.01
+        // against a much pricier counterfactual, so regret must be negative (the untrained baseline would
+        // likely have done worse AND cost more) and exactly the reward difference under the default
+        // (ε₁, ε₂) = (1, -0.1) weights.
         var harness = await BuildHarnessAsync(
         [
             new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
-            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, DimBestModel: "model-b")
-        ]);
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b")
+        ],
+        priorRows: [new PriorRow(Dimension: "code_generation", Model: "model-b", Score: 0.5)]);
 
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
 
@@ -253,6 +255,52 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             $"Routing beat the baseline on both axes; regret should be negative, got {routed.EstimatedRegret}.");
     }
 
+    // Regression coverage for docs/router/routing-roi-regret-plan.md's frozen-baseline correction, second
+    // pass: the transcript's own UntrainedBaselinePredictedScore (captured by RequestInterceptor from the
+    // prior snapshot in force at selection time) must win over priorMatrix even when a synced corpus is
+    // present and disagrees - simulating a benchmark sync that landed a different average for model-b
+    // between the request and this comparison cycle. Before that fix, PredictBaselineScore always
+    // re-derived the score from whatever prior this cycle loaded, silently pairing the request-time model
+    // with a comparison-time score.
+    [Fact]
+    public async Task RunCycle_PrefersTheTranscriptsOwnPredictedScore_OverAPriorThatHasSinceMoved()
+    {
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
+                UntrainedBaselinePredictedScore: 0.5)
+        ],
+        // A sync that landed after selection: the corpus now says model-b averages 0.9, not the 0.5 the
+        // transcript recorded at request time.
+        priorRows: [new PriorRow(Dimension: "code_generation", Model: "model-b", Score: 0.9)]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0.5, actual: row.BaselinePredictedScore!.Value, 10);
+    }
+
+    // Companion to the test above: a row written before this column existed (or whose selector abstained
+    // on the score) has no request-time score to prefer, so PredictBaselineScore must still fall back to
+    // priorMatrix rather than going permanently null.
+    [Fact]
+    public async Task RunCycle_FallsBackToThePriorMatrix_WhenTheTranscriptHasNoPredictedScoreOfItsOwn()
+    {
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
+                UntrainedBaselinePredictedScore: null)
+        ],
+        priorRows: [new PriorRow(Dimension: "code_generation", Model: "model-b", Score: 0.5)]);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0.5, actual: row.BaselinePredictedScore!.Value, 10);
+    }
+
     [Fact]
     public async Task RunCycle_UnpriceableBaseline_RecordsNullRegretOnce()
     {
@@ -260,7 +308,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         // missing, so both estimates stay null. One shot: the comparison row exists, so a second cycle
         // must not requeue or duplicate it.
         var harness = await BuildHarnessAsync(
-            [new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, DimBestModel: "model-c")]);
+            [new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, UntrainedBaselineModel: "model-c")]);
 
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
@@ -274,25 +322,28 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RunCycle_RoutedEqualsBaseline_UsesLeaveOneOutPrediction()
+    public async Task RunCycle_BaselinePrediction_NeverReadsLiveMemory_OnlyTheFrozenPrior()
     {
-        // When the routed model IS the baseline's pick, the observation being compared already sits in the
-        // baseline's own ledger cell, so the prediction must hold it out: with observations 0.2 and 0.8 in
-        // one cell, each row's baseline prediction is the OTHER observation, never the contaminated 0.5.
+        // The routed model IS the baseline's pick, and live memory ends up holding two observations for it
+        // (0.2, 0.8) by the time the cycle runs. Under the old dim_best-voter blend this self-contamination
+        // required a leave-one-out correction. The untrained baseline reads none of that live memory at
+        // all - both rows' predicted baseline score must be exactly the frozen prior's average (0.4),
+        // completely unaffected by what live traffic recorded for the very same model
+        // (docs/router/routing-roi-regret-plan.md's frozen-baseline correction).
         var harness = await BuildHarnessAsync(
         [
-            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.2, DimBestModel: "model-a"),
-            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.8, DimBestModel: "model-a")
-        ]);
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.2, UntrainedBaselineModel: "model-a"),
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.8, UntrainedBaselineModel: "model-a")
+        ],
+        priorRows: [new PriorRow(Dimension: "code_generation", Model: "model-a", Score: 0.4)]);
 
         await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
 
         var rows = await harness.ComparisonStore.LoadSinceAsync(
             since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
-        var low = Assert.Single(collection: rows, predicate: r => Math.Abs(r.ObservedScore - 0.2) < 1e-9);
-        var high = Assert.Single(collection: rows, predicate: r => Math.Abs(r.ObservedScore - 0.8) < 1e-9);
-        Assert.Equal(0.8, actual: low.BaselinePredictedScore!.Value, 10);
-        Assert.Equal(0.2, actual: high.BaselinePredictedScore!.Value, 10);
+        Assert.Equal(2, actual: rows.Count);
+        Assert.All(collection: rows,
+            action: r => Assert.Equal(0.4, actual: r.BaselinePredictedScore!.Value, 10));
     }
 
     [Fact]
@@ -398,7 +449,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         bool transcriptsEnabled = true,
         InFlightRequestGauge? inFlightGauge = null,
         int batchSize = 200,
-        Func<InFlightRequestGauge, ITranscriptStore, ITranscriptStore>? wrapTranscriptStore = null)
+        Func<InFlightRequestGauge, ITranscriptStore, ITranscriptStore>? wrapTranscriptStore = null,
+        IReadOnlyList<PriorRow>? priorRows = null)
     {
         var storageOptions = Options.Create(new StorageOptions
         {
@@ -453,7 +505,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     100,
                     50,
                     null,
-                    DimBestModel: sample.DimBestModel),
+                    UntrainedBaselineModel: sample.UntrainedBaselineModel,
+                    UntrainedBaselinePredictedScore: sample.UntrainedBaselinePredictedScore),
                 cancellationToken: token);
 
             if (id is not null)
@@ -475,6 +528,35 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
 
         if (trainClusterModel) WriteClusterModel();
 
+        // No prior rows -> point at a corpus file that never gets created, matching a machine where the
+        // benchmark has never been synced (DimensionModelScoreMatrix.SelectBest/AverageScore then always
+        // return null, so the untrained-baseline predicted score is null too - the same degrade
+        // UntrainedBaselineSelector and DimBestVoter both perform). Prior rows given -> a real, synced
+        // corpus backing the frozen probing-split prior the untrained baseline predicts from.
+        var benchmarkDbPath = Path.Combine(path1: _tempDirectory, path2: "coderouterbench.db");
+        var benchmarkDatabase = new BenchmarkDatabase(Options.Create(new StorageOptions
+        {
+            BenchmarkDatabasePath = priorRows is { Count: > 0 } ? benchmarkDbPath : "no-such-corpus.db"
+        }));
+        if (priorRows is { Count: > 0 })
+        {
+            benchmarkDatabase.EnsureCreated();
+            await using var connection = benchmarkDatabase.OpenConnection();
+            foreach (var row in priorRows)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                                      INSERT INTO benchmark_id_results (task_id, split, source_split, dimension, model, score)
+                                      VALUES ($taskId, 'probing', 'probing', $dimension, $model, $score);
+                                      """;
+                command.Parameters.AddWithValue(parameterName: "$taskId", value: Guid.NewGuid().ToString("N"));
+                command.Parameters.AddWithValue(parameterName: "$dimension", value: row.Dimension);
+                command.Parameters.AddWithValue(parameterName: "$model", value: row.Model);
+                command.Parameters.AddWithValue(parameterName: "$score", value: row.Score);
+                command.ExecuteNonQuery();
+            }
+        }
+
         inFlightGauge ??= wrapTranscriptStore is null ? null : new InFlightRequestGauge();
         var serviceTranscriptStore = wrapTranscriptStore is null
             ? transcriptStore
@@ -486,10 +568,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             comparisonStore: comparisonStore,
             memoryEntryStore: memoryEntryStore,
             routerMemory: routerMemory,
-            benchmarkDatabase: new BenchmarkDatabase(Options.Create(new StorageOptions
-            {
-                BenchmarkDatabasePath = Path.Combine(path1: _tempDirectory, path2: "no-such-corpus.db")
-            })),
+            benchmarkDatabase: benchmarkDatabase,
             routeResolver: new StubRouteResolver(),
             transcriptOptions: transcriptOptions,
             routingOptions: Options.Create(new RoutingOptions { ClusterAssignmentThreshold = 0.5 }),
@@ -527,8 +606,12 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         double? Score,
         bool IsExploratory = false,
         decimal? Cost = 0.05m,
-        string? DimBestModel = "model-b",
-        string? Dimension = "code_generation");
+        string? UntrainedBaselineModel = "model-b",
+        string? Dimension = "code_generation",
+        double? UntrainedBaselinePredictedScore = null);
+
+    /// <summary>One row of a fixture's synced frozen probing-split prior.</summary>
+    private sealed record PriorRow(string Dimension, string Model, double Score);
 
     /// <summary>Everything one test needs to drive a cycle and inspect its output.</summary>
     private sealed record Harness(

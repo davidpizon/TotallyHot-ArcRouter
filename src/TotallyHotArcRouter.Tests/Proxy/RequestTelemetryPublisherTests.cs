@@ -245,6 +245,50 @@ public class RequestTelemetryPublisherTests
         Assert.Single(telemetryPublisher.PublishedEvents);
     }
 
+    // Regression coverage for the PersistTranscriptAsync wiring itself: ThrowingTranscriptStore above only
+    // proves a transcript-store failure is swallowed, not that a successful insert actually carries
+    // UntrainedBaselineModel through - a wiring regression that dropped the argument on this call site
+    // would leave production transcript baselines null while every other transcript field's test stayed
+    // green.
+    [Fact]
+    public async Task PublishAsync_WritesUntrainedBaselineModelToTheTranscriptStore()
+    {
+        var telemetryPublisher = new FakeTelemetryPublisher();
+        var transcriptStore = new CapturingTranscriptStore();
+        var routingOptionsMonitor =
+            new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { EnableAdaptiveRouting = true });
+        var publisher = CreatePublisher(
+            telemetryPublisher: telemetryPublisher,
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: routingOptionsMonitor);
+
+        var route = CreateRoute(provider: "openai", true);
+        var context = CreateContext(sessionId: "session-untrained-baseline");
+
+        var clientShapeBytes = """{"choices":[]}"""u8.ToArray();
+
+        await publisher.PublishAsync(
+            context: context,
+            route: route,
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: clientShapeBytes,
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken,
+            untrainedBaselineModel: "kimi-k2.5",
+            untrainedBaselinePredictedScore: 0.62);
+
+        Assert.NotNull(transcriptStore.LastInserted);
+        Assert.Equal(expected: "kimi-k2.5", actual: transcriptStore.LastInserted!.UntrainedBaselineModel);
+        Assert.Equal(0.62, actual: transcriptStore.LastInserted.UntrainedBaselinePredictedScore);
+    }
+
     [Fact]
     public async Task PublishAsync_RepresentativeCase_PublishesEventWithExpectedShape()
     {
@@ -498,6 +542,92 @@ public class RequestTelemetryPublisherTests
         {
             InsertAttempted = true;
             throw new InvalidOperationException("simulated transcript store failure");
+        }
+
+        public Task UpdateOutcomeAsync(string correlationId, double? score,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    /// <summary>
+    /// Captures the record passed to <see cref="InsertAsync"/>, to verify a wiring regression in
+    /// <c>RequestTelemetryPublisher.PersistTranscriptAsync</c> would be caught by an assertion on the
+    /// actually-persisted <see cref="TranscriptRecord"/> rather than only on selector/service unit tests
+    /// that never go through <c>PublishAsync</c> at all. Every other member throws
+    /// <see cref="NotSupportedException"/> since <c>PublishAsync</c> only ever calls <see cref="InsertAsync"/>
+    /// on this seam.
+    /// </summary>
+    private sealed class CapturingTranscriptStore : ITranscriptStore
+    {
+        public TranscriptRecord? LastInserted { get; private set; }
+
+        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
+        {
+            LastInserted = record;
+            return Task.FromResult<long?>(1);
         }
 
         public Task UpdateOutcomeAsync(string correlationId, double? score,
