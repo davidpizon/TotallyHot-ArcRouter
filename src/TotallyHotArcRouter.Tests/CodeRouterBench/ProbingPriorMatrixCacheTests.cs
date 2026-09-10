@@ -5,9 +5,11 @@ namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 /// <summary>
 /// Covers <see cref="ProbingPriorMatrixCache"/>: its degrade path, and the freshness/sharing properties
-/// that let it replace the three private caches <see cref="Router.Orchestrator.DimBestVoter"/>,
-/// <see cref="Router.UntrainedBaselineSelector"/>, and <see cref="Transcripts.TaxonomyComparisonService"/>
-/// used to keep independently (each paying its own full-table scan of the same "probing" split).
+/// that let it replace the three private caches
+/// <see cref="TotallyHot.ArcRouter.Router.Orchestrator.DimBestVoter"/>,
+/// <see cref="TotallyHot.ArcRouter.Router.UntrainedBaselineSelector"/>, and
+/// <see cref="TotallyHot.ArcRouter.Transcripts.TaxonomyComparisonService"/> used to keep independently
+/// (each paying its own full-table scan of the same "probing" split).
 /// </summary>
 public sealed class ProbingPriorMatrixCacheTests
 {
