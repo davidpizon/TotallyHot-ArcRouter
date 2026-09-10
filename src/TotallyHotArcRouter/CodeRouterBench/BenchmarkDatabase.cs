@@ -125,36 +125,6 @@ public sealed class BenchmarkDatabase
     /// <summary>Gets the resolved absolute path of the database file.</summary>
     public string DatabasePath => _databasePath;
 
-    /// <summary>
-    /// Gets a stamp that changes whenever this database's committed content changes, or
-    /// <see cref="DateTime.MinValue"/> when it has never been synced on this machine.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="EnsureCreated"/> puts this database in WAL mode, so a sync's <c>INSERT</c>s can commit
-    /// entirely into the <c>-wal</c> sidecar without ever touching the main file's mtime - the checkpoint
-    /// that folds the WAL back in is opportunistic, not guaranteed to run before a caller re-checks
-    /// freshness. A staleness check keyed on <see cref="DatabasePath"/>'s own
-    /// <see cref="File.GetLastWriteTimeUtc(string)"/> alone can therefore miss a completed sync entirely.
-    /// This stamp is the newer of the main file and its <c>-wal</c> sidecar (when either exists), so both
-    /// <see cref="Router.UntrainedBaselineSelector"/> and
-    /// <see cref="Transcripts.TaxonomyComparisonService"/> - which must observe a sync at the same moment
-    /// to keep a baseline's selected model and predicted score paired from the same prior - see it.
-    /// </remarks>
-    public DateTime GetContentStamp()
-    {
-        if (!File.Exists(_databasePath)) return DateTime.MinValue;
-
-        var stamp = File.GetLastWriteTimeUtc(_databasePath);
-        var walPath = _databasePath + "-wal";
-        if (File.Exists(walPath))
-        {
-            var walStamp = File.GetLastWriteTimeUtc(walPath);
-            if (walStamp > stamp) stamp = walStamp;
-        }
-
-        return stamp;
-    }
-
     /// <summary>Gets the SQLite connection string for <see cref="_databasePath"/>, opened read/write and created if missing.</summary>
     private string ConnectionString => new SqliteConnectionStringBuilder
     {

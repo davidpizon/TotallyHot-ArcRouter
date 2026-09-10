@@ -495,8 +495,12 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="dimension">The row's captured heuristic dimension (bare, matching the prior's own keying).</param>
     /// <param name="priorMatrix">The frozen prior, or <see langword="null"/> when the corpus is unsynced.</param>
     /// <returns>
-    /// The predicted baseline score, or <see langword="null"/> when the baseline abstained, no score is
-    /// available, or the corpus is unsynced.
+    /// <see cref="TranscriptRecord.UntrainedBaselinePredictedScore"/> when the row carries one - in which
+    /// case this is <see langword="null"/> only when the baseline abstained, regardless of whether
+    /// <paramref name="priorMatrix"/> is currently unsynced or no longer has a cell for the model.
+    /// Otherwise (a legacy row predating that column), a fresh lookup against <paramref name="priorMatrix"/>,
+    /// <see langword="null"/> when the baseline abstained, the corpus is unsynced, or that lookup has no
+    /// average for it.
     /// </returns>
     /// <remarks>
     /// Prefers <see cref="TranscriptRecord.UntrainedBaselinePredictedScore"/> - the score

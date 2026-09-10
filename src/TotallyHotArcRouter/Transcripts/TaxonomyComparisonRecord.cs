@@ -61,12 +61,20 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// money against the frozen baseline, negative when it cost more. Inherits the estimate qualification.
 /// </param>
 /// <param name="BaselinePredictedScore">
-/// The score <see cref="BaselineModel"/> would likely have achieved on this request, read directly from
-/// the frozen CodeRouterBench probing-split prior - never live memory, unlike the taxonomy-accuracy
-/// comparison above. No leave-one-out correction applies: a table-only prediction never absorbed this
-/// observation, because it never reads live memory at all. <b>An estimate</b>: the counterfactual response
-/// was never produced. <see langword="null"/> when the baseline abstained or the frozen prior has no
-/// average for it.
+/// The score <see cref="BaselineModel"/> would likely have achieved on this request - never live memory,
+/// unlike the taxonomy-accuracy comparison above. No leave-one-out correction applies: a table-only
+/// prediction never absorbed this observation, because it never reads live memory at all. <b>An
+/// estimate</b>: the counterfactual response was never produced.
+/// <para>
+/// Sourced from <c>TranscriptRecord.UntrainedBaselinePredictedScore</c> - the score read from the exact
+/// frozen CodeRouterBench probing-split prior snapshot the baseline was selected from, at request time -
+/// when the transcript carries one (every row written since docs/router/routing-roi-regret-plan.md's
+/// frozen-baseline correction, second pass). Falls back to a fresh lookup against whatever prior is
+/// currently loaded only for a legacy row that predates that column - see
+/// <c>TaxonomyComparisonService.PredictBaselineScore</c>. <see langword="null"/> when the baseline
+/// abstained, or (legacy rows only) the corpus is unsynced or the current prior has no average for it; a
+/// modern row's persisted score is never nulled out by a later prior no longer containing the cell.
+/// </para>
 /// </param>
 /// <param name="EstimatedRegret">
 /// The routing decision's estimated regret against the untrained baseline under the canonical reward

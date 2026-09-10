@@ -35,6 +35,7 @@ public sealed class BenchmarkSyncService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly BenchmarkFileLedger _ledger;
     private readonly ILogger<BenchmarkSyncService> _logger;
+    private readonly ProbingPriorMatrixCache? _matrixCache;
     private readonly BenchmarkChecksumProbe _probe;
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkSyncService"/> class.</summary>
@@ -52,13 +53,21 @@ public sealed class BenchmarkSyncService
     /// the full download/verify/import/ledger pipeline against small fixture bytes without needing to
     /// satisfy the production manifest's five- and six-figure row-count assertions.
     /// </param>
+    /// <param name="matrixCache">
+    /// The shared probing-prior cache (<see cref="Router.Orchestrator.DimBestVoter"/>,
+    /// <see cref="Router.UntrainedBaselineSelector"/>, <see cref="Transcripts.TaxonomyComparisonService"/>),
+    /// forced to reload here - on this explicit, already-slow (network download) sync operation - rather
+    /// than left for whichever reader's next request happens to notice the corpus changed first. Optional
+    /// so a caller that doesn't route any live traffic (a one-shot CLI sync) needn't supply one.
+    /// </param>
     public BenchmarkSyncService(
         IHttpClientFactory httpClientFactory,
         BenchmarkChecksumProbe probe,
         BenchmarkDatabase database,
         BenchmarkFileLedger ledger,
         ILogger<BenchmarkSyncService> logger,
-        IReadOnlyList<BenchmarkFileSpec>? fileSpecs = null)
+        IReadOnlyList<BenchmarkFileSpec>? fileSpecs = null,
+        ProbingPriorMatrixCache? matrixCache = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(probe);
@@ -72,6 +81,7 @@ public sealed class BenchmarkSyncService
         _ledger = ledger;
         _logger = logger;
         _fileSpecs = fileSpecs ?? BenchmarkFileSpec.All;
+        _matrixCache = matrixCache;
     }
 
     /// <summary>
@@ -174,6 +184,21 @@ public sealed class BenchmarkSyncService
         var orderedOutcomes = _fileSpecs
             .Select(spec => outcomes.First(outcome => outcome.FileName == spec.FileName))
             .ToList();
+
+        // Forces the shared probing-prior cache to reload now, on this already-slow sync operation,
+        // rather than leaving the next reader's request to pay that full-table scan (see the constructor
+        // parameter's remarks). Best-effort: a reload failure here is not this sync's failure to report -
+        // the cache's own readers already degrade gracefully on an unsynced/unreadable corpus, and the
+        // next call to GetMatrix() will simply retry.
+        try
+        {
+            _matrixCache?.GetMatrix();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception: ex,
+                message: "Failed to warm the probing-prior cache after a benchmark sync; a reader's next call will retry.");
+        }
 
         return new BenchmarkSyncResult(RepoCommit: probeResult.RepoCommit, Files: orderedOutcomes);
     }

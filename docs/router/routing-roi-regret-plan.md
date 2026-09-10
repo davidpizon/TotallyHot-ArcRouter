@@ -68,6 +68,21 @@ the delivered summary.
 > silently ignoring every later benchmark sync; it now builds a fresh, cheap-to-construct `DimensionLedger`
 > around the shared cache's current matrix on every vote, so an explicit sync reaches its very next vote.
 > The blend rule itself (live-memory-preferred, prior as fallback) is unchanged.
+>
+> **Shared probing-prior cache, second pass (2026-09-10).** Two follow-up findings on the cache above.
+> (1) Its freshness stamp was `BenchmarkDatabase.GetContentStamp()` - a filesystem-mtime check (main file,
+> newer of it or its `-wal` sidecar) - which the second-pass note further up also relied on before this
+> cache existed. Both were replaced: `GetContentStamp()` is deleted, and `ProbingPriorMatrixCache` now keys
+> freshness on the probing file's own `benchmark_files.synced_at_utc` ledger row instead, because a
+> filesystem timestamp can retain an identical value across two rapid writes on some filesystems - a false
+> negative that would mask a real sync indefinitely, exactly the failure both mechanisms existed to
+> prevent. The ledger row has no such gap: `BenchmarkSyncService` writes it transactionally alongside the
+> actual imported rows, only when content actually changed. (2) `GetMatrix()` is still a synchronous
+> full-table scan on a cold cache, and `RequestInterceptor` reaches it during live request resolution -
+> so an unwarmed cache would add that scan's latency to whichever request arrived first. Two callers now
+> warm it off the request path: `StartupHealthCheckHostedService` loads it once before Kestrel binds
+> (covers the first request after process start), and `BenchmarkSyncService` forces a reload at the end of
+> every sync (covers the first request after each sync) - see `ProbingPriorMatrixCache`'s remarks for both.
 
 ## Context
 
