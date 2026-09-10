@@ -4,6 +4,35 @@
 the delivered summary.
 **Builds on:** [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T4 (shipped).
 
+> **Frozen-baseline correction (2026-09-09).** This plan's original "Not changing" list froze
+> `DimensionLedger`'s blend rule wholesale to keep the ROI savings figure's finish line from moving as the
+> router learns. That froze the wrong thing: the blend rule is *also* `DimBestVoter`'s live production
+> picking rule, so freezing it entirely would have blocked ever improving that rule (`src/PLAN.md` Phase
+> Q5). Worse, the frozen rule was never actually a fixed yardstick — it prefers the live
+> `RouterMemory` average the instant any observation exists, so the "untrained" counterfactual it priced
+> was learning right alongside the router it was measured against, holding their gap constant and
+> understating (or hiding) any real improvement.
+>
+> **What changed.** The counterfactual now comes from a new `UntrainedBaselineSelector`
+> (`src/TotallyHotArcRouter/Router/UntrainedBaselineSelector.cs`), which reads only the frozen
+> CodeRouterBench probing-split prior via `DimensionModelScoreMatrix.SelectBest` - never
+> `RouterMemory` - captured at request time (the candidate menu is only known then) into a new
+> `request_transcripts.untrained_baseline_model` column, alongside (not replacing) `dim_best_model`.
+> `TaxonomyComparisonService.PredictBaselineScore` reads the same frozen matrix directly instead of
+> `DimensionLedger`'s blend, dropping the leave-one-out correction for the baseline half entirely (a
+> table-only prediction never absorbed the observation being compared, so there is nothing to hold out).
+> The four cost ingredients behind `BaselineEstimatedCostUsd` (token averages, catalog prices) are now
+> persisted alongside the answer, and `SqliteTaxonomyComparisonStore.UpsertAsync` is first-write-wins
+> (`ON CONFLICT DO NOTHING`) so a later rescan can never silently reprice an already-published row against
+> drifted inputs. `DimBestVoter`'s own live-preferring blend is untouched - this correction is scoped to
+> the ROI yardstick, not the production voter. Zero rows existed in `taxonomy_comparisons` when this
+> shipped, so no historical savings figures needed reconciling.
+>
+> This unblocks Phase Q5's acceptance gate (a sample-size-aware `dim_best` estimator, evaluated by
+> `RegretReplayEngine`), which needed exactly this separation to exist - see
+> [`regret-evaluation-harness-plan.md`](regret-evaluation-harness-plan.md)'s Q5 status note for why Q5
+> itself remains blocked on real traffic even after this fix.
+
 ## Context
 
 The Routing ROI pipeline (Phase T4, `TaxonomyComparisonService`) compares each scored transcript's
@@ -162,10 +191,16 @@ MAE-ordering tests (the accuracy machinery is retained).
 
 ## Not changing
 
-`RoutingRoiPoint`, `RoutingRoiPointView`, `ManagementFacade.GetRoutingRoiAsync`, the
-`/admin/usage/routing-roi` JSON contract, the GUI Cost Analytics chart, the `request_transcripts`
-schema (`dim_best_model` stays), `DimBestVoter`, `DimensionLedger`'s blend rule (frozen-baseline
-constraint), and the cluster/dimension accuracy fields.
+`RoutingRoiPointView`, `ManagementFacade.GetRoutingRoiAsync`, the `/admin/usage/routing-roi` JSON
+contract, `DimBestVoter`'s own live-preferring blend, and the cluster/dimension accuracy fields.
+`request_transcripts.dim_best_model` stays exactly as it was - it feeds the dashboard's
+requested-vs-routed telemetry, not the ROI yardstick.
+
+**Superseded by the frozen-baseline correction above:** `RoutingRoiPoint` and the GUI Cost Analytics
+chart's *doc comments* now describe the untrained-baseline counterfactual rather than `dim_best`'s live
+pick (no field or contract shape changed); `DimensionLedger`'s blend rule was originally frozen wholesale
+here to protect the savings yardstick, but that block was replaced by `UntrainedBaselineSelector` reading
+the prior directly - the blend rule itself is unchanged and remains `DimBestVoter`'s to evolve (Phase Q5).
 
 ## Verification
 

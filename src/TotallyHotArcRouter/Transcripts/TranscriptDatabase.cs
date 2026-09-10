@@ -130,6 +130,8 @@ public sealed class TranscriptDatabase
         MigrateTaxonomyComparisonRegretColumns(connection);
         MigrateScorerVersionColumn(connection);
         MigrateSessionIdColumn(connection);
+        MigrateUntrainedBaselineModelColumn(connection);
+        MigrateTaxonomyComparisonBaselineCostColumns(connection);
     }
 
     /// <summary>
@@ -308,6 +310,68 @@ public sealed class TranscriptDatabase
         alter.CommandText = """
                             ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_predicted_score REAL NULL;
                             ALTER TABLE taxonomy_comparisons ADD COLUMN estimated_regret REAL NULL;
+                            """;
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the <c>untrained_baseline_model</c> column to <c>request_transcripts</c> if it is missing -
+    /// docs/router/routing-roi-regret-plan.md's frozen-baseline correction. Captured at request time
+    /// (unlike <c>dim_best_model</c>, this value never reads live memory, but the request's candidate menu
+    /// - which models were actually eligible - exists nowhere else and would otherwise be lost).
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. Nullable
+    /// with no backfill: rows captured before this column existed never recorded what the untrained
+    /// baseline would have picked, and inventing a value for them would fabricate exactly the
+    /// counterfactual this column exists to measure honestly.
+    /// </remarks>
+    private static void MigrateUntrainedBaselineModelColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'untrained_baseline_model';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN untrained_baseline_model TEXT NULL;";
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the four baseline-cost-ingredient columns to <c>taxonomy_comparisons</c> if they are missing -
+    /// the token estimate and price rates <see cref="TaxonomyComparisonService"/> used to
+    /// compute <c>baseline_estimated_cost_usd</c>, recorded alongside the answer rather than only the
+    /// answer, so a stored savings figure is auditable and reproducible from its own row rather than
+    /// trusted blind (docs/router/routing-roi-regret-plan.md's frozen-baseline correction).
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. All four
+    /// columns are nullable with no backfill, for the same reason as
+    /// <see cref="MigrateTaxonomyComparisonRegretColumns"/>: a row computed before these columns existed
+    /// never recorded its ingredients, and recomputing them later would price against catalog rates and
+    /// token averages that have since drifted - exactly the contamination this correction exists to
+    /// eliminate. The four columns travel together, so one existence check covers all of them.
+    /// </remarks>
+    private static void MigrateTaxonomyComparisonBaselineCostColumns(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = 'baseline_input_tokens';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = """
+                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_input_tokens REAL NULL;
+                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_output_tokens REAL NULL;
+                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_input_price_per_million REAL NULL;
+                            ALTER TABLE taxonomy_comparisons ADD COLUMN baseline_output_price_per_million REAL NULL;
                             """;
         alter.ExecuteNonQuery();
     }

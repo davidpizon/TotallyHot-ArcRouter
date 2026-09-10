@@ -87,6 +87,93 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Upsert_RoundTripsTheBaselineCostIngredients()
+    {
+        var store = CreateStore();
+
+        await store.UpsertAsync(
+            record: MakeRecord(1) with
+            {
+                BaselineInputTokens = 120.5,
+                BaselineOutputTokens = 340.25,
+                BaselineInputPricePerMillion = 1.5m,
+                BaselineOutputPricePerMillion = 7.5m
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await store.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(120.5, actual: row.BaselineInputTokens);
+        Assert.Equal(340.25, actual: row.BaselineOutputTokens);
+        Assert.Equal(1.5m, actual: row.BaselineInputPricePerMillion);
+        Assert.Equal(7.5m, actual: row.BaselineOutputPricePerMillion);
+    }
+
+    [Fact]
+    public async Task Upsert_NullIngredients_StayNullThroughTheRoundTrip()
+    {
+        var store = CreateStore();
+
+        await store.UpsertAsync(record: MakeRecord(1), cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await store.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Null(row.BaselineInputTokens);
+        Assert.Null(row.BaselineOutputTokens);
+        Assert.Null(row.BaselineInputPricePerMillion);
+        Assert.Null(row.BaselineOutputPricePerMillion);
+    }
+
+    // The property docs/router/routing-roi-regret-plan.md's frozen-baseline correction exists to
+    // guarantee: once a comparison row has been written, a later recomputation (a rescan, a backfill, a
+    // second drain over the same transcript) must never rewrite it - the frozen baseline's model, its
+    // predicted score, and the four cost ingredients would otherwise silently drift with whatever the
+    // price catalog and observed token averages happen to be at re-run time, reintroducing exactly the
+    // contamination the correction eliminates.
+    [Fact]
+    public async Task Upsert_ExistingRow_IsNeverRewritten()
+    {
+        var store = CreateStore();
+        var firstWrite = MakeRecord(1) with
+        {
+            BaselineModel = "model-b",
+            BaselineEstimatedCostUsd = 0.03m,
+            EstimatedNetSavingsUsd = 0.02m,
+            BaselineInputTokens = 100,
+            BaselineOutputTokens = 50,
+            BaselineInputPricePerMillion = 1m,
+            BaselineOutputPricePerMillion = 2m
+        };
+        await store.UpsertAsync(record: firstWrite, cancellationToken: TestContext.Current.CancellationToken);
+
+        // A second write for the same transcript, as a rescan/backfill would produce after prices and
+        // token averages have moved - every field disagrees with the first write.
+        var secondWrite = firstWrite with
+        {
+            ComparedAtUtc = firstWrite.ComparedAtUtc.AddDays(1),
+            BaselineModel = "model-c",
+            BaselineEstimatedCostUsd = 0.09m,
+            EstimatedNetSavingsUsd = -0.04m,
+            BaselineInputTokens = 999,
+            BaselineOutputTokens = 999,
+            BaselineInputPricePerMillion = 50m,
+            BaselineOutputPricePerMillion = 50m
+        };
+        await store.UpsertAsync(record: secondWrite, cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = Assert.Single(await store.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(expected: firstWrite.ComparedAtUtc, actual: row.ComparedAtUtc);
+        Assert.Equal(expected: "model-b", actual: row.BaselineModel);
+        Assert.Equal(0.03m, actual: row.BaselineEstimatedCostUsd);
+        Assert.Equal(0.02m, actual: row.EstimatedNetSavingsUsd);
+        Assert.Equal(100, actual: row.BaselineInputTokens);
+        Assert.Equal(50, actual: row.BaselineOutputTokens);
+        Assert.Equal(1m, actual: row.BaselineInputPricePerMillion);
+        Assert.Equal(2m, actual: row.BaselineOutputPricePerMillion);
+    }
+
+    [Fact]
     public async Task LoadPendingComparisons_ExcludesRowsWithNoDimension()
     {
         var options = Options.Create(new TranscriptOptions { Enabled = true });

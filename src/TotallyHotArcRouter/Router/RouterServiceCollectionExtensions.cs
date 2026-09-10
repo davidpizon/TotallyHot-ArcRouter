@@ -131,6 +131,7 @@ internal static class RouterServiceCollectionExtensions
         // OrchestratorRoutingPolicy's IEnumerable<IRoutingVoter> constructor parameter resolves every one
         // of them).
         services.AddSingleton<DimBestVoter>();
+        services.AddSingleton<UntrainedBaselineSelector>();
         services.AddSingleton<MemoryKnnVoter>();
         services.AddSingleton<LogRegVoter>();
         services.AddSingleton<LlmRouterVoter>();

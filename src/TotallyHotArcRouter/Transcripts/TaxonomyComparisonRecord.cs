@@ -38,36 +38,72 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </param>
 /// <param name="RoutedModel">The model that actually served the request.</param>
 /// <param name="BaselineModel">
-/// The model <c>dim_best</c> alone would have chosen, or <see langword="null"/> when it abstained - in
-/// which case no savings figure is computed for this row.
+/// The model an <em>untrained</em> router - one that has never read live memory - would have chosen from
+/// this request's actual candidate menu, using only the frozen CodeRouterBench probing-split prior
+/// (<c>UntrainedBaselineSelector</c>), or <see langword="null"/> when it abstained - in which case no
+/// savings figure is computed for this row. This is the ROI cost-savings yardstick's frozen counterfactual
+/// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction); it does <em>not</em> use the
+/// live, memory-preferring <c>dim_best</c> voter, because a baseline that learns alongside the router it is
+/// measured against holds the gap between them constant and reports an improvement of zero regardless of
+/// how much the router has actually learned.
 /// </param>
 /// <param name="ActualCostUsd">What serving this request actually cost, or <see langword="null"/> when unknown.</param>
 /// <param name="BaselineEstimatedCostUsd">
-/// What <see cref="BaselineModel"/> would have cost. <b>An estimate</b>: the counterfactual's true token
-/// count is never observed, so this prices that model's own observed-average token counts. Never presented
-/// without that qualification.
+/// What <see cref="BaselineModel"/> would have cost, computed from <see cref="BaselineInputTokens"/>/
+/// <see cref="BaselineOutputTokens"/> and <see cref="BaselineInputPricePerMillion"/>/
+/// <see cref="BaselineOutputPricePerMillion"/>. <b>An estimate</b>: the counterfactual's true token count
+/// is never observed, so this prices that model's own observed-average token counts at the ingredients'
+/// captured prices. Never presented without that qualification. Immutable once written - see
+/// <see cref="BaselineInputTokens"/>'s remarks.
 /// </param>
 /// <param name="EstimatedNetSavingsUsd">
 /// <see cref="BaselineEstimatedCostUsd"/> minus <see cref="ActualCostUsd"/> - positive when routing saved
 /// money against the frozen baseline, negative when it cost more. Inherits the estimate qualification.
 /// </param>
 /// <param name="BaselinePredictedScore">
-/// The score <see cref="BaselineModel"/> would likely have achieved on this request, predicted from the
-/// dimension ledger's blend (live average, else probing prior) - the same number <c>DimBestVoter</c> votes
-/// on, held out when the routed model <em>is</em> the baseline so a cell never predicts from its own
-/// observation. <b>An estimate</b>: the counterfactual response was never produced.
-/// <see langword="null"/> when the baseline abstained or neither ledger source has the cell.
+/// The score <see cref="BaselineModel"/> would likely have achieved on this request, read directly from
+/// the frozen CodeRouterBench probing-split prior - never live memory, unlike the taxonomy-accuracy
+/// comparison above. No leave-one-out correction applies: a table-only prediction never absorbed this
+/// observation, because it never reads live memory at all. <b>An estimate</b>: the counterfactual response
+/// was never produced. <see langword="null"/> when the baseline abstained or the frozen prior has no
+/// average for it.
 /// </param>
 /// <param name="EstimatedRegret">
-/// The routing decision's estimated regret against the <c>dim_best</c> baseline under the canonical
-/// reward <c>r = ε₁·s + ε₂·κ</c> (docs/router/routing-roi-regret-plan.md, weights from
+/// The routing decision's estimated regret against the untrained baseline under the canonical reward
+/// <c>r = ε₁·s + ε₂·κ</c> (docs/router/routing-roi-regret-plan.md, weights from
 /// <c>RoutingOptions.Epsilon1</c>/<c>Epsilon2</c>): the baseline's estimated reward
 /// (<see cref="BaselinePredictedScore"/>, <see cref="BaselineEstimatedCostUsd"/>) minus the routed pick's
-/// observed reward (<see cref="ObservedScore"/>, <see cref="ActualCostUsd"/>). Positive means the
-/// <c>dim_best</c> pick would likely have earned more reward; negative means routing beat it.
+/// observed reward (<see cref="ObservedScore"/>, <see cref="ActualCostUsd"/>). Positive means the untrained
+/// baseline would likely have earned more reward; negative means routing beat it.
 /// <see langword="null"/> whenever any input is missing - never fabricated. Inherits the estimate
 /// qualification: the baseline half is predicted, not observed.
 /// </param>
+/// <param name="BaselineInputTokens">
+/// <see cref="BaselineModel"/>'s observed-average prompt token count at the moment this row was first
+/// compared, the first ingredient behind <see cref="BaselineEstimatedCostUsd"/>.
+/// </param>
+/// <param name="BaselineOutputTokens">
+/// <see cref="BaselineModel"/>'s observed-average completion token count at the moment this row was first
+/// compared.
+/// </param>
+/// <param name="BaselineInputPricePerMillion">
+/// <see cref="BaselineModel"/>'s USD-per-million-input-token catalog rate at the moment this row was first
+/// compared.
+/// </param>
+/// <param name="BaselineOutputPricePerMillion">
+/// <see cref="BaselineModel"/>'s USD-per-million-output-token catalog rate at the moment this row was
+/// first compared.
+/// </param>
+/// <remarks>
+/// The four <c>Baseline*</c> cost ingredients (tokens and prices) are captured once, the first time a row
+/// is compared, and the row is then never rewritten: <c>SqliteTaxonomyComparisonStore.UpsertAsync</c> is
+/// first-write-wins for a row that already has a baseline recorded. Both the token averages and the price
+/// catalog drift as live traffic accumulates and prices refresh, so a re-run (a rescan, a backfill) would
+/// otherwise silently rewrite an already-published savings figure with today's inputs instead of the ones
+/// that were actually in force - the same contamination the frozen-baseline correction exists to eliminate.
+/// The ingredients are stored, not only the computed cost, so a savings figure is auditable and
+/// reproducible from its own row.
+/// </remarks>
 public sealed record TaxonomyComparisonRecord(
     long TranscriptId,
     DateTimeOffset ComparedAtUtc,
@@ -85,4 +121,8 @@ public sealed record TaxonomyComparisonRecord(
     decimal? BaselineEstimatedCostUsd,
     decimal? EstimatedNetSavingsUsd,
     double? BaselinePredictedScore,
-    double? EstimatedRegret);
+    double? EstimatedRegret,
+    double? BaselineInputTokens = null,
+    double? BaselineOutputTokens = null,
+    decimal? BaselineInputPricePerMillion = null,
+    decimal? BaselineOutputPricePerMillion = null);

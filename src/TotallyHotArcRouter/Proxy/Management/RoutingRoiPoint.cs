@@ -7,10 +7,14 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The baseline is the frozen nine-dimension taxonomy's own pick</b>, not a worst-case model. The
-/// figure answers "what did routing buy against the classifier we already had", which is the comparison
-/// docs/router/self-organizing-classification-plan.md Phase T4 defines and the only baseline this
-/// codebase actually computes.
+/// <b>The baseline is an untrained router's pick</b> - one that has never read live memory, choosing only
+/// from the frozen CodeRouterBench probing-split prior - not a worst-case model and not the live,
+/// memory-preferring <c>dim_best</c> voter. The figure answers "what did the router's learning buy against
+/// the same classifier before it had learned anything", which is the comparison
+/// docs/router/routing-roi-regret-plan.md's frozen-baseline correction defines and the only baseline this
+/// codebase computes as a savings yardstick. A baseline that itself learned from live traffic would hold
+/// the gap between it and the router constant and report an improvement of zero regardless of how much the
+/// router has actually learned.
 /// </para>
 /// <para>
 /// <b>The predictive-adequacy half is deliberately not projected here.</b> Phase T4's mean-absolute-error
@@ -25,8 +29,8 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// <param name="SessionId">The conversation this request belonged to, for the screen's per-session filter.</param>
 /// <param name="RoutedModel">The model that actually served the request.</param>
 /// <param name="BaselineModel">
-/// The model <c>dim_best</c> alone would have chosen, or <see langword="null"/> when it
-/// abstained.
+/// The model an untrained router would have chosen from the frozen CodeRouterBench prior alone, or
+/// <see langword="null"/> when it abstained.
 /// </param>
 /// <param name="ActualCostUsd">What serving the request actually cost, or <see langword="null"/> when unknown.</param>
 /// <param name="BaselineEstimatedCostUsd">

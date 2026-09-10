@@ -41,9 +41,17 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// future backfill needs no further schema migration.
 /// </param>
 /// <param name="DimBestModel">
-/// The model the frozen nine-dimension <c>dim_best</c> voter alone would have chosen, captured at decision
+/// The model the live, memory-preferring <c>dim_best</c> voter actually voted for, captured at decision
 /// time (Phase T4), or <see langword="null"/> when it abstained, no policy was consulted, or the row
-/// predates this column.
+/// predates this column. Despite its name this is <em>not</em> a frozen baseline - see
+/// <see cref="UntrainedBaselineModel"/> for that.
+/// </param>
+/// <param name="UntrainedBaselineModel">
+/// The model an untrained router - one that has never read live memory - would have picked from this
+/// request's actual candidate menu, via <c>TotallyHot.ArcRouter.Router.UntrainedBaselineSelector</c>. The
+/// ROI cost-savings yardstick's frozen counterfactual (docs/router/routing-roi-regret-plan.md);
+/// <see langword="null"/> when no selector was available, the corpus had no average for any candidate, or
+/// the row predates this column.
 /// </param>
 public sealed record TranscriptRecord(
     long Id,
@@ -64,4 +72,5 @@ public sealed record TranscriptRecord(
     int? InputTokens,
     int? OutputTokens,
     long? MemoryEntryId,
-    string? DimBestModel = null);
+    string? DimBestModel = null,
+    string? UntrainedBaselineModel = null);

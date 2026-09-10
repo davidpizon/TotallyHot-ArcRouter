@@ -15,7 +15,8 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// Background service implementing docs/router/self-organizing-classification-plan.md Phase T4's baseline
 /// comparison: for every scored, embedded request, it scores the frozen nine-dimension taxonomy and the
 /// learned cluster taxonomy against the same observation and records both, alongside an estimated
-/// token-cost saving versus what <c>dim_best</c> alone would have chosen.
+/// token-cost saving versus what an untrained router - one that has never read live memory - would have
+/// chosen (docs/router/routing-roi-regret-plan.md's frozen-baseline correction).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -258,6 +259,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         ClusterModelArtifact? artifact = null;
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? clusterLedger = null;
         DimensionLedger? dimensionLedger = null;
+        DimensionModelScoreMatrix? priorMatrix = null;
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages = new Dictionary<string, ModelTokenAverage>();
 
         while (true)
@@ -276,7 +278,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
                 // the one-batch version had.
                 (entriesById, artifact, clusterLedger) =
                     await GetClusteringInputsAsync(cancellationToken).ConfigureAwait(false);
-                dimensionLedger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: LoadPriorMatrix(),
+                priorMatrix = LoadPriorMatrix();
+                dimensionLedger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: priorMatrix,
                     liveMemoryPrefix: _liveMemoryPrefix);
                 tokenAverages = await _transcriptStore.LoadObservedTokenAveragesAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -306,7 +309,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
                 var record = Compare(transcript: transcript, observedScore: observedScore, dimension: dimension,
                     entriesById: entriesById, artifact: artifact, clusterLedger: clusterLedger,
-                    dimensionLedger: dimensionLedger!, tokenAverages: tokenAverages);
+                    dimensionLedger: dimensionLedger!, priorMatrix: priorMatrix, tokenAverages: tokenAverages);
                 await _comparisonStore.UpsertAsync(record: record, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
                 comparedThisBatch++;
@@ -400,6 +403,11 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="artifact">The current cluster model, or <see langword="null"/> when none is trained.</param>
     /// <param name="clusterLedger">The ledger built from <paramref name="artifact"/>, or <see langword="null"/> alongside it.</param>
     /// <param name="dimensionLedger">The frozen taxonomy's ledger.</param>
+    /// <param name="priorMatrix">
+    /// The frozen CodeRouterBench probing-split prior, or <see langword="null"/> when the corpus is
+    /// unsynced - backs the untrained-baseline predicted score, which reads it directly rather than
+    /// through <paramref name="dimensionLedger"/>'s live-preferring blend.
+    /// </param>
     /// <param name="tokenAverages">Per-model observed token averages backing the counterfactual estimate.</param>
     /// <returns>The comparison to persist.</returns>
     private TaxonomyComparisonRecord Compare(
@@ -410,6 +418,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         ClusterModelArtifact? artifact,
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterLedger.ClusterModelScore>>? clusterLedger,
         DimensionLedger dimensionLedger,
+        DimensionModelScoreMatrix? priorMatrix,
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages)
     {
         var liveKey = RouterDimension.ToLiveKey(liveMemoryPrefix: _liveMemoryPrefix, dimension: dimension);
@@ -438,9 +447,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
             }
         }
 
-        var (baselineCost, netSavings) = EstimateCounterfactual(transcript: transcript, tokenAverages: tokenAverages);
-        var baselinePredicted = PredictBaselineScore(transcript: transcript, liveKey: liveKey,
-            observedScore: observedScore, dimensionLedger: dimensionLedger);
+        var (baselineCost, netSavings, baselineIngredients) = EstimateCounterfactual(transcript: transcript,
+            tokenAverages: tokenAverages);
+        var baselinePredicted = PredictBaselineScore(transcript: transcript, dimension: dimension,
+            priorMatrix: priorMatrix);
         var regret = EstimateRegret(observedScore: observedScore, actualCost: transcript.Cost,
             baselinePredictedScore: baselinePredicted, baselineCost: baselineCost);
 
@@ -456,53 +466,49 @@ public sealed class TaxonomyComparisonService : BackgroundService
             IsClustered: isClustered,
             IsExploratory: transcript.IsExploratory,
             RoutedModel: transcript.RoutedModel,
-            BaselineModel: transcript.DimBestModel,
+            BaselineModel: transcript.UntrainedBaselineModel,
             ActualCostUsd: transcript.Cost,
             BaselineEstimatedCostUsd: baselineCost,
             EstimatedNetSavingsUsd: netSavings,
             BaselinePredictedScore: baselinePredicted,
-            EstimatedRegret: regret);
+            EstimatedRegret: regret,
+            BaselineInputTokens: baselineIngredients?.InputTokens,
+            BaselineOutputTokens: baselineIngredients?.OutputTokens,
+            BaselineInputPricePerMillion: baselineIngredients?.InputPricePerMillion,
+            BaselineOutputPricePerMillion: baselineIngredients?.OutputPricePerMillion);
     }
 
     /// <summary>
-    /// Predicts the score the <c>dim_best</c> baseline's pick would likely have achieved on this request -
-    /// the quality half of the regret estimate, from the same ledger blend <see cref="DimBestVoter"/>
-    /// votes on.
+    /// Predicts the score the untrained baseline's pick would likely have achieved on this request - the
+    /// quality half of the regret estimate, read directly from the frozen CodeRouterBench probing-split
+    /// prior.
     /// </summary>
     /// <param name="transcript">The row being compared.</param>
-    /// <param name="liveKey">The row's dimension as a live-memory key.</param>
-    /// <param name="observedScore">The verifier's score for the model that actually served the request.</param>
-    /// <param name="dimensionLedger">The frozen taxonomy's ledger.</param>
+    /// <param name="dimension">The row's captured heuristic dimension (bare, matching the prior's own keying).</param>
+    /// <param name="priorMatrix">The frozen prior, or <see langword="null"/> when the corpus is unsynced.</param>
     /// <returns>
-    /// The predicted baseline score, or <see langword="null"/> when the baseline abstained or neither ledger source
-    /// has the cell.
+    /// The predicted baseline score, or <see langword="null"/> when the baseline abstained, the corpus is
+    /// unsynced, or the prior has no cell for it.
     /// </returns>
     /// <remarks>
-    /// When the routed model <em>is</em> the baseline's pick, the observation being compared has already
-    /// been folded into that very cell, so it is queried leave-one-out - the same self-contamination
-    /// rationale as the accuracy comparison above. When they differ, the observation lives in a different
-    /// model's cell and the plain blend is the honest prediction.
+    /// No leave-one-out correction, unlike the taxonomy-accuracy comparison above: this prediction never
+    /// reads live memory, so it never absorbed the observation being compared in the first place - there is
+    /// nothing to hold out. Reading live memory here (even leave-one-out) would reintroduce exactly the
+    /// contamination the frozen-baseline correction exists to eliminate, since the baseline would then move
+    /// as the router learns.
     /// </remarks>
-    private double? PredictBaselineScore(
+    private static double? PredictBaselineScore(
         TranscriptRecord transcript,
-        string liveKey,
-        double observedScore,
-        DimensionLedger dimensionLedger)
+        string dimension,
+        DimensionModelScoreMatrix? priorMatrix)
     {
-        if (transcript.DimBestModel is not { } baselineModel) return null;
+        if (transcript.UntrainedBaselineModel is not { } baselineModel) return null;
 
-        var routedIsBaseline = string.Equals(
-            a: ModelNameCanonicalizer.Canonicalize(transcript.RoutedModel),
-            b: ModelNameCanonicalizer.Canonicalize(baselineModel),
-            comparisonType: StringComparison.Ordinal);
-
-        return routedIsBaseline
-            ? dimensionLedger.PredictLeaveOneOut(dimension: liveKey, model: baselineModel, observedScore: observedScore)
-            : dimensionLedger.Predict(dimension: liveKey, model: baselineModel);
+        return priorMatrix?.AverageScore(dimension: dimension, model: baselineModel);
     }
 
     /// <summary>
-    /// Estimates the routing decision's regret against the <c>dim_best</c> baseline under the canonical
+    /// Estimates the routing decision's regret against the untrained baseline under the canonical
     /// reward <c>r = ε₁·s + ε₂·κ</c> (docs/router/routing-roi-regret-plan.md): the baseline's estimated
     /// reward minus the routed pick's observed reward, using the same
     /// <see cref="RoutingOptions.Epsilon1"/>/<see cref="RoutingOptions.Epsilon2"/> weights
@@ -537,38 +543,58 @@ public sealed class TaxonomyComparisonService : BackgroundService
     }
 
     /// <summary>
-    /// Prices what the frozen baseline's pick would have cost, and the resulting net saving against what
+    /// The ingredients behind one row's <see cref="TaxonomyComparisonRecord.BaselineEstimatedCostUsd"/>,
+    /// captured so they can be persisted alongside the answer rather than recomputed later against
+    /// inputs that have since drifted (docs/router/routing-roi-regret-plan.md's frozen-baseline
+    /// correction).
+    /// </summary>
+    private sealed record BaselineCostIngredients(
+        double InputTokens,
+        double OutputTokens,
+        decimal InputPricePerMillion,
+        decimal OutputPricePerMillion);
+
+    /// <summary>
+    /// Prices what the untrained baseline's pick would have cost, and the resulting net saving against what
     /// the router actually spent.
     /// </summary>
     /// <param name="transcript">The row being compared.</param>
     /// <param name="tokenAverages">Per-model observed token averages.</param>
-    /// <returns>The estimated baseline cost and net saving, both <see langword="null"/> when no honest estimate exists.</returns>
+    /// <returns>
+    /// The estimated baseline cost, net saving, and the ingredients behind the cost - all
+    /// <see langword="null"/> when no honest estimate exists.
+    /// </returns>
     /// <remarks>
     /// Returns nulls rather than zeros whenever any input is missing - an abstaining baseline, an unpriced
     /// model, a model never yet observed, or an unknown actual cost. A zero here would read as "routing
     /// broke even", which is a measurement, not the absence of one.
     /// </remarks>
-    private (decimal? BaselineCost, decimal? NetSavings) EstimateCounterfactual(
+    private (decimal? BaselineCost, decimal? NetSavings, BaselineCostIngredients? Ingredients) EstimateCounterfactual(
         TranscriptRecord transcript,
         IReadOnlyDictionary<string, ModelTokenAverage> tokenAverages)
     {
-        if (transcript.DimBestModel is not { } baselineModel || transcript.Cost is not { } actualCost)
-            return (null, null);
+        if (transcript.UntrainedBaselineModel is not { } baselineModel || transcript.Cost is not { } actualCost)
+            return (null, null, null);
 
         if (!TryFindAverage(tokenAverages: tokenAverages, model: baselineModel, average: out var average))
-            return (null, null);
+            return (null, null, null);
 
-        if (!_routeResolver.TryResolve(modelName: baselineModel, route: out var route)) return (null, null);
+        if (!_routeResolver.TryResolve(modelName: baselineModel, route: out var route)) return (null, null, null);
 
         var price = route.IsFree
             ? ModelPrice.Free
             : _priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider));
-        if (price is null) return (null, null);
+        if (price is null) return (null, null, null);
 
         var baselineCost = price.EstimateCost(
             promptTokens: (int)Math.Round(average.InputTokens),
             completionTokens: (int)Math.Round(average.OutputTokens));
-        return (baselineCost, baselineCost - actualCost);
+        var ingredients = new BaselineCostIngredients(
+            InputTokens: average.InputTokens,
+            OutputTokens: average.OutputTokens,
+            InputPricePerMillion: price.InputPerMillionTokens,
+            OutputPricePerMillion: price.OutputPerMillionTokens);
+        return (baselineCost, baselineCost - actualCost, ingredients);
     }
 
     /// <summary>

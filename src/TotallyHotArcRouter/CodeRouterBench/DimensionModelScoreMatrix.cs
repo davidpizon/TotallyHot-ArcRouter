@@ -1,3 +1,4 @@
+using System.Linq;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.CodeRouterBench;
@@ -105,5 +106,46 @@ public sealed class DimensionModelScoreMatrix
             value: out var average)
             ? average
             : null;
+    }
+
+    /// <summary>
+    /// Picks the highest-scoring model for <paramref name="dimension"/> from
+    /// <paramref name="candidateModelIds"/>, using this frozen matrix alone.
+    /// </summary>
+    /// <param name="dimension">A <see cref="Quality.RouterDimension"/> key, matched verbatim.</param>
+    /// <param name="candidateModelIds">The models available for this request, in any spelling.</param>
+    /// <returns>
+    /// The winning model id as it was supplied, or <see langword="null"/> when this matrix has no average
+    /// for any candidate - "no untrained baseline exists for this request", never a fabricated pick.
+    /// </returns>
+    /// <remarks>
+    /// The single implementation of the DimensionBest rule, shared by the offline harness's
+    /// <see cref="Evaluation.DimensionBestBaseline"/> and the live ROI yardstick
+    /// (<see cref="Router.UntrainedBaselineSelector"/>). Keeping one copy is the point: the savings
+    /// figure claims to compare against the untrained router the harness measures, and two
+    /// implementations that merely resembled each other would let that claim quietly stop being true.
+    /// <para>
+    /// Deliberately reads nothing but this matrix - no <see cref="Router.RouterMemory"/>, no blend. That
+    /// independence is what makes it usable as a yardstick: a baseline that learned alongside the router
+    /// would hold the gap between them constant and report an improvement of zero.
+    /// </para>
+    /// <para>
+    /// Ties break by ordinal model-id order so a corpus containing a deliberate tie resolves
+    /// reproducibly rather than by dictionary enumeration order, matching
+    /// <see cref="Router.Orchestrator.OrchestratorRoutingPolicy"/>'s own tie-break.
+    /// </para>
+    /// </remarks>
+    public string? SelectBest(string dimension, IEnumerable<string> candidateModelIds)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dimension);
+        ArgumentNullException.ThrowIfNull(candidateModelIds);
+
+        return candidateModelIds
+            .Select(id => (Model: id, Score: AverageScore(dimension: dimension, model: id)))
+            .Where(entry => entry.Score is not null)
+            .OrderByDescending(entry => entry.Score!.Value)
+            .ThenBy(keySelector: entry => entry.Model, comparer: StringComparer.Ordinal)
+            .Select(entry => (string?)entry.Model)
+            .FirstOrDefault();
     }
 }
