@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Models;
@@ -50,11 +49,14 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// and a batch that makes no progress breaks the loop, so the drain provably terminates.
 /// </para>
 /// <para>
-/// <b>Heavy inputs are cached across cycles.</b> The memory-entry snapshot, cluster artifact,
-/// cluster ledger, and probing prior are rebuilt only when their cheap change stamps (max entry id,
-/// artifact/corpus file write times) move, not on every non-empty cycle. Within one cycle everything is
-/// loaded once - a row compared late in a long drain scores against the cycle-start snapshot, consistent
-/// with the per-cycle semantics this service always had.
+/// <b>Heavy inputs are cached across cycles.</b> The memory-entry snapshot and cluster artifact/ledger are
+/// rebuilt only when their cheap change stamps (max entry id, artifact file write time) move, not on every
+/// non-empty cycle. The probing prior is cached the same way, but in <see cref="ProbingPriorMatrixCache"/> -
+/// a shared cache also used by <see cref="Router.Orchestrator.DimBestVoter"/> and
+/// <see cref="Router.UntrainedBaselineSelector"/>, so the underlying full-table scan runs at most once per
+/// corpus sync across all three readers rather than once per reader. Within one cycle everything is loaded
+/// once - a row compared late in a long drain scores against the cycle-start snapshot, consistent with the
+/// per-cycle semantics this service always had.
 /// </para>
 /// </remarks>
 public sealed class TaxonomyComparisonService : BackgroundService
@@ -66,7 +68,6 @@ public sealed class TaxonomyComparisonService : BackgroundService
     private const int DefaultComparisonBatchSize = 200;
 
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(1);
-    private readonly BenchmarkDatabase _benchmarkDatabase;
     private readonly string _clusterModelPath;
     private readonly int _comparisonBatchSize;
     private readonly ITaxonomyComparisonStore _comparisonStore;
@@ -91,9 +92,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     // single BackgroundService loop (or a test driving RunCycleAsync directly), so no locking is needed.
     private IReadOnlyDictionary<long, MemoryEntry> _cachedEntriesById = new Dictionary<long, MemoryEntry>();
     private long _cachedMaxEntryId = -1;
-    private DimensionModelScoreMatrix? _cachedPriorMatrix;
-    private DateTime _cachedPriorStamp;
-    private bool _priorLoaded;
+    private readonly ProbingPriorMatrixCache _matrixCache;
 
     /// <summary>Initializes a new instance of the <see cref="TaxonomyComparisonService"/> class.</summary>
     /// <param name="logger">The logger.</param>
@@ -113,6 +112,13 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// guarantee (see the class remarks) only exists when the gauge does. Defaults to
     /// <see langword="null"/> so existing direct constructions keep their behavior.
     /// </param>
+    /// <param name="matrixCache">
+    /// The shared probing-prior cache, also used by <see cref="Router.Orchestrator.DimBestVoter"/> and
+    /// <see cref="Router.UntrainedBaselineSelector"/> - see the class remarks. DI always supplies the
+    /// shared singleton; <see langword="null"/> (the default) falls back to a private instance over
+    /// <paramref name="benchmarkDatabase"/>/<paramref name="logger"/> so existing direct construction
+    /// (e.g. tests) keeps compiling and behaving exactly as before this cache existed.
+    /// </param>
     public TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -126,13 +132,14 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<StorageOptions> storageOptions,
         IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup = null,
-        InFlightRequestGauge? inFlightGauge = null)
+        InFlightRequestGauge? inFlightGauge = null,
+        ProbingPriorMatrixCache? matrixCache = null)
         : this(
             logger: logger, transcriptStore: transcriptStore, comparisonStore: comparisonStore,
             memoryEntryStore: memoryEntryStore, routerMemory: routerMemory, benchmarkDatabase: benchmarkDatabase,
             routeResolver: routeResolver, transcriptOptions: transcriptOptions, routingOptions: routingOptions,
             storageOptions: storageOptions, qualityOptions: qualityOptions, priceLookup: priceLookup,
-            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize)
+            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize, matrixCache: matrixCache)
     {
     }
 
@@ -157,6 +164,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="priceLookup">Prices the counterfactual, or <see langword="null"/> when no catalog is configured.</param>
     /// <param name="inFlightGauge">The proxy's in-flight request gauge, or <see langword="null"/> to never pause.</param>
     /// <param name="comparisonBatchSize">The per-fetch batch size the drain loop uses. Must be positive.</param>
+    /// <param name="matrixCache">See the public constructor's parameter of the same name.</param>
     internal TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -171,7 +179,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup,
         InFlightRequestGauge? inFlightGauge,
-        int comparisonBatchSize)
+        int comparisonBatchSize,
+        ProbingPriorMatrixCache? matrixCache = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(comparisonBatchSize);
         ArgumentNullException.ThrowIfNull(logger);
@@ -191,7 +200,6 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _comparisonStore = comparisonStore;
         _memoryEntryStore = memoryEntryStore;
         _routerMemory = routerMemory;
-        _benchmarkDatabase = benchmarkDatabase;
         _routeResolver = routeResolver;
         _priceLookup = priceLookup;
         _transcriptOptions = transcriptOptions.Value;
@@ -200,6 +208,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _clusterModelPath = storageOptions.Value.ResolveClusterModelPath();
         _inFlightGauge = inFlightGauge;
         _comparisonBatchSize = comparisonBatchSize;
+        _matrixCache = matrixCache ?? new ProbingPriorMatrixCache(database: benchmarkDatabase, logger: logger);
     }
 
     /// <inheritdoc/>
@@ -654,39 +663,13 @@ public sealed class TaxonomyComparisonService : BackgroundService
 
     /// <summary>
     /// Reads the probing-split prior, returning <see langword="null"/> when the CodeRouterBench corpus is
-    /// not synced on this machine - the same degrade <see cref="DimBestVoter"/> already performs. Cached
-    /// across cycles keyed on <see cref="BenchmarkDatabase.GetContentStamp"/> - the same freshness check
-    /// <see cref="Router.UntrainedBaselineSelector"/> uses, so a sync is observed by both at the same
-    /// moment - the prior is offline data that only changes on an explicit benchmark sync, so re-reading
-    /// the whole split every cycle bought nothing.
+    /// not synced on this machine - the same degrade <see cref="DimBestVoter"/> already performs. A thin
+    /// delegation to the shared <see cref="ProbingPriorMatrixCache"/> (see the class remarks), which owns
+    /// the actual caching/freshness check.
     /// </summary>
     /// <returns>The probing matrix, or <see langword="null"/> when unavailable.</returns>
     private DimensionModelScoreMatrix? LoadPriorMatrix()
     {
-        var stamp = _benchmarkDatabase.GetContentStamp();
-        if (_priorLoaded && stamp == _cachedPriorStamp) return _cachedPriorMatrix;
-
-        _cachedPriorStamp = stamp;
-        _priorLoaded = true;
-
-        if (stamp == DateTime.MinValue)
-        {
-            _cachedPriorMatrix = null;
-            return null;
-        }
-
-        try
-        {
-            _cachedPriorMatrix = DimensionModelScoreMatrix.FromDatabase(database: _benchmarkDatabase, split: "probing");
-        }
-        catch (SqliteException ex)
-        {
-            _logger.LogWarning(exception: ex,
-                message:
-                "[TAXONOMY-COMPARE] Could not read the CodeRouterBench corpus; comparing against live memory only.");
-            _cachedPriorMatrix = null;
-        }
-
-        return _cachedPriorMatrix;
+        return _matrixCache.GetMatrix();
     }
 }

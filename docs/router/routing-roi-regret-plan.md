@@ -52,6 +52,22 @@ the delivered summary.
 > which selection and comparison could observe different snapshots at all; (2) makes the eventual answer
 > correct even within that window, since the model and its score now always travel together from the same
 > selection call.
+>
+> **Shared probing-prior cache (2026-09-10).** `DimBestVoter`, `UntrainedBaselineSelector`, and
+> `TaxonomyComparisonService.LoadPriorMatrix` each independently scanned the same frozen "probing" split
+> from `BenchmarkDatabase` and kept their own private copy. On a live request, `OrchestratorRoutingPolicy`
+> votes through `DimBestVoter` and `RequestInterceptor` separately consults `UntrainedBaselineSelector` for
+> the ROI baseline, both within the same request's call stack - so whichever singleton's first request
+> happened to arrive first paid a synchronous full-table scan, and the other paid it again independently.
+> A new `ProbingPriorMatrixCache` (`src/TotallyHotArcRouter/CodeRouterBench/ProbingPriorMatrixCache.cs`) is
+> now injected into all three (DI-registered singleton, with each constructor also accepting an optional
+> override defaulting to a private instance so existing direct construction, e.g. tests, is unaffected);
+> the scan now runs at most once per corpus sync process-wide. This also incidentally fixes a gap the note
+> above about `DimBestVoter`'s blend rule being "untouched" no longer fully describes: `DimBestVoter` used
+> to cache its `DimensionLedger` - and the prior snapshot inside it - for the process's entire lifetime,
+> silently ignoring every later benchmark sync; it now builds a fresh, cheap-to-construct `DimensionLedger`
+> around the shared cache's current matrix on every vote, so an explicit sync reaches its very next vote.
+> The blend rule itself (live-memory-preferred, prior as fallback) is unchanged.
 
 ## Context
 

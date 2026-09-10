@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.Embeddings;
@@ -130,6 +131,12 @@ internal static class RouterServiceCollectionExtensions
         // other consumers can depend on one directly) and again as IRoutingVoter (so
         // OrchestratorRoutingPolicy's IEnumerable<IRoutingVoter> constructor parameter resolves every one
         // of them).
+        // Shared across DimBestVoter, UntrainedBaselineSelector, and TaxonomyComparisonService: all three
+        // independently scanned the same frozen CodeRouterBench probing-split prior from BenchmarkDatabase
+        // before this cache existed, so a live request that both voted through DimBestVoter and separately
+        // consulted UntrainedBaselineSelector for the ROI baseline paid that full-table scan twice. See
+        // ProbingPriorMatrixCache's remarks.
+        services.AddSingleton<ProbingPriorMatrixCache>();
         services.AddSingleton<DimBestVoter>();
         services.AddSingleton<UntrainedBaselineSelector>();
         services.AddSingleton<MemoryKnnVoter>();

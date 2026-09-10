@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using TotallyHot.ArcRouter.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -27,23 +26,27 @@ namespace TotallyHot.ArcRouter.Router;
 /// </remarks>
 public sealed class UntrainedBaselineSelector
 {
-    private readonly BenchmarkDatabase _database;
-    private readonly ILogger<UntrainedBaselineSelector> _logger;
-    private readonly Lock _matrixLock = new();
-    private DimensionModelScoreMatrix? _matrix;
-    private bool _matrixLoaded;
-    private DateTime _matrixStamp;
+    private readonly ProbingPriorMatrixCache _matrixCache;
 
     /// <summary>Initializes a new instance of the <see cref="UntrainedBaselineSelector"/> class.</summary>
     /// <param name="database">The synced CodeRouterBench corpus.</param>
     /// <param name="logger">The logger.</param>
-    public UntrainedBaselineSelector(BenchmarkDatabase database, ILogger<UntrainedBaselineSelector> logger)
+    /// <param name="matrixCache">
+    /// The shared probing-prior cache, also used by <see cref="Orchestrator.DimBestVoter"/> and
+    /// <see cref="Transcripts.TaxonomyComparisonService"/>, so the underlying full-table scan
+    /// (<see cref="DimensionModelScoreMatrix.FromDatabase"/>) runs at most once per corpus sync across all
+    /// three rather than once per reader. DI always supplies the shared singleton;
+    /// <see langword="null"/> (the default) falls back to a private instance over
+    /// <paramref name="database"/>/<paramref name="logger"/> so existing direct construction (e.g. tests)
+    /// keeps compiling and behaving exactly as before this cache existed.
+    /// </param>
+    public UntrainedBaselineSelector(BenchmarkDatabase database, ILogger<UntrainedBaselineSelector> logger,
+        ProbingPriorMatrixCache? matrixCache = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _database = database;
-        _logger = logger;
+        _matrixCache = matrixCache ?? new ProbingPriorMatrixCache(database: database, logger: logger);
     }
 
     /// <summary>
@@ -73,8 +76,8 @@ public sealed class UntrainedBaselineSelector
     /// <param name="candidateModelIds">The models actually available for this request.</param>
     /// <returns>
     /// The pick and its score, both read from the exact same prior snapshot loaded by this call - see
-    /// <see cref="EnsureMatrixLoaded"/> - or <see langword="null"/> when the corpus is unsynced/unreadable
-    /// or has no average for any candidate.
+    /// <see cref="ProbingPriorMatrixCache.GetMatrix"/> - or <see langword="null"/> when the corpus is
+    /// unsynced/unreadable or has no average for any candidate.
     /// </returns>
     /// <remarks>
     /// The caller (<see cref="Proxy.RequestInterceptor"/>) persists this score alongside the model at
@@ -87,7 +90,7 @@ public sealed class UntrainedBaselineSelector
         ArgumentException.ThrowIfNullOrWhiteSpace(dimension);
         ArgumentNullException.ThrowIfNull(candidateModelIds);
 
-        var matrix = EnsureMatrixLoaded();
+        var matrix = _matrixCache.GetMatrix();
         if (matrix is null) return null;
 
         var model = matrix.SelectBest(dimension: dimension, candidateModelIds: candidateModelIds);
@@ -95,65 +98,12 @@ public sealed class UntrainedBaselineSelector
 
         var score = matrix.AverageScore(dimension: dimension, model: model);
         // matrix is a specific, already-built DimensionModelScoreMatrix instance - immutable once
-        // returned from EnsureMatrixLoaded, which builds a new instance rather than mutating the old one
-        // on reload - so SelectBest and AverageScore above are guaranteed to see the same snapshot even
-        // if a concurrent call causes _matrix to be replaced in between. SelectBest only ever returns a
-        // model it just confirmed has an average in that snapshot, so score is never null here in practice
-        // - the null check is defensive, not a documented degrade path.
+        // returned from GetMatrix, which builds a new instance rather than mutating the old one on
+        // reload - so SelectBest and AverageScore above are guaranteed to see the same snapshot even if a
+        // concurrent call causes the cache's matrix to be replaced in between. SelectBest only ever
+        // returns a model it just confirmed has an average in that snapshot, so score is never null here
+        // in practice - the null check is defensive, not a documented degrade path.
         return score is null ? null : new UntrainedBaselineSelection(Model: model, Score: score.Value);
-    }
-
-    /// <summary>
-    /// Loads the probing-split matrix, caching it keyed on <see cref="BenchmarkDatabase.GetContentStamp"/> -
-    /// the same freshness check <see cref="Transcripts.TaxonomyComparisonService.LoadPriorMatrix"/> uses -
-    /// so an explicit benchmark sync while the process is running is picked up on the next request
-    /// instead of being masked forever by a cached miss or a stale matrix.
-    /// </summary>
-    private DimensionModelScoreMatrix? EnsureMatrixLoaded()
-    {
-        lock (_matrixLock)
-        {
-            var stamp = _database.GetContentStamp();
-            if (_matrixLoaded && stamp == _matrixStamp) return _matrix;
-
-            _matrixStamp = stamp;
-            _matrixLoaded = true;
-            _matrix = LoadMatrix(stamp);
-            return _matrix;
-        }
-    }
-
-    /// <summary>
-    /// Reads the probing-split prior from the CodeRouterBench corpus, returning <see langword="null"/>
-    /// when the corpus is not synced on this machine or cannot be read - the same degrade
-    /// <see cref="Orchestrator.DimBestVoter.LoadPriorMatrix"/> performs.
-    /// </summary>
-    /// <param name="stamp">
-    /// The corpus file's last write time as observed by <see cref="EnsureMatrixLoaded"/>, or
-    /// <see cref="DateTime.MinValue"/> when the corpus does not exist.
-    /// </param>
-    private DimensionModelScoreMatrix? LoadMatrix(DateTime stamp)
-    {
-        if (stamp == DateTime.MinValue)
-        {
-            _logger.LogInformation(
-                message:
-                "Untrained-baseline selector found no synced CodeRouterBench corpus at {DatabasePath}; ROI savings will not estimate a baseline.",
-                _database.DatabasePath);
-            return null;
-        }
-
-        try
-        {
-            return DimensionModelScoreMatrix.FromDatabase(database: _database, split: "probing");
-        }
-        catch (SqliteException ex)
-        {
-            _logger.LogWarning(
-                exception: ex,
-                message: "Untrained-baseline selector could not read the CodeRouterBench corpus.");
-            return null;
-        }
     }
 }
 

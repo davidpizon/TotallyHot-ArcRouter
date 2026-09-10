@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Quality;
@@ -27,21 +26,25 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </para>
 /// <para>
 /// The benchmark corpus is synced on demand (<c>data/README.md</c>) and may not be present on a given
-/// machine. This voter tolerates that the same way <c>CodeRouterBenchTable10ReconciliationTests</c> does:
-/// it checks <see cref="BenchmarkDatabase.DatabasePath"/> for existence before opening a connection (SQLite
-/// would otherwise create an empty file as a side effect of connecting), and degrades to live-memory-only
-/// scoring rather than throwing when the corpus, or a needed row, is absent.
+/// machine. This voter tolerates that via <see cref="ProbingPriorMatrixCache"/>, which checks
+/// <see cref="BenchmarkDatabase.DatabasePath"/> for existence before opening a connection (SQLite would
+/// otherwise create an empty file as a side effect of connecting) and returns <see langword="null"/> rather
+/// than throwing when the corpus, or a needed row, is absent - <see cref="VoteAsync"/> then degrades to
+/// live-memory-only scoring.
+/// </para>
+/// <para>
+/// <b>Shares its prior with other readers.</b> <see cref="ProbingPriorMatrixCache"/> is a DI singleton also
+/// used by <see cref="UntrainedBaselineSelector"/> and <see cref="Transcripts.TaxonomyComparisonService"/>,
+/// so the underlying full-table scan runs at most once per corpus sync across all three rather than once
+/// per reader - a live request that both votes through this voter and separately consults
+/// <see cref="UntrainedBaselineSelector"/> for the ROI baseline previously paid that scan twice.
 /// </para>
 /// </remarks>
 public sealed class DimBestVoter : IRoutingVoter
 {
-    private readonly BenchmarkDatabase _database;
     private readonly string _liveMemoryPrefix;
-    private readonly ILogger<DimBestVoter> _logger;
-    private readonly Lock _matrixLock = new();
+    private readonly ProbingPriorMatrixCache _matrixCache;
     private readonly RouterMemory _routerMemory;
-    private DimensionLedger? _ledger;
-    private bool _matrixLoadAttempted;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DimBestVoter"/> class.
@@ -54,21 +57,27 @@ public sealed class DimBestVoter : IRoutingVoter
     /// bare <see cref="RouterDimension"/> key from <see cref="VotingContext.Dimension"/> before querying
     /// the probing-set prior - see <see cref="VoteAsync"/>'s remarks.
     /// </param>
+    /// <param name="matrixCache">
+    /// The shared probing-prior cache - see the class remarks. DI always supplies the shared singleton;
+    /// <see langword="null"/> (the default) falls back to a private instance over
+    /// <paramref name="database"/>/<paramref name="logger"/> so existing direct construction (e.g. tests)
+    /// keeps compiling and behaving exactly as before this cache existed.
+    /// </param>
     public DimBestVoter(
         BenchmarkDatabase database,
         RouterMemory routerMemory,
         ILogger<DimBestVoter> logger,
-        IOptions<QualityOptions> qualityOptions)
+        IOptions<QualityOptions> qualityOptions,
+        ProbingPriorMatrixCache? matrixCache = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(routerMemory);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(qualityOptions);
 
-        _database = database;
         _routerMemory = routerMemory;
-        _logger = logger;
         _liveMemoryPrefix = qualityOptions.Value.LiveMemoryPrefix;
+        _matrixCache = matrixCache ?? new ProbingPriorMatrixCache(database: database, logger: logger);
     }
 
     /// <inheritdoc/>
@@ -83,13 +92,20 @@ public sealed class DimBestVoter : IRoutingVoter
     /// key there would never match a row, silently degrading this voter to live-memory-only. The prior
     /// lookup below strips <see cref="_liveMemoryPrefix"/> back off first so both sources are queried under
     /// their own convention.
+    /// <para>
+    /// Builds a fresh <see cref="DimensionLedger"/> on every call rather than caching one: its constructor
+    /// only stores three field references, so this is cheap, and doing so lets a corpus sync's refreshed
+    /// prior - via <see cref="ProbingPriorMatrixCache.GetMatrix"/> - reach this voter's very next vote,
+    /// instead of the first-loaded prior being locked in for the process's lifetime.
+    /// </para>
     /// </remarks>
     public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var ledger = EnsureLedgerLoaded();
+        var ledger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: _matrixCache.GetMatrix(),
+            liveMemoryPrefix: _liveMemoryPrefix);
 
         string? bestModel = null;
         var bestScore = double.NegativeInfinity;
@@ -109,54 +125,5 @@ public sealed class DimBestVoter : IRoutingVoter
             ? VoterVote.Abstain(Name)
             : new VoterVote(VoterName: Name, ModelName: bestModel, Confidence: Math.Clamp(value: bestScore, 0d, 1d));
         return Task.FromResult(vote);
-    }
-
-    /// <summary>
-    /// Builds this voter's <see cref="DimensionLedger"/> on first use, loading the probing-split prior and
-    /// tolerating an unsynced or unreadable corpus by building a live-memory-only ledger instead - see the
-    /// class remarks.
-    /// </summary>
-    /// <returns>The cached ledger.</returns>
-    private DimensionLedger EnsureLedgerLoaded()
-    {
-        lock (_matrixLock)
-        {
-            if (_matrixLoadAttempted) return _ledger!;
-
-            _matrixLoadAttempted = true;
-            _ledger = new DimensionLedger(routerMemory: _routerMemory, priorMatrix: LoadPriorMatrix(),
-                liveMemoryPrefix: _liveMemoryPrefix);
-            return _ledger;
-        }
-    }
-
-    /// <summary>
-    /// Reads the probing-split prior from the CodeRouterBench corpus, returning <see langword="null"/> when
-    /// the corpus is not synced on this machine or cannot be read.
-    /// </summary>
-    /// <returns>The probing-split matrix, or <see langword="null"/> when unavailable.</returns>
-    private DimensionModelScoreMatrix? LoadPriorMatrix()
-    {
-        if (!File.Exists(_database.DatabasePath))
-        {
-            _logger.LogInformation(
-                message:
-                "dim_best voter found no synced CodeRouterBench corpus at {DatabasePath}; scoring from live RouterMemory only.",
-                _database.DatabasePath);
-            return null;
-        }
-
-        try
-        {
-            return DimensionModelScoreMatrix.FromDatabase(database: _database, split: "probing");
-        }
-        catch (SqliteException ex)
-        {
-            _logger.LogWarning(
-                exception: ex,
-                message:
-                "dim_best voter could not read the CodeRouterBench corpus; scoring from live RouterMemory only.");
-            return null;
-        }
     }
 }
