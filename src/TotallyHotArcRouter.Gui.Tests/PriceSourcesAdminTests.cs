@@ -117,7 +117,7 @@ public sealed class PriceSourcesAdminTests
         // as a fact.
         using var ctx = NewContext(new FakeClient
         {
-            ListError = new PriceSourceAdminException(message: "nope", isUnavailable: true)
+            ListError = new GrpcAdminException(message: "nope", isUnavailable: true)
         });
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -216,7 +216,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
-            SetEnabledError = new PriceSourceAdminException("No price source named 'litellm' exists.")
+            SetEnabledError = new GrpcAdminException("No price source named 'litellm' exists.")
         };
         using var ctx = NewContext(client);
 
@@ -233,7 +233,7 @@ public sealed class PriceSourcesAdminTests
     {
         using var ctx = NewContext(new FakeClient
         {
-            ListError = new PriceSourceAdminException(message: "the router is not reachable.", isUnavailable: true)
+            ListError = new GrpcAdminException(message: "the router is not reachable.", isUnavailable: true)
         });
 
         var cut = ctx.Render<PriceSourcesAdmin>();
@@ -249,7 +249,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
-            SetEnabledError = new PriceSourceAdminException(
+            SetEnabledError = new GrpcAdminException(
                 message: "Could not disable 'litellm': the router is not reachable.",
                 isUnavailable: true)
         };
@@ -271,7 +271,7 @@ public sealed class PriceSourcesAdminTests
             new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
             SetEnabledError =
-                new PriceSourceAdminException("Could not disable 'litellm': No price source named 'litellm' exists.")
+                new GrpcAdminException("Could not disable 'litellm': No price source named 'litellm' exists.")
         };
         using var ctx = NewContext(client);
 
@@ -577,7 +577,7 @@ public sealed class PriceSourcesAdminTests
             new PriceSourceStatus(Name: "openrouter", true, -10, 5))
         {
             ReorderError =
-                new PriceSourceAdminException("The submitted order must name every existing price source exactly once.")
+                new GrpcAdminException("The submitted order must name every existing price source exactly once.")
         };
         using var ctx = NewContext(client);
 
@@ -593,7 +593,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10))
         {
-            RefreshError = new PriceSourceAdminException(
+            RefreshError = new GrpcAdminException(
                 message: "Could not refresh the price sources: the router is not reachable.",
                 isUnavailable: true)
         };
@@ -622,13 +622,13 @@ public sealed class PriceSourcesAdminTests
             init => _anchor = DateTimeOffset.UtcNow - value;
         }
 
-        public PriceSourceAdminException? ListError { get; init; }
+        public GrpcAdminException? ListError { get; init; }
 
-        public PriceSourceAdminException? SetEnabledError { get; init; }
+        public GrpcAdminException? SetEnabledError { get; init; }
 
-        public PriceSourceAdminException? RefreshError { get; init; }
+        public GrpcAdminException? RefreshError { get; init; }
 
-        public PriceSourceAdminException? ReorderError { get; init; }
+        public GrpcAdminException? ReorderError { get; init; }
 
         public PriceRefreshOutcome RefreshOutcome { get; init; } =
             new(Source: "litellm", true, 42, null);

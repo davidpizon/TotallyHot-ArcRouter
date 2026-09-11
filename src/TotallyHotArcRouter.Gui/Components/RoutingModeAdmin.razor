@@ -41,6 +41,16 @@
             </button>
         </div>
 
+        @if (!string.IsNullOrEmpty(Store.LastError))
+        {
+            @* A rejected reload: Store.IsReachable stays true for a rejection, so it renders here rather
+               than the unreachable branch above. Without this, a rejected refresh would leave the previous,
+               now-stale mode on screen with no indication anything failed. *@
+            <div class="mb-3 text-xs ds-alert-critical">
+                @Store.LastError
+            </div>
+        }
+
         <div class="rounded-lg p-3 space-y-2.5 mb-3 ds-surface-card">
             <div class="flex items-center justify-between gap-2">
                 <span class="text-sm font-semibold @(mode.OrchestratorEnabled ? "state-enabled" : "state-disabled")">
@@ -96,7 +106,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Unsubscribes from <see cref="RoutingModeStore.Changed"/>.</summary>
+    /// <summary>Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;

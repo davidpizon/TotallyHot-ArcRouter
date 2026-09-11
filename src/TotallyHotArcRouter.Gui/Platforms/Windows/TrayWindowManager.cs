@@ -262,7 +262,7 @@ internal static class TrayWindowManager
     /// status line naming the reason, while "Show Dashboard" and "Exit" stay live. This used to suppress the
     /// menu entirely and show a balloon in its place, which left a user whose service was stopped with no way
     /// to reach Exit from the tray at all - exactly when quitting is the thing they most likely want.
-    /// Gated on <see cref="RoutingGateStore.IsUsable"/> rather than <see cref="RoutingGateStore.IsReachable"/>:
+    /// Gated on <see cref="RoutingGateStore.IsUsable"/> rather than <see cref="AdminStoreBase{TClient}.IsReachable"/>:
     /// a router that answers but rejects the call can't drive the toggle either, so the toggle is equally
     /// dead - only the status line's wording differs.
     /// </summary>
@@ -352,7 +352,7 @@ internal static class TrayWindowManager
             else
                 await _routingGateStore!.DisableAsync();
         }
-        catch (RoutingGateAdminException)
+        catch (GrpcAdminException)
         {
         }
     }

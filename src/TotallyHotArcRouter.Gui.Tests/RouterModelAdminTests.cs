@@ -90,7 +90,7 @@ public sealed class RouterModelAdminTests
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
         using var ctx = NewContext(new FakeClient
-        { Error = new LogRegModelAdminException(message: "nope", isUnavailable: true) });
+        { Error = new GrpcAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<RouterModelAdmin>();
 
@@ -101,7 +101,7 @@ public sealed class RouterModelAdminTests
     [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
-        var client = new FakeClient { Error = new LogRegModelAdminException(message: "nope", isUnavailable: true) };
+        var client = new FakeClient { Error = new GrpcAdminException(message: "nope", isUnavailable: true) };
         using var ctx = NewContext(client);
         var cut = ctx.Render<RouterModelAdmin>();
         cut.Markup.Should().Contain("Router unreachable");
@@ -172,7 +172,7 @@ public sealed class RouterModelAdminTests
     {
         public LogRegModelStatusInfo? Status { get; set; } = status;
 
-        public LogRegModelAdminException? Error { get; set; }
+        public GrpcAdminException? Error { get; set; }
 
         public IReadOnlyList<LogRegRetrainEvent> RetrainEvents { get; set; } = [];
 

@@ -152,7 +152,7 @@ public class RegretHarnessAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new RegretHarnessAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RegretHarnessAdminException>(async () =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
             await foreach (var _ in client.RunAsync(TestContext.Current.CancellationToken))
             {
@@ -170,7 +170,7 @@ public class RegretHarnessAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new RegretHarnessAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RegretHarnessAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the regret harness status: the router is not reachable.");
@@ -184,7 +184,7 @@ public class RegretHarnessAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RegretHarnessAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RegretHarnessAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the regret harness status: boom");

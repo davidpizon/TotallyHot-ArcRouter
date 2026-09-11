@@ -6,17 +6,16 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <summary>
 /// Singleton view-model backing the Governance tab's Router Model panel. Wraps
 /// <see cref="LogRegModelAdminClient"/> (the tested, platform-agnostic logic in
-/// TotallyHot.ArcRouter.Gui.Telemetry) with the same "singleton + Changed event + best-effort,
-/// reachability-tolerant" shape as <see cref="ClusterModelAdminStore"/>, so the UI survives tab switches
-/// and degrades gracefully when the proxy isn't running. Registered in <c>MauiProgram</c>.
+/// TotallyHot.ArcRouter.Gui.Telemetry) in the shared <see cref="AdminStoreBase{TClient}"/> shape, so the
+/// UI survives tab switches and degrades gracefully when the proxy isn't running. Registered in
+/// <c>MauiProgram</c>.
 /// </summary>
-public sealed class LogRegModelAdminStore : IDisposable
+public sealed class LogRegModelAdminStore : AdminStoreBase<ILogRegModelAdminClient>
 {
-    private readonly ILogRegModelAdminClient _client;
-    private readonly ILogger<LogRegModelAdminStore>? _logger;
-    private readonly IDisposable? _ownedClient;
-
-    /// <summary>Initializes a new instance of the <see cref="LogRegModelAdminStore"/> class.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LogRegModelAdminStore"/> class, creating and owning a
+    /// client to <paramref name="serverAddress"/>.
+    /// </summary>
     /// <param name="logger">Optional logger.</param>
     /// <param name="serverAddress">
     /// The proxy's TLS gRPC endpoint; defaults to
@@ -25,11 +24,8 @@ public sealed class LogRegModelAdminStore : IDisposable
     public LogRegModelAdminStore(
         ILogger<LogRegModelAdminStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(client: new LogRegModelAdminClient(serverAddress), logger: logger, ownsClient: true)
     {
-        _logger = logger;
-        var client = new LogRegModelAdminClient(serverAddress);
-        _client = client;
-        _ownedClient = client;
         ServerAddress = serverAddress;
     }
 
@@ -38,12 +34,11 @@ public sealed class LogRegModelAdminStore : IDisposable
     /// client. The seam tests use to drive the store without a live proxy; the caller owns the client's
     /// lifetime.
     /// </summary>
+    /// <param name="client">The admin client to drive.</param>
+    /// <param name="logger">Optional logger.</param>
     public LogRegModelAdminStore(ILogRegModelAdminClient client, ILogger<LogRegModelAdminStore>? logger = null)
+        : base(client: client, logger: logger)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedClient = null;
-        _logger = logger;
     }
 
     /// <summary>
@@ -56,16 +51,6 @@ public sealed class LogRegModelAdminStore : IDisposable
     /// <summary>The logreg model's last-known status, or <see langword="null"/> before the first load.</summary>
     public LogRegModelStatusInfo? Status { get; private set; }
 
-    /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
-    public bool IsLoaded { get; private set; }
-
-    /// <summary>Whether the last load or mutation reached the proxy.</summary>
-    /// <remarks>Same connectivity-only meaning as <see cref="PriceSourceStore.IsReachable"/>.</remarks>
-    public bool IsReachable { get; private set; }
-
-    /// <summary>The message from the last failure to reach the proxy, if any.</summary>
-    public string? LastError { get; private set; }
-
     /// <summary>Whether a retrain is currently running, so the UI can disable the button and show progress.</summary>
     public bool IsRetraining { get; private set; }
 
@@ -75,45 +60,25 @@ public sealed class LogRegModelAdminStore : IDisposable
     /// <summary>The most recent retrain's outcome message, or <see langword="null"/> before any retrain has run this session.</summary>
     public string? LastRetrainMessage { get; private set; }
 
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        _ownedClient?.Dispose();
-    }
-
-    /// <summary>Raised after any of the above change.</summary>
-    public event Action? Changed;
-
     /// <summary>
     /// Loads the logreg model's current status. Failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an error
-    /// state instead of crashing when the proxy isn't running.
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
+    /// rather than thrown, so the tab renders an error state instead of crashing when the proxy isn't
+    /// running.
     /// </summary>
     /// <remarks>
-    /// Only a connectivity failure clears <see cref="IsReachable"/>, the same split
-    /// <see cref="RecordFailure"/> applies to mutations: a status call the router *answered* with a
-    /// rejection has to keep the panel's normal layout and show the rejection, because collapsing it into
-    /// the "Router unreachable" state both misstates the cause and hides the message that explains it.
+    /// Only a connectivity failure clears <see cref="AdminStoreBase{TClient}.IsReachable"/>, the
+    /// same split the base applies to mutations: a status call the router *answered* with a rejection has to
+    /// keep the panel's normal layout and show the rejection, because collapsing it into the "Router
+    /// unreachable" state both misstates the cause and hides the message that explains it.
     /// </remarks>
-    public async Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Status = await _client.GetStatusAsync(cancellationToken);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (LogRegModelAdminException ex)
-        {
-            IsReachable = !ex.IsUnavailable;
-            LastError = ex.Message;
-            _logger?.LogWarning(exception: ex, message: "Failed to load the logreg model status from the router.");
-        }
-        finally
-        {
-            IsLoaded = true;
-            Changed?.Invoke();
-        }
+        return LoadGuardedAsync(
+            async ct => Status = await Client.GetStatusAsync(ct),
+            "load the logreg model status",
+            cancellationToken);
     }
 
     /// <summary>
@@ -121,17 +86,20 @@ public sealed class LogRegModelAdminStore : IDisposable
     /// it streams in and the final outcome plus status once it completes. <see cref="IsRetraining"/> is true
     /// for the duration.
     /// </summary>
-    /// <exception cref="LogRegModelAdminException">The retrain could not be started or the router is unreachable.</exception>
+    /// <param name="cancellationToken">Cancels the retrain.</param>
+    /// <exception cref="GrpcAdminException">The retrain could not be started or the router is unreachable.</exception>
     public async Task RetrainAsync(CancellationToken cancellationToken = default)
     {
         IsRetraining = true;
         BootstrapTasksEmbedded = 0;
         LastRetrainMessage = null;
-        Changed?.Invoke();
+        NotifyChanged();
+
+        var retrainingCleared = false;
 
         try
         {
-            await foreach (var retrainEvent in _client.RetrainAsync(cancellationToken))
+            await foreach (var retrainEvent in Client.RetrainAsync(cancellationToken))
             {
                 if (retrainEvent.BootstrapProgress is { } progress)
                 {
@@ -143,43 +111,35 @@ public sealed class LogRegModelAdminStore : IDisposable
                     Status = result.Status;
                 }
 
-                Changed?.Invoke();
+                NotifyChanged();
             }
 
-            IsReachable = true;
-            IsLoaded = true;
-            LastError = null;
+            RecordSuccess();
         }
-        catch (LogRegModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            // recordRejectionMessage: true because this panel's own catch (see RouterModelAdmin.razor.cs)
+            // swallows the exception without capturing its message anywhere else - LastRetrainMessage is
+            // only ever set from a streamed Result event, never from a caught exception - so LastError is
+            // the only place a rejection's text survives for the markup to render.
+            RecordFailure(exception: ex, description: "a logreg-model operation", recordRejectionMessage: true,
+                beforeNotify: () =>
+                {
+                    IsRetraining = false;
+                    retrainingCleared = true;
+                });
             throw;
         }
         finally
         {
-            // In a finally so a failed retrain re-enables the button rather than leaving it stuck disabled.
-            // The exception still propagates for the panel to render.
-            IsRetraining = false;
-            Changed?.Invoke();
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsRetraining and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!retrainingCleared)
+            {
+                IsRetraining = false;
+                NotifyChanged();
+            }
         }
-    }
-
-    /// <summary>
-    /// Reflects a failed mutation in the store's state before the caller rethrows, so
-    /// <see cref="IsReachable"/> keeps its documented meaning after a mutation and not only after a load.
-    /// </summary>
-    /// <remarks>
-    /// Only a connectivity failure moves <see cref="IsReachable"/>. A rejection reached the router and is
-    /// the panel's inline error to render; treating it as unreachable would replace the whole panel with a
-    /// "router down" state that is both wrong and hides the actual message.
-    /// </remarks>
-    private void RecordFailure(LogRegModelAdminException ex)
-    {
-        if (!ex.IsUnavailable) return;
-
-        IsReachable = false;
-        LastError = ex.Message;
-        _logger?.LogWarning(exception: ex, message: "The router became unreachable during a logreg-model operation.");
-        Changed?.Invoke();
     }
 }

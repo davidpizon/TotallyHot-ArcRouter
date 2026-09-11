@@ -50,6 +50,20 @@
                 @(Store.CurrentStage is { } stage ? StageLabel(stage) : "Starting…")
             </div>
         }
+        else if (!string.IsNullOrEmpty(Store.LastError))
+        {
+            @* Checked before LastRunMessage deliberately: a success (run or reload) always clears LastError,
+               so a non-null LastError here can only mean the *most recently completed* operation - run or
+               reload - was a rejection, and must not be hidden behind an older, now-stale LastRunMessage
+               from an earlier successful run. Store.IsReachable stays true for a rejection, so this branch
+               renders rather than the unreachable one above; LastRunMessage itself is only ever set from a
+               streamed Result event, never from a caught exception, so LastError is where a rejected run's
+               own catch (see the code-behind) - and a rejected Reload, via LoadGuardedAsync - leave the
+               message for this markup to show. *@
+            <div class="rounded-lg p-3 mb-3 text-xs text-red-400 ds-surface-card">
+                @Store.LastError
+            </div>
+        }
         else if (!string.IsNullOrEmpty(Store.LastRunMessage))
         {
             <div class="rounded-lg p-3 mb-3 text-xs text-slate-400 ds-surface-card">
@@ -102,7 +116,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Unsubscribes from <see cref="RegretHarnessAdminStore.Changed"/>.</summary>
+    /// <summary>Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
@@ -118,8 +132,8 @@
     }
 
     /// <summary>
-    /// Runs the harness. Errors are left to <see cref="RegretHarnessAdminStore.LastError"/>/
-    /// <see cref="RegretHarnessAdminStore.IsReachable"/> rather than surfaced here.
+    /// Runs the harness. Errors are left to <see cref="AdminStoreBase{TClient}.LastError"/>/
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/> rather than surfaced here.
     /// </summary>
     private async Task Run()
     {
@@ -127,7 +141,7 @@
         {
             await Store.RunAsync();
         }
-        catch (RegretHarnessAdminException)
+        catch (GrpcAdminException)
         {
             // Swallowed: the store already recorded IsReachable/LastError for the unreachable case, and a
             // rejection's message is rendered from LastRunMessage/LastError by the markup above.

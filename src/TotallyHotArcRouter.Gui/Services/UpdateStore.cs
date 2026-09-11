@@ -8,20 +8,19 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// Singleton view-model backing the System Settings window's "Software Update" section. Wraps
 /// <see cref="UpdateAdminClient"/> (status/check/audit-notify) and <see cref="MsiUpdateApplier"/>
 /// (download/verify/launch) - both the tested, platform-agnostic logic in TotallyHot.ArcRouter.Gui.Telemetry
-/// - with the same "singleton + Changed event + best-effort, reachability-tolerant" shape as
-/// <see cref="LlmRouterModelStore"/>, so the UI survives tab switches and degrades gracefully when the
-/// proxy isn't running. Registered in <c>MauiProgram</c>.
+/// - in the shared <see cref="AdminStoreBase{TClient}"/> shape, so the UI survives modal close/reopen
+/// and degrades gracefully when the proxy isn't running. Registered in <c>MauiProgram</c>.
 /// </summary>
-public sealed class UpdateStore : IDisposable
+public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
 {
     private readonly IMsiUpdateApplier _applier;
-    private readonly IUpdateAdminClient _client;
     private readonly Action _exitApplication;
-    private readonly ILogger<UpdateStore>? _logger;
-    private readonly IDisposable? _ownedClient;
-    private readonly HttpClient? _ownedHttpClient;
 
-    /// <summary>Initializes a new instance of the <see cref="UpdateStore"/> class.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="UpdateStore"/> class, creating and owning both a client
+    /// to <paramref name="serverAddress"/> and the <see cref="HttpClient"/> its installer applier downloads
+    /// through.
+    /// </summary>
     /// <param name="logger">Optional logger.</param>
     /// <param name="serverAddress">
     /// The proxy's TLS gRPC endpoint; defaults to
@@ -30,14 +29,9 @@ public sealed class UpdateStore : IDisposable
     public UpdateStore(
         ILogger<UpdateStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(client: new UpdateAdminClient(serverAddress), logger: logger, ownsClient: true)
     {
-        _logger = logger;
-        var client = new UpdateAdminClient(serverAddress);
-        _client = client;
-        _ownedClient = client;
-
-        var httpClient = new HttpClient();
-        _ownedHttpClient = httpClient;
+        var httpClient = Own(new HttpClient());
         _applier = new MsiUpdateApplier(httpClient: httpClient, logger: NullLogger<MsiUpdateApplier>.Instance);
 
         _exitApplication = () => Environment.Exit(0);
@@ -59,28 +53,15 @@ public sealed class UpdateStore : IDisposable
     /// <param name="logger">Optional logger.</param>
     public UpdateStore(IUpdateAdminClient client, IMsiUpdateApplier applier, Action? exitApplication = null,
         ILogger<UpdateStore>? logger = null)
+        : base(client: client, logger: logger)
     {
-        ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(applier);
-        _client = client;
         _applier = applier;
-        _ownedClient = null;
-        _ownedHttpClient = null;
         _exitApplication = exitApplication ?? (() => { });
-        _logger = logger;
     }
 
     /// <summary>The last-loaded (or freshly checked) update status, or <see langword="null"/> before the first load.</summary>
     public UpdateStatusInfo? Status { get; private set; }
-
-    /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
-    public bool IsLoaded { get; private set; }
-
-    /// <summary>Whether the last load or mutation reached the proxy.</summary>
-    public bool IsReachable { get; private set; }
-
-    /// <summary>The message from the last failure to reach or use the proxy, if any.</summary>
-    public string? LastError { get; private set; }
 
     /// <summary>Whether a check or apply is currently in flight, so the UI can disable buttons.</summary>
     public bool IsBusy { get; private set; }
@@ -88,29 +69,27 @@ public sealed class UpdateStore : IDisposable
     /// <summary>The outcome of the most recent apply attempt, or <see langword="null"/> before one has run.</summary>
     public MsiApplyResult? LastApplyOutcome { get; private set; }
 
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        _ownedClient?.Dispose();
-        _ownedHttpClient?.Dispose();
-    }
-
-    /// <summary>Raised after any of the above change.</summary>
-    public event Action? Changed;
-
     /// <summary>
-    /// Loads the last-known update status. Failures are swallowed and surfaced via <see cref="IsReachable"/>/
-    /// <see cref="LastError"/>.
+    /// Loads the last-known update status. Failures are swallowed and surfaced via
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the load.</param>
     public Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        return RunAsync(operation: () => _client.GetStatusAsync(cancellationToken), action: "load the update status");
+        return RunBusyAsync(
+            async ct => Status = await Client.GetStatusAsync(ct).ConfigureAwait(false),
+            "load the update status",
+            cancellationToken);
     }
 
     /// <summary>Forces an immediate re-check - the "Check Now" button.</summary>
+    /// <param name="cancellationToken">Cancels the check.</param>
     public Task CheckNowAsync(CancellationToken cancellationToken = default)
     {
-        return RunAsync(operation: () => _client.CheckNowAsync(cancellationToken), action: "check for updates");
+        return RunBusyAsync(
+            async ct => Status = await Client.CheckNowAsync(ct).ConfigureAwait(false),
+            "check for updates",
+            cancellationToken);
     }
 
     /// <summary>
@@ -122,6 +101,7 @@ public sealed class UpdateStore : IDisposable
     /// supplied at construction so this process releases its own files before the MSI tries to replace
     /// them.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the apply.</param>
     /// <exception cref="InvalidOperationException">
     /// No update is currently known available (call <see cref="LoadAsync"/>/
     /// <see cref="CheckNowAsync"/> first).
@@ -134,7 +114,7 @@ public sealed class UpdateStore : IDisposable
                 "No verified update is currently known available. Call LoadAsync/CheckNowAsync first.");
 
         IsBusy = true;
-        Changed?.Invoke();
+        NotifyChanged();
 
         try
         {
@@ -148,7 +128,7 @@ public sealed class UpdateStore : IDisposable
         finally
         {
             IsBusy = false;
-            Changed?.Invoke();
+            NotifyChanged();
         }
     }
 
@@ -161,48 +141,33 @@ public sealed class UpdateStore : IDisposable
     {
         try
         {
-            await _client.NotifyApplyStartingAsync(version: latestVersion, cancellationToken: cancellationToken)
+            await Client.NotifyApplyStartingAsync(version: latestVersion, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (UpdateAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            _logger?.LogWarning(exception: ex,
+            Logger?.LogWarning(exception: ex,
                 message: "Could not notify the router that an apply is starting; proceeding anyway.");
         }
     }
 
     /// <summary>
-    /// Runs one status-returning operation, updating the store's state and swallowing failures into
-    /// <see cref="IsReachable"/>/<see cref="LastError"/>.
+    /// Runs one guarded operation with <see cref="IsBusy"/> held for its duration, so the panel's buttons
+    /// re-enable even when it fails.
     /// </summary>
-    private async Task RunAsync(Func<Task<UpdateStatusInfo>> operation, string action)
+    /// <param name="operation">The status-refreshing call to run.</param>
+    /// <param name="description">A short lower-case phrase naming the operation for the failure log.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    private async Task RunBusyAsync(Func<CancellationToken, Task> operation, string description,
+        CancellationToken cancellationToken)
     {
         IsBusy = true;
-        Changed?.Invoke();
+        NotifyChanged();
 
-        try
-        {
-            Status = await operation().ConfigureAwait(false);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (UpdateAdminException ex)
-        {
-            RecordFailure(ex);
-            _logger?.LogWarning(exception: ex, message: "Failed to {Action} from the router.", action);
-        }
-        finally
-        {
-            IsLoaded = true;
-            IsBusy = false;
-            Changed?.Invoke();
-        }
-    }
-
-    /// <summary>Reflects a failed operation in the store's reachability state.</summary>
-    private void RecordFailure(UpdateAdminException ex)
-    {
-        IsReachable = !ex.IsUnavailable;
-        LastError = ex.Message;
+        // Clearing IsBusy here, right before LoadGuardedAsync's own completion notification, means that
+        // notification also carries "the buttons can re-enable" - instead of a third notification carrying
+        // an intermediate "finished but still busy" state that no subscriber should ever see.
+        await LoadGuardedAsync(operation: operation, description: description,
+            cancellationToken: cancellationToken, beforeNotify: () => IsBusy = false);
     }
 }

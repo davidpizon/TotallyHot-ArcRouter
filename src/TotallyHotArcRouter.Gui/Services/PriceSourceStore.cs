@@ -6,17 +6,15 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <summary>
 /// Singleton view-model backing the Governance tab's Price Sources panel. Wraps
 /// <see cref="PriceSourceAdminClient"/> (the tested, platform-agnostic logic in TotallyHot.ArcRouter.Gui.Telemetry)
-/// with the same "singleton + Changed event + best-effort, reachability-tolerant" shape as
-/// <see cref="ProviderAdminStore"/> and <see cref="LiveDataStore"/>, so the UI survives tab switches and
+/// in the shared <see cref="AdminStoreBase{TClient}"/> shape, so the UI survives tab switches and
 /// degrades gracefully when the proxy isn't running. Registered in <c>MauiProgram</c>.
 /// </summary>
-public sealed class PriceSourceStore : IDisposable
+public sealed class PriceSourceStore : AdminStoreBase<IPriceSourceAdminClient>
 {
-    private readonly IPriceSourceAdminClient _client;
-    private readonly ILogger<PriceSourceStore>? _logger;
-    private readonly IDisposable? _ownedClient;
-
-    /// <summary>Initializes a new instance of the <see cref="PriceSourceStore"/> class.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PriceSourceStore"/> class, creating and owning a client
+    /// to <paramref name="serverAddress"/>.
+    /// </summary>
     /// <param name="logger">Optional logger.</param>
     /// <param name="serverAddress">
     /// The proxy's TLS gRPC endpoint; defaults to
@@ -25,23 +23,19 @@ public sealed class PriceSourceStore : IDisposable
     public PriceSourceStore(
         ILogger<PriceSourceStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(client: new PriceSourceAdminClient(serverAddress), logger: logger, ownsClient: true)
     {
-        _logger = logger;
-        var client = new PriceSourceAdminClient(serverAddress);
-        _client = client;
-        _ownedClient = client;
     }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PriceSourceStore"/> class over a caller-supplied client.
     /// The seam tests use to drive the store without a live proxy; the caller owns the client's lifetime.
     /// </summary>
+    /// <param name="client">The admin client to drive.</param>
+    /// <param name="logger">Optional logger.</param>
     public PriceSourceStore(IPriceSourceAdminClient client, ILogger<PriceSourceStore>? logger = null)
+        : base(client: client, logger: logger)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedClient = null;
-        _logger = logger;
     }
 
     /// <summary>The price sources currently known, refreshed after each load or successful mutation.</summary>
@@ -71,28 +65,8 @@ public sealed class PriceSourceStore : IDisposable
     /// <summary>The per-source results of the most recent manual pull, or empty if none has run.</summary>
     public IReadOnlyList<PriceRefreshOutcome> LastRefreshOutcomes { get; private set; } = [];
 
-    /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
-    public bool IsLoaded { get; private set; }
-
-    /// <summary>Whether the last load or mutation reached the proxy.</summary>
-    /// <remarks>
-    /// Only connectivity tracks this. An operation the router <em>rejected</em> (an unknown source, say) has
-    /// still reached it, so it leaves this <see langword="true"/> and surfaces inline instead - otherwise one
-    /// bad argument would blank a panel whose data is perfectly good.
-    /// </remarks>
-    public bool IsReachable { get; private set; }
-
-    /// <summary>The message from the last failure to reach the proxy, if any.</summary>
-    public string? LastError { get; private set; }
-
     /// <summary>Whether a manual pull is currently running, so the UI can disable the button.</summary>
     public bool IsRefreshing { get; private set; }
-
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        _ownedClient?.Dispose();
-    }
 
     /// <summary>Returns the larger of two <see cref="TimeSpan"/> values.</summary>
     private static TimeSpan Max(TimeSpan left, TimeSpan right)
@@ -100,35 +74,24 @@ public sealed class PriceSourceStore : IDisposable
         return left > right ? left : right;
     }
 
-    /// <summary>Raised after any of the above change.</summary>
-    public event Action? Changed;
-
     /// <summary>
     /// Loads the price source list. Connection failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an
-    /// "unreachable" state instead of crashing when the proxy isn't running.
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
+    /// rather than thrown, so the tab renders an "unreachable" state instead of crashing when the proxy
+    /// isn't running.
     /// </summary>
-    public async Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var list = await _client.ListAsync(cancellationToken);
-            Sources = list.Sources;
-            Schedule = list.Schedule;
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (PriceSourceAdminException ex)
-        {
-            IsReachable = false;
-            LastError = ex.Message;
-            _logger?.LogWarning(exception: ex, message: "Failed to load price sources from the router.");
-        }
-        finally
-        {
-            IsLoaded = true;
-            Changed?.Invoke();
-        }
+        return LoadGuardedAsync(
+            async ct =>
+            {
+                var list = await Client.ListAsync(ct);
+                Sources = list.Sources;
+                Schedule = list.Schedule;
+            },
+            "load the price sources",
+            cancellationToken);
     }
 
     /// <summary>
@@ -139,36 +102,34 @@ public sealed class PriceSourceStore : IDisposable
     /// the unreachable state covers, but a toggle failing means "the thing you just asked for did not
     /// happen", which the user has to be told inline. Same split as <see cref="ProviderAdminStore"/>.
     /// </remarks>
-    /// <exception cref="PriceSourceAdminException">The toggle was rejected; the caller surfaces the message.</exception>
+    /// <exception cref="GrpcAdminException">The toggle was rejected; the caller surfaces the message.</exception>
     public async Task SetEnabledAsync(string name, bool enabled, CancellationToken cancellationToken = default)
     {
         try
         {
-            var list = await _client.SetEnabledAsync(name: name, enabled: enabled,
+            var list = await Client.SetEnabledAsync(name: name, enabled: enabled,
                 cancellationToken: cancellationToken);
             Sources = list.Sources;
             Schedule = list.Schedule;
         }
-        catch (PriceSourceAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            RecordFailure(exception: ex, description: "a price-source operation");
             throw;
         }
 
-        IsReachable = true;
-        IsLoaded = true;
-        LastError = null;
-        Changed?.Invoke();
+        RecordSuccess();
+        NotifyChanged();
     }
 
     /// <summary>
     /// Runs an ingestion cycle now, waits for it, and publishes both the per-source outcomes and the updated
     /// list. <see cref="IsRefreshing"/> is true for the duration.
     /// </summary>
-    /// <exception cref="PriceSourceAdminException">The pull could not be started or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The pull could not be started or the router is unreachable.</exception>
     public Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        return RunCycleAsync(() => _client.RefreshAsync(cancellationToken));
+        return RunCycleAsync(() => Client.RefreshAsync(cancellationToken));
     }
 
     /// <summary>
@@ -180,14 +141,14 @@ public sealed class PriceSourceStore : IDisposable
     /// <see cref="RefreshAsync"/>: both are "please wait, an update is running" from the panel's point of view,
     /// even though only <see cref="RefreshAsync"/> reaches out to a source over the network.
     /// </summary>
-    /// <exception cref="PriceSourceAdminException">
+    /// <exception cref="GrpcAdminException">
     /// The reorder was rejected (the name set didn't match every existing source), or the router is
     /// unreachable.
     /// </exception>
     public Task ReorderAsync(IReadOnlyList<string> namesInPriorityOrder, CancellationToken cancellationToken = default)
     {
         return RunCycleAsync(() =>
-            _client.ReorderAsync(namesInPriorityOrder: namesInPriorityOrder, cancellationToken: cancellationToken));
+            Client.ReorderAsync(namesInPriorityOrder: namesInPriorityOrder, cancellationToken: cancellationToken));
     }
 
     /// <summary>
@@ -198,7 +159,9 @@ public sealed class PriceSourceStore : IDisposable
     private async Task RunCycleAsync(Func<Task<PriceRefreshResult>> operation)
     {
         IsRefreshing = true;
-        Changed?.Invoke();
+        NotifyChanged();
+
+        var refreshingCleared = false;
 
         try
         {
@@ -214,40 +177,28 @@ public sealed class PriceSourceStore : IDisposable
             // Pull Now - no follow-up call, and no window where the panel counts down to a pull that has
             // already happened.
             Schedule = result.Schedule;
-            IsReachable = true;
-            IsLoaded = true;
-            LastError = null;
+            RecordSuccess();
         }
-        catch (PriceSourceAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            RecordFailure(exception: ex, description: "a price-source operation",
+                beforeNotify: () =>
+                {
+                    IsRefreshing = false;
+                    refreshingCleared = true;
+                });
             throw;
         }
         finally
         {
-            // In a finally so a failed cycle re-enables the buttons rather than leaving them stuck disabled.
-            // The exception still propagates for the panel to render.
-            IsRefreshing = false;
-            Changed?.Invoke();
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsRefreshing and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!refreshingCleared)
+            {
+                IsRefreshing = false;
+                NotifyChanged();
+            }
         }
-    }
-
-    /// <summary>
-    /// Reflects a failed mutation in the store's state before the caller rethrows, so
-    /// <see cref="IsReachable"/> keeps its documented meaning after a mutation and not only after a load.
-    /// </summary>
-    /// <remarks>
-    /// Only a connectivity failure moves <see cref="IsReachable"/>. A rejection reached the router and is the
-    /// panel's inline error to render; treating it as unreachable would replace the whole panel with a
-    /// "router down" state that is both wrong and hides the actual message.
-    /// </remarks>
-    private void RecordFailure(PriceSourceAdminException ex)
-    {
-        if (!ex.IsUnavailable) return;
-
-        IsReachable = false;
-        LastError = ex.Message;
-        _logger?.LogWarning(exception: ex, message: "The router became unreachable during a price-source operation.");
-        Changed?.Invoke();
     }
 }

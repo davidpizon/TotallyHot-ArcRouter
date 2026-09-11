@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Thrown when a routing-mode read call fails. Carries a message fit to render in the Governance panel
-/// rather than a raw <see cref="RpcException"/>, mirroring <see cref="PriceSourceAdminException"/>. See
-/// <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class RoutingModeAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="RoutingModeAdminException"/> class.</summary>
-    public RoutingModeAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
-/// <summary>
 /// One voter's participation in the Orchestrator's weighted vote (PLAN.md Phase L), as rendered by the Governance
 /// → Routing Mode panel.
 /// </summary>
@@ -49,7 +35,7 @@ public sealed record RoutingMode(
 /// unit-test it, exactly like <c>PriceSourceAdminClient</c>.
 /// </summary>
 public sealed class RoutingModeAdminClient
-    : GrpcAdminClientBase<Contract.RoutingModeAdminService.RoutingModeAdminServiceClient, RoutingModeAdminException>,
+    : GrpcAdminClientBase<Contract.RoutingModeAdminService.RoutingModeAdminServiceClient>,
         IRoutingModeAdminClient
 {
     /// <summary>
@@ -96,13 +82,5 @@ public sealed class RoutingModeAdminClient
         {
             throw Wrap(ex: ex, action: "Could not read the routing mode");
         }
-    }
-
-    /// <inheritdoc/>
-    protected override RoutingModeAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new RoutingModeAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

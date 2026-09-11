@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Thrown when a price-source management call fails. Carries a message fit to render in the Governance panel
-/// rather than a raw <see cref="RpcException"/>, mirroring how <c>ProviderAdminException</c> wraps the
-/// provider management API's failures. See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class PriceSourceAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="PriceSourceAdminException"/> class.</summary>
-    public PriceSourceAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
-/// <summary>
 /// One price feed's status, as rendered by the Governance → Price Sources panel.
 /// </summary>
 /// <param name="Name">The source's registry name.</param>
@@ -83,7 +69,7 @@ public sealed record PriceRefreshResult(
 /// Carries feed metadata only, never prices (D5) - see the service comment in <c>src/Protos/telemetry.proto</c>.
 /// </remarks>
 public sealed class PriceSourceAdminClient
-    : GrpcAdminClientBase<Contract.PriceSourceAdminService.PriceSourceAdminServiceClient, PriceSourceAdminException>,
+    : GrpcAdminClientBase<Contract.PriceSourceAdminService.PriceSourceAdminServiceClient>,
         IPriceSourceAdminClient
 {
     // Mirrors PriceCatalogOptions.PollIntervalHours' default, for the one case where a response carries no
@@ -248,13 +234,5 @@ public sealed class PriceSourceAdminClient
             : new PriceSourceSchedule(
                 PollInterval: TimeSpan.FromSeconds(schedule.PollIntervalSeconds),
                 ScheduleAnchorUtc: schedule.ScheduleAnchorUtc.ToDateTimeOffset());
-    }
-
-    /// <inheritdoc/>
-    protected override PriceSourceAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new PriceSourceAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

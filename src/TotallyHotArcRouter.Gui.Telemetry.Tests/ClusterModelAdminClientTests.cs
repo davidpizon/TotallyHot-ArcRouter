@@ -170,7 +170,7 @@ public class ClusterModelAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new ClusterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(async () =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
             await foreach (var _ in client.RetrainAsync(TestContext.Current.CancellationToken))
             {
@@ -188,7 +188,7 @@ public class ClusterModelAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new ClusterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the cluster model status: the router is not reachable.");
@@ -202,7 +202,7 @@ public class ClusterModelAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new ClusterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ClusterModelAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the cluster model status: boom");

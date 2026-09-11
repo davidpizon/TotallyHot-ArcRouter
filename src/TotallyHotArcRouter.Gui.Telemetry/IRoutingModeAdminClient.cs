@@ -7,6 +7,6 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 public interface IRoutingModeAdminClient
 {
     /// <summary>Reads the router's current routing configuration.</summary>
-    /// <exception cref="RoutingModeAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<RoutingMode> GetAsync(CancellationToken cancellationToken = default);
 }

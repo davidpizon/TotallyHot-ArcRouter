@@ -36,7 +36,7 @@ public sealed class RoutingGateStoreTests
 
         var becameUnusableCount = 0;
         store.BecameUnusable += () => Interlocked.Increment(ref becameUnusableCount);
-        client.GetFailure = new RoutingGateAdminException(message: "router is gone", isUnavailable: true);
+        client.GetFailure = new GrpcAdminException(message: "router is gone", isUnavailable: true);
 
         await WaitUntilAsync(condition: () => !store.IsReachable, timeout: WaitTimeout);
         // Give several more poll ticks a chance to run, to prove BecameUnusable doesn't fire again
@@ -51,7 +51,7 @@ public sealed class RoutingGateStoreTests
     {
         var client = new FakeRoutingGateAdminClient
         {
-            GetFailure = new RoutingGateAdminException(message: "router is gone", isUnavailable: true)
+            GetFailure = new GrpcAdminException(message: "router is gone", isUnavailable: true)
         };
         await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
 
@@ -70,7 +70,7 @@ public sealed class RoutingGateStoreTests
     {
         var client = new FakeRoutingGateAdminClient
         {
-            GetFailure = new RoutingGateAdminException("Could not update the routing gate: bad token")
+            GetFailure = new GrpcAdminException("Could not update the routing gate: bad token")
         };
         await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
 
@@ -87,7 +87,7 @@ public sealed class RoutingGateStoreTests
     {
         var client = new FakeRoutingGateAdminClient
         {
-            GetFailure = new RoutingGateAdminException("bad token")
+            GetFailure = new GrpcAdminException("bad token")
         };
         await using var store = new RoutingGateStore(client: client, pollInterval: FastPoll);
         await WaitUntilAsync(condition: () => store.ConnectionState == RouterConnectionState.Rejected,
@@ -108,7 +108,7 @@ public sealed class RoutingGateStoreTests
 
         var becameUnusableCount = 0;
         store.BecameUnusable += () => Interlocked.Increment(ref becameUnusableCount);
-        client.GetFailure = new RoutingGateAdminException("bad token");
+        client.GetFailure = new GrpcAdminException("bad token");
 
         await WaitUntilAsync(condition: () => store.ConnectionState == RouterConnectionState.Rejected,
             timeout: WaitTimeout);

@@ -3,23 +3,21 @@ using Grpc.Core;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Base for the 9 gRPC admin clients in this namespace (<see cref="PriceSourceAdminClient"/>,
+/// Base for the gRPC admin clients in this namespace (<see cref="PriceSourceAdminClient"/>,
 /// <see cref="ClusterModelAdminClient"/>, <see cref="BenchmarkDataAdminClient"/>, etc.): owns the
 /// owned-channel-vs-injected-client constructor pair, channel disposal, and the "unavailable → friendly
 /// message, else → server detail" exception-wrapping rule every one of them used to reimplement
 /// identically. Each concrete client keeps its own RPC calls and DTO mapping - only this scaffolding
-/// moves here.
+/// lives here.
 /// </summary>
 /// <typeparam name="TGeneratedClient">The generated gRPC client type this admin client wraps.</typeparam>
-/// <typeparam name="TException">The per-service <see cref="GrpcAdminException"/> subclass this client throws.</typeparam>
-public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDisposable
-    where TException : GrpcAdminException
+public abstract class GrpcAdminClientBase<TGeneratedClient> : IDisposable
 {
     private readonly IDisposable? _ownedChannel;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="GrpcAdminClientBase{TGeneratedClient, TException}"/>
-    /// class, creating and owning a channel to <paramref name="serverAddress"/>.
+    /// Initializes a new instance of the <see cref="GrpcAdminClientBase{TGeneratedClient}"/> class, creating
+    /// and owning a channel to <paramref name="serverAddress"/>.
     /// </summary>
     /// <param name="serverAddress">The proxy's gRPC endpoint.</param>
     /// <param name="createClient">Constructs the generated client from the authenticated call invoker.</param>
@@ -34,9 +32,9 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="GrpcAdminClientBase{TGeneratedClient, TException}"/>
-    /// class over a caller-supplied generated client. The seam tests use to substitute a fake without a
-    /// live server; the caller owns the channel's lifetime.
+    /// Initializes a new instance of the <see cref="GrpcAdminClientBase{TGeneratedClient}"/> class over a
+    /// caller-supplied generated client. The seam tests use to substitute a fake without a live server; the
+    /// caller owns the channel's lifetime.
     /// </summary>
     protected GrpcAdminClientBase(TGeneratedClient client)
     {
@@ -54,11 +52,8 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
         _ownedChannel?.Dispose();
     }
 
-    /// <summary>Constructs this client's concrete <typeparamref name="TException"/> from a wrapped failure.</summary>
-    protected abstract TException CreateException(string message, Exception? innerException, bool isUnavailable);
-
     /// <summary>
-    /// Wraps <paramref name="ex"/> into a <typeparamref name="TException"/>: a plain-language,
+    /// Wraps <paramref name="ex"/> into a <see cref="GrpcAdminException"/>: a plain-language,
     /// <see cref="GrpcAdminException.IsUnavailable"/>-flagged message of the form
     /// <c>"{action}: the router is not reachable."</c> when the router isn't reachable (an ordinary state
     /// for a GUI that can outlive it), or <c>"{action}: {server detail}"</c> otherwise - so callers can
@@ -66,7 +61,7 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
     /// </summary>
     /// <param name="ex">The failed call's exception.</param>
     /// <param name="action">Describes the failed operation, e.g. <c>"Could not read the price sources"</c>.</param>
-    protected TException Wrap(RpcException ex, string action)
+    protected static GrpcAdminException Wrap(RpcException ex, string action)
     {
         return Wrap(ex: ex, unavailableMessage: $"{action}: the router is not reachable.", action: action);
     }
@@ -78,10 +73,12 @@ public abstract class GrpcAdminClientBase<TGeneratedClient, TException> : IDispo
     /// shape (e.g. <c>RoutingGateAdminClient</c>, whose actions describe individual calls but whose
     /// unavailable message is action-agnostic).
     /// </summary>
-    protected TException Wrap(RpcException ex, string unavailableMessage, string action)
+    protected static GrpcAdminException Wrap(RpcException ex, string unavailableMessage, string action)
     {
+        ArgumentNullException.ThrowIfNull(ex);
+
         return ex.StatusCode == StatusCode.Unavailable
-            ? CreateException(message: unavailableMessage, innerException: ex, true)
-            : CreateException(message: $"{action}: {ex.Status.Detail}", innerException: ex, false);
+            ? new GrpcAdminException(message: unavailableMessage, innerException: ex, isUnavailable: true)
+            : new GrpcAdminException(message: $"{action}: {ex.Status.Detail}", innerException: ex);
     }
 }

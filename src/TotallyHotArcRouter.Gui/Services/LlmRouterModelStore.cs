@@ -6,19 +6,18 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <summary>
 /// Singleton view-model backing the Governance tab's Benchmark Data panel's "Local Voter Model" section.
 /// Wraps <see cref="LlmRouterModelAdminClient"/> (the tested, platform-agnostic logic in
-/// TotallyHot.ArcRouter.Gui.Telemetry) with the same "singleton + Changed event + best-effort,
-/// reachability-tolerant" shape as <see cref="BenchmarkDataStore"/>, so the UI survives tab switches and
-/// degrades gracefully when the proxy isn't running. Registered in <c>MauiProgram</c>.
+/// TotallyHot.ArcRouter.Gui.Telemetry) in the shared <see cref="AdminStoreBase{TClient}"/> shape, so
+/// the UI survives tab switches and degrades gracefully when the proxy isn't running. Registered in
+/// <c>MauiProgram</c>.
 /// </summary>
-public sealed class LlmRouterModelStore : IDisposable
+public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminClient>
 {
-    private readonly ILlmRouterModelAdminClient _client;
-    private readonly ILogger<LlmRouterModelStore>? _logger;
-    private readonly IDisposable? _ownedClient;
-
     private Dictionary<string, LlmRouterModelSyncProgressInfo> _syncProgress = [];
 
-    /// <summary>Initializes a new instance of the <see cref="LlmRouterModelStore"/> class.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LlmRouterModelStore"/> class, creating and owning a
+    /// client to <paramref name="serverAddress"/>.
+    /// </summary>
     /// <param name="logger">Optional logger.</param>
     /// <param name="serverAddress">
     /// The proxy's TLS gRPC endpoint; defaults to
@@ -27,11 +26,8 @@ public sealed class LlmRouterModelStore : IDisposable
     public LlmRouterModelStore(
         ILogger<LlmRouterModelStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(client: new LlmRouterModelAdminClient(serverAddress), logger: logger, ownsClient: true)
     {
-        _logger = logger;
-        var client = new LlmRouterModelAdminClient(serverAddress);
-        _client = client;
-        _ownedClient = client;
         ServerAddress = serverAddress;
     }
 
@@ -40,12 +36,11 @@ public sealed class LlmRouterModelStore : IDisposable
     /// client. The seam tests use to drive the store without a live proxy; the caller owns the client's
     /// lifetime.
     /// </summary>
+    /// <param name="client">The admin client to drive.</param>
+    /// <param name="logger">Optional logger.</param>
     public LlmRouterModelStore(ILlmRouterModelAdminClient client, ILogger<LlmRouterModelStore>? logger = null)
+        : base(client: client, logger: logger)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedClient = null;
-        _logger = logger;
     }
 
     /// <summary>
@@ -57,16 +52,6 @@ public sealed class LlmRouterModelStore : IDisposable
 
     /// <summary>The active model's last-known status, or <see langword="null"/> before the first load.</summary>
     public LlmRouterModelStatusInfo? Status { get; private set; }
-
-    /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
-    public bool IsLoaded { get; private set; }
-
-    /// <summary>Whether the last load or mutation reached the proxy.</summary>
-    /// <remarks>Same connectivity-only meaning as <see cref="BenchmarkDataStore.IsReachable"/>.</remarks>
-    public bool IsReachable { get; private set; }
-
-    /// <summary>The message from the last failure to reach the proxy, if any.</summary>
-    public string? LastError { get; private set; }
 
     /// <summary>Whether a sync is currently running, so the UI can disable the button and show progress.</summary>
     public bool IsSyncing { get; private set; }
@@ -116,39 +101,19 @@ public sealed class LlmRouterModelStore : IDisposable
     /// <summary>The combined planned size of every file in <see cref="SyncPlan"/>, or 0 before the plan arrives.</summary>
     public long CumulativeTotalBytes => SyncPlan?.TotalBytes ?? 0;
 
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        _ownedClient?.Dispose();
-    }
-
-    /// <summary>Raised after any of the above change.</summary>
-    public event Action? Changed;
-
     /// <summary>
     /// Loads the active model's cached status. Failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an error
-    /// state instead of crashing when the proxy isn't running.
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
+    /// rather than thrown, so the tab renders an error state instead of crashing when the proxy isn't
+    /// running.
     /// </summary>
-    public async Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Status = await _client.GetStatusAsync(cancellationToken);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (LlmRouterModelAdminException ex)
-        {
-            IsReachable = !ex.IsUnavailable;
-            LastError = ex.Message;
-            _logger?.LogWarning(exception: ex, message: "Failed to load the llm_router model status from the router.");
-        }
-        finally
-        {
-            IsLoaded = true;
-            Changed?.Invoke();
-        }
+        return LoadGuardedAsync(
+            async ct => Status = await Client.GetStatusAsync(ct),
+            "load the llm_router model status",
+            cancellationToken);
     }
 
     /// <summary>
@@ -156,16 +121,16 @@ public sealed class LlmRouterModelStore : IDisposable
     /// until-updated) status. Rethrows on failure - the panel has to render the rejection inline - the
     /// same split <see cref="SyncAsync"/> and <see cref="BenchmarkDataStore.RecheckAsync"/> use.
     /// </summary>
-    /// <exception cref="LlmRouterModelAdminException">The switch was rejected or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The switch was rejected or the router is unreachable.</exception>
     public async Task SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default)
     {
         try
         {
-            Status = await _client.SetBaseUrlAsync(baseUrl: baseUrl, cancellationToken: cancellationToken);
+            Status = await Client.SetBaseUrlAsync(baseUrl: baseUrl, cancellationToken: cancellationToken);
         }
-        catch (LlmRouterModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            RecordFailure(exception: ex, description: "a llm_router model operation");
             throw;
         }
 
@@ -174,10 +139,8 @@ public sealed class LlmRouterModelStore : IDisposable
         _syncProgress = [];
         SyncPlan = null;
         CurrentFileName = null;
-        IsReachable = true;
-        IsLoaded = true;
-        LastError = null;
-        Changed?.Invoke();
+        RecordSuccess();
+        NotifyChanged();
     }
 
     /// <summary>
@@ -185,18 +148,20 @@ public sealed class LlmRouterModelStore : IDisposable
     /// per-file progress into <see cref="SyncProgress"/> as it streams in and the final status once every
     /// file has been attempted. <see cref="IsSyncing"/> is true for the duration.
     /// </summary>
-    /// <exception cref="LlmRouterModelAdminException">The sync could not be started or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The sync could not be started or the router is unreachable.</exception>
     public async Task SyncAsync(CancellationToken cancellationToken = default)
     {
         IsSyncing = true;
         _syncProgress = [];
         SyncPlan = null;
         CurrentFileName = null;
-        Changed?.Invoke();
+        NotifyChanged();
+
+        var syncingCleared = false;
 
         try
         {
-            await foreach (var syncEvent in _client.SyncAsync(cancellationToken))
+            await foreach (var syncEvent in Client.SyncAsync(cancellationToken))
             {
                 if (syncEvent.Plan is { } plan)
                 {
@@ -222,39 +187,32 @@ public sealed class LlmRouterModelStore : IDisposable
                     Status = finalStatus;
                 }
 
-                Changed?.Invoke();
+                NotifyChanged();
             }
 
-            IsReachable = true;
-            IsLoaded = true;
-            LastError = null;
+            RecordSuccess();
         }
-        catch (LlmRouterModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            RecordFailure(exception: ex, description: "a llm_router model operation",
+                beforeNotify: () =>
+                {
+                    IsSyncing = false;
+                    syncingCleared = true;
+                });
             throw;
         }
         finally
         {
-            // In a finally so a failed sync re-enables the button rather than leaving it stuck disabled.
-            // The exception still propagates for the panel to render.
-            IsSyncing = false;
-            Changed?.Invoke();
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsSyncing and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!syncingCleared)
+            {
+                IsSyncing = false;
+                NotifyChanged();
+            }
         }
     }
 
-    /// <summary>
-    /// Reflects a failed mutation in the store's state before the caller rethrows, so
-    /// <see cref="IsReachable"/> keeps its documented meaning after a mutation and not only after a load.
-    /// </summary>
-    private void RecordFailure(LlmRouterModelAdminException ex)
-    {
-        if (!ex.IsUnavailable) return;
-
-        IsReachable = false;
-        LastError = ex.Message;
-        _logger?.LogWarning(exception: ex,
-            message: "The router became unreachable during a llm_router model operation.");
-        Changed?.Invoke();
-    }
 }

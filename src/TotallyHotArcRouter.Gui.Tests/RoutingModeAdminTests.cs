@@ -94,7 +94,7 @@ public sealed class RoutingModeAdminTests
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
         using var ctx = NewContext(new FakeClient
-        { Error = new RoutingModeAdminException(message: "nope", isUnavailable: true) });
+        { Error = new GrpcAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<RoutingModeAdmin>();
 
@@ -105,7 +105,7 @@ public sealed class RoutingModeAdminTests
     [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
-        var client = new FakeClient { Error = new RoutingModeAdminException(message: "nope", isUnavailable: true) };
+        var client = new FakeClient { Error = new GrpcAdminException(message: "nope", isUnavailable: true) };
         using var ctx = NewContext(client);
         var cut = ctx.Render<RoutingModeAdmin>();
         cut.Markup.Should().Contain("Router unreachable");
@@ -121,7 +121,7 @@ public sealed class RoutingModeAdminTests
     {
         public RoutingMode? Mode { get; set; } = mode;
 
-        public RoutingModeAdminException? Error { get; set; }
+        public GrpcAdminException? Error { get; set; }
 
         public Task<RoutingMode> GetAsync(CancellationToken cancellationToken = default)
         {

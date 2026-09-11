@@ -45,7 +45,7 @@ public class RoutingGateAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new RoutingGateAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not reach the router: the router is not reachable.");
@@ -60,7 +60,7 @@ public class RoutingGateAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RoutingGateAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetAsync(false, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not update the routing gate: boom");
@@ -74,7 +74,7 @@ public class RoutingGateAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RoutingGateAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingGateAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing gate: boom");

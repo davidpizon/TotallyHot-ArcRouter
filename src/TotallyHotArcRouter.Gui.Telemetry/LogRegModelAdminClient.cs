@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
-/// <summary>
-/// Thrown when a logreg-model management call fails. Carries a message fit to render in the Governance
-/// panel rather than a raw <see cref="RpcException"/>, mirroring <see cref="ClusterModelAdminException"/>.
-/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class LogRegModelAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="LogRegModelAdminException"/> class.</summary>
-    public LogRegModelAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
 /// <summary>The result category of one retrain, mirroring <c>LogRegTrainingResultKind</c>.</summary>
 public enum LogRegRetrainResultKindInfo
 {
@@ -98,7 +84,7 @@ public sealed record LogRegRetrainEvent(
 /// CI can unit-test it, exactly like <see cref="ClusterModelAdminClient"/>.
 /// </summary>
 public sealed class LogRegModelAdminClient
-    : GrpcAdminClientBase<Contract.RouterModelAdminService.RouterModelAdminServiceClient, LogRegModelAdminException>,
+    : GrpcAdminClientBase<Contract.RouterModelAdminService.RouterModelAdminServiceClient>,
         ILogRegModelAdminClient
 {
     /// <summary>
@@ -219,13 +205,5 @@ public sealed class LogRegModelAdminClient
             Contract.LogRegRetrainResultKind.AlreadyRunning => LogRegRetrainResultKindInfo.AlreadyRunning,
             _ => LogRegRetrainResultKindInfo.Declined
         };
-    }
-
-    /// <inheritdoc/>
-    protected override LogRegModelAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new LogRegModelAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

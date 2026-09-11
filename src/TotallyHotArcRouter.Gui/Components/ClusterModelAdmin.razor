@@ -52,6 +52,20 @@
                 Embedding OOD bootstrap tasks… @Store.BootstrapTasksEmbedded so far.
             </div>
         }
+        else if (!string.IsNullOrEmpty(Store.LastError))
+        {
+            @* Checked before LastRetrainMessage deliberately: a success (retrain or reload) always clears
+               LastError, so a non-null LastError here can only mean the *most recently completed* operation
+               - retrain or reload - was a rejection, and must not be hidden behind an older, now-stale
+               LastRetrainMessage from an earlier successful retrain. Store.IsReachable stays true for a
+               rejection, so this branch renders rather than the unreachable one above; LastRetrainMessage
+               itself is only ever set from a streamed Result event, never from a caught exception, so
+               LastError is where a rejected retrain's own catch (see the code-behind) - and a rejected
+               Reload, via LoadGuardedAsync - leave the message for this markup to show. *@
+            <div class="rounded-lg p-3 mb-3 text-xs text-red-400 ds-surface-card">
+                @Store.LastError
+            </div>
+        }
         else if (!string.IsNullOrEmpty(Store.LastRetrainMessage))
         {
             <div class="rounded-lg p-3 mb-3 text-xs text-slate-400 ds-surface-card">
@@ -119,7 +133,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Unsubscribes from <see cref="ClusterModelAdminStore.Changed"/>.</summary>
+    /// <summary>Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
@@ -135,8 +149,8 @@
     }
 
     /// <summary>
-    /// Runs a retrain. Errors are left to <see cref="ClusterModelAdminStore.LastError"/>/
-    /// <see cref="ClusterModelAdminStore.IsReachable"/> rather than surfaced here.
+    /// Runs a retrain. Errors are left to <see cref="AdminStoreBase{TClient}.LastError"/>/
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/> rather than surfaced here.
     /// </summary>
     private async Task Retrain()
     {
@@ -144,7 +158,7 @@
         {
             await Store.RetrainAsync();
         }
-        catch (ClusterModelAdminException)
+        catch (GrpcAdminException)
         {
             // Swallowed: the store already recorded IsReachable/LastError for the unreachable case, and a
             // rejection's message is rendered from LastRetrainMessage/LastError by the markup above.

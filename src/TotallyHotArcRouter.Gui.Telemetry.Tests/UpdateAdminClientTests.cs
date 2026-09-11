@@ -130,7 +130,7 @@ public class UpdateAdminClientTests
         // ReSharper disable once AccessToDisposedClosure
         var act = async () => await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
-        var ex = await act.Should().ThrowAsync<UpdateAdminException>();
+        var ex = await act.Should().ThrowAsync<GrpcAdminException>();
         ex.Which.IsUnavailable.Should().BeTrue();
     }
 
@@ -147,7 +147,7 @@ public class UpdateAdminClientTests
             await client.NotifyApplyStartingAsync(version: "2.0.0",
                 cancellationToken: TestContext.Current.CancellationToken);
 
-        var ex = await act.Should().ThrowAsync<UpdateAdminException>();
+        var ex = await act.Should().ThrowAsync<GrpcAdminException>();
         ex.Which.IsUnavailable.Should().BeFalse();
     }
 
@@ -162,7 +162,7 @@ public class UpdateAdminClientTests
         // ReSharper disable once AccessToDisposedClosure
         var act = async () => await client.CheckNowAsync(TestContext.Current.CancellationToken);
 
-        await act.Should().ThrowAsync<UpdateAdminException>();
+        await act.Should().ThrowAsync<GrpcAdminException>();
     }
 
     [Fact]

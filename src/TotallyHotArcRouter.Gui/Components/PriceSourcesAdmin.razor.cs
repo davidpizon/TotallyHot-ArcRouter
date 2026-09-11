@@ -56,7 +56,7 @@ public partial class PriceSourcesAdmin
     private IReadOnlyList<PriceSourceStatus> DisplayOrder => _order ?? Store.Sources;
 
     /// <summary>
-    /// Unsubscribes from <see cref="PriceSourceStore.Changed"/>, stops the countdown timer, and drops the
+    /// Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>, stops the countdown timer, and drops the
     /// reference the JS drag calls back through.
     /// </summary>
     /// <remarks>
@@ -273,7 +273,7 @@ public partial class PriceSourcesAdmin
             await operation();
             return true;
         }
-        catch (PriceSourceAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _opError = ex.Message;
             return false;

@@ -8,11 +8,11 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 public interface IBenchmarkDataAdminClient
 {
     /// <summary>Reads the router's last-computed corpus freshness state and every file's ledger status.</summary>
-    /// <exception cref="BenchmarkDataAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<BenchmarkDataStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Re-probes Hugging Face now and returns the recomputed freshness state.</summary>
-    /// <exception cref="BenchmarkDataAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<BenchmarkDataStatusInfo> RecheckAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -20,6 +20,6 @@ public interface IBenchmarkDataAdminClient
     /// per stage transition, plus one final event carrying the aggregate status once every file has been
     /// attempted.
     /// </summary>
-    /// <exception cref="BenchmarkDataAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     IAsyncEnumerable<BenchmarkSyncEvent> SyncAsync(CancellationToken cancellationToken = default);
 }

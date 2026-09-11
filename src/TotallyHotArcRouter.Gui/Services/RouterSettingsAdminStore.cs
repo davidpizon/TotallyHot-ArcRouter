@@ -7,17 +7,25 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// Singleton view-model backing the System Settings window's Adaptive Routing, Shadow Judge, and
 /// Transcription Capture rows. Wraps
 /// <see cref="RouterSettingsAdminClient"/> (the tested, platform-agnostic logic in
-/// TotallyHot.ArcRouter.Gui.Telemetry) with the same "singleton + Changed event + best-effort,
-/// reachability-tolerant" shape as <see cref="ClusterModelAdminStore"/>, so the UI survives modal
-/// close/reopen and degrades gracefully when the proxy isn't running. Registered in <c>MauiProgram</c>.
+/// TotallyHot.ArcRouter.Gui.Telemetry) in the shared <see cref="AdminStoreBase{TClient}"/> shape, so the
+/// UI survives modal close/reopen and degrades gracefully when the proxy isn't running. Registered in
+/// <c>MauiProgram</c>.
 /// </summary>
-public sealed class RouterSettingsAdminStore : IDisposable
+/// <remarks>
+/// Passes <c>recordRejectionMessage</c> to <see cref="AdminStoreBase{TClient}.RecordFailure"/>: the System
+/// Settings window reads <see cref="AdminStoreBase{TClient}.LastError"/> as its only error channel, so a
+/// rejected save whose message never reached that property would look like it succeeded.
+/// <see cref="ClusterModelAdminStore"/>, <see cref="LogRegModelAdminStore"/>, and
+/// <see cref="RegretHarnessAdminStore"/> pass it too, for the same underlying reason (their own panel's
+/// catch swallows the exception without capturing its message anywhere else) even though their UI reads it
+/// as a fallback alongside a dedicated success-message field rather than as the only channel.
+/// </remarks>
+public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdminClient>
 {
-    private readonly IRouterSettingsAdminClient _client;
-    private readonly ILogger<RouterSettingsAdminStore>? _logger;
-    private readonly IDisposable? _ownedClient;
-
-    /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminStore"/> class.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RouterSettingsAdminStore"/> class, creating and owning a
+    /// client to <paramref name="serverAddress"/>.
+    /// </summary>
     /// <param name="logger">Optional logger.</param>
     /// <param name="serverAddress">
     /// The proxy's TLS gRPC endpoint; defaults to
@@ -26,11 +34,8 @@ public sealed class RouterSettingsAdminStore : IDisposable
     public RouterSettingsAdminStore(
         ILogger<RouterSettingsAdminStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(client: new RouterSettingsAdminClient(serverAddress), logger: logger, ownsClient: true)
     {
-        _logger = logger;
-        var client = new RouterSettingsAdminClient(serverAddress);
-        _client = client;
-        _ownedClient = client;
     }
 
     /// <summary>
@@ -38,69 +43,40 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// client. The seam tests use to drive the store without a live proxy; the caller owns the client's
     /// lifetime.
     /// </summary>
-    public RouterSettingsAdminStore(IRouterSettingsAdminClient client, ILogger<RouterSettingsAdminStore>? logger = null)
+    /// <param name="client">The admin client to drive.</param>
+    /// <param name="logger">Optional logger.</param>
+    public RouterSettingsAdminStore(IRouterSettingsAdminClient client,
+        ILogger<RouterSettingsAdminStore>? logger = null)
+        : base(client: client, logger: logger)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedClient = null;
-        _logger = logger;
     }
 
     /// <summary>The router settings' last-known effective values, or <see langword="null"/> before the first load.</summary>
     public RouterSettingsInfo? Settings { get; private set; }
 
-    /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
-    public bool IsLoaded { get; private set; }
-
-    /// <summary>Whether the last load or save reached the proxy.</summary>
-    /// <remarks>Same connectivity-only meaning as <see cref="ClusterModelAdminStore.IsReachable"/>.</remarks>
-    public bool IsReachable { get; private set; }
-
-    /// <summary>The message from the last failure to reach - or from the last rejection by - the router, if any.</summary>
-    public string? LastError { get; private set; }
-
     /// <summary>Whether a save is currently in flight, so the UI can disable the Save button.</summary>
     public bool IsSaving { get; private set; }
 
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        _ownedClient?.Dispose();
-    }
-
-    /// <summary>Raised after any of the above change.</summary>
-    public event Action? Changed;
-
     /// <summary>
     /// Loads the router settings' current effective values. Failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the caller renders an error
-    /// state instead of crashing when the proxy isn't running.
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
+    /// rather than thrown, so the caller renders an error state instead of crashing when the proxy isn't
+    /// running.
     /// </summary>
-    public async Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Settings = await _client.GetAsync(cancellationToken).ConfigureAwait(false);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (RouterSettingsAdminException ex)
-        {
-            IsReachable = !ex.IsUnavailable;
-            LastError = ex.Message;
-            _logger?.LogWarning(exception: ex, message: "Failed to load the router settings.");
-        }
-        finally
-        {
-            IsLoaded = true;
-            Changed?.Invoke();
-        }
+        return LoadGuardedAsync(
+            async ct => Settings = await Client.GetAsync(ct).ConfigureAwait(false),
+            "load the router settings",
+            cancellationToken);
     }
 
     /// <summary>
     /// Validates and persists every setting, updating <see cref="Settings"/> to the fresh post-mutation
     /// effective values on success. The exception propagates on failure so the caller can render the
-    /// specific outcome inline; <see cref="IsReachable"/>/<see cref="LastError"/> are still updated first.
+    /// specific outcome inline; <see cref="AdminStoreBase{TClient}.IsReachable"/> and
+    /// <see cref="AdminStoreBase{TClient}.LastError"/> are still updated first.
     /// </summary>
     /// <param name="adaptiveRoutingEnabled">Whether adaptive routing is enabled.</param>
     /// <param name="embeddingMemoryCapacity">The embedding-memory capacity.</param>
@@ -111,7 +87,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// <param name="iceScoreEnabled">Whether Phase Q3's ICE-Score usefulness grader is enabled.</param>
     /// <param name="raceEnabled">Whether Phase Q3's RACE readability/maintainability grader is enabled.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <exception cref="RouterSettingsAdminException">The save was rejected or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The save was rejected or the router is unreachable.</exception>
     public async Task UpdateAsync(
         bool adaptiveRoutingEnabled,
         int embeddingMemoryCapacity,
@@ -124,30 +100,40 @@ public sealed class RouterSettingsAdminStore : IDisposable
         CancellationToken cancellationToken = default)
     {
         IsSaving = true;
-        Changed?.Invoke();
+        NotifyChanged();
+
+        var savingCleared = false;
 
         try
         {
-            Settings = await _client
+            Settings = await Client
                 .UpdateAsync(adaptiveRoutingEnabled: adaptiveRoutingEnabled,
                     embeddingMemoryCapacity: embeddingMemoryCapacity, judgeEnabled: judgeEnabled,
                     judgeModelName: judgeModelName, transcriptCaptureEnabled: transcriptCaptureEnabled,
                     codeJudgeEnabled: codeJudgeEnabled, iceScoreEnabled: iceScoreEnabled, raceEnabled: raceEnabled,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            IsReachable = true;
-            IsLoaded = true;
-            LastError = null;
+            RecordSuccess();
         }
-        catch (RouterSettingsAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            RecordFailure(exception: ex, description: "saving the router settings", recordRejectionMessage: true,
+                beforeNotify: () =>
+                {
+                    IsSaving = false;
+                    savingCleared = true;
+                });
             throw;
         }
         finally
         {
-            IsSaving = false;
-            Changed?.Invoke();
+            // RecordFailure's beforeNotify already cleared IsSaving and published the one notification a
+            // failure gets; this is only the success path's, so it never double-notifies.
+            if (!savingCleared)
+            {
+                IsSaving = false;
+                NotifyChanged();
+            }
         }
     }
 
@@ -157,45 +143,41 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// </summary>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The number of rows deleted.</returns>
-    /// <exception cref="RouterSettingsAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     public async Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
     {
         IsSaving = true;
-        Changed?.Invoke();
+        NotifyChanged();
+
+        var savingCleared = false;
 
         try
         {
-            var rowsDeleted = await _client.ClearTranscriptsAsync(cancellationToken).ConfigureAwait(false);
-            IsReachable = true;
-            LastError = null;
+            var rowsDeleted = await Client.ClearTranscriptsAsync(cancellationToken).ConfigureAwait(false);
+
+            // marksLoaded: false - clearing transcripts fetches nothing to render, so it must not claim a
+            // load has happened when none has.
+            RecordSuccess(false);
             return rowsDeleted;
         }
-        catch (RouterSettingsAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            RecordFailure(exception: ex, description: "clearing the captured transcripts",
+                recordRejectionMessage: true,
+                beforeNotify: () =>
+                {
+                    IsSaving = false;
+                    savingCleared = true;
+                });
             throw;
         }
         finally
         {
-            IsSaving = false;
-            Changed?.Invoke();
+            if (!savingCleared)
+            {
+                IsSaving = false;
+                NotifyChanged();
+            }
         }
-    }
-
-    /// <summary>
-    /// Reflects a failed save in the store's state before the caller rethrows, so <see cref="IsReachable"/>
-    /// keeps its documented meaning after a save and not only after a load.
-    /// </summary>
-    /// <remarks>
-    /// Only a connectivity failure moves <see cref="IsReachable"/>. A rejection reached the router and is
-    /// the caller's inline error to render; treating it as unreachable would misstate the cause.
-    /// </remarks>
-    private void RecordFailure(RouterSettingsAdminException ex)
-    {
-        LastError = ex.Message;
-        if (!ex.IsUnavailable) return;
-
-        IsReachable = false;
-        _logger?.LogWarning(exception: ex, message: "The router became unreachable while saving the router settings.");
     }
 }

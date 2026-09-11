@@ -61,7 +61,7 @@ public class RoutingModeAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new RoutingModeAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing mode: the router is not reachable.");
@@ -76,7 +76,7 @@ public class RoutingModeAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new RoutingModeAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RoutingModeAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing mode: boom");

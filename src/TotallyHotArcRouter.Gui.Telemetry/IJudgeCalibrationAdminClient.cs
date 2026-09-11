@@ -14,6 +14,6 @@ public interface IJudgeCalibrationAdminClient
 {
     /// <summary>Recomputes and reads the judge-vs-static calibration report over every shadow row.</summary>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <exception cref="JudgeCalibrationAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<JudgeCalibrationReportInfo> GetReportAsync(CancellationToken cancellationToken = default);
 }

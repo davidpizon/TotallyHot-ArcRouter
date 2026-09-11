@@ -261,7 +261,7 @@ public class LlmRouterModelAdminClientTests
         var stub = new StubClient { SyncEvents = [new Contract.LlmRouterModelSyncStreamEvent()] };
         using var client = new LlmRouterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(async () =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
             await foreach (var _ in client.SyncAsync(TestContext.Current.CancellationToken))
             {
@@ -278,7 +278,7 @@ public class LlmRouterModelAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(async () =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
             await foreach (var _ in client.SyncAsync(TestContext.Current.CancellationToken))
             {
@@ -296,7 +296,7 @@ public class LlmRouterModelAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the llm_router model status: the router is not reachable.");
@@ -310,7 +310,7 @@ public class LlmRouterModelAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new LlmRouterModelAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<LlmRouterModelAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetBaseUrlAsync(baseUrl: "https://huggingface.co/org/model/resolve/main",
                 cancellationToken: TestContext.Current.CancellationToken));
 

@@ -64,7 +64,7 @@ public sealed class RegretHarnessAdminTests
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
         using var ctx = NewContext(new FakeClient
-        { Error = new RegretHarnessAdminException(message: "nope", isUnavailable: true) });
+        { Error = new GrpcAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<RegretHarnessAdmin>();
 
@@ -80,7 +80,7 @@ public sealed class RegretHarnessAdminTests
         // the call itself failed. The panel must not fall through to "No run yet this session" here - that
         // would hide LastError behind a state that claims nothing has gone wrong.
         using var ctx = NewContext(new FakeClient
-        { Error = new RegretHarnessAdminException(message: "permission denied", isUnavailable: false) });
+        { Error = new GrpcAdminException(message: "permission denied", isUnavailable: false) });
 
         var cut = ctx.Render<RegretHarnessAdmin>();
 
@@ -92,7 +92,7 @@ public sealed class RegretHarnessAdminTests
     [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
-        var client = new FakeClient { Error = new RegretHarnessAdminException(message: "nope", isUnavailable: true) };
+        var client = new FakeClient { Error = new GrpcAdminException(message: "nope", isUnavailable: true) };
         using var ctx = NewContext(client);
         var cut = ctx.Render<RegretHarnessAdmin>();
         cut.Markup.Should().Contain("Router unreachable");
@@ -162,7 +162,7 @@ public sealed class RegretHarnessAdminTests
     {
         public RegretHarnessStatusInfo? Status { get; set; } = status;
 
-        public RegretHarnessAdminException? Error { get; set; }
+        public GrpcAdminException? Error { get; set; }
 
         public IReadOnlyList<RegretHarnessRunEvent> RunEvents { get; set; } = [];
 

@@ -10,6 +10,41 @@
   </PropertyGroup>
 
   <!--
+    The .NET analyzers (CA*) and code-style rules (IDE*). Enabled here but held at "silent" by
+    src/.editorconfig, with individual rules escalated to error one at a time - because
+    TreatWarningsAsErrors above is already on, turning these on at their default severities would break
+    the build across ~125k lines in a single commit and leave no way to land the fixes incrementally.
+
+    This closes the gap recorded as D1 in docs/router/code-smell-refactoring-plan.md: the repo's strict
+    gate enforced core compiler warnings and CS1591 (missing XML docs), but not CA2000 (dispose before
+    losing scope) or IDE0051/IDE0052 (unused private members) - which is also why a hand-rolled dead-code
+    sweep over this repo produced 36 candidates of which 35 were false positives. The compiler is the only
+    sound oracle for that question; see src/.editorconfig for which rules are live.
+  -->
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <!--
+    IDE0005 (unnecessary usings) only runs at build time in a project that generates a documentation
+    file - a Roslyn limitation (dotnet/roslyn#41640) - and the compiler advertises that with an
+    EnableGenerateDocumentationFile advisory in every project that lacks one. TreatWarningsAsErrors turns
+    the advisory into a build failure, and no .editorconfig severity silences it, because it comes from
+    the compiler rather than from an analyzer.
+
+    The test projects deliberately do not generate docs: doing so would activate CS1591 there, demanding
+    an XML doc comment on every test class and method, which is not a rule this repo has ever had (see
+    AGENTS.md, which scopes the documentation requirement to the production assemblies). So the advisory
+    is suppressed there instead, and IDE0005's unused-using check covers production code only. That
+    matches ADR-0008's scope rule that tests are the regression net, not the catalog.
+  -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <NoWarn>$(NoWarn);EnableGenerateDocumentationFile</NoWarn>
+  </PropertyGroup>
+
+  <!--
     Single source of truth for the combined Router/GUI release version and the GitHub repo the
     auto-updater checks (docs: the auto-update plan). Both TotallyHotArcRouter and
     TotallyHotArcRouter.Gui compile these into an AssemblyMetadataAttribute (see each csproj's

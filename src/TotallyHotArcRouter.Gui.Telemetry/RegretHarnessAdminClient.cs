@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
-/// <summary>
-/// Thrown when a regret-harness call fails. Carries a message fit to render in the Governance panel
-/// rather than a raw <see cref="RpcException"/>, mirroring <see cref="LogRegModelAdminException"/>. See
-/// <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class RegretHarnessAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="RegretHarnessAdminException"/> class.</summary>
-    public RegretHarnessAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
 /// <summary>The result category of one run, mirroring <c>RegretHarnessRunResultKind</c>.</summary>
 public enum RegretHarnessRunResultKindInfo
 {
@@ -95,7 +81,7 @@ public sealed record RegretHarnessRunEvent(RegretHarnessStageInfo? StageProgress
 /// so CI can unit-test it, exactly like <see cref="LogRegModelAdminClient"/>.
 /// </summary>
 public sealed class RegretHarnessAdminClient
-    : GrpcAdminClientBase<Contract.RegretHarnessAdminService.RegretHarnessAdminServiceClient, RegretHarnessAdminException>,
+    : GrpcAdminClientBase<Contract.RegretHarnessAdminService.RegretHarnessAdminServiceClient>,
         IRegretHarnessAdminClient
 {
     /// <summary>
@@ -226,13 +212,5 @@ public sealed class RegretHarnessAdminClient
             Contract.RegretHarnessStage.BuildingOrchestratorArm => RegretHarnessStageInfo.BuildingOrchestratorArm,
             _ => RegretHarnessStageInfo.BuildingReports
         };
-    }
-
-    /// <inheritdoc/>
-    protected override RegretHarnessAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new RegretHarnessAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

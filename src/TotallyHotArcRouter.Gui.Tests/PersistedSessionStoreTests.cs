@@ -77,7 +77,7 @@ public sealed class PersistedSessionStoreTests
     {
         var client = new FakePersistedSessionsClient
         {
-            Failure = new PersistedSessionsClientException(message: "router is gone", isUnavailable: true)
+            Failure = new GrpcAdminException(message: "router is gone", isUnavailable: true)
         };
         var store = new PersistedSessionStore(client);
 

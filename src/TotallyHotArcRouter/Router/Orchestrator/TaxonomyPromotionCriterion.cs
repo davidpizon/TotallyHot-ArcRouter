@@ -38,6 +38,13 @@ public sealed record TaxonomyComparisonWindow(
 /// dependency - the criterion is a statement about numbers, and keeping it free of ambient state is what
 /// makes it directly testable, which Phase T4's exit bar requires by name.
 /// </para>
+/// <para>
+/// <b>To a dead-code audit this type looks dead, and it is not.</b> It has zero production callers by
+/// design - see the first paragraph - so a caller search will keep rediscovering that and a reachability
+/// tool will keep reporting it. The 2026-09-11 survey confirmed it and deliberately left it alone; see
+/// <c>docs/router/admin-slice-consolidation-plan.md</c>'s "What was checked and rejected". Delete it only
+/// together with Phase T4 itself, never because nothing calls it.
+/// </para>
 /// </remarks>
 public static class TaxonomyPromotionCriterion
 {

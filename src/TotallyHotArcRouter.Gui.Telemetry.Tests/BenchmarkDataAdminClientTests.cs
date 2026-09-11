@@ -275,7 +275,7 @@ public class BenchmarkDataAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(async () =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
             await foreach (var _ in client.SyncAsync(TestContext.Current.CancellationToken))
             {
@@ -293,7 +293,7 @@ public class BenchmarkDataAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the benchmark data status: the router is not reachable.");
@@ -307,7 +307,7 @@ public class BenchmarkDataAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new BenchmarkDataAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<BenchmarkDataAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.RecheckAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not recheck the benchmark data: boom");

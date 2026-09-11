@@ -100,7 +100,7 @@ public class PersistedSessionsClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new PersistedSessionsClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read persisted sessions: the router is not reachable.");
@@ -115,7 +115,7 @@ public class PersistedSessionsClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new PersistedSessionsClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PersistedSessionsClientException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read persisted sessions: boom");
