@@ -16,6 +16,20 @@ public interface IJudgeShadowScoreStore
     /// <param name="cancellationToken">A cancellation token.</param>
     Task<int> GetRowCountAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Reads every row currently in <c>judge_shadow_scores</c>, oldest first, for
+    /// <see cref="IJudgeCalibrationAnalyzer"/>'s Phase G2 report.
+    /// </summary>
+    /// <remarks>
+    /// Unpaged on purpose, mirroring <see cref="IGraderScoreStore.GetAllAsync"/>: the table is bounded by
+    /// <see cref="JudgeOptions.MaxRows"/> and <see cref="JudgeOptions.RetentionDays"/>, and the analysis is
+    /// a whole-table group-and-correlate that has no meaningful partial answer - a correlation over an
+    /// arbitrary page is not a partial correlation, it is a wrong one.
+    /// </remarks>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>Every persisted row, or an empty list when the table is empty.</returns>
+    Task<IReadOnlyList<JudgeShadowScoreRecord>> GetAllAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Deletes the oldest <paramref name="count"/> rows, enforcing <see cref="JudgeOptions.MaxRows"/>.</summary>
     /// <param name="count">The number of oldest rows to delete.</param>
     /// <param name="cancellationToken">A cancellation token.</param>

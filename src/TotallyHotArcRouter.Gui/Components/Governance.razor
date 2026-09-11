@@ -62,10 +62,16 @@
             <RouterModelAdmin/>
         </div>
     }
-    else
+    else if (_view == GovView.RegretHarness)
     {
         <div class="flex-1 min-h-0">
             <RegretHarnessAdmin/>
+        </div>
+    }
+    else
+    {
+        <div class="flex-1 min-h-0">
+            <JudgeCalibrationAdmin/>
         </div>
     }
 </div>
@@ -82,7 +88,8 @@
         RoutingMode,
         ClusterModel,
         RouterModel,
-        RegretHarness
+        RegretHarness,
+        JudgeCalibration
     }
 
     private static readonly (GovView View, string Label)[] Views =
@@ -95,7 +102,8 @@
         (GovView.RoutingMode, "Routing Mode"),
         (GovView.ClusterModel, "Cluster Model"),
         (GovView.RouterModel, "Router Model"),
-        (GovView.RegretHarness, "Regret Harness")
+        (GovView.RegretHarness, "Regret Harness"),
+        (GovView.JudgeCalibration, "Judge Calibration")
     ];
 
     private GovView _view = GovView.Providers;

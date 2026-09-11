@@ -52,6 +52,7 @@ public class JudgeShadowScoreQueueTests
 
     private static JudgeShadowScoringJob MakeJob(string correlationId)
     {
-        return new JudgeShadowScoringJob(CorrelationId: correlationId, Dimension: "algorithm", Model: "model-a", 0.5);
+        return new JudgeShadowScoringJob(CorrelationId: correlationId, Dimension: "algorithm", Model: "model-a", 0.5,
+            SyntaxAuthoritative: true);
     }
 }

@@ -112,7 +112,7 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
             agreements.Add(new GraderPairAgreement(
                 GraderA: graderA,
                 GraderB: graderB,
-                Correlation: scoresA.Count >= MinimumSampleSize ? SpearmanCorrelation(scoresA, scoresB) : null,
+                Correlation: scoresA.Count >= MinimumSampleSize ? RankCorrelation.Spearman(scoresA, scoresB) : null,
                 SampleSize: scoresA.Count));
         }
 
@@ -135,7 +135,7 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
             skews.Add(new GraderVerbositySkew(
                 GraderKey: graderKey,
                 Correlation: paired.Count >= MinimumSampleSize
-                    ? SpearmanCorrelation([.. paired.Select(p => p.Score)], [.. paired.Select(p => p.Length)])
+                    ? RankCorrelation.Spearman([.. paired.Select(p => p.Score)], [.. paired.Select(p => p.Length)])
                     : null,
                 SampleSize: paired.Count));
         }
@@ -176,71 +176,5 @@ public sealed class GraderReliabilityAnalyzer : IGraderReliabilityAnalyzer
         }
 
         return skews;
-    }
-
-    /// <summary>
-    /// Computes the Spearman rank correlation between two equal-length samples: ranks each sample
-    /// (averaging ranks across ties) and returns the Pearson correlation of the two rank sequences, or
-    /// <see langword="null"/> when one sample has zero variance (see <see cref="PearsonCorrelation"/>).
-    /// </summary>
-    private static double? SpearmanCorrelation(IReadOnlyList<double> x, IReadOnlyList<double> y)
-    {
-        var ranksX = Rank(x);
-        var ranksY = Rank(y);
-        return PearsonCorrelation(ranksX, ranksY);
-    }
-
-    /// <summary>Ranks a sample in ascending order, giving tied values the average of the ranks they span.</summary>
-    private static double[] Rank(IReadOnlyList<double> values)
-    {
-        var indexed = values.Select((value, index) => (value, index)).OrderBy(t => t.value).ToArray();
-        var ranks = new double[values.Count];
-
-        var i = 0;
-        while (i < indexed.Length)
-        {
-            var j = i;
-            // .Equals(), not ==: this is an intentional exact-tie check over already-computed scores
-            // (some of which are legitimately identical, e.g. a clamped 0.0/1.0 boundary), not a
-            // should-be-approximate comparison of independently computed floating-point results.
-            while (j + 1 < indexed.Length && indexed[j + 1].value.Equals(indexed[i].value)) j++;
-
-            // 1-based ranks i+1..j+1, averaged across the tied run.
-            var averageRank = ((i + 1) + (j + 1)) / 2.0;
-            for (var k = i; k <= j; k++) ranks[indexed[k].index] = averageRank;
-
-            i = j + 1;
-        }
-
-        return ranks;
-    }
-
-    /// <summary>
-    /// Computes the Pearson correlation coefficient between two equal-length samples, or
-    /// <see langword="null"/> when either sample has zero variance (every value identical). Zero variance
-    /// makes the coefficient a literal 0/0 - mathematically undefined, not "no correlation" - so it is
-    /// suppressed the same way a too-small sample size already is, rather than reported as a misleadingly
-    /// precise 0.0.
-    /// </summary>
-    private static double? PearsonCorrelation(IReadOnlyList<double> x, IReadOnlyList<double> y)
-    {
-        var n = x.Count;
-        var meanX = x.Average();
-        var meanY = y.Average();
-
-        var covariance = 0.0;
-        var varianceX = 0.0;
-        var varianceY = 0.0;
-        for (var i = 0; i < n; i++)
-        {
-            var dx = x[i] - meanX;
-            var dy = y[i] - meanY;
-            covariance += dx * dy;
-            varianceX += dx * dx;
-            varianceY += dy * dy;
-        }
-
-        if (varianceX == 0.0 || varianceY == 0.0) return null;
-        return covariance / Math.Sqrt(varianceX * varianceY);
     }
 }

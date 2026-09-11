@@ -1,0 +1,273 @@
+@* Governance > Judge Calibration pane (docs/router/geval-shadow-scoring-plan.md Phase G2): how the
+   G-Eval judge's opinion compares with the static verifier's grade on the same requests. Read-only in
+   the strongest sense - unlike the Router Model/Cluster Model panes it starts nothing and mutates
+   nothing, and unlike the Regret Harness pane there is no run to trigger: the router recomputes on every
+   read, so Refresh and the initial load are the same call. Talks to the proxy's
+   JudgeCalibrationAdminService gRPC API via the injected JudgeCalibrationAdminStore. *@
+@implements IDisposable
+@inject JudgeCalibrationAdminStore Store
+
+<div class="h-full overflow-y-auto pr-1">
+    @if (!Store.IsLoaded)
+    {
+        <div class="text-sm text-slate-500 p-4">Loading judge calibration…</div>
+    }
+    else if (Store.Report is null)
+    {
+        @* Store.Report is null both before any successful load and after any failed one (including a
+           reachable-but-erroring call - the store never lets a stale report stand in for one that failed
+           to recompute). IsReachable still distinguishes the two causes, so an RPC error from a live
+           router is never mislabeled as the router being down. *@
+        <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
+            <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
+                <Icon Name="alert-triangle" Size="20"/> @(Store.IsReachable ? "Report unavailable" : "Router unreachable")
+            </div>
+            <div class="text-xs text-slate-400">
+                @if (Store.IsReachable)
+                {
+                    <text>The router responded, but the calibration report could not be generated.</text>
+                }
+                else
+                {
+                    <text>Could not reach <span class="font-mono">@(Store.ServerAddress ?? TelemetryChannelFactory.DefaultServerAddress)</span>. Is the proxy running?</text>
+                }
+            </div>
+            @if (!string.IsNullOrEmpty(Store.LastError))
+            {
+                <div class="text-xs text-slate-500 font-mono">@Store.LastError</div>
+            }
+            <button @onclick="Reload" class="btn btn-ghost">
+                Retry
+            </button>
+        </div>
+    }
+    else
+    {
+        var report = Store.Report;
+
+        <div class="flex items-center justify-between mb-3 gap-2">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Judge Calibration</span>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500 font-mono">
+                    @report.TotalRowsAnalyzed row(s) · @report.GeneratedAtUtc.ToLocalTime().ToString(format: "g", formatProvider: CultureInfo.InvariantCulture)
+                </span>
+                <button @onclick="Reload" disabled="@Store.IsLoading" class="btn btn-ghost flex items-center gap-1.5">
+                    <Icon Name="refresh" Size="20"/> @(Store.IsLoading ? "Refreshing…" : "Refresh")
+                </button>
+            </div>
+        </div>
+
+        @* Gate conditions first: a reader must see what is and is not being checked before reading any
+           number, or an absent verdict reads as a silent pass. *@
+        <div class="rounded-lg p-3 space-y-2 mb-3 ds-surface-card">
+            <span class="text-xs text-slate-500 uppercase tracking-widest">Gate conditions</span>
+            @foreach (var verdict in report.Verdicts)
+            {
+                <div class="space-y-0.5">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-semibold @VerdictClass(verdict.Kind)">@VerdictLabel(verdict.Kind)</span>
+                        <span class="text-sm text-slate-300 font-mono">@verdict.Condition</span>
+                    </div>
+                    <div class="text-xs text-slate-500">@verdict.Detail</div>
+                </div>
+            }
+        </div>
+
+        @if (report.Cohorts.Count == 0)
+        {
+            <div class="rounded-lg p-3 space-y-1 ds-surface-card">
+                <div class="text-sm font-semibold state-disabled">No shadow rows yet</div>
+                <div class="text-xs text-slate-500">
+                    The judge records one row per graded request while it is enabled. Turn it on in System
+                    Settings and route some traffic, then refresh.
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="rounded-lg p-3 space-y-2 mb-3 ds-surface-card">
+                <span class="text-xs text-slate-500 uppercase tracking-widest">Judge vs. static, by cohort</span>
+                <div class="text-xs text-slate-500">
+                    Never pooled: the backbone is resolved per call and probability weighting is not always
+                    available, so rows are only compared with rows that are actually comparable.
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs text-left">
+                        <thead class="text-slate-500 uppercase tracking-widest">
+                        <tr>
+                            <th class="py-1 pr-3">Dimension</th>
+                            <th class="py-1 pr-3">Judge model</th>
+                            <th class="py-1 pr-3">Weighting</th>
+                            <th class="py-1 pr-3">Static grade</th>
+                            <th class="py-1 pr-3 text-right">N</th>
+                            <th class="py-1 pr-3 text-right">Spearman</th>
+                            <th class="py-1 pr-3 text-right">MAD</th>
+                            <th class="py-1 pr-3 text-right">Mean judge</th>
+                            <th class="py-1 pr-3 text-right">Mean static</th>
+                            <th class="py-1 pr-3 text-right">SD</th>
+                            <th class="py-1 pr-3 text-right">Modal</th>
+                            <th class="py-1 text-right">Distinct</th>
+                        </tr>
+                        </thead>
+                        <tbody class="text-slate-400 font-mono">
+                        @foreach (var cohort in report.Cohorts)
+                        {
+                            <tr>
+                                <td class="py-1 pr-3">@cohort.Dimension</td>
+                                <td class="py-1 pr-3">@cohort.JudgeModel</td>
+                                <td class="py-1 pr-3">@(cohort.UsedLogprobs ? "logprobs" : "single-sample")</td>
+                                <td class="py-1 pr-3">@AuthorityLabel(cohort.StaticAuthority)</td>
+                                <td class="py-1 pr-3 text-right">@cohort.SampleSize</td>
+                                <td class="py-1 pr-3 text-right">@FormatCorrelation(cohort.Correlation)</td>
+                                <td class="py-1 pr-3 text-right">@FormatValue(cohort.MeanAbsoluteDifference)</td>
+                                <td class="py-1 pr-3 text-right">@FormatValue(cohort.MeanJudgeScore)</td>
+                                <td class="py-1 pr-3 text-right">@FormatValue(cohort.MeanStaticScore)</td>
+                                <td class="py-1 pr-3 text-right">@FormatValue(cohort.StandardDeviation)</td>
+                                <td class="py-1 pr-3 text-right">@FormatShare(cohort.ModalShare)</td>
+                                <td class="py-1 text-right">@cohort.DistinctScoreCount</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="rounded-lg p-3 space-y-2 mb-3 ds-surface-card">
+                <span class="text-xs text-slate-500 uppercase tracking-widest">Self-preference</span>
+                <div class="text-xs text-slate-500">
+                    Judge score minus static score, per candidate model. Reported without a pass/fail
+                    ceiling - G-Eval documents this bias's direction but no magnitude, and the static score
+                    is itself heuristic on some rows. A judge's own backbone at the top of its list is that
+                    finding reproduced locally.
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs text-left">
+                        <thead class="text-slate-500 uppercase tracking-widest">
+                        <tr>
+                            <th class="py-1 pr-3">Dimension</th>
+                            <th class="py-1 pr-3">Judge model</th>
+                            <th class="py-1 pr-3">Weighting</th>
+                            <th class="py-1 pr-3">Static grade</th>
+                            <th class="py-1 pr-3">Candidate</th>
+                            <th class="py-1 pr-3 text-right">Mean delta</th>
+                            <th class="py-1 text-right">N</th>
+                        </tr>
+                        </thead>
+                        <tbody class="text-slate-400 font-mono">
+                        @foreach (var row in report.SelfPreference)
+                        {
+                            <tr>
+                                <td class="py-1 pr-3">@row.Dimension</td>
+                                <td class="py-1 pr-3">@row.JudgeModel</td>
+                                <td class="py-1 pr-3">@(row.UsedLogprobs ? "logprobs" : "single-sample")</td>
+                                <td class="py-1 pr-3">@AuthorityLabel(row.StaticAuthority)</td>
+                                <td class="py-1 pr-3">
+                                    @row.CandidateModel
+                                    @if (row.IsOwnBackbone)
+                                    {
+                                        <span class="ml-1 text-amber-400">(own backbone)</span>
+                                    }
+                                </td>
+                                <td class="py-1 pr-3 text-right">@row.MeanScoreDelta.ToString(format: "+0.000;-0.000;0.000", provider: CultureInfo.InvariantCulture)</td>
+                                <td class="py-1 text-right">@row.SampleSize</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+
+    protected override async Task OnInitializedAsync()
+    {
+        Store.Changed += OnStoreChanged;
+        await Store.LoadAsync();
+    }
+
+    /// <summary>Re-renders when the store's state changes.</summary>
+    private void OnStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Unsubscribes from <see cref="JudgeCalibrationAdminStore.Changed"/>.</summary>
+    public void Dispose()
+    {
+        Store.Changed -= OnStoreChanged;
+    }
+
+    /// <summary>
+    /// Reloads the report. Implements both the unreachable state's Retry button and the loaded state's
+    /// Refresh button - and, because the router recomputes per call, this is a genuine re-run rather than
+    /// a re-read of a cached one.
+    /// </summary>
+    private Task Reload()
+    {
+        return Store.LoadAsync();
+    }
+
+    /// <summary>A short display label for a verdict kind.</summary>
+    private static string VerdictLabel(JudgeCalibrationVerdictKindInfo kind)
+    {
+        return kind switch
+        {
+            JudgeCalibrationVerdictKindInfo.Pass => "PASS",
+            JudgeCalibrationVerdictKindInfo.Fail => "FAIL",
+            JudgeCalibrationVerdictKindInfo.Insufficient => "PENDING",
+            _ => "N/A"
+        };
+    }
+
+    /// <summary>
+    /// The state colour for a verdict kind. "Pending" and "unevaluable" deliberately share the neutral
+    /// disabled colour rather than borrowing the failure colour: neither is a problem with the judge.
+    /// </summary>
+    private static string VerdictClass(JudgeCalibrationVerdictKindInfo kind)
+    {
+        return kind switch
+        {
+            JudgeCalibrationVerdictKindInfo.Pass => "state-enabled",
+            JudgeCalibrationVerdictKindInfo.Fail => "text-red-400",
+            _ => "state-disabled"
+        };
+    }
+
+    /// <summary>A short display label for a static-grade authority bucket.</summary>
+    private static string AuthorityLabel(StaticGradeAuthorityInfo authority)
+    {
+        return authority switch
+        {
+            StaticGradeAuthorityInfo.Authoritative => "parser",
+            StaticGradeAuthorityInfo.Heuristic => "heuristic",
+            _ => "unknown"
+        };
+    }
+
+    /// <summary>
+    /// Formats a correlation, naming a suppressed value rather than rendering an empty cell - a
+    /// suppressed statistic and a measured zero are opposite findings and must never look alike.
+    /// </summary>
+    private static string FormatCorrelation(double? correlation)
+    {
+        return correlation is { } value
+            ? value.ToString(format: "F3", provider: CultureInfo.InvariantCulture)
+            : "suppressed";
+    }
+
+    /// <summary>Formats a nullable score-scale value to three decimals, or a dash when undefined.</summary>
+    private static string FormatValue(double? value)
+    {
+        return value is { } number ? number.ToString(format: "F3", provider: CultureInfo.InvariantCulture) : "-";
+    }
+
+    /// <summary>Formats a nullable proportion as a whole percentage, or a dash when undefined.</summary>
+    private static string FormatShare(double? share)
+    {
+        return share is { } value ? value.ToString(format: "P0", provider: CultureInfo.InvariantCulture) : "-";
+    }
+
+}

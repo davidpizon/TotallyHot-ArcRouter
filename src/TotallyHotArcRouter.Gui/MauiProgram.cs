@@ -98,6 +98,9 @@ public static class MauiProgram
         // N6). A singleton for the same reason, sharing the TLS gRPC port (5002) with the stores above.
         // See Services/RegretHarnessAdminStore.cs.
         builder.Services.AddSingleton<RegretHarnessAdminStore>();
+
+        // See Services/JudgeCalibrationAdminStore.cs.
+        builder.Services.AddSingleton<JudgeCalibrationAdminStore>();
         // Backs the System Settings window's Adaptive Routing row (Phase T6). A singleton for the same
         // reason, sharing the TLS gRPC port (5002) with the stores above. See Services/RouterSettingsAdminStore.cs.
         builder.Services.AddSingleton<RouterSettingsAdminStore>();

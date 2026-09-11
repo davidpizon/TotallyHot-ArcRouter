@@ -38,6 +38,7 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
 | Phase G1 — shadow judge dispatch (`PendingResponseTextCache`, `JudgeShadowScoreDispatcher`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 | **Judge-join deadlock fix** — Phase N3's promotion of the judge to a real `QualityScoreAggregator` contributor never moved the judge's trigger off the write-time `IQualityScoreObserver` fan-out, so a held result could never start the judge that its own write was waiting on: every judged request silently degraded to the 60s join-timeout with no judge score ever reaching memory, while `judge_shadow_scores` kept filling and made the judge look healthy. Fixed by a new `IAsyncGraderDispatcher` seam, called at hold-time by `QualityScoreAggregator.SubmitAsync`; `JudgeShadowScoreObserver` renamed to `JudgeShadowScoreDispatcher` and moved off `IQualityScoreObserver` entirely; a second, related stall (a judge backbone throw leaving the join pinned) fixed in `JudgeShadowScoreDrainService.ProcessAsync` in the same change | [`../docs/router/judge-join-deadlock-fix-plan.md`](../docs/router/judge-join-deadlock-fix-plan.md) |
 | Auto-update Phases 0-1 — versioning source of truth, Windows Service hosting — plus update *detection* (`GitHubReleaseCheckClient`, `UpdateCheckHostedService`, `UpdateAdminService` gRPC surface) as originally shipped in Phase 2. Phase 2's *apply* mechanism (a separate `TotallyHotArcRouter.Updater` helper project) is superseded — the GUI now downloads/verifies/launches a single signed MSI installer instead | [`../docs/router/auto-update-plan.md`](../docs/router/auto-update-plan.md) (historical apply design), [`../docs/router/packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md) (current MSI design), [`../docs/router/version-compatibility.md`](../docs/router/version-compatibility.md) (current Router↔GUI versioning) |
+| Phase G2 — judge calibration as a standing check: `JudgeCalibrationAnalyzer` (cohort-segmented judge-vs-static agreement, score-collapse verdict, unverdicted self-preference), the `syntax_authoritative` column and its migration, `--run-judge-calibration-report`, the `JudgeCalibrationAdminService` gRPC surface, and the Governance → Judge Calibration panel | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) (Phase G2 status blockquote) |
 | Sessions tab shows persisted, training-linked transcripts — `request_transcripts.session_id` column + backfill, the `TelemetryService.ListPersistedSessions` RPC, GUI merge of live + persisted history, the `IsUsedForTraining` badge, and the full-width unselected-card-list CSS fix | [`../docs/router/sessions-tab-training-data-plan.md`](../docs/router/sessions-tab-training-data-plan.md) |
 
 **What is still missing**, and which remaining workstream owns it:
@@ -129,18 +130,23 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
 
 ```mermaid
 flowchart LR
-    subgraph shipped["Shipped — the live C-A-F loop, G1, and N1–N6"]
+    subgraph shipped["Shipped — the live C-A-F loop, G1–G3, N1–N6, Q0–Q4"]
         LOOP["Classifier → 5-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
-        G1["G1: shadow judge<br/>(accumulates, influences nothing)"]
+        G1["G1: shadow judge<br/>(judge_shadow_scores audit trail)"]
+        G3["G3: judge blended into u_i,<br/>is_judge_scored provenance,<br/>JudgeScoredRowPolicy"]
+        G2["G2: calibration as a standing check<br/>(cohort-segmented agreement,<br/>score-collapse verdict,<br/>self-preference unverdicted)"]
         N16["N1–N6: metrics core, replay engine,<br/>all 6 baselines, Orchestrator arm,<br/>on-demand CLI/GUI re-run<br/>(measured; exit criterion not met)"]
         LOOP -.-> G1
+        G1 --> G3
+        G3 --> LOOP
+        G1 -.->|"reads the shadow table"| G2
     end
 
-    G23["G2 → G3: judge calibration,<br/>then judge as verifier for<br/>non-executable dimensions"]
+    BLOCKED["Q5: sample-size-aware DimBestVoter<br/>(evidence-blocked — zero live observations)"]
+    UNSCHED["Unscheduled: live-traffic regret arm<br/>or richer offline bootstrap,<br/>to test the ensemble's claim for real"]
 
-    LOOP --> G23
-    N16 --> G23
-    G1 -.->|"shadow data gates"| G23
+    LOOP --> BLOCKED
+    N16 --> UNSCHED
 ```
 
 ## Remaining work, in order
@@ -223,15 +229,26 @@ flowchart LR
    [`regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)'s Q5 section.
    Rationale and per-source verdicts for the estimator's shape:
    [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
-2. **Phases G2 → G3 — judge calibration, then judge-as-verifier.**
-   [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md). G2's
-   agreement/calibration analysis runs once G1 has accumulated shadow data; G3 (the judge as scorer of
-   record for non-executable dimensions only, with `is_judge_scored` provenance) is gated on G2's
-   criteria and never starts if the gate fails. **Unaffected by the judge-join deadlock fix above:**
-   the drain worker wrote `judge_shadow_scores` rows regardless of whether the aggregator ever saw the
-   grade, so G2's `verifier_score`-vs-`judge_score` calibration data is intact. What the fix actually
-   changes for G3 is that `is_judge_scored`/routed judge grades now reach memory at all - before it, G3
-   would have promoted a scorer whose grades never once influenced a routed request.
+2. ~~**Phases G2 → G3 — judge calibration, then judge-as-verifier.**~~ **Both shipped.** G3 shipped first
+   (the judge blends into `u_i` on every graded request, with `is_judge_scored` provenance and the
+   `JudgeScoredRowPolicy` learning-layer policy); **G2 shipped 2026-09-10** as the standing regression
+   check that ordering leaves it as, rather than the gate it was designed to be — there is nothing left to
+   gate. Delivered as a full vertical slice: `JudgeCalibrationAnalyzer` over a new
+   `IJudgeShadowScoreStore.GetAllAsync`, a shared `JudgeCalibrationReportFormatter`, the headless
+   `--run-judge-calibration-report` flag, the `JudgeCalibrationAdminService` gRPC surface, and the
+   Governance → Judge Calibration panel. Every statistic is computed inside a
+   (dimension, `judge_model`, `used_logprobs`, static-grade authority) cohort rather than pooled, and a new
+   nullable `judge_shadow_scores.syntax_authoritative` column — plumbed from `QualityResult` through the
+   dispatcher and drain worker, NULL for pre-existing rows — supplies the parser-vs-heuristic split that
+   replaces the deleted `executed` flag. **Only one of the three G3 gate conditions is a pass/fail
+   verdict**, and the reasons are recorded in the owning doc rather than left implicit: condition (1)
+   (ground truth) is permanently `Unevaluable` because execution was removed; condition (2)
+   (score collapse) *is* verdicted, because `used_logprobs` gives the data its own control group for
+   exactly the failure G-Eval predicts; condition (3) (self-preference) ships as numbers with no ceiling,
+   because the paper establishes that bias's direction but no magnitude and the only local yardstick is
+   itself heuristic — pinned by a test, with a stated re-open condition. Full detail and every deviation:
+   [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) Phase G2's
+   status blockquote.
 
 ### Phase N: roadmap-level scope and exit bar
 
@@ -279,8 +296,8 @@ solve itself, but N never required them to complete.
 ## Other open work (tracked elsewhere; referenced here so it is not lost)
 
 - [`../docs/router/tracked-todos.md`](../docs/router/tracked-todos.md) — #3 DeepSeek dialect research,
-  #4 zero-coverage classes (`TotallyHot.ArcRouter.Quality` now sits at 97.9%; the remaining gap is in
-  `TotallyHotArcRouter` at 85.8%), #5 human review of
+  #4 zero-coverage classes (`TotallyHot.ArcRouter.Quality` now sits at 97.2%; the remaining gap is in
+  `TotallyHotArcRouter` at 89.4%), #5 human review of
   tool-call-normalization Phase 5's three design decisions.
 - [`../docs/router/tool-call-normalization.md`](../docs/router/tool-call-normalization.md) — Phase 6
   remainder (response/telemetry diagnostics), Phase 7 (native endpoints, design only).
@@ -303,6 +320,19 @@ solve itself, but N never required them to complete.
   a proto surface, a GUI client, and a Blazor panel with no additional measurement capability over the CLI.
   A separable, independently-shippable follow-up, not a gap in Q4's own exit criterion. Rationale:
   [`../docs/router/grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md)'s status note.
+- **G2's self-preference check ships as numbers, not a pass/fail verdict** — unlike its score-collapse
+  sibling, it has no control group in the data (there is no unbiased judge to compare against, and the
+  static score is itself heuristic on Python and shell rows), and G-Eval publishes this bias's direction
+  without a magnitude, so any ceiling would be invented rather than measured. The report ranks each
+  candidate's judge-minus-static delta and flags the judge's own backbone instead. **Re-open when** several
+  candidate models have accumulated rows and the spread across deltas supplies an empirical baseline.
+  Rationale: [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md)
+  Phase G2's status blockquote.
+- **G3 gate condition (1) is permanently unevaluable, and is reported as such rather than dropped** — it
+  required the judge to rank-correlate with execution-grounded scores, and code execution was removed from
+  the project. Reported every run as `Unevaluable`, distinct in the enum and on the wire from
+  `Insufficient`, so an absent check can never read as a silent pass. No re-open condition exists: waiting
+  will not produce the evidence. Rationale: same blockquote.
 - **The quality rescan does not write to router memory** — it grades saved transcript rows and stamps
   the score onto the row only. `IQualityScoreObserver`'s contract is that `QualityScoreAggregator` calls it
   exactly once per request, and `RouterMemory` accumulates a running sum and count, so a second writer
@@ -363,7 +393,7 @@ Applies at the end of every phase, per [`../AGENTS.md`](../AGENTS.md):
 2. Every new public/protected type and member carries accurate XML documentation; docs on code changed
    by a phase are re-read for staleness, which the compiler cannot check.
 3. All unit tests pass; both non-GUI assemblies hold ≥ 80% line coverage per-assembly, as
-   `.github/workflows/dotnet-ci.yml` measures it. `TotallyHot.ArcRouter.Quality` sits at ~97.9%, so
+   `.github/workflows/dotnet-ci.yml` measures it. `TotallyHot.ArcRouter.Quality` sits at ~97.2%, so
    phases touching it must add coverage, not just avoid removing it.
 4. No unusually heavy test exceeds 5 seconds. The embedding model load and Phase N's replay harness
    are the live risks here — both belong behind fixtures or environment gates.

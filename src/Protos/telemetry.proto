@@ -9,6 +9,7 @@ package TotallyHot.ArcRouter.telemetry.v1;
 option csharp_namespace = "TotallyHot.ArcRouter.Telemetry.Contract";
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
 
 // Replaces TotallyHot.ArcRouter.Telemetry.TelemetryHub (SignalR). See
 // docs/router/grpc-migration.md for the design this implements. Compiled independently into both
@@ -781,6 +782,92 @@ message RegretHarnessStreamEvent {
     RegretHarnessStageProgress stage_progress = 1;
     RegretHarnessRunResult result = 2;
   }
+}
+
+// The Governance UI's Judge Calibration panel (docs/router/geval-shadow-scoring-plan.md Phase G2):
+// reports how the G-Eval judge's opinion compares with the static verifier's grade on the same requests.
+// Unary-only, unlike RegretHarnessAdminService above - the analysis is pure SQL plus arithmetic over an
+// already-bounded table, so there is no long-running run to stream progress for and no "last run" state
+// to keep: every call recomputes from the current rows. Read-only in the strongest sense - it never
+// mutates a weight, a voter, or the judge's own blend contribution. Shares the :5002 TLS loopback
+// endpoint with every other admin service.
+service JudgeCalibrationAdminService {
+  // Recomputes and returns the calibration report over every judge_shadow_scores row.
+  rpc GetJudgeCalibrationReport (GetJudgeCalibrationReportRequest) returns (JudgeCalibrationReportResponse);
+}
+
+message GetJudgeCalibrationReportRequest {}
+
+// Whether one gate condition passed, failed, lacks data, or can never be evaluated. Mirrors
+// JudgeCalibrationVerdictKind (JudgeCalibrationReport.cs) exactly. UNEVALUABLE is distinct from
+// INSUFFICIENT on purpose: waiting for more data will never resolve it.
+enum JudgeCalibrationVerdictKind {
+  JUDGE_CALIBRATION_VERDICT_KIND_UNSPECIFIED = 0;
+  JUDGE_CALIBRATION_VERDICT_KIND_PASS = 1;
+  JUDGE_CALIBRATION_VERDICT_KIND_FAIL = 2;
+  JUDGE_CALIBRATION_VERDICT_KIND_INSUFFICIENT = 3;
+  JUDGE_CALIBRATION_VERDICT_KIND_UNEVALUABLE = 4;
+}
+
+// Whether a real parser or a heuristic produced the static grade a judge score is compared against.
+// Mirrors StaticGradeAuthority (JudgeCalibrationReport.cs) exactly. UNKNOWN is a real bucket for rows
+// written before the syntax_authoritative column existed, not a proto3 zero-value placeholder.
+enum StaticGradeAuthority {
+  STATIC_GRADE_AUTHORITY_UNKNOWN = 0;
+  STATIC_GRADE_AUTHORITY_HEURISTIC = 1;
+  STATIC_GRADE_AUTHORITY_AUTHORITATIVE = 2;
+}
+
+// One G3 gate condition's outcome, with the numbers behind it in detail.
+message JudgeCalibrationVerdict {
+  string condition = 1;
+  JudgeCalibrationVerdictKind kind = 2;
+  string detail = 3;
+}
+
+// One comparable slice of the shadow table: all rows sharing a dimension, a judge backbone, a
+// probability-weighting mode, and a static-grade authority. Every nullable statistic is carried in a
+// wrapper so "suppressed" (too few rows, or zero variance) stays distinguishable from a computed 0.0 -
+// they are opposite findings.
+message JudgeCalibrationCohort {
+  string dimension = 1;
+  string judge_model = 2;
+  bool used_logprobs = 3;
+  StaticGradeAuthority static_authority = 4;
+  int32 sample_size = 5;
+  google.protobuf.DoubleValue correlation = 6;
+  google.protobuf.DoubleValue mean_absolute_difference = 7;
+  google.protobuf.DoubleValue mean_judge_score = 8;
+  google.protobuf.DoubleValue mean_static_score = 9;
+  google.protobuf.DoubleValue standard_deviation = 10;
+  google.protobuf.DoubleValue modal_share = 11;
+  int32 distinct_score_count = 12;
+}
+
+// One candidate model's judge-minus-static delta, within one judge backbone. Carries no verdict by
+// design - see JudgeSelfPreferenceRow's remarks in JudgeCalibrationReport.cs.
+message JudgeSelfPreferenceRow {
+  string dimension = 1;
+  string judge_model = 2;
+  bool used_logprobs = 3;
+  StaticGradeAuthority static_authority = 4;
+  string candidate_model = 5;
+  double mean_score_delta = 6;
+  bool is_own_backbone = 7;
+  int32 sample_size = 8;
+}
+
+// The freshly computed report. markdown carries the same rendering the CLI flag prints
+// (JudgeCalibrationReportFormatter), so the panel and a piped --run-judge-calibration-report run can
+// never disagree about formatting; the structured fields beside it let the panel lay the numbers out
+// itself rather than only showing preformatted text.
+message JudgeCalibrationReportResponse {
+  google.protobuf.Timestamp generated_at_utc = 1;
+  int32 total_rows_analyzed = 2;
+  repeated JudgeCalibrationVerdict verdicts = 3;
+  repeated JudgeCalibrationCohort cohorts = 4;
+  repeated JudgeSelfPreferenceRow self_preference = 5;
+  string markdown = 6;
 }
 
 // Envelope: exactly one of these is set per message, matching SignalR's per-message-type dispatch

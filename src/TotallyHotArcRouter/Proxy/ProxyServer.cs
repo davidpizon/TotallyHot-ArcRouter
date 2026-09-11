@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using System.Net;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -112,6 +113,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         // are - so this always has something to register, falling back to a runner that always declines
         // when the caller didn't supply the real one.
         var regretHarnessAdmin = dependencies?.RegretHarnessAdmin;
+        var judgeCalibrationAdmin = dependencies?.JudgeCalibrationAdmin;
 
         // Own (and later dispose) the management client only when the caller didn't supply one. Note this
         // runs whether or not the management API is enabled, exactly as before the parameter moved into
@@ -301,6 +303,10 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // The Governance UI's Regret Harness panel API (Phase N6). Always registered - see
                     // the regretHarnessAdmin local's remarks above.
                     services.AddSingleton(regretHarnessAdmin?.Runner ?? new NullRegretHarnessRunner());
+
+                    // The Governance UI's Judge Calibration panel API (Phase G2). Always registered -
+                    // see the judgeCalibrationAdmin local's remarks above.
+                    services.AddSingleton(judgeCalibrationAdmin?.Analyzer ?? new NullJudgeCalibrationAnalyzer());
                 });
 
                 webBuilder.Configure(app =>
@@ -359,6 +365,11 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         // port with the telemetry stream and the other admin services. Always mapped -
                         // see the regretHarnessAdmin local's remarks above.
                         endpoints.MapGrpcService<RegretHarnessAdminGrpcService>();
+
+                        // The Governance UI's Judge Calibration panel API (Phase G2). Shares the TLS
+                        // gRPC port with the telemetry stream and the other admin services. Always
+                        // mapped - see the judgeCalibrationAdmin local's remarks above.
+                        endpoints.MapGrpcService<JudgeCalibrationAdminGrpcService>();
 
                         // The Governance UI's provider/credential/model management API. Only mapped
                         // when a writable store is supplied; shares this plain-HTTP loopback port with

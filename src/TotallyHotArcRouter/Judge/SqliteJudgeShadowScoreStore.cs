@@ -32,10 +32,12 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         command.CommandText = """
                               INSERT INTO judge_shadow_scores (
                                   correlation_id, created_at_utc, dimension, model, static_score, judge_score,
-                                  judge_model, judge_prompt_version, judge_latency_ms, used_logprobs)
+                                  judge_model, judge_prompt_version, judge_latency_ms, used_logprobs,
+                                  syntax_authoritative)
                               VALUES (
                                   $correlationId, $createdAtUtc, $dimension, $model, $staticScore, $judgeScore,
-                                  $judgeModel, $judgePromptVersion, $judgeLatencyMs, $usedLogprobs);
+                                  $judgeModel, $judgePromptVersion, $judgeLatencyMs, $usedLogprobs,
+                                  $syntaxAuthoritative);
                               """;
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: record.CorrelationId);
         command.Parameters.AddWithValue(parameterName: "$createdAtUtc", value: record.CreatedAtUtc.ToString("O"));
@@ -47,6 +49,12 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         command.Parameters.AddWithValue(parameterName: "$judgePromptVersion", value: record.JudgePromptVersion);
         command.Parameters.AddWithValue(parameterName: "$judgeLatencyMs", value: record.JudgeLatencyMs);
         command.Parameters.AddWithValue(parameterName: "$usedLogprobs", value: record.UsedLogprobs ? 1 : 0);
+
+        // DBNull, not a substituted 0/1: the live path always supplies a value, so a null here can only
+        // come from a caller that genuinely has no verdict, and writing one of the two real answers
+        // instead would make the row claim an authority nothing established.
+        command.Parameters.AddWithValue(parameterName: "$syntaxAuthoritative",
+            value: record.SyntaxAuthoritative is { } authoritative ? authoritative ? 1 : 0 : DBNull.Value);
 
         command.ExecuteNonQuery();
         return Task.CompletedTask;
@@ -61,6 +69,42 @@ public sealed class SqliteJudgeShadowScoreStore : IJudgeShadowScoreStore
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM judge_shadow_scores;";
         return Task.FromResult(Convert.ToInt32(value: command.ExecuteScalar(), provider: CultureInfo.InvariantCulture));
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<JudgeShadowScoreRecord>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT id, correlation_id, created_at_utc, dimension, model, static_score,
+                                     judge_score, judge_model, judge_prompt_version, judge_latency_ms,
+                                     used_logprobs, syntax_authoritative
+                              FROM judge_shadow_scores
+                              ORDER BY id ASC;
+                              """;
+
+        List<JudgeShadowScoreRecord> records = [];
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            records.Add(new JudgeShadowScoreRecord(
+                reader.GetInt64(0),
+                CorrelationId: reader.GetString(1),
+                CreatedAtUtc: DateTimeOffset.Parse(input: reader.GetString(2), formatProvider: CultureInfo.InvariantCulture,
+                    styles: DateTimeStyles.RoundtripKind),
+                Dimension: reader.GetString(3),
+                Model: reader.GetString(4),
+                StaticScore: reader.GetDouble(5),
+                JudgeScore: reader.GetDouble(6),
+                JudgeModel: reader.GetString(7),
+                JudgePromptVersion: reader.GetString(8),
+                JudgeLatencyMs: reader.GetInt64(9),
+                UsedLogprobs: reader.GetInt64(10) != 0,
+                SyntaxAuthoritative: reader.IsDBNull(11) ? null : reader.GetInt64(11) != 0));
+
+        return Task.FromResult<IReadOnlyList<JudgeShadowScoreRecord>>(records);
     }
 
     /// <inheritdoc/>

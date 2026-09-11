@@ -111,6 +111,16 @@ public sealed record ProxyServerDependencies
     /// service instead of the real one, always declining a run.
     /// </summary>
     public RegretHarnessAdminDependencies? RegretHarnessAdmin { get; init; }
+
+    /// <summary>
+    /// The Governance UI's Judge Calibration panel API (docs/router/geval-shadow-scoring-plan.md Phase G2).
+    /// Mapped <em>unconditionally</em> for the same reason <see cref="RegretHarnessAdmin"/> is - its one
+    /// dependency (<c>IJudgeCalibrationAnalyzer</c>) is registered by the host whether or not the judge is
+    /// currently switched on, since the report reads an accumulated table rather than a live grader. When
+    /// omitted, a private <see cref="Judge.NullJudgeCalibrationAnalyzer"/> backs the service, returning a
+    /// report that says so rather than a silently empty one.
+    /// </summary>
+    public JudgeCalibrationAdminDependencies? JudgeCalibrationAdmin { get; init; }
 }
 
 /// <summary>
@@ -365,3 +375,14 @@ public sealed record RoutingGateAdminDependencies(IRoutingGate Gate);
 /// </summary>
 /// <param name="Runner">Reports the last run's result and performs a new run for the panel's Run button.</param>
 public sealed record RegretHarnessAdminDependencies(CodeRouterBench.Evaluation.IRegretHarnessRunner Runner);
+
+/// <summary>
+/// Backs <see cref="Judge.JudgeCalibrationAdminGrpcService"/>, the Governance UI's Judge Calibration panel
+/// (docs/router/geval-shadow-scoring-plan.md Phase G2). Required - the service needs the outer container's
+/// real <see cref="Judge.IJudgeCalibrationAnalyzer"/>, since it depends on the router-memory database that
+/// lives there - and (like <see cref="ProxyServerDependencies.RegretHarnessAdmin"/>) is mapped even when
+/// this whole group is <see langword="null"/>: see
+/// <see cref="ProxyServerDependencies.JudgeCalibrationAdmin"/>'s remarks.
+/// </summary>
+/// <param name="Analyzer">Computes the judge-vs-static calibration report the panel renders.</param>
+public sealed record JudgeCalibrationAdminDependencies(IJudgeCalibrationAnalyzer Analyzer);

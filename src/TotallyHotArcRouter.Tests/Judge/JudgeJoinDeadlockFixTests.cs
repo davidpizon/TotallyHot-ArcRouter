@@ -56,7 +56,7 @@ public class JudgeJoinDeadlockFixTests
         var queue = new JudgeShadowScoreQueue(Options.Create(JudgeOptions(queueCapacity: 1)));
         // Fill the single slot so the dispatcher's own enqueue attempt is the one that gets shed.
         Assert.True(queue.TryEnqueue(new JudgeShadowScoringJob(CorrelationId: "occupant", Dimension: "algorithm",
-            Model: "model-a", StaticScore: 0.5)));
+            Model: "model-a", StaticScore: 0.5, SyntaxAuthoritative: true)));
 
         var observer = new RecordingObserver();
         var aggregator = CreateAggregator(observer: observer, queue: queue, willJudge: true);
@@ -186,6 +186,12 @@ public class JudgeJoinDeadlockFixTests
         public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Inserted.Count);
+        }
+
+        public Task<IReadOnlyList<JudgeShadowScoreRecord>> GetAllAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<JudgeShadowScoreRecord>>(Inserted);
         }
 
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)

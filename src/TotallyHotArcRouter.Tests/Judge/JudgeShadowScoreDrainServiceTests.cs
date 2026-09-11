@@ -267,10 +267,32 @@ public class JudgeShadowScoreDrainServiceTests
             logger: NullLogger<JudgeShadowScoreDrainService>.Instance);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProcessAsync_CarriesSyntaxAuthoritativeFromTheJobOntoThePersistedRow(bool syntaxAuthoritative)
+    {
+        // Phase G2: the flag is snapshotted at dispatch and must survive the queue hop to the row, or the
+        // analyzer's parser-vs-heuristic split has nothing to split on.
+        var cache = new PendingResponseTextCache(Options.Create(new JudgeOptions()));
+        cache.Set(correlationId: "corr-1", text: "public void M() { }");
+        var store = new FakeJudgeShadowScoreStore();
+        var service = CreateService(
+            cache: cache,
+            judgeClient: new FakeJudgeClient(new JudgeScoreResult(Score: 0.8, UsedLogprobs: true,
+                JudgeModel: "judge-a")),
+            store: store);
+
+        await service.ProcessAsync(job: MakeJob("corr-1") with { SyntaxAuthoritative = syntaxAuthoritative },
+            stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: syntaxAuthoritative, actual: Assert.Single(store.Inserted).SyntaxAuthoritative);
+    }
+
     private static JudgeShadowScoringJob MakeJob(string correlationId)
     {
         return new JudgeShadowScoringJob(CorrelationId: correlationId, Dimension: "algorithm", Model: "claude-opus-4-6",
-            0.6);
+            0.6, SyntaxAuthoritative: true);
     }
 
     private sealed class FakeJudgeClient(JudgeScoreResult? result = null, Exception? exception = null) : IJudgeClient
@@ -304,6 +326,12 @@ public class JudgeShadowScoreDrainServiceTests
         public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Inserted.Count);
+        }
+
+        public Task<IReadOnlyList<JudgeShadowScoreRecord>> GetAllAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<JudgeShadowScoreRecord>>(Inserted);
         }
 
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)

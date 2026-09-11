@@ -171,7 +171,7 @@ late that they can't.
 | Phase | Deliverable | Depends on | Status |
 |---|---|---|---|
 | G1 | Shadow judge observer, `PendingResponseTextCache`, `judge_shadow_scores` side table, `is_judge_scored` columns (always 0) | none (T1 optional) | **Shipped** |
-| G2 | Agreement/calibration analysis surface over the shadow table; go/no-go criteria for G3 | G1 + accumulated shadow data | Proposed |
+| G2 | Agreement/calibration analysis surface over the shadow table; go/no-go criteria for G3 | G1 + accumulated shadow data | **Shipped** (as a standing check, not a gate — G3 already shipped) |
 | G3 | Judge as scorer of record for non-executable dimensions; first `is_judge_scored = 1` rows | G2 gate passed | Proposed |
 
 ---
@@ -323,6 +323,62 @@ backbone across the table — a mixed sample would otherwise blend two models' c
 meaningless correlation. `used_logprobs` deserves the same treatment: rows scored through the
 single-sample fallback carry exactly the quantization noise probability weighting exists to remove, so
 they are not comparable with logprob-weighted rows.
+
+> **Status: shipped, 2026-09-10 — as a standing regression check rather than a gate.** G3 shipped before
+> this phase did, so there is nothing left to gate; what remains worth having is a repeatable answer to
+> "is the already-promoted judge still saying anything, and is it playing favourites?" Delivered as a full
+> vertical slice: `IJudgeCalibrationAnalyzer`/`JudgeCalibrationAnalyzer` over a new
+> `IJudgeShadowScoreStore.GetAllAsync` bulk read, `JudgeCalibrationReportFormatter` (one Markdown
+> rendering shared by both surfaces, so a panel and a piped CLI run can never disagree about formatting),
+> the headless `--run-judge-calibration-report` flag, the `JudgeCalibrationAdminService` gRPC surface
+> (`JudgeCalibrationAdminGrpcService` + `JudgeCalibrationAdminClient`), and the Governance →
+> **Judge Calibration** panel. Read-only throughout: nothing here reads or writes a weight, and every call
+> recomputes from current rows rather than caching a "last run", so the panel can never show a stale
+> verdict for a judge whose behavior has since changed.
+>
+> **Cohorts, never pools.** Every statistic is computed within a (dimension, `judge_model`,
+> `used_logprobs`, static-grade authority) cohort, enforced structurally by grouping on all four at once
+> rather than left to each statistic to remember.
+>
+> **`syntax_authoritative` shipped as a real column,** replacing the deleted `executed` flag this phase was
+> designed around: `judge_shadow_scores.syntax_authoritative INTEGER NULL`, plumbed from
+> `QualityResult.SyntaxAuthoritative` through `JudgeShadowScoreDispatcher` → `JudgeShadowScoringJob` →
+> `JudgeShadowScoreDrainService` → the row. Rows written before the column existed are **NULL, not
+> defaulted** — the language that decides authority was never stored here, so no answer is recoverable
+> after the fact, and defaulting would make historical rows claim an authority nothing established. They
+> report as a third `Unknown` cohort.
+>
+> **Deviations from this section as written, per AGENTS.md's deviation rule:**
+>
+> - *Condition (1) is reported, permanently, as `Unevaluable` rather than omitted.* Omitting it would let
+>   an absent check read as a silent pass. It is distinguished from `Insufficient` in the enum, the wire
+>   contract, the CLI and the panel, because one resolves with traffic and the other never will.
+> - *Condition (2), non-degenerate distribution, is the only pass/fail verdict.* It earns one because the
+>   data supplies its own control group: G-Eval predicts that single-sample rows
+>   (`used_logprobs = false`) collapse where probability-weighted rows do not, and both cohorts sit in the
+>   same table, so "is the fallback flatter?" is answerable without any absolute standard. Two thresholds
+>   (`JudgeCalibration:MinimumStandardDeviation` 0.05, `MaximumModalShare` 0.80) still exist so the check
+>   can fail on its own when *every* cohort is a fallback cohort — both are documented guesses in the
+>   `JudgeScoredRowWeight = 0.5` tradition, retunable from configuration. Modal share is checked alongside
+>   the deviation because a distribution of 29×0.6 plus one 0.0 clears a deviation floor on the strength of
+>   a single outlier.
+> - *Condition (3), self-preference, ships as numbers with **no** verdict — deliberately, and pinned by a
+>   test so it cannot quietly acquire one.* Unlike collapse it has no control group: there is no unbiased
+>   judge in the data to compare against, and the only available yardstick is the static score, which is
+>   itself heuristic on Python and shell rows. G-Eval establishes this bias's *direction* ("always scored
+>   the GPT-3.5 summaries higher … even in the subset where human judges preferred the human summaries")
+>   but publishes no magnitude, so any ceiling would be invented — and an invented FAIL is worse than no
+>   verdict, because it looks like a measurement. The panel and CLI instead rank each candidate's
+>   judge-minus-static delta and flag the judge's own backbone, so the paper's finding is visible if it
+>   reproduces. **Re-open condition:** once several candidate models have accumulated rows, the spread
+>   across deltas is itself an empirical baseline a ceiling can be set against.
+> - *No new GUI is gated on data existing.* On this machine the shadow table holds zero rows, so the
+>   shipped report was exercised end-to-end against an empty table (verdicts render, both sections say
+>   "no shadow rows yet") and against synthetic fixtures in `JudgeCalibrationAnalyzerTests`. The analyzer
+>   is not "unrun" in the Q5 sense — it runs, and reports honestly that there is nothing to report yet.
+> - *`RankCorrelation` was extracted* from `GraderReliabilityAnalyzer` (Phase Q4) so both analyzers share
+>   one Spearman/rank/Pearson implementation. The two reports are read side by side; a divergence in
+>   tie-handling or zero-variance convention between them would be read as a difference in the data.
 
 **The G3 gate is moot as written.** Its first condition — "on *executed* rows, judge rank-correlates
 with the verifier at or above a configured floor" — was the whole point of the gate: prove the judge
