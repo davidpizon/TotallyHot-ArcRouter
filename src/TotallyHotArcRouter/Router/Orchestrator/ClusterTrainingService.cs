@@ -127,6 +127,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
         var liveEntriesById = new List<MemoryEntry>();
         var memoryEntryCount = 0;
         var skippedForModelMismatch = 0;
+        var skippedForJudgePolicy = 0;
         foreach (var entry in liveEntries)
         {
             if (entry.TaskEmbedding.Length != dimension)
@@ -152,8 +153,15 @@ public sealed class ClusterTrainingService : IClusterTrainingService
                 continue;
             }
 
+            var judgeWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored);
+            if (judgeWeight is null)
+            {
+                skippedForJudgePolicy++;
+                continue;
+            }
+
             liveSamples.Add(new ClusterTrainingSample(Embedding: entry.TaskEmbedding, Dimension: entry.Dimension,
-                Weight: _routingOptions.ClusterLiveSampleWeight));
+                Weight: _routingOptions.ClusterLiveSampleWeight * judgeWeight.Value));
             liveEntriesById.Add(entry);
             memoryEntryCount++;
         }
@@ -164,6 +172,12 @@ public sealed class ClusterTrainingService : IClusterTrainingService
                 "Skipped {SkippedCount} memory entry/entries produced by a different embedding model than the current {ModelIdentity}; they are retained in the store but cannot be clustered.",
                 skippedForModelMismatch,
                 modelIdentity);
+
+        if (skippedForJudgePolicy > 0)
+            _logger.LogInformation(
+                message:
+                "Excluded {SkippedCount} judge-scored memory entry/entries from cluster training per the configured judge-row policy.",
+                skippedForJudgePolicy);
 
         var samples = new List<ClusterTrainingSample>(bootstrapSamples.Count + liveSamples.Count);
         samples.AddRange(bootstrapSamples);
@@ -221,7 +235,8 @@ public sealed class ClusterTrainingService : IClusterTrainingService
             TrainedFrom: trainedFrom,
             BootstrapTaskCount: bootstrapTaskCount,
             MemoryEntryCount: memoryEntryCount,
-            EmbeddingModel: modelIdentity);
+            EmbeddingModel: modelIdentity,
+            TotalLiveMemoryEntryCount: liveEntries.Count);
         ClusterModelArtifactSerializer.Validate(artifact);
 
         await WriteArtifactAtomicallyAsync(artifact: artifact, cancellationToken: cancellationToken)

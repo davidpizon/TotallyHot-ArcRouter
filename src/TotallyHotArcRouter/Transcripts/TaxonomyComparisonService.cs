@@ -411,7 +411,9 @@ public sealed class TaxonomyComparisonService : BackgroundService
             _cachedClusterLedger = _cachedArtifact is null
                 ? null
                 : ClusterLedger.Build(artifact: _cachedArtifact, entries: entries,
-                    assignmentThreshold: _routingOptions.ClusterAssignmentThreshold);
+                    assignmentThreshold: _routingOptions.ClusterAssignmentThreshold,
+                    judgeRowPolicy: _routingOptions.JudgeScoredRowPolicy,
+                    judgeRowWeight: _routingOptions.JudgeScoredRowWeight);
             _cachedMaxEntryId = maxEntryId;
             _cachedArtifactStamp = artifactStamp;
         }
@@ -467,7 +469,9 @@ public sealed class TaxonomyComparisonService : BackgroundService
                            scores.TryGetValue(key: key, value: out var found)
                     ? found
                     : null;
-                clusterPredicted = ClusterLedger.PredictLeaveOneOut(cell: cell, observedScore: observedScore);
+                var observedWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored) ?? 1.0;
+                clusterPredicted = ClusterLedger.PredictLeaveOneOut(cell: cell, observedScore: observedScore,
+                    observedScoreWeight: observedWeight);
             }
         }
 

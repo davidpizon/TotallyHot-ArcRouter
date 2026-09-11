@@ -189,6 +189,52 @@ public class EmbeddingMemoryScoreObserverTests
         Assert.Equal(1.0, actual: entry.Propensity);
     }
 
+    [Fact]
+    public async Task ObserveAsync_JudgeScoreContributed_StampsIsJudgeScoredTrue()
+    {
+        var store = new FakeMemoryEntryStore();
+        var memory = CreateMemory(store);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var pendingCache = CreatePendingCache();
+        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
+        var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
+            pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
+            logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+
+        var result = new QualityResult
+        {
+            RequestCorrelationId = "corr-1", Model = "claude-opus-4-6", UnifiedScore = 0.75, JudgeScore = 0.8
+        };
+
+        await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(Assert.Single(store.Entries).IsJudgeScored);
+    }
+
+    [Fact]
+    public async Task ObserveAsync_NoJudgeScore_StampsIsJudgeScoredFalse()
+    {
+        var store = new FakeMemoryEntryStore();
+        var memory = CreateMemory(store);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var pendingCache = CreatePendingCache();
+        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
+        var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
+            pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
+            logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+
+        // A held result can time out and write static-only even when a judge grade was expected - that row
+        // is still execution/heuristic-grounded, not judge-scored, since JudgeScore never actually arrived.
+        var result = new QualityResult
+        { RequestCorrelationId = "corr-1", Model = "claude-opus-4-6", UnifiedScore = 0.75, JudgeScore = null };
+
+        await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(Assert.Single(store.Entries).IsJudgeScored);
+    }
+
     private static EmbeddingMemory CreateMemory(IMemoryEntryStore store)
     {
         return new EmbeddingMemory(

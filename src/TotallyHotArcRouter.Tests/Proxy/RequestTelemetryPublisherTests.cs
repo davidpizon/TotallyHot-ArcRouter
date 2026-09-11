@@ -544,7 +544,7 @@ public class RequestTelemetryPublisherTests
             throw new InvalidOperationException("simulated transcript store failure");
         }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score,
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
@@ -630,7 +630,7 @@ public class RequestTelemetryPublisherTests
             return Task.FromResult<long?>(1);
         }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score,
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();

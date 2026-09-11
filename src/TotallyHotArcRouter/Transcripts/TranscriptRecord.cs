@@ -62,6 +62,15 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// (docs/router/routing-roi-regret-plan.md's frozen-baseline correction). <see langword="null"/> whenever
 /// <see cref="UntrainedBaselineModel"/> is, or the row predates this column.
 /// </param>
+/// <param name="IsJudgeScored">
+/// Whether the judge actually contributed a grade that fed <see cref="Score"/>, mirroring
+/// <see cref="Router.MemoryEntry.IsJudgeScored"/>'s definition - stamped by
+/// <see cref="TranscriptScoreObserver"/> alongside <see cref="Score"/> when the verifier's result arrives.
+/// Carried on this record so <see cref="EmbeddingBackfillService"/> can propagate judge-row provenance
+/// onto a <see cref="Router.MemoryEntry"/> it creates later, for a request whose embedding missed the live
+/// path (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" backfill gap). Defaults to
+/// <see langword="false"/> for a row predating this column.
+/// </param>
 public sealed record TranscriptRecord(
     long Id,
     string CorrelationId,
@@ -83,4 +92,5 @@ public sealed record TranscriptRecord(
     long? MemoryEntryId,
     string? DimBestModel = null,
     string? UntrainedBaselineModel = null,
-    double? UntrainedBaselinePredictedScore = null);
+    double? UntrainedBaselinePredictedScore = null,
+    bool IsJudgeScored = false);

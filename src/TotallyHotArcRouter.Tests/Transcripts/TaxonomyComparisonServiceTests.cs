@@ -748,11 +748,11 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             return inner.InsertAsync(record: record, cancellationToken: cancellationToken);
         }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score,
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
             CancellationToken cancellationToken = default)
         {
             return inner.UpdateOutcomeAsync(correlationId: correlationId, score: score,
-                cancellationToken: cancellationToken);
+                isJudgeScored: isJudgeScored, cancellationToken: cancellationToken);
         }
 
         public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,

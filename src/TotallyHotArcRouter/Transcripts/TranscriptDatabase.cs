@@ -38,7 +38,8 @@ public sealed class TranscriptDatabase
                                          output_tokens      INTEGER NULL,
                                          memory_entry_id    INTEGER NULL,
                                          dim_best_model     TEXT    NULL,
-                                         scorer_version     TEXT    NULL
+                                         scorer_version     TEXT    NULL,
+                                         is_judge_scored    INTEGER NOT NULL DEFAULT 0
                                      );
 
                                      CREATE INDEX IF NOT EXISTS ix_request_transcripts_correlation_id
@@ -136,6 +137,7 @@ public sealed class TranscriptDatabase
         MigrateTaxonomyComparisonBaselineCostColumns(connection);
         MigrateUntrainedBaselinePredictedScoreColumn(connection);
         MigrateTaxonomyComparisonTokenizerRatioColumns(connection);
+        MigrateIsJudgeScoredColumn(connection);
     }
 
     /// <summary>
@@ -284,6 +286,35 @@ public sealed class TranscriptDatabase
 
         using var alter = connection.CreateCommand();
         alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN dim_best_model TEXT NULL;";
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the <c>is_judge_scored</c> column to <c>request_transcripts</c> if it is missing, so a
+    /// transcript database created before this column existed picks it up on startup instead of failing
+    /// every write with "no such column" - docs/router/geval-shadow-scoring-plan.md's G3 backfill-provenance
+    /// gap: <see cref="EmbeddingBackfillService"/> needs this to propagate judge-row provenance onto a
+    /// <see cref="Router.MemoryEntry"/> for a request whose embedding missed the live
+    /// <see cref="Router.EmbeddingMemoryScoreObserver"/> path.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// Same additive <c>PRAGMA</c>-check convention as <see cref="MigrateDimBestModelColumn"/>. Defaults to
+    /// 0 (not judge-scored) with no backfill: a row captured before this column existed never recorded
+    /// whether the judge contributed, and inventing a value would fabricate provenance this column exists
+    /// to record honestly.
+    /// </remarks>
+    private static void MigrateIsJudgeScoredColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'is_judge_scored';";
+            if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN is_judge_scored INTEGER NOT NULL DEFAULT 0;";
         alter.ExecuteNonQuery();
     }
 

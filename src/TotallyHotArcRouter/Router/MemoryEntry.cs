@@ -32,13 +32,13 @@ namespace TotallyHot.ArcRouter.Router;
 /// capture is enabled.
 /// </param>
 /// <param name="IsJudgeScored">
-/// Whether <paramref name="Score"/> was produced by the G-Eval judge rather than
-/// <see cref="Quality.Scoring.QualityScorer"/>'s structural/execution signals
-/// (docs/router/geval-shadow-scoring-plan.md §Provenance). Always <see langword="false"/> through Phase G1
-/// and G2 - shadow scores live only in <c>judge_shadow_scores</c>, never here - landed early so every
-/// learning consumer (<see cref="Orchestrator.MemoryKnnVoter"/>, the logreg/clustering trainers) can be
-/// written against the final schema once, and can weight, discount, or exclude judge-graded rows from the
-/// day Phase G3 first writes one.
+/// Whether the judge actually contributed a grade that influenced <paramref name="Score"/>, as opposed to
+/// a judge grade being requested but timing out or abstaining (docs/router/geval-shadow-scoring-plan.md's
+/// G3 provenance definition). <see cref="EmbeddingMemoryScoreObserver"/> stamps this as
+/// <see cref="Quality.QualityResult.JudgeScore"/>.HasValue. Used by learning consumers
+/// (<see cref="Orchestrator.MemoryKnnVoter"/>, the logreg/clustering trainers, <see cref="Orchestrator.ClusterLedger"/>)
+/// to weight, exclude, or discount judge-influenced rows per the operator's configured
+/// <see cref="Models.JudgeRowPolicy"/>.
 /// </param>
 /// <param name="EmbeddingModel">
 /// The identity of the embedding model that produced <paramref name="TaskEmbedding"/>

@@ -164,7 +164,12 @@ public sealed class EmbeddingBackfillService : BackgroundService
                     // EmbeddingMemory.AddEntryAsync does for the request-path writes. Backfilled entries
                     // are computed here and now, so they carry the current identity - not whatever model
                     // was configured when the underlying transcript row was originally captured.
-                    EmbeddingModel: _embeddingClient.ModelIdentity);
+                    EmbeddingModel: _embeddingClient.ModelIdentity,
+                    // Propagates judge-row provenance from the transcript row TranscriptScoreObserver
+                    // stamped when the score arrived - without this, a judge-influenced request whose
+                    // embedding missed the live EmbeddingMemoryScoreObserver path would backfill with the
+                    // default false and silently bypass Exclude/DownWeight (Copilot review on PR #93).
+                    IsJudgeScored: transcript.IsJudgeScored);
 
                 var persistedEntry = await _memoryEntryStore
                     .AppendAsync(entry: memoryEntry, cancellationToken: cancellationToken)

@@ -10,7 +10,7 @@ namespace TotallyHot.ArcRouter.Hosting;
 /// <summary>
 /// Background poll loop that automatically retrains the self-organizing cluster model's artifact once
 /// <see cref="RoutingOptions.ClusterRetrainThreshold"/> new <c>memory_entries</c> rows have accumulated
-/// since the artifact's last recorded <see cref="ClusterModelArtifact.MemoryEntryCount"/>
+/// since the artifact's last recorded <see cref="ClusterModelArtifact.TotalLiveMemoryEntryCount"/>
 /// (docs/router/self-organizing-classification-plan.md Phase T2g). Mirrors
 /// <see cref="LogRegRetrainHostedService"/>'s <see cref="PeriodicTimer"/> shape exactly; always
 /// registered, but a no-op every tick while <see cref="RoutingOptions.EnableAutomaticClusterRetrain"/> is
@@ -127,9 +127,12 @@ public sealed class ClusterRetrainHostedService : BackgroundService
     }
 
     /// <summary>
-    /// Reads only the <see cref="ClusterModelArtifact.MemoryEntryCount"/> field of the artifact currently
-    /// on disk, tolerating a missing or unreadable file by returning <c>0</c> - the honest baseline when
-    /// no artifact has ever been trained.
+    /// Reads only the <see cref="ClusterModelArtifact.TotalLiveMemoryEntryCount"/> field of the artifact
+    /// currently on disk, tolerating a missing or unreadable file by returning <c>0</c> - the honest
+    /// baseline when no artifact has ever been trained. This is the raw, policy-unfiltered watermark
+    /// comparable to <see cref="IMemoryEntryStore.LoadAllAsync"/>'s count - not
+    /// <see cref="ClusterModelArtifact.MemoryEntryCount"/>, which under <see cref="Models.JudgeRowPolicy.Exclude"/>
+    /// omits policy-excluded rows and would never let this comparison converge.
     /// </summary>
     private int TryReadLastTrainedMemoryEntryCount()
     {
@@ -138,7 +141,7 @@ public sealed class ClusterRetrainHostedService : BackgroundService
         try
         {
             var json = File.ReadAllText(_modelPath);
-            return ClusterModelArtifactSerializer.Deserialize(json).MemoryEntryCount;
+            return ClusterModelArtifactSerializer.Deserialize(json).TotalLiveMemoryEntryCount;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
         {

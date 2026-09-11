@@ -39,7 +39,8 @@ public static class ClusterModelArtifactSerializer
             ClusterTopTerms = [.. artifact.ClusterTopTerms.Select(t => (List<string>)[.. t])],
             TrainedFrom = artifact.TrainedFrom,
             BootstrapTaskCount = artifact.BootstrapTaskCount,
-            MemoryEntryCount = artifact.MemoryEntryCount
+            MemoryEntryCount = artifact.MemoryEntryCount,
+            TotalLiveMemoryEntryCount = artifact.TotalLiveMemoryEntryCount
         };
 
         return JsonSerializer.Serialize(value: dto, options: Options);
@@ -67,7 +68,8 @@ public static class ClusterModelArtifactSerializer
             TrainedFrom: dto.TrainedFrom,
             BootstrapTaskCount: dto.BootstrapTaskCount,
             MemoryEntryCount: dto.MemoryEntryCount,
-            EmbeddingModel: dto.EmbeddingModel);
+            EmbeddingModel: dto.EmbeddingModel,
+            TotalLiveMemoryEntryCount: dto.TotalLiveMemoryEntryCount);
         Validate(artifact);
         return artifact;
     }
@@ -170,5 +172,12 @@ public static class ClusterModelArtifactSerializer
         /// </summary>
         [JsonPropertyName("embeddingModel")]
         public string? EmbeddingModel { get; init; }
+
+        /// <summary>
+        /// Gets or sets the raw <c>memory_entries</c> row count observed at training time, before judge-row
+        /// policy filtering. Defaults to 0 for a document written before this field existed.
+        /// </summary>
+        [JsonPropertyName("totalLiveMemoryEntryCount")]
+        public int TotalLiveMemoryEntryCount { get; init; }
     }
 }

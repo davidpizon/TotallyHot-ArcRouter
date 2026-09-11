@@ -146,11 +146,11 @@ public sealed class EmbeddingMemory : IDisposable
     /// compiling unchanged.
     /// </param>
     /// <param name="isJudgeScored">
-    /// Whether <paramref name="score"/> was produced by the G-Eval judge rather than
-    /// <see cref="Quality.Scoring.QualityScorer"/> (docs/router/geval-shadow-scoring-plan.md
-    /// §Provenance). Defaults to <see langword="false"/> - through Phase G1/G2 no caller ever passes
-    /// <see langword="true"/>; the parameter exists so Phase G3 needs no further signature change. Placed
-    /// last so every existing positional call site keeps compiling unchanged.
+    /// Whether the G-Eval judge contributed to <paramref name="score"/> - <see cref="Router.EmbeddingMemoryScoreObserver"/>
+    /// passes <c>result.JudgeScore.HasValue</c> (docs/router/geval-shadow-scoring-plan.md §Provenance;
+    /// the G3 "still owed" item this closes). Defaults to <see langword="false"/> so every other caller
+    /// (bootstrap import, tests) keeps recording rows as execution/heuristic-grounded without change.
+    /// Placed last so every existing positional call site keeps compiling unchanged.
     /// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,
@@ -248,8 +248,16 @@ public sealed class EmbeddingMemory : IDisposable
     /// silent zero would conceal the next such bug rather than surface it.
     /// </para>
     /// </remarks>
-    /// <param name="queryEmbedding">The task embedding to find neighbors for.</param>
-    public IReadOnlyList<(MemoryEntry Entry, double Similarity)> FindNearest(float[] queryEmbedding)
+    /// <summary>
+    /// Retrieves the nearest memory entries to <paramref name="queryEmbedding"/>, optionally filtering
+    /// by a judge-row policy before applying the neighbor limit (so excluded judge rows don't consume the budget).
+    /// </summary>
+    /// <param name="queryEmbedding">The embedding to find neighbors for.</param>
+    /// <param name="judgeRowPolicy">Optional policy for judge-scored rows; if provided, Exclude skips those rows entirely.</param>
+    /// <param name="judgeRowWeight">Ignored unless <paramref name="judgeRowPolicy"/> is provided.</param>
+    /// <returns>Up to <see cref="RoutingOptions.MaxNeighborCount"/> entries sorted by decreasing similarity.</returns>
+    public IReadOnlyList<(MemoryEntry Entry, double Similarity)> FindNearest(float[] queryEmbedding,
+        JudgeRowPolicy? judgeRowPolicy = null, double judgeRowWeight = 1.0)
     {
         ArgumentNullException.ThrowIfNull(queryEmbedding);
 
@@ -284,6 +292,7 @@ public sealed class EmbeddingMemory : IDisposable
                 Similarity: CosineSimilarity(left: queryEmbedding, right: entry.TaskEmbedding)))
             .Where(candidate => candidate.Similarity >= options.EmbeddingSimilarityThreshold)
             .OrderByDescending(candidate => candidate.Similarity)
+            .Where(candidate => judgeRowPolicy is null || JudgeRowWeighting.ResolveWeight(candidate.Entry.IsJudgeScored, judgeRowPolicy.Value, judgeRowWeight) is not null)
             .Take(options.MaxNeighborCount)];
     }
 

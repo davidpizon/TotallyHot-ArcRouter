@@ -18,13 +18,20 @@ public interface ITranscriptStore
     Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Backfills the <c>score</c> column for the row matching <paramref name="correlationId"/>, once the
-    /// verifier's score arrives. A no-op when transcript capture is disabled or no row matches.
+    /// Backfills the <c>score</c> column (and <see cref="TranscriptRecord.IsJudgeScored"/>) for the row
+    /// matching <paramref name="correlationId"/>, once the verifier's score arrives. A no-op when
+    /// transcript capture is disabled or no row matches.
     /// </summary>
     /// <param name="correlationId">The correlation id shared with the row's <see cref="TranscriptRecord.CorrelationId"/>.</param>
     /// <param name="score">The verifier's observed quality score in [0, 1].</param>
+    /// <param name="isJudgeScored">
+    /// Whether the judge actually contributed a grade that fed <paramref name="score"/>, for
+    /// <see cref="TranscriptRecord.IsJudgeScored"/>. Defaults to <see langword="false"/> for a caller that
+    /// does not track judge provenance.
+    /// </param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    Task UpdateOutcomeAsync(string correlationId, double? score, CancellationToken cancellationToken = default);
+    Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Loads up to <paramref name="limit"/> transcript IDs where <c>memory_entry_id IS NULL AND score IS NOT NULL</c>,

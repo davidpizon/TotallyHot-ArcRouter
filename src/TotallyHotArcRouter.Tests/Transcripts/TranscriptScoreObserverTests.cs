@@ -20,9 +20,25 @@ public class TranscriptScoreObserverTests
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
-        var (correlationId, score) = Assert.Single(store.Updates);
+        var (correlationId, score, isJudgeScored) = Assert.Single(store.Updates);
         Assert.Equal(expected: "corr-1", actual: correlationId);
         Assert.Equal(0.83, actual: score);
+        Assert.False(isJudgeScored);
+    }
+
+    [Fact]
+    public async Task ObserveAsync_JudgeScoreContributed_BackfillsIsJudgeScoredTrue()
+    {
+        var store = new FakeTranscriptStore();
+        var observer = new TranscriptScoreObserver(store: store, logger: NullLogger<TranscriptScoreObserver>.Instance);
+        var result = new QualityResult
+        {
+            RequestCorrelationId = "corr-1", Model = "kimi-k2.5", UnifiedScore = 0.83, JudgeScore = 0.9
+        };
+
+        await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(Assert.Single(store.Updates).IsJudgeScored);
     }
 
     [Fact]
@@ -51,19 +67,19 @@ public class TranscriptScoreObserverTests
 
     private sealed class FakeTranscriptStore : ITranscriptStore
     {
-        private readonly List<(string CorrelationId, double? Score)> _updates = [];
+        private readonly List<(string CorrelationId, double? Score, bool IsJudgeScored)> _updates = [];
 
-        public IReadOnlyList<(string CorrelationId, double? Score)> Updates => _updates;
+        public IReadOnlyList<(string CorrelationId, double? Score, bool IsJudgeScored)> Updates => _updates;
 
         public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
         {
             return Task.FromResult<long?>(1);
         }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score,
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
             CancellationToken cancellationToken = default)
         {
-            _updates.Add((correlationId, score));
+            _updates.Add((correlationId, score, isJudgeScored));
             return Task.CompletedTask;
         }
 

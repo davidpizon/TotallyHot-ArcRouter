@@ -151,8 +151,55 @@ public class EmbeddingLogRegTrainingServiceTests
         }
     }
 
+    [Fact]
+    public async Task RetrainAsync_ExcludePolicy_JudgeScoredEntriesAreNotCounted()
+    {
+        var memoryStore = new FakeMemoryEntryStore();
+        for (var i = 0; i < 15; i++)
+        {
+            memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0);
+            memoryStore.Add(embedding: UnitVector(0, 1), chosenModel: "model-b", 1.0);
+        }
+
+        // These would otherwise push MemoryEntryCount to 32 and still train - Exclude must drop them instead.
+        memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, isJudgeScored: true);
+        memoryStore.Add(embedding: UnitVector(0, 1), chosenModel: "model-b", 1.0, isJudgeScored: true);
+
+        var modelPath = TempModelPath();
+        var voter = new LogRegVoter(logger: NullLogger<LogRegVoter>.Instance,
+            storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }),
+            embeddingClient: new StubEmbeddingClient());
+        using var temp = new TempBenchmarkDatabase();
+        var service = CreateService(memoryStore: memoryStore, voter: voter, modelPath: modelPath, temp: temp,
+            routingOptions: new RoutingOptions
+            {
+                LogRegLiveSampleWeight = 1.0, LogRegMinTrainingRows = 20, LogRegMinModelsRepresented = 2,
+                JudgeScoredRowPolicy = JudgeRowPolicy.Exclude
+            });
+
+        try
+        {
+            var outcome = await service.RetrainAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(expected: LogRegTrainingResultKind.Trained, actual: outcome.Kind);
+            Assert.Equal(30, actual: outcome.MemoryEntryCount);
+
+            // The retrain watermark must track the raw store total (32), not the policy-filtered
+            // MemoryEntryCount (30) - otherwise LogRegRetrainHostedService's threshold comparison can
+            // never converge once Exclude drops rows every cycle (Copilot review on PR #93).
+            var artifact = EmbeddingLogRegModelArtifactSerializer.Deserialize(
+                await File.ReadAllTextAsync(path: modelPath, cancellationToken: TestContext.Current.CancellationToken));
+            Assert.Equal(32, actual: artifact.TotalLiveMemoryEntryCount);
+        }
+        finally
+        {
+            CleanupModelPath(modelPath);
+        }
+    }
+
     private static EmbeddingLogRegTrainingService CreateService(
-        IMemoryEntryStore memoryStore, LogRegVoter voter, string modelPath, TempBenchmarkDatabase temp)
+        IMemoryEntryStore memoryStore, LogRegVoter voter, string modelPath, TempBenchmarkDatabase temp,
+        RoutingOptions? routingOptions = null)
     {
         var bootstrapSource = new OodBootstrapSampleSource(
             database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0]),
@@ -163,7 +210,7 @@ public class EmbeddingLogRegTrainingServiceTests
             memoryEntryStore: memoryStore,
             embeddingClient: new StubEmbeddingClient(),
             voter: voter,
-            routingOptions: Options.Create(new RoutingOptions
+            routingOptions: Options.Create(routingOptions ?? new RoutingOptions
             { LogRegLiveSampleWeight = 1.0, LogRegMinTrainingRows = 20, LogRegMinModelsRepresented = 2 }),
             embeddingOptions: Options.Create(new EmbeddingOptions { EmbeddingDimension = 2 }),
             storageOptions: Options.Create(new StorageOptions { LogRegModelPath = modelPath }),
@@ -219,10 +266,10 @@ public class EmbeddingLogRegTrainingServiceTests
             return Task.CompletedTask;
         }
 
-        public void Add(float[] embedding, string chosenModel, double score)
+        public void Add(float[] embedding, string chosenModel, double score, bool isJudgeScored = false)
         {
             _entries.Add(new MemoryEntry(Id: _nextId++, TaskEmbedding: embedding, ChosenModel: chosenModel,
-                Score: score, 0.01, null, CreatedAtUtc: DateTimeOffset.UtcNow));
+                Score: score, 0.01, null, CreatedAtUtc: DateTimeOffset.UtcNow, IsJudgeScored: isJudgeScored));
         }
     }
 }
