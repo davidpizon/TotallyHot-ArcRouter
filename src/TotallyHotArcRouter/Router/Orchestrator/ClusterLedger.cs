@@ -42,9 +42,10 @@ public static class ClusterLedger
     /// A map from cluster index to that cluster's per-canonicalized-model <see cref="ClusterModelScore"/>.
     /// A cluster with no assigned entries is present with an empty inner map, not omitted, so a caller can
     /// enumerate every cluster in <paramref name="artifact"/> uniformly. <see cref="ClusterModelScore.ObservationCount"/>
-    /// counts raw assigned entries regardless of judge-row weighting - it answers "how many real data
-    /// points support this cell", which <see cref="RoutingOptions.ClusterBestMinObservations"/>'s floor
-    /// needs undiluted by weight; only <see cref="ClusterModelScore.MeanScore"/> is weighted.
+    /// counts entries retained by the judge-row policy (excluded entries are not counted) - it answers
+    /// "how many actual observations support this cell", which <see cref="RoutingOptions.ClusterBestMinObservations"/>'s
+    /// floor uses directly; <see cref="ClusterModelScore.MeanScore"/> and <see cref="ClusterModelScore.WeightTotal"/>
+    /// account for the policy's weight multipliers.
     /// </returns>
     public static IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterModelScore>> Build(
         ClusterModelArtifact artifact, IReadOnlyList<MemoryEntry> entries, double assignmentThreshold = 0.5,

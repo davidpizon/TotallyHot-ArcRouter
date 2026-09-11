@@ -1,7 +1,8 @@
 # G-Eval Shadow Scoring and Judge-Verifier Plan
 
 Status: **G1 shipped** (shadow judge observer, ephemeral response-text cache, `judge_shadow_scores` side
-table, `is_judge_scored` provenance columns). **G2/G3 proposed**, gated on accumulated shadow data.
+table, `is_judge_scored` provenance columns). **G2 proposed**, gated on accumulated shadow data. **G3 shipped**
+(judge-row provenance and configurable learning-layer policy — see Phase G3 below).
 **Ordering** (per `src/PLAN.md`'s "Remaining work, in order"): G1 lands after the
 `self-organizing-classification-plan.md` T phases and *before* PLAN.md Phase N — the shadow table costs
 nothing on the hot path and G2's gate needs volume, so agreement data accumulates passively while the

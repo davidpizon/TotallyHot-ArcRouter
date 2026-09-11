@@ -11,8 +11,9 @@ namespace TotallyHot.ArcRouter.Router;
 /// correlation id has no pending embedding (never computed, already claimed, or expired) is a lost
 /// learning opportunity, not an error - logged and dropped, exactly like every other best-effort
 /// observation path in this codebase. Also stamps <see cref="MemoryEntry.IsJudgeScored"/> from
-/// <see cref="QualityResult.JudgeScore"/>'s presence - the provenance bit docs/router/geval-shadow-scoring-plan.md's
-/// G3 defined but never wired up.
+/// <see cref="QualityResult.JudgeScore"/>'s presence: true only when the judge actually contributed
+/// (not merely when a judge grade was requested/pending), false otherwise - the judge-row provenance
+/// tracking that docs/router/geval-shadow-scoring-plan.md's G3 requires.
 /// </summary>
 public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
 {
