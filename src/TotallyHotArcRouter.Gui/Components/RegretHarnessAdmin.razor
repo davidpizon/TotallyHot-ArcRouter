@@ -102,7 +102,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Unsubscribes from <see cref="RegretHarnessAdminStore.Changed"/>.</summary>
+    /// <summary>Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
@@ -118,8 +118,8 @@
     }
 
     /// <summary>
-    /// Runs the harness. Errors are left to <see cref="RegretHarnessAdminStore.LastError"/>/
-    /// <see cref="RegretHarnessAdminStore.IsReachable"/> rather than surfaced here.
+    /// Runs the harness. Errors are left to <see cref="AdminStoreBase{TClient}.LastError"/>/
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/> rather than surfaced here.
     /// </summary>
     private async Task Run()
     {

@@ -194,7 +194,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Unsubscribes from <see cref="JudgeCalibrationAdminStore.Changed"/>.</summary>
+    /// <summary>Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;

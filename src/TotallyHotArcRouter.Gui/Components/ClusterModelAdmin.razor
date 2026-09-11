@@ -119,7 +119,7 @@
         InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Unsubscribes from <see cref="ClusterModelAdminStore.Changed"/>.</summary>
+    /// <summary>Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
@@ -135,8 +135,8 @@
     }
 
     /// <summary>
-    /// Runs a retrain. Errors are left to <see cref="ClusterModelAdminStore.LastError"/>/
-    /// <see cref="ClusterModelAdminStore.IsReachable"/> rather than surfaced here.
+    /// Runs a retrain. Errors are left to <see cref="AdminStoreBase{TClient}.LastError"/>/
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/> rather than surfaced here.
     /// </summary>
     private async Task Retrain()
     {

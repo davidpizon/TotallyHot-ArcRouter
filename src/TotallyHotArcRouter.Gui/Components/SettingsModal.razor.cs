@@ -87,7 +87,7 @@ public partial class SettingsModal
     /// poll, or "Router unknown" when none did.
     /// </summary>
     /// <remarks>
-    /// Gated on <see cref="Services.UpdateStore.IsReachable"/> rather than merely on a non-null Status, because
+    /// Gated on <see cref="Services.AdminStoreBase{TClient}.IsReachable"/> rather than merely on a non-null Status, because
     /// <see cref="UpdateStore"/> is an app-lifetime singleton that keeps its last successful status when
     /// a later poll fails. Reading Status alone would therefore keep displaying the version of a Router
     /// that has since stopped, which is precisely the case this label exists to make visible. A blank

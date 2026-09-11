@@ -6,17 +6,16 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <summary>
 /// Singleton view-model backing the Governance tab's Regret Harness panel. Wraps
 /// <see cref="RegretHarnessAdminClient"/> (the tested, platform-agnostic logic in
-/// TotallyHot.ArcRouter.Gui.Telemetry) with the same "singleton + Changed event + best-effort,
-/// reachability-tolerant" shape as <see cref="LogRegModelAdminStore"/>, so the UI survives tab switches
-/// and degrades gracefully when the proxy isn't running. Registered in <c>MauiProgram</c>.
+/// TotallyHot.ArcRouter.Gui.Telemetry) in the shared <see cref="AdminStoreBase{TClient}"/> shape, so the
+/// UI survives tab switches and degrades gracefully when the proxy isn't running. Registered in
+/// <c>MauiProgram</c>.
 /// </summary>
-public sealed class RegretHarnessAdminStore : IDisposable
+public sealed class RegretHarnessAdminStore : AdminStoreBase<IRegretHarnessAdminClient>
 {
-    private readonly IRegretHarnessAdminClient _client;
-    private readonly ILogger<RegretHarnessAdminStore>? _logger;
-    private readonly IDisposable? _ownedClient;
-
-    /// <summary>Initializes a new instance of the <see cref="RegretHarnessAdminStore"/> class.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RegretHarnessAdminStore"/> class, creating and owning a
+    /// client to <paramref name="serverAddress"/>.
+    /// </summary>
     /// <param name="logger">Optional logger.</param>
     /// <param name="serverAddress">
     /// The proxy's TLS gRPC endpoint; defaults to
@@ -25,11 +24,8 @@ public sealed class RegretHarnessAdminStore : IDisposable
     public RegretHarnessAdminStore(
         ILogger<RegretHarnessAdminStore>? logger = null,
         string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(client: new RegretHarnessAdminClient(serverAddress), logger: logger, ownsClient: true)
     {
-        _logger = logger;
-        var client = new RegretHarnessAdminClient(serverAddress);
-        _client = client;
-        _ownedClient = client;
         ServerAddress = serverAddress;
     }
 
@@ -38,12 +34,11 @@ public sealed class RegretHarnessAdminStore : IDisposable
     /// caller-supplied client. The seam tests use to drive the store without a live proxy; the caller
     /// owns the client's lifetime.
     /// </summary>
+    /// <param name="client">The admin client to drive.</param>
+    /// <param name="logger">Optional logger.</param>
     public RegretHarnessAdminStore(IRegretHarnessAdminClient client, ILogger<RegretHarnessAdminStore>? logger = null)
+        : base(client: client, logger: logger)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _ownedClient = null;
-        _logger = logger;
     }
 
     /// <summary>
@@ -56,16 +51,6 @@ public sealed class RegretHarnessAdminStore : IDisposable
     /// <summary>The last completed run's status, or <see langword="null"/> before the first load.</summary>
     public RegretHarnessStatusInfo? Status { get; private set; }
 
-    /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
-    public bool IsLoaded { get; private set; }
-
-    /// <summary>Whether the last load or run reached the proxy.</summary>
-    /// <remarks>Same connectivity-only meaning as <see cref="PriceSourceStore.IsReachable"/>.</remarks>
-    public bool IsReachable { get; private set; }
-
-    /// <summary>The message from the last failure to reach the proxy, if any.</summary>
-    public string? LastError { get; private set; }
-
     /// <summary>Whether a run is currently in progress, so the UI can disable the button and show progress.</summary>
     public bool IsRunning { get; private set; }
 
@@ -75,56 +60,37 @@ public sealed class RegretHarnessAdminStore : IDisposable
     /// <summary>The most recent run's outcome message, or <see langword="null"/> before any run has completed this session.</summary>
     public string? LastRunMessage { get; private set; }
 
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        _ownedClient?.Dispose();
-    }
-
-    /// <summary>Raised after any of the above change.</summary>
-    public event Action? Changed;
-
     /// <summary>
     /// Loads the last completed run's status. Failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an error
-    /// state instead of crashing when the proxy isn't running.
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
+    /// rather than thrown, so the tab renders an error state instead of crashing when the proxy isn't
+    /// running.
     /// </summary>
-    public async Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Status = await _client.GetStatusAsync(cancellationToken);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (GrpcAdminException ex)
-        {
-            IsReachable = !ex.IsUnavailable;
-            LastError = ex.Message;
-            _logger?.LogWarning(exception: ex, message: "Failed to load the regret harness status from the router.");
-        }
-        finally
-        {
-            IsLoaded = true;
-            Changed?.Invoke();
-        }
+        return LoadGuardedAsync(
+            async ct => Status = await Client.GetStatusAsync(ct),
+            "load the regret harness status",
+            cancellationToken);
     }
 
     /// <summary>
     /// Runs the harness, publishing stage progress into <see cref="CurrentStage"/> as it streams in and
     /// the final outcome once it completes. <see cref="IsRunning"/> is true for the duration.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the run.</param>
     /// <exception cref="GrpcAdminException">The run could not be started or the router is unreachable.</exception>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         IsRunning = true;
         CurrentStage = null;
         LastRunMessage = null;
-        Changed?.Invoke();
+        NotifyChanged();
 
         try
         {
-            await foreach (var runEvent in _client.RunAsync(cancellationToken))
+            await foreach (var runEvent in Client.RunAsync(cancellationToken))
             {
                 if (runEvent.StageProgress is { } stage)
                 {
@@ -138,16 +104,14 @@ public sealed class RegretHarnessAdminStore : IDisposable
                             result.Splits);
                 }
 
-                Changed?.Invoke();
+                NotifyChanged();
             }
 
-            IsReachable = true;
-            IsLoaded = true;
-            LastError = null;
+            RecordSuccess();
         }
         catch (GrpcAdminException ex)
         {
-            RecordFailure(ex);
+            RecordFailure(exception: ex, description: "a regret harness run");
             throw;
         }
         finally
@@ -155,21 +119,7 @@ public sealed class RegretHarnessAdminStore : IDisposable
             // In a finally so a failed run re-enables the button rather than leaving it stuck disabled.
             // The exception still propagates for the panel to render.
             IsRunning = false;
-            Changed?.Invoke();
+            NotifyChanged();
         }
-    }
-
-    /// <summary>
-    /// Reflects a failed mutation in the store's state before the caller rethrows, so
-    /// <see cref="IsReachable"/> keeps its documented meaning after a run and not only after a load.
-    /// </summary>
-    private void RecordFailure(GrpcAdminException ex)
-    {
-        if (!ex.IsUnavailable) return;
-
-        IsReachable = false;
-        LastError = ex.Message;
-        _logger?.LogWarning(exception: ex, message: "The router became unreachable during a regret harness run.");
-        Changed?.Invoke();
     }
 }

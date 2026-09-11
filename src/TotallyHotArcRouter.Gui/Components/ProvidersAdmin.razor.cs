@@ -53,7 +53,7 @@ public partial class ProvidersAdmin
     /// <summary>The dialects the override dropdown offers, plus the "auto-detect" entry the markup adds.</summary>
     private static IReadOnlyList<string> ToolDialects => ToolCallDialectNames.All;
 
-    /// <summary>Unsubscribes from <see cref="ProviderAdminStore.Changed"/>.</summary>
+    /// <summary>Unsubscribes from <see cref="AdminStoreBase{TClient}.Changed"/>.</summary>
     public void Dispose()
     {
         Store.Changed -= OnStoreChanged;
