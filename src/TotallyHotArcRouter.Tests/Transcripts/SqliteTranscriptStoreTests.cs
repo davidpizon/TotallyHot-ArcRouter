@@ -76,7 +76,7 @@ public class SqliteTranscriptStoreTests : IDisposable
         await store.UpdateOutcomeAsync(correlationId: "corr-judge-scored", 0.9, isJudgeScored: true,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        var row = await store.GetTranscriptAsync(id: id!.Value,
+        var row = await store.GetTranscriptAsync(id: id.Value,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(row!.IsJudgeScored);
     }
@@ -96,7 +96,7 @@ public class SqliteTranscriptStoreTests : IDisposable
         await store.UpdateOutcomeAsync(correlationId: "corr-not-judge-scored", 0.9,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        var row = await store.GetTranscriptAsync(id: id!.Value,
+        var row = await store.GetTranscriptAsync(id: id.Value,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.False(row!.IsJudgeScored);
     }
