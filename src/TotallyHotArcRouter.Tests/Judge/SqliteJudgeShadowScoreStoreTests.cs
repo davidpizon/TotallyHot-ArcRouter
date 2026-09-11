@@ -179,13 +179,13 @@ public class SqliteJudgeShadowScoreStoreTests : IDisposable
         // The Phase G2 migration. A row written before the column existed cannot have its authority
         // recovered - the language that decides it was never stored here - so it must read back as
         // unknown, not as one of the two real answers.
-        using (var connection = _database.OpenConnection())
+        await using (var connection = _database.OpenConnection())
         {
-            using var drop = connection.CreateCommand();
+            await using var drop = connection.CreateCommand();
             drop.CommandText = "ALTER TABLE judge_shadow_scores DROP COLUMN syntax_authoritative;";
             drop.ExecuteNonQuery();
 
-            using var insert = connection.CreateCommand();
+            await using var insert = connection.CreateCommand();
             insert.CommandText = """
                                  INSERT INTO judge_shadow_scores (
                                      correlation_id, created_at_utc, dimension, model, static_score,

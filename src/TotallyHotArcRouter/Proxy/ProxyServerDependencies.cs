@@ -385,4 +385,4 @@ public sealed record RegretHarnessAdminDependencies(CodeRouterBench.Evaluation.I
 /// <see cref="ProxyServerDependencies.JudgeCalibrationAdmin"/>'s remarks.
 /// </summary>
 /// <param name="Analyzer">Computes the judge-vs-static calibration report the panel renders.</param>
-public sealed record JudgeCalibrationAdminDependencies(Judge.IJudgeCalibrationAnalyzer Analyzer);
+public sealed record JudgeCalibrationAdminDependencies(IJudgeCalibrationAnalyzer Analyzer);
