@@ -1,5 +1,24 @@
 # Code-Smell Refactoring Plan
 
+> **Superseded for new findings.** This document's own end condition is reached; later findings start a
+> new document, per [ADR-0008 Amendment 1](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)
+> rule 4. The 2026-09-11 survey therefore lives in
+> [`admin-slice-consolidation-plan.md`](admin-slice-consolidation-plan.md), which found the one growth
+> mechanism this plan never looked at: the admin-knob vertical slice, repeated 11 times.
+>
+> Two items here are affected by it:
+> - **C5** (`ProxyServer` constructor, 351 lines) is **done, but re-scoped** — the remedy recorded here
+>   was one `Configure<Group>` method per feature, which would have relocated 11 copies into 11 methods
+>   and left the duplication intact. The measured cause was a missing registry. See
+>   [ADR-0010](../adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md).
+> - **D1** (analyzer configuration gap) is **done** — analyzers enabled and staged via a new
+>   `src/.editorconfig`. Its verdict on dead code: essentially none.
+>
+> ⚠️ **Unresolved contradiction, for the maintainer.** This document disagrees with itself about whether
+> C1's manual golden-path smoke has run: the bullet at line ~79 says *"complete"*, while the header note
+> and the Phase 5 roadmap both say it is *outstanding*. That determines whether this plan is closed.
+> Left as-is rather than guessed at.
+
 **Status:** Phase 1 implemented (see [PR #75](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/75)).
 Phase 2 (all 5 steps) and Phase 3 steps 1-2 are implemented. The Phase 4 Razor `.razor.cs` code-behind
 split is also implemented (`ProvidersAdmin`, `SettingsModal`, `BenchmarkData`, `PriceSourcesAdmin`).

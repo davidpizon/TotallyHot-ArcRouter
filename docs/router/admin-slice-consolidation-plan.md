@@ -1,16 +1,16 @@
 # Admin-Slice Consolidation Plan
 
-**Status:** Phase 0 complete ([ADR-0010](../adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md),
-proposed). Phases 1-3 in progress.
+**Status: Phases 0-3 implemented (2026-09-11).** One item outstanding — the manual golden-path smoke,
+see [Validation gate](#validation-gate).
 
 **End condition (stated up front, per [ADR-0008 Amendment 1](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)
-rule 4):** this document closes when Phases 0-3 have shipped **and one subsequent admin knob has been
+rule 4):** this document closes when the smoke below has run **and one subsequent admin knob has been
 added through the new seams** — that addition is the only real proof the marginal cost actually fell.
 Findings after that start a new document rather than extending this one.
 
 **Engine note:** this survey ran **CodeGraph-only. Serena MCP was unreachable** (cached connection
 failure). Per ADR-0008 step 2 the Critical/Major/Minor classification below is **the agent's own and
-not a dual-engine result** — do not read this catalog as one.
+not a dual-engine result** — do not read this catalog as one. **Serena skipped.**
 
 **Trigger:** maintainer-reported pain — "the application keeps growing and growing" — not a cadence
 or a phase boundary, per ADR-0008 step 3.
@@ -30,173 +30,141 @@ admin knob is the same **six-file vertical slice across three assemblies**, and 
 
 | Layer | Count | Lines | Consolidated? |
 |---|---|---|---|
-| `*AdminGrpcService` (router) | 11 | 1,783 | No |
-| `*AdminClient` + `I*AdminClient` (`Gui.Telemetry`) | 11 | 2,666 | **Half** — `GrpcAdminClientBase` took the channel/dispose/wrap scaffolding |
-| `*AdminException` subclasses | 11 | ~150 | No — every one adds **zero** behavior over `GrpcAdminException` |
-| `*Store` (`Gui/Services`) | 13 of 16 | ~2,400 | No — all share `IsLoaded`/`IsReachable`/`LastError`/`Changed`, the owned-vs-injected constructor pair, and swallow-and-flag `LoadAsync` |
-| `ProxyServer` ctor + endpoint blocks | 11 | ~200 | No |
+| `*AdminGrpcService` (router) | 11 | 1,783 | No — left alone, each is genuinely per-feature |
+| `*AdminClient` + `I*AdminClient` (`Gui.Telemetry`) | 11 | 2,666 | **Was half** — `GrpcAdminClientBase` had taken the channel/dispose/wrap scaffolding |
+| `*AdminException` subclasses | **12** | ~150 | **Now deleted** — every one added zero behavior over `GrpcAdminException` |
+| `*Store` (`Gui/Services`) | 11 | ~2,400 | **Now on `AdminStoreBase<TClient>`** |
+| `ProxyServer` ctor + endpoint blocks | 11 | ~200 | **Now an `IAdminServiceModule` registry** |
 
-`ProxyServer.cs`'s 351-line constructor is 11 copies of one block, and its own comments say
-*"Same reasoning again"* four times ([`ProxyServer.cs:223`](../../src/TotallyHotArcRouter/Proxy/ProxyServer.cs),
-`:234`, `:248`, `:261`). The code was already telling us it is a pattern.
+`ProxyServer.cs`'s 351-line constructor was 11 copies of one block, and its own comments said
+*"Same reasoning again"* four times. The code was already telling us it was a pattern.
+
+The exception count turned out to be **12, not 11** — `PersistedSessionsClient` had one too, which the
+initial survey missed.
 
 ### Observed cost (Amendment 1 rule 1)
 
-Rule 1 requires a real cost, and rejects line count and blast radius as the cost itself. This item
-has one, measured:
-
 - **`d2dca10` (judge calibration) cost 42 files and +3,171 lines** for a single read-only panel.
   ~630 production and ~420 test lines of that were pure transport plumbing.
-- The slice forces edits to the same shared files every time: `ProxyServer.cs`,
+- The slice forced edits to the same shared files every time: `ProxyServer.cs`,
   `ProxyServerDependencies.cs`, `MauiProgram.cs`, `Governance.razor`,
-  `ProxyServiceCollectionExtensions.cs`, `telemetry.proto`. That is the Shotgun Surgery signature, on
-  the same evidence basis that justified **A2**.
-- The maintainer named the cost directly. This survey exists because of that, not despite it.
+  `ProxyServiceCollectionExtensions.cs`, `telemetry.proto` — the Shotgun Surgery signature, on the same
+  evidence basis that justified **A2**.
+- The maintainer named the cost directly. This survey exists because of that.
 
-**Honest framing (rule 3):** this is a **marginal-cost** fix more than a total-size fix. Phases 1 and
-3 delete lines; Phase 2 is roughly line-neutral and is argued on edit-set size, not volume. The PR
-descriptions should say so rather than claim a large deletion.
+---
+
+## What shipped
+
+| Phase | Commit | Net production lines |
+|---|---|---|
+| 0 — [ADR-0010](../adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md) | `f1e8705` | docs only |
+| 1a — delete 12 `*AdminException` subclasses | `f1e8705` | −112 |
+| 1b — 11 stores onto `AdminStoreBase<TClient>` | `762e369` | **−263** (already absorbing the new 224-line base) |
+| 2 — `IAdminServiceModule` registry | `87f856d` | **+63** — see the honest note below |
+| 3 — analyzer gate (D1) | `6c9f9e9` | −4 usings |
+
+**Phase 2 adds lines, and that is stated rather than smoothed over** (Amendment 1 rule 3):
+`ProxyServer.cs` −97, `ProxyServerDependencies.cs` +160. The justification is the edit set, not the
+volume — adding an optional admin service went from editing `ProxyServer.cs` in two places ~120 lines
+apart *plus* its dependency record, to editing the dependency record alone.
+
+### Three deviations from ADR-0010 as written
+
+All three are recorded in that ADR's Amendment 1; they are summarized here because each was a case of
+the plan being wrong rather than the work being incomplete.
+
+1. **`AdminStoreBase` is not generic over its exception.** The ADR specified
+   `AdminStoreBase<TClient, TException>` so the HTTP stores could bind `ProviderAdminException`. No HTTP
+   store ended up deriving from it, so the parameter bought nothing and would itself have been
+   speculative generality — the exact smell this work exists to remove.
+2. **Three stores are deliberately *not* on the base.** `RoutingGateStore` polls on a background loop
+   behind its own lock, with a three-valued connection state and `IAsyncDisposable`. `ProviderAdminStore`
+   and `UsageStore` speak HTTP ([ADR-0007](../adr/0007-provider-admin-client-stays-on-http.md)), have no
+   `IsUnavailable` for the base's central rule to key off, and report failures through `ToastService`
+   rather than `LastError`. Fitting them would have meant growing the base for two callers, which is how
+   a useful base class turns into a burden.
+3. **The load path is now connectivity-aware everywhere.** Most stores already set
+   `IsReachable = !ex.IsUnavailable` on a failed load; `PriceSourceStore`, `RoutingModeStore` and
+   `PersistedSessionStore` bluntly set it false for any failure. The base takes the connectivity-aware
+   reading, matching what `IsReachable`'s own doc comment says it means and what every store already did
+   on its *mutation* path. A rejected load now renders inline instead of collapsing the panel.
+
+### What Phase 3 measured
+
+The dead-code question has an answer now, and it is **essentially none**:
+
+| Rule | Hits | Verdict |
+|---|---|---|
+| `IDE0051` unused private members | **2** | Both false positives — see below |
+| `IDE0005` unnecessary usings | **4** | All introduced by this series' own `ProxyServer` change |
+| `IDE0052` unread private members | **0** | |
+| `CA1823` unused private fields | **0** | |
+
+Both `IDE0051` hits were `ProviderOptions.PrintMembers` and `ResolvedModelRoute.PrintMembers`, and
+**deleting them would have been a security regression**: a record's user-declared `PrintMembers`
+replaces the compiler-generated one and is called by the generated `ToString()`, which the analyzer does
+not model. Both exist to redact AWS secret keys, session tokens, and header values out of `ToString()`.
+Suppressed at both sites with that reasoning inline.
+
+`CA2000` (1,758) and `CA1849` (188) stay silent with their measured counts and reasons recorded in
+`src/.editorconfig`. Neither is a to-do list; both are dominated by patterns the analyzer cannot see
+through (container-owned lifetimes, a synchronous SQLite provider behind an async API).
 
 ---
 
 ## What was checked and rejected
 
-Kept to the existing plan's convention — a survey that finds only work is a survey that was not
-honest about its misses.
+A survey that finds only work is a survey that was not honest about its misses.
 
 - **Performance was not measured, and no performance problem was found.** The prior audit recorded 0
-  `async void` and 0 `Thread.Sleep`; C7's nine sync-over-async sites are off the hot path. Nothing
-  here is a runtime optimization — "optimization" in this document means structural. If runtime cost
-  is the real question, that is a profiling exercise and a different document.
+  `async void` and 0 `Thread.Sleep`; C7's nine sync-over-async sites are off the hot path. Nothing here
+  is a runtime optimization — "optimization" in this document means structural. If runtime cost is the
+  real question, that is a profiling exercise and a different document.
 - **A hand-rolled dead-code sweep produced 36 candidates; 35 were false positives.** Static-class call
   sites and JSON DTO graphs — `ChatChoice`/`ChoiceLogprobs`/`TopLogprobCandidate`,
   `FencedCodeBlockParser`, `DelimiterBalance`, `GateCheck`, `KnownPriceSource`,
-  `*ServiceCollectionExtensions` — all read as unreferenced to a text scan and are live. This is
-  direct empirical confirmation of **D1**'s claim that the compiler is the only sound oracle here,
-  and it is why Phase 3 turns the oracle on instead of shipping a hand-made list.
-- **`ProviderAdminException` is out of scope.** It derives from `Exception`, not `GrpcAdminException`
-  — it belongs to the HTTP client kept on HTTP by
-  [ADR-0007](../adr/0007-provider-admin-client-stays-on-http.md). Its 8 catch sites are untouched.
+  `*ServiceCollectionExtensions` — all read as unreferenced to a text scan and are live. Phase 3 exists
+  because of this: the compiler is the only sound oracle, which is what **D1** always said.
+- **The 11 `*AdminGrpcService` classes were left alone.** They look duplicated by name but each maps a
+  genuinely different RPC surface onto different collaborators. Same verdict the earlier plan reached
+  for the per-provider payload translators.
 - **`src/TotallyHotArcRouter.Sandbox{,.Tests}`** hold only `bin/`+`obj/`, are **untracked**, and are
   absent from `TotallyHotArcRouter.slnx`. Local disk litter, not a repo change.
-- **`TaxonomyPromotionCriterion` is dark but deliberate — keep it.** 100 production + 97 test lines
-  with **zero callers**, confirmed via `codegraph callers`. It implements Phase T4 of
-  [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) and is built
-  ahead of its consumer, not abandoned. **Recorded here so a future audit does not re-flag it as
-  dead code.**
-
----
-
-## Phases
-
-```mermaid
-flowchart TD
-    P0["Phase 0 — ADR-0010\npublic-surface decision, required first"]
-    P1["Phase 1 — GUI collapse\nexception subclasses + AdminStoreBase"]
-    P2["Phase 2 — Router collapse\nIAdminServiceModule registry"]
-    P3["Phase 3 — Analyzer gate (D1)\nthe sound dead-code oracle"]
-
-    P0 --> P1
-    P0 --> P2
-    P1 -.independent of.-> P2
-    P3 -.land first if possible.-> P1
-```
-
-### Phase 0 — ADR-0010. **Complete.**
-
-Deleting 11 `public` types from `Gui.Telemetry` and adding a registration interface to
-`ProxyServerDependencies` are public-surface changes, which AGENTS.md's dual-engine rule 4 and the
-existing plan's "Constraints carried forward" both gate behind an ADR.
-
-### Phase 1 — GUI collapse (`Gui.Telemetry` + `Gui`)
-
-**1a — Delete the 11 `*AdminException` subclasses.** `GrpcAdminClientBase<TGeneratedClient,
-TException>` simplifies to `GrpcAdminClientBase<TGeneratedClient>`, throwing `GrpcAdminException`
-directly; each client's `CreateException` override goes with it.
-
-> **The one behavioral risk in this phase.** Widening `catch (XxxAdminException)` to
-> `catch (GrpcAdminException)` is safe only because **no `try` block spans two different admin
-> clients**. That was enumerated across all 33 catch sites and confirmed. `BenchmarkData.razor.cs`
-> catches two types but in two separate wrapper methods (`:329`, `:412`) — whose comments
-> (*"Same wrapper shape as PriceSourcesAdmin's"*) are themselves further evidence of the duplication.
-> Re-confirm before committing.
-
-**1b — Introduce `AdminStoreBase<TClient, TException>`** (Template Method) owning what all 13 stores
-repeat: the four status properties, `Changed`, `Dispose`, the owned-vs-injected constructor pair, and
-a `RunAsync` helper that swallows the transport exception into `IsReachable`/`LastError` and
-**always** raises `Changed`.
-
-Generic over the exception so **ADR-0007's transport split survives in the type system**: gRPC stores
-bind `GrpcAdminException`, `ProviderAdminStore`/`UsageStore` bind `ProviderAdminException`.
-
-Preserve exactly: the `disposeHandler: false` ownership subtlety recorded in the existing plan's
-C3/C4 note. Copying that pattern naively introduces the opposite bug.
-
-**1c** — ship 1a and 1b as two separate commits so a regression bisects cleanly.
-
-### Phase 2 — Router collapse (`ProxyServer`)
-
-This **re-scopes C5**. That item recorded `ProxyServer`'s constructor as a long-method smell and
-prescribed one `Configure<Group>` method per feature; that would have relocated 11 copies into 11
-methods and left the duplication intact. The measurement says the cause is a missing **registry**.
-
-`IAdminServiceModule` (`Register(IServiceCollection)` + `Map(IEndpointRouteBuilder)`) implemented by
-the 10 `*AdminDependencies` records that already hold exactly the collaborators each block registers.
-`ProxyServer` iterates instead of enumerating.
-
-**Keep explicit, do not fold in:** `TelemetryGrpcService`, `RoutingModeAdminGrpcService`,
-`UpdateAdminGrpcService`, `RoutingGateAdminGrpcService` map **unconditionally**, and
-`RoutingModeAdminGrpcService` carries a deliberate `RoutingOptions` fallback
-([`ProxyServer.cs:243-246`](../../src/TotallyHotArcRouter/Proxy/ProxyServer.cs)). Folding them into
-the conditional loop would change *when* they map.
-
-### Phase 3 — Turn on the dead-code oracle (D1)
-
-Confirmed still open: `src/Directory.Build.props` sets **only** `TreatWarningsAsErrors`, and the repo
-has **no `.editorconfig` at all**. Because warnings are already errors repo-wide, any analyzer
-warning is an instant build break across ~125k lines — so stage it:
-
-**3a** — land the enablement with everything silent (a green, zero-risk commit):
-`EnableNETAnalyzers` / `AnalysisLevel` / `EnforceCodeStyleInBuild` in `Directory.Build.props`, plus
-`dotnet_analyzer_diagnostic.severity = silent` in a new `src/.editorconfig`.
-
-**3b** — escalate one rule per commit, fixing its fallout in that same commit:
-
-| Rule | Finds | Note |
-|---|---|---|
-| `IDE0005` | unused usings | Reports at build only where `GenerateDocumentationFile` is set — true for 7 projects, not all |
-| `IDE0051` / `IDE0052` | unused / unread private members | **this is the actual dead-code report** |
-| `CA1823` | unused private fields | |
-| `CA2000` | dispose before losing scope | would have caught C3/C4 for free |
-| `CA1849` | sync-over-async | fires on C7's 9 known-benign sites — fix, or suppress **with the documented justification AGENTS.md requires** |
-
-Whatever `IDE0051`/`IDE0052` report **is** the dark-code answer. Do not pre-write a list.
+- **`TaxonomyPromotionCriterion` is dark but deliberate — kept.** 100 production + 97 test lines with
+  **zero callers**, confirmed via `codegraph callers` and again by `IDE0051` finding nothing (it is
+  `public`, so the unused-member analyzers cannot see it — that gap is real and worth knowing). It
+  implements Phase T4 of [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md)
+  and is built ahead of its consumer, not abandoned. **Recorded here so a future audit does not re-flag
+  it as dead code.**
 
 ---
 
 ## Validation gate
 
-The existing plan's gate applies unchanged, plus two additions specific to this work.
+| # | Gate | Status |
+|---|---|---|
+| 1 | `dotnet build` zero warnings, zero errors | ✅ with the new analyzer gate live |
+| 2 | Touched XML docs re-read for staleness | ✅ — incl. 24 `cref`s repointed as members moved to the base |
+| 3 | All tests pass | ✅ router 2,719 (8 new), Gui 430 (7 new), Gui.Telemetry 225, Gui.Admin 106, Gui.Charts 71, Gui.Console 30 |
+| 4 | No test over 5 seconds | ✅ slowest suite 18s total |
+| 5 | Serilog templates stay static literals | ✅ — the base logs `"Admin load failed: could not {Operation}."` with the operation as a structured property |
+| 6 | **Manual golden-path smoke across all 11 Governance panels** | ❌ **outstanding** |
+| 7 | Deferred items recorded with evidence | ✅ above, and in `src/.editorconfig` |
 
-1. `dotnet build` — zero warnings, zero errors (`TreatWarningsAsErrors` is repo-wide).
-2. Every touched member's XML doc re-read for **staleness**. Extraction moves code between classes;
-   `CS1591` catches a *missing* doc, never a wrong one.
-3. All tests pass; both non-GUI assemblies hold ≥80% line coverage.
-4. No unusually heavy test exceeds 5 seconds.
-5. Serilog message templates stay static string literals; extracted code carries its log statements
-   to the new home rather than dropping them.
-6. **Phase 2 — manual golden-path smoke through a running proxy, exercising every one of the 11
-   Governance panels, not a sample.** `ProxyServer` owns the Kestrel host and gRPC mapping, and a
-   registration mistake surfaces as a service that maps and then throws on its first RPC
-   ([`ProxyServer.cs:90`](../../src/TotallyHotArcRouter/Proxy/ProxyServer.cs) documents exactly this
-   failure mode). A module that silently fails to register is invisible to the unit suite.
-7. **Phase 1 — the bUnit suites** (`ProvidersAdminTests`, `SettingsModalTests`, `BenchmarkDataTests`,
-   `PriceSourcesAdminTests`) plus the `Gui.Telemetry` client tests are the regression net for the
-   exception collapse. Confirm each store's "unreachable router" degraded state still renders.
+**Gate 6 is the one open item.** `ProxyServer` owns the Kestrel host and the gRPC endpoint mapping, and
+`MapGrpcService` only reflects over the service type — it never constructs it — so a registration
+mistake surfaces as a service that maps and *then* throws on its first RPC, which no unit test sees.
 
-**New tests this work should add:**
+`AdminServiceModuleTests` was added as partial insurance: it finds the module groups by reflection
+rather than a hand-maintained list (a list would need the same edit as the thing it guards, so it would
+go stale in exactly the case that matters) and fails if a group implements the seam but never reaches
+`AdminModules`. **That is not a substitute for the smoke** — it proves the registry carries every group,
+not that each service answers over the wire.
 
-- `AdminStoreBase.RunAsync` raises `Changed` **even on failure** — currently re-implemented 13 times,
-  and the behavior that keeps the UI off a permanent "loading" state when the router is down.
-- After Phase 2, every non-null `AdminModule` maps an endpoint — cheap insurance against the exact
-  silent-unmapped-service failure item 6 smoke-tests for.
+### New tests this work added
+
+- `AdminStoreBaseTests` — the always-raise-`Changed`-even-on-failure rule (previously re-implemented
+  once per store and asserted nowhere), the rejection-keeps-reachable rule, cleanup-before-notify
+  ordering, and that disposal releases what a store built but never what it was handed.
+- `AdminServiceModuleTests` — see above.

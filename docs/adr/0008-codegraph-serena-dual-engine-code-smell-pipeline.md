@@ -129,6 +129,35 @@ coupling was observed; the earlier plan's acyclic reference graph still holds.
 **GUI stores** (14 files under `Gui/Services/*Store.cs`): still concrete singletons without
 interfaces — the existing plan's going-forward norm, not a dedicated pass.
 
+### Catalog entry (2026-09-11): the admin-knob vertical slice — **Serena skipped**
+
+Triggered by maintainer-reported pain ("the application keeps growing and growing"), per step 3 —
+not a cadence. **Serena MCP was unreachable this pass**, so the classification below is the agent's
+own and this is *not* a dual-engine result; recorded here so the catalog is not misread as one.
+
+**Finding (Major, acted on):** every Governance admin knob is the same six-file vertical slice
+across three assemblies, repeated 11 times. Its observed cost is measured, not argued: `d2dca10`
+(judge calibration) cost **42 files and +3,171 lines** for one read-only panel, ~1,050 of them pure
+transport plumbing, and every instance edits the same shared files — `ProxyServer.cs`,
+`ProxyServerDependencies.cs`, `MauiProgram.cs`, `Governance.razor`, `telemetry.proto`.
+
+Shipped as [ADR-0010](0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md); work and
+honest line accounting in [`admin-slice-consolidation-plan.md`](../router/admin-slice-consolidation-plan.md).
+The GUI-store row above is now stale: 11 of those stores are on a shared `AdminStoreBase<TClient>`,
+and three are deliberately off it.
+
+**Finding (noted, not scheduled):** `Router/Orchestrator/TaxonomyPromotionCriterion.cs` — 100
+production + 97 test lines, **zero callers**. Built ahead of its consumer per Phase T4 of
+`self-organizing-classification-plan.md`, not abandoned. Per rule 1 it has no observed cost, so it is
+recorded here and left alone.
+
+**Method note worth keeping:** a hand-rolled dead-code sweep over this repo produced **36 candidates
+of which 35 were false positives** — static-class call sites and JSON DTO graphs read as
+unreferenced to any text scan. The compiler is the only sound oracle for that question, which is
+what D1 always said; it is now enabled (`src/.editorconfig`), and its verdict is that this codebase
+has essentially no dead code: 2 `IDE0051` hits, both false positives, and 0 each for `IDE0052` and
+`CA1823`. **Do not accept a grep-based dead-code list from a future survey without this check.**
+
 ### Non-smell use: the CodeGraph step applied to a correctness bug
 
 Step 1 of this pipeline (map with CodeGraph first) is not exclusive to smell surveys — it is the
