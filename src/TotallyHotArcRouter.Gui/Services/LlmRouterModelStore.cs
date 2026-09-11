@@ -138,7 +138,7 @@ public sealed class LlmRouterModelStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (LlmRouterModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
@@ -156,14 +156,14 @@ public sealed class LlmRouterModelStore : IDisposable
     /// until-updated) status. Rethrows on failure - the panel has to render the rejection inline - the
     /// same split <see cref="SyncAsync"/> and <see cref="BenchmarkDataStore.RecheckAsync"/> use.
     /// </summary>
-    /// <exception cref="LlmRouterModelAdminException">The switch was rejected or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The switch was rejected or the router is unreachable.</exception>
     public async Task SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default)
     {
         try
         {
             Status = await _client.SetBaseUrlAsync(baseUrl: baseUrl, cancellationToken: cancellationToken);
         }
-        catch (LlmRouterModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -185,7 +185,7 @@ public sealed class LlmRouterModelStore : IDisposable
     /// per-file progress into <see cref="SyncProgress"/> as it streams in and the final status once every
     /// file has been attempted. <see cref="IsSyncing"/> is true for the duration.
     /// </summary>
-    /// <exception cref="LlmRouterModelAdminException">The sync could not be started or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The sync could not be started or the router is unreachable.</exception>
     public async Task SyncAsync(CancellationToken cancellationToken = default)
     {
         IsSyncing = true;
@@ -229,7 +229,7 @@ public sealed class LlmRouterModelStore : IDisposable
             IsLoaded = true;
             LastError = null;
         }
-        catch (LlmRouterModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -247,7 +247,7 @@ public sealed class LlmRouterModelStore : IDisposable
     /// Reflects a failed mutation in the store's state before the caller rethrows, so
     /// <see cref="IsReachable"/> keeps its documented meaning after a mutation and not only after a load.
     /// </summary>
-    private void RecordFailure(LlmRouterModelAdminException ex)
+    private void RecordFailure(GrpcAdminException ex)
     {
         if (!ex.IsUnavailable) return;
 

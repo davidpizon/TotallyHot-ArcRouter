@@ -65,7 +65,7 @@ public sealed class SettingsModalTests
     {
         var updateClient = new FakeUpdateAdminClient
         {
-            Failure = new UpdateAdminException(message: "router is down", isUnavailable: true)
+            Failure = new GrpcAdminException(message: "router is down", isUnavailable: true)
         };
         using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _,
             updateClient: updateClient);
@@ -616,7 +616,7 @@ public sealed class SettingsModalTests
     {
         var client = new FakeRouterSettingsAdminClient
         {
-            Failure = new RouterSettingsAdminException(
+            Failure = new GrpcAdminException(
                 message: "Could not save the router settings: the router is not reachable.", isUnavailable: true)
         };
         using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _,
@@ -633,7 +633,7 @@ public sealed class SettingsModalTests
     {
         var client = new FakeRouterSettingsAdminClient
         {
-            Failure = new RouterSettingsAdminException(
+            Failure = new GrpcAdminException(
                 message: "Could not save the router settings: the router is not reachable.", isUnavailable: true)
         };
         using var ctx = NewContext(liveDataStore: out _, settingsStore: out var settingsStore,
@@ -663,7 +663,7 @@ public sealed class SettingsModalTests
             null);
 
         /// <summary>When set, every call fails with it - how a test stands in for a Router that isn't running.</summary>
-        public UpdateAdminException? Failure { get; set; }
+        public GrpcAdminException? Failure { get; set; }
 
         public Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
         {
@@ -706,7 +706,7 @@ public sealed class SettingsModalTests
             EligibleJudgeModels: ["free-judge"],
             true);
 
-        public RouterSettingsAdminException? Failure { get; set; }
+        public GrpcAdminException? Failure { get; set; }
 
         public int ClearTranscriptsCallCount { get; private set; }
 

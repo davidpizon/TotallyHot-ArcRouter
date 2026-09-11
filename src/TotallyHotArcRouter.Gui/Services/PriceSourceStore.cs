@@ -118,7 +118,7 @@ public sealed class PriceSourceStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (PriceSourceAdminException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = false;
             LastError = ex.Message;
@@ -139,7 +139,7 @@ public sealed class PriceSourceStore : IDisposable
     /// the unreachable state covers, but a toggle failing means "the thing you just asked for did not
     /// happen", which the user has to be told inline. Same split as <see cref="ProviderAdminStore"/>.
     /// </remarks>
-    /// <exception cref="PriceSourceAdminException">The toggle was rejected; the caller surfaces the message.</exception>
+    /// <exception cref="GrpcAdminException">The toggle was rejected; the caller surfaces the message.</exception>
     public async Task SetEnabledAsync(string name, bool enabled, CancellationToken cancellationToken = default)
     {
         try
@@ -149,7 +149,7 @@ public sealed class PriceSourceStore : IDisposable
             Sources = list.Sources;
             Schedule = list.Schedule;
         }
-        catch (PriceSourceAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -165,7 +165,7 @@ public sealed class PriceSourceStore : IDisposable
     /// Runs an ingestion cycle now, waits for it, and publishes both the per-source outcomes and the updated
     /// list. <see cref="IsRefreshing"/> is true for the duration.
     /// </summary>
-    /// <exception cref="PriceSourceAdminException">The pull could not be started or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The pull could not be started or the router is unreachable.</exception>
     public Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         return RunCycleAsync(() => _client.RefreshAsync(cancellationToken));
@@ -180,7 +180,7 @@ public sealed class PriceSourceStore : IDisposable
     /// <see cref="RefreshAsync"/>: both are "please wait, an update is running" from the panel's point of view,
     /// even though only <see cref="RefreshAsync"/> reaches out to a source over the network.
     /// </summary>
-    /// <exception cref="PriceSourceAdminException">
+    /// <exception cref="GrpcAdminException">
     /// The reorder was rejected (the name set didn't match every existing source), or the router is
     /// unreachable.
     /// </exception>
@@ -218,7 +218,7 @@ public sealed class PriceSourceStore : IDisposable
             IsLoaded = true;
             LastError = null;
         }
-        catch (PriceSourceAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -241,7 +241,7 @@ public sealed class PriceSourceStore : IDisposable
     /// panel's inline error to render; treating it as unreachable would replace the whole panel with a
     /// "router down" state that is both wrong and hides the actual message.
     /// </remarks>
-    private void RecordFailure(PriceSourceAdminException ex)
+    private void RecordFailure(GrpcAdminException ex)
     {
         if (!ex.IsUnavailable) return;
 

@@ -110,7 +110,7 @@ public sealed class JudgeCalibrationAdminStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (JudgeCalibrationAdminException ex)
+        catch (GrpcAdminException ex)
         {
             // Cleared unconditionally, not only when IsReachable ends up false: a reachable failure (the
             // router answered but the call itself failed) is just as much a reason to distrust the

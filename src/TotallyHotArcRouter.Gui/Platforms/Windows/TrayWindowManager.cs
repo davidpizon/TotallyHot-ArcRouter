@@ -352,7 +352,7 @@ internal static class TrayWindowManager
             else
                 await _routingGateStore!.DisableAsync();
         }
-        catch (RoutingGateAdminException)
+        catch (GrpcAdminException)
         {
         }
     }

@@ -103,7 +103,7 @@ public sealed class LogRegModelAdminStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (LogRegModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
@@ -121,7 +121,7 @@ public sealed class LogRegModelAdminStore : IDisposable
     /// it streams in and the final outcome plus status once it completes. <see cref="IsRetraining"/> is true
     /// for the duration.
     /// </summary>
-    /// <exception cref="LogRegModelAdminException">The retrain could not be started or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The retrain could not be started or the router is unreachable.</exception>
     public async Task RetrainAsync(CancellationToken cancellationToken = default)
     {
         IsRetraining = true;
@@ -150,7 +150,7 @@ public sealed class LogRegModelAdminStore : IDisposable
             IsLoaded = true;
             LastError = null;
         }
-        catch (LogRegModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -173,7 +173,7 @@ public sealed class LogRegModelAdminStore : IDisposable
     /// the panel's inline error to render; treating it as unreachable would replace the whole panel with a
     /// "router down" state that is both wrong and hides the actual message.
     /// </remarks>
-    private void RecordFailure(LogRegModelAdminException ex)
+    private void RecordFailure(GrpcAdminException ex)
     {
         if (!ex.IsUnavailable) return;
 

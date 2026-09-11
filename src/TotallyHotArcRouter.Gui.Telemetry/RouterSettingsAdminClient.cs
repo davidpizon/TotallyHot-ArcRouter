@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Thrown when a router-settings read or write call fails. Carries a message fit to render in the System
-/// Settings window rather than a raw <see cref="RpcException"/>, mirroring <see cref="ClusterModelAdminException"/>.
-/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class RouterSettingsAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminException"/> class.</summary>
-    public RouterSettingsAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
-/// <summary>
 /// The router settings' currently effective values (docs/router/self-organizing-classification-plan.md
 /// Phase T6; docs/router/geval-shadow-scoring-plan.md), as read or written by the System Settings window's
 /// Adaptive Routing and Shadow Judge rows.
@@ -64,8 +50,7 @@ public sealed record RouterSettingsInfo(
 /// rather than the Windows-only MAUI project so CI can unit-test it, exactly like <see cref="ClusterModelAdminClient"/>.
 /// </summary>
 public sealed class RouterSettingsAdminClient
-    : GrpcAdminClientBase<Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient,
-            RouterSettingsAdminException>,
+    : GrpcAdminClientBase<Contract.RouterSettingsAdminService.RouterSettingsAdminServiceClient>,
         IRouterSettingsAdminClient
 {
     /// <summary>
@@ -176,13 +161,5 @@ public sealed class RouterSettingsAdminClient
             CodeJudgeEnabled: response.CodeJudgeEnabled,
             IceScoreEnabled: response.IceScoreEnabled,
             RaceEnabled: response.RaceEnabled);
-    }
-
-    /// <inheritdoc/>
-    protected override RouterSettingsAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new RouterSettingsAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

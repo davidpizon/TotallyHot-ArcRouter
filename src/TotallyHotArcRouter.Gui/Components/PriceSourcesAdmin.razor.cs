@@ -273,7 +273,7 @@ public partial class PriceSourcesAdmin
             await operation();
             return true;
         }
-        catch (PriceSourceAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _opError = ex.Message;
             return false;

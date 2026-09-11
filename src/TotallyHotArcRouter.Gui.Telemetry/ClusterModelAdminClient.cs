@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
-/// <summary>
-/// Thrown when a cluster-model management call fails. Carries a message fit to render in the Governance
-/// panel rather than a raw <see cref="RpcException"/>, mirroring <see cref="BenchmarkDataAdminException"/>.
-/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class ClusterModelAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="ClusterModelAdminException"/> class.</summary>
-    public ClusterModelAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
 /// <summary>The result category of one retrain, mirroring <c>ClusterTrainingResultKind</c>.</summary>
 public enum ClusterRetrainResultKindInfo
 {
@@ -103,7 +89,7 @@ public sealed record ClusterRetrainEvent(
 /// CI can unit-test it, exactly like <see cref="BenchmarkDataAdminClient"/>.
 /// </summary>
 public sealed class ClusterModelAdminClient
-    : GrpcAdminClientBase<Contract.ClusterModelAdminService.ClusterModelAdminServiceClient, ClusterModelAdminException>,
+    : GrpcAdminClientBase<Contract.ClusterModelAdminService.ClusterModelAdminServiceClient>,
         IClusterModelAdminClient
 {
     /// <summary>
@@ -229,13 +215,5 @@ public sealed class ClusterModelAdminClient
             Contract.ClusterRetrainResultKind.AlreadyRunning => ClusterRetrainResultKindInfo.AlreadyRunning,
             _ => ClusterRetrainResultKindInfo.Declined
         };
-    }
-
-    /// <inheritdoc/>
-    protected override ClusterModelAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new ClusterModelAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

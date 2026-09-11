@@ -329,7 +329,7 @@ public sealed class BenchmarkDataTests
     {
         using var ctx = NewContext(new FakeClient
         {
-            StatusError = new BenchmarkDataAdminException(message: "the router is not reachable.", isUnavailable: true)
+            StatusError = new GrpcAdminException(message: "the router is not reachable.", isUnavailable: true)
         });
 
         var cut = ctx.Render<BenchmarkData>();
@@ -345,7 +345,7 @@ public sealed class BenchmarkDataTests
         // address would assert an endpoint this client may never have been pointed at.
         using var ctx = NewContext(new FakeClient
         {
-            StatusError = new BenchmarkDataAdminException(message: "the router is not reachable.", isUnavailable: true)
+            StatusError = new GrpcAdminException(message: "the router is not reachable.", isUnavailable: true)
         });
 
         var cut = ctx.Render<BenchmarkData>();
@@ -372,7 +372,7 @@ public sealed class BenchmarkDataTests
         // covers the Retry affordance rather than the address text, which the corpus test already covers.
         var voterClient = new FakeVoterClient
         {
-            StatusError = new LlmRouterModelAdminException(message: "the router is not reachable.", isUnavailable: true)
+            StatusError = new GrpcAdminException(message: "the router is not reachable.", isUnavailable: true)
         };
         using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
@@ -535,7 +535,7 @@ public sealed class BenchmarkDataTests
         using var ctx = NewContext(new FakeClient
         {
             StatusError =
-                new BenchmarkDataAdminException("Could not read the benchmark data status: database is locked.")
+                new GrpcAdminException("Could not read the benchmark data status: database is locked.")
         });
 
         var cut = ctx.Render<BenchmarkData>();
@@ -549,7 +549,7 @@ public sealed class BenchmarkDataTests
     {
         var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "boom")
         {
-            RecheckError = new BenchmarkDataAdminException("Could not recheck the benchmark data: boom")
+            RecheckError = new GrpcAdminException("Could not recheck the benchmark data: boom")
         };
         using var ctx = NewContext(client);
 
@@ -586,9 +586,9 @@ public sealed class BenchmarkDataTests
             _files = [];
         }
 
-        public BenchmarkDataAdminException? StatusError { get; init; }
+        public GrpcAdminException? StatusError { get; init; }
 
-        public BenchmarkDataAdminException? RecheckError { get; init; }
+        public GrpcAdminException? RecheckError { get; init; }
 
         public IReadOnlyList<BenchmarkSyncEvent> SyncEvents { get; init; } = [];
 
@@ -653,7 +653,7 @@ public sealed class BenchmarkDataTests
     /// </summary>
     private sealed class FakeVoterClient : ILlmRouterModelAdminClient
     {
-        public LlmRouterModelAdminException? StatusError { get; init; }
+        public GrpcAdminException? StatusError { get; init; }
 
         public IReadOnlyList<LlmRouterModelFileStatusInfo> Files { get; init; } = [];
 

@@ -164,7 +164,7 @@ public sealed class UpdateStore : IDisposable
             await _client.NotifyApplyStartingAsync(version: latestVersion, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (UpdateAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _logger?.LogWarning(exception: ex,
                 message: "Could not notify the router that an apply is starting; proceeding anyway.");
@@ -186,7 +186,7 @@ public sealed class UpdateStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (UpdateAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             _logger?.LogWarning(exception: ex, message: "Failed to {Action} from the router.", action);
@@ -200,7 +200,7 @@ public sealed class UpdateStore : IDisposable
     }
 
     /// <summary>Reflects a failed operation in the store's reachability state.</summary>
-    private void RecordFailure(UpdateAdminException ex)
+    private void RecordFailure(GrpcAdminException ex)
     {
         IsReachable = !ex.IsUnavailable;
         LastError = ex.Message;

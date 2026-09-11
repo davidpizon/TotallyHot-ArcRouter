@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
-/// <summary>
-/// Thrown when a benchmark-data management call fails. Carries a message fit to render in the Governance
-/// panel rather than a raw <see cref="RpcException"/>, mirroring <see cref="PriceSourceAdminException"/>.
-/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class BenchmarkDataAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="BenchmarkDataAdminException"/> class.</summary>
-    public BenchmarkDataAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
 /// <summary>The CodeRouterBench corpus's freshness relative to the published Hugging Face dataset.</summary>
 public enum BenchmarkDataAdminState
 {
@@ -125,8 +111,7 @@ public sealed record BenchmarkSyncEvent(
 /// so CI can unit-test it, exactly like <see cref="PriceSourceAdminClient"/>.
 /// </summary>
 public sealed class BenchmarkDataAdminClient
-    : GrpcAdminClientBase<Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient,
-            BenchmarkDataAdminException>,
+    : GrpcAdminClientBase<Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient>,
         IBenchmarkDataAdminClient
 {
     /// <summary>
@@ -304,13 +289,5 @@ public sealed class BenchmarkDataAdminClient
             Contract.BenchmarkSyncStage.Completed => BenchmarkSyncStageInfo.Completed,
             _ => BenchmarkSyncStageInfo.Failed
         };
-    }
-
-    /// <inheritdoc/>
-    protected override BenchmarkDataAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new BenchmarkDataAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

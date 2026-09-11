@@ -5,21 +5,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Thrown when a persisted-sessions read call fails. Carries a message fit to render in the Sessions tab
-/// rather than a raw <see cref="RpcException"/>, mirroring <see cref="RoutingModeAdminException"/>. See
-/// <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class PersistedSessionsClientException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="PersistedSessionsClientException"/> class.</summary>
-    public PersistedSessionsClientException(string message, Exception? innerException = null,
-        bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
-/// <summary>
 /// The result of a <see cref="IPersistedSessionsClient.ListAsync"/> call.
 /// </summary>
 /// <param name="TranscriptCaptureEnabled">
@@ -48,7 +33,7 @@ public interface IPersistedSessionsClient
 /// <see cref="RoutingModeAdminClient"/>.
 /// </summary>
 public sealed class PersistedSessionsClient
-    : GrpcAdminClientBase<Contract.TelemetryService.TelemetryServiceClient, PersistedSessionsClientException>,
+    : GrpcAdminClientBase<Contract.TelemetryService.TelemetryServiceClient>,
         IPersistedSessionsClient
 {
     /// <summary>
@@ -112,13 +97,5 @@ public sealed class PersistedSessionsClient
             InputTokens: t.HasInputTokens ? t.InputTokens : null,
             OutputTokens: t.HasOutputTokens ? t.OutputTokens : null,
             MemoryEntryId: t.HasMemoryEntryId ? t.MemoryEntryId : null);
-    }
-
-    /// <inheritdoc/>
-    protected override PersistedSessionsClientException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new PersistedSessionsClientException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

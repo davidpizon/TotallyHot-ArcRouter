@@ -97,7 +97,7 @@ public sealed class RegretHarnessAdminStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (RegretHarnessAdminException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
@@ -114,7 +114,7 @@ public sealed class RegretHarnessAdminStore : IDisposable
     /// Runs the harness, publishing stage progress into <see cref="CurrentStage"/> as it streams in and
     /// the final outcome once it completes. <see cref="IsRunning"/> is true for the duration.
     /// </summary>
-    /// <exception cref="RegretHarnessAdminException">The run could not be started or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The run could not be started or the router is unreachable.</exception>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         IsRunning = true;
@@ -145,7 +145,7 @@ public sealed class RegretHarnessAdminStore : IDisposable
             IsLoaded = true;
             LastError = null;
         }
-        catch (RegretHarnessAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -163,7 +163,7 @@ public sealed class RegretHarnessAdminStore : IDisposable
     /// Reflects a failed mutation in the store's state before the caller rethrows, so
     /// <see cref="IsReachable"/> keeps its documented meaning after a run and not only after a load.
     /// </summary>
-    private void RecordFailure(RegretHarnessAdminException ex)
+    private void RecordFailure(GrpcAdminException ex)
     {
         if (!ex.IsUnavailable) return;
 

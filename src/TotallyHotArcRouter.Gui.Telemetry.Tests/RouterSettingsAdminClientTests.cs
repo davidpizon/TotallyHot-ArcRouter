@@ -106,7 +106,7 @@ public class RouterSettingsAdminClientTests
         };
         using var client = new RouterSettingsAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ClearTranscriptsAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not clear the transcript data: the router is not reachable.");
@@ -122,7 +122,7 @@ public class RouterSettingsAdminClientTests
         };
         using var client = new RouterSettingsAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the router settings: the router is not reachable.");
@@ -140,7 +140,7 @@ public class RouterSettingsAdminClientTests
         };
         using var client = new RouterSettingsAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<RouterSettingsAdminException>(() => client.UpdateAsync(false, 1, false,
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() => client.UpdateAsync(false, 1, false,
             judgeModelName: string.Empty, false, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should()

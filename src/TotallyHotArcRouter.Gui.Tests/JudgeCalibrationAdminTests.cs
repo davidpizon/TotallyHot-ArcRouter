@@ -116,7 +116,7 @@ public sealed class JudgeCalibrationAdminTests
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
         using var ctx = NewContext(new FakeClient
-        { Error = new JudgeCalibrationAdminException(message: "nope", isUnavailable: true) });
+        { Error = new GrpcAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<JudgeCalibrationAdmin>();
 
@@ -130,7 +130,7 @@ public sealed class JudgeCalibrationAdminTests
         // A reachable RPC failure (the router answered, the call itself failed) must never be labeled
         // "Router unreachable" - that phrase is reserved for an actual connectivity failure.
         using var ctx = NewContext(new FakeClient
-        { Error = new JudgeCalibrationAdminException(message: "permission denied", isUnavailable: false) });
+        { Error = new GrpcAdminException(message: "permission denied", isUnavailable: false) });
 
         var cut = ctx.Render<JudgeCalibrationAdmin>();
 
@@ -147,7 +147,7 @@ public sealed class JudgeCalibrationAdminTests
         // recompute must never be left standing in for the one that would have replaced it.
         var client = new SequencedClient(
             MakeReport(cohorts: [MakeCohort(judgeModel: "stale-judge-model")]),
-            new JudgeCalibrationAdminException(message: "boom", isUnavailable: false));
+            new GrpcAdminException(message: "boom", isUnavailable: false));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<JudgeCalibrationAdmin>();
@@ -219,7 +219,7 @@ public sealed class JudgeCalibrationAdminTests
     /// <summary>Serves one fixed report, or throws one fixed error, counting calls.</summary>
     private sealed class FakeClient(JudgeCalibrationReportInfo? report = null) : IJudgeCalibrationAdminClient
     {
-        public JudgeCalibrationAdminException? Error { get; init; }
+        public GrpcAdminException? Error { get; init; }
 
         public int CallCount { get; private set; }
 
@@ -232,7 +232,7 @@ public sealed class JudgeCalibrationAdminTests
     }
 
     /// <summary>Succeeds on the first call and fails on every call after, for testing a failed refresh.</summary>
-    private sealed class SequencedClient(JudgeCalibrationReportInfo firstReport, JudgeCalibrationAdminException laterFailure)
+    private sealed class SequencedClient(JudgeCalibrationReportInfo firstReport, GrpcAdminException laterFailure)
         : IJudgeCalibrationAdminClient
     {
         private int _callCount;

@@ -4,26 +4,12 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Thrown when a routing-gate read or write call fails. Carries a message fit to render in a tray
-/// notification rather than a raw <see cref="RpcException"/>, mirroring <see cref="RoutingModeAdminException"/>.
-/// See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class RoutingGateAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="RoutingGateAdminException"/> class.</summary>
-    public RoutingGateAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
-/// <summary>
 /// Client for the proxy's <c>RoutingGateAdminService</c> - the tray's "Enable Routing"/"Disable Routing"
 /// toggle. Lives in this plain <c>net10.0</c> library rather than the Windows-only MAUI project so CI can
 /// unit-test it, exactly like <c>RoutingModeAdminClient</c>.
 /// </summary>
 public sealed class RoutingGateAdminClient
-    : GrpcAdminClientBase<Contract.RoutingGateAdminService.RoutingGateAdminServiceClient, RoutingGateAdminException>,
+    : GrpcAdminClientBase<Contract.RoutingGateAdminService.RoutingGateAdminServiceClient>,
         IRoutingGateAdminClient
 {
     /// <summary>
@@ -83,13 +69,5 @@ public sealed class RoutingGateAdminClient
             throw Wrap(ex: ex, unavailableMessage: "Could not reach the router: the router is not reachable.",
                 action: "Could not update the routing gate");
         }
-    }
-
-    /// <inheritdoc/>
-    protected override RoutingGateAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new RoutingGateAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

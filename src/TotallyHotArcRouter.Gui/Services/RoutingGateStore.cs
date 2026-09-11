@@ -202,14 +202,14 @@ public sealed class RoutingGateStore : IAsyncDisposable
     public event Action? Changed;
 
     /// <summary>Enables routing, returning the confirmed post-mutation state.</summary>
-    /// <exception cref="RoutingGateAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     public Task<bool> EnableAsync(CancellationToken cancellationToken = default)
     {
         return SetAsync(true, cancellationToken: cancellationToken);
     }
 
     /// <summary>Disables routing, returning the confirmed post-mutation state.</summary>
-    /// <exception cref="RoutingGateAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     public Task<bool> DisableAsync(CancellationToken cancellationToken = default)
     {
         return SetAsync(false, cancellationToken: cancellationToken);
@@ -237,7 +237,7 @@ public sealed class RoutingGateStore : IAsyncDisposable
                 var enabled = await _client.GetAsync(cancellationToken).ConfigureAwait(false);
                 UpdateState(connectionState: RouterConnectionState.Connected, null, isEnabled: enabled);
             }
-            catch (RoutingGateAdminException ex)
+            catch (GrpcAdminException ex)
             {
                 // IsUnavailable is the whole point of this branch: only a genuine "nothing is listening"
                 // failure means the router is down. Everything else - a rejected token, a permissions

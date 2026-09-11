@@ -129,7 +129,7 @@
         {
             await Store.RetrainAsync();
         }
-        catch (LogRegModelAdminException)
+        catch (GrpcAdminException)
         {
             // Swallowed: the store already recorded IsReachable/LastError for the unreachable case, and a
             // rejection's message is rendered from LastRetrainMessage/LastError by the markup above.

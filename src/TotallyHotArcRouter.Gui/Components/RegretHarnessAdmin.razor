@@ -127,7 +127,7 @@
         {
             await Store.RunAsync();
         }
-        catch (RegretHarnessAdminException)
+        catch (GrpcAdminException)
         {
             // Swallowed: the store already recorded IsReachable/LastError for the unreachable case, and a
             // rejection's message is rendered from LastRunMessage/LastError by the markup above.

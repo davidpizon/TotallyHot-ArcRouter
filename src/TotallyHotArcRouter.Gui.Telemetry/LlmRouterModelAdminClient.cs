@@ -4,20 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
-/// <summary>
-/// Thrown when a llm_router model management call fails. Carries a message fit to render in the
-/// Governance panel rather than a raw <see cref="RpcException"/>, mirroring
-/// <see cref="BenchmarkDataAdminException"/>. See <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class LlmRouterModelAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="LlmRouterModelAdminException"/> class.</summary>
-    public LlmRouterModelAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
 /// <summary>One of the llm_router voter's 5 model files, as rendered by the "Local Voter Model" section.</summary>
 /// <param name="FileName">The file's name.</param>
 /// <param name="Synced">Whether this file is present in the active model's cache directory.</param>
@@ -113,11 +99,11 @@ public sealed record LlmRouterModelSyncEvent(
 public interface ILlmRouterModelAdminClient
 {
     /// <summary>Reads the active model's base URL and every file's cache status.</summary>
-    /// <exception cref="LlmRouterModelAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<LlmRouterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Switches the active model to <paramref name="baseUrl"/>. Does not download.</summary>
-    /// <exception cref="LlmRouterModelAdminException">The call failed, was rejected, or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed, was rejected, or the router is unreachable.</exception>
     Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -125,7 +111,7 @@ public interface ILlmRouterModelAdminClient
     /// <see cref="LlmRouterModelSyncEvent"/> per stage transition, plus one final event carrying the
     /// aggregate status once every file has been attempted.
     /// </summary>
-    /// <exception cref="LlmRouterModelAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     IAsyncEnumerable<LlmRouterModelSyncEvent> SyncAsync(CancellationToken cancellationToken = default);
 }
 
@@ -136,8 +122,7 @@ public interface ILlmRouterModelAdminClient
 /// <see cref="BenchmarkDataAdminClient"/>.
 /// </summary>
 public sealed class LlmRouterModelAdminClient
-    : GrpcAdminClientBase<Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient,
-            LlmRouterModelAdminException>,
+    : GrpcAdminClientBase<Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient>,
         ILlmRouterModelAdminClient
 {
     /// <summary>
@@ -249,7 +234,7 @@ public sealed class LlmRouterModelAdminClient
     }
 
     /// <summary>Converts a gRPC-contract sync stream message into the client's <see cref="LlmRouterModelSyncEvent"/>.</summary>
-    /// <exception cref="LlmRouterModelAdminException">
+    /// <exception cref="GrpcAdminException">
     /// <paramref name="wire"/> carries none of <c>Plan</c>, <c>Progress</c>, or <c>FinalStatus</c> - a
     /// malformed message the wire contract's <c>oneof</c> should never actually produce.
     /// </exception>
@@ -280,7 +265,7 @@ public sealed class LlmRouterModelAdminClient
                         Error: wire.Progress.HasError ? wire.Progress.Error : null,
                         TotalBytes: wire.Progress.HasTotalBytes ? wire.Progress.TotalBytes : null),
                     null),
-            _ => throw new LlmRouterModelAdminException("llm_router model sync stream sent an empty message")
+            _ => throw new GrpcAdminException("llm_router model sync stream sent an empty message")
         };
     }
 
@@ -294,13 +279,5 @@ public sealed class LlmRouterModelAdminClient
             Contract.LlmRouterModelSyncStage.Completed => LlmRouterModelSyncStageInfo.Completed,
             _ => LlmRouterModelSyncStageInfo.Failed
         };
-    }
-
-    /// <inheritdoc/>
-    protected override LlmRouterModelAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new LlmRouterModelAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 }

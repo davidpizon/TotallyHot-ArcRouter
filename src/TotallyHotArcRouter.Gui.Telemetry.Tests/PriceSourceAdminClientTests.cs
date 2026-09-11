@@ -204,7 +204,7 @@ public class PriceSourceAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ListAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the price sources: the router is not reachable.");
@@ -226,7 +226,7 @@ public class PriceSourceAdminClientTests
         };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetEnabledAsync(name: "nope", true, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.IsUnavailable.Should().BeFalse();
@@ -244,7 +244,7 @@ public class PriceSourceAdminClientTests
         };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetEnabledAsync(name: "nope", true, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not enable 'nope': No price source named 'nope' exists.");
@@ -257,7 +257,7 @@ public class PriceSourceAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetEnabledAsync(name: "litellm", false, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not disable 'litellm': boom");
@@ -270,7 +270,7 @@ public class PriceSourceAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.RefreshAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not refresh the price sources: the router is not reachable.");
@@ -338,7 +338,7 @@ public class PriceSourceAdminClientTests
         };
         using var client = new PriceSourceAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<PriceSourceAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ReorderAsync(namesInPriorityOrder: ["litellm"],
                 cancellationToken: TestContext.Current.CancellationToken));
 

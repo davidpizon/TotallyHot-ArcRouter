@@ -78,7 +78,7 @@ public sealed class RoutingModeStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (RoutingModeAdminException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = false;
             LastError = ex.Message;

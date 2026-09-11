@@ -98,7 +98,7 @@ public sealed class ClusterModelAdminTests
     public void Renders_an_unreachable_state_when_the_router_cannot_be_reached()
     {
         using var ctx = NewContext(new FakeClient
-        { Error = new ClusterModelAdminException(message: "nope", isUnavailable: true) });
+        { Error = new GrpcAdminException(message: "nope", isUnavailable: true) });
 
         var cut = ctx.Render<ClusterModelAdmin>();
 
@@ -109,7 +109,7 @@ public sealed class ClusterModelAdminTests
     [Fact]
     public void Retry_reloads_after_the_router_becomes_reachable()
     {
-        var client = new FakeClient { Error = new ClusterModelAdminException(message: "nope", isUnavailable: true) };
+        var client = new FakeClient { Error = new GrpcAdminException(message: "nope", isUnavailable: true) };
         using var ctx = NewContext(client);
         var cut = ctx.Render<ClusterModelAdmin>();
         cut.Markup.Should().Contain("Router unreachable");
@@ -180,7 +180,7 @@ public sealed class ClusterModelAdminTests
     {
         public ClusterModelStatusInfo? Status { get; set; } = status;
 
-        public ClusterModelAdminException? Error { get; set; }
+        public GrpcAdminException? Error { get; set; }
 
         public IReadOnlyList<ClusterRetrainEvent> RetrainEvents { get; set; } = [];
 

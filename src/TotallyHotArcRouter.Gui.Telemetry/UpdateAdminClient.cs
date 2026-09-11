@@ -4,24 +4,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Why an <see cref="IUpdateAdminClient"/> call failed - mirrors <see cref="LlmRouterModelAdminException"/>'s
-/// "flag Unavailable distinctly" shape: the Router being down is an ordinary state for a GUI that can
-/// outlive it, not the same kind of failure as a rejected request. See
-/// <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class UpdateAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="UpdateAdminException"/> class.</summary>
-    /// <param name="message">A plain-language description of the failure.</param>
-    /// <param name="innerException">The underlying <see cref="RpcException"/>, if any.</param>
-    /// <param name="isUnavailable">Whether the failure was specifically the router being unreachable.</param>
-    public UpdateAdminException(string message, Exception? innerException = null, bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
-/// <summary>
 /// Why a check could not resolve a definite answer. Mirrors
 /// <c>TotallyHot.ArcRouter.Update.ReleaseCheckUnavailableReason</c>.
 /// </summary>
@@ -90,11 +72,11 @@ public sealed record NotifyApplyStartingInfo(bool Acknowledged);
 public interface IUpdateAdminClient
 {
     /// <summary>Reads the last-known check outcome.</summary>
-    /// <exception cref="UpdateAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Forces an immediate re-check and returns the fresh outcome.</summary>
-    /// <exception cref="UpdateAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<UpdateStatusInfo> CheckNowAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -104,7 +86,7 @@ public interface IUpdateAdminClient
     /// from a prior <see cref="GetStatusAsync"/>/<see cref="CheckNowAsync"/> result and proceeds with the
     /// apply even if this call fails to reach the Router.
     /// </summary>
-    /// <exception cref="UpdateAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version,
         CancellationToken cancellationToken = default);
 }
@@ -116,7 +98,7 @@ public interface IUpdateAdminClient
 /// Windows-only MAUI project so CI can unit-test it, exactly like <see cref="LlmRouterModelAdminClient"/>.
 /// </summary>
 public sealed class UpdateAdminClient
-    : GrpcAdminClientBase<Contract.UpdateAdminService.UpdateAdminServiceClient, UpdateAdminException>,
+    : GrpcAdminClientBase<Contract.UpdateAdminService.UpdateAdminServiceClient>,
         IUpdateAdminClient
 {
     /// <summary>
@@ -220,12 +202,5 @@ public sealed class UpdateAdminClient
             Contract.UpdateUnavailableReason.NetworkOrApiFailure => UpdateUnavailableReasonInfo.NetworkOrApiFailure,
             _ => UpdateUnavailableReasonInfo.None
         };
-    }
-
-    /// <inheritdoc/>
-    protected override UpdateAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new UpdateAdminException(message: message, innerException: innerException, isUnavailable: isUnavailable);
     }
 }

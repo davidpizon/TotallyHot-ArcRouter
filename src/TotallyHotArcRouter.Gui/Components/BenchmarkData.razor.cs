@@ -326,7 +326,7 @@ public partial class BenchmarkData
             await operation();
             return true;
         }
-        catch (BenchmarkDataAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _opError = ex.Message;
             return false;
@@ -409,7 +409,7 @@ public partial class BenchmarkData
             await operation();
             return true;
         }
-        catch (LlmRouterModelAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _voterOpError = ex.Message;
             return false;

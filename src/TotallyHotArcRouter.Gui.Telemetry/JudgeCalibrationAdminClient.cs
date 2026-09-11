@@ -3,21 +3,6 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
-/// <summary>
-/// Thrown when a judge-calibration call fails. Carries a message fit to render in the Governance panel
-/// rather than a raw <see cref="RpcException"/>, mirroring <see cref="RegretHarnessAdminException"/>. See
-/// <see cref="GrpcAdminException.IsUnavailable"/>'s remarks.
-/// </summary>
-public sealed class JudgeCalibrationAdminException : GrpcAdminException
-{
-    /// <summary>Initializes a new instance of the <see cref="JudgeCalibrationAdminException"/> class.</summary>
-    public JudgeCalibrationAdminException(string message, Exception? innerException = null,
-        bool isUnavailable = false)
-        : base(message: message, innerException: innerException, isUnavailable: isUnavailable)
-    {
-    }
-}
-
 /// <summary>Whether one gate condition passed, failed, lacks data, or can never be evaluated.</summary>
 public enum JudgeCalibrationVerdictKindInfo
 {
@@ -135,8 +120,7 @@ public sealed record JudgeCalibrationReportInfo(
 /// <see cref="RegretHarnessAdminClient"/>.
 /// </summary>
 public sealed class JudgeCalibrationAdminClient
-    : GrpcAdminClientBase<Contract.JudgeCalibrationAdminService.JudgeCalibrationAdminServiceClient,
-            JudgeCalibrationAdminException>,
+    : GrpcAdminClientBase<Contract.JudgeCalibrationAdminService.JudgeCalibrationAdminServiceClient>,
         IJudgeCalibrationAdminClient
 {
     /// <summary>
@@ -183,14 +167,6 @@ public sealed class JudgeCalibrationAdminClient
         {
             throw Wrap(ex: ex, action: "Could not read the judge calibration report");
         }
-    }
-
-    /// <inheritdoc/>
-    protected override JudgeCalibrationAdminException CreateException(string message, Exception? innerException,
-        bool isUnavailable)
-    {
-        return new JudgeCalibrationAdminException(message: message, innerException: innerException,
-            isUnavailable: isUnavailable);
     }
 
     /// <summary>Converts a gRPC-contract verdict into the client's <see cref="JudgeCalibrationVerdictInfo"/>.</summary>

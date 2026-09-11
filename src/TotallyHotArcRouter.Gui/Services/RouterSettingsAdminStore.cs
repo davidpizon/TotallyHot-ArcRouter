@@ -84,7 +84,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (RouterSettingsAdminException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
@@ -111,7 +111,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// <param name="iceScoreEnabled">Whether Phase Q3's ICE-Score usefulness grader is enabled.</param>
     /// <param name="raceEnabled">Whether Phase Q3's RACE readability/maintainability grader is enabled.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <exception cref="RouterSettingsAdminException">The save was rejected or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The save was rejected or the router is unreachable.</exception>
     public async Task UpdateAsync(
         bool adaptiveRoutingEnabled,
         int embeddingMemoryCapacity,
@@ -139,7 +139,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
             IsLoaded = true;
             LastError = null;
         }
-        catch (RouterSettingsAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -157,7 +157,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// </summary>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The number of rows deleted.</returns>
-    /// <exception cref="RouterSettingsAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     public async Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
     {
         IsSaving = true;
@@ -170,7 +170,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
             LastError = null;
             return rowsDeleted;
         }
-        catch (RouterSettingsAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -190,7 +190,7 @@ public sealed class RouterSettingsAdminStore : IDisposable
     /// Only a connectivity failure moves <see cref="IsReachable"/>. A rejection reached the router and is
     /// the caller's inline error to render; treating it as unreachable would misstate the cause.
     /// </remarks>
-    private void RecordFailure(RouterSettingsAdminException ex)
+    private void RecordFailure(GrpcAdminException ex)
     {
         LastError = ex.Message;
         if (!ex.IsUnavailable) return;

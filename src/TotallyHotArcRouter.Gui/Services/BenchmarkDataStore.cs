@@ -143,7 +143,7 @@ public sealed class BenchmarkDataStore : IDisposable
             IsReachable = true;
             LastError = null;
         }
-        catch (BenchmarkDataAdminException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
@@ -161,14 +161,14 @@ public sealed class BenchmarkDataStore : IDisposable
     /// rethrows: a recheck failing means "the thing you just asked for did not happen", which the panel
     /// has to be told inline, same split as <see cref="PriceSourceStore.SetEnabledAsync"/>.
     /// </summary>
-    /// <exception cref="BenchmarkDataAdminException">The recheck failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The recheck failed or the router is unreachable.</exception>
     public async Task RecheckAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             Status = await _client.RecheckAsync(cancellationToken);
         }
-        catch (BenchmarkDataAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -185,7 +185,7 @@ public sealed class BenchmarkDataStore : IDisposable
     /// <see cref="SyncProgress"/> as it streams in and the final status once every file has been
     /// attempted. <see cref="IsSyncing"/> is true for the duration.
     /// </summary>
-    /// <exception cref="BenchmarkDataAdminException">The sync could not be started or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The sync could not be started or the router is unreachable.</exception>
     public async Task SyncAsync(CancellationToken cancellationToken = default)
     {
         IsSyncing = true;
@@ -229,7 +229,7 @@ public sealed class BenchmarkDataStore : IDisposable
             IsLoaded = true;
             LastError = null;
         }
-        catch (BenchmarkDataAdminException ex)
+        catch (GrpcAdminException ex)
         {
             RecordFailure(ex);
             throw;
@@ -252,7 +252,7 @@ public sealed class BenchmarkDataStore : IDisposable
     /// the panel's inline error to render; treating it as unreachable would replace the whole panel with a
     /// "router down" state that is both wrong and hides the actual message.
     /// </remarks>
-    private void RecordFailure(BenchmarkDataAdminException ex)
+    private void RecordFailure(GrpcAdminException ex)
     {
         if (!ex.IsUnavailable) return;
 

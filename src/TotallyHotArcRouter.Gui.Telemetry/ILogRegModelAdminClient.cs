@@ -8,13 +8,13 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 public interface ILogRegModelAdminClient
 {
     /// <summary>Reads the trained logreg model's current status plus the retrain threshold/live-sample-weight context.</summary>
-    /// <exception cref="LogRegModelAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<LogRegModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Runs a retrain, yielding one <see cref="LogRegRetrainEvent"/> per OOD bootstrap-embedding progress
     /// tick, plus one final event carrying the outcome and the fresh post-mutation status.
     /// </summary>
-    /// <exception cref="LogRegModelAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     IAsyncEnumerable<LogRegRetrainEvent> RetrainAsync(CancellationToken cancellationToken = default);
 }

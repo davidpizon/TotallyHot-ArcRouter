@@ -238,7 +238,7 @@ public partial class SettingsModal
             _clearTranscriptsMessage = rowsDeleted == 1 ? "Cleared 1 row." : $"Cleared {rowsDeleted} rows.";
             _clearTranscriptsFailed = false;
         }
-        catch (RouterSettingsAdminException)
+        catch (GrpcAdminException)
         {
             _clearTranscriptsMessage = RouterSettingsStore.IsReachable
                 ? RouterSettingsStore.LastError
@@ -331,7 +331,7 @@ public partial class SettingsModal
             // list, the way the pre-instant-save footer button used to.
             if (RouterSettingsStore.Settings is { } saved) ApplyRouterSettings(saved);
         }
-        catch (RouterSettingsAdminException)
+        catch (GrpcAdminException)
         {
             _routerSettingsMessage = RouterSettingsStore.IsReachable
                 ? RouterSettingsStore.LastError
@@ -404,7 +404,7 @@ public partial class SettingsModal
         {
             await UpdateStore.CheckNowAsync();
         }
-        catch (UpdateAdminException)
+        catch (GrpcAdminException)
         {
             // UpdateStore already recorded IsReachable/LastError; the panel reads those via
             // UpdateStore.Status remaining unchanged on failure, so nothing further to do here.

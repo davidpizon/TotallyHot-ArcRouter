@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 public interface IRouterSettingsAdminClient
 {
     /// <summary>Reads the router settings' currently effective values.</summary>
-    /// <exception cref="RouterSettingsAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<RouterSettingsInfo> GetAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Validates and persists every setting, returning the fresh post-mutation effective values.</summary>
@@ -24,7 +24,7 @@ public interface IRouterSettingsAdminClient
     /// <param name="iceScoreEnabled">Whether Phase Q3's ICE-Score usefulness grader is enabled.</param>
     /// <param name="raceEnabled">Whether Phase Q3's RACE readability/maintainability grader is enabled.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <exception cref="RouterSettingsAdminException">
+    /// <exception cref="GrpcAdminException">
     /// The call was rejected (e.g. an out-of-range capacity, or an ineligible
     /// judge model) or the router is unreachable.
     /// </exception>
@@ -42,6 +42,6 @@ public interface IRouterSettingsAdminClient
     /// <summary>Deletes every captured transcript row - the Transcription Capture row's "Clear" action.</summary>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The number of rows deleted.</returns>
-    /// <exception cref="RouterSettingsAdminException">The call failed or the router is unreachable.</exception>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default);
 }

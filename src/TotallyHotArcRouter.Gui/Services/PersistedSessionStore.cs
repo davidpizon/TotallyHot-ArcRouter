@@ -101,7 +101,7 @@ public sealed class PersistedSessionStore : IDisposable
             Sessions = [.. PersistedSessionAggregator.Aggregate(result.Transcripts).Select(PersistedSessionMapper.ToModel)];
             IsReachable = true;
         }
-        catch (PersistedSessionsClientException ex)
+        catch (GrpcAdminException ex)
         {
             IsReachable = false;
             _logger?.LogWarning(exception: ex, message: "Failed to load persisted sessions from the router.");
