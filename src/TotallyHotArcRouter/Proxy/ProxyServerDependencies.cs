@@ -162,12 +162,15 @@ public sealed record ProxyServerDependencies
 /// service type and never constructs it.
 /// </para>
 /// <para>
-/// Implemented explicitly by each record, so a group's public surface is unchanged and callers building one
-/// see no new members. See
+/// Public because C# forbids a public record from listing a less-accessible interface in its base list even
+/// when every member is implemented explicitly (CS0061) - the interface itself must be as accessible as the
+/// records that implement it. It stays effectively invisible to callers anyway: each record implements both
+/// methods explicitly, so a group's public surface is unchanged and callers building one see no new members.
+/// See
 /// <see href="../../../docs/adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md">ADR-0010</see>.
 /// </para>
 /// </remarks>
-internal interface IAdminServiceModule
+public interface IAdminServiceModule
 {
     /// <summary>Registers this feature's collaborators into the inner Kestrel host's private container.</summary>
     /// <param name="services">The inner host's service collection.</param>

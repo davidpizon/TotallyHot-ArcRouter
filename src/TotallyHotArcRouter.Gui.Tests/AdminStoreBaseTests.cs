@@ -84,6 +84,30 @@ public sealed class AdminStoreBaseTests
     }
 
     [Fact]
+    public async Task A_successful_load_runs_beforeNotify_before_its_single_notification()
+    {
+        var store = new TestStore();
+        var isBusy = true;
+        var notifications = 0;
+        bool? isBusySeenBySubscriber = null;
+        store.Changed += () =>
+        {
+            notifications++;
+            isBusySeenBySubscriber = isBusy;
+        };
+
+        // Mirrors how JudgeCalibrationAdminStore.LoadAsync/UpdateStore.RunBusyAsync clear their own
+        // transient IsLoading/IsBusy flag: passing it as beforeNotify folds that into this call's one
+        // notification instead of a separate wrapper-owned notify that would either fire before this one
+        // (an intermediate "finished but still busy" state) or need a second Changed subscription entirely.
+        await store.LoadAsync(beforeNotify: () => isBusy = false);
+
+        notifications.Should().Be(1);
+        isBusySeenBySubscriber.Should().BeFalse(
+            "beforeNotify must run before Changed fires, not after");
+    }
+
+    [Fact]
     public void A_rejected_mutation_does_not_blank_the_panel_but_an_unavailable_one_does()
     {
         var store = new TestStore();
@@ -99,6 +123,38 @@ public sealed class AdminStoreBaseTests
         store.Fail(Unavailable());
         store.IsReachable.Should().BeFalse();
         store.LastError.Should().Be("the router is not reachable.");
+    }
+
+    [Fact]
+    public void A_rejection_after_a_real_outage_restores_reachability_and_clears_the_stale_message()
+    {
+        var store = new TestStore();
+        store.Fail(Unavailable());
+        store.IsReachable.Should().BeFalse();
+        store.LastError.Should().Be("the router is not reachable.");
+
+        // The router just answered - however badly - which disproves the outage this store is still
+        // reporting. Leaving IsReachable false or the old message standing here is exactly the stale
+        // "Router unreachable" panel a live router must never show.
+        store.Fail(Rejected());
+
+        store.IsReachable.Should().BeTrue("a rejection is proof the router answered, overriding the outage");
+        store.LastError.Should().BeNull("the stale outage message must not survive next to proof it is wrong");
+    }
+
+    [Fact]
+    public void Repeated_identical_unavailable_failures_notify_only_once()
+    {
+        var store = new TestStore();
+        var notifications = 0;
+        store.Changed += () => notifications++;
+
+        store.Fail(Unavailable());
+        store.Fail(Unavailable());
+        store.Fail(Unavailable());
+
+        notifications.Should().Be(1,
+            "nothing about the store's observable state changed on the second or third identical failure");
     }
 
     [Fact]
@@ -145,7 +201,7 @@ public sealed class AdminStoreBaseTests
 
         public string? Value { get; private set; } = "stale";
 
-        public Task LoadAsync(bool clearValueOnFailure = false)
+        public Task LoadAsync(bool clearValueOnFailure = false, Action? beforeNotify = null)
         {
             return LoadGuardedAsync(
                 _ =>
@@ -156,7 +212,8 @@ public sealed class AdminStoreBaseTests
                 },
                 "do the thing",
                 CancellationToken.None,
-                clearValueOnFailure ? () => Value = null : null);
+                onFailure: clearValueOnFailure ? () => Value = null : null,
+                beforeNotify: beforeNotify);
         }
 
         public void Fail(GrpcAdminException exception, bool recordRejectionMessage = false)

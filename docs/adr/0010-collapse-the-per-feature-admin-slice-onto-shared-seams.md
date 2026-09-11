@@ -65,10 +65,11 @@ Amendment 1 rule 3 warns about, and it is worth recording that the catalog's own
 about the cause. Option 3 also reuses the `ProviderRegistration` precedent rather than inventing a
 seam.
 
-`TelemetryGrpcService`, `RoutingModeAdminGrpcService`, `UpdateAdminGrpcService`, and
-`RoutingGateAdminGrpcService` stay mapped explicitly and unconditionally. They are core operational
-state rather than optional feature groups, and `RoutingModeAdminGrpcService` carries a deliberate
-`RoutingOptions` fallback; folding them into the conditional loop would change *when* they map.
+`TelemetryGrpcService`, `RoutingModeAdminGrpcService`, `UpdateAdminGrpcService`,
+`RoutingGateAdminGrpcService`, `RegretHarnessAdminGrpcService`, and `JudgeCalibrationAdminGrpcService`
+stay mapped explicitly and unconditionally. They are core operational state rather than optional
+feature groups, and `RoutingModeAdminGrpcService` carries a deliberate `RoutingOptions` fallback;
+folding them into the conditional loop would change *when* they map.
 
 ### Amendment 1 (2026-09-11): the store base is not generic over its exception, and covers 11 stores
 
@@ -94,8 +95,9 @@ speculative generality — the exact smell this ADR exists to remove. It was dro
 `GrpcAdminStoreBase<TClient>` (an intermediate type that existed only to bind it) was folded into
 `AdminStoreBase<TClient>`.
 
-**ADR-0007's transport split is still honored, and more plainly than the generic managed:** the base
-is documented as the gRPC stores' seam, and the HTTP stores are simply not part of it.
+**ADR-0007's transport split is still honored, and more plainly than the discarded generic base would
+have honored it:** the base is documented as the gRPC stores' seam, and the HTTP stores are simply not
+part of it.
 
 ### Consequences
 
@@ -153,8 +155,10 @@ is documented as the gRPC stores' seam, and the HTTP stores are simply not part 
 - Good, because it shrinks the marginal cost, which is the cost that was actually observed.
 - Good, because `GrpcAdminClientBase` already proved this exact move on the client half of the same
   slice, so the pattern is established and its tests are the regression net.
-- Good, because the generic-over-exception base keeps ADR-0007's transport split explicit in the type
-  system rather than papering over it.
+- Good, because a shared store base keeps ADR-0007's transport split explicit — the base binds
+  `GrpcAdminException` and simply has no HTTP-backed member, rather than papering over the split (see
+  Amendment 1: the originally-specified `AdminStoreBase<TClient, TException>`, generic over the
+  exception so both transports could share it, is not what shipped).
 - Bad, because it touches all 11 features at once across three assemblies — a wide, if shallow, diff.
 - Bad, because a module that silently fails to register is invisible to the unit suite, so it forces a
   manual smoke of every Governance panel rather than a sampled one.

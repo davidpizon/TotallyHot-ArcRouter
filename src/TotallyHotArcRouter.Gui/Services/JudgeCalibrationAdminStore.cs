@@ -83,20 +83,16 @@ public sealed class JudgeCalibrationAdminStore : AdminStoreBase<IJudgeCalibratio
         IsLoading = true;
         NotifyChanged();
 
-        try
-        {
-            await LoadGuardedAsync(
-                async ct => Report = await Client.GetReportAsync(ct),
-                "load the judge calibration report",
-                cancellationToken,
-                () => Report = null);
-        }
-        finally
-        {
-            // In a finally so a failed load re-enables the Refresh button rather than leaving it stuck
-            // disabled, matching RegretHarnessAdminStore.RunAsync's reasoning.
-            IsLoading = false;
-            NotifyChanged();
-        }
+        await LoadGuardedAsync(
+            async ct => Report = await Client.GetReportAsync(ct),
+            "load the judge calibration report",
+            cancellationToken,
+            onFailure: () => Report = null,
+            // Clearing IsLoading here, right before LoadGuardedAsync's own completion notification, means
+            // that notification is also this call's "the Refresh button can re-enable" notification -
+            // instead of a third one carrying an intermediate "finished but still loading" state that no
+            // subscriber should ever see. Runs whether the load succeeds or fails, matching
+            // RegretHarnessAdminStore.RunAsync's reasoning for re-enabling on failure too.
+            beforeNotify: () => IsLoading = false);
     }
 }

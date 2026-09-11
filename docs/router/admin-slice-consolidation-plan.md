@@ -1,7 +1,8 @@
 # Admin-Slice Consolidation Plan
 
-**Status: Phases 0-3 implemented (2026-09-11).** One item outstanding — the manual golden-path smoke,
-see [Validation gate](#validation-gate).
+**Status: Phases 0-3 implemented (2026-09-11).** Two items outstanding, per the end condition below:
+the manual golden-path smoke (see [Validation gate](#validation-gate)) and one subsequent admin knob
+added through the new seams.
 
 **End condition (stated up front, per [ADR-0008 Amendment 1](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)
 rule 4):** this document closes when the smoke below has run **and one subsequent admin knob has been

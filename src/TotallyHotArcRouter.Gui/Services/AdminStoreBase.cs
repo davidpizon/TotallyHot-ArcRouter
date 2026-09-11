@@ -144,12 +144,20 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     /// report is recomputed on every read). Running it before the notification is the point: a subscriber
     /// must never be woken to render data this store has already decided to distrust.
     /// </param>
+    /// <param name="beforeNotify">
+    /// Optional cleanup to run, on success or failure, immediately before this call's own
+    /// <see cref="Changed"/> notification - for a wrapper that holds a transient flag (<c>IsLoading</c>,
+    /// <c>IsBusy</c>) around the call and would otherwise have to notify again itself just to clear it,
+    /// publishing an extra, misleading "finished but still loading" state in between. Runs after
+    /// <paramref name="onFailure"/> on the failure path.
+    /// </param>
     /// <returns>Whether the read succeeded.</returns>
     protected async Task<bool> LoadGuardedAsync(
         Func<CancellationToken, Task> operation,
         string description,
         CancellationToken cancellationToken,
-        Action? onFailure = null)
+        Action? onFailure = null,
+        Action? beforeNotify = null)
     {
         ArgumentNullException.ThrowIfNull(operation);
 
@@ -176,6 +184,7 @@ public abstract class AdminStoreBase<TClient> : IDisposable
         finally
         {
             IsLoaded = true;
+            beforeNotify?.Invoke();
             NotifyChanged();
         }
     }
@@ -198,8 +207,15 @@ public abstract class AdminStoreBase<TClient> : IDisposable
 
     /// <summary>
     /// Reflects a failed mutation in this store's state before the caller rethrows, so
-    /// <see cref="IsReachable"/> keeps its documented meaning after a mutation and not only after a load.
-    /// Raises <see cref="Changed"/> only when it actually changed something.
+    /// <see cref="IsReachable"/> keeps its documented meaning after a mutation and not only after a load. A
+    /// <em>rejection</em> never moves <see cref="IsReachable"/> on its own - starting unreachable stays
+    /// unreachable, starting reachable stays reachable - with one exception: if the store is currently
+    /// unreachable <em>because an earlier call actually failed to reach the router</em> (as opposed to
+    /// simply never having succeeded yet), this rejection disproves that outage - the router answered,
+    /// however badly - so it restores <see cref="IsReachable"/> to <see langword="true"/> and replaces the
+    /// stale outage message rather than leaving both standing next to proof they are wrong. Raises
+    /// <see cref="Changed"/> only when something actually changed, so a run of identical failures does not
+    /// re-render the panel on every retry.
     /// </summary>
     /// <param name="exception">The mutation's failure.</param>
     /// <param name="description">
@@ -217,14 +233,34 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     {
         ArgumentNullException.ThrowIfNull(exception);
 
-        if (recordRejectionMessage) LastError = exception.Message;
+        if (!exception.IsUnavailable)
+        {
+            // LastError being set here (while IsReachable is false) is the tell for "a real outage", not
+            // "never yet contacted" - the virgin state is false/null, never false/non-null.
+            if (!IsReachable && LastError is not null)
+            {
+                IsReachable = true;
+                LastError = recordRejectionMessage ? exception.Message : null;
+                NotifyChanged();
+                return;
+            }
 
-        if (!exception.IsUnavailable) return;
+            if (recordRejectionMessage && LastError != exception.Message)
+            {
+                LastError = exception.Message;
+                NotifyChanged();
+            }
+
+            return;
+        }
+
+        var alreadyUnreachableWithSameError = !IsReachable && LastError == exception.Message;
 
         IsReachable = false;
         LastError = exception.Message;
         Logger?.LogWarning(exception: exception,
             message: "The router became unreachable during {Operation}.", description);
-        NotifyChanged();
+
+        if (!alreadyUnreachableWithSameError) NotifyChanged();
     }
 }

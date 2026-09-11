@@ -164,15 +164,10 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
         IsBusy = true;
         NotifyChanged();
 
-        try
-        {
-            await LoadGuardedAsync(operation: operation, description: description,
-                cancellationToken: cancellationToken);
-        }
-        finally
-        {
-            IsBusy = false;
-            NotifyChanged();
-        }
+        // Clearing IsBusy here, right before LoadGuardedAsync's own completion notification, means that
+        // notification also carries "the buttons can re-enable" - instead of a third notification carrying
+        // an intermediate "finished but still busy" state that no subscriber should ever see.
+        await LoadGuardedAsync(operation: operation, description: description,
+            cancellationToken: cancellationToken, beforeNotify: () => IsBusy = false);
     }
 }
