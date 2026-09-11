@@ -41,7 +41,7 @@ public sealed class TranscriptScoreObserver : IQualityScoreObserver
 
         var score = Math.Clamp(value: result.UnifiedScore, 0.0, 1.0);
         await _store.UpdateOutcomeAsync(correlationId: result.RequestCorrelationId, score: score,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            isJudgeScored: result.JudgeScore.HasValue, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug(

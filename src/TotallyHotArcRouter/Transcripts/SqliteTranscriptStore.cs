@@ -99,7 +99,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     }
 
     /// <inheritdoc/>
-    public Task UpdateOutcomeAsync(string correlationId, double? score, CancellationToken cancellationToken = default)
+    public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
         cancellationToken.ThrowIfCancellationRequested();
@@ -112,8 +113,10 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         // Updates every matching row, not just the newest - in the ordinary case there is exactly one
         // (correlation ids are per-request), and this avoids a second query to find "the" row when more
         // than one somehow shares an id.
-        command.CommandText = "UPDATE request_transcripts SET score = $score WHERE correlation_id = $correlationId;";
+        command.CommandText =
+            "UPDATE request_transcripts SET score = $score, is_judge_scored = $isJudgeScored WHERE correlation_id = $correlationId;";
         command.Parameters.AddWithValue(parameterName: "$score", value: (object?)score ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$isJudgeScored", value: isJudgeScored ? 1 : 0);
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: correlationId);
         command.ExecuteNonQuery();
 
@@ -226,7 +229,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                                   id, correlation_id, created_at_utc, requested_model, routed_model, dimension, difficulty,
                                   language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
                                   input_tokens, output_tokens, memory_entry_id, dim_best_model, untrained_baseline_model,
-                                  untrained_baseline_predicted_score
+                                  untrained_baseline_predicted_score, is_judge_scored
                               FROM request_transcripts
                               WHERE id = $id;
                               """;
@@ -475,6 +478,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             MemoryEntryId: reader.IsDBNull(17) ? null : reader.GetInt64(17),
             DimBestModel: reader.IsDBNull(18) ? null : reader.GetString(18),
             UntrainedBaselineModel: reader.IsDBNull(19) ? null : reader.GetString(19),
-            UntrainedBaselinePredictedScore: reader.IsDBNull(20) ? null : reader.GetDouble(20));
+            UntrainedBaselinePredictedScore: reader.IsDBNull(20) ? null : reader.GetDouble(20),
+            IsJudgeScored: !reader.IsDBNull(21) && reader.GetInt32(21) != 0);
     }
 }

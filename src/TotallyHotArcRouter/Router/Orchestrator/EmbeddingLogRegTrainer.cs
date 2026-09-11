@@ -49,6 +49,11 @@ public static class EmbeddingLogRegTrainer
     /// <param name="epochs">The number of full gradient-descent passes per model head.</param>
     /// <param name="learningRate">The gradient-descent step size.</param>
     /// <param name="l2Regularization">The L2 penalty applied to every non-bias weight each epoch.</param>
+    /// <param name="totalLiveMemoryEntryCount">
+    /// The raw <c>memory_entries</c> row count observed at training time, before judge-row policy
+    /// filtering, for <see cref="EmbeddingLogRegModelArtifact.TotalLiveMemoryEntryCount"/>. Defaults to 0
+    /// for callers that do not track it.
+    /// </param>
     /// <returns>
     /// A trained <see cref="EmbeddingLogRegModelArtifact"/> with one head per distinct model key in
     /// <paramref name="samples"/>.
@@ -66,7 +71,8 @@ public static class EmbeddingLogRegTrainer
         string? embeddingModel = null,
         int epochs = 200,
         double learningRate = 0.1,
-        double l2Regularization = 0.01)
+        double l2Regularization = 0.01,
+        int totalLiveMemoryEntryCount = 0)
     {
         ArgumentNullException.ThrowIfNull(samples);
         ArgumentException.ThrowIfNullOrWhiteSpace(trainedFrom);
@@ -76,6 +82,7 @@ public static class EmbeddingLogRegTrainer
         ArgumentOutOfRangeException.ThrowIfNegative(l2Regularization);
         ArgumentOutOfRangeException.ThrowIfNegative(bootstrapTaskCount);
         ArgumentOutOfRangeException.ThrowIfNegative(memoryEntryCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(totalLiveMemoryEntryCount);
 
         if (samples.Count == 0)
             throw new ArgumentException(message: "At least one training sample is required.",
@@ -101,7 +108,8 @@ public static class EmbeddingLogRegTrainer
             TrainedFrom: trainedFrom,
             BootstrapTaskCount: bootstrapTaskCount,
             MemoryEntryCount: memoryEntryCount,
-            EmbeddingModel: embeddingModel);
+            EmbeddingModel: embeddingModel,
+            TotalLiveMemoryEntryCount: totalLiveMemoryEntryCount);
     }
 
     /// <summary>

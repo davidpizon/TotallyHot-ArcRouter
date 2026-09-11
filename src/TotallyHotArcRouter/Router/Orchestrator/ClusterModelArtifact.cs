@@ -46,7 +46,9 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </param>
 /// <param name="MemoryEntryCount">
 /// The number of live <c>memory_entries</c> rows that contributed to this artifact, or 0 if
-/// none.
+/// none. Under a judge-row policy of <see cref="Models.JudgeRowPolicy.Exclude"/> this is smaller than the
+/// store's raw row count at training time - see <see cref="TotalLiveMemoryEntryCount"/> for the count
+/// comparable to <c>IMemoryEntryStore.LoadAllAsync</c>'s raw total.
 /// </param>
 /// <param name="EmbeddingModel">
 /// The identity of the embedding model whose vectors this artifact was fitted against
@@ -56,6 +58,15 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// frequently share a dimensionality, and swapping between them leaves every length check passing while
 /// the weights below refer to a coordinate space that no longer exists. A consumer compares this against
 /// the live client and abstains on a mismatch, exactly as it does for a dimension mismatch.
+/// </param>
+/// <param name="TotalLiveMemoryEntryCount">
+/// The raw <c>memory_entries</c> row count observed at training time, before any judge-row policy
+/// filtering - the watermark <see cref="Hosting.ClusterRetrainHostedService"/> compares against the
+/// store's current raw row count to decide whether enough new rows have accumulated to retrain.
+/// Comparing against <see cref="MemoryEntryCount"/> instead would be wrong under
+/// <see cref="Models.JudgeRowPolicy.Exclude"/>: that count omits policy-excluded rows, so it can never
+/// catch up to the raw store total once excluded rows accumulate, triggering a retrain on every poll.
+/// Defaults to 0 for an artifact trained before this field existed.
 /// </param>
 public sealed record ClusterModelArtifact(
     int EmbeddingDimension,
@@ -68,7 +79,8 @@ public sealed record ClusterModelArtifact(
     string TrainedFrom,
     int BootstrapTaskCount,
     int MemoryEntryCount,
-    string? EmbeddingModel = null)
+    string? EmbeddingModel = null,
+    int TotalLiveMemoryEntryCount = 0)
 {
     /// <summary>
     /// Returns a human-readable name for cluster <paramref name="clusterIndex"/>, preferring its top TF-IDF

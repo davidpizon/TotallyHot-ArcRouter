@@ -235,7 +235,8 @@ public sealed class ClusterTrainingService : IClusterTrainingService
             TrainedFrom: trainedFrom,
             BootstrapTaskCount: bootstrapTaskCount,
             MemoryEntryCount: memoryEntryCount,
-            EmbeddingModel: modelIdentity);
+            EmbeddingModel: modelIdentity,
+            TotalLiveMemoryEntryCount: liveEntries.Count);
         ClusterModelArtifactSerializer.Validate(artifact);
 
         await WriteArtifactAtomicallyAsync(artifact: artifact, cancellationToken: cancellationToken)

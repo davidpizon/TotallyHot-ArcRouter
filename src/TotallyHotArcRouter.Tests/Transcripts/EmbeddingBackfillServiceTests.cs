@@ -73,6 +73,49 @@ public class EmbeddingBackfillServiceTests
     }
 
     [Fact]
+    public async Task CheckAndBackfillAsync_JudgeScoredTranscript_PropagatesIsJudgeScoredOntoMemoryEntry()
+    {
+        var transcriptId = 42L;
+        var embedding = new[] { 0.1f, 0.2f, 0.3f };
+        var transcript = new TranscriptRecord(
+            Id: transcriptId,
+            CorrelationId: "test-correlation-123",
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            RequestedModel: "model-a",
+            RoutedModel: "model-b",
+            Dimension: "code_quality",
+            Difficulty: "medium",
+            Language: "en",
+            false,
+            PromptText: "Test prompt",
+            ResponseText: "Test response",
+            0.85,
+            0.01m,
+            false,
+            0.95,
+            100,
+            200,
+            null,
+            IsJudgeScored: true);
+
+        var store = new FakeTranscriptStore(
+            unembeddedIds: [transcriptId],
+            getTranscriptResult: transcript);
+        var embeddingClient = new FakeEmbeddingClient(embedding);
+        var memoryStore = new FakeMemoryEntryStore();
+        var service = CreateService(store: store, embeddingClient: embeddingClient, memoryStore: memoryStore, true,
+            true);
+
+        // Regression coverage for the gap Copilot flagged on PR #93: a judge-influenced request whose
+        // embedding missed the live EmbeddingMemoryScoreObserver path must not silently lose its
+        // judge-row provenance when EmbeddingBackfillService recovers it later.
+        await service.CheckAndBackfillAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(memoryStore.LastPersistedEntry);
+        Assert.True(memoryStore.LastPersistedEntry.IsJudgeScored);
+    }
+
+    [Fact]
     public async Task CheckAndBackfillAsync_BackfillDisabled_NoOp()
     {
         var store = new FakeTranscriptStore(unembeddedIds: [1, 2, 3]);
@@ -113,7 +156,7 @@ public class EmbeddingBackfillServiceTests
             throw new NotSupportedException();
         }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score,
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
@@ -210,16 +253,7 @@ public class EmbeddingBackfillServiceTests
         public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             AppendCallCount++;
-            var persisted = new MemoryEntry(
-                Id: AppendCallCount,
-                TaskEmbedding: entry.TaskEmbedding,
-                ChosenModel: entry.ChosenModel,
-                Score: entry.Score,
-                Cost: entry.Cost,
-                VerifierTrace: entry.VerifierTrace,
-                CreatedAtUtc: entry.CreatedAtUtc,
-                IsExploratory: entry.IsExploratory,
-                Propensity: entry.Propensity);
+            var persisted = entry with { Id = AppendCallCount };
             LastPersistedEntry = persisted;
             return Task.FromResult(persisted);
         }

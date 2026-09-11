@@ -183,6 +183,13 @@ public class EmbeddingLogRegTrainingServiceTests
 
             Assert.Equal(expected: LogRegTrainingResultKind.Trained, actual: outcome.Kind);
             Assert.Equal(30, actual: outcome.MemoryEntryCount);
+
+            // The retrain watermark must track the raw store total (32), not the policy-filtered
+            // MemoryEntryCount (30) - otherwise LogRegRetrainHostedService's threshold comparison can
+            // never converge once Exclude drops rows every cycle (Copilot review on PR #93).
+            var artifact = EmbeddingLogRegModelArtifactSerializer.Deserialize(
+                await File.ReadAllTextAsync(path: modelPath, cancellationToken: TestContext.Current.CancellationToken));
+            Assert.Equal(32, actual: artifact.TotalLiveMemoryEntryCount);
         }
         finally
         {

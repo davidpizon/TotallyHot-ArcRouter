@@ -112,9 +112,13 @@ public sealed class LogRegRetrainHostedService : BackgroundService
     }
 
     /// <summary>
-    /// Reads only the <see cref="EmbeddingLogRegModelArtifact.MemoryEntryCount"/> field of the
+    /// Reads only the <see cref="EmbeddingLogRegModelArtifact.TotalLiveMemoryEntryCount"/> field of the
     /// artifact currently on disk, tolerating a missing or unreadable file by returning <c>0</c> - the
-    /// honest baseline when no artifact has ever been trained.
+    /// honest baseline when no artifact has ever been trained. This is the raw, policy-unfiltered watermark
+    /// comparable to <see cref="IMemoryEntryStore.LoadAllAsync"/>'s count - not
+    /// <see cref="EmbeddingLogRegModelArtifact.MemoryEntryCount"/>, which under
+    /// <see cref="Models.JudgeRowPolicy.Exclude"/> omits policy-excluded rows and would never let this
+    /// comparison converge.
     /// </summary>
     private int TryReadLastTrainedMemoryEntryCount()
     {
@@ -123,7 +127,7 @@ public sealed class LogRegRetrainHostedService : BackgroundService
         try
         {
             var json = File.ReadAllText(_modelPath);
-            return EmbeddingLogRegModelArtifactSerializer.Deserialize(json).MemoryEntryCount;
+            return EmbeddingLogRegModelArtifactSerializer.Deserialize(json).TotalLiveMemoryEntryCount;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or JsonException)
         {

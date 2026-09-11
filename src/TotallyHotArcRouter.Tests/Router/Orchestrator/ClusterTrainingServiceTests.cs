@@ -159,6 +159,13 @@ public class ClusterTrainingServiceTests
 
             Assert.Equal(expected: ClusterTrainingResultKind.Trained, actual: outcome.Kind);
             Assert.Equal(100, actual: outcome.MemoryEntryCount);
+
+            // The retrain watermark must track the raw store total (120), not the policy-filtered
+            // MemoryEntryCount (100) - otherwise ClusterRetrainHostedService's threshold comparison can
+            // never converge once Exclude drops rows every cycle (Copilot review on PR #93).
+            var artifact = ClusterModelArtifactSerializer.Deserialize(
+                await File.ReadAllTextAsync(path: modelPath, cancellationToken: TestContext.Current.CancellationToken));
+            Assert.Equal(120, actual: artifact.TotalLiveMemoryEntryCount);
         }
         finally
         {
@@ -269,7 +276,7 @@ public class ClusterTrainingServiceTests
             return Task.FromResult<long?>(null);
         }
 
-        public Task UpdateOutcomeAsync(string correlationId, double? score,
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
             CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;

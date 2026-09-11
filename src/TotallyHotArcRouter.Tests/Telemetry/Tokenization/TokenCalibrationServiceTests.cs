@@ -289,7 +289,7 @@ public class TokenCalibrationServiceTests
         }
 
         /// <inheritdoc/>
-        public Task UpdateOutcomeAsync(string correlationId, double? score,
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();

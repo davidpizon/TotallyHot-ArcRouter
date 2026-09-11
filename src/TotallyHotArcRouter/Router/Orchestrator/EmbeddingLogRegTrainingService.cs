@@ -196,7 +196,8 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
 
         var artifact = EmbeddingLogRegTrainer.Train(
             samples: samples, embeddingDimension: dimension, trainedFrom: trainedFrom,
-            bootstrapTaskCount: bootstrapTaskCount, memoryEntryCount: memoryEntryCount, embeddingModel: modelIdentity);
+            bootstrapTaskCount: bootstrapTaskCount, memoryEntryCount: memoryEntryCount, embeddingModel: modelIdentity,
+            totalLiveMemoryEntryCount: liveEntries.Count);
         EmbeddingLogRegModelArtifactSerializer.Validate(artifact);
 
         await WriteArtifactAtomicallyAsync(artifact: artifact, cancellationToken: cancellationToken)

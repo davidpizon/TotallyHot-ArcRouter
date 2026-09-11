@@ -62,6 +62,46 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task InsertAsync_ThenUpdateOutcomeAsync_RoundTripsIsJudgeScored()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+
+        var record = MakeRecord("corr-judge-scored");
+        var id = await store.InsertAsync(record: record, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(id);
+
+        await store.UpdateOutcomeAsync(correlationId: "corr-judge-scored", 0.9, isJudgeScored: true,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(row!.IsJudgeScored);
+    }
+
+    [Fact]
+    public async Task InsertAsync_ThenUpdateOutcomeAsync_DefaultsIsJudgeScoredToFalse()
+    {
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+
+        var record = MakeRecord("corr-not-judge-scored");
+        var id = await store.InsertAsync(record: record, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(id);
+
+        await store.UpdateOutcomeAsync(correlationId: "corr-not-judge-scored", 0.9,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.False(row!.IsJudgeScored);
+    }
+
+    [Fact]
     public async Task InsertAsync_ScoreLeftNullUntilBackfilled()
     {
         var database = CreateDatabase();
@@ -333,6 +373,43 @@ public class SqliteTranscriptStoreTests : IDisposable
         var row = await store.GetTranscriptAsync(id: id!.Value,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(expected: "glm-5", actual: row!.DimBestModel);
+    }
+
+    [Fact]
+    public async Task EnsureCreated_DatabasePredatingG3_GainsTheIsJudgeScoredColumn()
+    {
+        // A transcript database written by a pre-G3 build already exists without is_judge_scored - without
+        // the explicit PRAGMA migration every write/read would fail with "no such column".
+        Directory.CreateDirectory(_tempDirectory);
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            await using var create = connection.CreateCommand();
+            create.CommandText = """
+                                 CREATE TABLE request_transcripts (
+                                     id INTEGER PRIMARY KEY AUTOINCREMENT, correlation_id TEXT NOT NULL,
+                                     created_at_utc TEXT NOT NULL, requested_model TEXT NOT NULL, routed_model TEXT NOT NULL,
+                                     dimension TEXT NULL, difficulty TEXT NULL, language TEXT NULL, is_utility INTEGER NOT NULL,
+                                     prompt_text TEXT NULL, response_text TEXT NULL, score REAL NULL, cost REAL NULL,
+                                     is_exploratory INTEGER NOT NULL, propensity REAL NOT NULL, input_tokens INTEGER NULL,
+                                     output_tokens INTEGER NULL, memory_entry_id INTEGER NULL);
+                                 """;
+            create.ExecuteNonQuery();
+        }
+
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+
+        var id = await store.InsertAsync(record: MakeRecord("corr-judge-migrated"),
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.UpdateOutcomeAsync(correlationId: "corr-judge-migrated", 0.9, isJudgeScored: true,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(row!.IsJudgeScored);
     }
 
     [Fact]
