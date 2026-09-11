@@ -41,7 +41,9 @@ public sealed class MemoryKnnVoter : IRoutingVoter
 
         if (context.TaskEmbedding is null) return Task.FromResult(VoterVote.Abstain(Name));
 
-        var neighbors = _embeddingMemory.FindNearest(context.TaskEmbedding);
+        var neighbors = _embeddingMemory.FindNearest(context.TaskEmbedding,
+            judgeRowPolicy: _routingOptions.JudgeScoredRowPolicy,
+            judgeRowWeight: _routingOptions.JudgeScoredRowWeight);
         if (neighbors.Count == 0) return Task.FromResult(VoterVote.Abstain(Name));
 
         var candidateNames = new HashSet<string>(
@@ -55,6 +57,7 @@ public sealed class MemoryKnnVoter : IRoutingVoter
             if (!candidateNames.Contains(entry.ChosenModel) || similarity <= 0) continue;
 
             var judgeWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored);
+            // FindNearest already filtered by policy, so judgeWeight should not be null
             if (judgeWeight is null) continue;
 
             var effectiveWeight = similarity * judgeWeight.Value;

@@ -86,7 +86,9 @@ public static class ClusterLedger
             var perModel = new Dictionary<string, ClusterModelScore>(StringComparer.Ordinal);
             foreach (var (modelKey, count) in counts[c])
                 perModel[modelKey] = new ClusterModelScore(
-                    MeanScore: weightedSums[c][modelKey] / weightTotals[c][modelKey], ObservationCount: count);
+                    MeanScore: weightedSums[c][modelKey] / weightTotals[c][modelKey],
+                    ObservationCount: count,
+                    WeightTotal: weightTotals[c][modelKey]);
 
             result[c] = perModel;
         }
@@ -124,6 +126,11 @@ public static class ClusterLedger
     /// The observation to exclude, already aggregated into <paramref name="cell"/> by the time
     /// this runs.
     /// </param>
+    /// <param name="observedScoreWeight">
+    /// The effective weight of <paramref name="observedScore"/> under the policy in effect when
+    /// <paramref name="cell"/> was built (1.0 for non-judge rows or when weights don't apply,
+    /// or a configured multiplier). Defaults to 1.0 for calls that don't account for weighting.
+    /// </param>
     /// <returns>
     /// The mean of the cell's other observations, or <see langword="null"/> when the cell holds only this
     /// one and no honest held-out prediction exists.
@@ -132,13 +139,21 @@ public static class ClusterLedger
     /// The contamination this corrects is structural, not incidental: <see cref="Build"/> aggregates the
     /// live <c>memory_entries</c> working set, which by comparison time already contains the very entry
     /// being scored. Both taxonomies are corrected the same way so the comparison stays like-for-like.
+    /// When <paramref name="cell"/> was built with weighted means (due to judge-row policy),
+    /// <paramref name="observedScoreWeight"/> must match the weight that score received in the aggregation.
     /// </remarks>
-    public static double? PredictLeaveOneOut(ClusterModelScore? cell, double observedScore)
+    public static double? PredictLeaveOneOut(ClusterModelScore? cell, double observedScore, double observedScoreWeight = 1.0)
     {
-        return cell is null
-            ? null
-            : DimensionLedger.LeaveOneOutMean(mean: cell.MeanScore, count: cell.ObservationCount,
-                observedScore: observedScore);
+        if (cell is null) return null;
+
+        // If only one effective observation (weight-wise) contributed, no leave-one-out is possible
+        var remainingWeight = cell.WeightTotal - observedScoreWeight;
+        if (remainingWeight <= 0) return null;
+
+        // Recover weighted sum from mean*weight, then subtract the held-out contribution
+        var weightedSum = cell.MeanScore * cell.WeightTotal;
+        var remainingWeightedSum = weightedSum - observedScore * observedScoreWeight;
+        return remainingWeightedSum / remainingWeight;
     }
 
     /// <summary>Returns the index and cosine similarity of the centroid nearest <paramref name="embedding"/>.</summary>
@@ -179,8 +194,14 @@ public static class ClusterLedger
         return dot / (Math.Sqrt(leftMagnitude) * Math.Sqrt(rightMagnitude));
     }
 
-    /// <summary>One cluster's aggregated observations for one model.</summary>
-    /// <param name="MeanScore">The mean Verifier score across every observation of this model in this cluster.</param>
-    /// <param name="ObservationCount">The number of observations behind <see cref="MeanScore"/>.</param>
-    public sealed record ClusterModelScore(double MeanScore, int ObservationCount);
+    /// <summary>
+    /// One (cluster, model) cell's aggregated score from the ledger. <see cref="MeanScore"/> is weighted
+    /// when judge-row policies apply; <see cref="ObservationCount"/> always counts raw entries regardless of
+    /// policy (answers "how many data points"); and <see cref="WeightTotal"/> stores the sum of weights for
+    /// correct leave-one-out prediction with weighted means.
+    /// </summary>
+    /// <param name="MeanScore">The (possibly weighted) mean score across every observation of this model in this cluster.</param>
+    /// <param name="ObservationCount">The unweighted count of observations that contributed to this cell.</param>
+    /// <param name="WeightTotal">The sum of weights applied to all observations in this cell.</param>
+    public sealed record ClusterModelScore(double MeanScore, int ObservationCount, double WeightTotal);
 }

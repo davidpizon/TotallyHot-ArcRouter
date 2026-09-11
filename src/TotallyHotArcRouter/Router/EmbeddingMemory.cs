@@ -248,8 +248,16 @@ public sealed class EmbeddingMemory : IDisposable
     /// silent zero would conceal the next such bug rather than surface it.
     /// </para>
     /// </remarks>
-    /// <param name="queryEmbedding">The task embedding to find neighbors for.</param>
-    public IReadOnlyList<(MemoryEntry Entry, double Similarity)> FindNearest(float[] queryEmbedding)
+    /// <summary>
+    /// Retrieves the nearest memory entries to <paramref name="queryEmbedding"/>, optionally filtering
+    /// by a judge-row policy before applying the neighbor limit (so excluded judge rows don't consume the budget).
+    /// </summary>
+    /// <param name="queryEmbedding">The embedding to find neighbors for.</param>
+    /// <param name="judgeRowPolicy">Optional policy for judge-scored rows; if provided, Exclude skips those rows entirely.</param>
+    /// <param name="judgeRowWeight">Ignored unless <paramref name="judgeRowPolicy"/> is provided.</param>
+    /// <returns>Up to <see cref="RoutingOptions.MaxNeighborCount"/> entries sorted by decreasing similarity.</returns>
+    public IReadOnlyList<(MemoryEntry Entry, double Similarity)> FindNearest(float[] queryEmbedding,
+        JudgeRowPolicy? judgeRowPolicy = null, double judgeRowWeight = 1.0)
     {
         ArgumentNullException.ThrowIfNull(queryEmbedding);
 
@@ -284,6 +292,7 @@ public sealed class EmbeddingMemory : IDisposable
                 Similarity: CosineSimilarity(left: queryEmbedding, right: entry.TaskEmbedding)))
             .Where(candidate => candidate.Similarity >= options.EmbeddingSimilarityThreshold)
             .OrderByDescending(candidate => candidate.Similarity)
+            .Where(candidate => judgeRowPolicy is null || JudgeRowWeighting.ResolveWeight(candidate.Entry.IsJudgeScored, judgeRowPolicy.Value, judgeRowWeight) is not null)
             .Take(options.MaxNeighborCount)];
     }
 

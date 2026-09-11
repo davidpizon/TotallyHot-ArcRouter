@@ -460,5 +460,12 @@ public sealed class RoutingOptions
                 [
                     $"ClusterCountMax ({ClusterCountMax}) must be greater than or equal to ClusterCountMin ({ClusterCountMin})."
                 ]);
+
+        if (JudgeScoredRowPolicy == JudgeRowPolicy.DownWeight && JudgeScoredRowWeight <= 0)
+            throw new OptionsValidationException(
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages:
+                [$"JudgeScoredRowWeight must be positive when JudgeScoredRowPolicy is DownWeight."]);
     }
 }

@@ -31,8 +31,8 @@ public static class JudgeRowWeighting
         {
             JudgeRowPolicy.Include => 1.0,
             JudgeRowPolicy.Exclude => null,
-            JudgeRowPolicy.DownWeight => judgeRowWeight,
-            _ => 1.0
+            JudgeRowPolicy.DownWeight => judgeRowWeight <= 0 ? null : judgeRowWeight,
+            _ => throw new ArgumentException($"Unknown JudgeRowPolicy: {policy}", nameof(policy))
         };
     }
 }

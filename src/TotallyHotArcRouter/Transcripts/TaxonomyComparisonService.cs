@@ -469,7 +469,9 @@ public sealed class TaxonomyComparisonService : BackgroundService
                            scores.TryGetValue(key: key, value: out var found)
                     ? found
                     : null;
-                clusterPredicted = ClusterLedger.PredictLeaveOneOut(cell: cell, observedScore: observedScore);
+                var observedWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored) ?? 1.0;
+                clusterPredicted = ClusterLedger.PredictLeaveOneOut(cell: cell, observedScore: observedScore,
+                    observedScoreWeight: observedWeight);
             }
         }
 
