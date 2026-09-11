@@ -79,6 +79,15 @@ public class JudgeShadowScoreRetentionServiceTests
             throw new NotSupportedException();
         }
 
+        // Throws for the same reason InsertAsync does: this fake exists to observe the retention loop's
+        // delete calls, and a retention test that silently read rows would be exercising a path it never
+        // means to take.
+        public Task<IReadOnlyList<JudgeShadowScoreRecord>> GetAllAsync(
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(rowCount);

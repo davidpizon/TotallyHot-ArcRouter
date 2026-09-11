@@ -55,8 +55,14 @@ public static class Program
             // docs/router/grader-reliability-plan.md Phase Q4: headless grader-reliability report trigger,
             // stripped for the same reason - it must never reach the command-line configuration provider
             // as a stray "run-grader-reliability-report" key.
-            var (runGraderReliabilityReport, remainingArgs) =
+            var (runGraderReliabilityReport, afterGraderReliabilityFlag) =
                 ExtractFlag(args: afterRegretHarnessFlag, flagName: "--run-grader-reliability-report");
+
+            // docs/router/geval-shadow-scoring-plan.md Phase G2: headless judge-calibration report
+            // trigger, stripped for the same reason - it must never reach the command-line configuration
+            // provider as a stray "run-judge-calibration-report" key.
+            var (runJudgeCalibrationReport, remainingArgs) =
+                ExtractFlag(args: afterGraderReliabilityFlag, flagName: "--run-judge-calibration-report");
 
             // `using` (not a bare local) so the sync/retrain paths below, which return without ever calling
             // RunAsync, still dispose the container and everything singleton-scoped in it - SQLite
@@ -90,6 +96,12 @@ public static class Program
             if (runGraderReliabilityReport)
             {
                 await RunGraderReliabilityReportAsync(host.Services);
+                return;
+            }
+
+            if (runJudgeCalibrationReport)
+            {
+                await RunJudgeCalibrationReportAsync(host.Services);
                 return;
             }
 
@@ -391,6 +403,28 @@ public static class Program
                     $"| {skew.GraderKey} | {(skew.MeanScoreDelta is { } delta ? delta.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) : "undefined")} | {skew.OwnModelSampleSize} | {skew.OtherModelSampleSize} |");
             Console.WriteLine();
         }
+    }
+
+    /// <summary>
+    /// Runs the Phase G2 judge-calibration report and writes it to stdout as Markdown
+    /// (docs/router/geval-shadow-scoring-plan.md Phase G2). Read-only: it reads accumulated
+    /// judge_shadow_scores rows and computes statistics, never touching the judge's blend weight, a
+    /// voter, or the live path.
+    /// </summary>
+    /// <param name="services">The built host's service provider.</param>
+    private static async Task RunJudgeCalibrationReportAsync(IServiceProvider services)
+    {
+        var logger = services.GetRequiredService<ILogger<IJudgeCalibrationAnalyzer>>();
+        var analyzer = services.GetRequiredService<IJudgeCalibrationAnalyzer>();
+
+        var report = await analyzer.AnalyzeAsync(CancellationToken.None);
+
+        logger.LogInformation(
+            message: "Judge calibration report generated at {GeneratedAtUtc} from {TotalRows} judge_shadow_scores row(s).",
+            report.GeneratedAtUtc,
+            report.TotalRowsAnalyzed);
+
+        Console.Write(JudgeCalibrationReportFormatter.FormatMarkdown(report));
     }
 
     /// <summary>Formats a nullable correlation for console output, naming a suppressed value rather than showing a blank.</summary>

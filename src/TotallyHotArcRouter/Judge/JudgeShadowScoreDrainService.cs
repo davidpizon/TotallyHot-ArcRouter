@@ -167,7 +167,8 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                     JudgeModel: result.JudgeModel,
                     JudgePromptVersion: _options.CurrentValue.PromptVersion,
                     JudgeLatencyMs: stopwatch.ElapsedMilliseconds,
-                    UsedLogprobs: result.UsedLogprobs),
+                    UsedLogprobs: result.UsedLogprobs,
+                    SyntaxAuthoritative: job.SyntaxAuthoritative),
                 cancellationToken: stoppingToken).ConfigureAwait(false);
 
             // Recorded before the join completes, mirroring the shadow-row-before-join ordering immediately

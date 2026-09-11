@@ -57,6 +57,17 @@ internal static class JudgeServiceCollectionExtensions
         services.AddSingleton<GraderScoreRecordObserver>();
         services.AddSingleton<IGraderReliabilityAnalyzer, GraderReliabilityAnalyzer>();
 
+        // docs/router/geval-shadow-scoring-plan.md Phase G2: judge-vs-static calibration over the shadow
+        // table. Read-only and inert until judge_shadow_scores has rows, so it is registered
+        // unconditionally alongside the Q4 analyzer above rather than gated on JudgeOptions.Enabled -
+        // that flag is live, and a report over an accumulated table stays meaningful after the judge is
+        // switched off.
+        services.AddOptions<JudgeCalibrationOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(JudgeCalibrationOptions.SectionName).Bind(options))
+            .ValidateDataAnnotations();
+        services.AddSingleton<IJudgeCalibrationAnalyzer, JudgeCalibrationAnalyzer>();
+
         // Promotes the judge from a shadow observer to a real contributor: this is what tells the
         // quality aggregator to hold a static verdict open for a judge grade instead of writing it
         // immediately. Registered before AddQuality so it wins that method's TryAddSingleton default.

@@ -16,8 +16,14 @@ namespace TotallyHot.ArcRouter.Judge;
 /// The static verifier's unified score for this result, recorded alongside the judge's opinion
 /// for later agreement analysis.
 /// </param>
+/// <param name="SyntaxAuthoritative">
+/// Whether a real parser rather than a heuristic produced <paramref name="StaticScore"/>'s syntax verdict,
+/// snapshotted here so the shadow row can record how much the static half of the comparison is worth
+/// (docs/router/geval-shadow-scoring-plan.md Phase G2).
+/// </param>
 public sealed record JudgeShadowScoringJob(
     string CorrelationId,
     string Dimension,
     string Model,
-    double StaticScore);
+    double StaticScore,
+    bool SyntaxAuthoritative);

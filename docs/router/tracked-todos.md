@@ -162,8 +162,8 @@ line-coverage bar as CI actually checks it (per-assembly via `reportgenerator` m
 `TotallyHot.ArcRouter.Tests` + `TotallyHot.ArcRouter.Quality.Tests` cobertura reports, matching
 `.github/workflows/dotnet-ci.yml`'s "Check coverage threshold" step):
 
-- `TotallyHotArcRouter`: **85.8%**
-- `TotallyHot.ArcRouter.Quality`: **97.9%**
+- `TotallyHotArcRouter`: **89.4%** (was 85.8%; raised by Phase G2's judge-calibration tests)
+- `TotallyHot.ArcRouter.Quality`: **97.2%**
 
 > **Re-measured after the quality-verifier change.** The thin margin this item was filed about is gone.
 > `TotallyHot.ArcRouter.Quality` moved from 80.1% to 97.9% for two reasons: the two large, untestable

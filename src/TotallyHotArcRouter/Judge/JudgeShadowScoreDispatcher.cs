@@ -76,7 +76,8 @@ public sealed class JudgeShadowScoreDispatcher : IAsyncGraderDispatcher
             CorrelationId: result.RequestCorrelationId,
             Dimension: result.Dimension,
             Model: result.Model,
-            StaticScore: result.UnifiedScore);
+            StaticScore: result.UnifiedScore,
+            SyntaxAuthoritative: result.SyntaxAuthoritative);
 
         if (!_queue.TryEnqueue(job))
         {

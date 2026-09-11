@@ -36,6 +36,14 @@ namespace TotallyHot.ArcRouter.Judge;
 /// Whether <see cref="JudgeScore"/> was computed via probability weighting rather than the
 /// single-sample fallback.
 /// </param>
+/// <param name="SyntaxAuthoritative">
+/// Whether a real parser - Roslyn for C#, Acornima for JS/TS - rather than a heuristic produced
+/// <see cref="StaticScore"/>'s syntax verdict. Nullable because rows written before this column existed
+/// carry no value; G2's agreement analysis reports those as their own "unknown" cohort rather than
+/// guessing (<see cref="StaticGradeAuthority"/>). This is the nearest remaining proxy for "how much do we
+/// trust the non-judge number" now that the <c>executed</c> flag G2 was designed around is gone: without
+/// it, a weak agreement figure cannot be attributed to the judge rather than to a guessing static checker.
+/// </param>
 public sealed record JudgeShadowScoreRecord(
     long Id,
     string CorrelationId,
@@ -47,4 +55,5 @@ public sealed record JudgeShadowScoreRecord(
     string JudgeModel,
     string JudgePromptVersion,
     long JudgeLatencyMs,
-    bool UsedLogprobs);
+    bool UsedLogprobs,
+    bool? SyntaxAuthoritative = null);

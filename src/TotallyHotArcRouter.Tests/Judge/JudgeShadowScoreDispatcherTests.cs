@@ -26,7 +26,8 @@ public class JudgeShadowScoreDispatcherTests
             RequestCorrelationId = "corr-1",
             Dimension = "algorithm",
             Model = "claude-opus-4-6",
-            UnifiedScore = 0.75
+            UnifiedScore = 0.75,
+            SyntaxAuthoritative = true
         };
 
         var accepted = await dispatcher.DispatchAsync(result: result,
@@ -47,6 +48,41 @@ public class JudgeShadowScoreDispatcherTests
         Assert.Equal(expected: "algorithm", actual: enqueued.Dimension);
         Assert.Equal(expected: "claude-opus-4-6", actual: enqueued.Model);
         Assert.Equal(0.75, actual: enqueued.StaticScore);
+        Assert.True(enqueued.SyntaxAuthoritative);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DispatchAsync_SnapshotsSyntaxAuthoritativeFromTheResult(bool syntaxAuthoritative)
+    {
+        // Phase G2: the shadow row's static half is only interpretable if the row records whether a real
+        // parser or a heuristic produced it, and the dispatcher is the only place that still knows.
+        var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
+        var dispatcher = new JudgeShadowScoreDispatcher(queue: queue, options: EnabledJudge(),
+            logger: NullLogger<JudgeShadowScoreDispatcher>.Instance);
+
+        var result = new QualityResult
+        {
+            RequestCorrelationId = "corr-1",
+            Dimension = "algorithm",
+            Model = "claude-opus-4-6",
+            UnifiedScore = 0.75,
+            SyntaxAuthoritative = syntaxAuthoritative
+        };
+
+        await dispatcher.DispatchAsync(result: result,
+            pendingGraderKeys: new HashSet<string> { GraderKeys.Judge },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var jobs = new List<JudgeShadowScoringJob>();
+        await foreach (var job in queue.DequeueAllAsync(TestContext.Current.CancellationToken))
+        {
+            jobs.Add(job);
+            break;
+        }
+
+        Assert.Equal(expected: syntaxAuthoritative, actual: Assert.Single(jobs).SyntaxAuthoritative);
     }
 
     [Fact]

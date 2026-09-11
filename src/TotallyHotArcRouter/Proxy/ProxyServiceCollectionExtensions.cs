@@ -388,7 +388,11 @@ internal static class ProxyServiceCollectionExtensions
                     RoutingGateAdmin = new RoutingGateAdminDependencies(sp.GetRequiredService<IRoutingGate>()),
 
                     // Backs the Governance UI's Regret Harness panel gRPC API (Phase N6).
-                    RegretHarnessAdmin = new RegretHarnessAdminDependencies(sp.GetRequiredService<IRegretHarnessRunner>())
+                    RegretHarnessAdmin = new RegretHarnessAdminDependencies(sp.GetRequiredService<IRegretHarnessRunner>()),
+
+                    // Backs the Governance UI's Judge Calibration panel gRPC API (Phase G2).
+                    JudgeCalibrationAdmin =
+                        new JudgeCalibrationAdminDependencies(sp.GetRequiredService<IJudgeCalibrationAnalyzer>())
                 }));
 
         return services;

@@ -62,7 +62,8 @@ public sealed class RouterMemoryDatabase
                                          judge_model           TEXT    NOT NULL,
                                          judge_prompt_version  TEXT    NOT NULL,
                                          judge_latency_ms      INTEGER NOT NULL,
-                                         used_logprobs         INTEGER NOT NULL
+                                         used_logprobs         INTEGER NOT NULL,
+                                         syntax_authoritative  INTEGER NULL
                                      );
 
                                      CREATE INDEX IF NOT EXISTS ix_judge_shadow_scores_correlation_id
@@ -250,11 +251,12 @@ public sealed class RouterMemoryDatabase
     // default, so the current INSERT - which no longer supplies it - would fail on every write.
     /// <summary>
     /// Migrates `judge_shadow_scores` from the executing verifier's shape to the current one: renames
-    /// `verifier_score` to `static_score` and drops the `executed` column.
+    /// `verifier_score` to `static_score`, drops the `executed` column, and adds Phase G2's
+    /// `syntax_authoritative` column.
     /// </summary>
     /// <remarks>
-    /// Both statements are guarded on the column actually being present, so this is idempotent and a no-op
-    /// on a database created by the current DDL. The historical rows are kept rather than truncated: their
+    /// Every statement is guarded on the column's actual presence, so this is idempotent and a no-op on a
+    /// database created by the current DDL. The historical rows are kept rather than truncated: their
     /// score column still means "the non-judge grade for this request", which is exactly what
     /// `static_score` means now - only its provenance changed, and that provenance is recoverable from the
     /// row's timestamp. Dropping `executed` does lose the execution-grounded flag from those old rows;
@@ -275,6 +277,19 @@ public sealed class RouterMemoryDatabase
             using var drop = connection.CreateCommand();
             drop.CommandText = "ALTER TABLE judge_shadow_scores DROP COLUMN executed;";
             drop.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection: connection, table: "judge_shadow_scores", column: "syntax_authoritative"))
+        {
+            using var add = connection.CreateCommand();
+
+            // Deliberately NULL for every pre-existing row rather than defaulted to 0 or 1. The column
+            // says whether a real parser or a heuristic graded the row, and no answer is recoverable
+            // after the fact - the language that decides it was never stored here. A default would make
+            // every historical row claim an authority it may not have had, quietly corrupting exactly
+            // the split G2 added the column for; NULL reports them as their own "unknown" cohort instead.
+            add.CommandText = "ALTER TABLE judge_shadow_scores ADD COLUMN syntax_authoritative INTEGER NULL;";
+            add.ExecuteNonQuery();
         }
     }
 
