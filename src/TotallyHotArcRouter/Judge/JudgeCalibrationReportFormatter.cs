@@ -47,7 +47,7 @@ public static class JudgeCalibrationReportFormatter
         builder.AppendLine("|---|---|---|");
         foreach (var verdict in report.Verdicts)
             builder.AppendLine(
-                $"| {verdict.Condition} | {DescribeVerdict(verdict.Kind)} | {EscapePipes(verdict.Detail)} |");
+                $"| {EscapeCell(verdict.Condition)} | {DescribeVerdict(verdict.Kind)} | {EscapeCell(verdict.Detail)} |");
         builder.AppendLine();
     }
 
@@ -69,8 +69,8 @@ public static class JudgeCalibrationReportFormatter
         builder.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|---|");
         foreach (var cohort in report.Cohorts)
             builder.AppendLine(
-                $"| {cohort.Dimension} "
-                + $"| {cohort.JudgeModel} "
+                $"| {EscapeCell(cohort.Dimension)} "
+                + $"| {EscapeCell(cohort.JudgeModel)} "
                 + $"| {(cohort.UsedLogprobs ? "logprobs" : "single-sample")} "
                 + $"| {DescribeAuthority(cohort.StaticAuthority)} "
                 + $"| {cohort.SampleSize} "
@@ -105,11 +105,17 @@ public static class JudgeCalibrationReportFormatter
             return;
         }
 
-        builder.AppendLine("| Judge model | Candidate model | Own backbone | Mean delta | N |");
-        builder.AppendLine("|---|---|---|---|---|");
+        builder.AppendLine(
+            "| Dimension | Judge model | Weighting | Static grade | Candidate model | Own backbone | Mean delta | N |");
+        builder.AppendLine("|---|---|---|---|---|---|---|---|");
         foreach (var row in report.SelfPreference)
             builder.AppendLine(
-                $"| {row.JudgeModel} | {row.CandidateModel} | {(row.IsOwnBackbone ? "yes" : "no")} "
+                $"| {EscapeCell(row.Dimension)} "
+                + $"| {EscapeCell(row.JudgeModel)} "
+                + $"| {(row.UsedLogprobs ? "logprobs" : "single-sample")} "
+                + $"| {DescribeAuthority(row.StaticAuthority)} "
+                + $"| {EscapeCell(row.CandidateModel)} "
+                + $"| {(row.IsOwnBackbone ? "yes" : "no")} "
                 + $"| {row.MeanScoreDelta.ToString("+0.000;-0.000;0.000", CultureInfo.InvariantCulture)} "
                 + $"| {row.SampleSize} |");
         builder.AppendLine();
@@ -162,11 +168,19 @@ public static class JudgeCalibrationReportFormatter
     }
 
     /// <summary>
-    /// Escapes pipes in free text so a verdict's detail cannot break the Markdown table it sits in. Only
-    /// the detail strings need this - every other cell is a number, an enum name, or a model id.
+    /// Escapes a free-text table cell so it cannot break the Markdown table it sits in: pipes are escaped
+    /// (a raw <c>|</c> would be read as a new column boundary) and embedded newlines are collapsed to a
+    /// space (a raw newline would be read as the end of the row). Applied to every cell whose value is
+    /// operator-controlled free text - a dimension name, a model id, a verdict condition, or a detail
+    /// message - since routing validation only rejects blank/duplicate values, not table-breaking
+    /// characters. Cells derived internally (numbers, enum labels) never need this.
     /// </summary>
-    private static string EscapePipes(string text)
+    private static string EscapeCell(string text)
     {
-        return text.Replace(oldValue: "|", newValue: @"\|", comparisonType: StringComparison.Ordinal);
+        return text
+            .Replace(oldValue: "|", newValue: @"\|", comparisonType: StringComparison.Ordinal)
+            .Replace(oldValue: "\r\n", newValue: " ", comparisonType: StringComparison.Ordinal)
+            .Replace(oldValue: "\n", newValue: " ", comparisonType: StringComparison.Ordinal)
+            .Replace(oldValue: "\r", newValue: " ", comparisonType: StringComparison.Ordinal);
     }
 }

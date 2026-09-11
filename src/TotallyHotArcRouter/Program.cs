@@ -417,6 +417,13 @@ public static class Program
         var logger = services.GetRequiredService<ILogger<IJudgeCalibrationAnalyzer>>();
         var analyzer = services.GetRequiredService<IJudgeCalibrationAnalyzer>();
 
+        // On the hosted path, StartupHealthCheckHostedService.EnsureCreated()s judge_shadow_scores before
+        // anything reads it. This flag never starts that hosted service - CreateHostBuilder(...).Build()
+        // returns before host.RunAsync() - so a fresh install with no router-memory database file would
+        // otherwise select from a table that does not exist and exit fatally instead of honestly reporting
+        // zero rows. Mirrors RunBenchmarkDataSyncAsync's own EnsureCreated call for BenchmarkDatabase.
+        services.GetRequiredService<Router.RouterMemoryDatabase>().EnsureCreated();
+
         var report = await analyzer.AnalyzeAsync(CancellationToken.None);
 
         logger.LogInformation(

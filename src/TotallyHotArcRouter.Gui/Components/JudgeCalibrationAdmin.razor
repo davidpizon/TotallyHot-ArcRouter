@@ -12,14 +12,25 @@
     {
         <div class="text-sm text-slate-500 p-4">Loading judge calibration…</div>
     }
-    else if (!Store.IsReachable || Store.Report is null)
+    else if (Store.Report is null)
     {
+        @* Store.Report is null both before any successful load and after any failed one (including a
+           reachable-but-erroring call - the store never lets a stale report stand in for one that failed
+           to recompute). IsReachable still distinguishes the two causes, so an RPC error from a live
+           router is never mislabeled as the router being down. *@
         <div class="rounded-lg p-4 space-y-2 ds-surface-card-critical">
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
-                <Icon Name="alert-triangle" Size="20"/> Router unreachable
+                <Icon Name="alert-triangle" Size="20"/> @(Store.IsReachable ? "Report unavailable" : "Router unreachable")
             </div>
             <div class="text-xs text-slate-400">
-                Could not reach <span class="font-mono">@(Store.ServerAddress ?? TelemetryChannelFactory.DefaultServerAddress)</span>. Is the proxy running?
+                @if (Store.IsReachable)
+                {
+                    <text>The router responded, but the calibration report could not be generated.</text>
+                }
+                else
+                {
+                    <text>Could not reach <span class="font-mono">@(Store.ServerAddress ?? TelemetryChannelFactory.DefaultServerAddress)</span>. Is the proxy running?</text>
+                }
             </div>
             @if (!string.IsNullOrEmpty(Store.LastError))
             {
@@ -91,6 +102,8 @@
                             <th class="py-1 pr-3 text-right">N</th>
                             <th class="py-1 pr-3 text-right">Spearman</th>
                             <th class="py-1 pr-3 text-right">MAD</th>
+                            <th class="py-1 pr-3 text-right">Mean judge</th>
+                            <th class="py-1 pr-3 text-right">Mean static</th>
                             <th class="py-1 pr-3 text-right">SD</th>
                             <th class="py-1 pr-3 text-right">Modal</th>
                             <th class="py-1 text-right">Distinct</th>
@@ -107,6 +120,8 @@
                                 <td class="py-1 pr-3 text-right">@cohort.SampleSize</td>
                                 <td class="py-1 pr-3 text-right">@FormatCorrelation(cohort.Correlation)</td>
                                 <td class="py-1 pr-3 text-right">@FormatValue(cohort.MeanAbsoluteDifference)</td>
+                                <td class="py-1 pr-3 text-right">@FormatValue(cohort.MeanJudgeScore)</td>
+                                <td class="py-1 pr-3 text-right">@FormatValue(cohort.MeanStaticScore)</td>
                                 <td class="py-1 pr-3 text-right">@FormatValue(cohort.StandardDeviation)</td>
                                 <td class="py-1 pr-3 text-right">@FormatShare(cohort.ModalShare)</td>
                                 <td class="py-1 text-right">@cohort.DistinctScoreCount</td>
@@ -129,7 +144,10 @@
                     <table class="w-full text-xs text-left">
                         <thead class="text-slate-500 uppercase tracking-widest">
                         <tr>
+                            <th class="py-1 pr-3">Dimension</th>
                             <th class="py-1 pr-3">Judge model</th>
+                            <th class="py-1 pr-3">Weighting</th>
+                            <th class="py-1 pr-3">Static grade</th>
                             <th class="py-1 pr-3">Candidate</th>
                             <th class="py-1 pr-3 text-right">Mean delta</th>
                             <th class="py-1 text-right">N</th>
@@ -139,7 +157,10 @@
                         @foreach (var row in report.SelfPreference)
                         {
                             <tr>
+                                <td class="py-1 pr-3">@row.Dimension</td>
                                 <td class="py-1 pr-3">@row.JudgeModel</td>
+                                <td class="py-1 pr-3">@(row.UsedLogprobs ? "logprobs" : "single-sample")</td>
+                                <td class="py-1 pr-3">@AuthorityLabel(row.StaticAuthority)</td>
                                 <td class="py-1 pr-3">
                                     @row.CandidateModel
                                     @if (row.IsOwnBackbone)

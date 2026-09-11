@@ -145,11 +145,14 @@ public sealed record JudgeScoreDistribution(
 /// The re-open condition is real traffic: once several models have accumulated rows, the spread across
 /// <see cref="MeanScoreDelta"/> values becomes an empirical baseline a ceiling can be set against.
 /// </remarks>
+/// <param name="Dimension">The task dimension these rows were graded under - one of the four cohort keys, carried here so this row is never read as pooled across dimensions.</param>
 /// <param name="JudgeModel">The backbone whose grading is described.</param>
+/// <param name="UsedLogprobs">Whether these scores were probability-weighted - the second cohort key.</param>
+/// <param name="StaticAuthority">Whether a real parser produced the static grades being compared against - the third cohort key.</param>
 /// <param name="CandidateModel">The model whose responses were graded.</param>
 /// <param name="MeanScoreDelta">
-/// The mean judge score minus the mean static score for this candidate. Positive means the judge is more
-/// generous to this model than the static verifier is.
+/// The mean judge score minus the mean static score for this candidate, within this cohort. Positive means
+/// the judge is more generous to this model than the static verifier is.
 /// </param>
 /// <param name="IsOwnBackbone">
 /// Whether <paramref name="CandidateModel"/> is the judge's own backbone - the self-preference case
@@ -158,7 +161,10 @@ public sealed record JudgeScoreDistribution(
 /// </param>
 /// <param name="SampleSize">The number of rows behind this candidate's means.</param>
 public sealed record JudgeSelfPreferenceRow(
+    string Dimension,
     string JudgeModel,
+    bool UsedLogprobs,
+    StaticGradeAuthority StaticAuthority,
     string CandidateModel,
     double MeanScoreDelta,
     bool IsOwnBackbone,

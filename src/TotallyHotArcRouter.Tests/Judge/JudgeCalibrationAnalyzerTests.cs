@@ -259,6 +259,67 @@ public class JudgeCalibrationAnalyzerTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_SelfPreferenceIsSegmentedByCohortNotPooledAcrossThem()
+    {
+        // The bug this test pins: pooling self-preference across dimensions (or logprobs modes, or
+        // static-grade authority) could make a judge's own backbone look preferred merely because one
+        // cohort has a different score distribution from another - a confound that has nothing to do with
+        // self-preference. Two dimensions, opposite deltas for the same (judge, candidate) pair: pooling
+        // them would average to a misleading ~0, while segmenting reports both real deltas distinctly.
+        List<JudgeShadowScoreRecord> rows =
+        [
+            MakeRow(1, staticScore: 0.5, judgeScore: 0.9, judgeModel: "judge-a", model: "judge-a", dimension: "algorithm"),
+            MakeRow(2, staticScore: 0.5, judgeScore: 0.9, judgeModel: "judge-a", model: "judge-a", dimension: "algorithm"),
+            MakeRow(3, staticScore: 0.5, judgeScore: 0.1, judgeModel: "judge-a", model: "judge-a", dimension: "bug_fixing"),
+            MakeRow(4, staticScore: 0.5, judgeScore: 0.1, judgeModel: "judge-a", model: "judge-a", dimension: "bug_fixing")
+        ];
+
+        var report = await Analyze(rows);
+
+        Assert.Equal(expected: 2, actual: report.SelfPreference.Count);
+        var algorithm = report.SelfPreference.Single(r => r.Dimension == "algorithm");
+        var bugFixing = report.SelfPreference.Single(r => r.Dimension == "bug_fixing");
+        Assert.Equal(expected: 0.4, actual: algorithm.MeanScoreDelta, precision: 9);
+        Assert.Equal(expected: -0.4, actual: bugFixing.MeanScoreDelta, precision: 9);
+        Assert.Equal(expected: 2, actual: algorithm.SampleSize);
+        Assert.Equal(expected: 2, actual: bugFixing.SampleSize);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_SelfPreferenceSeparatesLogprobsCohorts()
+    {
+        List<JudgeShadowScoreRecord> rows =
+        [
+            MakeRow(1, staticScore: 0.5, judgeScore: 0.9, judgeModel: "judge-a", model: "judge-a", usedLogprobs: true),
+            MakeRow(2, staticScore: 0.5, judgeScore: 0.5, judgeModel: "judge-a", model: "judge-a", usedLogprobs: false)
+        ];
+
+        var report = await Analyze(rows);
+
+        Assert.Equal(expected: 2, actual: report.SelfPreference.Count);
+        Assert.Contains(report.SelfPreference, r => r.UsedLogprobs && r.MeanScoreDelta > 0.39);
+        Assert.Contains(report.SelfPreference, r => !r.UsedLogprobs && r.MeanScoreDelta == 0.0);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_SelfPreferenceSeparatesStaticAuthorityCohorts()
+    {
+        List<JudgeShadowScoreRecord> rows =
+        [
+            MakeRow(1, staticScore: 0.5, judgeScore: 0.9, judgeModel: "judge-a", model: "judge-a", syntaxAuthoritative: true),
+            MakeRow(2, staticScore: 0.5, judgeScore: 0.5, judgeModel: "judge-a", model: "judge-a", syntaxAuthoritative: false)
+        ];
+
+        var report = await Analyze(rows);
+
+        Assert.Equal(expected: 2, actual: report.SelfPreference.Count);
+        Assert.Contains(report.SelfPreference,
+            r => r.StaticAuthority == StaticGradeAuthority.Authoritative && r.MeanScoreDelta > 0.39);
+        Assert.Contains(report.SelfPreference,
+            r => r.StaticAuthority == StaticGradeAuthority.Heuristic && r.MeanScoreDelta == 0.0);
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_SelfPreferenceNeverProducesAPassOrFail()
     {
         // The deliberate design decision, pinned by a test so a later change cannot quietly add a

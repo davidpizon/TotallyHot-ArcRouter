@@ -87,14 +87,24 @@ public sealed record JudgeCalibrationCohortInfo(
     double? ModalShare,
     int DistinctScoreCount);
 
-/// <summary>One candidate model's judge-minus-static delta, within one judge backbone.</summary>
+/// <summary>
+/// One candidate model's judge-minus-static delta, within one judge backbone and one (dimension,
+/// logprobs, static authority) cohort - never pooled across cohorts, matching every other statistic in
+/// the report.
+/// </summary>
+/// <param name="Dimension">The task dimension these rows were graded under.</param>
 /// <param name="JudgeModel">The backbone whose grading is described.</param>
+/// <param name="UsedLogprobs">Whether these scores were probability-weighted.</param>
+/// <param name="StaticAuthority">Whether a real parser produced the static grades being compared against.</param>
 /// <param name="CandidateModel">The model whose responses were graded.</param>
 /// <param name="MeanScoreDelta">Mean judge score minus mean static score; positive means the judge is more generous.</param>
 /// <param name="IsOwnBackbone">Whether the candidate is the judge's own backbone - G-Eval's self-preference case.</param>
 /// <param name="SampleSize">The number of rows behind this candidate's means.</param>
 public sealed record JudgeSelfPreferenceRowInfo(
+    string Dimension,
     string JudgeModel,
+    bool UsedLogprobs,
+    StaticGradeAuthorityInfo StaticAuthority,
     string CandidateModel,
     double MeanScoreDelta,
     bool IsOwnBackbone,
@@ -227,7 +237,15 @@ public sealed class JudgeCalibrationAdminClient
     private static JudgeSelfPreferenceRowInfo MapSelfPreference(Contract.JudgeSelfPreferenceRow row)
     {
         return new JudgeSelfPreferenceRowInfo(
+            Dimension: row.Dimension,
             JudgeModel: row.JudgeModel,
+            UsedLogprobs: row.UsedLogprobs,
+            StaticAuthority: row.StaticAuthority switch
+            {
+                Contract.StaticGradeAuthority.Heuristic => StaticGradeAuthorityInfo.Heuristic,
+                Contract.StaticGradeAuthority.Authoritative => StaticGradeAuthorityInfo.Authoritative,
+                _ => StaticGradeAuthorityInfo.Unknown
+            },
             CandidateModel: row.CandidateModel,
             MeanScoreDelta: row.MeanScoreDelta,
             IsOwnBackbone: row.IsOwnBackbone,

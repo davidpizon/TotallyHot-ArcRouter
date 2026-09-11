@@ -87,13 +87,53 @@ public class JudgeCalibrationReportFormatterTests
     }
 
     [Fact]
+    public void FormatMarkdown_PipeInAModelOrDimensionName_IsEscapedRatherThanBreakingTheTable()
+    {
+        // Model names are operator-configurable, and routing validation only rejects blank/duplicate
+        // values - not table-breaking characters. Every free-text cell needs the same protection Detail
+        // gets, not just Detail.
+        var report = MakeReport(
+            cohorts: [MakeCohort() with { Dimension = "weird|dimension", JudgeModel = "weird|model" }],
+            selfPreference:
+            [
+                new JudgeSelfPreferenceRow(Dimension: "weird|dimension", JudgeModel: "weird|model",
+                    UsedLogprobs: true, StaticAuthority: StaticGradeAuthority.Authoritative,
+                    CandidateModel: "weird|candidate", MeanScoreDelta: 0.1, IsOwnBackbone: false, SampleSize: 3)
+            ],
+            verdicts: [new JudgeCalibrationVerdict(Condition: "weird|condition", Kind: JudgeCalibrationVerdictKind.Pass, Detail: "d")]);
+
+        var markdown = JudgeCalibrationReportFormatter.FormatMarkdown(report);
+
+        Assert.Contains(expectedSubstring: @"weird\|dimension", actualString: markdown, comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: @"weird\|model", actualString: markdown, comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: @"weird\|candidate", actualString: markdown, comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: @"weird\|condition", actualString: markdown, comparisonType: StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatMarkdown_EmbeddedNewlineInAFreeTextCell_IsCollapsedRatherThanBreakingTheRow()
+    {
+        var report = MakeReport(verdicts:
+        [
+            new JudgeCalibrationVerdict(Condition: "score-collapse", Kind: JudgeCalibrationVerdictKind.Fail,
+                Detail: "line one\nline two")
+        ]);
+
+        var markdown = JudgeCalibrationReportFormatter.FormatMarkdown(report);
+
+        Assert.Contains(expectedSubstring: "line one line two", actualString: markdown,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FormatMarkdown_SelfPreferenceDelta_CarriesAnExplicitSign()
     {
         // The direction is the finding. An unsigned "0.400" hides whether the judge is more or less
         // generous than the static verifier, which is the entire question.
         var report = MakeReport(selfPreference:
         [
-            new JudgeSelfPreferenceRow(JudgeModel: "judge-a", CandidateModel: "judge-a", MeanScoreDelta: 0.4,
+            new JudgeSelfPreferenceRow(Dimension: "algorithm", JudgeModel: "judge-a", UsedLogprobs: true,
+                StaticAuthority: StaticGradeAuthority.Authoritative, CandidateModel: "judge-a", MeanScoreDelta: 0.4,
                 IsOwnBackbone: true, SampleSize: 5)
         ]);
 
@@ -117,7 +157,7 @@ public class JudgeCalibrationReportFormatterTests
     }
 
     /// <summary>Builds one cohort with a caller-chosen correlation and plausible values elsewhere.</summary>
-    private static JudgeCalibrationCohort MakeCohort(double? correlation)
+    private static JudgeCalibrationCohort MakeCohort(double? correlation = 0.75)
     {
         return new JudgeCalibrationCohort(
             Dimension: "algorithm",

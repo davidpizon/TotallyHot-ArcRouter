@@ -90,6 +90,14 @@ public sealed class JudgeCalibrationAdminStore : IDisposable
     /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an error
     /// state instead of crashing when the proxy isn't running.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Report"/> is cleared on every failure, including a reachable one (a server-side
+    /// exception, a bad request) - not only an unreachable-router failure. Every call recomputes from
+    /// current rows (this store's whole reason to exist, per its own remarks), so a report that failed to
+    /// recompute must never be left standing in for the one that would have replaced it: a refresh that
+    /// silently keeps showing yesterday's verdict while <see cref="LastError"/> goes unread by the caller
+    /// is a worse failure mode than an honest "could not load" state.
+    /// </remarks>
     /// <param name="cancellationToken">A cancellation token.</param>
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
@@ -104,6 +112,12 @@ public sealed class JudgeCalibrationAdminStore : IDisposable
         }
         catch (JudgeCalibrationAdminException ex)
         {
+            // Cleared unconditionally, not only when IsReachable ends up false: a reachable failure (the
+            // router answered but the call itself failed) is just as much a reason to distrust the
+            // previous report as an unreachable one is. IsReachable still records which kind of failure
+            // this was, so the panel can tell "the router is down" from "the router answered with an
+            // error" without ever risking a stale render in either case.
+            Report = null;
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
             _logger?.LogWarning(exception: ex, message: "Failed to load the judge calibration report from the router.");

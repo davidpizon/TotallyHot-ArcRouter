@@ -847,11 +847,14 @@ message JudgeCalibrationCohort {
 // One candidate model's judge-minus-static delta, within one judge backbone. Carries no verdict by
 // design - see JudgeSelfPreferenceRow's remarks in JudgeCalibrationReport.cs.
 message JudgeSelfPreferenceRow {
-  string judge_model = 1;
-  string candidate_model = 2;
-  double mean_score_delta = 3;
-  bool is_own_backbone = 4;
-  int32 sample_size = 5;
+  string dimension = 1;
+  string judge_model = 2;
+  bool used_logprobs = 3;
+  StaticGradeAuthority static_authority = 4;
+  string candidate_model = 5;
+  double mean_score_delta = 6;
+  bool is_own_backbone = 7;
+  int32 sample_size = 8;
 }
 
 // The freshly computed report. markdown carries the same rendering the CLI flag prints

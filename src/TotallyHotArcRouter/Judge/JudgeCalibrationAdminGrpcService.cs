@@ -102,7 +102,15 @@ public sealed class JudgeCalibrationAdminGrpcService
     {
         return new Contract.JudgeSelfPreferenceRow
         {
+            Dimension = row.Dimension,
             JudgeModel = row.JudgeModel,
+            UsedLogprobs = row.UsedLogprobs,
+            StaticAuthority = row.StaticAuthority switch
+            {
+                StaticGradeAuthority.Heuristic => Contract.StaticGradeAuthority.Heuristic,
+                StaticGradeAuthority.Authoritative => Contract.StaticGradeAuthority.Authoritative,
+                _ => Contract.StaticGradeAuthority.Unknown
+            },
             CandidateModel = row.CandidateModel,
             MeanScoreDelta = row.MeanScoreDelta,
             IsOwnBackbone = row.IsOwnBackbone,

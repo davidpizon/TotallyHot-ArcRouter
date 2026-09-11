@@ -94,13 +94,17 @@ public class JudgeCalibrationAdminGrpcServiceTests
     {
         var service = new JudgeCalibrationAdminGrpcService(new FakeAnalyzer(MakeReport(selfPreference:
         [
-            new JudgeSelfPreferenceRow(JudgeModel: "judge-a", CandidateModel: "judge-a", MeanScoreDelta: 0.4,
+            new JudgeSelfPreferenceRow(Dimension: "algorithm", JudgeModel: "judge-a", UsedLogprobs: true,
+                StaticAuthority: StaticGradeAuthority.Authoritative, CandidateModel: "judge-a", MeanScoreDelta: 0.4,
                 IsOwnBackbone: true, SampleSize: 7)
         ])));
 
         var response = await Invoke(service);
 
         var row = Assert.Single(response.SelfPreference);
+        Assert.Equal(expected: "algorithm", actual: row.Dimension);
+        Assert.True(row.UsedLogprobs);
+        Assert.Equal(expected: Contract.StaticGradeAuthority.Authoritative, actual: row.StaticAuthority);
         Assert.True(row.IsOwnBackbone);
         Assert.Equal(expected: 0.4, actual: row.MeanScoreDelta, precision: 9);
         Assert.Equal(expected: 7, actual: row.SampleSize);

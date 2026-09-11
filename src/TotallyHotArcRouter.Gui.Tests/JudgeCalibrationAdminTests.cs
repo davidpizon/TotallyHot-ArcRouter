@@ -89,8 +89,9 @@ public sealed class JudgeCalibrationAdminTests
             cohorts: [MakeCohort()],
             selfPreference:
             [
-                new JudgeSelfPreferenceRowInfo("judge-a", "judge-a", MeanScoreDelta: 0.4, IsOwnBackbone: true,
-                    SampleSize: 12)
+                new JudgeSelfPreferenceRowInfo(Dimension: "algorithm", JudgeModel: "judge-a", UsedLogprobs: true,
+                    StaticAuthority: StaticGradeAuthorityInfo.Authoritative, CandidateModel: "judge-a",
+                    MeanScoreDelta: 0.4, IsOwnBackbone: true, SampleSize: 12)
             ])));
 
         var cut = ctx.Render<JudgeCalibrationAdmin>();
@@ -124,18 +125,39 @@ public sealed class JudgeCalibrationAdminTests
     }
 
     [Fact]
-    public void Renders_an_error_state_when_the_load_fails_but_the_router_is_reachable()
+    public void Renders_a_distinct_error_state_when_the_load_fails_but_the_router_is_reachable()
     {
-        // Mirrors RegretHarnessAdminTests' reasoning: a non-connectivity RPC failure leaves IsReachable
-        // true but Report null, and the panel must not fall through to the reassuring empty state.
+        // A reachable RPC failure (the router answered, the call itself failed) must never be labeled
+        // "Router unreachable" - that phrase is reserved for an actual connectivity failure.
         using var ctx = NewContext(new FakeClient
         { Error = new JudgeCalibrationAdminException(message: "permission denied", isUnavailable: false) });
 
         var cut = ctx.Render<JudgeCalibrationAdmin>();
 
-        cut.Markup.Should().Contain("Router unreachable");
+        cut.Markup.Should().Contain("Report unavailable");
         cut.Markup.Should().Contain("permission denied");
+        cut.Markup.Should().NotContain("Router unreachable");
         cut.Markup.Should().NotContain("No shadow rows yet");
+    }
+
+    [Fact]
+    public void A_failed_refresh_after_a_successful_load_never_leaves_the_stale_report_on_screen()
+    {
+        // The regression this store exists to prevent: every call recomputes, so a report that failed to
+        // recompute must never be left standing in for the one that would have replaced it.
+        var client = new SequencedClient(
+            MakeReport(cohorts: [MakeCohort(judgeModel: "stale-judge-model")]),
+            new JudgeCalibrationAdminException(message: "boom", isUnavailable: false));
+        using var ctx = NewContext(client);
+
+        var cut = ctx.Render<JudgeCalibrationAdmin>();
+        cut.Markup.Should().Contain("stale-judge-model");
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Refresh").Click();
+
+        cut.Markup.Should().NotContain("stale-judge-model");
+        cut.Markup.Should().Contain("Report unavailable");
+        cut.Markup.Should().Contain("boom");
     }
 
     [Fact]
@@ -206,6 +228,20 @@ public sealed class JudgeCalibrationAdminTests
             CallCount++;
             if (Error is not null) throw Error;
             return Task.FromResult(report!);
+        }
+    }
+
+    /// <summary>Succeeds on the first call and fails on every call after, for testing a failed refresh.</summary>
+    private sealed class SequencedClient(JudgeCalibrationReportInfo firstReport, JudgeCalibrationAdminException laterFailure)
+        : IJudgeCalibrationAdminClient
+    {
+        private int _callCount;
+
+        public Task<JudgeCalibrationReportInfo> GetReportAsync(CancellationToken cancellationToken = default)
+        {
+            _callCount++;
+            if (_callCount == 1) return Task.FromResult(firstReport);
+            throw laterFailure;
         }
     }
 }

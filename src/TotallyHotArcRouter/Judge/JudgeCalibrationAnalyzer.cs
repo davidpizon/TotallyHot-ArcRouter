@@ -116,7 +116,8 @@ public sealed class JudgeCalibrationAnalyzer : IJudgeCalibrationAnalyzer
 
     /// <summary>
     /// For each judge backbone, compares its mean score against the static verifier's mean score for every
-    /// candidate model it graded - the judge-minus-static delta per candidate.
+    /// candidate model it graded - the judge-minus-static delta per candidate, computed within the same
+    /// (dimension, judge model, logprobs, static authority) cohort as everything else in the report.
     /// </summary>
     /// <remarks>
     /// The delta is against the static grade rather than against the judge's other candidates, because the
@@ -125,20 +126,38 @@ public sealed class JudgeCalibrationAnalyzer : IJudgeCalibrationAnalyzer
     /// equally and is not exhibiting self-preference; a judge whose delta is far larger for one model is.
     /// Reported flat, without a verdict - see <see cref="JudgeSelfPreferenceRow"/>'s remarks.
     /// </remarks>
+    /// <remarks>
+    /// Grouped on all four cohort keys plus the candidate model, not just (judge model, candidate model):
+    /// pooling across dimensions or weighting modes would let a judge's own backbone appear preferred
+    /// merely because one cohort has a different score distribution from another, which is exactly the
+    /// confound <see cref="JudgeCalibrationReport"/>'s "segmented, never pooled" rule exists to rule out.
+    /// </remarks>
     private static List<JudgeSelfPreferenceRow> ComputeSelfPreference(IReadOnlyList<JudgeShadowScoreRecord> rows)
     {
         return
         [
             .. rows
-                .GroupBy(row => (row.JudgeModel, row.Model))
-                .Select(group => new JudgeSelfPreferenceRow(
-                    JudgeModel: group.Key.JudgeModel,
-                    CandidateModel: group.Key.Model,
-                    MeanScoreDelta: group.Average(row => row.JudgeScore) - group.Average(row => row.StaticScore),
-                    IsOwnBackbone: string.Equals(group.Key.JudgeModel, group.Key.Model,
-                        StringComparison.OrdinalIgnoreCase),
-                    SampleSize: group.Count()))
-                .OrderBy(row => row.JudgeModel, StringComparer.OrdinalIgnoreCase)
+                .GroupBy(row => new CohortKey(
+                    Dimension: row.Dimension,
+                    JudgeModel: row.JudgeModel,
+                    UsedLogprobs: row.UsedLogprobs,
+                    StaticAuthority: ToAuthority(row.SyntaxAuthoritative)))
+                .SelectMany(cohort => cohort
+                    .GroupBy(row => row.Model)
+                    .Select(group => new JudgeSelfPreferenceRow(
+                        Dimension: cohort.Key.Dimension,
+                        JudgeModel: cohort.Key.JudgeModel,
+                        UsedLogprobs: cohort.Key.UsedLogprobs,
+                        StaticAuthority: cohort.Key.StaticAuthority,
+                        CandidateModel: group.Key,
+                        MeanScoreDelta: group.Average(row => row.JudgeScore) - group.Average(row => row.StaticScore),
+                        IsOwnBackbone: string.Equals(cohort.Key.JudgeModel, group.Key,
+                            StringComparison.OrdinalIgnoreCase),
+                        SampleSize: group.Count())))
+                .OrderBy(row => row.Dimension, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => row.JudgeModel, StringComparer.OrdinalIgnoreCase)
+                .ThenByDescending(row => row.UsedLogprobs)
+                .ThenBy(row => row.StaticAuthority)
                 .ThenByDescending(row => row.MeanScoreDelta)
         ];
     }
