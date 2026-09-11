@@ -11,6 +11,7 @@ using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
+using TotallyHot.ArcRouter.Telemetry.Tokenization;
 
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
 
@@ -153,6 +154,105 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Null(row.EstimatedNetSavingsUsd);
         Assert.Null(row.BaselineEstimatedCostUsd);
+    }
+
+    [Fact]
+    public async Task RunCycle_PricesLargeAndSmallTurnsDifferently()
+    {
+        // ADR-0009's headline regression, stated the way the ADR states it: two turns with the same
+        // baseline model, differing only in how much input they actually consumed. Before this change both
+        // produced the *identical* baseline cost, because the estimate came from one all-time per-model
+        // average - which is exactly what made the per-turn ROI bars uninformative.
+        var small = await BaselineCostForTurnAsync(inputTokens: 500, tokenCounter: new TokenCounterRegistry());
+        var large = await BaselineCostForTurnAsync(inputTokens: 150_000, tokenCounter: new TokenCounterRegistry());
+
+        // model-b is priced at $100/MTok both ways and averages 50 output tokens in this fixture, so the
+        // exact figures are pinned: the input half now tracks the turn while the output half does not.
+        Assert.Equal(expected: 0.055m, actual: small);   // 500/1e6*100 + 50/1e6*100
+        Assert.Equal(expected: 15.005m, actual: large);  // 150_000/1e6*100 + 50/1e6*100
+    }
+
+    [Fact]
+    public async Task RunCycle_ScalesTheBaselineFromTheTurnsOwnObservedInput_NotJustItsPromptText()
+    {
+        // Guards the fix for the review finding that TranscriptRecord.PromptText is only the newest user
+        // message: two turns carrying the *same* short prompt text but very different real input usage must
+        // still price differently, or the estimate is being taken from the text fragment again.
+        var counter = new TokenCounterRegistry();
+        var small = await BaselineCostForTurnAsync(inputTokens: 1_000, tokenCounter: counter, prompt: "same text");
+        var large = await BaselineCostForTurnAsync(inputTokens: 100_000, tokenCounter: counter, prompt: "same text");
+
+        Assert.NotNull(small);
+        Assert.NotNull(large);
+        Assert.True(condition: large > small * 50,
+            userMessage: $"expected observed usage to drive the baseline; got small={small} large={large}");
+    }
+
+    [Fact]
+    public async Task RunCycle_BothModelsOnAStandInEncoding_RecordsTheRatioAsUnmeasured()
+    {
+        // model-a and model-b both fall back to cl100k_base, so their ratio is 1.0 by construction. The row
+        // must say that was assumed, not measured - otherwise a reader cannot tell this apart from two
+        // models that genuinely share a tokenizer.
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b")
+        ], tokenCounter: new TokenCounterRegistry());
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var row = (await harness.ComparisonStore.LoadSinceAsync(since: DateTimeOffset.MinValue,
+            cancellationToken: TestContext.Current.CancellationToken)).Last(r => r.RoutedModel == "model-a");
+        Assert.Equal(expected: 1d, actual: row.BaselineTokenizerRatio!.Value, tolerance: 0.0001d);
+        Assert.False(row.BaselineTokenizerRatioMeasured);
+    }
+
+    [Fact]
+    public async Task RunCycle_TurnWithNoRecordedUsage_StillPricesFromTheObservedAverage()
+    {
+        // The fallback path: a turn the provider reported no usage for keeps the previous behavior rather
+        // than losing the estimate entirely.
+        var harness = await BuildHarnessAsync(
+        [
+            new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
+                InputTokens: 0)
+        ], tokenCounter: new TokenCounterRegistry());
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        var rows = await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(rows.Last(r => r.RoutedModel == "model-a").BaselineEstimatedCostUsd);
+    }
+
+    /// <summary>
+    /// Runs one comparison cycle over a single routed turn that consumed <paramref name="inputTokens"/> of
+    /// input, and returns the baseline cost the counterfactual estimated for it.
+    /// </summary>
+    /// <param name="inputTokens">The turn's observed input token usage.</param>
+    /// <param name="tokenCounter">The counter to wire, or <see langword="null"/> for the average fallback.</param>
+    /// <param name="prompt">The captured prompt text for the routed turn.</param>
+    /// <returns>The estimated baseline cost, or <see langword="null"/> when none was estimable.</returns>
+    private async Task<decimal?> BaselineCostForTurnAsync(int inputTokens, ITokenCounter? tokenCounter,
+        string prompt = "write a function")
+    {
+        var harness = await BuildHarnessAsync(
+        [
+            // Seeds an observed token average for model-b, which the output half of the estimate still needs.
+            new Sample(Embedding: [1f, 0f], Model: "model-b", 0.5, Cost: 0.10m),
+            new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9, Cost: 0.01m, UntrainedBaselineModel: "model-b",
+                PromptText: prompt, InputTokens: inputTokens)
+        ], tokenCounter: tokenCounter);
+
+        await harness.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+
+        // Both scenarios in a test share this class instance's database, so rows accumulate across calls;
+        // the newest matching row (LoadSinceAsync returns oldest first) is this invocation's.
+        var rows = await harness.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        return rows.Last(r => r.RoutedModel == "model-a").BaselineEstimatedCostUsd;
     }
 
     [Fact]
@@ -450,7 +550,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         InFlightRequestGauge? inFlightGauge = null,
         int batchSize = 200,
         Func<InFlightRequestGauge, ITranscriptStore, ITranscriptStore>? wrapTranscriptStore = null,
-        IReadOnlyList<PriorRow>? priorRows = null)
+        IReadOnlyList<PriorRow>? priorRows = null,
+        ITokenCounter? tokenCounter = null)
     {
         var storageOptions = Options.Create(new StorageOptions
         {
@@ -496,13 +597,13 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     Difficulty: "medium",
                     Language: "python",
                     false,
-                    PromptText: "write a function",
+                    PromptText: sample.PromptText,
                     ResponseText: "def f(): ...",
                     null,
                     Cost: sample.Cost,
                     IsExploratory: sample.IsExploratory,
                     1.0,
-                    100,
+                    sample.InputTokens,
                     50,
                     null,
                     UntrainedBaselineModel: sample.UntrainedBaselineModel,
@@ -576,7 +677,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             qualityOptions: Options.Create(new QualityOptions { LiveMemoryPrefix = Prefix }),
             priceLookup: new StubPriceLookup(),
             inFlightGauge: inFlightGauge,
-            comparisonBatchSize: batchSize);
+            comparisonBatchSize: batchSize,
+            tokenCounter: tokenCounter);
 
         return new Harness(Service: service, ComparisonStore: comparisonStore, Gauge: inFlightGauge);
     }
@@ -608,7 +710,9 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         decimal? Cost = 0.05m,
         string? UntrainedBaselineModel = "model-b",
         string? Dimension = "code_generation",
-        double? UntrainedBaselinePredictedScore = null);
+        double? UntrainedBaselinePredictedScore = null,
+        string PromptText = "write a function",
+        int InputTokens = 100);
 
     /// <summary>One row of a fixture's synced frozen probing-split prior.</summary>
     private sealed record PriorRow(string Dimension, string Model, double Score);

@@ -61,7 +61,9 @@ public sealed class TranscriptDatabase
                                          baseline_estimated_cost_usd REAL  NULL,
                                          estimated_net_savings_usd REAL    NULL,
                                          baseline_predicted_score  REAL    NULL,
-                                         estimated_regret          REAL    NULL
+                                         estimated_regret          REAL    NULL,
+                                         baseline_tokenizer_ratio  REAL    NULL,
+                                         baseline_tokenizer_ratio_measured INTEGER NULL
                                      );
 
                                      CREATE INDEX IF NOT EXISTS ix_taxonomy_comparisons_session
@@ -133,6 +135,7 @@ public sealed class TranscriptDatabase
         MigrateUntrainedBaselineModelColumn(connection);
         MigrateTaxonomyComparisonBaselineCostColumns(connection);
         MigrateUntrainedBaselinePredictedScoreColumn(connection);
+        MigrateTaxonomyComparisonTokenizerRatioColumns(connection);
     }
 
     /// <summary>
@@ -387,6 +390,52 @@ public sealed class TranscriptDatabase
             using var alter = connection.CreateCommand();
             alter.Transaction = transaction;
             alter.CommandText = $"ALTER TABLE taxonomy_comparisons ADD COLUMN {column} REAL NULL;";
+            alter.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Adds the <c>baseline_tokenizer_ratio</c> and <c>baseline_tokenizer_ratio_measured</c> columns to
+    /// <c>taxonomy_comparisons</c> if they are missing - the multiplier applied to a turn's observed input
+    /// tokens when pricing the counterfactual, and whether that multiplier was actually measured
+    /// (ADR-0009).
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    /// <remarks>
+    /// The second column is not redundant with the first. A ratio of <c>1.0</c> is both the correct answer
+    /// for two models that share a tokenizer and the fallback for two models counted with the same stand-in
+    /// encoding, and those are entirely different claims - see
+    /// <see cref="Telemetry.Tokenization.TokenizerRatio"/>. Same additive <c>PRAGMA</c>-check convention as
+    /// <see cref="MigrateTaxonomyComparisonBaselineCostColumns"/>; nullable with no backfill, since a row
+    /// written before these columns existed recorded no ratio and inventing one now would be exactly the
+    /// confident-but-unmeasured figure they exist to prevent.
+    /// </remarks>
+    private static void MigrateTaxonomyComparisonTokenizerRatioColumns(SqliteConnection connection)
+    {
+        (string Name, string Type)[] columns =
+        [
+            ("baseline_tokenizer_ratio", "REAL"),
+            ("baseline_tokenizer_ratio_measured", "INTEGER")
+        ];
+
+        using var transaction = connection.BeginTransaction();
+        foreach (var (name, type) in columns)
+        {
+            using (var pragma = connection.CreateCommand())
+            {
+                pragma.Transaction = transaction;
+                pragma.CommandText =
+                    "SELECT COUNT(*) FROM pragma_table_info('taxonomy_comparisons') WHERE name = $column;";
+                pragma.Parameters.AddWithValue(parameterName: "$column", value: name);
+                if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0)
+                    continue;
+            }
+
+            using var alter = connection.CreateCommand();
+            alter.Transaction = transaction;
+            alter.CommandText = $"ALTER TABLE taxonomy_comparisons ADD COLUMN {name} {type} NULL;";
             alter.ExecuteNonQuery();
         }
 

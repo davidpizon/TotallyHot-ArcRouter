@@ -8,6 +8,11 @@
 > persistent turn tracker (superseding [`telemetry.md`](telemetry.md)'s process-lifetime model, see the
 > note there), and the §5.11 incremental scanner fallback. All six phases below have landed.
 
+> **Follow-on work:** the counterfactual ("what would the baseline model have cost?") half of Routing
+> ROI is *not* covered by this plan and remained a global per-model token average until
+> [ADR-0009](../adr/0009-per-request-counterfactual-token-estimation.md). Its execution plan is
+> [`counterfactual-token-estimation-plan.md`](counterfactual-token-estimation-plan.md).
+
 ## Ground rules (apply to every phase)
 
 - **Phase completion criteria** (from `AGENTS.md`): zero build warnings/errors (repo-wide

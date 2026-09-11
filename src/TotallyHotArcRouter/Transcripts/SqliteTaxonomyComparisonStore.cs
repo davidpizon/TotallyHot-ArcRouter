@@ -82,14 +82,15 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                                   baseline_estimated_cost_usd, estimated_net_savings_usd,
                                   baseline_predicted_score, estimated_regret, baseline_input_tokens,
                                   baseline_output_tokens, baseline_input_price_per_million,
-                                  baseline_output_price_per_million)
+                                  baseline_output_price_per_million, baseline_tokenizer_ratio,
+                                  baseline_tokenizer_ratio_measured)
                               VALUES (
                                   $transcriptId, $comparedAtUtc, $sessionId, $observedScore, $dimensionPredicted,
                                   $clusterPredicted, $dimensionError, $clusterError, $isClustered,
                                   $isExploratory, $routedModel, $baselineModel, $actualCost,
                                   $baselineCost, $netSavings, $baselinePredicted, $estimatedRegret,
                                   $baselineInputTokens, $baselineOutputTokens, $baselineInputPrice,
-                                  $baselineOutputPrice)
+                                  $baselineOutputPrice, $tokenizerRatio, $tokenizerRatioMeasured)
                               ON CONFLICT(transcript_id) DO NOTHING;
                               """;
         command.Parameters.AddWithValue(parameterName: "$transcriptId", value: record.TranscriptId);
@@ -128,6 +129,10 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
             value: record.BaselineInputPricePerMillion is { } inputPrice ? (double)inputPrice : DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$baselineOutputPrice",
             value: record.BaselineOutputPricePerMillion is { } outputPrice ? (double)outputPrice : DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$tokenizerRatio",
+            value: (object?)record.BaselineTokenizerRatio ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$tokenizerRatioMeasured",
+            value: record.BaselineTokenizerRatioMeasured is { } measured ? measured ? 1 : 0 : DBNull.Value);
         command.ExecuteNonQuery();
 
         return Task.CompletedTask;
@@ -153,7 +158,8 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                                   baseline_estimated_cost_usd, estimated_net_savings_usd,
                                   baseline_predicted_score, estimated_regret, baseline_input_tokens,
                                   baseline_output_tokens, baseline_input_price_per_million,
-                                  baseline_output_price_per_million
+                                  baseline_output_price_per_million, baseline_tokenizer_ratio,
+                                  baseline_tokenizer_ratio_measured
                               FROM taxonomy_comparisons
                               WHERE compared_at_utc >= $since AND ($sessionId IS NULL OR session_id = $sessionId)
                               ORDER BY compared_at_utc ASC, transcript_id ASC;
@@ -196,6 +202,8 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
             BaselineInputTokens: reader.IsDBNull(17) ? null : reader.GetDouble(17),
             BaselineOutputTokens: reader.IsDBNull(18) ? null : reader.GetDouble(18),
             BaselineInputPricePerMillion: reader.IsDBNull(19) ? null : (decimal)reader.GetDouble(19),
-            BaselineOutputPricePerMillion: reader.IsDBNull(20) ? null : (decimal)reader.GetDouble(20));
+            BaselineOutputPricePerMillion: reader.IsDBNull(20) ? null : (decimal)reader.GetDouble(20),
+            BaselineTokenizerRatio: reader.IsDBNull(21) ? null : reader.GetDouble(21),
+            BaselineTokenizerRatioMeasured: reader.IsDBNull(22) ? null : reader.GetInt64(22) != 0);
     }
 }

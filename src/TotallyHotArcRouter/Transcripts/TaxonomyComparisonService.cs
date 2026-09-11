@@ -7,6 +7,7 @@ using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Telemetry.Tokenization;
 
 namespace TotallyHot.ArcRouter.Transcripts;
 
@@ -82,6 +83,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
     private readonly RoutingOptions _routingOptions;
     private readonly TranscriptOptions _transcriptOptions;
     private readonly ITranscriptStore _transcriptStore;
+    private readonly ITokenCounter? _tokenCounter;
     private ClusterModelArtifact? _cachedArtifact;
     private DateTime _cachedArtifactStamp;
 
@@ -119,6 +121,11 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <paramref name="benchmarkDatabase"/>/<paramref name="logger"/> so existing direct construction
     /// (e.g. tests) keeps compiling and behaving exactly as before this cache existed.
     /// </param>
+    /// <param name="tokenCounter">
+    /// Counts the baseline model's tokens for this turn's captured prompt (ADR-0009), or
+    /// <see langword="null"/> to fall back to the observed per-model average. Defaults to
+    /// <see langword="null"/> so existing direct constructions keep their behavior.
+    /// </param>
     public TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -133,13 +140,15 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IOptions<QualityOptions> qualityOptions,
         IModelPriceLookup? priceLookup = null,
         InFlightRequestGauge? inFlightGauge = null,
-        ProbingPriorMatrixCache? matrixCache = null)
+        ProbingPriorMatrixCache? matrixCache = null,
+        ITokenCounter? tokenCounter = null)
         : this(
             logger: logger, transcriptStore: transcriptStore, comparisonStore: comparisonStore,
             memoryEntryStore: memoryEntryStore, routerMemory: routerMemory, benchmarkDatabase: benchmarkDatabase,
             routeResolver: routeResolver, transcriptOptions: transcriptOptions, routingOptions: routingOptions,
             storageOptions: storageOptions, qualityOptions: qualityOptions, priceLookup: priceLookup,
-            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize, matrixCache: matrixCache)
+            inFlightGauge: inFlightGauge, comparisonBatchSize: DefaultComparisonBatchSize,
+            matrixCache: matrixCache, tokenCounter: tokenCounter)
     {
     }
 
@@ -165,6 +174,10 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <param name="inFlightGauge">The proxy's in-flight request gauge, or <see langword="null"/> to never pause.</param>
     /// <param name="comparisonBatchSize">The per-fetch batch size the drain loop uses. Must be positive.</param>
     /// <param name="matrixCache">See the public constructor's parameter of the same name.</param>
+    /// <param name="tokenCounter">
+    /// Counts the baseline model's tokens for a captured prompt, or <see langword="null"/> to fall back to
+    /// the observed per-model average (the pre-ADR-0009 behavior).
+    /// </param>
     internal TaxonomyComparisonService(
         ILogger<TaxonomyComparisonService> logger,
         ITranscriptStore transcriptStore,
@@ -180,7 +193,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
         IModelPriceLookup? priceLookup,
         InFlightRequestGauge? inFlightGauge,
         int comparisonBatchSize,
-        ProbingPriorMatrixCache? matrixCache = null)
+        ProbingPriorMatrixCache? matrixCache = null,
+        ITokenCounter? tokenCounter = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(comparisonBatchSize);
         ArgumentNullException.ThrowIfNull(logger);
@@ -207,6 +221,7 @@ public sealed class TaxonomyComparisonService : BackgroundService
         _liveMemoryPrefix = qualityOptions.Value.LiveMemoryPrefix;
         _clusterModelPath = storageOptions.Value.ResolveClusterModelPath();
         _inFlightGauge = inFlightGauge;
+        _tokenCounter = tokenCounter;
         _comparisonBatchSize = comparisonBatchSize;
         _matrixCache = matrixCache ?? new ProbingPriorMatrixCache(database: benchmarkDatabase, logger: logger);
     }
@@ -484,7 +499,9 @@ public sealed class TaxonomyComparisonService : BackgroundService
             BaselineInputTokens: baselineIngredients?.InputTokens,
             BaselineOutputTokens: baselineIngredients?.OutputTokens,
             BaselineInputPricePerMillion: baselineIngredients?.InputPricePerMillion,
-            BaselineOutputPricePerMillion: baselineIngredients?.OutputPricePerMillion);
+            BaselineOutputPricePerMillion: baselineIngredients?.OutputPricePerMillion,
+            BaselineTokenizerRatio: baselineIngredients?.TokenizerRatio,
+            BaselineTokenizerRatioMeasured: baselineIngredients?.TokenizerRatioMeasured);
     }
 
     /// <summary>
@@ -567,11 +584,23 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// inputs that have since drifted (docs/router/routing-roi-regret-plan.md's frozen-baseline
     /// correction).
     /// </summary>
+    /// <param name="InputTokens">The input token count the cost was computed from.</param>
+    /// <param name="OutputTokens">The output token count the cost was computed from.</param>
+    /// <param name="InputPricePerMillion">The input rate applied.</param>
+    /// <param name="OutputPricePerMillion">The output rate applied.</param>
+    /// <param name="TokenizerRatio">The baseline-to-routed tokenizer multiplier applied to the observed input.</param>
+    /// <param name="TokenizerRatioMeasured">
+    /// Whether that multiplier was measured against both models' real tokenizers, or assumed to be 1
+    /// because at least one of them was counted with a stand-in encoding. Persisted because a ratio of 1
+    /// otherwise reads identically in both cases - see <see cref="TotallyHot.ArcRouter.Telemetry.Tokenization.TokenizerRatio"/>.
+    /// </param>
     private sealed record BaselineCostIngredients(
         double InputTokens,
         double OutputTokens,
         decimal InputPricePerMillion,
-        decimal OutputPricePerMillion);
+        decimal OutputPricePerMillion,
+        double TokenizerRatio,
+        bool TokenizerRatioMeasured);
 
     /// <summary>
     /// Prices what the untrained baseline's pick would have cost, and the resulting net saving against what
@@ -584,9 +613,30 @@ public sealed class TaxonomyComparisonService : BackgroundService
     /// <see langword="null"/> when no honest estimate exists.
     /// </returns>
     /// <remarks>
+    /// <para>
     /// Returns nulls rather than zeros whenever any input is missing - an abstaining baseline, an unpriced
     /// model, a model never yet observed, or an unknown actual cost. A zero here would read as "routing
     /// broke even", which is a measurement, not the absence of one.
+    /// </para>
+    /// <para>
+    /// <b>Input tokens are per-request, not averaged</b> (ADR-0009). The baseline model would have received
+    /// the same request, so this turn's own observed input usage sets the scale - see
+    /// <see cref="EstimateBaselineInputTokens"/> for why that is the anchor rather than the captured prompt
+    /// text. Before this, a 500-token turn and a 150,000-token turn produced the identical baseline figure,
+    /// which is what made the per-turn ROI bars uninformative. The observed average remains the fallback
+    /// for a turn that recorded no usage at all.
+    /// </para>
+    /// <para>
+    /// <b>Output tokens remain an estimate</b>, because a model that never ran produced no output to count.
+    /// They stay sourced from the observed average here.
+    /// </para>
+    /// <para>
+    /// The counted figure is priced at the <em>standard</em> input rate, with no cache discount applied.
+    /// That is deliberate rather than an omission: the baseline model never served this session, so it
+    /// would have met a cold prompt cache on this turn. Modelling a warm one would require replaying the
+    /// whole session against the baseline, which is a materially different (and much larger) question than
+    /// the per-turn counterfactual this method answers.
+    /// </para>
     /// </remarks>
     private (decimal? BaselineCost, decimal? NetSavings, BaselineCostIngredients? Ingredients) EstimateCounterfactual(
         TranscriptRecord transcript,
@@ -605,17 +655,93 @@ public sealed class TaxonomyComparisonService : BackgroundService
             : _priceLookup?.TryGetPrice(new ModelKey(ModelName: route.ModelName, Provider: route.Provider));
         if (price is null) return (null, null, null);
 
-        var roundedInputTokens = Math.Round(average.InputTokens);
+        // Per-request rather than a global mean (ADR-0009), falling back to the observed mean when this
+        // turn recorded no usage. The same figure feeds the frozen ingredients below: they exist to record
+        // what actually produced this cost, so recording the average here would defeat them.
+        var estimated = EstimateBaselineInputTokens(transcript: transcript, baselineRoute: route);
+        var inputTokens = estimated?.Tokens ?? (int)Math.Round(average.InputTokens);
+        var ratio = estimated?.Ratio ?? TokenizerRatio.Assumed;
         var roundedOutputTokens = Math.Round(average.OutputTokens);
+
         var baselineCost = price.EstimateCost(
-            promptTokens: (int)roundedInputTokens,
+            promptTokens: inputTokens,
             completionTokens: (int)roundedOutputTokens);
         var ingredients = new BaselineCostIngredients(
-            InputTokens: roundedInputTokens,
+            InputTokens: inputTokens,
             OutputTokens: roundedOutputTokens,
             InputPricePerMillion: price.InputPerMillionTokens,
-            OutputPricePerMillion: price.OutputPerMillionTokens);
+            OutputPricePerMillion: price.OutputPerMillionTokens,
+            TokenizerRatio: ratio.Value,
+            TokenizerRatioMeasured: ratio.IsMeasured);
         return (baselineCost, baselineCost - actualCost, ingredients);
+    }
+
+    /// <summary>
+    /// Estimates the input tokens <paramref name="baselineRoute"/>'s model would have been billed for this
+    /// exact turn.
+    /// </summary>
+    /// <param name="transcript">The row being compared, supplying the observed usage and captured text.</param>
+    /// <param name="baselineRoute">The resolved baseline route.</param>
+    /// <returns>
+    /// The per-request estimate, or <see langword="null"/> when this turn recorded no input usage - in
+    /// which case the caller falls back to the observed average rather than fabricating a number.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Anchored on the turn's own observed usage, not on captured text.</b> The baseline model would
+    /// have received the <em>same</em> request, so <see cref="TranscriptRecord.InputTokens"/> - the
+    /// provider's own count of the full billable input - is the correct scale. It is deliberately not
+    /// <see cref="TranscriptRecord.PromptText"/>: that field is only the newest user message
+    /// (<see cref="RequestTextExtractor.ExtractNewestUserMessage"/>), so pricing it as the whole input
+    /// would omit conversation history, the system prompt, tool definitions, and tool results. On the
+    /// agentic traffic this router proxies that is not a rounding error - it is most of the request - and
+    /// it would bias every baseline low, which systematically <em>overstates</em> routing savings.
+    /// </para>
+    /// <para>
+    /// The only thing the two models genuinely differ on for an identical request is their tokenizer, so
+    /// the observed count is scaled by the ratio between them, measured on the one piece of text this row
+    /// retains. When that ratio cannot be measured - no captured text, no counter, or a counter that
+    /// cannot serve one of the two models - the ratio is 1, which is exactly right for two models sharing
+    /// an encoding and a bounded error otherwise.
+    /// </para>
+    /// </remarks>
+    private (int Tokens, TokenizerRatio Ratio)? EstimateBaselineInputTokens(TranscriptRecord transcript,
+        ResolvedModelRoute baselineRoute)
+    {
+        if (transcript.InputTokens is not { } observedInputTokens || observedInputTokens <= 0) return null;
+
+        var ratio = MeasureTokenizerRatio(promptText: transcript.PromptText, routedModel: transcript.RoutedModel,
+            baselineRoute: baselineRoute);
+
+        return ((int)Math.Max(1d, Math.Round(observedInputTokens * ratio.Value)), ratio);
+    }
+
+    /// <summary>
+    /// Measures how many tokens the baseline model spends per token the routed model spent, by counting the
+    /// same text under both models' encodings.
+    /// </summary>
+    /// <param name="promptText">The captured text to measure on, or <see langword="null"/> when none was kept.</param>
+    /// <param name="routedModel">The model that actually served the turn.</param>
+    /// <param name="baselineRoute">The resolved baseline route.</param>
+    /// <returns>The ratio, or <c>1</c> when it cannot be measured.</returns>
+    private TokenizerRatio MeasureTokenizerRatio(string? promptText, string routedModel,
+        ResolvedModelRoute baselineRoute)
+    {
+        if (_tokenCounter is null || string.IsNullOrWhiteSpace(promptText)) return TokenizerRatio.Assumed;
+        if (!_routeResolver.TryResolve(modelName: routedModel, route: out var routed)) return TokenizerRatio.Assumed;
+
+        if (!_tokenCounter.TryCountPromptTokens(text: promptText,
+                key: new ModelKey(ModelName: baselineRoute.ModelName, Provider: baselineRoute.Provider),
+                tokens: out var baselineTokens, source: out var baselineSource))
+            return TokenizerRatio.Assumed;
+
+        if (!_tokenCounter.TryCountPromptTokens(text: promptText,
+                key: new ModelKey(ModelName: routed.ModelName, Provider: routed.Provider),
+                tokens: out var routedTokens, source: out var routedSource))
+            return TokenizerRatio.Assumed;
+
+        return TokenizerRatio.Measure(baselineTokens: baselineTokens, baselineSource: baselineSource,
+            routedTokens: routedTokens, routedSource: routedSource);
     }
 
     /// <summary>

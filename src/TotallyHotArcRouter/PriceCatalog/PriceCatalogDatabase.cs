@@ -357,6 +357,20 @@ public sealed class PriceCatalogDatabase
                                          provider              TEXT PRIMARY KEY,
                                          last_reconciled_day   TEXT NOT NULL
                                      );
+
+                                     -- Per-(model, provider) multiplier correcting the local tiktoken proxy count toward what the
+                                     -- provider actually bills (ADR-0009). factor is an invariant-culture decimal string, not REAL,
+                                     -- matching this file's rule for every non-integer quantity. sample_count gates trust: a factor
+                                     -- below TokenizationOptions.MinSamplesForTrust is retained but not applied, so one
+                                     -- unrepresentative prompt cannot move every counterfactual for a model.
+                                     CREATE TABLE IF NOT EXISTS model_token_calibration (
+                                         model          TEXT    NOT NULL,
+                                         provider       TEXT    NOT NULL,
+                                         factor         TEXT    NOT NULL,
+                                         sample_count   INTEGER NOT NULL,
+                                         updated_at_utc TEXT    NOT NULL,
+                                         PRIMARY KEY (model, provider)
+                                     );
                                      """;
 
     /// <summary>
