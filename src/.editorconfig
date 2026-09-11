@@ -1,0 +1,63 @@
+# Analyzer severities for every project under src/.
+#
+# src/Directory.Build.props turns the .NET analyzers and code-style rules on; this file decides which of
+# them the build actually enforces. Everything starts silent and rules are escalated one at a time, each
+# with the fixes that make it pass, because TreatWarningsAsErrors is already on repo-wide - so a rule
+# promoted before its fallout is cleaned up breaks the build for everyone rather than producing a to-do
+# list.
+#
+# This is not a formatting config. It deliberately sets no indent, spacing, or naming preferences: the
+# repo has no .editorconfig history, and inferring a house style from the current tree would be guessing.
+# Add those separately if they are ever wanted.
+
+root = true
+
+[*.cs]
+
+# The blanket default. Every analyzer diagnostic is off unless named below.
+dotnet_analyzer_diagnostic.severity = silent
+
+# ---------------------------------------------------------------------------
+# Live rules - the dead-code oracle.
+#
+# These exist because a hand-rolled dead-code sweep over this repo produced 36 candidates of which 35
+# were false positives: static-class call sites and JSON DTO graphs read as unreferenced to a text scan
+# and are perfectly live. The compiler is the only sound oracle for the question, which is what D1 in
+# docs/router/code-smell-refactoring-plan.md was about.
+#
+# Their standing answer for this codebase, as of 2026-09-11: essentially no dead code. Two IDE0051 hits,
+# both false positives suppressed at their sites; four unnecessary usings, all introduced by the
+# ProxyServer change in the same series; zero IDE0052; zero CA1823.
+# ---------------------------------------------------------------------------
+
+# Unnecessary using directives. IDE0005 only runs at build where GenerateDocumentationFile is set, which
+# is the seven doc-enforced production projects and not the test projects - so a clean build here is
+# evidence about production code, not about everything. See src/Directory.Build.props for why the test
+# projects are left out rather than opted in.
+dotnet_diagnostic.IDE0005.severity = error
+
+# Unused private members. This is the actual dead-code report.
+dotnet_diagnostic.IDE0051.severity = error
+
+# Private members assigned but never read.
+dotnet_diagnostic.IDE0052.severity = error
+
+# Unused private fields.
+dotnet_diagnostic.CA1823.severity = error
+
+# ---------------------------------------------------------------------------
+# Deliberately still silent, with the measured reason.
+#
+# CA2000 (dispose objects before losing scope): 1758 hits. Overwhelmingly DI-registered singletons and
+#   fluent builders whose lifetime the container owns - CA2000 cannot see either. Escalating it would
+#   mean triaging 1758 sites to find the handful of real leaks, and the two real ones this repo has had
+#   (C3/C4 in the refactoring plan) are already fixed. Worth revisiting only with a targeted pass.
+#
+# CA1849 (synchronously blocks in an async method): 188 hits, concentrated in the SQLite stores, whose
+#   provider executes synchronously underneath the async API anyway. C7 in the refactoring plan already
+#   assessed the nine sync-over-async sites outside that pattern as benign; this rule does not
+#   distinguish them from the 179 that are simply how Microsoft.Data.Sqlite works.
+#
+# Both counts are from a measured pass on 2026-09-11, not an estimate. Re-measure before arguing either
+# is cheap: run the build with -p:TreatWarningsAsErrors=false after raising one to warning.
+# ---------------------------------------------------------------------------

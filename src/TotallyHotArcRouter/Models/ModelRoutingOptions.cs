@@ -226,6 +226,11 @@ public sealed record ProviderOptions
     /// judgment call that leaves <c>ResolvedModelRoute.AwsAccessKeyId</c> visible.
     /// </para>
     /// </summary>
+#pragma warning disable IDE0051 // Private member is unused
+    // IDE0051 is wrong here, and dangerously so. A record's user-declared PrintMembers replaces the
+    // compiler-generated one and is called by the generated ToString(); the analyzer does not model that
+    // call, so it reports the method as dead. Deleting it would silently restore the default ToString()
+    // that prints every property verbatim - which is the secret leak this method exists to prevent.
     private bool PrintMembers(StringBuilder builder)
     {
         builder.Append("BaseUrl = ").Append(BaseUrl);
@@ -247,6 +252,7 @@ public sealed record ProviderOptions
         builder.Append(", AwsSessionTokenEnvVar = ").Append(AwsSessionTokenEnvVar);
         return true;
     }
+#pragma warning restore IDE0051
 }
 
 /// <summary>

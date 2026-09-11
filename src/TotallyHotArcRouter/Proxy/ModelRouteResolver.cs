@@ -129,6 +129,11 @@ public sealed record ResolvedModelRoute(
     /// <see cref="AwsAccessKeyId"/> is left visible: it identifies but does not itself authenticate (same
     /// judgment call as <c>BedrockRuntimeClientFactory.CredentialFingerprint</c>'s remarks).
     /// </summary>
+#pragma warning disable IDE0051 // Private member is unused
+    // IDE0051 is wrong here, and dangerously so. A record's user-declared PrintMembers replaces the
+    // compiler-generated one and is called by the generated ToString(); the analyzer does not model that
+    // call, so it reports the method as dead. Deleting it would silently restore the default ToString()
+    // that prints every property verbatim - which is the secret leak this method exists to prevent.
     private bool PrintMembers(StringBuilder builder)
     {
         builder.Append("ModelName = ").Append(ModelName);
@@ -146,6 +151,7 @@ public sealed record ResolvedModelRoute(
         builder.Append(", AwsSessionToken = ").Append(Redacted(AwsSessionToken));
         return true;
     }
+#pragma warning restore IDE0051
 
     /// <summary>Returns a safe placeholder for a secret value: "&lt;null&gt;" if absent, otherwise "&lt;redacted&gt;".</summary>
     private static string Redacted(string? secret)
