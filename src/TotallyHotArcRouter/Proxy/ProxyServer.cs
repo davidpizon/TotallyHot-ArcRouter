@@ -82,20 +82,15 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         var managementToken = dependencies?.ManagementToken;
         var routingOptions = dependencies?.RoutingOptions;
 
-        // Each feature group is either wholly present or wholly absent, so a single null check per group
-        // decides both whether its services are registered below and whether its endpoint is mapped. The
-        // members within a present group are non-nullable by type, which is what makes "supplied two of
-        // the three" impossible to express: previously each of these was a two-to-five-way conjunction
-        // written out twice, ~60-120 lines apart, and the two copies drifting apart would have produced a
-        // service that maps successfully and then throws on its first RPC call - MapGrpcService only
-        // reflects over the service type, it never constructs it, so nothing fails at startup.
         var managementApi = dependencies?.ManagementApi;
-        var priceSourceAdmin = dependencies?.PriceSourceAdmin;
-        var benchmarkDataAdmin = dependencies?.BenchmarkDataAdmin;
-        var llmRouterModelAdmin = dependencies?.LlmRouterModelAdmin;
-        var clusterModelAdmin = dependencies?.ClusterModelAdmin;
-        var logRegModelAdmin = dependencies?.LogRegModelAdmin;
-        var routerSettingsAdmin = dependencies?.RouterSettingsAdmin;
+
+        // Each optional feature group is either wholly present or wholly absent, and each now owns both
+        // halves of its own wiring through IAdminServiceModule - registration and endpoint mapping - so
+        // the two can no longer drift apart. They used to be written out twice, ~120 lines apart, and two
+        // copies disagreeing would have produced a service that maps successfully and then throws on its
+        // first RPC call: MapGrpcService only reflects over the service type, it never constructs it, so
+        // nothing fails at startup. Materialized once because it is walked twice, below.
+        var adminModules = dependencies?.AdminModules ?? [];
 
         // Update (docs/router/auto-update-plan.md Phase 2) is mapped unconditionally, like
         // RoutingModeAdminGrpcService above - so unlike every optional group, this one always has
@@ -206,90 +201,18 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 
                     services.AddSingleton(broadcaster);
 
-                    // Same reasoning as the broadcaster: the price catalog singletons live in the outer
-                    // container, so PriceSourceAdminGrpcService can only be constructed here if they are
-                    // handed across explicitly. Registered as a pair - the service needs both.
-                    if (priceSourceAdmin is not null)
-                    {
-                        services.AddSingleton(priceSourceAdmin.ToggleStore);
-                        services.AddSingleton(priceSourceAdmin.IngestionService);
+                    // Same reasoning as the broadcaster: every optional admin feature's collaborators live
+                    // in the outer container, so its gRPC service can only be constructed here if they are
+                    // handed across explicitly. Each group knows its own registrations - see
+                    // IAdminServiceModule.
+                    foreach (var module in adminModules) module.Register(services);
 
-                        // The panel's countdown needs the poll cadence, and this inner container has no
-                        // configuration bound into it - AddGrpc alone would leave the IOptions dependency
-                        // unresolvable and fail on the first call, not at startup.
-                        services.AddSingleton(Options.Create(priceSourceAdmin.Options ?? new PriceCatalogOptions()));
-                    }
-
-                    // Same reasoning again: the CodeRouterBench singletons live in the outer container,
-                    // so BenchmarkDataAdminGrpcService can only be constructed here if they are handed
-                    // across explicitly. Registered as a trio - the service needs all three.
-                    if (benchmarkDataAdmin is not null)
-                    {
-                        services.AddSingleton(benchmarkDataAdmin.StatusService);
-                        services.AddSingleton(benchmarkDataAdmin.FileLedger);
-                        services.AddSingleton(benchmarkDataAdmin.SyncService);
-                        services.AddSingleton(Options.Create(benchmarkDataAdmin.Options ?? new BenchmarkSyncOptions()));
-                    }
-
-                    // Same reasoning again: the llm_router model override store and sync service live
-                    // in the outer container, so LlmRouterModelAdminGrpcService can only be
-                    // constructed here if they are handed across explicitly.
-                    if (llmRouterModelAdmin is not null)
-                    {
-                        services.AddSingleton(llmRouterModelAdmin.OverrideStore);
-                        services.AddSingleton(llmRouterModelAdmin.SyncService);
-                    }
-
-                    // Unlike the pairs above, RoutingModeAdminGrpcService's dependency is core
+                    // Unlike the optional groups above, RoutingModeAdminGrpcService's dependency is core
                     // configuration rather than an optional feature store, so it defaults to the
-                    // caller's own RoutingOptions defaults instead of leaving the service unmapped.
+                    // caller's own RoutingOptions defaults instead of leaving the service unmapped. It is
+                    // also what covers LogRegModelAdminGrpcService's own IOptions<RoutingOptions>.
                     services.AddSingleton(routingOptions ?? Options.Create(new RoutingOptions()));
 
-                    // Same reasoning again: the cluster training service and its supporting stores live
-                    // in the outer container, so ClusterModelAdminGrpcService can only be constructed
-                    // here if they are handed across explicitly. Registered as a group of five - the
-                    // service needs all of them.
-                    if (clusterModelAdmin is not null)
-                    {
-                        services.AddSingleton(clusterModelAdmin.TrainingService);
-                        services.AddSingleton(clusterModelAdmin.MemoryEntryStore);
-                        services.AddSingleton(clusterModelAdmin.TranscriptStore);
-                        services.AddSingleton(clusterModelAdmin.TranscriptOptions);
-                        services.AddSingleton(clusterModelAdmin.StorageOptions);
-                    }
-
-                    // Same reasoning again: the logreg training service and its supporting store live
-                    // in the outer container, so LogRegModelAdminGrpcService can only be constructed
-                    // here if they are handed across explicitly. Its IOptions<RoutingOptions> dependency
-                    // is already covered by the unconditional registration above, so only the
-                    // training-specific pair is registered here.
-                    if (logRegModelAdmin is not null)
-                    {
-                        services.AddSingleton(logRegModelAdmin.TrainingService);
-                        services.AddSingleton(logRegModelAdmin.MemoryEntryStore);
-                        services.AddSingleton(logRegModelAdmin.StorageOptions);
-                    }
-
-                    // The Governance UI's System Settings panel API (Phase T6). Same reasoning again:
-                    // the settings store, reload token, and options monitor live in the outer
-                    // container, so RouterSettingsAdminGrpcService can only be constructed here if
-                    // they are handed across explicitly. The embedding memory is optional within the
-                    // group - the service takes it as an optional constructor parameter and falls back
-                    // to the reactive OnChange trim when it is absent.
-                    if (routerSettingsAdmin is not null)
-                    {
-                        services.AddSingleton(routerSettingsAdmin.Store);
-                        services.AddSingleton(routerSettingsAdmin.ReloadToken);
-                        services.AddSingleton(routerSettingsAdmin.OptionsMonitor);
-                        services.AddSingleton(routerSettingsAdmin.JudgeOptionsMonitor);
-                        services.AddSingleton(routerSettingsAdmin.PortfolioGraderOptionsMonitor);
-                        services.AddSingleton(routerSettingsAdmin.JudgeModelSelector);
-                        services.AddSingleton(routerSettingsAdmin.TranscriptOptionsMonitor);
-                        services.AddSingleton(routerSettingsAdmin.TranscriptStore);
-
-                        if (routerSettingsAdmin.EmbeddingMemory is not null)
-                            services.AddSingleton(routerSettingsAdmin.EmbeddingMemory);
-                    }
 
                     // The Governance UI's "Software Update" section API (Phase 2). Always registered -
                     // see the updateAdmin local's remarks above.
@@ -321,36 +244,16 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     {
                         endpoints.MapGrpcService<TelemetryGrpcService>();
 
-                        // The Governance UI's price-source panel API. Shares the TLS gRPC port with the
-                        // telemetry stream - price data itself never crosses it (D5); this carries only
-                        // feed metadata and the toggle/refresh commands.
-                        if (priceSourceAdmin is not null) endpoints.MapGrpcService<PriceSourceAdminGrpcService>();
-
-                        // The Governance UI's Benchmark Data panel API. Shares the TLS gRPC port with
-                        // the telemetry stream and price-source admin service.
-                        if (benchmarkDataAdmin is not null) endpoints.MapGrpcService<BenchmarkDataAdminGrpcService>();
-
-                        // The Governance UI's Benchmark Data panel's "Local Voter Model" section API.
-                        // Shares the TLS gRPC port with the telemetry stream and the other admin services.
-                        if (llmRouterModelAdmin is not null) endpoints.MapGrpcService<LlmRouterModelAdminGrpcService>();
+                        // Every optional Governance panel API - price sources, benchmark data, the
+                        // "Local Voter Model" section, cluster model, router model, and System Settings.
+                        // All share the TLS gRPC port with the telemetry stream, and each maps itself
+                        // right where it registered its collaborators - see IAdminServiceModule.
+                        foreach (var module in adminModules) module.Map(endpoints);
 
                         // The Governance UI's Routing Mode panel API. Shares the TLS gRPC port with the
                         // telemetry stream and the other admin services. Always mapped - see the
                         // routingOptions registration above.
                         endpoints.MapGrpcService<RoutingModeAdminGrpcService>();
-
-                        // The Governance UI's Cluster Model panel API (Phase T5). Shares the TLS gRPC
-                        // port with the telemetry stream and the other admin services.
-                        if (clusterModelAdmin is not null) endpoints.MapGrpcService<ClusterModelAdminGrpcService>();
-
-                        // The Governance UI's Router Model panel API (live-feedback-learning-plan.md
-                        // Phase 5). Shares the TLS gRPC port with the telemetry stream and the other
-                        // admin services.
-                        if (logRegModelAdmin is not null) endpoints.MapGrpcService<LogRegModelAdminGrpcService>();
-
-                        // The Governance UI's System Settings panel API (Phase T6). Shares the TLS
-                        // gRPC port with the telemetry stream and the other admin services.
-                        if (routerSettingsAdmin is not null) endpoints.MapGrpcService<RouterSettingsAdminGrpcService>();
 
                         // The Governance UI's "Software Update" section API (Phase 2). Always mapped -
                         // see the updateAdmin local's remarks above.

@@ -116,8 +116,14 @@ is documented as the gRPC stores' seam, and the HTTP stores are simply not part 
   reading, because that is what `IsReachable`'s own doc comment says it means everywhere, and what
   every store already did on its mutation path. A *rejected* load therefore now leaves a panel
   rendering its data plus an inline error rather than collapsing to "router unreachable".
-- Neutral, because the router-side change is roughly line-neutral (~200 removed from `ProxyServer`,
-  ~80 added across the dependency records) and is justified on edit-set size, per rule 3.
+- Bad, because the router-side change **adds production lines rather than removing them**: measured at
+  `ProxyServer.cs` -97, `ProxyServerDependencies.cs` +160, **net +63**. The estimate in this ADR's first
+  draft ("roughly line-neutral") was wrong, and the overshoot is the interface plus six pairs of method
+  scaffolding and their doc comments. Per ADR-0008 Amendment 1 rule 3 this needs a justification rather
+  than a shrug, and the justification is the edit set, not the volume: adding an optional admin service
+  went from editing `ProxyServer.cs` in two places ~120 lines apart **plus** its dependency record, to
+  editing the dependency record alone. The two halves of a feature's wiring also can no longer drift
+  apart, which is the failure this file's own comments warned about.
 - Neutral, because this locks in the `*AdminDependencies` records as the place registration knowledge
   lives. A future admin service needing inner-container wiring implements `IAdminServiceModule` there
   rather than adding a block to `ProxyServer`.

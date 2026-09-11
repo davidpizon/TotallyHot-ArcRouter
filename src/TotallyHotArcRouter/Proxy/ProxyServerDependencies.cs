@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Judge;
@@ -121,6 +122,61 @@ public sealed record ProxyServerDependencies
     /// report that says so rather than a silently empty one.
     /// </summary>
     public JudgeCalibrationAdminDependencies? JudgeCalibrationAdmin { get; init; }
+
+    /// <summary>
+    /// Every optional admin feature group that was actually supplied, as the registration seam
+    /// <see cref="ProxyServer"/> drives. Adding an optional admin service means implementing
+    /// <see cref="IAdminServiceModule"/> on its group record and adding a name here - never editing
+    /// <see cref="ProxyServer"/>, which used to carry one hand-written registration block and one
+    /// hand-written endpoint mapping per feature, ~120 lines apart, with nothing but a comment tying the
+    /// two halves together.
+    /// </summary>
+    /// <remarks>
+    /// The unconditional services (<c>TelemetryGrpcService</c>, <c>RoutingModeAdminGrpcService</c>,
+    /// <c>UpdateAdminGrpcService</c>, <c>RoutingGateAdminGrpcService</c>,
+    /// <c>RegretHarnessAdminGrpcService</c>, <c>JudgeCalibrationAdminGrpcService</c>) are deliberately
+    /// <em>not</em> here. They map whether or not their group was supplied, falling back to a null-object
+    /// collaborator - a module cannot register itself when it does not exist, and folding them in would
+    /// change when they map.
+    /// </remarks>
+    internal IReadOnlyList<IAdminServiceModule> AdminModules =>
+    [
+        .. new IAdminServiceModule?[]
+        {
+            PriceSourceAdmin, BenchmarkDataAdmin, LlmRouterModelAdmin, ClusterModelAdmin, LogRegModelAdmin,
+            RouterSettingsAdmin
+        }.OfType<IAdminServiceModule>()
+    ];
+}
+
+/// <summary>
+/// One optional admin feature's own inner-container registration and endpoint mapping, implemented by the
+/// <c>*AdminDependencies</c> record that already carries exactly the collaborators its gRPC service needs.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This exists so registration knowledge lives next to the group it describes. Before it,
+/// <see cref="ProxyServer"/>'s constructor held one <c>if (xxxAdmin is not null) { ... AddSingleton ... }</c>
+/// block per feature and its endpoint block held a matching <c>if</c> - the file's own comments said
+/// "Same reasoning again" four times over. The two halves drifting apart produces a service that maps
+/// successfully and then throws on its first RPC call, because <c>MapGrpcService</c> only reflects over the
+/// service type and never constructs it.
+/// </para>
+/// <para>
+/// Implemented explicitly by each record, so a group's public surface is unchanged and callers building one
+/// see no new members. See
+/// <see href="../../../docs/adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md">ADR-0010</see>.
+/// </para>
+/// </remarks>
+internal interface IAdminServiceModule
+{
+    /// <summary>Registers this feature's collaborators into the inner Kestrel host's private container.</summary>
+    /// <param name="services">The inner host's service collection.</param>
+    void Register(IServiceCollection services);
+
+    /// <summary>Maps this feature's gRPC service onto the shared TLS admin endpoint.</summary>
+    /// <param name="endpoints">The inner host's endpoint builder.</param>
+    void Map(IEndpointRouteBuilder endpoints);
 }
 
 /// <summary>
@@ -218,7 +274,7 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
 /// <param name="IngestionService">Backs the panel's "Pull Now" action.</param>
 public sealed record PriceSourceAdminDependencies(
     PriceSourceToggleStore ToggleStore,
-    PriceCatalogIngestionService IngestionService)
+    PriceCatalogIngestionService IngestionService) : IAdminServiceModule
 {
     /// <summary>
     /// Supplies the poll cadence driving the panel's countdown. The inner host has no configuration bound
@@ -226,6 +282,24 @@ public sealed record PriceSourceAdminDependencies(
     /// fails on the first call rather than at startup. Defaults to <see cref="PriceCatalogOptions"/>'s own values.
     /// </summary>
     public PriceCatalogOptions? Options { get; init; }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        services.AddSingleton(ToggleStore);
+        services.AddSingleton(IngestionService);
+
+        // The panel's countdown needs the poll cadence, and this inner container has no configuration
+        // bound into it - AddGrpc alone would leave the IOptions dependency unresolvable and fail on the
+        // first call, not at startup.
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(Options ?? new PriceCatalogOptions()));
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<PriceSourceAdminGrpcService>();
+    }
 }
 
 /// <summary>
@@ -238,10 +312,25 @@ public sealed record PriceSourceAdminDependencies(
 public sealed record BenchmarkDataAdminDependencies(
     BenchmarkDataStatusService StatusService,
     BenchmarkFileLedger FileLedger,
-    BenchmarkSyncService SyncService)
+    BenchmarkSyncService SyncService) : IAdminServiceModule
 {
     /// <summary>Supplies the dataset ref driving the sync action. Defaults to <see cref="BenchmarkSyncOptions"/>'s own values.</summary>
     public BenchmarkSyncOptions? Options { get; init; }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        services.AddSingleton(StatusService);
+        services.AddSingleton(FileLedger);
+        services.AddSingleton(SyncService);
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(Options ?? new BenchmarkSyncOptions()));
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<BenchmarkDataAdminGrpcService>();
+    }
 }
 
 /// <summary>
@@ -252,7 +341,21 @@ public sealed record BenchmarkDataAdminDependencies(
 /// <param name="SyncService">Backs the section's sync action.</param>
 public sealed record LlmRouterModelAdminDependencies(
     ILlmRouterModelOverrideStore OverrideStore,
-    LlmRouterModelSyncService SyncService);
+    LlmRouterModelSyncService SyncService) : IAdminServiceModule
+{
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        services.AddSingleton(OverrideStore);
+        services.AddSingleton(SyncService);
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<LlmRouterModelAdminGrpcService>();
+    }
+}
 
 /// <summary>
 /// Backs <see cref="ClusterModelAdminGrpcService"/>, the Governance UI's Cluster Model panel
@@ -270,7 +373,24 @@ public sealed record ClusterModelAdminDependencies(
     IMemoryEntryStore MemoryEntryStore,
     ITranscriptStore TranscriptStore,
     IOptions<TranscriptOptions> TranscriptOptions,
-    IOptions<StorageOptions> StorageOptions);
+    IOptions<StorageOptions> StorageOptions) : IAdminServiceModule
+{
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        services.AddSingleton(TrainingService);
+        services.AddSingleton(MemoryEntryStore);
+        services.AddSingleton(TranscriptStore);
+        services.AddSingleton(TranscriptOptions);
+        services.AddSingleton(StorageOptions);
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<ClusterModelAdminGrpcService>();
+    }
+}
 
 /// <summary>
 /// Backs <see cref="LogRegModelAdminGrpcService"/>, the Governance UI's Router Model panel
@@ -285,7 +405,24 @@ public sealed record ClusterModelAdminDependencies(
 public sealed record LogRegModelAdminDependencies(
     IEmbeddingLogRegTrainingService TrainingService,
     IMemoryEntryStore MemoryEntryStore,
-    IOptions<StorageOptions> StorageOptions);
+    IOptions<StorageOptions> StorageOptions) : IAdminServiceModule
+{
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        // IOptions<RoutingOptions>, this service's third dependency, is registered unconditionally by
+        // ProxyServer - see this record's own remarks.
+        services.AddSingleton(TrainingService);
+        services.AddSingleton(MemoryEntryStore);
+        services.AddSingleton(StorageOptions);
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<LogRegModelAdminGrpcService>();
+    }
+}
 
 /// <summary>
 /// Backs <see cref="RouterSettingsAdminGrpcService"/>, the Governance UI's System Settings window
@@ -318,7 +455,7 @@ public sealed record RouterSettingsAdminDependencies(
     IOptionsMonitor<JudgeOptions> JudgeOptionsMonitor,
     JudgeModelSelector JudgeModelSelector,
     IOptionsMonitor<TranscriptOptions> TranscriptOptionsMonitor,
-    ITranscriptStore TranscriptStore)
+    ITranscriptStore TranscriptStore) : IAdminServiceModule
 {
     /// <summary>
     /// The working set trimmed synchronously when a save lowers the capacity, so the response reflects the
@@ -336,6 +473,29 @@ public sealed record RouterSettingsAdminDependencies(
     /// since the System Settings window's Save action needs it to persist the three toggles.
     /// </summary>
     public required IOptionsMonitor<PortfolioGraderOptions> PortfolioGraderOptionsMonitor { get; init; }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        services.AddSingleton(Store);
+        services.AddSingleton(ReloadToken);
+        services.AddSingleton(OptionsMonitor);
+        services.AddSingleton(JudgeOptionsMonitor);
+        services.AddSingleton(PortfolioGraderOptionsMonitor);
+        services.AddSingleton(JudgeModelSelector);
+        services.AddSingleton(TranscriptOptionsMonitor);
+        services.AddSingleton(TranscriptStore);
+
+        // Optional within the group - the service takes it as an optional constructor parameter and falls
+        // back to the reactive OnChange trim when it is absent.
+        if (EmbeddingMemory is not null) services.AddSingleton(EmbeddingMemory);
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<RouterSettingsAdminGrpcService>();
+    }
 }
 
 /// <summary>
