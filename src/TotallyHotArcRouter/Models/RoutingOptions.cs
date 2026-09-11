@@ -466,6 +466,6 @@ public sealed class RoutingOptions
                 optionsName: nameof(RoutingOptions),
                 optionsType: typeof(RoutingOptions),
                 failureMessages:
-                [$"JudgeScoredRowWeight must be positive when JudgeScoredRowPolicy is DownWeight."]);
+                ["JudgeScoredRowWeight must be positive when JudgeScoredRowPolicy is DownWeight."]);
     }
 }
