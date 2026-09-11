@@ -161,6 +161,8 @@ public sealed class PriceSourceStore : AdminStoreBase<IPriceSourceAdminClient>
         IsRefreshing = true;
         NotifyChanged();
 
+        var refreshingCleared = false;
+
         try
         {
             var result = await operation();
@@ -179,15 +181,24 @@ public sealed class PriceSourceStore : AdminStoreBase<IPriceSourceAdminClient>
         }
         catch (GrpcAdminException ex)
         {
-            RecordFailure(exception: ex, description: "a price-source operation");
+            RecordFailure(exception: ex, description: "a price-source operation",
+                beforeNotify: () =>
+                {
+                    IsRefreshing = false;
+                    refreshingCleared = true;
+                });
             throw;
         }
         finally
         {
-            // In a finally so a failed cycle re-enables the buttons rather than leaving them stuck disabled.
-            // The exception still propagates for the panel to render.
-            IsRefreshing = false;
-            NotifyChanged();
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsRefreshing and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!refreshingCleared)
+            {
+                IsRefreshing = false;
+                NotifyChanged();
+            }
         }
     }
 }

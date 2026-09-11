@@ -143,6 +143,54 @@ public sealed class AdminStoreBaseTests
     }
 
     [Fact]
+    public void Consecutive_rejections_with_recordRejectionMessage_never_flip_reachability()
+    {
+        // Regression for a real bug in an earlier version of this fix: using "LastError is non-null" as the
+        // outage marker broke here, because recordRejectionMessage also writes a rejection's own message
+        // into LastError. That made the *second* rejection look indistinguishable from "recovering from a
+        // real outage" and incorrectly flip IsReachable true - depending on how many times the same
+        // rejection had already happened. Only an actually-observed Unavailable failure may do that.
+        var store = new TestStore();
+
+        store.Fail(exception: Rejected(), recordRejectionMessage: true);
+        store.IsReachable.Should().BeFalse("no outage has ever been observed - this store is still virgin");
+        store.LastError.Should().Be("no price source named 'nope'.");
+
+        store.Fail(exception: Rejected(), recordRejectionMessage: true);
+        store.IsReachable.Should().BeFalse(
+            "a second rejection is no more proof of an outage-recovery than the first one was");
+        store.LastError.Should().Be("no price source named 'nope'.");
+    }
+
+    [Fact]
+    public void A_failure_with_beforeNotify_always_notifies_exactly_once()
+    {
+        // Regression for a real double-notify bug: a mutation store used to call RecordFailure in its catch
+        // (one notification, when anything changed) and then clear its own IsSaving/IsRunning/etc. flag in a
+        // finally that notified again - so a failed mutation woke subscribers twice, the first time with the
+        // busy flag still true. beforeNotify folds the flag-clear into RecordFailure's own single
+        // notification instead, and - unlike a plain repeated-failure dedup - must fire even when nothing
+        // else about this call changed, because the caller's flag transition alone is a real, unpublished
+        // state change.
+        var store = new TestStore();
+        var isSaving = true;
+        var notifications = 0;
+        bool? isSavingSeenBySubscriber = null;
+        store.Changed += () =>
+        {
+            notifications++;
+            isSavingSeenBySubscriber = isSaving;
+        };
+
+        // A rejection with no recordRejectionMessage and no prior outage changes nothing about the store's
+        // own fields - exactly the case that would otherwise be deduped into silence.
+        store.Fail(Rejected(), beforeNotify: () => isSaving = false);
+
+        notifications.Should().Be(1);
+        isSavingSeenBySubscriber.Should().BeFalse("beforeNotify must run before Changed fires, not after");
+    }
+
+    [Fact]
     public void Repeated_identical_unavailable_failures_notify_only_once()
     {
         var store = new TestStore();
@@ -216,10 +264,11 @@ public sealed class AdminStoreBaseTests
                 beforeNotify: beforeNotify);
         }
 
-        public void Fail(GrpcAdminException exception, bool recordRejectionMessage = false)
+        public void Fail(GrpcAdminException exception, bool recordRejectionMessage = false,
+            Action? beforeNotify = null)
         {
             RecordFailure(exception: exception, description: "a test operation",
-                recordRejectionMessage: recordRejectionMessage);
+                recordRejectionMessage: recordRejectionMessage, beforeNotify: beforeNotify);
         }
 
         public void RecordReached()

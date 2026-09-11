@@ -60,6 +60,16 @@
                 @_opError
             </div>
         }
+        else if (!string.IsNullOrEmpty(Store.LastError))
+        {
+            @* _opError covers a rejected Toggle/PullNow (RunAsync's own catch, above); this covers a
+               rejected Reload - Store.IsReachable stays true for a rejection, so it renders here rather than
+               the unreachable branch above, and without this check a rejected refresh would otherwise leave
+               the previous, now-stale Sources/Schedule on screen with no indication anything failed. *@
+            <div class="mb-3 text-xs ds-alert-critical">
+                @Store.LastError
+            </div>
+        }
 
         @if (Store.Sources.Count == 0)
         {

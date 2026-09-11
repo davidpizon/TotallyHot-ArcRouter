@@ -88,6 +88,8 @@ public sealed class RegretHarnessAdminStore : AdminStoreBase<IRegretHarnessAdmin
         LastRunMessage = null;
         NotifyChanged();
 
+        var runningCleared = false;
+
         try
         {
             await foreach (var runEvent in Client.RunAsync(cancellationToken))
@@ -111,15 +113,28 @@ public sealed class RegretHarnessAdminStore : AdminStoreBase<IRegretHarnessAdmin
         }
         catch (GrpcAdminException ex)
         {
-            RecordFailure(exception: ex, description: "a regret harness run");
+            // recordRejectionMessage: true because this panel's own catch (see RegretHarnessAdmin.razor.cs)
+            // swallows the exception without capturing its message anywhere else - LastRunMessage is only
+            // ever set from a streamed Result event, never from a caught exception - so LastError is the
+            // only place a rejection's text survives for the markup to render.
+            RecordFailure(exception: ex, description: "a regret harness run", recordRejectionMessage: true,
+                beforeNotify: () =>
+                {
+                    IsRunning = false;
+                    runningCleared = true;
+                });
             throw;
         }
         finally
         {
-            // In a finally so a failed run re-enables the button rather than leaving it stuck disabled.
-            // The exception still propagates for the panel to render.
-            IsRunning = false;
-            NotifyChanged();
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsRunning and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!runningCleared)
+            {
+                IsRunning = false;
+                NotifyChanged();
+            }
         }
     }
 }

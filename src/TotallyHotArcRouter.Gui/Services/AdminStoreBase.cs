@@ -38,6 +38,13 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     private readonly List<IDisposable> _owned = [];
     private bool _disposed;
 
+    // Whether IsReachable == false is currently because an operation actually failed to reach the router,
+    // as opposed to nothing having succeeded yet (the virgin state is also IsReachable == false). LastError
+    // being non-null looks like the same signal but is not: RecordFailure also writes a rejection's message
+    // into LastError when asked to, and that must never be mistaken for proof of an outage - see
+    // RecordFailure's remarks and its regression test for the sequence this field exists to get right.
+    private bool _unreachableIsARealOutage;
+
     /// <summary>Initializes a new instance of the <see cref="AdminStoreBase{TClient}"/> class.</summary>
     /// <param name="client">The admin client to drive. Never null.</param>
     /// <param name="logger">Optional logger.</param>
@@ -76,7 +83,13 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     /// </summary>
     public bool IsReachable { get; private set; }
 
-    /// <summary>Gets the message from the last failure to reach the router, if any.</summary>
+    /// <summary>
+    /// Gets the message from the last failed operation, if any. Usually a connectivity failure, but a
+    /// caller can also route a reachable rejection here via <see cref="RecordFailure"/>'s
+    /// <c>recordRejectionMessage</c> - the System Settings window does, since it reads this as its only
+    /// error channel. Most panels instead render a rejection from the exception they caught, so this stays
+    /// <see langword="null"/> for them even after one.
+    /// </summary>
     public string? LastError { get; private set; }
 
     /// <inheritdoc/>
@@ -166,6 +179,7 @@ public abstract class AdminStoreBase<TClient> : IDisposable
             await operation(cancellationToken);
             IsReachable = true;
             LastError = null;
+            _unreachableIsARealOutage = false;
             return true;
         }
         catch (GrpcAdminException ex)
@@ -176,6 +190,7 @@ public abstract class AdminStoreBase<TClient> : IDisposable
             // applied consistently on their mutation paths and inconsistently on their load paths.
             IsReachable = !ex.IsUnavailable;
             LastError = ex.Message;
+            _unreachableIsARealOutage = ex.IsUnavailable;
             Logger?.LogWarning(exception: ex, message: "Admin load failed: could not {Operation}.",
                 description);
             onFailure?.Invoke();
@@ -203,6 +218,7 @@ public abstract class AdminStoreBase<TClient> : IDisposable
         IsReachable = true;
         if (marksLoaded) IsLoaded = true;
         LastError = null;
+        _unreachableIsARealOutage = false;
     }
 
     /// <summary>
@@ -211,11 +227,15 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     /// <em>rejection</em> never moves <see cref="IsReachable"/> on its own - starting unreachable stays
     /// unreachable, starting reachable stays reachable - with one exception: if the store is currently
     /// unreachable <em>because an earlier call actually failed to reach the router</em> (as opposed to
-    /// simply never having succeeded yet), this rejection disproves that outage - the router answered,
-    /// however badly - so it restores <see cref="IsReachable"/> to <see langword="true"/> and replaces the
-    /// stale outage message rather than leaving both standing next to proof they are wrong. Raises
-    /// <see cref="Changed"/> only when something actually changed, so a run of identical failures does not
-    /// re-render the panel on every retry.
+    /// simply never having succeeded yet, or a prior rejection having merely recorded a message), this
+    /// rejection disproves that outage - the router answered, however badly - so it restores
+    /// <see cref="IsReachable"/> to <see langword="true"/> and replaces the stale outage message rather than
+    /// leaving both standing next to proof they are wrong. Every rejection is logged, the same as an
+    /// outage, for the audit trail; <see cref="Changed"/> fires at most once, immediately after
+    /// <paramref name="beforeNotify"/> runs, and is skipped entirely only when nothing observable changed
+    /// and no <paramref name="beforeNotify"/> was given - so a run of identical background failures does not
+    /// re-render the panel on every retry, while a caller that always has a transient flag to publish
+    /// (<c>IsSaving</c>, <c>IsRunning</c>) still gets its one notification.
     /// </summary>
     /// <param name="exception">The mutation's failure.</param>
     /// <param name="description">
@@ -228,26 +248,40 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     /// <see cref="LastError"/> as its only error channel — the System Settings window does, and dropping the
     /// message there would leave a rejected save looking like it succeeded.
     /// </param>
+    /// <param name="beforeNotify">
+    /// Optional cleanup to run immediately before this call's own <see cref="Changed"/> notification - for
+    /// a wrapper that holds a transient flag (<c>IsSaving</c>, <c>IsRunning</c>) around the call and would
+    /// otherwise have to notify again itself just to clear it, publishing an extra, misleading "failed but
+    /// still saving" state in between. Supplying this guarantees a notification even when this call's own
+    /// fields did not change, since the caller's flag change still needs publishing exactly once.
+    /// </param>
     protected void RecordFailure(GrpcAdminException exception, string description,
-        bool recordRejectionMessage = false)
+        bool recordRejectionMessage = false, Action? beforeNotify = null)
     {
         ArgumentNullException.ThrowIfNull(exception);
 
         if (!exception.IsUnavailable)
         {
-            // LastError being set here (while IsReachable is false) is the tell for "a real outage", not
-            // "never yet contacted" - the virgin state is false/null, never false/non-null.
-            if (!IsReachable && LastError is not null)
+            var changed = false;
+
+            if (_unreachableIsARealOutage)
             {
                 IsReachable = true;
                 LastError = recordRejectionMessage ? exception.Message : null;
-                NotifyChanged();
-                return;
+                _unreachableIsARealOutage = false;
+                changed = true;
             }
-
-            if (recordRejectionMessage && LastError != exception.Message)
+            else if (recordRejectionMessage && LastError != exception.Message)
             {
                 LastError = exception.Message;
+                changed = true;
+            }
+
+            Logger?.LogWarning(exception: exception, message: "The router rejected {Operation}.", description);
+
+            if (changed || beforeNotify is not null)
+            {
+                beforeNotify?.Invoke();
                 NotifyChanged();
             }
 
@@ -258,9 +292,14 @@ public abstract class AdminStoreBase<TClient> : IDisposable
 
         IsReachable = false;
         LastError = exception.Message;
+        _unreachableIsARealOutage = true;
         Logger?.LogWarning(exception: exception,
             message: "The router became unreachable during {Operation}.", description);
 
-        if (!alreadyUnreachableWithSameError) NotifyChanged();
+        if (!alreadyUnreachableWithSameError || beforeNotify is not null)
+        {
+            beforeNotify?.Invoke();
+            NotifyChanged();
+        }
     }
 }

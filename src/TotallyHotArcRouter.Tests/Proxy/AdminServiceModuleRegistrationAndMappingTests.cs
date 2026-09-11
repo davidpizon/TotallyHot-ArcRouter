@@ -45,6 +45,28 @@ public sealed class AdminServiceModuleRegistrationAndMappingTests
         return data;
     }
 
+    /// <summary>
+    /// Guards <see cref="Modules"/> itself against drift: it is a hand-written list, kept separate from
+    /// <see cref="AdminServiceModuleTests"/>'s reflection-discovered one so this suite can pair each group
+    /// with the gRPC service type reflection alone cannot name. Without this check, a new
+    /// <c>*AdminDependencies</c> record that implements <see cref="IAdminServiceModule"/> would be picked up
+    /// by <see cref="AdminServiceModuleTests"/>'s registry test and silently miss this one - the exact
+    /// missing-registration/mapping gap this suite exists to catch.
+    /// </summary>
+    [Fact]
+    public void Modules_covers_every_group_that_implements_the_module_seam()
+    {
+        var reflectedGroupTypes = typeof(ProxyServerDependencies)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => typeof(IAdminServiceModule).IsAssignableFrom(p.PropertyType))
+            .Select(p => p.PropertyType)
+            .ToArray();
+
+        reflectedGroupTypes.Should().BeEquivalentTo(Modules.Select(m => m.GroupType),
+            "every ProxyServerDependencies property typed as IAdminServiceModule must have a paired "
+            + "gRPC service type here, or Register/Map for it are never exercised by this suite");
+    }
+
     [Theory]
     [MemberData(nameof(ModuleGroupNames))]
     public void Register_and_Map_wire_everything_the_grpc_service_construction_needs(string groupTypeName)

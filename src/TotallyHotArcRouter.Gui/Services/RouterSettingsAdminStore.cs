@@ -12,10 +12,13 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <c>MauiProgram</c>.
 /// </summary>
 /// <remarks>
-/// The one store that passes <c>recordRejectionMessage</c> to
-/// <see cref="AdminStoreBase{TClient}.RecordFailure"/>: the System Settings window reads
-/// <see cref="AdminStoreBase{TClient}.LastError"/> as its only error channel, so a rejected
-/// save whose message never reached that property would look like it succeeded.
+/// Passes <c>recordRejectionMessage</c> to <see cref="AdminStoreBase{TClient}.RecordFailure"/>: the System
+/// Settings window reads <see cref="AdminStoreBase{TClient}.LastError"/> as its only error channel, so a
+/// rejected save whose message never reached that property would look like it succeeded.
+/// <see cref="ClusterModelAdminStore"/>, <see cref="LogRegModelAdminStore"/>, and
+/// <see cref="RegretHarnessAdminStore"/> pass it too, for the same underlying reason (their own panel's
+/// catch swallows the exception without capturing its message anywhere else) even though their UI reads it
+/// as a fallback alongside a dedicated success-message field rather than as the only channel.
 /// </remarks>
 public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdminClient>
 {
@@ -99,6 +102,8 @@ public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdm
         IsSaving = true;
         NotifyChanged();
 
+        var savingCleared = false;
+
         try
         {
             Settings = await Client
@@ -112,13 +117,23 @@ public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdm
         }
         catch (GrpcAdminException ex)
         {
-            RecordFailure(exception: ex, description: "saving the router settings", recordRejectionMessage: true);
+            RecordFailure(exception: ex, description: "saving the router settings", recordRejectionMessage: true,
+                beforeNotify: () =>
+                {
+                    IsSaving = false;
+                    savingCleared = true;
+                });
             throw;
         }
         finally
         {
-            IsSaving = false;
-            NotifyChanged();
+            // RecordFailure's beforeNotify already cleared IsSaving and published the one notification a
+            // failure gets; this is only the success path's, so it never double-notifies.
+            if (!savingCleared)
+            {
+                IsSaving = false;
+                NotifyChanged();
+            }
         }
     }
 
@@ -134,6 +149,8 @@ public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdm
         IsSaving = true;
         NotifyChanged();
 
+        var savingCleared = false;
+
         try
         {
             var rowsDeleted = await Client.ClearTranscriptsAsync(cancellationToken).ConfigureAwait(false);
@@ -146,13 +163,21 @@ public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdm
         catch (GrpcAdminException ex)
         {
             RecordFailure(exception: ex, description: "clearing the captured transcripts",
-                recordRejectionMessage: true);
+                recordRejectionMessage: true,
+                beforeNotify: () =>
+                {
+                    IsSaving = false;
+                    savingCleared = true;
+                });
             throw;
         }
         finally
         {
-            IsSaving = false;
-            NotifyChanged();
+            if (!savingCleared)
+            {
+                IsSaving = false;
+                NotifyChanged();
+            }
         }
     }
 }

@@ -157,6 +157,8 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
         CurrentFileName = null;
         NotifyChanged();
 
+        var syncingCleared = false;
+
         try
         {
             await foreach (var syncEvent in Client.SyncAsync(cancellationToken))
@@ -192,15 +194,24 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
         }
         catch (GrpcAdminException ex)
         {
-            RecordFailure(exception: ex, description: "a llm_router model operation");
+            RecordFailure(exception: ex, description: "a llm_router model operation",
+                beforeNotify: () =>
+                {
+                    IsSyncing = false;
+                    syncingCleared = true;
+                });
             throw;
         }
         finally
         {
-            // In a finally so a failed sync re-enables the button rather than leaving it stuck disabled.
-            // The exception still propagates for the panel to render.
-            IsSyncing = false;
-            NotifyChanged();
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsSyncing and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!syncingCleared)
+            {
+                IsSyncing = false;
+                NotifyChanged();
+            }
         }
     }
 

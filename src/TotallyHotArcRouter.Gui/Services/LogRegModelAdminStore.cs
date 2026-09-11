@@ -95,6 +95,8 @@ public sealed class LogRegModelAdminStore : AdminStoreBase<ILogRegModelAdminClie
         LastRetrainMessage = null;
         NotifyChanged();
 
+        var retrainingCleared = false;
+
         try
         {
             await foreach (var retrainEvent in Client.RetrainAsync(cancellationToken))
@@ -116,15 +118,28 @@ public sealed class LogRegModelAdminStore : AdminStoreBase<ILogRegModelAdminClie
         }
         catch (GrpcAdminException ex)
         {
-            RecordFailure(exception: ex, description: "a logreg-model operation");
+            // recordRejectionMessage: true because this panel's own catch (see RouterModelAdmin.razor.cs)
+            // swallows the exception without capturing its message anywhere else - LastRetrainMessage is
+            // only ever set from a streamed Result event, never from a caught exception - so LastError is
+            // the only place a rejection's text survives for the markup to render.
+            RecordFailure(exception: ex, description: "a logreg-model operation", recordRejectionMessage: true,
+                beforeNotify: () =>
+                {
+                    IsRetraining = false;
+                    retrainingCleared = true;
+                });
             throw;
         }
         finally
         {
-            // In a finally so a failed retrain re-enables the button rather than leaving it stuck disabled.
-            // The exception still propagates for the panel to render.
-            IsRetraining = false;
-            NotifyChanged();
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsRetraining and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!retrainingCleared)
+            {
+                IsRetraining = false;
+                NotifyChanged();
+            }
         }
     }
 }
