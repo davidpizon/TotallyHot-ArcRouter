@@ -58,9 +58,9 @@ public static class ClusterLedger
         var counts = new Dictionary<string, int>[artifact.Centroids.Count];
         for (var c = 0; c < artifact.Centroids.Count; c++)
         {
-            weightedSums[c] = new Dictionary<string, double>(StringComparer.Ordinal);
-            weightTotals[c] = new Dictionary<string, double>(StringComparer.Ordinal);
-            counts[c] = new Dictionary<string, int>(StringComparer.Ordinal);
+            weightedSums[c] = new(StringComparer.Ordinal);
+            weightTotals[c] = new(StringComparer.Ordinal);
+            counts[c] = new(StringComparer.Ordinal);
         }
 
         foreach (var entry in entries)
