@@ -119,6 +119,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
         var liveEntries = await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
         var memoryEntryCount = 0;
         var skippedForModelMismatch = 0;
+        var skippedForJudgePolicy = 0;
         foreach (var entry in liveEntries)
         {
             if (entry.TaskEmbedding.Length != dimension)
@@ -146,11 +147,18 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
                 continue;
             }
 
+            var judgeWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored);
+            if (judgeWeight is null)
+            {
+                skippedForJudgePolicy++;
+                continue;
+            }
+
             samples.Add(new LogRegTrainingSample(
                 Embedding: entry.TaskEmbedding,
                 ModelKey: ModelNameCanonicalizer.Canonicalize(entry.ChosenModel),
                 Score: entry.Score,
-                Weight: _routingOptions.LogRegLiveSampleWeight));
+                Weight: _routingOptions.LogRegLiveSampleWeight * judgeWeight.Value));
             memoryEntryCount++;
         }
 
@@ -160,6 +168,12 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
                 "Skipped {SkippedCount} memory entry/entries produced by a different embedding model than the current {ModelIdentity}; they are retained in the store but cannot be trained on.",
                 skippedForModelMismatch,
                 modelIdentity);
+
+        if (skippedForJudgePolicy > 0)
+            _logger.LogInformation(
+                message:
+                "Excluded {SkippedCount} judge-scored memory entry/entries from logreg training per the configured judge-row policy.",
+                skippedForJudgePolicy);
 
         var modelsRepresented = samples.Select(s => s.ModelKey).Distinct(StringComparer.Ordinal).Count();
 

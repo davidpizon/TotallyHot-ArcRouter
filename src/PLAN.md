@@ -99,9 +99,13 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
     verdict; no managed Python parser exists to replace it. IronPython was rejected — it is a full
     interpreter, and referencing it would make "we cannot execute model code" a claim about discipline
     rather than a fact about the assembly.
-  - *`is_judge_scored` provenance and the learning-layer policy for judge-influenced rows are still
-    outstanding* — G3 required both in the same phase as the promotion, and they did not land. Tracked in
-    `geval-shadow-scoring-plan.md` §G3.
+  - ~~*`is_judge_scored` provenance and the learning-layer policy for judge-influenced rows are still
+    outstanding*~~ — **closed.** G3 required both in the same phase as the promotion and they did not land
+    then; they have now. `is_judge_scored` is stamped from whether the judge actually contributed a grade
+    (`QualityResult.JudgeScore.HasValue`), and `MemoryKnnVoter`, the `logreg`/cluster trainers, and
+    `ClusterLedger` (feeding both `ClusterBestVoter` and the T4 baseline comparison) all apply the same
+    configurable include/exclude/down-weight policy (`RoutingOptions.JudgeScoredRowPolicy`, default
+    down-weight at 0.5). Full detail: `geval-shadow-scoring-plan.md` §G3.
   - *Security findings T-11, T-12, and T-18 are closed as no longer applicable*, and the CI step that
     loosened `kernel.apparmor_restrict_unprivileged_userns` for a jail-launch test was removed.
   - *The uncommitted resource-efficiency scoring axis was discarded*; both its inputs (wall-clock, peak

@@ -383,6 +383,42 @@ public sealed class RoutingOptions
     public bool EnableAdaptiveRouting { get; init; } = true;
 
     /// <summary>
+    /// Gets how <see cref="Router.Orchestrator.MemoryKnnVoter"/>, the <c>logreg</c>/cluster trainers, and
+    /// <see cref="Router.Orchestrator.ClusterLedger"/> treat a <see cref="Router.MemoryEntry"/> whose score
+    /// came from the G-Eval judge (<see cref="Router.MemoryEntry.IsJudgeScored"/>) rather than from
+    /// <c>QualityScorer</c>'s static signals alone. Defaults to
+    /// <see cref="Models.JudgeRowPolicy.DownWeight"/> - the judge is a real opinion, not ground truth, and
+    /// G-Eval's own analysis shows LLM judges systematically over-score LLM-generated text - so a
+    /// judge-scored row still teaches the router something but counts for less than an execution/heuristic
+    /// row until G2's calibration data says otherwise. This closes docs/router/geval-shadow-scoring-plan.md's
+    /// G3 "still owed" item: the policy was promised in the same phase that promoted the judge to a
+    /// co-grader, and did not land until now.
+    /// </summary>
+    public JudgeRowPolicy JudgeScoredRowPolicy { get; init; } = JudgeRowPolicy.DownWeight;
+
+    /// <summary>
+    /// Gets the multiplier applied to a judge-scored row's contribution when
+    /// <see cref="JudgeScoredRowPolicy"/> is <see cref="Models.JudgeRowPolicy.DownWeight"/>. Ignored for
+    /// the other two policies. Defaults to half strength - a starting point pending G2's agreement/
+    /// calibration analysis, not a measured value.
+    /// </summary>
+    [Range(0d, 1d)]
+    public double JudgeScoredRowWeight { get; init; } = 0.5;
+
+    /// <summary>
+    /// Resolves the multiplier a learning consumer should apply to a <see cref="Router.MemoryEntry"/>'s
+    /// contribution under <see cref="JudgeScoredRowPolicy"/>/<see cref="JudgeScoredRowWeight"/>. See
+    /// <see cref="Models.JudgeRowWeighting.ResolveWeight"/> for the shared rule every consumer applies.
+    /// </summary>
+    /// <param name="isJudgeScored">Whether the row's score came from the G-Eval judge.</param>
+    /// <returns><see langword="null"/> when the row must be dropped entirely; otherwise the multiplier to apply.</returns>
+    public double? ResolveJudgeRowWeight(bool isJudgeScored)
+    {
+        return JudgeRowWeighting.ResolveWeight(isJudgeScored: isJudgeScored, policy: JudgeScoredRowPolicy,
+            judgeRowWeight: JudgeScoredRowWeight);
+    }
+
+    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="OptionsValidationException">Thrown when the routing option values are inconsistent.</exception>

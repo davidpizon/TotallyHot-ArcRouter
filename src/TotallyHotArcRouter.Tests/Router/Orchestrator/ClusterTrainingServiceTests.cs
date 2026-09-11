@@ -133,8 +133,42 @@ public class ClusterTrainingServiceTests
         }
     }
 
+    [Fact]
+    public async Task RetrainAsync_ExcludePolicy_JudgeScoredEntriesAreNotCounted()
+    {
+        var memoryStore = new FakeMemoryEntryStore();
+        for (var i = 0; i < 100; i++)
+            memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, dimension: "bug_fixing");
+        // These would otherwise push MemoryEntryCount to 120 and still train - Exclude must drop them instead.
+        for (var i = 0; i < 20; i++)
+            memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, dimension: "bug_fixing",
+                isJudgeScored: true);
+
+        var modelPath = TempModelPath();
+        using var temp = new TempBenchmarkDatabase();
+        var service = CreateService(memoryStore: memoryStore, modelPath: modelPath, 100, temp: temp,
+            routingOptions: new RoutingOptions
+            {
+                ClusterLiveSampleWeight = 1.0, ClusterMinTrainingRows = 100, ClusterCountMin = 2,
+                ClusterCountMax = 3, JudgeScoredRowPolicy = JudgeRowPolicy.Exclude
+            });
+
+        try
+        {
+            var outcome = await service.RetrainAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Equal(expected: ClusterTrainingResultKind.Trained, actual: outcome.Kind);
+            Assert.Equal(100, actual: outcome.MemoryEntryCount);
+        }
+        finally
+        {
+            CleanupModelPath(modelPath);
+        }
+    }
+
     private static ClusterTrainingService CreateService(
-        IMemoryEntryStore memoryStore, string modelPath, int minTrainingRows, TempBenchmarkDatabase temp)
+        IMemoryEntryStore memoryStore, string modelPath, int minTrainingRows, TempBenchmarkDatabase temp,
+        RoutingOptions? routingOptions = null)
     {
         var bootstrapSource = new OodClusterBootstrapSampleSource(
             database: temp.Database, embeddingClient: new FakeEmbeddingClient(_ => [1, 0]),
@@ -154,7 +188,7 @@ public class ClusterTrainingServiceTests
             embeddingClient: new StubEmbeddingClient(),
             transcriptStore: new NoOpTranscriptStore(),
             voter: voter,
-            routingOptions: Options.Create(new RoutingOptions
+            routingOptions: Options.Create(routingOptions ?? new RoutingOptions
             {
                 ClusterLiveSampleWeight = 1.0,
                 ClusterMinTrainingRows = minTrainingRows,
@@ -215,10 +249,12 @@ public class ClusterTrainingServiceTests
             return Task.CompletedTask;
         }
 
-        public void Add(float[] embedding, string chosenModel, double score, string? dimension)
+        public void Add(float[] embedding, string chosenModel, double score, string? dimension,
+            bool isJudgeScored = false)
         {
             _entries.Add(new MemoryEntry(Id: _nextId++, TaskEmbedding: embedding, ChosenModel: chosenModel,
-                Score: score, 0.01, null, CreatedAtUtc: DateTimeOffset.UtcNow, Dimension: dimension));
+                Score: score, 0.01, null, CreatedAtUtc: DateTimeOffset.UtcNow, Dimension: dimension,
+                IsJudgeScored: isJudgeScored));
         }
     }
 

@@ -146,11 +146,11 @@ public sealed class EmbeddingMemory : IDisposable
     /// compiling unchanged.
     /// </param>
     /// <param name="isJudgeScored">
-    /// Whether <paramref name="score"/> was produced by the G-Eval judge rather than
-    /// <see cref="Quality.Scoring.QualityScorer"/> (docs/router/geval-shadow-scoring-plan.md
-    /// §Provenance). Defaults to <see langword="false"/> - through Phase G1/G2 no caller ever passes
-    /// <see langword="true"/>; the parameter exists so Phase G3 needs no further signature change. Placed
-    /// last so every existing positional call site keeps compiling unchanged.
+    /// Whether the G-Eval judge contributed to <paramref name="score"/> - <see cref="Router.EmbeddingMemoryScoreObserver"/>
+    /// passes <c>result.JudgeScore.HasValue</c> (docs/router/geval-shadow-scoring-plan.md §Provenance;
+    /// the G3 "still owed" item this closes). Defaults to <see langword="false"/> so every other caller
+    /// (bootstrap import, tests) keeps recording rows as execution/heuristic-grounded without change.
+    /// Placed last so every existing positional call site keeps compiling unchanged.
     /// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,

@@ -10,7 +10,9 @@ namespace TotallyHot.ArcRouter.Router;
 /// computation and <see cref="PendingTaskEmbeddingCache"/> exist to feed. A scored result whose
 /// correlation id has no pending embedding (never computed, already claimed, or expired) is a lost
 /// learning opportunity, not an error - logged and dropped, exactly like every other best-effort
-/// observation path in this codebase.
+/// observation path in this codebase. Also stamps <see cref="MemoryEntry.IsJudgeScored"/> from
+/// <see cref="QualityResult.JudgeScore"/>'s presence - the provenance bit docs/router/geval-shadow-scoring-plan.md's
+/// G3 defined but never wired up.
 /// </summary>
 public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
 {
@@ -119,7 +121,12 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
             cancellationToken: cancellationToken,
             isExploratory: recoveredIsExploratory,
             propensity: recoveredPropensity,
-            dimension: recoveredDimension).ConfigureAwait(false);
+            dimension: recoveredDimension,
+            // "Judge-scored" means the G-Eval judge actually contributed a grade that fed UnifiedScore, not
+            // merely that a judge grade was requested/pending - QualityScoreAggregator can write a
+            // static-only result when the judge times out or abstains, and that row is execution/heuristic-
+            // grounded like any other (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" item).
+            isJudgeScored: result.JudgeScore.HasValue).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(

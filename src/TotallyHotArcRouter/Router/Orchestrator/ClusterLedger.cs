@@ -27,22 +27,39 @@ public static class ClusterLedger
     /// <see cref="TotallyHot.ArcRouter.Router.Orchestrator.ClusterModelArtifact"/>'s eventual voter applies
     /// at vote time (Phase T3).
     /// </param>
+    /// <param name="judgeRowPolicy">
+    /// How a judge-scored entry (<see cref="MemoryEntry.IsJudgeScored"/>) contributes to the ledger's mean
+    /// (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" item). Defaults to
+    /// <see cref="Models.JudgeRowPolicy.Include"/> so every existing caller that does not pass this
+    /// explicitly keeps today's byte-identical behavior; production callers pass the operator's configured
+    /// <see cref="Models.RoutingOptions.JudgeScoredRowPolicy"/>.
+    /// </param>
+    /// <param name="judgeRowWeight">
+    /// The multiplier <see cref="Models.JudgeRowPolicy.DownWeight"/> applies; ignored otherwise. See
+    /// <see cref="Models.RoutingOptions.JudgeScoredRowWeight"/>.
+    /// </param>
     /// <returns>
     /// A map from cluster index to that cluster's per-canonicalized-model <see cref="ClusterModelScore"/>.
     /// A cluster with no assigned entries is present with an empty inner map, not omitted, so a caller can
-    /// enumerate every cluster in <paramref name="artifact"/> uniformly.
+    /// enumerate every cluster in <paramref name="artifact"/> uniformly. <see cref="ClusterModelScore.ObservationCount"/>
+    /// counts raw assigned entries regardless of judge-row weighting - it answers "how many real data
+    /// points support this cell", which <see cref="RoutingOptions.ClusterBestMinObservations"/>'s floor
+    /// needs undiluted by weight; only <see cref="ClusterModelScore.MeanScore"/> is weighted.
     /// </returns>
     public static IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterModelScore>> Build(
-        ClusterModelArtifact artifact, IReadOnlyList<MemoryEntry> entries, double assignmentThreshold = 0.5)
+        ClusterModelArtifact artifact, IReadOnlyList<MemoryEntry> entries, double assignmentThreshold = 0.5,
+        JudgeRowPolicy judgeRowPolicy = JudgeRowPolicy.Include, double judgeRowWeight = 1.0)
     {
         ArgumentNullException.ThrowIfNull(artifact);
         ArgumentNullException.ThrowIfNull(entries);
 
-        var sums = new Dictionary<string, double>[artifact.Centroids.Count];
+        var weightedSums = new Dictionary<string, double>[artifact.Centroids.Count];
+        var weightTotals = new Dictionary<string, double>[artifact.Centroids.Count];
         var counts = new Dictionary<string, int>[artifact.Centroids.Count];
         for (var c = 0; c < artifact.Centroids.Count; c++)
         {
-            sums[c] = new Dictionary<string, double>(StringComparer.Ordinal);
+            weightedSums[c] = new Dictionary<string, double>(StringComparer.Ordinal);
+            weightTotals[c] = new Dictionary<string, double>(StringComparer.Ordinal);
             counts[c] = new Dictionary<string, int>(StringComparer.Ordinal);
         }
 
@@ -53,8 +70,13 @@ public static class ClusterLedger
             var (nearest, similarity) = NearestCentroid(embedding: entry.TaskEmbedding, centroids: artifact.Centroids);
             if (similarity < assignmentThreshold) continue;
 
+            var weight = JudgeRowWeighting.ResolveWeight(isJudgeScored: entry.IsJudgeScored, policy: judgeRowPolicy,
+                judgeRowWeight: judgeRowWeight);
+            if (weight is null) continue;
+
             var modelKey = ModelNameCanonicalizer.Canonicalize(entry.ChosenModel);
-            sums[nearest][modelKey] = sums[nearest].GetValueOrDefault(modelKey) + entry.Score;
+            weightedSums[nearest][modelKey] = weightedSums[nearest].GetValueOrDefault(modelKey) + entry.Score * weight.Value;
+            weightTotals[nearest][modelKey] = weightTotals[nearest].GetValueOrDefault(modelKey) + weight.Value;
             counts[nearest][modelKey] = counts[nearest].GetValueOrDefault(modelKey) + 1;
         }
 
@@ -63,8 +85,8 @@ public static class ClusterLedger
         {
             var perModel = new Dictionary<string, ClusterModelScore>(StringComparer.Ordinal);
             foreach (var (modelKey, count) in counts[c])
-                perModel[modelKey] =
-                    new ClusterModelScore(MeanScore: sums[c][modelKey] / count, ObservationCount: count);
+                perModel[modelKey] = new ClusterModelScore(
+                    MeanScore: weightedSums[c][modelKey] / weightTotals[c][modelKey], ObservationCount: count);
 
             result[c] = perModel;
         }

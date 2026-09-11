@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 
@@ -91,10 +92,44 @@ public class ClusterLedgerTests
         Assert.Equal(2, actual: ledger[0].Values.Single().ObservationCount);
     }
 
-    private static MemoryEntry Entry(float[] embedding, string model, double score)
+    [Fact]
+    public void Build_ExcludePolicy_DropsJudgeScoredEntriesFromMeanAndObservationCount()
+    {
+        MemoryEntry[] entries =
+        [
+            Entry(embedding: [1, 0], model: "model-a", 0.9),
+            Entry(embedding: [1, 0], model: "model-a", 0.1, isJudgeScored: true)
+        ];
+
+        var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries, assignmentThreshold: 0.5,
+            judgeRowPolicy: JudgeRowPolicy.Exclude);
+
+        Assert.Equal(0.9, actual: ledger[0]["model-a"].MeanScore, 6);
+        Assert.Equal(1, actual: ledger[0]["model-a"].ObservationCount);
+    }
+
+    [Fact]
+    public void Build_DownWeightPolicy_WeightsTheMeanButNotTheObservationCount()
+    {
+        MemoryEntry[] entries =
+        [
+            Entry(embedding: [1, 0], model: "model-a", 0.9),
+            Entry(embedding: [1, 0], model: "model-a", 0.3, isJudgeScored: true)
+        ];
+
+        var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries, assignmentThreshold: 0.5,
+            judgeRowPolicy: JudgeRowPolicy.DownWeight, judgeRowWeight: 0.5);
+
+        // (0.9*1 + 0.3*0.5) / (1 + 0.5) = 1.05 / 1.5 = 0.7 - the weighted mean shifts toward the
+        // non-judge-scored entry, but ObservationCount still counts both raw rows.
+        Assert.Equal(0.7, actual: ledger[0]["model-a"].MeanScore, 6);
+        Assert.Equal(2, actual: ledger[0]["model-a"].ObservationCount);
+    }
+
+    private static MemoryEntry Entry(float[] embedding, string model, double score, bool isJudgeScored = false)
     {
         return new MemoryEntry(0, TaskEmbedding: embedding, ChosenModel: model, Score: score, 0.01, null,
-            CreatedAtUtc: DateTimeOffset.UtcNow);
+            CreatedAtUtc: DateTimeOffset.UtcNow, IsJudgeScored: isJudgeScored);
     }
 
     private static float[] Normalize(float[] vector)

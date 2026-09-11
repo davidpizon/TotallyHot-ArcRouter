@@ -196,7 +196,9 @@ public sealed class ClusterBestVoter : IRoutingVoter
             {
                 var entries = await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
                 _ledger = ClusterLedger.Build(artifact: _artifact, entries: entries,
-                    assignmentThreshold: _routingOptions.ClusterAssignmentThreshold);
+                    assignmentThreshold: _routingOptions.ClusterAssignmentThreshold,
+                    judgeRowPolicy: _routingOptions.JudgeScoredRowPolicy,
+                    judgeRowWeight: _routingOptions.JudgeScoredRowWeight);
             }
 
             return (_artifact, _ledger);

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
@@ -13,7 +14,7 @@ public class MemoryKnnVoterTests
     public async Task VoteAsync_NoEmbedding_Abstains()
     {
         var memory = CreateMemory();
-        var voter = new MemoryKnnVoter(memory);
+        var voter = CreateVoter(memory);
         var context = new VotingContext(Dimension: "live:code_generation",
             Candidates: [new RoutingCandidate(ModelName: "model-a", Provider: "openai", false)]);
 
@@ -27,7 +28,7 @@ public class MemoryKnnVoterTests
     {
         var memory = CreateMemory();
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
-        var voter = new MemoryKnnVoter(memory);
+        var voter = CreateVoter(memory);
         var context = new VotingContext(
             Dimension: "live:code_generation",
             Candidates: [new RoutingCandidate(ModelName: "model-a", Provider: "openai", false)],
@@ -51,7 +52,7 @@ public class MemoryKnnVoterTests
         await memory.AddEntryAsync(taskEmbedding: [1f, 0f, 0f], chosenModel: "model-b", 0.9, 0.01, null,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        var voter = new MemoryKnnVoter(memory);
+        var voter = CreateVoter(memory);
         var context = new VotingContext(
             Dimension: "live:code_generation",
             Candidates:
@@ -80,7 +81,7 @@ public class MemoryKnnVoterTests
         await memory.AddEntryAsync(taskEmbedding: [1f, 0f, 0f], chosenModel: "model-a", 0.4, 0.01, null,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        var voter = new MemoryKnnVoter(memory);
+        var voter = CreateVoter(memory);
         var context = new VotingContext(
             Dimension: "live:code_generation",
             Candidates: [new RoutingCandidate(ModelName: "model-a", Provider: "openai", false)],
@@ -105,7 +106,7 @@ public class MemoryKnnVoterTests
         await memory.AddEntryAsync(taskEmbedding: [1f, 0f, 0f], chosenModel: "model-a", 0.6, 0.01, null,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        var voter = new MemoryKnnVoter(memory);
+        var voter = CreateVoter(memory);
         var context = new VotingContext(
             Dimension: "live:code_generation",
             Candidates:
@@ -118,6 +119,64 @@ public class MemoryKnnVoterTests
         var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(expected: "model-a", actual: vote.ModelName);
+    }
+
+    [Fact]
+    public async Task VoteAsync_JudgeScoredNeighbor_ExcludePolicy_IsIgnored()
+    {
+        var memory = CreateMemory();
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        // Only a judge-scored, high-scoring entry exists for model-a - Exclude must abstain rather than vote.
+        await memory.AddEntryAsync(taskEmbedding: [1f, 0f, 0f], chosenModel: "model-a", 0.9, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken, isJudgeScored: true);
+
+        var voter = CreateVoter(memory, new RoutingOptions { JudgeScoredRowPolicy = JudgeRowPolicy.Exclude });
+        var context = new VotingContext(Dimension: "live:code_generation",
+            Candidates: [new RoutingCandidate(ModelName: "model-a", Provider: "openai", false)],
+            TaskEmbedding: [1f, 0f, 0f]);
+
+        var vote = await voter.VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(vote.IsAbstain);
+    }
+
+    [Fact]
+    public async Task VoteAsync_DownWeightPolicy_PullsTheWeightedAverageTowardTheNonJudgeScoredNeighbor()
+    {
+        var memory = CreateMemory();
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        // Two exact-match neighbors for the same model: a non-judge-scored 0.9 and a judge-scored 0.3.
+        await memory.AddEntryAsync(taskEmbedding: [1f, 0f, 0f], chosenModel: "model-a", 0.9, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: [1f, 0f, 0f], chosenModel: "model-a", 0.3, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken, isJudgeScored: true);
+
+        var context = new VotingContext(Dimension: "live:code_generation",
+            Candidates: [new RoutingCandidate(ModelName: "model-a", Provider: "openai", false)],
+            TaskEmbedding: [1f, 0f, 0f]);
+
+        // Include: plain average of both neighbors, (0.9 + 0.3) / 2.
+        var includeVote = await CreateVoter(memory, new RoutingOptions { JudgeScoredRowPolicy = JudgeRowPolicy.Include })
+            .VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(0.6, actual: includeVote.Confidence, 3);
+
+        // DownWeight at 0.5: (0.9*1 + 0.3*0.5) / (1 + 0.5) = 1.05 / 1.5.
+        var downWeightVote = await CreateVoter(memory,
+                new RoutingOptions { JudgeScoredRowPolicy = JudgeRowPolicy.DownWeight, JudgeScoredRowWeight = 0.5 })
+            .VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(0.7, actual: downWeightVote.Confidence, 3);
+
+        // Exclude: the judge-scored neighbor is dropped entirely, leaving just the 0.9 neighbor.
+        var excludeVote = await CreateVoter(memory, new RoutingOptions { JudgeScoredRowPolicy = JudgeRowPolicy.Exclude })
+            .VoteAsync(context: context, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(0.9, actual: excludeVote.Confidence, 3);
+    }
+
+    private static MemoryKnnVoter CreateVoter(EmbeddingMemory memory, RoutingOptions? routingOptions = null)
+    {
+        return new MemoryKnnVoter(embeddingMemory: memory, routingOptions: Options.Create(routingOptions ?? new RoutingOptions()));
     }
 
     private static EmbeddingMemory CreateMemory()

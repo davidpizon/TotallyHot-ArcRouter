@@ -369,15 +369,30 @@ the judge cleanly reverts non-executable dimensions to today's Tier-0 behavior.
 Shipped: the judge contributes to `u_i` on every graded request, blended with the static score rather than
 replacing it, with exactly-once write semantics and graceful static-only degradation.
 
-**Still owed from this phase, and tracked as outstanding:**
+**Both items below shipped** (previously tracked here as outstanding):
 
-- **`is_judge_scored` provenance is not being set on blended rows.** The column exists and the plumbing
-  is there, but with every row now potentially judge-influenced, the flag needs a definition — "the judge
-  contributed at all" or "the judge contributed more than X of the weight" — before it means anything.
-- **The learning-layer policy was never implemented.** `MemoryKnnVoter` and the logreg/clustering trainers
-  still have no include/exclude/down-weight policy for judge-influenced rows. G3 was explicit that this
-  should land in the same phase as the promotion, precisely so the first such row was already handled
-  deliberately. It did not.
+- ~~**`is_judge_scored` provenance is not being set on blended rows.**~~ **Shipped.** Defined as "the judge
+  contributed at all": `EmbeddingMemoryScoreObserver.ObserveAsync` now stamps
+  `MemoryEntry.IsJudgeScored`/`memory_entries.is_judge_scored` from `QualityResult.JudgeScore.HasValue` —
+  `true` only when a judge grade actually reached the blend, not merely when one was requested or pending
+  (a held result that times out or whose judge abstains writes static-only and is correctly `false`). The
+  narrower of the two definitions this section originally posed ("contributed at all" vs. "contributed more
+  than X of the weight") was chosen because the blend weight itself is a `QualityOptions`/
+  `DimensionWeightOptions` configuration detail that changes independently of provenance — a boolean tied to
+  a specific weight threshold would silently mean something different after any weight retune.
+- ~~**The learning-layer policy was never implemented.**~~ **Shipped.** A new `JudgeRowPolicy` enum
+  (`Include`/`Exclude`/`DownWeight`) and `RoutingOptions.JudgeScoredRowPolicy`/`JudgeScoredRowWeight`
+  (default `DownWeight` at `0.5`) are applied identically by every learning consumer that reads raw
+  `memory_entries` rows: `MemoryKnnVoter` (scales a judge-scored neighbor's similarity weight, or drops it
+  under `Exclude`), `EmbeddingLogRegTrainingService` and `ClusterTrainingService` (scale the live sample
+  weight the same way when building training rows), and `ClusterLedger.Build` (used by both
+  `ClusterBestVoter`'s live scoring and `TaxonomyComparisonService`'s T4 baseline comparison — a weighted
+  mean rather than a plain one; `ClusterModelScore.ObservationCount` stays an unweighted raw count, since
+  `RoutingOptions.ClusterBestMinObservations`'s floor is about how many real data points support a cell, not
+  how much trust-weighted mass they carry). The shared rule lives in one place
+  (`Models.JudgeRowWeighting.ResolveWeight`) so the policy cannot silently mean something different in one
+  consumer than another. `0.5` is a starting point pending G2's agreement/calibration analysis, not a
+  measured value — re-tuning it needs no code change.
 
 ## Non-goals
 
