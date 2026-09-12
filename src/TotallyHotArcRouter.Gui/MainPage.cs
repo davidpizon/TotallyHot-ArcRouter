@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components.WebView;
 using Microsoft.AspNetCore.Components.WebView.Maui;
+using Microsoft.UI.Dispatching;
 using Serilog;
 using System.Diagnostics.CodeAnalysis;
 using TotallyHot.ArcRouter.Gui.Components;
@@ -19,6 +20,11 @@ namespace TotallyHot.ArcRouter.Gui;
 [ExcludeFromCodeCoverage]
 public sealed class MainPage : ContentPage
 {
+    // Rooted here (rather than only local to the constructor) so TrayWindowManager - a static Win32
+    // wrapper with no view of the BlazorWebView it shows and hides - can reach the platform control
+    // through SetWebViewVisible. Null until OnHandlerChanged fires.
+    private static WebView2Control? _platformWebView;
+
     /// <summary>
     /// Wires the BlazorWebView to <see cref="Components.Dashboard"/> as its root component and traces
     /// its initialization. The tracing exists because the failure mode this page has actually shown in
@@ -91,6 +97,8 @@ public sealed class MainPage : ContentPage
     {
         if (sender is BlazorWebView { Handler.PlatformView: WebView2Control platformView })
         {
+            _platformWebView = platformView;
+
             // Lambdas rather than method groups: these event argument types are WinRT projections whose
             // assembly this project only references transitively, so letting the compiler infer them from
             // the delegates keeps those types out of this file's signatures.
@@ -102,5 +110,56 @@ public sealed class MainPage : ContentPage
                 "The WebView2 browser process failed ({ProcessFailedKind}); the dashboard will stop rendering.",
                 propertyValue: args.ProcessFailedKind);
         }
+    }
+
+    /// <summary>
+    /// Keeps the platform WebView2 control's XAML <c>Visibility</c> in step with
+    /// <see cref="Platforms.Windows.TrayWindowManager"/> hiding and showing the main window, forcing a
+    /// fresh layout/composition pass on the way back to visible.
+    /// </summary>
+    /// <remarks>
+    /// This control hosts CoreWebView2 as a DirectComposition visual rather than as a classic child HWND,
+    /// and exposes no public hook to tell it a hosted window's visibility changed. WinUI/XAML's own
+    /// composition wiring is keyed off the element's own <c>Visibility</c>, not off the
+    /// host window's actual on-screen state - so <see cref="Platforms.Windows.TrayWindowManager"/> hiding,
+    /// DWM-cloaking, and showing the main window entirely through raw Win32/DWM calls never touches that
+    /// wiring, and nothing ever asks the composited surface to re-establish itself once the window is
+    /// shown again. The browser process itself keeps running throughout (hence the clean "BlazorWebView
+    /// initialized" log line with no error after it), but the composited frame it is drawing never gets
+    /// reattached, leaving the dashboard a flat, empty background behind otherwise-correct native chrome.
+    /// Collapsing the element and restoring it on the next dispatcher tick - rather than only ever setting
+    /// <see cref="Microsoft.UI.Xaml.Visibility.Visible"/> - is what forces WinUI to redo that attachment instead of treating
+    /// an already-<see cref="Microsoft.UI.Xaml.Visibility.Visible"/> element as unchanged and skipping it.
+    /// A missing platform control (no call has reached <see cref="OnHandlerChanged"/> yet) is logged and
+    /// otherwise ignored rather than throwing, since the very first hide can happen before the
+    /// BlazorWebView has finished initializing.
+    /// </remarks>
+    /// <param name="visible">
+    /// <see langword="true"/> to force a re-composition pass so the dashboard resumes painting;
+    /// <see langword="false"/> to collapse the control while the window is hidden.
+    /// </param>
+    internal static void SetWebViewVisible(bool visible)
+    {
+        if (_platformWebView is not { } webView)
+        {
+            Log.Debug(
+                messageTemplate: "SetWebViewVisible({Visible}) skipped: no platform WebView2 control yet.",
+                propertyValue: visible);
+            return;
+        }
+
+        if (!visible)
+        {
+            webView.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            Log.Debug("WebView2 control collapsed for the tray hide.");
+            return;
+        }
+
+        webView.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+        DispatcherQueue.GetForCurrentThread().TryEnqueue(() =>
+        {
+            webView.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            Log.Debug("WebView2 control restored to Visible after a forced layout pass.");
+        });
     }
 }

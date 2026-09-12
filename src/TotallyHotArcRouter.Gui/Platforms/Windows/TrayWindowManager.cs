@@ -148,6 +148,7 @@ internal static class TrayWindowManager
         {
             CenterOnWorkArea();
             ShowWindowNative(hWnd: _hwnd, nCmdShow: SW_HIDE);
+            MainPage.SetWebViewVisible(false);
 
             // Uncloaked only now, once the window is genuinely hidden - uncloaking while it is still
             // shown would reveal the very frame this avoids. Order here is load-bearing.
@@ -228,11 +229,13 @@ internal static class TrayWindowManager
             case WM_SYSCOMMAND when ((long)wParam & 0xFFF0) == SC_MINIMIZE:
                 // Minimize hides to the tray instead of going to the taskbar.
                 ShowWindowNative(hWnd: hWnd, nCmdShow: SW_HIDE);
+                MainPage.SetWebViewVisible(false);
                 return IntPtr.Zero;
 
             case WM_CLOSE when !_isExiting:
                 // The title bar X hides to the tray; only the tray menu's Exit really closes.
                 ShowWindowNative(hWnd: hWnd, nCmdShow: SW_HIDE);
+                MainPage.SetWebViewVisible(false);
                 return IntPtr.Zero;
         }
 
@@ -252,6 +255,13 @@ internal static class TrayWindowManager
         ShowWindowNative(hWnd: _hwnd, nCmdShow: SW_RESTORE);
         ShowWindowNative(hWnd: _hwnd, nCmdShow: SW_SHOW);
         SetForegroundWindow(_hwnd);
+
+        // Load-bearing, not cosmetic: the dashboard's WebView2 control hosts CoreWebView2 as a
+        // DirectComposition visual, which cannot detect visibility changes made through the raw
+        // Win32/DWM calls above the way a classic windowed control would - so without this call the
+        // composited surface never resumes presenting and the window opens with correct native chrome
+        // over a flat, empty background. See MainPage.SetWebViewVisible for the full explanation.
+        MainPage.SetWebViewVisible(true);
     }
 
     /// <summary>
