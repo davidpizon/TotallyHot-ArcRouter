@@ -112,6 +112,7 @@
     <!-- Link: see the matching comment on TotallyHotArcRouter.Gui.csproj's copy of this item - keeps this
          out-of-project-tree file correctly recognized by MSBuild/Visual Studio and its codegen step. -->
     <Protobuf Include="..\Protos\telemetry.proto" Link="Protos\telemetry.proto" GrpcServices="Server" ProtoRoot="..\Protos" />
+    <Protobuf Include="..\Protos\admin.proto" Link="Protos\admin.proto" GrpcServices="Server" ProtoRoot="..\Protos" />
   </ItemGroup>
 
   <ItemGroup>

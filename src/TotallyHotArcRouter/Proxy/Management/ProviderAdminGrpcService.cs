@@ -3,7 +3,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
-using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
@@ -80,7 +80,8 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var budget = request.Budget;
+        var budget = request.Budget ?? throw new RpcException(new Status(statusCode: StatusCode.InvalidArgument,
+            detail: "A budget is required."));
         var write = new ProviderBudgetWriteRequest(
             DollarCap: budget.HasDollarCap ? ParseDecimal(budget.DollarCap) : null,
             TokenCap: budget.HasTokenCap ? budget.TokenCap : null,
@@ -107,8 +108,10 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var model = request.Model ?? throw new RpcException(new Status(statusCode: StatusCode.InvalidArgument,
+            detail: "A model is required."));
         var write = new ModelWriteRequest(
-            ProviderModelId: request.Model.HasProviderModelId ? request.Model.ProviderModelId : null);
+            ProviderModelId: model.HasProviderModelId ? model.ProviderModelId : null);
 
         var result = await _facade.UpsertModelAsync(providerKey: request.ProviderKey, modelName: request.ModelName,
             request: write, cancellationToken: context.CancellationToken).ConfigureAwait(false);
@@ -194,10 +197,12 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var overrideValue = request.Override ?? throw new RpcException(new Status(
+            statusCode: StatusCode.InvalidArgument, detail: "An override is required."));
         var write = new PriceOverrideWriteRequest(
-            SourceName: request.Override.SourceName,
-            AggregatorModelKey: request.Override.AggregatorModelKey,
-            ModelName: request.Override.ModelName);
+            SourceName: overrideValue.SourceName,
+            AggregatorModelKey: overrideValue.AggregatorModelKey,
+            ModelName: overrideValue.ModelName);
         var result = _facade.SetPriceOverride(write);
         return Task.FromResult(ToWire(Unwrap(result)));
     }
@@ -234,7 +239,8 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         Contract.GetRateLimitHistoryRequest request, ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var result = _facade.GetRateLimitHistory(providerKey: request.ProviderKey, hours: request.Hours);
+        var hours = request.HasHours ? request.Hours : 6.0;
+        var result = _facade.GetRateLimitHistory(providerKey: request.ProviderKey, hours: hours);
         var value = Unwrap(result);
 
         var response = new Contract.RateLimitHistoryResponse();
@@ -342,6 +348,7 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         return wire;
     }
 
+    /// <summary>Projects a single <see cref="ModelView"/> into its wire shape.</summary>
     private static Contract.ModelState ToWire(ModelView model)
     {
         var wire = new Contract.ModelState
@@ -356,6 +363,7 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         return wire;
     }
 
+    /// <summary>Projects a single <see cref="HeaderView"/> into its masked wire shape.</summary>
     private static Contract.HeaderState ToWire(HeaderView header)
     {
         var wire = new Contract.HeaderState { Name = header.Name, Source = header.Source, Locked = header.Locked };
@@ -364,6 +372,7 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         return wire;
     }
 
+    /// <summary>Projects a single <see cref="ProviderEndpointCapabilities"/> into its wire shape.</summary>
     private static Contract.EndpointCapabilitiesState ToWire(ProviderEndpointCapabilities capabilities)
     {
         var wire = new Contract.EndpointCapabilitiesState
@@ -379,6 +388,7 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         return wire;
     }
 
+    /// <summary>Projects a single <see cref="ProviderReportedUsageView"/> into its wire shape.</summary>
     private static Contract.ProviderReportedUsageState ToWire(ProviderReportedUsageView reportedUsage)
     {
         var wire = new Contract.ProviderReportedUsageState
@@ -397,6 +407,7 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         return wire;
     }
 
+    /// <summary>Projects a single <see cref="ProviderInteractionStatus"/> into its wire shape.</summary>
     private static Contract.ProviderInteractionState ToWire(ProviderInteractionStatus status)
     {
         var wire = new Contract.ProviderInteractionState
@@ -410,6 +421,7 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         return wire;
     }
 
+    /// <summary>Projects a single <see cref="ProviderRateLimitView"/> into its wire shape.</summary>
     private static Contract.ProviderRateLimitState ToWire(ProviderRateLimitView rateLimit)
     {
         var wire = new Contract.ProviderRateLimitState
@@ -434,9 +446,19 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
             wire.Dimensions[dimensionName] = dimensionWire;
         }
 
+        foreach (var (windowName, window) in rateLimit.Snapshot.UnifiedWindows)
+        {
+            var windowWire = new Contract.UnifiedWindowState();
+            if (window.Status is not null) windowWire.Status = window.Status;
+            if (window.Remaining.HasValue) windowWire.Remaining = window.Remaining.Value;
+            if (window.ResetAt.HasValue) windowWire.ResetAt = Timestamp.FromDateTimeOffset(window.ResetAt.Value);
+            wire.UnifiedWindows[windowName] = windowWire;
+        }
+
         return wire;
     }
 
+    /// <summary>Projects the configured price overrides into their wire shape.</summary>
     private static Contract.PriceOverrideListResponse ToWire(IReadOnlyList<ModelAliasOverride> overrides)
     {
         var wire = new Contract.PriceOverrideListResponse();

@@ -1,11 +1,12 @@
 using AwesomeAssertions;
 using Bunit;
-using System.Net;
-using System.Text;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
 using System.Text.RegularExpressions;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 using IElement = AngleSharp.Dom.IElement;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
@@ -15,282 +16,189 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// rows, the budget panel, and every mutation reachable from them.
 /// <para>
 /// <see cref="ProvidersAdminTests"/> deliberately covers only the unreachable branch, which is all a test
-/// process could reach while the store built its own <see cref="HttpClient"/>: with nothing listening,
+/// process could reach while the store built its own channel: with nothing listening,
 /// <c>OnInitializedAsync</c> always landed on "proxy unreachable" and the entire body of this component
-/// went unrendered. These tests drive it through <see cref="ProviderAdminStore"/>'s <c>transport</c> seam
-/// against a canned management API instead, so the loaded UI is exercised for real.
+/// went unrendered. These tests drive it through <see cref="ProviderAdminStore"/>'s <c>client</c> seam
+/// against a canned generated-client stub instead, so the loaded UI is exercised for real.
 /// </para>
 /// </summary>
 public sealed class ProvidersAdminLoadedTests
 {
     /// <summary>
-    /// One fully-populated provider: a literal credential, a stopped model and a not-detected one, a
+    /// One fully-populated provider set: a literal credential, a stopped model and a not-detected one, a
     /// completed capability scan, and both budget dimensions capped. Chosen so a single render walks most
     /// of the card's conditional branches at once rather than needing a fixture per branch.
     /// </summary>
-    private const string ProvidersJson = """
-                                         {
-                                           "providers": [
-                                             {
-                                               "key": "anthropic",
-                                               "name": "Anthropic Prod",
-                                               "baseUrl": "https://api.anthropic.com",
-                                               "authHeaderName": "x-api-key",
-                                               "authHeaderScheme": "",
-                                               "hasApiKey": true,
-                                               "apiKeyEnvVar": null,
-                                               "providerType": "Anthropic",
-                                               "models": [
-                                                 { "modelName": "claude-opus", "providerModelId": "claude-opus-5", "dialect": "openai-native", "confidence": "Observed", "enabled": true, "presentUpstream": true },
-                                                 { "modelName": "claude-haiku", "providerModelId": "claude-haiku-4-5", "dialect": null, "confidence": null, "enabled": false, "presentUpstream": false }
-                                               ],
-                                               "headers": [ { "name": "anthropic-version", "source": "literal", "valueEnvVar": null } ],
-                                               "isFree": false,
-                                               "dollarCap": 100.0,
-                                               "tokenCap": 1000000,
-                                               "dollarSpent": 42.5,
-                                               "tokensUsed": 250000,
-                                               "enabled": true,
-                                               "endpointCapabilities": {
-                                                 "providerKey": "anthropic",
-                                                 "openAiCompatible": false,
-                                                 "lmStudioNative": false,
-                                                 "ollamaNative": false,
-                                                 "anthropicCompatible": true,
-                                                 "scannedAtUtc": "2026-08-01T00:00:00Z",
-                                                 "scanError": null
-                                               }
-                                             },
-                                             {
-                                               "key": "ollama",
-                                               "name": null,
-                                               "baseUrl": "http://localhost:11434/v1",
-                                               "authHeaderName": "Authorization",
-                                               "authHeaderScheme": "Bearer",
-                                               "hasApiKey": false,
-                                               "apiKeyEnvVar": null,
-                                               "providerType": "LocalRuntime",
-                                               "models": [],
-                                               "headers": [],
-                                               "isFree": true,
-                                               "dollarCap": null,
-                                               "tokenCap": null,
-                                               "dollarSpent": 0.0,
-                                               "tokensUsed": 0,
-                                               "enabled": false,
-                                               "endpointCapabilities": null
-                                             },
-                                             {
-                                               "key": "openai",
-                                               "name": "OpenAI",
-                                               "baseUrl": "https://api.openai.com/v1",
-                                               "authHeaderName": "Authorization",
-                                               "authHeaderScheme": "Bearer",
-                                               "hasApiKey": false,
-                                               "apiKeyEnvVar": "OPENAI_API_KEY",
-                                               "providerType": "OpenAI",
-                                               "models": [],
-                                               "headers": [],
-                                               "isFree": false,
-                                               "dollarCap": null,
-                                               "tokenCap": null,
-                                               "dollarSpent": 3.25,
-                                               "tokensUsed": 900,
-                                               "enabled": true,
-                                               "endpointCapabilities": {
-                                                 "providerKey": "openai",
-                                                 "openAiCompatible": false,
-                                                 "lmStudioNative": false,
-                                                 "ollamaNative": false,
-                                                 "anthropicCompatible": false,
-                                                 "scannedAtUtc": "2026-08-01T00:00:00Z",
-                                                 "scanError": "timed out"
-                                               }
-                                             }
-                                           ]
-                                         }
-                                         """;
+    private static Contract.ProviderListResponse DefaultProviders()
+    {
+        var response = new Contract.ProviderListResponse();
 
-    // Same anthropic provider as ProvidersJson, but with reportedUsage rows and a stored admin key -
+        var anthropic = new Contract.ProviderState
+        {
+            Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
+            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", IsFree = false, DollarCap = "100",
+            TokenCap = 1_000_000, DollarSpent = "42.5", TokensUsed = 250000, Enabled = true, WindowKind = "Monthly",
+            EndpointCapabilities = new Contract.EndpointCapabilitiesState
+            {
+                AnthropicCompatible = true,
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-01T00:00:00Z"))
+            }
+        };
+        anthropic.Models.Add(new Contract.ModelState
+        {
+            ModelName = "claude-opus", ProviderModelId = "claude-opus-5", Dialect = "openai-native",
+            Confidence = "Observed", Enabled = true, PresentUpstream = true
+        });
+        anthropic.Models.Add(new Contract.ModelState
+        {
+            ModelName = "claude-haiku", ProviderModelId = "claude-haiku-4-5", Enabled = false,
+            PresentUpstream = false
+        });
+        anthropic.Headers.Add(new Contract.HeaderState { Name = "anthropic-version", Source = "literal" });
+        response.Providers.Add(anthropic);
+
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "ollama", BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization",
+            ProviderType = "LocalRuntime", IsFree = true, DollarSpent = "0", TokensUsed = 0, Enabled = false,
+            WindowKind = "Monthly"
+        });
+
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", AuthHeaderName = "Authorization",
+            ProviderType = "OpenAI", IsFree = false, DollarSpent = "3.25", TokensUsed = 900, Enabled = true,
+            WindowKind = "Monthly",
+            EndpointCapabilities = new Contract.EndpointCapabilitiesState
+            {
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-01T00:00:00Z")),
+                ScanError = "timed out"
+            }
+        });
+
+        return response;
+    }
+
+    // Same anthropic provider as DefaultProviders, but with reportedUsage rows and a stored admin key -
     // exercises the populated-data branches of the reported-usage section (§8.2), which must render from
     // these backend-supplied values, never the GUI clock.
-    private const string ProvidersJsonWithReportedUsage = """
-                                                          {
-                                                            "providers": [
-                                                              {
-                                                                "key": "anthropic",
-                                                                "name": "Anthropic Prod",
-                                                                "baseUrl": "https://api.anthropic.com",
-                                                                "authHeaderName": "x-api-key",
-                                                                "authHeaderScheme": "",
-                                                                "hasApiKey": true,
-                                                                "apiKeyEnvVar": null,
-                                                                "providerType": "Anthropic",
-                                                                "models": [],
-                                                                "headers": [],
-                                                                "isFree": false,
-                                                                "dollarCap": null,
-                                                                "tokenCap": null,
-                                                                "dollarSpent": 0.0,
-                                                                "tokensUsed": 0,
-                                                                "enabled": true,
-                                                                "endpointCapabilities": null,
-                                                                "hasStoredAdminKey": true,
-                                                                "reportedUsage": {
-                                                                  "rows": [
-                                                                    { "usageDay": "2026-03-01", "model": "claude-opus-4-1", "inputTokens": 100, "outputTokens": 50, "cacheCreationTokens": 5, "cacheReadTokens": 10 }
-                                                                  ],
-                                                                  "fetchedAtUtc": "2026-03-02T04:00:00Z"
-                                                                }
-                                                              }
-                                                            ]
-                                                          }
-                                                          """;
+    private static Contract.ProviderListResponse ProvidersWithReportedUsage()
+    {
+        var response = new Contract.ProviderListResponse();
+        var anthropic = new Contract.ProviderState
+        {
+            Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
+            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "0", Enabled = true,
+            WindowKind = "Monthly", HasStoredAdminKey = true,
+            ReportedUsage = new Contract.ProviderReportedUsageState
+            {
+                FetchedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-02T04:00:00Z"))
+            }
+        };
+        anthropic.ReportedUsage.Rows.Add(new Contract.ReportedUsageRow
+        {
+            UsageDay = "2026-03-01", Model = "claude-opus-4-1", InputTokens = 100, OutputTokens = 50,
+            CacheCreationTokens = 5, CacheReadTokens = 10
+        });
+        response.Providers.Add(anthropic);
+        return response;
+    }
 
-    // Same fixture as ProvidersJsonWithUsageAndRateLimit but IsStale is set and no projections - exercises
-    // the "As of ... stale" branch distinctly from the fresh-and-projected one.
-    private const string ProvidersJsonWithStaleRateLimit = """
-                                                           {
-                                                             "providers": [
-                                                               {
-                                                                 "key": "anthropic",
-                                                                 "name": "Anthropic Prod",
-                                                                 "baseUrl": "https://api.anthropic.com",
-                                                                 "authHeaderName": "x-api-key",
-                                                                 "authHeaderScheme": "",
-                                                                 "hasApiKey": true,
-                                                                 "apiKeyEnvVar": null,
-                                                                 "providerType": "Anthropic",
-                                                                 "models": [],
-                                                                 "headers": [],
-                                                                 "isFree": false,
-                                                                 "dollarCap": null,
-                                                                 "tokenCap": null,
-                                                                 "dollarSpent": 12.5,
-                                                                 "tokensUsed": 158000,
-                                                                 "enabled": true,
-                                                                 "endpointCapabilities": null,
-                                                                 "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
-                                                                 "rateLimit": {
-                                                                   "snapshot": {
-                                                                     "standardDimensions": {
-                                                                       "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
-                                                                     },
-                                                                     "unifiedStatus": null,
-                                                                     "unifiedResetAt": null,
-                                                                     "unifiedWindows": {},
-                                                                     "representativeClaim": null,
-                                                                     "rawHeaders": {}
-                                                                   },
-                                                                   "observedAtUtc": "2026-03-01T12:00:00Z",
-                                                                   "isStale": true
-                                                                 }
-                                                               }
-                                                             ]
-                                                           }
-                                                           """;
+    // Same fixture as ProvidersWithUsageAndRateLimit but IsStale is set and no projections - exercises the
+    // "As of ... stale" branch distinctly from the fresh-and-projected one.
+    private static Contract.ProviderListResponse ProvidersWithStaleRateLimit()
+    {
+        var response = new Contract.ProviderListResponse();
+        var rateLimit = new Contract.ProviderRateLimitState
+        {
+            ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")),
+            IsStale = true
+        };
+        rateLimit.Dimensions["tokens"] = new Contract.RateLimitDimensionState
+        {
+            Limit = 200000, Remaining = 158000,
+            ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
+        };
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
+            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
+            Enabled = true, WindowKind = "Monthly",
+            UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
+            RateLimit = rateLimit
+        });
+        return response;
+    }
 
-    // Same three providers as ProvidersJson, but the anthropic entry carries a populated
-    // usageLastRecordedAtUtc and rateLimit - exercises the card's populated-data branches, which the
-    // GUI must render from these backend-supplied values, never the GUI clock.
-    private const string ProvidersJsonWithUsageAndRateLimit = """
-                                                              {
-                                                                "providers": [
-                                                                  {
-                                                                    "key": "anthropic",
-                                                                    "name": "Anthropic Prod",
-                                                                    "baseUrl": "https://api.anthropic.com",
-                                                                    "authHeaderName": "x-api-key",
-                                                                    "authHeaderScheme": "",
-                                                                    "hasApiKey": true,
-                                                                    "apiKeyEnvVar": null,
-                                                                    "providerType": "Anthropic",
-                                                                    "models": [],
-                                                                    "headers": [],
-                                                                    "isFree": false,
-                                                                    "dollarCap": null,
-                                                                    "tokenCap": null,
-                                                                    "dollarSpent": 12.5,
-                                                                    "tokensUsed": 158000,
-                                                                    "enabled": true,
-                                                                    "endpointCapabilities": null,
-                                                                    "usageLastRecordedAtUtc": "2026-03-01T08:00:00Z",
-                                                                    "rateLimit": {
-                                                                      "snapshot": {
-                                                                        "standardDimensions": {
-                                                                          "tokens": { "limit": 200000, "remaining": 158000, "resetAt": "2026-03-01T13:00:00Z" }
-                                                                        },
-                                                                        "unifiedStatus": "allowed",
-                                                                        "unifiedResetAt": null,
-                                                                        "unifiedWindows": {
-                                                                          "5h": { "status": "allowed", "remaining": null, "resetAt": "2026-03-01T13:00:00Z" }
-                                                                        },
-                                                                        "representativeClaim": null,
-                                                                        "rawHeaders": {}
-                                                                      },
-                                                                      "observedAtUtc": "2026-03-01T12:00:00Z",
-                                                                      "projections": {
-                                                                        "tokens": { "timeToExhaustion": "00:19:00", "burnRatePerMinute": 2210.5 }
-                                                                      }
-                                                                    }
-                                                                  }
-                                                                ]
-                                                              }
-                                                              """;
+    // Same anthropic provider as DefaultProviders, but with a populated usageLastRecordedAtUtc and
+    // rateLimit (including a unified-family window and an exhaustion projection) - exercises the card's
+    // populated-data branches, which the GUI must render from these backend-supplied values, never the GUI
+    // clock.
+    private static Contract.ProviderListResponse ProvidersWithUsageAndRateLimit()
+    {
+        var response = new Contract.ProviderListResponse();
+        var rateLimit = new Contract.ProviderRateLimitState
+        {
+            ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z"))
+        };
+        rateLimit.Dimensions["tokens"] = new Contract.RateLimitDimensionState
+        {
+            Limit = 200000, Remaining = 158000,
+            ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z")),
+            TimeToExhaustionSeconds = 19 * 60, BurnRatePerMinute = 2210.5
+        };
+        rateLimit.UnifiedWindows["5h"] = new Contract.UnifiedWindowState
+        {
+            Status = "allowed", ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
+        };
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
+            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
+            Enabled = true, WindowKind = "Monthly",
+            UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
+            RateLimit = rateLimit
+        });
+        return response;
+    }
 
-    // Same anthropic/ollama/openai providers as ProvidersJson, but openai's adminAction carries a
-    // failed "Refresh from endpoint" - the expired-API-key scenario that motivated the warning icon/toast.
-    private const string ProvidersJsonWithFailedInteraction = """
-                                                              {
-                                                                "providers": [
-                                                                  {
-                                                                    "key": "anthropic",
-                                                                    "name": "Anthropic Prod",
-                                                                    "baseUrl": "https://api.anthropic.com",
-                                                                    "authHeaderName": "x-api-key",
-                                                                    "authHeaderScheme": "",
-                                                                    "hasApiKey": true,
-                                                                    "apiKeyEnvVar": null,
-                                                                    "providerType": "Anthropic",
-                                                                    "models": [],
-                                                                    "headers": [],
-                                                                    "isFree": false,
-                                                                    "enabled": true
-                                                                  },
-                                                                  {
-                                                                    "key": "openai",
-                                                                    "name": "OpenAI",
-                                                                    "baseUrl": "https://api.openai.com/v1",
-                                                                    "authHeaderName": "Authorization",
-                                                                    "authHeaderScheme": "Bearer",
-                                                                    "hasApiKey": false,
-                                                                    "apiKeyEnvVar": "OPENAI_API_KEY",
-                                                                    "providerType": "OpenAI",
-                                                                    "models": [],
-                                                                    "headers": [],
-                                                                    "isFree": false,
-                                                                    "enabled": true,
-                                                                    "adminAction": {
-                                                                      "ok": false,
-                                                                      "operation": "Refresh from endpoint",
-                                                                      "message": "Provider returned 401 for https://api.openai.com/v1/models.",
-                                                                      "atUtc": "2026-08-24T09:00:00Z"
-                                                                    }
-                                                                  }
-                                                                ]
-                                                              }
-                                                              """;
+    // Same three providers as DefaultProviders, but openai's adminAction carries a failed "Refresh from
+    // endpoint" - the expired-API-key scenario that motivated the warning icon/toast.
+    private static Contract.ProviderListResponse ProvidersWithFailedInteraction()
+    {
+        var response = new Contract.ProviderListResponse();
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
+            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "0", Enabled = true,
+            WindowKind = "Monthly"
+        });
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "ollama", BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization",
+            ProviderType = "LocalRuntime", IsFree = true, DollarSpent = "0", Enabled = false, WindowKind = "Monthly"
+        });
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", AuthHeaderName = "Authorization",
+            ProviderType = "OpenAI", DollarSpent = "0", Enabled = true, WindowKind = "Monthly",
+            AdminAction = new Contract.ProviderInteractionState
+            {
+                Ok = false, Operation = "Refresh from endpoint",
+                Message = "Provider returned 401 for https://api.openai.com/v1/models.",
+                AtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-24T09:00:00Z")), Kind = "None"
+            }
+        });
+        return response;
+    }
 
-    private static BunitContext NewContext(StubTransport transport)
+    private static BunitContext NewContext(StubClient client)
     {
         var ctx = new BunitContext();
         // The budget panel renders EChart, which calls into echartsInterop; Loose mode records the calls
         // instead of failing them, matching EChartTests and DashboardTests.
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new ProviderAdminStore(
-            managementAddress: "http://127.0.0.1:59995",
-            adminToken: "test-token",
-            transport: transport));
+        ctx.Services.AddSingleton(new ProviderAdminStore(client: new ProviderAdminClient(client, "test-token")));
         return ctx;
     }
 
@@ -306,17 +214,14 @@ public sealed class ProvidersAdminLoadedTests
     /// Same as <see cref="NewContext"/>, but also registers a <see cref="ToastService"/> so a mutation's toast can be
     /// asserted on.
     /// </summary>
-    private static (BunitContext Context, ToastService Toasts) NewContextWithToasts(StubTransport transport)
+    private static (BunitContext Context, ToastService Toasts) NewContextWithToasts(StubClient client)
     {
         var toasts = new ToastService();
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton(toasts);
         ctx.Services.AddSingleton(new ProviderAdminStore(
-            managementAddress: "http://127.0.0.1:59995",
-            adminToken: "test-token",
-            transport: transport,
-            toasts: toasts));
+            client: new ProviderAdminClient(client, "test-token"), toasts: toasts));
         return (ctx, toasts);
     }
 
@@ -334,8 +239,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Renders_a_card_per_provider_with_its_display_name_and_endpoint()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -349,8 +254,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Shows_a_badge_per_detected_api_and_none_when_never_scanned_or_all_false()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -365,8 +270,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Marks_a_model_the_last_scan_did_not_report_as_not_detected()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -378,8 +283,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Renders_budget_bars_when_capped_and_an_unlimited_note_when_not()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -393,22 +298,22 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Toggling_a_provider_sends_the_inverted_enabled_flag()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.Find("button[aria-label='Stop provider anthropic']").Click();
 
-        cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Method == "PUT" && r.Path.EndsWith("admin/providers/anthropic/enabled", StringComparison.Ordinal)));
-        transport.LastBody.Should().Contain(expected: "false", occurrenceConstraint: Exactly.Once());
+        cut.WaitForAssertion(() => client.LastSetProviderEnabledRequest.Should().NotBeNull());
+        client.LastSetProviderEnabledRequest!.Key.Should().Be("anthropic");
+        client.LastSetProviderEnabledRequest.Enabled.Should().BeFalse();
     }
 
     [Fact]
     public void A_stopped_provider_offers_start_rather_than_stop()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -418,49 +323,49 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Toggling_a_model_sends_the_inverted_enabled_flag()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.Find("button[aria-label='Stop model claude-opus']").Click();
 
-        cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Path.EndsWith("admin/providers/anthropic/models/claude-opus/enabled", StringComparison.Ordinal)));
+        cut.WaitForAssertion(() => client.LastSetModelEnabledRequest.Should().NotBeNull());
+        client.LastSetModelEnabledRequest!.ModelName.Should().Be("claude-opus");
     }
 
     [Fact]
     public void Pinning_a_tool_dialect_writes_it_and_auto_detect_clears_it()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.Find("select[aria-label='Tool-call dialect for claude-opus']").Change("hermes");
 
-        cut.WaitForAssertion(() =>
-            transport.LastBody.Should().Contain(expected: "hermes", occurrenceConstraint: Exactly.Once()));
-        transport.Requests.Should().Contain(r =>
-            r.Path.EndsWith("admin/providers/anthropic/models/claude-opus/tool-dialect", StringComparison.Ordinal));
+        cut.WaitForAssertion(() => client.LastSetModelToolDialectRequest.Should().NotBeNull());
+        client.LastSetModelToolDialectRequest!.ProviderKey.Should().Be("anthropic");
+        client.LastSetModelToolDialectRequest.ModelName.Should().Be("claude-opus");
+        client.LastSetModelToolDialectRequest.Dialect.Should().Be("hermes");
     }
 
     [Fact]
     public void Refresh_from_endpoint_posts_to_the_provider()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.Find("button[aria-label='Refresh provider anthropic']").Click();
 
-        cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Path.EndsWith("admin/providers/anthropic/refresh-from-endpoint", StringComparison.Ordinal)));
+        cut.WaitForAssertion(() => client.LastRefreshFromEndpointRequest.Should().NotBeNull());
+        client.LastRefreshFromEndpointRequest!.ProviderKey.Should().Be("anthropic");
     }
 
     [Fact]
     public void A_provider_whose_last_interaction_failed_shows_a_warning_icon()
     {
-        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithFailedInteraction };
-        using var ctx = NewContext(transport);
+        var client = new StubClient { Response = ProvidersWithFailedInteraction() };
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -471,9 +376,9 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void A_provider_with_no_recorded_interaction_shows_no_warning_icon()
     {
-        // ProvidersJson (the default fixture) carries no adminAction on any provider.
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        // DefaultProviders (the default fixture) carries no adminAction on any provider.
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -483,12 +388,12 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Refreshing_a_provider_whose_refresh_failed_raises_a_toast()
     {
-        // The motivating bug: RefreshFromEndpointAsync returns 200 OK even when the router's discovery
+        // The motivating bug: RefreshFromEndpointAsync returns success even when the router's discovery
         // failed (an expired API key), so ProvidersAdmin.RunAsync's own thrown-exception catch never fires -
         // ProviderAdminStore.RefreshFromEndpointAsync must notice via AdminAction and raise the toast
         // itself.
-        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithFailedInteraction };
-        var (ctx, toasts) = NewContextWithToasts(transport);
+        var client = new StubClient { Response = ProvidersWithFailedInteraction() };
+        var (ctx, toasts) = NewContextWithToasts(client);
         using var _ = ctx;
         var cut = RenderLoaded(ctx);
 
@@ -501,8 +406,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void The_add_model_pane_is_collapsed_until_toggled()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         // Every provider's pane stays mounted so it can animate shut as well as open, so a collapsed
@@ -526,8 +431,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Adding_a_model_sends_its_name_and_optional_provider_id()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
         cut.FindAll("button[aria-label='Add model manually']")[0].Click();
 
@@ -535,44 +440,44 @@ public sealed class ProvidersAdminLoadedTests
         cut.Find("input[placeholder='provider model id (optional)']").Input("claude-sonnet-5");
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Add").Click();
 
-        cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Path.EndsWith("admin/providers/anthropic/models/claude-sonnet", StringComparison.Ordinal)));
-        transport.LastBody.Should().Contain(expected: "claude-sonnet-5", occurrenceConstraint: Exactly.Once());
+        cut.WaitForAssertion(() => client.LastUpsertModelRequest.Should().NotBeNull());
+        client.LastUpsertModelRequest!.ProviderKey.Should().Be("anthropic");
+        client.LastUpsertModelRequest.ModelName.Should().Be("claude-sonnet");
+        client.LastUpsertModelRequest.Model.ProviderModelId.Should().Be("claude-sonnet-5");
     }
 
     [Fact]
     public void Adding_a_model_with_a_blank_name_sends_nothing()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
         cut.FindAll("button[aria-label='Add model manually']")[0].Click();
 
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Add").Click();
 
-        // Only the initial GET; a blank name is a no-op rather than a 400 round-trip.
-        transport.Requests.Should().OnlyContain(r => r.Method == "GET");
+        // Only the initial list; a blank name is a no-op rather than a round-trip.
+        client.LastUpsertModelRequest.Should().BeNull();
     }
 
     [Fact]
     public void Removing_a_model_deletes_it()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.Find("button[title='Remove model']").Click();
 
-        cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Method == "DELETE" &&
-            r.Path.EndsWith("admin/providers/anthropic/models/claude-opus", StringComparison.Ordinal)));
+        cut.WaitForAssertion(() => client.LastRemoveModelRequest.Should().NotBeNull());
+        client.LastRemoveModelRequest!.ModelName.Should().Be("claude-opus");
     }
 
     [Fact]
     public void Removing_a_provider_opens_the_type_to_confirm_dialog_rather_than_deleting()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.Find("button[aria-label='Remove provider anthropic']").Click();
@@ -580,28 +485,28 @@ public sealed class ProvidersAdminLoadedTests
         // Removal cascades to the provider's models, so it is gated behind typing the key.
         cut.Find(".overlay-panel span").TextContent.Trim().Should().Be("Remove Provider");
         cut.FindAll("input[aria-label='Type anthropic to confirm removal']").Should().ContainSingle();
-        transport.Requests.Should().OnlyContain(r => r.Method == "GET");
+        client.LastRemoveProviderRequest.Should().BeNull();
     }
 
     [Fact]
     public void Cancelling_the_remove_dialog_closes_it_without_deleting()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
         cut.Find("button[aria-label='Remove provider anthropic']").Click();
 
         FindDialogButton(cut: cut, label: "Cancel").Click();
 
         cut.FindAll(".overlay-panel").Should().BeEmpty();
-        transport.Requests.Should().OnlyContain(r => r.Method == "GET");
+        client.LastRemoveProviderRequest.Should().BeNull();
     }
 
     [Fact]
     public void Add_provider_opens_the_dialog_in_new_mode()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.FindAll("button")
@@ -615,8 +520,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Edit_opens_the_dialog_seeded_with_the_providers_stored_type()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.FindAll("button[title='Config']")[0].Click();
@@ -630,41 +535,40 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Saving_the_edit_dialog_writes_the_provider_type_through()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
         cut.FindAll("button[title='Config']")[0].Click();
 
         FindDialogButton(cut: cut, label: "Save").Click();
 
-        cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Method == "PUT" && r.Path.EndsWith("admin/providers/anthropic", StringComparison.Ordinal)));
-        transport.LastBody.Should()
-            .Contain(expected: "\"providerType\":\"Anthropic\"", occurrenceConstraint: Exactly.Once());
+        cut.WaitForAssertion(() => client.LastUpsertProviderRequest.Should().NotBeNull());
+        client.LastUpsertProviderRequest!.Key.Should().Be("anthropic");
+        client.LastUpsertProviderRequest.ProviderType.Should().Be("Anthropic");
     }
 
     [Fact]
     public void Cancelling_the_edit_dialog_closes_it_without_writing()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
         cut.FindAll("button[title='Config']")[0].Click();
 
         FindDialogButton(cut: cut, label: "Cancel").Click();
 
         cut.FindAll(".overlay-panel").Should().BeEmpty();
-        transport.Requests.Should().OnlyContain(r => r.Method == "GET");
+        client.LastUpsertProviderRequest.Should().BeNull();
     }
 
     [Fact]
     public void A_rejected_edit_surfaces_the_servers_message_in_the_dialog()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
         cut.FindAll("button[title='Config']")[0].Click();
-        transport.NextFailure = "BaseUrl must be an absolute URI.";
+        client.NextFailure = "BaseUrl must be an absolute URI.";
 
         FindDialogButton(cut: cut, label: "Save").Click();
 
@@ -678,8 +582,8 @@ public sealed class ProvidersAdminLoadedTests
     [InlineData("", "1.5", "Monthly token cap must be a non-negative whole number")]
     public void An_invalid_budget_cap_is_rejected_locally_with_a_reason(string dollars, string tokens, string expected)
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.FindAll("input[placeholder='monthly $ cap (optional)']")[0].Input(dollars);
@@ -688,32 +592,32 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.Markup.Should().Contain(expected);
         // Rejected before any request - a malformed cap never reaches the proxy.
-        transport.Requests.Should().OnlyContain(r => r.Method == "GET");
+        client.LastSetProviderBudgetRequest.Should().BeNull();
     }
 
     [Fact]
     public void A_valid_budget_is_written()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
 
         cut.FindAll("input[placeholder='monthly $ cap (optional)']")[0].Input("250");
         cut.FindAll("input[placeholder='monthly token cap (optional)']")[0].Input("5000");
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
 
-        cut.WaitForAssertion(() => transport.Requests.Should().Contain(r =>
-            r.Path.EndsWith("admin/providers/anthropic/budget", StringComparison.Ordinal)));
-        transport.LastBody.Should().Contain(expected: "250", occurrenceConstraint: Exactly.Once());
+        cut.WaitForAssertion(() => client.LastSetProviderBudgetRequest.Should().NotBeNull());
+        client.LastSetProviderBudgetRequest!.ProviderKey.Should().Be("anthropic");
+        client.LastSetProviderBudgetRequest.Budget.DollarCap.Should().Be("250");
     }
 
     [Fact]
     public void A_failed_mutation_surfaces_in_the_panes_error_banner()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
         var cut = RenderLoaded(ctx);
-        transport.NextFailure = "provider is in use";
+        client.NextFailure = "provider is in use";
 
         cut.Find("button[aria-label='Stop provider anthropic']").Click();
 
@@ -726,8 +630,8 @@ public sealed class ProvidersAdminLoadedTests
         // docs/router/openai-format-usage-accuracy-plan.md §6.2 generalizes this card beyond Anthropic:
         // it now renders (titled by the provider's own type) for both Anthropic- and OpenAI-typed
         // providers, but ollama (LocalRuntime) still must not render the section.
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -744,8 +648,8 @@ public sealed class ProvidersAdminLoadedTests
         // docs/router/secrets-at-rest-plan.md §8.2: the section is Anthropic-only, unlike the wider
         // Anthropic/OpenAI usage block it lives inside; the fixture's anthropic provider carries no
         // reportedUsage, so the empty state renders.
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -757,8 +661,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void AdminApiKey_field_renders_for_recognized_reconciliation_providers()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -771,8 +675,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void ReportedUsage_section_rendersChartAndFetchedFooter_whenDataPresent()
     {
-        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithReportedUsage };
-        using var ctx = NewContext(transport);
+        var client = new StubClient { Response = ProvidersWithReportedUsage() };
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -784,8 +688,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Anthropic_Usage_card_shows_empty_states_when_nothing_recorded_yet()
     {
-        var transport = new StubTransport();
-        using var ctx = NewContext(transport);
+        var client = new StubClient();
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -797,8 +701,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void Anthropic_Usage_card_renders_backend_timestamps_for_both_sub_blocks()
     {
-        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithUsageAndRateLimit };
-        using var ctx = NewContext(transport);
+        var client = new StubClient { Response = ProvidersWithUsageAndRateLimit() };
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -813,8 +717,8 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void RateLimit_Stale_DimsAsOfFooterAndLabelsIt()
     {
-        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithStaleRateLimit };
-        using var ctx = NewContext(transport);
+        var client = new StubClient { Response = ProvidersWithStaleRateLimit() };
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
@@ -824,57 +728,136 @@ public sealed class ProvidersAdminLoadedTests
     [Fact]
     public void RateLimit_ExhaustionProjection_RendersBurnRateLine()
     {
-        var transport = new StubTransport { ResponseOverride = ProvidersJsonWithUsageAndRateLimit };
-        using var ctx = NewContext(transport);
+        var client = new StubClient { Response = ProvidersWithUsageAndRateLimit() };
+        using var ctx = NewContext(client);
 
         var cut = RenderLoaded(ctx);
 
         cut.Markup.Should().Contain("at current rate");
     }
 
-    /// <summary>A record of one request the component caused, for asserting what reached the wire.</summary>
-    private sealed record RecordedRequest(string Method, string Path);
-
     /// <summary>
-    /// A canned management API: answers every request with the provider list, so the component's
-    /// "mutate, then publish the returned list" flow works end to end. <see cref="NextFailure"/> makes the
-    /// next write fail with a 400, which is how the error paths are reached.
+    /// A canned <c>ProviderAdminService</c> client: answers every read with the provider list, so the
+    /// component's "mutate, then publish the returned list" flow works end to end.
+    /// <see cref="NextFailure"/> makes the next mutation fail with <see cref="StatusCode.InvalidArgument"/>,
+    /// which is how the error paths are reached. Overrides only the <c>CallOptions</c> overloads: the
+    /// generated convenience overloads delegate to them.
     /// </summary>
-    private sealed class StubTransport : HttpMessageHandler
+    private sealed class StubClient : Contract.ProviderAdminService.ProviderAdminServiceClient
     {
-        private readonly List<RecordedRequest> _requests = [];
+        public Contract.ProviderListResponse Response { get; init; } = DefaultProviders();
 
-        public IReadOnlyList<RecordedRequest> Requests => _requests;
-
-        public string? LastBody { get; private set; }
-
-        /// <summary>When set, the next non-GET request answers 400 with this message and clears the flag.</summary>
         public string? NextFailure { get; set; }
 
-        /// <summary>When set, every GET answers with this JSON instead of the default <see cref="ProvidersJson"/> fixture.</summary>
-        public string? ResponseOverride { get; set; }
+        public Contract.UpsertProviderRequest? LastUpsertProviderRequest { get; private set; }
+        public Contract.RemoveProviderRequest? LastRemoveProviderRequest { get; private set; }
+        public Contract.SetProviderBudgetRequest? LastSetProviderBudgetRequest { get; private set; }
+        public Contract.SetProviderEnabledRequest? LastSetProviderEnabledRequest { get; private set; }
+        public Contract.UpsertModelRequest? LastUpsertModelRequest { get; private set; }
+        public Contract.RemoveModelRequest? LastRemoveModelRequest { get; private set; }
+        public Contract.SetModelEnabledRequest? LastSetModelEnabledRequest { get; private set; }
+        public Contract.SetModelToolDialectRequest? LastSetModelToolDialectRequest { get; private set; }
+        public Contract.RefreshFromEndpointRequest? LastRefreshFromEndpointRequest { get; private set; }
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        public override AsyncUnaryCall<Contract.ProviderListResponse> ListProvidersAsync(
+            Contract.ListProvidersRequest request, CallOptions options)
         {
-            _requests.Add(new RecordedRequest(Method: request.Method.Method, Path: request.RequestUri!.AbsolutePath));
+            return Ok(Response);
+        }
 
-            if (request.Content is not null) LastBody = await request.Content.ReadAsStringAsync(cancellationToken);
+        public override AsyncUnaryCall<Contract.ProviderListResponse> UpsertProviderAsync(
+            Contract.UpsertProviderRequest request, CallOptions options)
+        {
+            LastUpsertProviderRequest = request;
+            return Mutate();
+        }
 
-            if (NextFailure is { } failure && request.Method != HttpMethod.Get)
+        public override AsyncUnaryCall<Contract.ProviderListResponse> RemoveProviderAsync(
+            Contract.RemoveProviderRequest request, CallOptions options)
+        {
+            LastRemoveProviderRequest = request;
+            return Mutate();
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetProviderBudgetAsync(
+            Contract.SetProviderBudgetRequest request, CallOptions options)
+        {
+            LastSetProviderBudgetRequest = request;
+            return Mutate();
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetProviderEnabledAsync(
+            Contract.SetProviderEnabledRequest request, CallOptions options)
+        {
+            LastSetProviderEnabledRequest = request;
+            return Mutate();
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> UpsertModelAsync(
+            Contract.UpsertModelRequest request, CallOptions options)
+        {
+            LastUpsertModelRequest = request;
+            return Mutate();
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> RemoveModelAsync(
+            Contract.RemoveModelRequest request, CallOptions options)
+        {
+            LastRemoveModelRequest = request;
+            return Mutate();
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetModelEnabledAsync(
+            Contract.SetModelEnabledRequest request, CallOptions options)
+        {
+            LastSetModelEnabledRequest = request;
+            return Mutate();
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetModelToolDialectAsync(
+            Contract.SetModelToolDialectRequest request, CallOptions options)
+        {
+            LastSetModelToolDialectRequest = request;
+            return Mutate();
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> RefreshFromEndpointAsync(
+            Contract.RefreshFromEndpointRequest request, CallOptions options)
+        {
+            LastRefreshFromEndpointRequest = request;
+            return Mutate();
+        }
+
+        /// <summary>Answers a mutation: the next queued failure if one is set, otherwise the canned list.</summary>
+        private AsyncUnaryCall<Contract.ProviderListResponse> Mutate()
+        {
+            if (NextFailure is { } failure)
             {
                 NextFailure = null;
-                return new HttpResponseMessage(HttpStatusCode.BadRequest)
-                {
-                    Content = new StringContent(content: failure, encoding: Encoding.UTF8, mediaType: "text/plain")
-                };
+                return Fail(new RpcException(new Status(statusCode: StatusCode.InvalidArgument, detail: failure)));
             }
 
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(content: ResponseOverride ?? ProvidersJson, encoding: Encoding.UTF8,
-                    mediaType: "application/json")
-            };
+            return Ok(Response);
+        }
+
+        private static AsyncUnaryCall<Contract.ProviderListResponse> Ok(Contract.ProviderListResponse response)
+        {
+            return new AsyncUnaryCall<Contract.ProviderListResponse>(
+                responseAsync: Task.FromResult(response),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
+
+        private static AsyncUnaryCall<Contract.ProviderListResponse> Fail(RpcException failure)
+        {
+            return new AsyncUnaryCall<Contract.ProviderListResponse>(
+                responseAsync: Task.FromException<Contract.ProviderListResponse>(failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
     }
 }

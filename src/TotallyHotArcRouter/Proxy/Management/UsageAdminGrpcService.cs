@@ -2,7 +2,7 @@ using System.Globalization;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using TotallyHot.ArcRouter.Telemetry;
-using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
@@ -64,9 +64,11 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
         ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var from = ParseTimestamp(request.From, fieldName: "from");
+        var to = ParseTimestamp(request.To, fieldName: "to");
         var result = await _reportingService.GetRoutingRoiAsync(
-            from: request.From.ToDateTimeOffset(),
-            to: request.To.ToDateTimeOffset(),
+            from: from,
+            to: to,
             sessionId: request.HasSessionId ? request.SessionId : null,
             cancellationToken: context.CancellationToken).ConfigureAwait(false);
         var points = Unwrap(result);
@@ -92,14 +94,39 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
     }
 
     /// <summary>Runs the shared rollup query with the request's range/width/groupBy, defaulting width/groupBy to "day".</summary>
-    private IReadOnlyList<UsageRollupBucket> QueryRollup(Timestamp from, Timestamp to, string width, string groupBy)
+    private IReadOnlyList<UsageRollupBucket> QueryRollup(Timestamp? from, Timestamp? to, string width, string groupBy)
     {
         var result = _reportingService.GetUsageRollup(
-            from: from.ToDateTimeOffset(),
-            to: to.ToDateTimeOffset(),
+            from: ParseTimestamp(from, fieldName: "from"),
+            to: ParseTimestamp(to, fieldName: "to"),
             width: string.IsNullOrEmpty(width) ? "day" : width,
             groupBy: string.IsNullOrEmpty(groupBy) ? "day" : groupBy);
         return Unwrap(result);
+    }
+
+    /// <summary>
+    /// Converts a wire <see cref="Timestamp"/> field to a <see cref="DateTimeOffset"/>, rejecting an absent
+    /// field or an out-of-range value with the same <c>INVALID_ARGUMENT</c> contract the REST-era endpoint
+    /// enforced via its own ISO-8601 parsing, rather than letting a missing/malformed value surface as an
+    /// unhandled null-reference or framework exception.
+    /// </summary>
+    /// <param name="timestamp">The wire timestamp, or <see langword="null"/> when the client omitted it.</param>
+    /// <param name="fieldName">The request field's name, for the rejection message.</param>
+    private static DateTimeOffset ParseTimestamp(Timestamp? timestamp, string fieldName)
+    {
+        if (timestamp is null)
+            throw new RpcException(new Status(statusCode: StatusCode.InvalidArgument,
+                detail: $"'{fieldName}' is required."));
+
+        try
+        {
+            return timestamp.ToDateTimeOffset();
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new RpcException(new Status(statusCode: StatusCode.InvalidArgument,
+                detail: $"'{fieldName}' is not a valid timestamp: {ex.Message}"));
+        }
     }
 
     /// <summary>Returns a successful <see cref="ManagementResult{T}"/>'s value, or throws the equivalent <see cref="RpcException"/>.</summary>
@@ -117,6 +144,7 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
         throw new RpcException(new Status(statusCode: statusCode, detail: result.ErrorMessage!));
     }
 
+    /// <summary>Projects a single <see cref="UsageRollupBucket"/> into its wire shape.</summary>
     private static Contract.UsageRollupBucketRow ToWire(UsageRollupBucket bucket)
     {
         return new Contract.UsageRollupBucketRow
@@ -134,6 +162,7 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
         };
     }
 
+    /// <summary>Projects a single <see cref="RoutingRoiPoint"/> into its wire shape.</summary>
     private static Contract.RoutingRoiEntry ToWire(RoutingRoiPoint point)
     {
         var wire = new Contract.RoutingRoiEntry

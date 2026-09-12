@@ -1,599 +1,709 @@
-using System.Net;
-using System.Text;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
 
 /// <summary>
-/// Unit coverage for <see cref="ProviderAdminClient"/>: request URLs/bodies/headers and response
-/// (de)serialization against a stubbed transport, plus error-envelope handling. Runs cross-platform in
-/// CI (the MAUI glue that wraps this client cannot).
+/// Unit coverage for <see cref="ProviderAdminClient"/>: request-message mapping and response
+/// (de)serialization against a stubbed generated client, plus admin-token metadata and error translation.
+/// Driven through a subclassed generated stub rather than a live server, the same seam
+/// <c>TotallyHot.ArcRouter.Gui.Telemetry.PriceSourceAdminClientTests</c> established for gRPC clients in
+/// this codebase - the generated client exposes a protected parameterless constructor precisely for this,
+/// and overriding the <c>CallOptions</c> overload catches the convenience overloads too (they delegate to
+/// it).
 /// </summary>
 public sealed class ProviderAdminClientTests
 {
-    private const string ProvidersJson = """
-                                         {
-                                           "providers": [
-                                             {
-                                               "key": "openai",
-                                               "baseUrl": "https://api.openai.com",
-                                               "authHeaderName": "Authorization",
-                                               "models": [ { "modelName": "gpt-5.4", "providerModelId": "gpt-5.4" } ],
-                                               "headers": [ { "name": "anthropic-version", "value": "2023-06-01", "valueEnvVar": null } ],
-                                               "dollarCap": 500.0,
-                                               "tokenCap": 1000000,
-                                               "dollarSpent": 12.5,
-                                               "tokensUsed": 500
-                                             }
-                                           ]
-                                         }
-                                         """;
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static ProviderAdminClient CreateClient(HttpMessageHandler handler, string? token = null)
+    private static Contract.ProviderListResponse ListResponse(params Contract.ProviderState[] providers)
     {
-        return new ProviderAdminClient(
-            httpClient: new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5001/") },
-            adminToken: token);
+        var response = new Contract.ProviderListResponse();
+        response.Providers.AddRange(providers);
+        return response;
+    }
+
+    private static Contract.ProviderState Provider(string key, string baseUrl = "https://api.openai.com",
+        bool enabled = true, params Contract.ModelState[] models)
+    {
+        var provider = new Contract.ProviderState
+        {
+            Key = key, BaseUrl = baseUrl, AuthHeaderName = "Authorization", DollarSpent = "0", Enabled = enabled,
+            WindowKind = "Monthly"
+        };
+        provider.Models.AddRange(models);
+        return provider;
     }
 
     [Fact]
-    public async Task GetProvidersAsync_DeserializesProvidersAndModels()
+    public async Task GetProvidersAsync_MapsProvidersAndModels()
     {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
+        var stub = new StubClient
+        {
+            ListProvidersResponse = ListResponse(Provider(key: "openai",
+                models: new Contract.ModelState { ModelName = "gpt-5.4", ProviderModelId = "gpt-5.4" }))
+        };
+        var client = new ProviderAdminClient(stub);
 
-        var providers = await client.GetProvidersAsync(TestContext.Current.CancellationToken);
+        var providers = await client.GetProvidersAsync(Ct);
 
         var provider = Assert.Single(providers);
         Assert.Equal(expected: "openai", actual: provider.Key);
         Assert.Equal(expected: "gpt-5.4", actual: Assert.Single(provider.Models).ModelName);
-        Assert.Equal(expected: HttpMethod.Get, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers",
-            actual: handler.LastRequest.RequestUri!.ToString());
     }
 
     [Fact]
-    public async Task UpsertProviderAsync_PutsToKeyedUrl_WithJsonBody()
+    public async Task GetProvidersAsync_MapsBudgetCapsAndSpend()
     {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.UpsertProviderAsync(
-            key: "ollama",
-            body: new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization"),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Put, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/ollama",
-            actual: handler.LastRequest.RequestUri!.ToString());
-        Assert.Contains(expectedSubstring: "\"baseUrl\":\"http://localhost:11434/v1\"", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    // ProviderWriteRequest is duplicated on the proxy side (Proxy.Management) rather than shared, so the
-    // two can drift silently. Pin the wire name the proxy binds against.
-    [Fact]
-    public async Task UpsertProviderAsync_SerializesIsFree_OnTheWire()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.UpsertProviderAsync(
-            key: "ollama",
-            body: new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization",
-                IsFree: true),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Contains(expectedSubstring: "\"isFree\":true", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task GetProvidersAsync_DeserializesBudgetCapsAndSpend()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Equal(500.0m, actual: provider.DollarCap);
-        Assert.Equal(1_000_000L, actual: provider.TokenCap);
-        Assert.Equal(12.5m, actual: provider.DollarSpent);
-        Assert.Equal(500L, actual: provider.TokensUsed);
-    }
-
-    [Fact]
-    public async Task SetBudgetAsync_PutsToBudgetUrl_WithCapsInBody()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.SetBudgetAsync(
-            key: "openai",
-            body: new ProviderBudgetWriteRequest(250m, 2_000_000L),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Put, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/openai/budget",
-            actual: handler.LastRequest.RequestUri!.ToString());
-        Assert.Contains(expectedSubstring: "\"dollarCap\":250", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-        Assert.Contains(expectedSubstring: "\"tokenCap\":2000000", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task SetBudgetAsync_NullCaps_SerializeAsNull()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.SetBudgetAsync(
-            key: "openai",
-            body: new ProviderBudgetWriteRequest(null, null),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Contains(expectedSubstring: "\"dollarCap\":null", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-        Assert.Contains(expectedSubstring: "\"tokenCap\":null", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task SetEnabledAsync_PutsToEnabledUrl_WithStateInBody()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.SetEnabledAsync(key: "openai", body: new ProviderEnabledWriteRequest(false),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Put, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/openai/enabled",
-            actual: handler.LastRequest.RequestUri!.ToString());
-        Assert.Contains(expectedSubstring: "\"enabled\":false", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task GetProvidersAsync_MissingEnabled_DefaultsToOn()
-    {
-        // ProvidersJson predates the flag, standing in for a proxy that hasn't been updated yet: a provider
-        // must never read as stopped just because the field is absent.
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.True(provider.Enabled);
-    }
-
-    [Fact]
-    public async Task UpsertModelAsync_PutsToNestedModelUrl()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.UpsertModelAsync(key: "ollama", modelName: "llama3", body: new ModelWriteRequest("llama3"),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Put, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/ollama/models/llama3",
-            actual: handler.LastRequest.RequestUri!.ToString());
-    }
-
-    [Fact]
-    public async Task RemoveProviderAsync_DeletesKeyedUrl()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.RemoveProviderAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Delete, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/openai",
-            actual: handler.LastRequest.RequestUri!.ToString());
-    }
-
-    [Fact]
-    public async Task DiscoverModelsAsync_DeserializesResult()
-    {
-        const string discoverJson = """{ "supported": true, "models": [ "gpt-5.4", "gpt-4o" ], "error": null }""";
-        var handler = new StubHandler(_ => Json(discoverJson));
-        var client = CreateClient(handler);
-
-        var result =
-            await client.DiscoverModelsAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.True(result.Supported);
-        Assert.Equal(expected: ["gpt-5.4", "gpt-4o"], actual: result.Models);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/openai/discover-models",
-            actual: handler.LastRequest!.RequestUri!.ToString());
-    }
-
-    [Fact]
-    public async Task ScanCapabilitiesAsync_DeserializesResult()
-    {
-        const string scanJson = """
-                                {
-                                  "providerKey": "lmstudio",
-                                  "openAiCompatible": true,
-                                  "lmStudioNative": true,
-                                  "ollamaNative": false,
-                                  "anthropicCompatible": false,
-                                  "scannedAtUtc": "2026-07-31T00:00:00Z",
-                                  "scanError": null
-                                }
-                                """;
-        var handler = new StubHandler(_ => Json(scanJson));
-        var client = CreateClient(handler);
-
-        var result = await client.ScanCapabilitiesAsync(key: "lmstudio",
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.True(result.OpenAiCompatible);
-        Assert.True(result.LmStudioNative);
-        Assert.False(result.OllamaNative);
-        Assert.Equal(expected: HttpMethod.Post, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/lmstudio/scan-capabilities",
-            actual: handler.LastRequest.RequestUri!.ToString());
-    }
-
-    [Fact]
-    public async Task RefreshFromEndpointAsync_PostsToTheRefreshRoute_AndDeserializesTheProviderList()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        var providers =
-            await client.RefreshFromEndpointAsync(key: "openai",
-                cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Single(providers);
-        Assert.Equal(expected: HttpMethod.Post, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/openai/refresh-from-endpoint",
-            actual: handler.LastRequest.RequestUri!.ToString());
-    }
-
-    [Fact]
-    public async Task SetModelEnabledAsync_PutsToTheModelEnabledRoute_WithTheRequestedState()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.SetModelEnabledAsync(key: "openai", modelName: "gpt-5.4",
-            body: new ModelEnabledWriteRequest(false), cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Put, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/openai/models/gpt-5.4/enabled",
-            actual: handler.LastRequest.RequestUri!.ToString());
-        Assert.Contains(expectedSubstring: "\"enabled\":false", actualString: handler.LastBody,
-            comparisonType: StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task SetModelToolDialectAsync_PutsToTheToolDialectRoute()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.SetModelToolDialectAsync(
-            key: "openai", modelName: "gpt-5.4", body: new ModelToolDialectWriteRequest("constrained"),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Put, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/providers/openai/models/gpt-5.4/tool-dialect",
-            actual: handler.LastRequest.RequestUri!.ToString());
-        Assert.Contains(expectedSubstring: "\"dialect\":\"constrained\"", actualString: handler.LastBody,
-            comparisonType: StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task SetModelToolDialectAsync_WithANullDialect_SendsTheClearingBody()
-    {
-        // Clearing the pin is the undo, so it must reach the server as an explicit null rather than being
-        // dropped from the payload - the route reads a missing dialect the same way, but only by accident.
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.SetModelToolDialectAsync(
-            key: "openai", modelName: "gpt-5.4", body: new ModelToolDialectWriteRequest(null),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Contains(expectedSubstring: "\"dialect\":null", actualString: handler.LastBody,
-            comparisonType: StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task GetProvidersAsync_DeserializesDialectAndEndpointCapabilities()
-    {
-        const string json = """
-                            {
-                              "providers": [
-                                {
-                                  "key": "lmstudio",
-                                  "baseUrl": "http://localhost:1234/v1",
-                                  "authHeaderName": "Authorization",
-                                  "models": [ { "modelName": "qwen2.5-coder", "providerModelId": "qwen2.5-coder", "dialect": "hermes", "confidence": "Observed", "enabled": false, "presentUpstream": false } ],
-                                  "headers": [],
-                                  "endpointCapabilities": {
-                                    "providerKey": "lmstudio",
-                                    "openAiCompatible": true,
-                                    "lmStudioNative": true,
-                                    "ollamaNative": false,
-                                    "anthropicCompatible": false,
-                                    "scannedAtUtc": "2026-07-31T00:00:00Z",
-                                    "scanError": null
-                                  }
-                                }
-                              ]
-                            }
-                            """;
-        var handler = new StubHandler(_ => Json(json));
-        var client = CreateClient(handler);
-
-        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        var model = Assert.Single(provider.Models);
-        Assert.Equal(expected: "hermes", actual: model.Dialect);
-        Assert.Equal(expected: "Observed", actual: model.Confidence);
-        Assert.False(model.Enabled);
-        Assert.False(model.PresentUpstream);
-    }
-
-    [Fact]
-    public async Task GetProvidersAsync_WithNoDialectOrCapabilityFields_LeavesThemNull()
-    {
-        // A never-scanned provider's response omits the new fields entirely (they are optional server
-        // side); the client must deserialize that as null rather than fail.
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        var model = Assert.Single(provider.Models);
-        Assert.Null(model.Dialect);
-        // Enabled/PresentUpstream are also omitted from this fixture - both default true, same
-        // back-compat reasoning as ProviderAdminView.Enabled.
-        Assert.True(model.Enabled);
-        Assert.True(model.PresentUpstream);
-    }
-
-    [Fact]
-    public async Task ErrorResponse_ThrowsWithServerMessage()
-    {
-        const string errorJson =
-            """{ "error": { "message": "ModelList entry 'x' references unknown provider 'y'.", "type": "invalid_request_error", "code": "400" } }""";
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
-        {
-            Content = new StringContent(content: errorJson, encoding: Encoding.UTF8, mediaType: "application/json")
-        });
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.RemoveProviderAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Contains(expectedSubstring: "unknown provider", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AdminToken_WhenConfigured_IsSentAsHeader()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler: handler, token: "s3cret");
-
-        await client.GetProvidersAsync(TestContext.Current.CancellationToken);
-
-        Assert.True(handler.LastRequest!.Headers.TryGetValues(name: "X-Admin-Token", values: out var values));
-        Assert.Equal(expected: "s3cret", actual: Assert.Single(values));
-    }
-
-    [Fact]
-    public async Task AdminToken_WhenNotConfigured_IsNotSent()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.GetProvidersAsync(TestContext.Current.CancellationToken);
-
-        Assert.False(handler.LastRequest!.Headers.Contains("X-Admin-Token"));
-    }
-
-    [Fact]
-    public async Task TransportFailure_ThrowsWithTheUnderlyingExceptionAsInnerException()
-    {
-        var handler = new ThrowingHandler(new HttpRequestException("connection refused"));
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Contains(expectedSubstring: "Could not reach the proxy management API", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
-        Assert.IsType<HttpRequestException>(ex.InnerException);
-    }
-
-    [Fact]
-    public async Task MalformedJsonResponse_ThrowsWithTheParseError()
-    {
-        var handler = new StubHandler(_ => Json("{ not valid json"));
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Contains(expectedSubstring: "unreadable response", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
-        Assert.NotNull(ex.InnerException);
-    }
-
-    [Fact]
-    public async Task NullJsonResponse_ThrowsAnEmptyResponseError()
-    {
-        var handler = new StubHandler(_ => Json("null"));
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Contains(expectedSubstring: "empty response", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ErrorResponse_WithNonJsonBody_FallsBackToRawBody()
-    {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
-        {
-            Content = new StringContent(content: "upstream is on fire", encoding: Encoding.UTF8,
-                mediaType: "text/plain")
-        });
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Equal(expected: "upstream is on fire", actual: ex.Message);
-    }
-
-    [Fact]
-    public async Task ErrorResponse_WithEmptyBody_FallsBackToTheStatusCode()
-    {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
-        {
-            Content = new StringContent(string.Empty)
-        });
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Equal(expected: "The proxy management API returned 404.", actual: ex.Message);
-    }
-
-    [Fact]
-    public async Task UpsertProviderAsync_SerializesProviderName_OnTheWire()
-    {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
-
-        await client.UpsertProviderAsync(
-            key: "openai",
-            body: new ProviderWriteRequest(null, null, ProviderName: "OpenAI API"),
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Contains(expectedSubstring: "\"providerName\":\"OpenAI API\"", actualString: handler.LastBody,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task GetProvidersAsync_DeserializesProviderName()
-    {
-        const string json = """
-                            {
-                              "providers": [
-                                {
-                                  "key": "openai",
-                                  "name": "OpenAI API",
-                                  "baseUrl": "https://api.openai.com",
-                                  "authHeaderName": "Authorization",
-                                  "models": [],
-                                  "headers": []
-                                }
-                              ]
-                            }
-                            """;
-        var handler = new StubHandler(_ => Json(json));
-        var client = CreateClient(handler);
-
-        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Equal(expected: "OpenAI API", actual: provider.Name);
+        var provider = Provider("openai");
+        provider.DollarCap = "500";
+        provider.TokenCap = 1_000_000;
+        provider.DollarSpent = "12.5";
+        provider.TokensUsed = 500;
+        var stub = new StubClient { ListProvidersResponse = ListResponse(provider) };
+        var client = new ProviderAdminClient(stub);
+
+        var result = Assert.Single(await client.GetProvidersAsync(Ct));
+
+        Assert.Equal(500.0m, actual: result.DollarCap);
+        Assert.Equal(1_000_000L, actual: result.TokenCap);
+        Assert.Equal(12.5m, actual: result.DollarSpent);
+        Assert.Equal(500L, actual: result.TokensUsed);
     }
 
     [Fact]
     public async Task GetProvidersAsync_MissingName_DeserializesAsNull()
     {
-        var handler = new StubHandler(_ => Json(ProvidersJson));
-        var client = CreateClient(handler);
+        var stub = new StubClient { ListProvidersResponse = ListResponse(Provider("openai")) };
+        var client = new ProviderAdminClient(stub);
 
-        var provider = Assert.Single(await client.GetProvidersAsync(TestContext.Current.CancellationToken));
-
-        Assert.Null(provider.Name);
+        Assert.Null(Assert.Single(await client.GetProvidersAsync(Ct)).Name);
     }
 
     [Fact]
-    public async Task GetRateLimitHistoryAsync_DeserializesDimensionsAndSendsExpectedUrl()
+    public async Task GetProvidersAsync_MapsDialectAndEndpointCapabilities()
     {
-        const string historyJson = """
-                                   {
-                                     "dimensions": {
-                                       "tokens": [
-                                         { "bucketUtc": "2026-03-01T12:00:00Z", "remaining": 1000, "limit": 2000 },
-                                         { "bucketUtc": "2026-03-01T12:01:00Z", "remaining": 900, "limit": 2000 }
-                                       ]
-                                     }
-                                   }
-                                   """;
-        var handler = new StubHandler(_ => Json(historyJson));
-        var client = CreateClient(handler);
-
-        var response = await client.GetRateLimitHistoryAsync(key: "openai", 3.5,
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Get, actual: handler.LastRequest!.Method);
-        Assert.Contains(expectedSubstring: "admin/providers/openai/rate-limit-history",
-            actualString: handler.LastRequest.RequestUri!.ToString());
-        Assert.Contains(expectedSubstring: "hours=3.5", actualString: handler.LastRequest.RequestUri!.ToString());
-        var points = response.Dimensions["tokens"];
-        Assert.Equal(2, actual: points.Count);
-        Assert.Equal(1000, actual: points[0].Remaining);
-        Assert.Equal(900, actual: points[1].Remaining);
-    }
-
-    [Fact]
-    public async Task GetRateLimitHistoryAsync_NotFound_ThrowsProviderAdminException()
-    {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        var provider = Provider(key: "lmstudio", baseUrl: "http://localhost:1234/v1",
+            models: new Contract.ModelState
+            {
+                ModelName = "qwen2.5-coder", ProviderModelId = "qwen2.5-coder", Dialect = "hermes",
+                Confidence = "Observed", Enabled = false, PresentUpstream = false
+            });
+        provider.EndpointCapabilities = new Contract.EndpointCapabilitiesState
         {
-            Content = new StringContent("""{"error":{"message":"Provider 'x' not found."}}""", encoding: Encoding.UTF8,
-                mediaType: "application/json")
-        });
-        var client = CreateClient(handler);
+            OpenaiCompatible = true, LmStudioNative = true, OllamaNative = false, AnthropicCompatible = false,
+            ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-07-31T00:00:00Z"))
+        };
+        var stub = new StubClient { ListProvidersResponse = ListResponse(provider) };
+        var client = new ProviderAdminClient(stub);
+
+        var result = Assert.Single(await client.GetProvidersAsync(Ct));
+
+        var model = Assert.Single(result.Models);
+        Assert.Equal(expected: "hermes", actual: model.Dialect);
+        Assert.Equal(expected: "Observed", actual: model.Confidence);
+        Assert.False(model.Enabled);
+        Assert.False(model.PresentUpstream);
+        Assert.True(result.EndpointCapabilities!.OpenAiCompatible);
+        Assert.True(result.EndpointCapabilities.LmStudioNative);
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_SendsEveryConfiguredField()
+    {
+        var stub = new StubClient { UpsertProviderResponse = ListResponse(Provider("ollama")) };
+        var client = new ProviderAdminClient(stub);
+
+        await client.UpsertProviderAsync(
+            key: "ollama",
+            body: new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization",
+                IsFree: true, ProviderName: "Ollama"),
+            cancellationToken: Ct);
+
+        var request = stub.LastUpsertProviderRequest!;
+        Assert.Equal(expected: "ollama", actual: request.Key);
+        Assert.Equal(expected: "http://localhost:11434/v1", actual: request.BaseUrl);
+        Assert.True(request.IsFree);
+        Assert.Equal(expected: "Ollama", actual: request.ProviderName);
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_NullHeaders_DoesNotReplaceHeaders()
+    {
+        var stub = new StubClient { UpsertProviderResponse = ListResponse(Provider("openai")) };
+        var client = new ProviderAdminClient(stub);
+
+        await client.UpsertProviderAsync(key: "openai",
+            body: new ProviderWriteRequest(BaseUrl: null, AuthHeaderName: null), cancellationToken: Ct);
+
+        Assert.False(stub.LastUpsertProviderRequest!.ReplaceHeaders);
+        Assert.Empty(stub.LastUpsertProviderRequest.Headers);
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_WithHeaders_SetsReplaceHeadersAndTheHeaderList()
+    {
+        var stub = new StubClient { UpsertProviderResponse = ListResponse(Provider("openai")) };
+        var client = new ProviderAdminClient(stub);
+
+        await client.UpsertProviderAsync(key: "openai",
+            body: new ProviderWriteRequest(BaseUrl: null, AuthHeaderName: null,
+                Headers: [new ProviderHeaderWriteModel(Name: "anthropic-version", Value: "2023-06-01", null)]),
+            cancellationToken: Ct);
+
+        Assert.True(stub.LastUpsertProviderRequest!.ReplaceHeaders);
+        var header = Assert.Single(stub.LastUpsertProviderRequest.Headers);
+        Assert.Equal(expected: "anthropic-version", actual: header.Name);
+        Assert.Equal(expected: "2023-06-01", actual: header.Value);
+    }
+
+    [Fact]
+    public async Task RemoveProviderAsync_SendsTheKey()
+    {
+        var stub = new StubClient { RemoveProviderResponse = new Contract.ProviderListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.RemoveProviderAsync(key: "openai", cancellationToken: Ct);
+
+        Assert.Equal(expected: "openai", actual: stub.LastRemoveProviderRequest!.Key);
+    }
+
+    [Fact]
+    public async Task SetBudgetAsync_SendsCaps()
+    {
+        var stub = new StubClient { SetBudgetResponse = ListResponse(Provider("openai")) };
+        var client = new ProviderAdminClient(stub);
+
+        await client.SetBudgetAsync(key: "openai", body: new ProviderBudgetWriteRequest(250m, 2_000_000L), Ct);
+
+        var budget = stub.LastSetBudgetRequest!.Budget;
+        Assert.Equal(expected: "openai", actual: stub.LastSetBudgetRequest.ProviderKey);
+        Assert.Equal(expected: "250", actual: budget.DollarCap);
+        Assert.Equal(2_000_000L, actual: budget.TokenCap);
+    }
+
+    [Fact]
+    public async Task SetBudgetAsync_NullCaps_LeavePresenceUnset()
+    {
+        var stub = new StubClient { SetBudgetResponse = ListResponse(Provider("openai")) };
+        var client = new ProviderAdminClient(stub);
+
+        await client.SetBudgetAsync(key: "openai", body: new ProviderBudgetWriteRequest(null, null), Ct);
+
+        var budget = stub.LastSetBudgetRequest!.Budget;
+        Assert.False(budget.HasDollarCap);
+        Assert.False(budget.HasTokenCap);
+    }
+
+    [Fact]
+    public async Task SetEnabledAsync_SendsTheKeyAndState()
+    {
+        var stub = new StubClient { SetEnabledResponse = ListResponse(Provider(key: "openai", enabled: false)) };
+        var client = new ProviderAdminClient(stub);
+
+        var result = await client.SetEnabledAsync(key: "openai", body: new ProviderEnabledWriteRequest(false), Ct);
+
+        Assert.Equal(expected: "openai", actual: stub.LastSetEnabledRequest!.Key);
+        Assert.False(stub.LastSetEnabledRequest.Enabled);
+        Assert.False(Assert.Single(result).Enabled);
+    }
+
+    [Fact]
+    public async Task UpsertModelAsync_SendsProviderKeyModelNameAndUpstreamId()
+    {
+        var stub = new StubClient { UpsertModelResponse = ListResponse(Provider("ollama")) };
+        var client = new ProviderAdminClient(stub);
+
+        await client.UpsertModelAsync(key: "ollama", modelName: "llama3", body: new ModelWriteRequest("llama3"), Ct);
+
+        Assert.Equal(expected: "ollama", actual: stub.LastUpsertModelRequest!.ProviderKey);
+        Assert.Equal(expected: "llama3", actual: stub.LastUpsertModelRequest.ModelName);
+        Assert.Equal(expected: "llama3", actual: stub.LastUpsertModelRequest.Model.ProviderModelId);
+    }
+
+    [Fact]
+    public async Task RemoveModelAsync_SendsTheModelName()
+    {
+        var stub = new StubClient { RemoveModelResponse = new Contract.ProviderListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.RemoveModelAsync(key: "ollama", modelName: "llama3", Ct);
+
+        Assert.Equal(expected: "llama3", actual: stub.LastRemoveModelRequest!.ModelName);
+    }
+
+    [Fact]
+    public async Task SetModelEnabledAsync_SendsTheModelNameAndState()
+    {
+        var stub = new StubClient { SetModelEnabledResponse = new Contract.ProviderListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.SetModelEnabledAsync(key: "openai", modelName: "gpt-5.4",
+            body: new ModelEnabledWriteRequest(false), Ct);
+
+        Assert.Equal(expected: "gpt-5.4", actual: stub.LastSetModelEnabledRequest!.ModelName);
+        Assert.False(stub.LastSetModelEnabledRequest.Enabled);
+    }
+
+    [Fact]
+    public async Task SetModelToolDialectAsync_SendsTheDialect()
+    {
+        var stub = new StubClient { SetModelToolDialectResponse = new Contract.ProviderListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.SetModelToolDialectAsync(key: "openai", modelName: "gpt-5.4",
+            body: new ModelToolDialectWriteRequest("constrained"), Ct);
+
+        Assert.Equal(expected: "constrained", actual: stub.LastSetModelToolDialectRequest!.Dialect);
+    }
+
+    [Fact]
+    public async Task SetModelToolDialectAsync_NullDialect_SendsAnEmptyString()
+    {
+        // Clearing the pin is the undo, so it must reach the server as an explicit clearing value rather
+        // than being dropped from the request.
+        var stub = new StubClient { SetModelToolDialectResponse = new Contract.ProviderListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.SetModelToolDialectAsync(key: "openai", modelName: "gpt-5.4",
+            body: new ModelToolDialectWriteRequest(null), Ct);
+
+        Assert.Equal(expected: string.Empty, actual: stub.LastSetModelToolDialectRequest!.Dialect);
+    }
+
+    [Fact]
+    public async Task DiscoverModelsAsync_MapsSupportedModelsAndError()
+    {
+        var stub = new StubClient
+        {
+            DiscoverModelsResponse = new Contract.DiscoverModelsResponse { Supported = true }
+        };
+        stub.DiscoverModelsResponse.Models.AddRange(["gpt-5.4", "gpt-4o"]);
+        var client = new ProviderAdminClient(stub);
+
+        var result = await client.DiscoverModelsAsync(key: "openai", Ct);
+
+        Assert.True(result.Supported);
+        Assert.Equal(expected: ["gpt-5.4", "gpt-4o"], actual: result.Models);
+        Assert.Equal(expected: "openai", actual: stub.LastDiscoverModelsRequest!.ProviderKey);
+    }
+
+    [Fact]
+    public async Task ScanCapabilitiesAsync_NarrowsTheRefreshedListToTheScannedProvider()
+    {
+        // The RPC returns the full refreshed list (every mutation on this service does); this method's own
+        // contract is the single scanned provider's capabilities - unchanged from the REST-era client.
+        var provider = Provider("lmstudio");
+        provider.EndpointCapabilities = new Contract.EndpointCapabilitiesState
+        {
+            OpenaiCompatible = true, LmStudioNative = true,
+            ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-07-31T00:00:00Z"))
+        };
+        var stub = new StubClient
+        {
+            ScanCapabilitiesResponse = ListResponse(Provider("openai"), provider)
+        };
+        var client = new ProviderAdminClient(stub);
+
+        var result = await client.ScanCapabilitiesAsync(key: "lmstudio", Ct);
+
+        Assert.True(result.OpenAiCompatible);
+        Assert.True(result.LmStudioNative);
+        Assert.False(result.OllamaNative);
+        Assert.Equal(expected: "lmstudio", actual: stub.LastScanCapabilitiesRequest!.ProviderKey);
+    }
+
+    [Fact]
+    public async Task ScanCapabilitiesAsync_ProviderMissingCapabilities_Throws()
+    {
+        var stub = new StubClient { ScanCapabilitiesResponse = ListResponse(Provider("openai")) };
+        var client = new ProviderAdminClient(stub);
 
         await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetRateLimitHistoryAsync(key: "x", cancellationToken: TestContext.Current.CancellationToken));
+            client.ScanCapabilitiesAsync(key: "openai", Ct));
     }
 
-    private static HttpResponseMessage Json(string body)
+    [Fact]
+    public async Task RefreshFromEndpointAsync_SendsTheKey_AndReturnsTheRefreshedList()
     {
-        return new HttpResponseMessage(HttpStatusCode.OK)
-        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json") };
+        var stub = new StubClient { RefreshFromEndpointResponse = ListResponse(Provider("openai")) };
+        var client = new ProviderAdminClient(stub);
+
+        var providers = await client.RefreshFromEndpointAsync(key: "openai", Ct);
+
+        Assert.Single(providers);
+        Assert.Equal(expected: "openai", actual: stub.LastRefreshFromEndpointRequest!.ProviderKey);
     }
 
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+    [Fact]
+    public async Task GetPriceOverridesAsync_MapsEveryOverride()
     {
+        var response = new Contract.PriceOverrideListResponse();
+        response.Overrides.Add(new Contract.PriceOverride
+        { SourceName = "LiteLLM", AggregatorModelKey = "gpt-5.4", ModelName = "gpt-5.4" });
+        var stub = new StubClient { ListPriceOverridesResponse = response };
+        var client = new ProviderAdminClient(stub);
 
-        public HttpRequestMessage? LastRequest { get; private set; }
+        var overrides = await client.GetPriceOverridesAsync(Ct);
 
-        public string? LastBody { get; private set; }
+        var over = Assert.Single(overrides);
+        Assert.Equal(expected: "LiteLLM", actual: over.SourceName);
+    }
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
+    [Fact]
+    public async Task SetPriceOverrideAsync_SendsTheOverride()
+    {
+        var stub = new StubClient { SetPriceOverrideResponse = new Contract.PriceOverrideListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.SetPriceOverrideAsync(new PriceOverrideWriteRequest("LiteLLM", "gpt-5.4", "gpt-5.4"), Ct);
+
+        var over = stub.LastSetPriceOverrideRequest!.Override;
+        Assert.Equal(expected: "LiteLLM", actual: over.SourceName);
+        Assert.Equal(expected: "gpt-5.4", actual: over.AggregatorModelKey);
+    }
+
+    [Fact]
+    public async Task RemovePriceOverrideAsync_SendsSourceAndKey()
+    {
+        var stub = new StubClient { RemovePriceOverrideResponse = new Contract.PriceOverrideListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.RemovePriceOverrideAsync(sourceName: "LiteLLM", aggregatorModelKey: "gpt-5.4", Ct);
+
+        Assert.Equal(expected: "LiteLLM", actual: stub.LastRemovePriceOverrideRequest!.SourceName);
+        Assert.Equal(expected: "gpt-5.4", actual: stub.LastRemovePriceOverrideRequest.AggregatorModelKey);
+    }
+
+    [Fact]
+    public async Task GetPriceResolutionDiagnosisAsync_MapsEveryEntry()
+    {
+        var response = new Contract.PriceResolutionResponse();
+        response.Entries.Add(new Contract.PriceResolutionEntry
+        { ModelName = "gpt-5.4", Provider = "openai", Resolved = true, IsApproximate = false });
+        var stub = new StubClient { PriceResolutionResponse = response };
+        var client = new ProviderAdminClient(stub);
+
+        var entries = await client.GetPriceResolutionDiagnosisAsync(Ct);
+
+        var entry = Assert.Single(entries);
+        Assert.True(entry.Resolved);
+        Assert.False(entry.IsApproximate);
+    }
+
+    [Fact]
+    public async Task GetRateLimitHistoryAsync_SendsTheHoursAndMapsThePoints()
+    {
+        var response = new Contract.RateLimitHistoryResponse();
+        var series = new Contract.RateLimitHistorySeries();
+        series.Points.Add(new Contract.RateLimitHistoryPoint
         {
-            LastRequest = request;
-            LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-            return responder(request);
+            BucketUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")), Remaining = 1000,
+            Limit = 2000
+        });
+        response.Dimensions["tokens"] = series;
+        var stub = new StubClient { RateLimitHistoryResponse = response };
+        var client = new ProviderAdminClient(stub);
+
+        var result = await client.GetRateLimitHistoryAsync(key: "openai", 3.5, Ct);
+
+        Assert.Equal(expected: "openai", actual: stub.LastRateLimitHistoryRequest!.ProviderKey);
+        Assert.Equal(3.5, actual: stub.LastRateLimitHistoryRequest.Hours);
+        var points = result.Dimensions["tokens"];
+        Assert.Equal(1000, actual: Assert.Single(points).Remaining);
+    }
+
+    [Fact]
+    public async Task SetAdminApiKeyAsync_SendsTheReconciliationSecretName()
+    {
+        var stub = new StubClient { SetSecretResponse = new Contract.SetSecretResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.SetAdminApiKeyAsync(provider: "openai", value: "sk-abc", Ct);
+
+        Assert.Equal(expected: "reconciliation:openai:admin-key", actual: stub.LastSetSecretRequest!.Name);
+        Assert.Equal(expected: "sk-abc", actual: stub.LastSetSecretRequest.Value);
+    }
+
+    [Fact]
+    public async Task DeleteAdminApiKeyAsync_SendsTheReconciliationSecretName()
+    {
+        var stub = new StubClient { DeleteSecretResponse = new Contract.DeleteSecretResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.DeleteAdminApiKeyAsync(provider: "anthropic", Ct);
+
+        Assert.Equal(expected: "reconciliation:anthropic:admin-key", actual: stub.LastDeleteSecretRequest!.Name);
+    }
+
+    // --- admin token metadata ---
+
+    [Fact]
+    public async Task AdminToken_WhenConfigured_IsSentAsMetadata()
+    {
+        var stub = new StubClient { ListProvidersResponse = new Contract.ProviderListResponse() };
+        var client = new ProviderAdminClient(stub, adminToken: "s3cret");
+
+        await client.GetProvidersAsync(Ct);
+
+        var entry = Assert.Single(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
+        Assert.Equal(expected: "s3cret", actual: entry.Value);
+    }
+
+    [Fact]
+    public async Task AdminToken_WhenNotConfigured_IsNotSent()
+    {
+        var stub = new StubClient { ListProvidersResponse = new Contract.ProviderListResponse() };
+        var client = new ProviderAdminClient(stub);
+
+        await client.GetProvidersAsync(Ct);
+
+        Assert.Empty(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
+    }
+
+    // --- error handling ---
+
+    [Fact]
+    public async Task Unavailable_BecomesTheReachabilityMessage()
+    {
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        var client = new ProviderAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() => client.GetProvidersAsync(Ct));
+
+        Assert.Contains(expectedSubstring: "Could not reach the proxy management API", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
+        Assert.IsType<RpcException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task ServerRejection_KeepsTheServersOwnDetail()
+    {
+        var stub = new StubClient
+        {
+            Failure = new RpcException(new Status(statusCode: StatusCode.InvalidArgument,
+                detail: "ModelList entry 'x' references unknown provider 'y'."))
+        };
+        var client = new ProviderAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
+            client.RemoveProviderAsync(key: "openai", Ct));
+
+        Assert.Contains(expectedSubstring: "unknown provider", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Constructor_NullChannel_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ProviderAdminClient((Grpc.Net.Client.GrpcChannel)null!));
+    }
+
+    /// <summary>
+    /// A generated-client test double. Overrides only the <c>CallOptions</c> overloads: the generated
+    /// convenience overloads delegate to them, so this intercepts both call shapes.
+    /// </summary>
+    private sealed class StubClient : Contract.ProviderAdminService.ProviderAdminServiceClient
+    {
+        public Contract.ProviderListResponse ListProvidersResponse { get; init; } = new();
+        public Contract.ProviderListResponse UpsertProviderResponse { get; init; } = new();
+        public Contract.ProviderListResponse RemoveProviderResponse { get; init; } = new();
+        public Contract.ProviderListResponse SetBudgetResponse { get; init; } = new();
+        public Contract.ProviderListResponse SetEnabledResponse { get; init; } = new();
+        public Contract.ProviderListResponse UpsertModelResponse { get; init; } = new();
+        public Contract.ProviderListResponse RemoveModelResponse { get; init; } = new();
+        public Contract.ProviderListResponse SetModelEnabledResponse { get; init; } = new();
+        public Contract.ProviderListResponse SetModelToolDialectResponse { get; init; } = new();
+        public Contract.DiscoverModelsResponse DiscoverModelsResponse { get; init; } = new();
+        public Contract.ProviderListResponse ScanCapabilitiesResponse { get; init; } = new();
+        public Contract.ProviderListResponse RefreshFromEndpointResponse { get; init; } = new();
+        public Contract.PriceOverrideListResponse ListPriceOverridesResponse { get; init; } = new();
+        public Contract.PriceOverrideListResponse SetPriceOverrideResponse { get; init; } = new();
+        public Contract.PriceOverrideListResponse RemovePriceOverrideResponse { get; init; } = new();
+        public Contract.PriceResolutionResponse PriceResolutionResponse { get; init; } = new();
+        public Contract.RateLimitHistoryResponse RateLimitHistoryResponse { get; init; } = new();
+        public Contract.SetSecretResponse SetSecretResponse { get; init; } = new();
+        public Contract.DeleteSecretResponse DeleteSecretResponse { get; init; } = new();
+
+        public RpcException? Failure { get; init; }
+
+        public Contract.UpsertProviderRequest? LastUpsertProviderRequest { get; private set; }
+        public Contract.RemoveProviderRequest? LastRemoveProviderRequest { get; private set; }
+        public Contract.SetProviderBudgetRequest? LastSetBudgetRequest { get; private set; }
+        public Contract.SetProviderEnabledRequest? LastSetEnabledRequest { get; private set; }
+        public Contract.UpsertModelRequest? LastUpsertModelRequest { get; private set; }
+        public Contract.RemoveModelRequest? LastRemoveModelRequest { get; private set; }
+        public Contract.SetModelEnabledRequest? LastSetModelEnabledRequest { get; private set; }
+        public Contract.SetModelToolDialectRequest? LastSetModelToolDialectRequest { get; private set; }
+        public Contract.DiscoverModelsRequest? LastDiscoverModelsRequest { get; private set; }
+        public Contract.ScanCapabilitiesRequest? LastScanCapabilitiesRequest { get; private set; }
+        public Contract.RefreshFromEndpointRequest? LastRefreshFromEndpointRequest { get; private set; }
+        public Contract.SetPriceOverrideRequest? LastSetPriceOverrideRequest { get; private set; }
+        public Contract.RemovePriceOverrideRequest? LastRemovePriceOverrideRequest { get; private set; }
+        public Contract.GetRateLimitHistoryRequest? LastRateLimitHistoryRequest { get; private set; }
+        public Contract.SetSecretRequest? LastSetSecretRequest { get; private set; }
+        public Contract.DeleteSecretRequest? LastDeleteSecretRequest { get; private set; }
+        public CallOptions? LastCallOptions { get; private set; }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> ListProvidersAsync(
+            Contract.ListProvidersRequest request, CallOptions options)
+        {
+            LastCallOptions = options;
+            return Call(ListProvidersResponse);
         }
-    }
 
-    /// <summary>A transport that always fails, standing in for a network-level failure (DNS, connection refused, etc.).</summary>
-    private sealed class ThrowingHandler(HttpRequestException exception) : HttpMessageHandler
-    {
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        public override AsyncUnaryCall<Contract.ProviderListResponse> UpsertProviderAsync(
+            Contract.UpsertProviderRequest request, CallOptions options)
         {
-            throw exception;
+            LastUpsertProviderRequest = request;
+            LastCallOptions = options;
+            return Call(UpsertProviderResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> RemoveProviderAsync(
+            Contract.RemoveProviderRequest request, CallOptions options)
+        {
+            LastRemoveProviderRequest = request;
+            LastCallOptions = options;
+            return Call(RemoveProviderResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetProviderBudgetAsync(
+            Contract.SetProviderBudgetRequest request, CallOptions options)
+        {
+            LastSetBudgetRequest = request;
+            LastCallOptions = options;
+            return Call(SetBudgetResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetProviderEnabledAsync(
+            Contract.SetProviderEnabledRequest request, CallOptions options)
+        {
+            LastSetEnabledRequest = request;
+            LastCallOptions = options;
+            return Call(SetEnabledResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> UpsertModelAsync(
+            Contract.UpsertModelRequest request, CallOptions options)
+        {
+            LastUpsertModelRequest = request;
+            LastCallOptions = options;
+            return Call(UpsertModelResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> RemoveModelAsync(
+            Contract.RemoveModelRequest request, CallOptions options)
+        {
+            LastRemoveModelRequest = request;
+            LastCallOptions = options;
+            return Call(RemoveModelResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetModelEnabledAsync(
+            Contract.SetModelEnabledRequest request, CallOptions options)
+        {
+            LastSetModelEnabledRequest = request;
+            LastCallOptions = options;
+            return Call(SetModelEnabledResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> SetModelToolDialectAsync(
+            Contract.SetModelToolDialectRequest request, CallOptions options)
+        {
+            LastSetModelToolDialectRequest = request;
+            LastCallOptions = options;
+            return Call(SetModelToolDialectResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.DiscoverModelsResponse> DiscoverModelsAsync(
+            Contract.DiscoverModelsRequest request, CallOptions options)
+        {
+            LastDiscoverModelsRequest = request;
+            LastCallOptions = options;
+            return Call(DiscoverModelsResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> ScanCapabilitiesAsync(
+            Contract.ScanCapabilitiesRequest request, CallOptions options)
+        {
+            LastScanCapabilitiesRequest = request;
+            LastCallOptions = options;
+            return Call(ScanCapabilitiesResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderListResponse> RefreshFromEndpointAsync(
+            Contract.RefreshFromEndpointRequest request, CallOptions options)
+        {
+            LastRefreshFromEndpointRequest = request;
+            LastCallOptions = options;
+            return Call(RefreshFromEndpointResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.PriceOverrideListResponse> ListPriceOverridesAsync(
+            Contract.ListPriceOverridesRequest request, CallOptions options)
+        {
+            LastCallOptions = options;
+            return Call(ListPriceOverridesResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.PriceOverrideListResponse> SetPriceOverrideAsync(
+            Contract.SetPriceOverrideRequest request, CallOptions options)
+        {
+            LastSetPriceOverrideRequest = request;
+            LastCallOptions = options;
+            return Call(SetPriceOverrideResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.PriceOverrideListResponse> RemovePriceOverrideAsync(
+            Contract.RemovePriceOverrideRequest request, CallOptions options)
+        {
+            LastRemovePriceOverrideRequest = request;
+            LastCallOptions = options;
+            return Call(RemovePriceOverrideResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.PriceResolutionResponse> GetPriceResolutionAsync(
+            Contract.GetPriceResolutionRequest request, CallOptions options)
+        {
+            LastCallOptions = options;
+            return Call(PriceResolutionResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.RateLimitHistoryResponse> GetRateLimitHistoryAsync(
+            Contract.GetRateLimitHistoryRequest request, CallOptions options)
+        {
+            LastRateLimitHistoryRequest = request;
+            LastCallOptions = options;
+            return Call(RateLimitHistoryResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.SetSecretResponse> SetSecretAsync(
+            Contract.SetSecretRequest request, CallOptions options)
+        {
+            LastSetSecretRequest = request;
+            LastCallOptions = options;
+            return Call(SetSecretResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.DeleteSecretResponse> DeleteSecretAsync(
+            Contract.DeleteSecretRequest request, CallOptions options)
+        {
+            LastDeleteSecretRequest = request;
+            LastCallOptions = options;
+            return Call(DeleteSecretResponse);
+        }
+
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
     }
 }
