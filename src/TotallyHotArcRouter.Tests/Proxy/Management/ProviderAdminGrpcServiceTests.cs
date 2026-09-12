@@ -6,7 +6,6 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
-using TotallyHot.ArcRouter.Tests.Proxy;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;

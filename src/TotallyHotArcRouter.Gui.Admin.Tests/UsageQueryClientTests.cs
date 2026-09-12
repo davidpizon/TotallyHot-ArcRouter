@@ -54,7 +54,7 @@ public sealed class UsageQueryClientTests
     {
         var stub = new StubClient
         {
-            RollupResponse = RollupResponse(Bucket(bucketStartUtc: "2026-01-01T00:00:00Z", bucketWidth: "P1D",
+            CannedRollupResponse = RollupResponse(Bucket(bucketStartUtc: "2026-01-01T00:00:00Z", bucketWidth: "P1D",
                 groupKey: "gpt-5.4", requests: 50, unpricedRequests: 2, promptTokens: 40000, completionTokens: 10000,
                 cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: "1.20"))
         };
@@ -80,7 +80,7 @@ public sealed class UsageQueryClientTests
     [Fact]
     public async Task GetRollupAsync_EmptyResponse_ReturnsEmptyList()
     {
-        var stub = new StubClient { RollupResponse = new Contract.UsageRollupResponse() };
+        var stub = new StubClient { CannedRollupResponse = new Contract.UsageRollupResponse() };
         var client = new UsageQueryClient(stub);
         var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
 
@@ -97,7 +97,7 @@ public sealed class UsageQueryClientTests
     {
         var stub = new StubClient
         {
-            RoutingRoiResponse = RoutingRoiResponse(new Contract.RoutingRoiEntry
+            CannedRoutingRoiResponse = RoutingRoiResponse(new Contract.RoutingRoiEntry
             {
                 ComparedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-01-05T10:00:00Z")),
                 SessionId = "session-7",
@@ -127,7 +127,7 @@ public sealed class UsageQueryClientTests
     [Fact]
     public async Task GetRoutingRoiAsync_SessionId_IsSentWhenProvided()
     {
-        var stub = new StubClient { RoutingRoiResponse = new Contract.RoutingRoiResponse() };
+        var stub = new StubClient { CannedRoutingRoiResponse = new Contract.RoutingRoiResponse() };
         var client = new UsageQueryClient(stub);
         var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
 
@@ -144,7 +144,7 @@ public sealed class UsageQueryClientTests
         // "routing broke even".
         var stub = new StubClient
         {
-            RoutingRoiResponse = RoutingRoiResponse(new Contract.RoutingRoiEntry
+            CannedRoutingRoiResponse = RoutingRoiResponse(new Contract.RoutingRoiEntry
             {
                 ComparedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
                 SessionId = "s",
@@ -315,9 +315,9 @@ public sealed class UsageQueryClientTests
     {
         public Contract.UsageSummaryResponse SummaryResponse { get; init; } = new();
 
-        public Contract.UsageRollupResponse RollupResponse { get; init; } = new();
+        public Contract.UsageRollupResponse CannedRollupResponse { get; init; } = new();
 
-        public Contract.RoutingRoiResponse RoutingRoiResponse { get; init; } = new();
+        public Contract.RoutingRoiResponse CannedRoutingRoiResponse { get; init; } = new();
 
         public IReadOnlyList<Contract.UsageRollupBucketRow> ExportRows { get; init; } = [];
 
@@ -344,7 +344,7 @@ public sealed class UsageQueryClientTests
         {
             LastRollupRequest = request;
             LastCallOptions = options;
-            return Call(RollupResponse);
+            return Call(CannedRollupResponse);
         }
 
         public override AsyncUnaryCall<Contract.RoutingRoiResponse> GetRoutingRoiAsync(
@@ -352,7 +352,7 @@ public sealed class UsageQueryClientTests
         {
             LastRoutingRoiRequest = request;
             LastCallOptions = options;
-            return Call(RoutingRoiResponse);
+            return Call(CannedRoutingRoiResponse);
         }
 
         public override AsyncServerStreamingCall<Contract.UsageRollupBucketRow> ExportUsageRollup(

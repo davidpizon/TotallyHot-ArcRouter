@@ -543,7 +543,7 @@ public sealed class ProviderAdminClient
 
     private static ProviderInteractionStatusAdminView ToView(Contract.ProviderInteractionState status)
     {
-        var kind = System.Enum.TryParse<ProviderInteractionKindAdminView>(value: status.Kind, result: out var parsed)
+        var kind = Enum.TryParse<ProviderInteractionKindAdminView>(value: status.Kind, result: out var parsed)
             ? parsed
             : ProviderInteractionKindAdminView.None;
         return new ProviderInteractionStatusAdminView(
@@ -566,7 +566,7 @@ public sealed class ProviderAdminClient
                 Remaining: dimension.HasRemaining ? dimension.Remaining : null,
                 ResetAt: dimension.ResetAt?.ToDateTimeOffset());
 
-            if (dimension.HasTimeToExhaustionSeconds && dimension.HasBurnRatePerMinute)
+            if (dimension is { HasTimeToExhaustionSeconds: true, HasBurnRatePerMinute: true })
                 projections[name] = new RateLimitExhaustionAdminView(
                     TimeToExhaustion: TimeSpan.FromSeconds(dimension.TimeToExhaustionSeconds),
                     BurnRatePerMinute: dimension.BurnRatePerMinute);
