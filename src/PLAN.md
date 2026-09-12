@@ -296,9 +296,10 @@ solve itself, but N never required them to complete.
 ## Other open work (tracked elsewhere; referenced here so it is not lost)
 
 - [`../docs/router/tracked-todos.md`](../docs/router/tracked-todos.md) — #3 DeepSeek dialect research,
-  #4 zero-coverage classes (`TotallyHot.ArcRouter.Quality` now sits at 97.2%; the remaining gap is in
-  `TotallyHotArcRouter` at 89.4%), #5 human review of
-  tool-call-normalization Phase 5's three design decisions.
+  #5 human review of tool-call-normalization Phase 5's three design decisions, #6 a real Gemini cost
+  reconciler, #7 moving the remaining `/admin/*` REST endpoints onto gRPC. #4 (zero-coverage classes)
+  closed 2026-09-12: `TotallyHotArcRouter` sits at 90.0%, `TotallyHot.ArcRouter.Quality` at 98.5%, and
+  every remaining 0%-coverage class is a pure DTO record with no logic to test.
 - [`../docs/router/tool-call-normalization.md`](../docs/router/tool-call-normalization.md) — Phase 6
   remainder (response/telemetry diagnostics), Phase 7 (native endpoints, design only).
 - [`../docs/gui/backlog.md`](../docs/gui/backlog.md) — remaining live-telemetry gaps (Routing ROI /

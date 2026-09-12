@@ -12,7 +12,7 @@ and this is the nearer of the two repos' doc folders to where the work is being 
 | [1](#1-make-converttoolstoopenai-degrade-instead-of-throwing-on-toolmoderequired-with-multiple-tools) | Open | `spark-vscode-extension` | Make `convertToolsToOpenAI` degrade instead of throwing on `ToolMode.Required` with multiple tools |
 | [2](#2-write-tool-call-normalizationmd-design-doc) | ✅ Done | ArcRouter | Write `tool-call-normalization.md` design doc |
 | [3](#3-research-deepseek-tool-call-delimiters-and-register-a-deepseek-dialect) | Open | ArcRouter | Research DeepSeek tool-call delimiters and register a `deepseek` dialect |
-| [4](#4-add-test-coverage-for-zero-coverage-classes-in-TotallyHotArcRouter-and-TotallyHotArcRoutersandbox) | Open | ArcRouter | Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality` |
+| [4](#4-add-test-coverage-for-zero-coverage-classes-in-TotallyHotArcRouter-and-TotallyHotArcRoutersandbox) | ✅ Done | ArcRouter | Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality` |
 | [5](#5-get-a-human-review-of-phase-5s-three-design-decisions) | Open | ArcRouter | Get a human review of Phase 5's three design decisions |
 | [6](#6-build-a-real-iprovidercostreconciler-for-gemini) | Open | ArcRouter | Build a real `IProviderCostReconciler` for Gemini |
 | [7](#7-move-the-remaining-adminusage-rest-endpoints-onto-grpc) | Open | ArcRouter | Move the remaining `/admin/*` and `/admin/usage/*` REST endpoints onto gRPC |
@@ -151,88 +151,53 @@ is the one thing this attempt did establish.
 
 ---
 
-## #4 Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality`
+## #4 Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality` — **complete**
 
-**Repo:** ArcRouter · **Status:** Open
+**Repo:** ArcRouter · **Status:** ✅ Done · **Closed:** 2026-09-12
 
-### Why this is open
+Both non-GUI production assemblies clear AGENTS.md's 80% line-coverage bar as CI actually checks it
+(per-assembly via `reportgenerator` merging `TotallyHot.ArcRouter.Tests` +
+`TotallyHot.ArcRouter.Quality.Tests` cobertura reports):
 
-Verified locally that both non-GUI production assemblies currently clear AGENTS.md's 80%
-line-coverage bar as CI actually checks it (per-assembly via `reportgenerator` merging
-`TotallyHot.ArcRouter.Tests` + `TotallyHot.ArcRouter.Quality.Tests` cobertura reports, matching
-`.github/workflows/dotnet-ci.yml`'s "Check coverage threshold" step):
+- `TotallyHotArcRouter`: **90.0%** (was 89.7% before this pass)
+- `TotallyHot.ArcRouter.Quality`: **98.5%** (was 98.2%)
 
-- `TotallyHotArcRouter`: **89.4%** (was 85.8%; raised by Phase G2's judge-calibration tests)
-- `TotallyHot.ArcRouter.Quality`: **97.2%**
+This item's own class list was stale by the time it was picked back up: `McpHostedService`, `McpServer`,
+`PriceSourceAdminGrpcService`, `StartupHealthCheckHostedService`, and `TelemetryPublisher` had all
+already gained tests from unrelated work, and a fresh 0%-coverage scan turned up a different, current
+set (including `CostReconciliationHostedService`, added by the Cost Reconciliation module after this
+item was filed). Every substantive one is now covered:
 
-> **Re-measured after the quality-verifier change.** The thin margin this item was filed about is gone.
-> `TotallyHot.ArcRouter.Quality` moved from 80.1% to 97.9% for two reasons: the two large, untestable
-> launcher classes named below were **deleted** along with the executing verifier
-> ([`quality-verifier-architecture.md`](quality-verifier-architecture.md)), and everything that replaced
-> them is in-process and directly testable. The remaining work in this item is now only the
-> `TotallyHotArcRouter` list.
+- `TotallyHot.ArcRouter.Hosting.PriceCatalogIngestionHostedService` (80.3%) — a lifecycle test that
+  deliberately does **not** exercise the "already due" poll-loop branch: forcing that within a test's
+  lifetime needs a zero-hour interval (production only ever configures 4-12h), and a zero interval makes
+  the loop re-check with no delay at all. Confirmed experimentally to busy-spin fast enough to starve the
+  thread pool and hang the test *process* (not just run slowly) — the original test attempt had to be
+  `taskkill`ed. See `PriceCatalogIngestionHostedServiceTests`' class remarks.
+- `TotallyHot.ArcRouter.Hosting.CostReconciliationHostedService` (68.1%) — safe to test the immediate
+  first-cycle behavior here since `CostReconciliationOptions.EnsureValid()` enforces a >= 1-hour interval,
+  and the `BackgroundService`'s `do { ... } while (WaitForNextTickAsync)` shape runs cycle #1
+  unconditionally before ever awaiting the timer.
+- `TotallyHot.ArcRouter.Proxy.EnvironmentVariableProvider`, `TotallyHot.ArcRouter.Telemetry.ITelemetryPublisher`
+  (its `PublishQualitySignalAsync` default member), `TotallyHot.ArcRouter.Transcripts.ITranscriptStore`
+  (its `ListSessionsAsync` default member), `TotallyHot.ArcRouter.CodeRouterBench.Evaluation.NullRegretHarnessRunner`,
+  and `TotallyHot.ArcRouter.Quality.Grading.NoAsyncGraderDispatcher` — all now at 100%.
 
-Both pass comfortably. `TotallyHotArcRouter` still carries classes sitting at exactly **0%** covered —
-none of which individually fail the per-assembly gate, but which are the reason its margin is thinner
-than it looks.
+**Left at 0% deliberately**: `JudgeCalibrationAdminDependencies`, `RegretHarnessAdminDependencies`,
+`RoutingGateAdminDependencies`, `UpdateAdminDependencies`, `ModelEnabledWriteRequest`, and
+`SecretWriteRequest` are pure positional-record DTOs (constructor parameters only, no method bodies) —
+testing them would be exactly the "token line-hit" this item's own acceptance criterion ruled out, not
+meaningful coverage of any logic.
 
-### Classes at 0% coverage
-
-**`TotallyHotArcRouter`:**
-- `TotallyHot.ArcRouter.Hosting.PriceCatalogIngestionHostedService`
-- `TotallyHot.ArcRouter.Hosting.StartupHealthCheckHostedService`
-- `TotallyHot.ArcRouter.Mcp.McpHostedService`
-- `TotallyHot.ArcRouter.Mcp.McpServer`
-- `TotallyHot.ArcRouter.Proxy.EnvironmentVariableProvider`
-- `TotallyHot.ArcRouter.PriceCatalog.PriceSourceAdminGrpcService`
-- `TotallyHot.ArcRouter.Telemetry.ITelemetryPublisher` (likely just an interface with a default member —
-  verify before writing tests; may not need any)
-- ~~`TotallyHot.ArcRouter.Tools.RunVisibleTests`~~ — **deleted.** It shelled out to `dotnet test` in a
-  caller-supplied directory: a live path to executing code, removed with the executing verifier.
-
-**`TotallyHot.ArcRouter.Quality`:** none.
-
-- ~~`TotallyHot.ArcRouter.Quality.Firecracker.FirecrackerMicroVmLauncher`~~ — **deleted.**
-- ~~`TotallyHot.ArcRouter.Quality.Tier1.LinuxJailLauncher`~~ — **deleted.**
-
-### What to do
-
-1. For each remaining class, determine **why** it's untested — most are thin `IHostedService` wrappers
-   where a real unit test needs little more than a lifecycle smoke test (start/stop, verify it calls
-   through to its dependency). The two genuinely hard cases — `LinuxJailLauncher` and
-   `FirecrackerMicroVmLauncher`, which needed environment-gated integration tests and a CI runner with
-   unprivileged user namespaces enabled — no longer exist. The CI step that loosened
-   `kernel.apparmor_restrict_unprivileged_userns` for them has been removed too.
-2. `ITelemetryPublisher` should be checked first — if it's a pure interface with no
-   default-implemented members, it needs no test at all and can be dropped from this list; note the
-   outcome either way so it isn't re-flagged in a future coverage sweep.
-3. Add or extend tests to bring each class off 0%. Aim for meaningful coverage of the class's actual
-   logic, not a token line-hit.
-4. Re-run the exact verification done when this item was filed, to confirm progress and that neither
-   assembly regresses:
-   ```
-   dotnet-coverage collect --output TestResults/MainCov/coverage.cobertura.xml --output-format cobertura --settings coverage.runsettings "./src/TotallyHotArcRouter.Tests/bin/Debug/net10.0/TotallyHotArcRouter.Tests.exe"
-   dotnet-coverage collect --output TestResults/QCov/coverage.cobertura.xml --output-format cobertura --settings coverage.runsettings "./src/TotallyHotArcRouter.Quality.Tests/bin/Debug/net10.0/TotallyHotArcRouter.Quality.Tests.exe"
-   reportgenerator "-reports:TestResults/MainCov/coverage.cobertura.xml;TestResults/QCov/coverage.cobertura.xml" -targetdir:TestResults/Report -reporttypes:"JsonSummary;TextSummary"
-   ```
-   Then check `TestResults/Report/Summary.json`'s per-assembly `coverage` values against the 80% bar,
-   the same way `.github/workflows/dotnet-ci.yml`'s "Check coverage threshold" step does — **not**
-   the root-level aggregate `line-rate` a single project's own cobertura report shows. That aggregate
-   double-counts an assembly pulled in transitively but barely exercised by a given test project (e.g.
-   `TotallyHot.ArcRouter.Tests` alone reports `TotallyHot.ArcRouter.Quality` at ~4% because it only loads that
-   assembly as a side effect of a `ProjectReference`, not because it tests it) and understated the true
-   combined number by roughly 13 points when this item was filed.
-
-### Acceptance
-
-Every remaining listed class (except `ITelemetryPublisher` if it turns out to need none) has non-zero,
-meaningful coverage. Both assemblies stay at or above 80% per the CI's own per-assembly check.
-
-### Not urgent
-
-Neither assembly is failing today. This is a proactive margin-building task, not a fix for a current
-gate failure — reasonable to pick up opportunistically alongside other work in these areas rather
-than as a standalone push.
+Verification commands (same ones this item was originally filed with):
+```
+dotnet-coverage collect --output TestResults/MainCov/coverage.cobertura.xml --output-format cobertura --settings coverage.runsettings "./src/TotallyHotArcRouter.Tests/bin/Debug/net10.0/TotallyHotArcRouter.Tests.exe"
+dotnet-coverage collect --output TestResults/QCov/coverage.cobertura.xml --output-format cobertura --settings coverage.runsettings "./src/TotallyHotArcRouter.Quality.Tests/bin/Debug/net10.0/TotallyHotArcRouter.Quality.Tests.exe"
+reportgenerator "-reports:TestResults/MainCov/coverage.cobertura.xml;TestResults/QCov/coverage.cobertura.xml" -targetdir:TestResults/Report -reporttypes:"JsonSummary;TextSummary"
+```
+Check `TestResults/Report/Summary.json`'s per-assembly `coverage` values against the 80% bar — **not**
+the root-level aggregate `line-rate` a single project's own cobertura report shows, which double-counts
+an assembly pulled in transitively but barely exercised by a given test project.
 
 ---
 
