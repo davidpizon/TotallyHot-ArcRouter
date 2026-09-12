@@ -19,8 +19,8 @@ namespace TotallyHot.ArcRouter.Tests.Hosting;
 /// interval (production only ever configures 4-12h, per <see cref="PriceCatalogOptions"/>), and a zero
 /// interval makes the loop re-check <em>immediately</em> after every cycle with no delay at all - confirmed
 /// experimentally to busy-spin fast enough to starve the thread pool and hang the test process rather than
-/// merely run slowly. That branch is exercised indirectly by <c>StartupHealthCheckHostedServiceTests</c>
-/// and the ingestion service's own tests calling <c>RunCycleAsync</c> directly.
+/// merely run slowly. The due-path branch is exercised directly in the ingestion service's own tests, which
+/// call <see cref="PriceCatalogIngestionService.RunCycleAsync"/> to completion.
 /// </remarks>
 public class PriceCatalogIngestionHostedServiceTests
 {

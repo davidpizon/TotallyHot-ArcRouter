@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Tests.Telemetry;
 /// implementers may ignore the quality-signal event entirely, so the interface supplies a completed-task
 /// no-op rather than forcing every implementer to add an empty override.
 /// </summary>
-public class ITelemetryPublisherDefaultMemberTests
+public class TelemetryPublisherDefaultMemberTests
 {
     [Fact]
     public async Task PublishQualitySignalAsync_NotOverridden_CompletesAsANoOp()

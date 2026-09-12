@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Tests.Transcripts;
 /// pre-existing <see cref="ITranscriptStore"/> test fakes that don't override session listing don't need
 /// a matching stub, and returns an empty list rather than throwing.
 /// </summary>
-public class ITranscriptStoreDefaultMemberTests
+public class TranscriptStoreDefaultMemberTests
 {
     [Fact]
     public async Task ListSessionsAsync_NotOverridden_ReturnsEmptyList()
