@@ -1034,3 +1034,43 @@ message UpdateStatusResponse {
   optional string asset_sha256 = 8;
 }
 
+// System Settings' Cost Reconciliation section: read each configured provider's reconciliation
+// checkpoint and most recent reported-vs-local comparison (docs/router/agent-cost-tracking.md §5.8),
+// and trigger a cycle on demand instead of waiting for CostReconciliationHostedService's poll interval.
+//
+// Same shape as PriceSourceAdminService: unary reads/mutations, no streaming, sharing the :5002 TLS
+// loopback endpoint.
+service CostReconciliationAdminService {
+  // Returns every provider CostReconciliationOptions configures a reconciler for, with its checkpoint
+  // and most recent snapshot. A provider with no reconciler configured is not listed at all - there is
+  // nothing to report on.
+  rpc GetCostReconciliationStatus (GetCostReconciliationStatusRequest) returns (CostReconciliationStatusResponse);
+
+  // Runs CostReconciliationService.RunCycleAsync once, synchronously, and returns the resulting status -
+  // the same request/response shape as GetCostReconciliationStatus, so the caller can replace its state
+  // in one shot. Serialized against the background poll loop the same way PriceSourceAdminService's
+  // RefreshPriceSources is against its own.
+  rpc RunCostReconciliationNow (RunCostReconciliationNowRequest) returns (CostReconciliationStatusResponse);
+}
+
+message GetCostReconciliationStatusRequest {}
+
+message RunCostReconciliationNowRequest {}
+
+// One provider's reconciliation state, per ProviderCostReconciliationEntry plus its checkpoint cursor.
+message ProviderReconciliationStatus {
+  string provider = 1;
+  // The last fully-reconciled UTC day (yyyy-MM-dd), absent if this provider has never completed a cycle.
+  optional string last_reconciled_day = 2;
+  // The most recent snapshot's comparison - decimal-as-string, same convention as PersistedTranscript's
+  // cost_usd. Both are absent together: there is no snapshot without both costs recorded.
+  optional string last_reported_cost_usd = 3;
+  optional string last_local_cost_usd = 4;
+  // When the most recent snapshot was fetched, absent alongside the two costs above.
+  optional google.protobuf.Timestamp last_fetched_at_utc = 5;
+}
+
+message CostReconciliationStatusResponse {
+  repeated ProviderReconciliationStatus providers = 1;
+}
+

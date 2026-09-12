@@ -8,7 +8,8 @@ namespace TotallyHot.ArcRouter.Gui.Components;
 /// System settings modal: telemetry connection settings, the adaptive-routing toggle and sample size
 /// (docs/router/self-organizing-classification-plan.md Phase T6), the shadow-judge toggle and backbone
 /// picker (docs/router/geval-shadow-scoring-plan.md), the transcription-capture toggle and its Clear action
-/// (docs/router/self-organizing-classification-plan.md Phase T1), destructive actions gated behind a typed
+/// (docs/router/self-organizing-classification-plan.md Phase T1), the Cost Reconciliation status and
+/// manual run trigger (docs/router/agent-cost-tracking.md §5.8), destructive actions gated behind a typed
 /// confirmation word, and a discreet GUI/Router version footer.
 /// </summary>
 public partial class SettingsModal
@@ -41,6 +42,8 @@ public partial class SettingsModal
     private string _confirmText = string.Empty;
     private bool _confirmingApply;
     private bool _confirmingClearTranscripts;
+    private bool _costReconciliationFailed;
+    private string? _costReconciliationMessage;
     private IReadOnlyList<string> _eligibleJudgeModels = [];
     private bool _iceScoreEnabled;
     private bool _raceEnabled;
@@ -103,6 +106,7 @@ public partial class SettingsModal
     public void Dispose()
     {
         UpdateStore.Changed -= OnUpdateStoreChanged;
+        CostReconciliationStore.Changed -= OnCostReconciliationStoreChanged;
     }
 
     /// <inheritdoc/>
@@ -117,6 +121,9 @@ public partial class SettingsModal
 
         await RouterSettingsStore.LoadAsync();
         if (RouterSettingsStore.Settings is { } settings) ApplyRouterSettings(settings);
+
+        CostReconciliationStore.Changed += OnCostReconciliationStoreChanged;
+        await CostReconciliationStore.LoadAsync();
     }
 
     // Shared by the initial load and every instant save's post-mutation refresh (success re-syncs to the
@@ -431,6 +438,31 @@ public partial class SettingsModal
             // No update was known available - e.g. a background CheckNowAsync/LoadAsync raced this
             // confirmation and cleared the status between the button appearing and the click landing.
             _updateErrorMessage = ex.Message;
+        }
+    }
+
+    /// <summary>Re-renders when the cost reconciliation store's state changes.</summary>
+    private void OnCostReconciliationStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Runs a reconciliation cycle now via the "Run Now" button.</summary>
+    private async Task RunCostReconciliationNow()
+    {
+        _costReconciliationMessage = null;
+        try
+        {
+            await CostReconciliationStore.RunNowAsync();
+            _costReconciliationMessage = "Reconciliation complete.";
+            _costReconciliationFailed = false;
+        }
+        catch (GrpcAdminException ex)
+        {
+            _costReconciliationMessage = CostReconciliationStore.IsReachable
+                ? ex.Message
+                : "Could not reach the router. Is the proxy running?";
+            _costReconciliationFailed = true;
         }
     }
 }

@@ -1,13 +1,15 @@
 # Admin-Slice Consolidation Plan
 
-**Status: Phases 0-3 implemented (2026-09-11).** Two items outstanding, per the end condition below:
-the manual golden-path smoke (see [Validation gate](#validation-gate)) and one subsequent admin knob
-added through the new seams.
+**Status: Phases 0-3 implemented, the proof-of-seam knob shipped (2026-09-11).** One item outstanding,
+per the end condition below: the manual golden-path smoke (see [Validation gate](#validation-gate)),
+now blocked on an unrelated, pre-existing GUI bug rather than on anything in this plan — see Gate 6.
 
 **End condition (stated up front, per [ADR-0008 Amendment 1](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)
 rule 4):** this document closes when the smoke below has run **and one subsequent admin knob has been
 added through the new seams** — that addition is the only real proof the marginal cost actually fell.
-Findings after that start a new document rather than extending this one.
+The knob has shipped (see [What shipped](#what-shipped)); only the smoke remains, and it is blocked by
+a separate bug, not by this plan's own work. Findings after this document closes start a new document
+rather than extending this one.
 
 **Engine note:** this survey ran **CodeGraph-only. Serena MCP was unreachable** (cached connection
 failure). Per ADR-0008 step 2 the Critical/Major/Minor classification below is **the agent's own and
@@ -64,11 +66,40 @@ initial survey missed.
 | 1b — 11 stores onto `AdminStoreBase<TClient>` | `762e369` | **−263** (already absorbing the new 224-line base) |
 | 2 — `IAdminServiceModule` registry | `87f856d` | **+63** — see the honest note below |
 | 3 — analyzer gate (D1) | `6c9f9e9` | −4 usings |
+| 4 — proof-of-seam knob: Cost Reconciliation section | *(pending commit)* | new feature — see below |
 
 **Phase 2 adds lines, and that is stated rather than smoothed over** (Amendment 1 rule 3):
 `ProxyServer.cs` −97, `ProxyServerDependencies.cs` +160. The justification is the edit set, not the
 volume — adding an optional admin service went from editing `ProxyServer.cs` in two places ~120 lines
 apart *plus* its dependency record, to editing the dependency record alone.
+
+### Phase 4: the proof-of-seam knob
+
+The end condition (above) requires one subsequent admin knob added through the new seams as the real
+proof the marginal cost fell — a measurement, not a re-assertion of Phase 2's own math. System
+Settings' new **Cost Reconciliation** section (status + a manual "Run Now" trigger for
+`CostReconciliationService`, docs/router/agent-cost-tracking.md §5.8) is that knob, chosen because it
+is a genuinely new, optional admin capability rather than a field bolted onto an existing one:
+
+- `CostReconciliationAdminGrpcService` (`src/TotallyHotArcRouter/Telemetry/`) — a brand-new gRPC
+  service, following `PriceSourceAdminGrpcService`'s shape.
+- `CostReconciliationAdminDependencies : IAdminServiceModule` (`ProxyServerDependencies.cs`) — the
+  **only** place this knob is wired into `ProxyServer`. `ProxyServer.cs` itself has **zero** lines
+  changed for this addition — the concrete confirmation of the ADR-0010 consequence "the next admin
+  knob stops touching `ProxyServer.cs` at all."
+- `CostReconciliationAdminClient`/`ICostReconciliationAdminClient` (`Gui.Telemetry`) — no new exception
+  subclass; both failure paths bind straight to `GrpcAdminException` via `GrpcAdminClientBase`, per the
+  Phase 1a seam.
+- `CostReconciliationStore : AdminStoreBase<ICostReconciliationAdminClient>` (`Gui/Services`) — the
+  Phase 1b seam absorbed the load/mutation/reachability scaffolding; the store itself is ~100 lines
+  covering only its two real actions (`LoadAsync`, `RunNowAsync`).
+- One new query method on the existing `IProviderCostReconciliationStore`
+  (`GetLatestReconciliation`) — the only router-side domain logic this knob needed beyond the seams
+  themselves.
+
+Full test coverage added alongside it (grpc service, client, store, and an
+`AdminServiceModuleRegistrationAndMappingTests` case proving `Register`/`Map` construct the real
+service through DI) — see the updated counts in [Validation gate](#validation-gate) gate 3.
 
 ### Three deviations from ADR-0010 as written
 
@@ -146,22 +177,42 @@ A survey that finds only work is a survey that was not honest about its misses.
 | # | Gate | Status |
 |---|---|---|
 | 1 | `dotnet build` zero warnings, zero errors | ✅ with the new analyzer gate live |
-| 2 | Touched XML docs re-read for staleness | ✅ — incl. 24 `cref`s repointed as members moved to the base |
-| 3 | All tests pass | ✅ router 2,719 (8 new), Gui 430 (7 new), Gui.Telemetry 225, Gui.Admin 106, Gui.Charts 71, Gui.Console 30 |
+| 2 | Touched XML docs re-read for staleness | ✅ — incl. 24 `cref`s repointed as members moved to the base, plus the new Phase 4 types |
+| 3 | All tests pass | ✅ router 2,735 (24 new total, 16 from Phase 4), Gui 441 (18 new total, 11 from Phase 4), Gui.Telemetry 234 (9 from Phase 4), Gui.Admin 106, Gui.Charts 71, Gui.Console 30 |
 | 4 | No test over 5 seconds | ✅ slowest suite 18s total |
 | 5 | Serilog templates stay static literals | ✅ — the base logs `"Admin load failed: could not {Operation}."` with the operation as a structured property |
-| 6 | **Manual golden-path smoke across all 11 Governance panels** | ❌ **outstanding** |
+| 6 | **Manual golden-path smoke across all 11 Governance panels** | ❌ **blocked** — see below |
 | 7 | Deferred items recorded with evidence | ✅ above, and in `src/.editorconfig` |
 
-**Gate 6 is the one open item.** `ProxyServer` owns the Kestrel host and the gRPC endpoint mapping, and
-`MapGrpcService` only reflects over the service type — it never constructs it — so a registration
-mistake surfaces as a service that maps and *then* throws on its first RPC, which no unit test sees.
+**Gate 6 is the one open item, and it is blocked by a bug this plan did not introduce.** `ProxyServer`
+owns the Kestrel host and the gRPC endpoint mapping, and `MapGrpcService` only reflects over the
+service type — it never constructs it — so a registration mistake surfaces as a service that maps and
+*then* throws on its first RPC, which no unit test sees. That risk is exactly what the smoke exists to
+catch, and it is still open, but not for a reason internal to this plan:
+
+Attempting the smoke on 2026-09-11 surfaced a **blank Dashboard window** — the app opens (tray icon,
+native window chrome, and every static asset load with a fully clean log: `BlazorWebView
+initializing`/`initialized`, WebView2 runtime 152.0.4191.66, `Calling Blazor.start()`, zero exceptions
+anywhere) but the Blazor content never paints, on the router's own machine, confirmed visually by the
+maintainer rather than only through a remote screenshot. **Isolated to a pre-existing defect, not this
+plan's work:** the same blank window reproduces identically after `git stash`-ing every change this
+document describes, rebuilding, and relaunching from a clean `features` HEAD (`2b94969`). It resembles
+but is not the same as the historical WebView2-environment-failure bug `MauiProgram.cs`/
+`docs/router/serilog-logging-guide.md` already document and fixed — that one logged nothing at all;
+this one logs a fully successful bootstrap, so the existing "look for `BlazorWebView initializing`"
+diagnostic does not catch it. Filed as its own item rather than folded into this plan's scope, since
+fixing a WebView2/Blazor mounting bug is unrelated engineering to admin-slice consolidation. Gate 6
+reopens once that bug is fixed and the smoke can actually run.
 
 `AdminServiceModuleTests` was added as partial insurance: it finds the module groups by reflection
 rather than a hand-maintained list (a list would need the same edit as the thing it guards, so it would
 go stale in exactly the case that matters) and fails if a group implements the seam but never reaches
 `AdminModules`. **That is not a substitute for the smoke** — it proves the registry carries every group,
 not that each service answers over the wire.
+`AdminServiceModuleRegistrationAndMappingTests` goes one step further and constructs each mapped
+service through a real `WebApplication`'s DI container (including the new
+`CostReconciliationAdminDependencies`/`CostReconciliationAdminGrpcService` pair), which is the closest
+an automated test gets to the smoke without actually driving the GUI.
 
 ### New tests this work added
 
@@ -169,3 +220,7 @@ not that each service answers over the wire.
   once per store and asserted nowhere), the rejection-keeps-reachable rule, cleanup-before-notify
   ordering, and that disposal releases what a store built but never what it was handed.
 - `AdminServiceModuleTests` — see above.
+- Phase 4 (Cost Reconciliation knob): `CostReconciliationAdminGrpcServiceTests`,
+  `CostReconciliationAdminClientTests`, `CostReconciliationStoreTests`, three new
+  `ProviderCostReconciliationStoreTests` cases for `GetLatestReconciliation`, and the
+  `AdminServiceModuleRegistrationAndMappingTests`/bUnit fake-client wiring described above.

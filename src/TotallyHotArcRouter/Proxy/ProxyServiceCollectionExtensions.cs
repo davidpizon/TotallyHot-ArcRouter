@@ -392,7 +392,16 @@ internal static class ProxyServiceCollectionExtensions
 
                     // Backs the Governance UI's Judge Calibration panel gRPC API (Phase G2).
                     JudgeCalibrationAdmin =
-                        new JudgeCalibrationAdminDependencies(sp.GetRequiredService<IJudgeCalibrationAnalyzer>())
+                        new JudgeCalibrationAdminDependencies(sp.GetRequiredService<IJudgeCalibrationAnalyzer>()),
+
+                    // Backs System Settings' Cost Reconciliation section gRPC API (§5.8). The reconciler list
+                    // is the fixed one resolved at DI construction, same as CostReconciliationHostedService's
+                    // own fallback - not the always-fresh Func<IReadOnlyList<IProviderCostReconciler>> factory,
+                    // which exists for the background poll loop and is out of reach of this one-shot wiring.
+                    CostReconciliationAdmin = new CostReconciliationAdminDependencies(
+                        Store: sp.GetRequiredService<IProviderCostReconciliationStore>(),
+                        ReconciliationService: sp.GetRequiredService<CostReconciliationService>(),
+                        Reconcilers: sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>())
                 }));
 
         return services;

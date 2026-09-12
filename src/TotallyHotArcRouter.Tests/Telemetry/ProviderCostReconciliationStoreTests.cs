@@ -71,4 +71,54 @@ public class ProviderCostReconciliationStoreTests
         command.CommandText = "SELECT COUNT(*) FROM provider_cost_reconciliation WHERE provider = 'openai';";
         Assert.Equal(2L, actual: (long)command.ExecuteScalar()!);
     }
+
+    [Fact]
+    public void GetLatestReconciliation_NoSnapshotYet_ReturnsNull()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateCostReconciliationStore();
+
+        Assert.Null(store.GetLatestReconciliation("openai"));
+    }
+
+    [Fact]
+    public void GetLatestReconciliation_MultipleSnapshots_ReturnsTheMostRecentWindow()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateCostReconciliationStore();
+        var windowStart = new DateTimeOffset(2026, 1, 15, 0, 0, 0, offset: TimeSpan.Zero);
+
+        store.InsertReconciliation(new ProviderCostReconciliationEntry(
+            Provider: "openai", WindowStartUtc: windowStart, WindowEndUtc: windowStart.AddDays(1), 10.50m, 10.00m,
+            ScopeNote: "older", FetchedAtUtc: DateTimeOffset.UtcNow));
+        store.InsertReconciliation(new ProviderCostReconciliationEntry(
+            Provider: "openai", WindowStartUtc: windowStart.AddDays(1), WindowEndUtc: windowStart.AddDays(2), 5.25m,
+            5.00m, ScopeNote: "newer", FetchedAtUtc: DateTimeOffset.UtcNow));
+
+        var latest = store.GetLatestReconciliation("openai");
+
+        Assert.NotNull(latest);
+        Assert.Equal(expected: windowStart.AddDays(1), actual: latest.WindowStartUtc);
+        Assert.Equal(expected: 5.25m, actual: latest.ProviderReportedCostUsd);
+        Assert.Equal(expected: 5.00m, actual: latest.LocalEstimatedCostUsd);
+        Assert.Equal(expected: "newer", actual: latest.ScopeNote);
+    }
+
+    [Fact]
+    public void GetLatestReconciliation_DifferentProviders_TrackedIndependently()
+    {
+        using var temp = new TempDatabase();
+        var store = temp.CreateCostReconciliationStore();
+        var windowStart = new DateTimeOffset(2026, 1, 15, 0, 0, 0, offset: TimeSpan.Zero);
+
+        store.InsertReconciliation(new ProviderCostReconciliationEntry(
+            Provider: "openai", WindowStartUtc: windowStart, WindowEndUtc: windowStart.AddDays(1), 1m, 1m,
+            ScopeNote: "openai", FetchedAtUtc: DateTimeOffset.UtcNow));
+        store.InsertReconciliation(new ProviderCostReconciliationEntry(
+            Provider: "anthropic", WindowStartUtc: windowStart, WindowEndUtc: windowStart.AddDays(1), 2m, 2m,
+            ScopeNote: "anthropic", FetchedAtUtc: DateTimeOffset.UtcNow));
+
+        Assert.Equal(expected: "openai", actual: store.GetLatestReconciliation("openai")?.ScopeNote);
+        Assert.Equal(expected: "anthropic", actual: store.GetLatestReconciliation("anthropic")?.ScopeNote);
+    }
 }

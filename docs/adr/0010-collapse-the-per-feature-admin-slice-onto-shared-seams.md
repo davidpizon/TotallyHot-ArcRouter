@@ -1,6 +1,6 @@
 # 0010. Collapse the per-feature admin slice onto shared seams
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-11
 **Deciders:** David Pizon
 
@@ -174,6 +174,13 @@ part of it.
   seams address — and it would have to be debugged against MAUI/Blazor tooling.
 - Bad, because it would obscure the `ProviderAdminClient` HTTP exception from ADR-0007, which has no
   proto definition at all.
+
+### Amendment 2 (2026-09-11): the proof-of-seam knob shipped
+
+Accepted per the plan's end condition: System Settings' Cost Reconciliation section (§5.8) is the
+"next admin knob" this ADR's Consequences section predicted, added as a new optional
+`IAdminServiceModule` with **zero lines changed in `ProxyServer.cs`** — the concrete confirmation that
+the marginal cost actually fell. See the plan document's Phase 4 for the file-by-file breakdown.
 
 ## More Information
 

@@ -21,6 +21,13 @@ public interface IProviderCostReconciliationStore
 
     /// <summary>Advances the checkpoint cursor for <paramref name="provider"/> to <paramref name="day"/>.</summary>
     void SetLastReconciledDay(string provider, DateOnly day);
+
+    /// <summary>
+    /// Gets the most recently fetched reconciliation snapshot for <paramref name="provider"/>, or
+    /// <see langword="null"/> if none has ever been recorded. Backs the System Settings Cost Reconciliation
+    /// section's status display.
+    /// </summary>
+    ProviderCostReconciliationEntry? GetLatestReconciliation(string provider);
 }
 
 /// <inheritdoc cref="IProviderCostReconciliationStore"/>
@@ -101,5 +108,43 @@ public sealed class ProviderCostReconciliationStore : IProviderCostReconciliatio
         command.Parameters.AddWithValue(parameterName: "$day",
             value: day.ToString(format: DayFormat, provider: CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
+    }
+
+    /// <inheritdoc/>
+    public ProviderCostReconciliationEntry? GetLatestReconciliation(string provider)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT window_start_utc, window_end_utc, provider_reported_cost_usd,
+                                     local_estimated_cost_usd, scope_note, fetched_at_utc
+                              FROM provider_cost_reconciliation
+                              WHERE provider = $provider
+                              ORDER BY window_start_utc DESC
+                              LIMIT 1;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$provider", value: provider);
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+
+        return new ProviderCostReconciliationEntry(
+            Provider: provider,
+            WindowStartUtc: ParseTimestamp(reader.GetString(0)),
+            WindowEndUtc: ParseTimestamp(reader.GetString(1)),
+            ProviderReportedCostUsd: decimal.Parse(reader.GetString(2), CultureInfo.InvariantCulture),
+            LocalEstimatedCostUsd: decimal.Parse(reader.GetString(3), CultureInfo.InvariantCulture),
+            ScopeNote: reader.GetString(4),
+            FetchedAtUtc: ParseTimestamp(reader.GetString(5)));
+    }
+
+    /// <summary>Parses a stored UTC ISO 8601 timestamp back into a <see cref="DateTimeOffset"/>.</summary>
+    private static DateTimeOffset ParseTimestamp(string stored)
+    {
+        return new DateTimeOffset(
+            DateTime.ParseExact(s: stored, format: TimestampFormat, provider: CultureInfo.InvariantCulture,
+                style: DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal));
     }
 }

@@ -123,6 +123,15 @@ public sealed record ProxyServerDependencies
     public JudgeCalibrationAdminDependencies? JudgeCalibrationAdmin { get; init; }
 
     /// <summary>
+    /// System Settings' Cost Reconciliation section API (docs/router/agent-cost-tracking.md §5.8).
+    /// <see langword="null"/> leaves it unmapped - this is the first admin service added after
+    /// <see href="../../../docs/adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md">ADR-0010</see>
+    /// shipped, so its addition here (with no corresponding edit to <see cref="ProxyServer"/>) is the
+    /// concrete evidence the new seams actually lower the marginal cost of the next knob.
+    /// </summary>
+    public CostReconciliationAdminDependencies? CostReconciliationAdmin { get; init; }
+
+    /// <summary>
     /// Every optional admin feature group that was actually supplied, as the registration seam
     /// <see cref="ProxyServer"/> drives. Adding an optional admin service means implementing
     /// <see cref="IAdminServiceModule"/> on its group record and adding a name here - never editing
@@ -143,7 +152,7 @@ public sealed record ProxyServerDependencies
         .. new IAdminServiceModule?[]
         {
             PriceSourceAdmin, BenchmarkDataAdmin, LlmRouterModelAdmin, ClusterModelAdmin, LogRegModelAdmin,
-            RouterSettingsAdmin
+            RouterSettingsAdmin, CostReconciliationAdmin
         }.OfType<IAdminServiceModule>()
     ];
 }
@@ -497,6 +506,39 @@ public sealed record RouterSettingsAdminDependencies(
     void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGrpcService<RouterSettingsAdminGrpcService>();
+    }
+}
+
+/// <summary>
+/// Backs <see cref="CostReconciliationAdminGrpcService"/>, System Settings' Cost Reconciliation section
+/// (docs/router/agent-cost-tracking.md §5.8): reads each configured provider's checkpoint and most recent
+/// snapshot, and runs a cycle on demand.
+/// </summary>
+/// <param name="Store">The reconciliation checkpoint and snapshot history.</param>
+/// <param name="ReconciliationService">Backs the section's "Run Now" action.</param>
+/// <param name="Reconcilers">
+/// Every provider with a resolvable Admin API key at the time this group was built - the set of providers
+/// the section reports on. Resolved once from the outer container, like the other collaborators here; an
+/// operator who saves a new key from the GUI needs a restart to pick it up on this surface, unlike the
+/// background poll loop's own always-fresh <c>Func</c> factory (docs/router/secrets-at-rest-plan.md §7).
+/// </param>
+public sealed record CostReconciliationAdminDependencies(
+    IProviderCostReconciliationStore Store,
+    CostReconciliationService ReconciliationService,
+    IReadOnlyList<IProviderCostReconciler> Reconcilers) : IAdminServiceModule
+{
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        services.AddSingleton(Store);
+        services.AddSingleton(ReconciliationService);
+        services.AddSingleton(Reconcilers);
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<CostReconciliationAdminGrpcService>();
     }
 }
 
