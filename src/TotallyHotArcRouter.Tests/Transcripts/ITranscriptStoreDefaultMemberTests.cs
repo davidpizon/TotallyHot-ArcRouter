@@ -4,8 +4,8 @@ namespace TotallyHot.ArcRouter.Tests.Transcripts;
 
 /// <summary>
 /// Covers <see cref="ITranscriptStore.ListSessionsAsync"/>'s default implementation: it exists so the
-/// eight pre-existing <see cref="ITranscriptStore"/> test fakes that predate session listing don't all
-/// need a matching stub, and returns an empty list rather than throwing.
+/// pre-existing <see cref="ITranscriptStore"/> test fakes that don't override session listing don't need
+/// a matching stub, and returns an empty list rather than throwing.
 /// </summary>
 public class ITranscriptStoreDefaultMemberTests
 {

@@ -84,6 +84,7 @@ public class CostReconciliationHostedServiceTests
         var completed = await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(5), Ct));
 
         Assert.Same(stopTask, completed);
+        await stopTask;
         service.Dispose();
     }
 
