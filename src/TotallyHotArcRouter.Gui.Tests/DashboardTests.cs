@@ -25,6 +25,7 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59993"));
         ctx.Services.AddSingleton(new RouterSettingsAdminStore(serverAddress: "https://127.0.0.1:59995"));
         ctx.Services.AddSingleton(new UpdateStore(serverAddress: "https://127.0.0.1:59992"));
+        ctx.Services.AddSingleton(new CostReconciliationStore(serverAddress: "https://127.0.0.1:59991"));
         ctx.Services.AddSingleton(new ToastService());
         var settingsPath = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".json");
         ctx.Services.AddSingleton<IGuiSettingsStore>(new GuiSettingsStore(settingsPath));

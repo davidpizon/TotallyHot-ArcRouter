@@ -1,13 +1,15 @@
 @* System settings modal: telemetry connection settings, the adaptive-routing toggle and sample size
    (docs/router/self-organizing-classification-plan.md Phase T6), the shadow-judge toggle and backbone
    picker (docs/router/geval-shadow-scoring-plan.md), the transcription-capture toggle and its Clear action
-   (docs/router/self-organizing-classification-plan.md Phase T1), destructive actions gated behind a typed
+   (docs/router/self-organizing-classification-plan.md Phase T1), the Cost Reconciliation status and manual
+   run trigger (docs/router/agent-cost-tracking.md §5.8), destructive actions gated behind a typed
    confirmation word, and a discreet GUI/Router version footer. *@
 @implements IDisposable
 @inject LiveDataStore LiveDataStore
 @inject IGuiSettingsStore SettingsStore
 @inject RouterSettingsAdminStore RouterSettingsStore
 @inject UpdateStore UpdateStore
+@inject CostReconciliationStore CostReconciliationStore
 <DialogShell Title="System Settings" CloseAriaLabel="Close system settings" OnClose="OnClose">
 @* Connection settings. Unlike the router settings below, this is local-only (no round trip to
                the router) and needs an app restart to take effect, so it keeps its own explicit Save/Undo
@@ -257,6 +259,52 @@
     @if (_updateErrorMessage is not null)
     {
         <p class="text-xs text-red-400">@_updateErrorMessage</p>
+    }
+</div>
+
+@* Cost Reconciliation (docs/router/agent-cost-tracking.md §5.8). Read-only status for every provider
+               with a resolvable reconciliation Admin API key, plus a manual trigger - the background poll loop
+               already runs on its own interval, so this exists for verifying a newly-configured key or
+               checking freshness on demand rather than waiting for the next tick. *@
+<div class="space-y-2">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Cost Reconciliation
+    </label>
+    @if (CostReconciliationStore.IsLoaded && CostReconciliationStore.IsReachable && CostReconciliationStore.Providers.Count == 0)
+    {
+        <p class="text-xs text-slate-600">No provider has a reconciliation Admin API key configured.</p>
+    }
+    else
+    {
+        @foreach (var provider in CostReconciliationStore.Providers)
+        {
+            <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-mono text-slate-200">@provider.Provider</span>
+                @if (provider.LastReportedCostUsd is { } reported && provider.LastLocalCostUsd is { } local)
+                {
+                    <span>
+                        Reported <span class="font-mono text-slate-200">$@reported.ToString("F2")</span>
+                        vs local <span class="font-mono text-slate-200">$@local.ToString("F2")</span>
+                        (@provider.LastReconciledDay)
+                    </span>
+                }
+                else
+                {
+                    <span class="text-slate-600">No reconciliation run yet</span>
+                }
+            </div>
+        }
+    }
+    @if (CostReconciliationStore.IsLoaded && !CostReconciliationStore.IsReachable)
+    {
+        <p class="text-xs text-amber-400">Could not reach the router. Is the proxy running?</p>
+    }
+    <button @onclick="RunCostReconciliationNow" disabled="@CostReconciliationStore.IsRunning" class="btn btn-ghost">
+        @(CostReconciliationStore.IsRunning ? "Running…" : "Run Now")
+    </button>
+    @if (_costReconciliationMessage is not null)
+    {
+        <p class="text-xs @(_costReconciliationFailed ? "text-red-400" : "text-emerald-400")">@_costReconciliationMessage</p>
     }
 </div>
 

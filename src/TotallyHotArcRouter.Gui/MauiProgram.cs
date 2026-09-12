@@ -108,6 +108,10 @@ public static class MauiProgram
         // Phase 2). A singleton for the same reason, sharing the TLS gRPC port (5002) with the stores
         // above. See Services/UpdateStore.cs.
         builder.Services.AddSingleton<UpdateStore>();
+        // Backs the System Settings window's Cost Reconciliation section (docs/router/agent-cost-tracking.md
+        // §5.8). A singleton for the same reason, sharing the TLS gRPC port (5002) with the stores above.
+        // See Services/CostReconciliationStore.cs.
+        builder.Services.AddSingleton<CostReconciliationStore>();
         // Backs the Model Distribution / Cost Analytics history / header ticker's real data (Phase 4,
         // §5.15). A singleton so its range-keyed cache survives tab switches; talks to the proxy's
         // /admin/usage API (port 5001), same as ProviderAdminStore. See Services/UsageStore.cs.

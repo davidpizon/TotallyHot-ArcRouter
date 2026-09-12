@@ -31,6 +31,7 @@ public sealed class SettingsModalTests
         ctx.Services.AddSingleton(routerSettingsStore);
         ctx.Services.AddSingleton(new UpdateStore(client: updateClient ?? new FakeUpdateAdminClient(),
             applier: new FakeMsiUpdateApplier()));
+        ctx.Services.AddSingleton(new CostReconciliationStore(new FakeCostReconciliationAdminClient()));
         ctx.Services.AddSingleton(_ => new TempFileCleanup(settingsPath));
         ctx.Services.GetRequiredService<TempFileCleanup>();
         return ctx;
@@ -749,6 +750,30 @@ public sealed class SettingsModalTests
             return Failure is null
                 ? Task.FromResult(ClearTranscriptsRowsDeleted)
                 : Task.FromException<int>(Failure);
+        }
+    }
+
+    /// <summary>A controllable <see cref="ICostReconciliationAdminClient"/> double; empty provider list by default.</summary>
+    private sealed class FakeCostReconciliationAdminClient : ICostReconciliationAdminClient
+    {
+        public IReadOnlyList<ProviderReconciliationStatus> Status { get; set; } = [];
+
+        public GrpcAdminException? Failure { get; set; }
+
+        public Task<IReadOnlyList<ProviderReconciliationStatus>> GetStatusAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return Failure is null
+                ? Task.FromResult(Status)
+                : Task.FromException<IReadOnlyList<ProviderReconciliationStatus>>(Failure);
+        }
+
+        public Task<IReadOnlyList<ProviderReconciliationStatus>> RunNowAsync(
+            CancellationToken cancellationToken = default)
+        {
+            return Failure is null
+                ? Task.FromResult(Status)
+                : Task.FromException<IReadOnlyList<ProviderReconciliationStatus>>(Failure);
         }
     }
 }
