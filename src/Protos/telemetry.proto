@@ -1074,3 +1074,455 @@ message CostReconciliationStatusResponse {
   repeated ProviderReconciliationStatus providers = 1;
 }
 
+// docs/router/tracked-todos.md #7: the Governance UI's Providers card management plane - provider/model
+// CRUD, budgets, discovery, endpoint capability scanning, price overrides, rate-limit history, and
+// secrets. Replaces the plain-HTTP /admin/* REST surface (ProviderAdminEndpoints), which shared the
+// LLM-forwarding proxy port (5001) rather than this service's :5002 TLS loopback endpoint - port 5001
+// now carries only LLM-forwarding traffic and /v1/models. Every mutation returns the full refreshed
+// ProviderListResponse, the same "full state after the mutation" convention as RefreshPriceSourcesResponse
+// and friends, so the GUI's ProviderAdminStore never needs a follow-up ListProviders call. Failures use
+// standard gRPC status codes (NOT_FOUND, INVALID_ARGUMENT, UNAVAILABLE, INTERNAL) rather than a bespoke
+// error envelope, mapped 1:1 from ManagementErrorType by ProviderAdminGrpcService.
+service ProviderAdminService {
+  rpc ListProviders (ListProvidersRequest) returns (ProviderListResponse);
+  rpc UpsertProvider (UpsertProviderRequest) returns (ProviderListResponse);
+  rpc RemoveProvider (RemoveProviderRequest) returns (ProviderListResponse);
+  rpc SetProviderBudget (SetProviderBudgetRequest) returns (ProviderListResponse);
+  rpc SetProviderEnabled (SetProviderEnabledRequest) returns (ProviderListResponse);
+  rpc UpsertModel (UpsertModelRequest) returns (ProviderListResponse);
+  rpc RemoveModel (RemoveModelRequest) returns (ProviderListResponse);
+  rpc SetModelEnabled (SetModelEnabledRequest) returns (ProviderListResponse);
+  rpc SetModelToolDialect (SetModelToolDialectRequest) returns (ProviderListResponse);
+
+  // Queries the provider's own live model list. Does not mutate configuration - RefreshFromEndpoint below
+  // is the consolidated action that discovers and reconciles in one call.
+  rpc DiscoverModels (DiscoverModelsRequest) returns (DiscoverModelsResponse);
+
+  // Re-probes which API flavors the provider's endpoint answers (docs/router/tool-call-normalization.md
+  // §3.3) and persists the result. Returns the refreshed list so the GUI sees any newly-detected dialects
+  // without a follow-up read.
+  rpc ScanCapabilities (ScanCapabilitiesRequest) returns (ProviderListResponse);
+
+  // The Governance UI's "Refresh from endpoint" action: discovers the live model list, reconciles it into
+  // configuration (adding new models as stopped, flagging missing ones absent - never deleting), then
+  // re-scans endpoint flavors and re-runs dialect detection. One round trip instead of the GUI
+  // orchestrating DiscoverModels + ScanCapabilities itself.
+  rpc RefreshFromEndpoint (RefreshFromEndpointRequest) returns (ProviderListResponse);
+
+  rpc ListPriceOverrides (ListPriceOverridesRequest) returns (PriceOverrideListResponse);
+  rpc SetPriceOverride (SetPriceOverrideRequest) returns (PriceOverrideListResponse);
+  rpc RemovePriceOverride (RemovePriceOverrideRequest) returns (PriceOverrideListResponse);
+
+  // The price-overrides pane's read-only diagnosis view: per configured model, whether a price resolves
+  // today and via an exact or approximate match.
+  rpc GetPriceResolution (GetPriceResolutionRequest) returns (PriceResolutionResponse);
+
+  // The Providers card's rate-limit trend chart data source (§5.9): per-dimension remaining-over-time
+  // history for the last `hours` hours.
+  rpc GetRateLimitHistory (GetRateLimitHistoryRequest) returns (RateLimitHistoryResponse);
+
+  // Write-only protected-secret surface (docs/router/secrets-at-rest-plan.md §4/§7). Deliberately no read
+  // RPC - the invariant is that no secret that reaches the protected store is ever readable back through
+  // any management API; ProviderView.has_stored_admin_key reports only whether one is stored.
+  rpc SetSecret (SetSecretRequest) returns (SetSecretResponse);
+  rpc DeleteSecret (DeleteSecretRequest) returns (DeleteSecretResponse);
+}
+
+message ListProvidersRequest {}
+
+// A single custom header to store for a provider. Mirrors HeaderWriteRequest (ManagementFacadeModels.cs).
+message HeaderWrite {
+  string name = 1;
+  // A literal value; takes precedence over value_env_var when non-empty.
+  optional string value = 2;
+  optional string value_env_var = 3;
+  // Whether the literal value is a secret to withhold from future reads. Unset (proto3 field-presence)
+  // is the legacy shape: blank preserves the stored value, a non-blank literal stores locked. An explicit
+  // false clears a previously-locked value - see HeaderWriteRequest's remarks for the full rule.
+  optional bool locked = 4;
+}
+
+// The body for adding or editing a provider. Every field is optional (proto3 field presence): unset means
+// "keep the existing value" for every field except headers, where unset (vs. an empty repeated field)
+// distinguishes "leave headers alone" from "replace with no headers" - see has_headers below.
+message UpsertProviderRequest {
+  string key = 1;
+  optional string base_url = 2;
+  optional string auth_header_name = 3;
+  repeated HeaderWrite headers = 4;
+  // Whether `headers` above should be applied at all - proto3 can't distinguish an empty repeated field
+  // from an absent one, so this flag carries ProviderWriteRequest.Headers' null-vs-empty-list distinction
+  // explicitly. False means "keep the provider's existing headers unchanged".
+  bool replace_headers = 5;
+  optional bool is_free = 6;
+  optional bool enabled = 7;
+  optional string provider_name = 8;
+  optional string provider_type = 9;
+}
+
+message RemoveProviderRequest {
+  string key = 1;
+}
+
+// Groups a provider's budget caps and reset window - the natural gRPC shape for
+// ProviderBudgetWriteRequest's four positional fields. A null cap clears that dimension; both null
+// removes the budget entirely.
+message BudgetWrite {
+  optional string dollar_cap = 1;
+  optional int64 token_cap = 2;
+  // "Monthly", "Weekly", or "RollingHours"; unset keeps today's default (Monthly).
+  optional string window_kind = 3;
+  // Required and must be positive when window_kind is "RollingHours"; ignored otherwise.
+  optional int32 window_hours = 4;
+}
+
+message SetProviderBudgetRequest {
+  string provider_key = 1;
+  BudgetWrite budget = 2;
+}
+
+message SetProviderEnabledRequest {
+  string key = 1;
+  bool enabled = 2;
+}
+
+// The body for adding or editing a model under a provider.
+message ModelWrite {
+  // The upstream model identifier; defaults to the model name when blank.
+  optional string provider_model_id = 1;
+}
+
+message UpsertModelRequest {
+  string provider_key = 1;
+  string model_name = 2;
+  ModelWrite model = 3;
+}
+
+message RemoveModelRequest {
+  // Global model name - model routes are looked up by name alone, not scoped to a provider.
+  string model_name = 1;
+}
+
+message SetModelEnabledRequest {
+  string model_name = 1;
+  bool enabled = 2;
+}
+
+message SetModelToolDialectRequest {
+  string provider_key = 1;
+  string model_name = 2;
+  // A ToolCallDialect name to pin, or empty to clear the pin and hand the model back to automatic
+  // detection.
+  string dialect = 3;
+}
+
+message DiscoverModelsRequest {
+  string provider_key = 1;
+}
+
+message DiscoverModelsResponse {
+  bool supported = 1;
+  repeated string models = 2;
+  optional string error = 3;
+}
+
+message ScanCapabilitiesRequest {
+  string provider_key = 1;
+}
+
+message RefreshFromEndpointRequest {
+  string provider_key = 1;
+}
+
+message ListPriceOverridesRequest {}
+
+// Mirrors PriceOverrideWriteRequest (ManagementFacadeModels.cs), also used as the read shape for
+// ListPriceOverrides/PriceOverrideListResponse - an override has no separate masked view.
+message PriceOverride {
+  string source_name = 1;
+  string aggregator_model_key = 2;
+  string model_name = 3;
+}
+
+message SetPriceOverrideRequest {
+  PriceOverride override = 1;
+}
+
+message RemovePriceOverrideRequest {
+  string source_name = 1;
+  string aggregator_model_key = 2;
+}
+
+message PriceOverrideListResponse {
+  repeated PriceOverride overrides = 1;
+}
+
+message GetPriceResolutionRequest {}
+
+// One configured model's current price-resolution state. Mirrors PriceResolutionDiagnosisView.
+message PriceResolutionEntry {
+  string model_name = 1;
+  string provider = 2;
+  bool resolved = 3;
+  bool is_approximate = 4;
+}
+
+message PriceResolutionResponse {
+  repeated PriceResolutionEntry entries = 1;
+}
+
+message GetRateLimitHistoryRequest {
+  string provider_key = 1;
+  // How far back to look, in hours; the server clamps to [0.25, 720].
+  double hours = 2;
+}
+
+// One time bucket's remaining/limit for one dimension. Both fields absent means "no header was captured
+// this bucket" - a gap the GUI renders as a break in the trend line, not a value of zero.
+message RateLimitHistoryPoint {
+  google.protobuf.Timestamp bucket_utc = 1;
+  optional int64 remaining = 2;
+  optional int64 limit = 3;
+}
+
+message RateLimitHistorySeries {
+  repeated RateLimitHistoryPoint points = 1;
+}
+
+message RateLimitHistoryResponse {
+  // Keyed by standard-family dimension name (RateLimitSnapshotParser.StandardDimensions).
+  map<string, RateLimitHistorySeries> dimensions = 1;
+}
+
+message SetSecretRequest {
+  string name = 1;
+  string value = 2;
+}
+
+message SetSecretResponse {}
+
+message DeleteSecretRequest {
+  string name = 1;
+}
+
+message DeleteSecretResponse {}
+
+// A single custom header as returned to a management caller - masked per HeaderView's contract: an
+// unlocked literal's value is readable, a locked one (or a protected-store-backed one) is write-only and
+// reports only its source.
+message HeaderState {
+  string name = 1;
+  // One of "literal", "envVar", "protected", "none" - HeaderValueSource's members verbatim.
+  string source = 2;
+  optional string value_env_var = 3;
+  optional string value = 4;
+  bool locked = 5;
+}
+
+// A single configured model as returned to a management caller. Mirrors ModelView.
+message ModelState {
+  string model_name = 1;
+  string provider_model_id = 2;
+  // The detected/pinned tool-call dialect, absent when never classified.
+  optional string dialect = 3;
+  // How dialect was learned ("Heuristic", "Template", "Observed", "Operator"), absent alongside dialect.
+  optional string confidence = 4;
+  bool enabled = 5;
+  bool present_upstream = 6;
+}
+
+// Which API flavors a provider's endpoint answers, as last recorded by a capability scan. Mirrors
+// TotallyHot.ArcRouter.Proxy.Translation.ToolCalling.ProviderEndpointCapabilities.
+message EndpointCapabilitiesState {
+  bool openai_compatible = 1;
+  bool lm_studio_native = 2;
+  bool ollama_native = 3;
+  bool anthropic_compatible = 4;
+  bool json_schema_response_format = 5;
+  google.protobuf.Timestamp scanned_at_utc = 6;
+  // Set when the scan could not complete (the provider was unreachable); the flags above are then all
+  // false rather than unknown - the scan is best-effort and never fails a provider save.
+  optional string scan_error = 7;
+}
+
+// One (day, model) row of a provider's own reported per-model daily token usage
+// (docs/router/secrets-at-rest-plan.md §8.1). usage_day is an ISO 8601 calendar date (yyyy-MM-dd), not a
+// Timestamp - it names a whole UTC day, not an instant. Mirrors ReportedUsageRowView.
+message ReportedUsageRow {
+  string usage_day = 1;
+  string model = 2;
+  int64 input_tokens = 3;
+  int64 output_tokens = 4;
+  int64 cache_creation_tokens = 5;
+  int64 cache_read_tokens = 6;
+}
+
+message ProviderReportedUsageState {
+  repeated ReportedUsageRow rows = 1;
+  google.protobuf.Timestamp fetched_at_utc = 2;
+}
+
+// The outcome of the most recent admin-initiated or live-traffic-classified interaction with a provider
+// (refresh, capability scan, discovery, or an out-of-credits response). Mirrors
+// TotallyHot.ArcRouter.Proxy.Management.ProviderInteractionStatus.
+message ProviderInteractionState {
+  bool ok = 1;
+  // A short label for the interaction, e.g. "Refresh from endpoint" or "Live traffic".
+  string operation = 2;
+  // A human-readable failure reason, absent when ok is set.
+  optional string message = 3;
+  google.protobuf.Timestamp at_utc = 4;
+  // "None" or "OutOfCredits" - ProviderInteractionKind's members verbatim. "None" for every
+  // admin-action-track record, which predates this classification.
+  string kind = 5;
+}
+
+// One dimension's current remaining/limit plus its exhaustion projection, folding
+// RateLimitDimensionView and RateLimitExhaustionProjection into the single natural per-dimension shape a
+// gRPC client wants, rather than two parallel maps. time_to_exhaustion_seconds/burn_rate_per_minute are
+// both absent together when no projection could be made (flat, refilled, reset-before-empty, or too
+// little history) - the GUI shows nothing for that dimension rather than fabricating urgency.
+message RateLimitDimensionState {
+  optional int64 limit = 1;
+  optional int64 remaining = 2;
+  optional google.protobuf.Timestamp reset_at = 3;
+  optional int64 time_to_exhaustion_seconds = 4;
+  optional double burn_rate_per_minute = 5;
+}
+
+// A provider's most recently captured rate-limit snapshot. Mirrors ProviderRateLimitView.
+message ProviderRateLimitState {
+  map<string, RateLimitDimensionState> dimensions = 1;
+  google.protobuf.Timestamp observed_at_utc = 2;
+  // Whether observed_at_utc is older than the configured staleness threshold (§5.9) - the GUI dims and
+  // labels the snapshot stale rather than presenting old numbers as current.
+  bool is_stale = 3;
+}
+
+// A provider as returned to a management caller, with credentials masked. Mirrors ProviderView
+// (ManagementFacadeModels.cs) field-for-field.
+message ProviderState {
+  string key = 1;
+  optional string name = 2;
+  string base_url = 3;
+  string auth_header_name = 4;
+  repeated ModelState models = 5;
+  repeated HeaderState headers = 6;
+  bool is_free = 7;
+  optional string dollar_cap = 8;
+  optional int64 token_cap = 9;
+  string dollar_spent = 10;
+  int64 tokens_used = 11;
+  bool enabled = 12;
+  optional EndpointCapabilitiesState endpoint_capabilities = 13;
+  optional string provider_type = 14;
+  optional google.protobuf.Timestamp usage_last_recorded_at_utc = 15;
+  optional ProviderRateLimitState rate_limit = 16;
+  // "Monthly", "Weekly", or "RollingHours" - the window the caps above reset on.
+  string window_kind = 17;
+  optional google.protobuf.Timestamp next_reset_utc = 18;
+  bool has_stored_admin_key = 19;
+  optional ProviderReportedUsageState reported_usage = 20;
+  optional ProviderInteractionState admin_action = 21;
+  optional ProviderInteractionState live_traffic = 22;
+}
+
+message ProviderListResponse {
+  repeated ProviderState providers = 1;
+}
+
+// docs/router/tracked-todos.md #7: the Governance/Model Distribution/Cost Analytics GUI tabs' read-only
+// usage-query surface. Replaces the plain-HTTP /admin/usage/* REST surface (UsageAdminEndpoints). All
+// four RPCs are read-only, unlike ProviderAdminService above - no mutation, no security-boundary
+// concerns beyond the same management-token gate every service on this endpoint shares.
+service UsageAdminService {
+  // Totals for the header ticker and summary tiles over a preset window ("day", "week", "month", "all").
+  rpc GetUsageSummary (GetUsageSummaryRequest) returns (UsageSummaryResponse);
+
+  // The Model Distribution / Cost Analytics chart feed over an explicit range.
+  rpc GetUsageRollup (GetUsageRollupRequest) returns (UsageRollupResponse);
+
+  // docs/router/self-organizing-classification-plan.md Phase T4: the Cost Analytics "Routing ROI" feed.
+  rpc GetRoutingRoi (GetRoutingRoiRequest) returns (RoutingRoiResponse);
+
+  // §5.12: streams the same rollup buckets GetUsageRollup returns, one message per bucket, so the GUI can
+  // render a CSV or JSON download without buffering the whole range server-side first. Export is a
+  // rendering choice over the same query GetUsageRollup makes - never a second, independently-written
+  // query path that could disagree with the chart about what counts as "the same range".
+  rpc ExportUsageRollup (ExportUsageRollupRequest) returns (stream UsageRollupBucketRow);
+}
+
+message GetUsageSummaryRequest {
+  // "day", "week", "month", or "all"; defaults to "day" when empty.
+  string window = 1;
+}
+
+// Mirrors UsageSummary (UsageRollupStore.cs) field-for-field.
+message UsageSummaryResponse {
+  int64 requests = 1;
+  int64 unpriced_requests = 2;
+  int64 prompt_tokens = 3;
+  int64 completion_tokens = 4;
+  int64 cache_creation_tokens = 5;
+  int64 cache_read_tokens = 6;
+  string cost_usd = 7;
+}
+
+message GetUsageRollupRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  // "hour" or "day"; defaults to "day" when empty.
+  string width = 3;
+  // "model", "provider", or "day"; defaults to "day" when empty.
+  string group_by = 4;
+}
+
+// One aggregated bucket. Mirrors UsageRollupBucket (UsageRollupStore.cs) field-for-field; also the row
+// shape ExportUsageRollup streams, so the chart feed and the export can never structurally diverge.
+message UsageRollupBucketRow {
+  google.protobuf.Timestamp bucket_start_utc = 1;
+  string bucket_width = 2;
+  string group_key = 3;
+  int64 requests = 4;
+  int64 unpriced_requests = 5;
+  int64 prompt_tokens = 6;
+  int64 completion_tokens = 7;
+  int64 cache_creation_tokens = 8;
+  int64 cache_read_tokens = 9;
+  string cost_usd = 10;
+}
+
+message UsageRollupResponse {
+  repeated UsageRollupBucketRow buckets = 1;
+}
+
+message GetRoutingRoiRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  // Narrows to one conversation; unset (proto3 field presence) queries every session.
+  optional string session_id = 3;
+}
+
+// One request's routing return-on-investment. Mirrors RoutingRoiPoint field-for-field.
+message RoutingRoiEntry {
+  google.protobuf.Timestamp compared_at_utc = 1;
+  string session_id = 2;
+  string routed_model = 3;
+  optional string baseline_model = 4;
+  optional string actual_cost_usd = 5;
+  optional string baseline_estimated_cost_usd = 6;
+  optional string estimated_net_savings_usd = 7;
+  bool is_exploratory = 8;
+}
+
+message RoutingRoiResponse {
+  repeated RoutingRoiEntry entries = 1;
+}
+
+message ExportUsageRollupRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  string width = 3;
+  string group_by = 4;
+}
+

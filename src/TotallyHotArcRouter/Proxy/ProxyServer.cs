@@ -226,6 +226,41 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // The Governance UI's Judge Calibration panel API (Phase G2). Always registered -
                     // see the judgeCalibrationAdmin local's remarks above.
                     services.AddSingleton(judgeCalibrationAdmin?.Analyzer ?? new NullJudgeCalibrationAnalyzer());
+
+                    // docs/router/tracked-todos.md #7: ProviderAdminGrpcService/UsageAdminGrpcService are
+                    // resolved from this inner host's own DI container (gRPC services always are), so the
+                    // facade/reporting-service instances backing them are registered here rather than
+                    // constructed inline in the endpoint-mapping block below - and that same block reuses
+                    // these singletons for the REST surface instead of building a second copy, so both
+                    // transports share one facade instance (and therefore one in-memory state) while the
+                    // migration keeps both mapped side by side.
+                    if (managementApi is not null)
+                    {
+                        var facade = new ManagementFacade(
+                            store: managementApi.ConfigStore,
+                            environment: managementApi.Environment ?? new EnvironmentVariableProvider(),
+                            httpClient: managementClient,
+                            dependencies: new ManagementFacadeDependencies
+                            {
+                                BudgetStore = managementApi.BudgetStore,
+                                EndpointScanner = managementApi.EndpointScanner,
+                                CapabilityStore = managementApi.CapabilityStore,
+                                PriceRepository = managementApi.PriceRepository,
+                                RateLimitRepository = managementApi.RateLimitRepository,
+                                ReportedUsageRepository = managementApi.ReportedUsageRepository,
+                                OverrideStore = managementApi.ModelAliasOverrideStore,
+                                SecretWriter = managementApi.SecretWriter,
+                                SecretReader = managementApi.SecretReader,
+                                InteractionStatusStore = managementApi.InteractionStatusStore ??
+                                                         new ProviderInteractionStatusStore()
+                            });
+                        var reportingService = new ManagementReportingService(
+                            rollupStore: managementApi.UsageRollupStore,
+                            comparisonStore: managementApi.TaxonomyComparisonStore);
+
+                        services.AddSingleton(facade);
+                        services.AddSingleton(reportingService);
+                    }
                 });
 
                 webBuilder.Configure(app =>
@@ -270,42 +305,21 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         // mapped - see the judgeCalibrationAdmin local's remarks above.
                         endpoints.MapGrpcService<JudgeCalibrationAdminGrpcService>();
 
-                        // The Governance UI's provider/credential/model management API. Only mapped
-                        // when a writable store is supplied; shares this plain-HTTP loopback port with
-                        // LLM forwarding (real traffic never targets /admin, so it's never intercepted).
-                        // The facade is the same shared core the MCP endpoint's provider tools use -
-                        // projection, merging, and credential/header masking live there, not here.
+                        // The Governance UI's provider/credential/model management and usage-query APIs.
+                        // Only mapped when a writable store is supplied. Both the gRPC services (§7's
+                        // migration target, sharing the :5002 TLS loopback endpoint like every other
+                        // admin service) and the REST surface they are replacing are mapped side by side
+                        // for now, resolving the same ManagementFacade/ManagementReportingService
+                        // singletons registered above so both transports see one shared state - see
+                        // docs/router/tracked-todos.md #7.
                         if (managementApi is not null)
                         {
-                            var facade = new ManagementFacade(
-                                store: managementApi.ConfigStore,
-                                environment: managementApi.Environment ?? new EnvironmentVariableProvider(),
-                                httpClient: managementClient,
-                                dependencies: new ManagementFacadeDependencies
-                                {
-                                    BudgetStore = managementApi.BudgetStore,
-                                    EndpointScanner = managementApi.EndpointScanner,
-                                    CapabilityStore = managementApi.CapabilityStore,
-                                    PriceRepository = managementApi.PriceRepository,
-                                    RateLimitRepository = managementApi.RateLimitRepository,
-                                    ReportedUsageRepository = managementApi.ReportedUsageRepository,
-                                    OverrideStore = managementApi.ModelAliasOverrideStore,
-                                    SecretWriter = managementApi.SecretWriter,
-                                    SecretReader = managementApi.SecretReader,
-                                    // Falls back to a fresh, unshared instance only when the caller
-                                    // didn't supply one - see ManagementApiDependencies.InteractionStatusStore's
-                                    // remarks: the real composition root (ServiceCollectionExtensions)
-                                    // always supplies the same singleton also given to RequestInterceptor
-                                    // and ProxyMiddleware, so the Providers tab sees live-traffic state.
-                                    InteractionStatusStore = managementApi.InteractionStatusStore ??
-                                                             new ProviderInteractionStatusStore()
-                                });
-                            // The read-only reporting surface (usage summary/rollup/routing-ROI) split
-                            // out of ManagementFacade (docs/router/code-smell-refactoring-plan.md Phase
-                            // 3 step 1) - a separate, stateless collaborator rather than a facade member.
-                            var reportingService = new ManagementReportingService(
-                                rollupStore: managementApi.UsageRollupStore,
-                                comparisonStore: managementApi.TaxonomyComparisonStore);
+                            var facade = app.ApplicationServices.GetRequiredService<ManagementFacade>();
+                            var reportingService = app.ApplicationServices.GetRequiredService<ManagementReportingService>();
+
+                            endpoints.MapGrpcService<ProviderAdminGrpcService>();
+                            endpoints.MapGrpcService<UsageAdminGrpcService>();
+
                             endpoints.MapProviderAdminEndpoints(facade: facade, managementToken: managementToken);
                             endpoints.MapUsageAdminEndpoints(reportingService: reportingService,
                                 managementToken: managementToken);
