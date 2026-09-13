@@ -18,6 +18,7 @@
     <Functions>
       <Exclude>
         <Function>^TotallyHot\.ArcRouter\.Telemetry\.Contract\..*</Function>
+        <Function>^TotallyHot\.ArcRouter\.Admin\.Contract\..*</Function>
       </Exclude>
     </Functions>
   </CodeCoverage>

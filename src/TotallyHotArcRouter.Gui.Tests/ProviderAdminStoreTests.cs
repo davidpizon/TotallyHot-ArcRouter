@@ -1,8 +1,9 @@
 using AwesomeAssertions;
-using System.Net;
-using System.Text;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Services;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -68,11 +69,11 @@ public sealed class ProviderAdminStoreTests
     }
 
     [Fact]
-    public void Constructor_normalizes_a_management_address_missing_a_trailing_slash()
+    public void Constructor_buildingItsOwnChannel_DoesNotThrow()
     {
-        // No exception on construction - the normalized address is only exercised on send, which the
-        // other tests cover; this just guards the constructor path itself doesn't throw either way.
-        var act = () => new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991/already-slashed/");
+        // GrpcChannel.ForAddress validates and resolves the address eagerly enough that a malformed one
+        // would throw here rather than only on first send - this guards the constructor path itself.
+        var act = () => new ProviderAdminStore(managementAddress: UnreachableAddress);
         act.Should().NotThrow();
     }
 
@@ -88,14 +89,17 @@ public sealed class ProviderAdminStoreTests
     }
 
     [Fact]
-    public async Task LoadRateLimitHistoryAsync_timeout_is_swallowed_not_propagated()
+    public async Task LoadRateLimitHistoryAsync_deadlineExceeded_is_swallowed_not_propagated()
     {
-        // ProviderAdminClient.SendAsync only wraps HttpRequestException into ProviderAdminException; a
-        // request timeout surfaces as a raw TaskCanceledException instead. Called fire-and-forget from
-        // ProvidersAdmin.razor, this method must swallow that too rather than let it become an
-        // unobserved task exception.
-        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991",
-            transport: new TimingOutHandler());
+        // Every RpcException ProviderAdminClient's calls can raise - including a timeout's
+        // DeadlineExceeded - is wrapped into ProviderAdminException, which this method catches. Called
+        // fire-and-forget from ProvidersAdmin.razor, it must never let a failure become an unobserved task
+        // exception.
+        var stub = new StubClient
+        {
+            Failure = new RpcException(new Status(statusCode: StatusCode.DeadlineExceeded, detail: "timed out"))
+        };
+        var store = new ProviderAdminStore(client: new ProviderAdminClient(stub));
 
         var act = () =>
             store.LoadRateLimitHistoryAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);
@@ -110,10 +114,16 @@ public sealed class ProviderAdminStoreTests
         // several can complete around the same time and write into the shared cache concurrently -
         // RateLimitHistory is backed by a ConcurrentDictionary specifically so this doesn't throw or drop
         // entries.
-        const string historyJson =
-            """{"dimensions":{"tokens":[{"bucketUtc":"2026-03-01T12:00:00Z","remaining":1000,"limit":2000}]}}""";
-        var store = new ProviderAdminStore(managementAddress: "http://127.0.0.1:59991",
-            transport: new StubHandler(historyJson));
+        var response = new Contract.RateLimitHistoryResponse();
+        var series = new Contract.RateLimitHistorySeries();
+        series.Points.Add(new Contract.RateLimitHistoryPoint
+        {
+            BucketUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")), Remaining = 1000,
+            Limit = 2000
+        });
+        response.Dimensions["tokens"] = series;
+        var stub = new StubClient { RateLimitHistoryResponse = response };
+        var store = new ProviderAdminStore(client: new ProviderAdminClient(stub));
         var providerKeys = Enumerable.Range(0, 50).Select(i => $"provider-{i}").ToArray();
 
         await Task.WhenAll(providerKeys.Select(key =>
@@ -123,25 +133,28 @@ public sealed class ProviderAdminStoreTests
         foreach (var key in providerKeys) store.RateLimitHistory.Should().ContainKey(key);
     }
 
-    private sealed class TimingOutHandler : HttpMessageHandler
+    /// <summary>
+    /// A generated-client test double covering only <see cref="GetRateLimitHistoryAsync"/>, which is all
+    /// this file's stubbed tests need. Overrides only the <c>CallOptions</c> overload: the generated
+    /// convenience overloads delegate to it.
+    /// </summary>
+    private sealed class StubClient : Contract.ProviderAdminService.ProviderAdminServiceClient
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            throw new TaskCanceledException("Simulated request timeout.");
-        }
-    }
+        public Contract.RateLimitHistoryResponse RateLimitHistoryResponse { get; init; } = new();
 
-    private sealed class StubHandler(string jsonBody) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        public RpcException? Failure { get; init; }
+
+        public override AsyncUnaryCall<Contract.RateLimitHistoryResponse> GetRateLimitHistoryAsync(
+            Contract.GetRateLimitHistoryRequest request, CallOptions options)
         {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(content: jsonBody, encoding: Encoding.UTF8,
-                    mediaType: "application/json")
-            });
+            return new AsyncUnaryCall<Contract.RateLimitHistoryResponse>(
+                responseAsync: Failure is null
+                    ? Task.FromResult(RateLimitHistoryResponse)
+                    : Task.FromException<Contract.RateLimitHistoryResponse>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
     }
 }

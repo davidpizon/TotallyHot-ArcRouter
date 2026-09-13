@@ -1,9 +1,10 @@
 using AwesomeAssertions;
 using Bunit;
-using System.Net;
-using System.Text;
+using Google.Protobuf.WellKnownTypes;
+using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -14,49 +15,46 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class GovernanceModelCardsTests
 {
-    private const string ProvidersJson = """
-                                         {
-                                           "providers": [
-                                             {
-                                               "key": "openai",
-                                               "name": "OpenAI",
-                                               "baseUrl": "https://api.openai.com/v1",
-                                               "authHeaderName": "Authorization",
-                                               "models": [
-                                                 { "modelName": "gpt-5.4", "providerModelId": "gpt-5-4-provider-id", "enabled": true, "presentUpstream": true }
-                                               ],
-                                               "headers": []
-                                             }
-                                           ]
-                                         }
-                                         """;
+    private static Contract.ProviderListResponse ProvidersResponse()
+    {
+        var response = new Contract.ProviderListResponse();
+        response.Providers.Add(new Contract.ProviderState
+        {
+            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", AuthHeaderName = "Authorization",
+            DollarSpent = "0", WindowKind = "Monthly", Enabled = true,
+            Models = { new Contract.ModelState { ModelName = "gpt-5.4", ProviderModelId = "gpt-5-4-provider-id", Enabled = true, PresentUpstream = true } }
+        });
+        return response;
+    }
 
-    private const string RollupJson = """
-                                      [
-                                        {
-                                          "bucketStartUtc": "2026-08-01T00:00:00Z",
-                                          "bucketWidth": "P1D",
-                                          "groupKey": "gpt-5-4-provider-id",
-                                          "requests": 3,
-                                          "unpricedRequests": 0,
-                                          "promptTokens": 1000,
-                                          "completionTokens": 500,
-                                          "cacheCreationTokens": 0,
-                                          "cacheReadTokens": 0,
-                                          "costUsd": 4.82
-                                        }
-                                      ]
-                                      """;
+    private static Contract.UsageRollupResponse RollupResponse()
+    {
+        var response = new Contract.UsageRollupResponse();
+        response.Buckets.Add(new Contract.UsageRollupBucketRow
+        {
+            BucketStartUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-01T00:00:00Z")),
+            BucketWidth = "P1D",
+            GroupKey = "gpt-5-4-provider-id",
+            Requests = 3,
+            UnpricedRequests = 0,
+            PromptTokens = 1000,
+            CompletionTokens = 500,
+            CacheCreationTokens = 0,
+            CacheReadTokens = 0,
+            CostUsd = "4.82"
+        });
+        return response;
+    }
 
     private static BunitContext NewContext(bool withData)
     {
         var ctx = new BunitContext();
         if (withData)
         {
-            ctx.Services.AddSingleton(new ProviderAdminStore(
-                managementAddress: "http://127.0.0.1:59988", transport: new StaticJsonTransport(ProvidersJson)));
-            ctx.Services.AddSingleton(new UsageStore(
-                managementAddress: "http://127.0.0.1:59988", transport: new StaticJsonTransport(RollupJson)));
+            ctx.Services.AddSingleton(new ProviderAdminStore(client: new ProviderAdminClient(
+                new StubProviderAdminServiceClient { ListProvidersResponse = ProvidersResponse() })));
+            ctx.Services.AddSingleton(new UsageStore(client: new UsageQueryClient(
+                new StubUsageAdminServiceClient { RollupResponse = RollupResponse() })));
         }
         else
         {
@@ -102,15 +100,4 @@ public sealed class GovernanceModelCardsTests
         }, timeout: TimeSpan.FromSeconds(6));
     }
 
-    private sealed class StaticJsonTransport(string json) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(content: json, encoding: Encoding.UTF8, mediaType: "application/json")
-            });
-        }
-    }
 }

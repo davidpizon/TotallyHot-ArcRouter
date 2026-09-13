@@ -1,6 +1,8 @@
+using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 
@@ -16,9 +18,9 @@ public sealed class UsageStore : IDisposable
     private readonly UsageQueryClient _client;
     private readonly ILogger<UsageStore>? _logger;
 
-    // This store always builds its own HttpClient (even over a caller-supplied transport), so it always
-    // owns that client's lifetime - see Dispose. Mirrors UpdateStore's _ownedHttpClient.
-    private readonly HttpClient _ownedHttpClient;
+    // Non-null only when this store built its own channel (the production path) - see Dispose and
+    // ProviderAdminStore's identical field.
+    private readonly GrpcChannel? _ownedChannel;
 
     // Keyed per distinct range/width/groupBy so repeated filter-bar clicks over an already-seen range don't
     // re-fetch. Small and unbounded by design: a session's worth of distinct filter selections is a handful
@@ -30,33 +32,35 @@ public sealed class UsageStore : IDisposable
     /// <summary>Initializes a new instance of the <see cref="UsageStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
     /// <param name="managementAddress">
-    /// The proxy management origin; defaults to
-    /// <see cref="ProviderAdminStore.DefaultManagementAddress"/>.
+    /// The proxy's gRPC endpoint; defaults to <see cref="ProviderAdminStore.DefaultManagementAddress"/>.
     /// </param>
     /// <param name="adminToken">
     /// Optional management token override; when null (the default), the token is read from the shared
     /// management-token file the proxy generates (see <see cref="ManagementTokenReader"/>).
     /// </param>
-    /// <param name="transport">
-    /// The HTTP transport to send through; <see langword="null"/> (the default, and always the case in
-    /// production) uses the framework's own. Lets tests render the tab against a canned response, the same
-    /// seam <see cref="ProviderAdminStore"/> exposes for the same reason.
+    /// <param name="client">
+    /// A pre-built client to use instead of creating a channel from <paramref name="managementAddress"/>;
+    /// see <see cref="ProviderAdminStore"/>'s identical parameter for the full rationale.
     /// </param>
     public UsageStore(
         ILogger<UsageStore>? logger = null,
         string managementAddress = ProviderAdminStore.DefaultManagementAddress,
         string? adminToken = null,
-        HttpMessageHandler? transport = null)
+        UsageQueryClient? client = null)
     {
         _logger = logger;
-        var normalized = managementAddress.EndsWith('/') ? managementAddress : managementAddress + "/";
 
-        // disposeHandler: false for a caller-supplied transport - see ProviderAdminStore's identical note.
-        var httpClient = transport is null ? new HttpClient() : new HttpClient(handler: transport, false);
-        httpClient.BaseAddress = new Uri(normalized);
-        _ownedHttpClient = httpClient;
-        _client = new UsageQueryClient(httpClient: httpClient,
-            adminToken: adminToken ?? ManagementTokenReader.TryRead());
+        if (client is not null)
+        {
+            _client = client;
+            _ownedChannel = null;
+        }
+        else
+        {
+            var channel = TelemetryChannelFactory.Create(managementAddress);
+            _ownedChannel = channel;
+            _client = new UsageQueryClient(channel, adminToken ?? ManagementTokenReader.TryRead());
+        }
     }
 
     /// <summary>
@@ -75,13 +79,13 @@ public sealed class UsageStore : IDisposable
     public string? LastError { get; private set; }
 
     /// <summary>
-    /// Disposes the <see cref="HttpClient"/> this store built for itself, leaving any caller-supplied
-    /// transport alone. Registered as a DI singleton in <c>MauiProgram</c>, so the container invokes this
-    /// at shutdown.
+    /// Disposes the <see cref="GrpcChannel"/> this store built for itself, when it built one - see
+    /// <see cref="ProviderAdminStore.Dispose"/>'s identical note. Registered as a DI singleton in
+    /// <c>MauiProgram</c>, so the container invokes this at shutdown.
     /// </summary>
     public void Dispose()
     {
-        _ownedHttpClient.Dispose();
+        _ownedChannel?.Dispose();
     }
 
     /// <summary>Raised after <see cref="Summary"/>, <see cref="IsReachable"/>, or <see cref="LastError"/> change.</summary>

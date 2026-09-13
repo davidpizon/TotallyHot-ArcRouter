@@ -1,54 +1,43 @@
-using System.Globalization;
-using System.Net;
-using System.Text;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
 
 /// <summary>
-/// Unit coverage for <see cref="UsageQueryClient"/>: request URLs/headers and response (de)serialization
-/// against a stubbed transport, plus error-envelope handling. Mirrors <see cref="ProviderAdminClientTests"/>
-/// in structure because the two clients are intentional siblings.
+/// Unit coverage for <see cref="UsageQueryClient"/>: request-message mapping and response (de)serialization
+/// against a stubbed generated client, plus error translation. Mirrors
+/// <see cref="ProviderAdminClientTests"/> in structure - the two clients are intentional siblings - and
+/// the generated-client test-double seam <c>TotallyHot.ArcRouter.Gui.Telemetry.PriceSourceAdminClientTests</c>
+/// established for gRPC clients in this codebase.
 /// </summary>
 public sealed class UsageQueryClientTests
 {
-    private static UsageQueryClient CreateClient(HttpMessageHandler handler, string? token = null)
-    {
-        return new UsageQueryClient(
-            httpClient: new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5001/") },
-            adminToken: token);
-    }
-
-    private static HttpResponseMessage Json(string body)
-    {
-        return new HttpResponseMessage(HttpStatusCode.OK)
-        { Content = new StringContent(content: body, encoding: Encoding.UTF8, mediaType: "application/json") };
-    }
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     // --- GetSummaryAsync ---
 
     [Fact]
-    public async Task GetSummaryAsync_SendsGetToSummaryUrl()
+    public async Task GetSummaryAsync_SendsTheWindow_AndMapsEveryField()
     {
-        const string json = """
-                            {
-                              "requests": 120,
-                              "unpricedRequests": 5,
-                              "promptTokens": 80000,
-                              "completionTokens": 20000,
-                              "cacheCreationTokens": 1000,
-                              "cacheReadTokens": 500,
-                              "costUsd": 3.75
-                            }
-                            """;
-        var handler = new StubHandler(_ => Json(json));
-        var client = CreateClient(handler);
+        var stub = new StubClient
+        {
+            SummaryResponse = new Contract.UsageSummaryResponse
+            {
+                Requests = 120,
+                UnpricedRequests = 5,
+                PromptTokens = 80000,
+                CompletionTokens = 20000,
+                CacheCreationTokens = 1000,
+                CacheReadTokens = 500,
+                CostUsd = "3.75"
+            }
+        };
+        var client = new UsageQueryClient(stub);
 
-        var summary =
-            await client.GetSummaryAsync(window: "day", cancellationToken: TestContext.Current.CancellationToken);
+        var summary = await client.GetSummaryAsync(window: "day", cancellationToken: Ct);
 
-        Assert.Equal(expected: HttpMethod.Get, actual: handler.LastRequest!.Method);
-        Assert.Equal(expected: "http://localhost:5001/admin/usage/summary?window=day",
-            actual: handler.LastRequest.RequestUri!.ToString());
+        Assert.Equal(expected: "day", actual: stub.LastSummaryRequest!.Window);
         Assert.Equal(120L, actual: summary.Requests);
         Assert.Equal(5L, actual: summary.UnpricedRequests);
         Assert.Equal(80000L, actual: summary.PromptTokens);
@@ -58,58 +47,28 @@ public sealed class UsageQueryClientTests
         Assert.Equal(3.75m, actual: summary.CostUsd);
     }
 
-    [Fact]
-    public async Task GetSummaryAsync_EscapesWindowParameter()
-    {
-        var handler = new StubHandler(_ => Json("""
-                                                {"requests":0,"unpricedRequests":0,"promptTokens":0,"completionTokens":0,"cacheCreationTokens":0,"cacheReadTokens":0,"costUsd":0}
-                                                """));
-        var client = CreateClient(handler);
-
-        await client.GetSummaryAsync(window: "all&special", cancellationToken: TestContext.Current.CancellationToken);
-
-        // Ampersand must be percent-encoded so it does not split the query string.
-        Assert.Contains(expectedSubstring: "window=all%26special",
-            actualString: handler.LastRequest!.RequestUri!.ToString(), comparisonType: StringComparison.Ordinal);
-    }
-
     // --- GetRollupAsync ---
 
     [Fact]
-    public async Task GetRollupAsync_SendsGetToRollupUrlWithAllParameters()
+    public async Task GetRollupAsync_SendsTheRangeAndBinning_AndMapsEveryBucketField()
     {
-        const string json = """
-                            [
-                              {
-                                "bucketStartUtc": "2026-01-01T00:00:00Z",
-                                "bucketWidth": "P1D",
-                                "groupKey": "gpt-5.4",
-                                "requests": 50,
-                                "unpricedRequests": 2,
-                                "promptTokens": 40000,
-                                "completionTokens": 10000,
-                                "cacheCreationTokens": 0,
-                                "cacheReadTokens": 0,
-                                "costUsd": 1.20
-                              }
-                            ]
-                            """;
-        var handler = new StubHandler(_ => Json(json));
-        var client = CreateClient(handler);
-
-        var from = DateTimeOffset.Parse(input: "2026-01-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
-        var to = DateTimeOffset.Parse(input: "2026-02-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
+        var stub = new StubClient
+        {
+            CannedRollupResponse = RollupResponse(Bucket(bucketStartUtc: "2026-01-01T00:00:00Z", bucketWidth: "P1D",
+                groupKey: "gpt-5.4", requests: 50, unpricedRequests: 2, promptTokens: 40000, completionTokens: 10000,
+                cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: "1.20"))
+        };
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z");
 
         var buckets = await client.GetRollupAsync(from: from, to: to, width: "day", groupBy: "model",
-            cancellationToken: TestContext.Current.CancellationToken);
+            cancellationToken: Ct);
 
-        Assert.Equal(expected: HttpMethod.Get, actual: handler.LastRequest!.Method);
-        var url = handler.LastRequest.RequestUri!.ToString();
-        Assert.StartsWith(expectedStartString: "http://localhost:5001/admin/usage/rollup?", actualString: url,
-            comparisonType: StringComparison.Ordinal);
-        Assert.Contains(expectedSubstring: "width=day", actualString: url, comparisonType: StringComparison.Ordinal);
-        Assert.Contains(expectedSubstring: "groupBy=model", actualString: url,
-            comparisonType: StringComparison.Ordinal);
+        Assert.Equal(expected: from, actual: stub.LastRollupRequest!.From.ToDateTimeOffset());
+        Assert.Equal(expected: to, actual: stub.LastRollupRequest.To.ToDateTimeOffset());
+        Assert.Equal(expected: "day", actual: stub.LastRollupRequest.Width);
+        Assert.Equal(expected: "model", actual: stub.LastRollupRequest.GroupBy);
 
         var bucket = Assert.Single(buckets);
         Assert.Equal(expected: "gpt-5.4", actual: bucket.GroupKey);
@@ -119,16 +78,14 @@ public sealed class UsageQueryClientTests
     }
 
     [Fact]
-    public async Task GetRollupAsync_ReturnsEmptyListForEmptyArray()
+    public async Task GetRollupAsync_EmptyResponse_ReturnsEmptyList()
     {
-        var handler = new StubHandler(_ => Json("[]"));
-        var client = CreateClient(handler);
+        var stub = new StubClient { CannedRollupResponse = new Contract.UsageRollupResponse() };
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
 
-        var from = DateTimeOffset.Parse(input: "2026-01-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
-        var to = DateTimeOffset.Parse(input: "2026-02-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
-
-        var buckets = await client.GetRollupAsync(from: from, to: to, width: "hour", groupBy: "provider",
-            cancellationToken: TestContext.Current.CancellationToken);
+        var buckets = await client.GetRollupAsync(from: from, to: from.AddDays(1), width: "hour",
+            groupBy: "provider", cancellationToken: Ct);
 
         Assert.Empty(buckets);
     }
@@ -136,36 +93,29 @@ public sealed class UsageQueryClientTests
     // --- GetRoutingRoiAsync ---
 
     [Fact]
-    public async Task GetRoutingRoiAsync_SendsGetAndDeserializesTheCounterfactual()
+    public async Task GetRoutingRoiAsync_SendsTheRange_AndMapsTheCounterfactual()
     {
-        const string json = """
-                            [
-                              {
-                                "comparedAtUtc": "2026-01-05T10:00:00Z",
-                                "sessionId": "session-7",
-                                "routedModel": "kimi-k2.5",
-                                "baselineModel": "glm-5",
-                                "actualCostUsd": 0.02,
-                                "baselineEstimatedCostUsd": 0.11,
-                                "estimatedNetSavingsUsd": 0.09,
-                                "isExploratory": true
-                              }
-                            ]
-                            """;
-        var handler = new StubHandler(_ => Json(json));
-        var client = CreateClient(handler);
+        var stub = new StubClient
+        {
+            CannedRoutingRoiResponse = RoutingRoiResponse(new Contract.RoutingRoiEntry
+            {
+                ComparedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-01-05T10:00:00Z")),
+                SessionId = "session-7",
+                RoutedModel = "kimi-k2.5",
+                BaselineModel = "glm-5",
+                ActualCostUsd = "0.02",
+                BaselineEstimatedCostUsd = "0.11",
+                EstimatedNetSavingsUsd = "0.09",
+                IsExploratory = true
+            })
+        };
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z");
 
-        var from = DateTimeOffset.Parse(input: "2026-01-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
-        var to = DateTimeOffset.Parse(input: "2026-02-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
+        var points = await client.GetRoutingRoiAsync(from: from, to: to, cancellationToken: Ct);
 
-        var points = await client.GetRoutingRoiAsync(from: from, to: to,
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(expected: HttpMethod.Get, actual: handler.LastRequest!.Method);
-        Assert.StartsWith(
-            expectedStartString: "http://localhost:5001/admin/usage/routing-roi?",
-            actualString: handler.LastRequest.RequestUri!.ToString(), comparisonType: StringComparison.Ordinal);
-
+        Assert.False(stub.LastRoutingRoiRequest!.HasSessionId);
         var point = Assert.Single(points);
         Assert.Equal(expected: "session-7", actual: point.SessionId);
         Assert.Equal(expected: "kimi-k2.5", actual: point.RoutedModel);
@@ -175,209 +125,271 @@ public sealed class UsageQueryClientTests
     }
 
     [Fact]
-    public async Task GetRoutingRoiAsync_OmitsTheSessionParameterWhenNotFiltering()
+    public async Task GetRoutingRoiAsync_SessionId_IsSentWhenProvided()
     {
-        var handler = new StubHandler(_ => Json("[]"));
-        var client = CreateClient(handler);
+        var stub = new StubClient { CannedRoutingRoiResponse = new Contract.RoutingRoiResponse() };
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
 
-        var from = DateTimeOffset.Parse(input: "2026-01-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
-        await client.GetRoutingRoiAsync(from: from, to: from.AddDays(1),
-            cancellationToken: TestContext.Current.CancellationToken);
+        await client.GetRoutingRoiAsync(from: from, to: from.AddDays(1), sessionId: "s-1", cancellationToken: Ct);
 
-        Assert.DoesNotContain(expectedSubstring: "session=", actualString: handler.LastRequest!.RequestUri!.ToString(),
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task GetRoutingRoiAsync_EscapesTheSessionParameter()
-    {
-        var handler = new StubHandler(_ => Json("[]"));
-        var client = CreateClient(handler);
-
-        var from = DateTimeOffset.Parse(input: "2026-01-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
-        await client.GetRoutingRoiAsync(from: from, to: from.AddDays(1), sessionId: "a&b",
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Contains(expectedSubstring: "session=a%26b", actualString: handler.LastRequest!.RequestUri!.ToString(),
-            comparisonType: StringComparison.Ordinal);
+        Assert.True(stub.LastRoutingRoiRequest!.HasSessionId);
+        Assert.Equal(expected: "s-1", actual: stub.LastRoutingRoiRequest.SessionId);
     }
 
     [Fact]
     public async Task GetRoutingRoiAsync_NullCostsRoundTripAsNullNotZero()
     {
-        // An abstaining baseline yields nulls; collapsing them to 0 would read as "routing broke even".
-        const string json = """
-                            [
-                              {
-                                "comparedAtUtc": "2026-01-05T10:00:00Z",
-                                "sessionId": "s",
-                                "routedModel": "kimi-k2.5",
-                                "baselineModel": null,
-                                "actualCostUsd": 0.02,
-                                "baselineEstimatedCostUsd": null,
-                                "estimatedNetSavingsUsd": null,
-                                "isExploratory": false
-                              }
-                            ]
-                            """;
-        var client = CreateClient(new StubHandler(_ => Json(json)));
+        // An abstaining baseline yields absent optional fields; collapsing them to 0 would read as
+        // "routing broke even".
+        var stub = new StubClient
+        {
+            CannedRoutingRoiResponse = RoutingRoiResponse(new Contract.RoutingRoiEntry
+            {
+                ComparedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+                SessionId = "s",
+                RoutedModel = "kimi-k2.5",
+                ActualCostUsd = "0.02",
+                IsExploratory = false
+            })
+        };
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
 
-        var from = DateTimeOffset.Parse(input: "2026-01-01T00:00:00Z", formatProvider: CultureInfo.InvariantCulture);
-        var points = await client.GetRoutingRoiAsync(from: from, to: from.AddDays(30),
-            cancellationToken: TestContext.Current.CancellationToken);
+        var point = Assert.Single(await client.GetRoutingRoiAsync(from: from, to: from.AddDays(30),
+            cancellationToken: Ct));
 
-        var point = Assert.Single(points);
         Assert.Null(point.BaselineModel);
         Assert.Null(point.BaselineEstimatedCostUsd);
         Assert.Null(point.EstimatedNetSavingsUsd);
     }
 
-    // --- admin token header ---
+    // --- ExportRollupAsync ---
 
     [Fact]
-    public async Task AdminToken_WhenConfigured_IsSentAsHeader()
+    public async Task ExportRollupAsync_StreamsEveryRow()
     {
-        var handler = new StubHandler(_ => Json("""
-                                                {"requests":0,"unpricedRequests":0,"promptTokens":0,"completionTokens":0,"cacheCreationTokens":0,"cacheReadTokens":0,"costUsd":0}
-                                                """));
-        var client = CreateClient(handler: handler, token: "s3cret");
+        var stub = new StubClient
+        {
+            ExportRows =
+            [
+                Bucket(bucketStartUtc: "2026-01-01T00:00:00Z", bucketWidth: "P1D", groupKey: "day",
+                    requests: 10, unpricedRequests: 0, promptTokens: 1000, completionTokens: 500,
+                    cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: "0.50"),
+                Bucket(bucketStartUtc: "2026-01-02T00:00:00Z", bucketWidth: "P1D", groupKey: "day",
+                    requests: 20, unpricedRequests: 0, promptTokens: 2000, completionTokens: 1000,
+                    cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: "1.00")
+            ]
+        };
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
 
-        await client.GetSummaryAsync(window: "week", cancellationToken: TestContext.Current.CancellationToken);
+        var rows = new List<UsageRollupBucketView>();
+        await foreach (var row in client.ExportRollupAsync(from: from, to: from.AddDays(2), width: "day",
+                           groupBy: "day", cancellationToken: Ct))
+            rows.Add(row);
 
-        Assert.True(handler.LastRequest!.Headers.TryGetValues(name: "X-Admin-Token", values: out var values));
-        Assert.Equal(expected: "s3cret", actual: Assert.Single(values));
+        Assert.Equal(2, actual: rows.Count);
+        Assert.Equal(0.50m, actual: rows[0].CostUsd);
+        Assert.Equal(1.00m, actual: rows[1].CostUsd);
+    }
+
+    // --- admin token metadata ---
+
+    [Fact]
+    public async Task AdminToken_WhenConfigured_IsSentAsMetadata()
+    {
+        var stub = new StubClient { SummaryResponse = new Contract.UsageSummaryResponse { CostUsd = "0" } };
+        var client = new UsageQueryClient(stub, adminToken: "s3cret");
+
+        await client.GetSummaryAsync(window: "week", cancellationToken: Ct);
+
+        var entry = Assert.Single(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
+        Assert.Equal(expected: "s3cret", actual: entry.Value);
     }
 
     [Fact]
     public async Task AdminToken_WhenNotConfigured_IsNotSent()
     {
-        var handler = new StubHandler(_ => Json("""
-                                                {"requests":0,"unpricedRequests":0,"promptTokens":0,"completionTokens":0,"cacheCreationTokens":0,"cacheReadTokens":0,"costUsd":0}
-                                                """));
-        var client = CreateClient(handler);
+        var stub = new StubClient { SummaryResponse = new Contract.UsageSummaryResponse { CostUsd = "0" } };
+        var client = new UsageQueryClient(stub);
 
-        await client.GetSummaryAsync(window: "week", cancellationToken: TestContext.Current.CancellationToken);
+        await client.GetSummaryAsync(window: "week", cancellationToken: Ct);
 
-        Assert.False(handler.LastRequest!.Headers.Contains("X-Admin-Token"));
+        Assert.Empty(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
     }
 
     // --- error handling ---
 
     [Fact]
-    public async Task ErrorResponse_ThrowsWithServerMessage()
+    public async Task Unavailable_BecomesTheReachabilityMessage()
     {
-        const string errorJson =
-            """{ "error": { "message": "Usage data unavailable.", "type": "server_error", "code": "500" } }""";
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
-        {
-            Content = new StringContent(content: errorJson, encoding: Encoding.UTF8, mediaType: "application/json")
-        });
-        var client = CreateClient(handler);
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        var client = new UsageQueryClient(stub);
 
         var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetSummaryAsync(window: "day", cancellationToken: TestContext.Current.CancellationToken));
-
-        Assert.Contains(expectedSubstring: "Usage data unavailable", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ErrorResponse_WithNonJsonBody_FallsBackToRawBody()
-    {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
-        {
-            Content = new StringContent(content: "service overloaded", encoding: Encoding.UTF8, mediaType: "text/plain")
-        });
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetSummaryAsync(window: "day", cancellationToken: TestContext.Current.CancellationToken));
-
-        Assert.Equal(expected: "service overloaded", actual: ex.Message);
-    }
-
-    [Fact]
-    public async Task ErrorResponse_WithEmptyBody_FallsBackToTheStatusCode()
-    {
-        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
-        {
-            Content = new StringContent(string.Empty)
-        });
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetSummaryAsync(window: "day", cancellationToken: TestContext.Current.CancellationToken));
-
-        Assert.Equal(expected: "The proxy management API returned 404.", actual: ex.Message);
-    }
-
-    [Fact]
-    public async Task TransportFailure_ThrowsWithTheUnderlyingExceptionAsInnerException()
-    {
-        var handler = new ThrowingHandler(new HttpRequestException("connection refused"));
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetSummaryAsync(window: "day", cancellationToken: TestContext.Current.CancellationToken));
+            client.GetSummaryAsync(window: "day", cancellationToken: Ct));
 
         Assert.Contains(expectedSubstring: "Could not reach the proxy management API", actualString: ex.Message,
             comparisonType: StringComparison.Ordinal);
-        Assert.IsType<HttpRequestException>(ex.InnerException);
+        Assert.IsType<RpcException>(ex.InnerException);
     }
 
     [Fact]
-    public async Task MalformedJsonResponse_ThrowsWithTheParseError()
+    public async Task ServerRejection_KeepsTheServersOwnDetail()
     {
-        var handler = new StubHandler(_ => Json("{ not valid json"));
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetSummaryAsync(window: "day", cancellationToken: TestContext.Current.CancellationToken));
-
-        Assert.Contains(expectedSubstring: "unreadable response", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
-        Assert.NotNull(ex.InnerException);
-    }
-
-    [Fact]
-    public async Task NullJsonResponse_ThrowsAnEmptyResponseError()
-    {
-        var handler = new StubHandler(_ => Json("null"));
-        var client = CreateClient(handler);
-
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
-            client.GetSummaryAsync(window: "day", cancellationToken: TestContext.Current.CancellationToken));
-
-        Assert.Contains(expectedSubstring: "empty response", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Constructor_NullHttpClient_Throws()
-    {
-        Assert.Throws<ArgumentNullException>(() => new UsageQueryClient(null!));
-    }
-
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
-    {
-
-        public HttpRequestMessage? LastRequest { get; private set; }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        var stub = new StubClient
         {
-            LastRequest = request;
-            return Task.FromResult(responder(request));
+            Failure = new RpcException(new Status(statusCode: StatusCode.FailedPrecondition,
+                detail: "Usage rollups are not available."))
+        };
+        var client = new UsageQueryClient(stub);
+
+        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
+            client.GetSummaryAsync(window: "day", cancellationToken: Ct));
+
+        Assert.Equal(expected: "Usage rollups are not available.", actual: ex.Message);
+    }
+
+    [Fact]
+    public void Constructor_NullChannel_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new UsageQueryClient((Grpc.Net.Client.GrpcChannel)null!));
+    }
+
+    private static Contract.UsageRollupResponse RollupResponse(params Contract.UsageRollupBucketRow[] buckets)
+    {
+        var response = new Contract.UsageRollupResponse();
+        response.Buckets.AddRange(buckets);
+        return response;
+    }
+
+    private static Contract.RoutingRoiResponse RoutingRoiResponse(params Contract.RoutingRoiEntry[] entries)
+    {
+        var response = new Contract.RoutingRoiResponse();
+        response.Entries.AddRange(entries);
+        return response;
+    }
+
+    private static Contract.UsageRollupBucketRow Bucket(string bucketStartUtc, string bucketWidth, string groupKey,
+        long requests, long unpricedRequests, long promptTokens, long completionTokens, long cacheCreationTokens,
+        long cacheReadTokens, string costUsd)
+    {
+        return new Contract.UsageRollupBucketRow
+        {
+            BucketStartUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse(bucketStartUtc)),
+            BucketWidth = bucketWidth,
+            GroupKey = groupKey,
+            Requests = requests,
+            UnpricedRequests = unpricedRequests,
+            PromptTokens = promptTokens,
+            CompletionTokens = completionTokens,
+            CacheCreationTokens = cacheCreationTokens,
+            CacheReadTokens = cacheReadTokens,
+            CostUsd = costUsd
+        };
+    }
+
+    private sealed class FakeStreamReader<T>(IReadOnlyList<T> messages) : IAsyncStreamReader<T>
+    {
+        private int _index = -1;
+
+        public T Current { get; private set; } = default!;
+
+        public Task<bool> MoveNext(CancellationToken cancellationToken)
+        {
+            _index++;
+            if (_index >= messages.Count) return Task.FromResult(false);
+
+            Current = messages[_index];
+            return Task.FromResult(true);
         }
     }
 
-    private sealed class ThrowingHandler(HttpRequestException exception) : HttpMessageHandler
+    /// <summary>
+    /// A generated-client test double. Overrides only the <c>CallOptions</c> overloads: the generated
+    /// convenience overloads delegate to them, so this intercepts both call shapes.
+    /// </summary>
+    private sealed class StubClient : Contract.UsageAdminService.UsageAdminServiceClient
     {
+        public Contract.UsageSummaryResponse SummaryResponse { get; init; } = new();
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
+        public Contract.UsageRollupResponse CannedRollupResponse { get; init; } = new();
+
+        public Contract.RoutingRoiResponse CannedRoutingRoiResponse { get; init; } = new();
+
+        public IReadOnlyList<Contract.UsageRollupBucketRow> ExportRows { get; init; } = [];
+
+        public RpcException? Failure { get; init; }
+
+        public Contract.GetUsageSummaryRequest? LastSummaryRequest { get; private set; }
+
+        public Contract.GetUsageRollupRequest? LastRollupRequest { get; private set; }
+
+        public Contract.GetRoutingRoiRequest? LastRoutingRoiRequest { get; private set; }
+
+        public CallOptions? LastCallOptions { get; private set; }
+
+        public override AsyncUnaryCall<Contract.UsageSummaryResponse> GetUsageSummaryAsync(
+            Contract.GetUsageSummaryRequest request, CallOptions options)
         {
-            throw exception;
+            LastSummaryRequest = request;
+            LastCallOptions = options;
+            return Call(SummaryResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.UsageRollupResponse> GetUsageRollupAsync(
+            Contract.GetUsageRollupRequest request, CallOptions options)
+        {
+            LastRollupRequest = request;
+            LastCallOptions = options;
+            return Call(CannedRollupResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.RoutingRoiResponse> GetRoutingRoiAsync(
+            Contract.GetRoutingRoiRequest request, CallOptions options)
+        {
+            LastRoutingRoiRequest = request;
+            LastCallOptions = options;
+            return Call(CannedRoutingRoiResponse);
+        }
+
+        public override AsyncServerStreamingCall<Contract.UsageRollupBucketRow> ExportUsageRollup(
+            Contract.ExportUsageRollupRequest request, CallOptions options)
+        {
+            LastCallOptions = options;
+            IAsyncStreamReader<Contract.UsageRollupBucketRow> reader = Failure is null
+                ? new FakeStreamReader<Contract.UsageRollupBucketRow>(ExportRows)
+                : new ThrowingStreamReader(Failure);
+
+            return new AsyncServerStreamingCall<Contract.UsageRollupBucketRow>(
+                responseStream: reader,
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
+
+        private AsyncUnaryCall<T> Call<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Failure is null ? Task.FromResult(response) : Task.FromException<T>(Failure),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
+
+        private sealed class ThrowingStreamReader(RpcException failure)
+            : IAsyncStreamReader<Contract.UsageRollupBucketRow>
+        {
+            public Contract.UsageRollupBucketRow Current => throw failure;
+
+            public Task<bool> MoveNext(CancellationToken cancellationToken)
+            {
+                return Task.FromException<bool>(failure);
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
+using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Services;
 
@@ -14,37 +16,37 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class ProviderAdminStore : IDisposable
 {
     /// <summary>
-    /// The proxy's plain-HTTP management origin. The management API shares the LLM-forwarding port
-    /// (5001), distinct from the TLS gRPC telemetry port (5002) <see cref="LiveDataStore"/> uses.
+    /// The proxy's TLS gRPC endpoint (docs/router/tracked-todos.md #7 - the provider-admin surface moved
+    /// off the plain-HTTP LLM-forwarding port onto this one), matching <see cref="LiveDataStore"/>'s own
+    /// server address.
     /// </summary>
-    public const string DefaultManagementAddress = "http://localhost:5001";
+    public const string DefaultManagementAddress = TelemetryChannelFactory.DefaultServerAddress;
 
     private readonly ProviderAdminClient _client;
     private readonly ILogger<ProviderAdminStore>? _logger;
 
-    // This store always builds its own HttpClient (even over a caller-supplied transport), so it always
-    // owns that client's lifetime - see Dispose. Mirrors UpdateStore's _ownedHttpClient.
-    private readonly HttpClient _ownedHttpClient;
+    // Non-null only when this store built its own channel (the production path) - see Dispose. A
+    // test-injected client (built over a fake generated client with no real channel) owns nothing here to
+    // dispose.
+    private readonly GrpcChannel? _ownedChannel;
 
     private readonly ConcurrentDictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = new();
     private readonly ToastService? _toasts;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderAdminStore"/> class.</summary>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="managementAddress">The proxy management origin; defaults to <see cref="DefaultManagementAddress"/>.</param>
+    /// <param name="managementAddress">The proxy's gRPC endpoint; defaults to <see cref="DefaultManagementAddress"/>.</param>
     /// <param name="adminToken">
     /// Optional management token override; when null (the default), the token is read from the shared
     /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c> file the proxy generates (see
-    /// <see cref="ManagementTokenReader"/>). The REST <c>/admin/*</c> API requires this token by default.
+    /// <see cref="ManagementTokenReader"/>). Sent as the <c>x-admin-token</c> gRPC metadata entry.
     /// </param>
-    /// <param name="transport">
-    /// The HTTP transport to send through; <see langword="null"/> (the default, and always the case in
-    /// production) uses the framework's own. This exists so tests can render the Governance tab against a
-    /// canned provider list: without it the store builds its own <see cref="HttpClient"/> and the only
-    /// reachable state in a test process is "connection refused", which leaves the entire loaded UI - the
-    /// provider cards, the dialogs, every mutation - unexercised. <see cref="ProviderAdminClient"/> already
-    /// takes its <see cref="HttpClient"/> from the caller for the same reason; this extends that seam the
-    /// one level up that <c>ProvidersAdmin</c> needs.
+    /// <param name="client">
+    /// A pre-built client to use instead of creating a channel from <paramref name="managementAddress"/>;
+    /// <see langword="null"/> (the default, and always the case in production) builds one. This exists so
+    /// tests can render the Governance tab against a canned provider list: without it the store builds its
+    /// own <see cref="GrpcChannel"/> and the only reachable state in a test process is "unavailable", which
+    /// leaves the entire loaded UI - the provider cards, the dialogs, every mutation - unexercised.
     /// </param>
     /// <param name="toasts">
     /// App-wide error-toast notifications; <see langword="null"/> (a test's default) simply skips raising
@@ -54,22 +56,23 @@ public sealed class ProviderAdminStore : IDisposable
         ILogger<ProviderAdminStore>? logger = null,
         string managementAddress = DefaultManagementAddress,
         string? adminToken = null,
-        HttpMessageHandler? transport = null,
+        ProviderAdminClient? client = null,
         ToastService? toasts = null)
     {
         _logger = logger;
         _toasts = toasts;
-        var normalized = managementAddress.EndsWith('/') ? managementAddress : managementAddress + "/";
 
-        // disposeHandler: false for a caller-supplied transport. HttpClient's single-argument constructor
-        // defaults to disposing its handler, which would reach past this store's own client and dispose a
-        // test's handler out from under it. This store owns the client it built; it never owns the
-        // transport it was handed.
-        var httpClient = transport is null ? new HttpClient() : new HttpClient(handler: transport, false);
-        httpClient.BaseAddress = new Uri(normalized);
-        _ownedHttpClient = httpClient;
-        _client = new ProviderAdminClient(httpClient: httpClient,
-            adminToken: adminToken ?? ManagementTokenReader.TryRead());
+        if (client is not null)
+        {
+            _client = client;
+            _ownedChannel = null;
+        }
+        else
+        {
+            var channel = TelemetryChannelFactory.Create(managementAddress);
+            _ownedChannel = channel;
+            _client = new ProviderAdminClient(channel, adminToken ?? ManagementTokenReader.TryRead());
+        }
     }
 
     /// <summary>The providers currently known, refreshed after each load or successful edit.</summary>
@@ -110,13 +113,13 @@ public sealed class ProviderAdminStore : IDisposable
     public string? LastError { get; private set; }
 
     /// <summary>
-    /// Disposes the <see cref="HttpClient"/> this store built for itself. A caller-supplied
-    /// <c>transport</c> is deliberately left alone - see the constructor's <c>disposeHandler</c> note.
-    /// Registered as a DI singleton in <c>MauiProgram</c>, so the container invokes this at shutdown.
+    /// Disposes the <see cref="GrpcChannel"/> this store built for itself, when it built one - a
+    /// test-injected client owns no channel here to dispose. Registered as a DI singleton in
+    /// <c>MauiProgram</c>, so the container invokes this at shutdown.
     /// </summary>
     public void Dispose()
     {
-        _ownedHttpClient.Dispose();
+        _ownedChannel?.Dispose();
     }
 
     /// <summary>Raised after <see cref="Providers"/>, <see cref="IsReachable"/>, or <see cref="LastError"/> change.</summary>

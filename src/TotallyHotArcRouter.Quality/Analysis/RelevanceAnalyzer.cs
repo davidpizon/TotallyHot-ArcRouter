@@ -90,10 +90,10 @@ public sealed partial class RelevanceAnalyzer : IStaticAnalyzer
             ? 1.0
             : Floor + (1.0 - Floor) * (overlap / OverlapBudget);
 
-        var notes = new List<string>
-        {
+        List<string> notes =
+        [
             $"{matched}/{promptTokens.Count} salient prompt terms found in the response ({overlap:P0} overlap)"
-        };
+        ];
 
         return new StaticAnalysisFinding(Analyzer: Name, Score: score, Notes: notes);
     }
