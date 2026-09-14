@@ -50,7 +50,11 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0004](0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) | Surface out-of-credits provider failures on the Providers tab | proposed |
 | [0005](0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-trip.md) | Protect explicit provider selections from silent substitution on any circuit trip | proposed |
 | [0006](0006-split-managementfacade-along-crud-aggregate-boundaries.md) | Split ManagementFacade along CRUD-aggregate boundaries, not its public surface | accepted |
-| [0007](0007-provider-admin-client-stays-on-http.md) | ProviderAdminClient stays on HTTP; document the split instead of migrating it | accepted |
+| [0007](0007-provider-admin-client-stays-on-http.md) | ProviderAdminClient stays on HTTP; document the split instead of migrating it | superseded by ADR-0011 |
 | [0008](0008-codegraph-serena-dual-engine-code-smell-pipeline.md) | Adopt CodeGraph + Serena as the standing dual-engine code-smell pipeline | proposed |
 | [0009](0009-per-request-counterfactual-token-estimation.md) | Estimate the routing counterfactual from the request's own prompt, not a global token average | proposed |
 | [0010](0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md) | Collapse the per-feature admin slice onto shared seams | proposed |
+| [0011](0011-router-served-blazor-webassembly-gui-over-grpc-web.md) | Router-served Blazor WebAssembly GUI over gRPC-Web; retire port 5002 and REST `/admin` | proposed |
+| [0012](0012-loopback-session-auth-and-token-in-secret-store.md) | Loopback session-cookie auth for the web GUI; management token moves into the encrypted secret store | proposed |
+| [0013](0013-name-constrained-local-ca-for-router-tls.md) | Router-generated, name-constrained local CA for trusted HTTPS on every listener | proposed |
+| [0014](0014-cross-platform-service-layout-and-secret-backend.md) | Cross-platform data paths, machine-wide service layout, and a non-Windows secret backend | proposed |

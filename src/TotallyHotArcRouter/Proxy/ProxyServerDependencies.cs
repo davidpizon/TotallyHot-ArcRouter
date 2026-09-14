@@ -49,6 +49,15 @@ public sealed record ProxyServerDependencies
     public string? ManagementToken { get; init; }
 
     /// <summary>
+    /// The outer host's Serilog logger, so this inner host's own framework/request logs (routing,
+    /// endpoint dispatch, Kestrel bind failures) reach the same sinks (console, file) the rest of the
+    /// application logs through instead of the default console provider. <see langword="null"/> falls
+    /// back to the pre-existing behavior: a filtered default console provider, used by tests that build
+    /// a <see cref="ProxyServer"/> directly with no Serilog pipeline available.
+    /// </summary>
+    public Serilog.ILogger? SerilogLogger { get; init; }
+
+    /// <summary>
     /// Routing configuration backing <see cref="RoutingModeAdminGrpcService"/>. Unlike every group below,
     /// that service is mapped <em>unconditionally</em> - routing configuration is core, not an add-on that
     /// can be absent - so this property changes only the values the Routing Mode panel reports, never

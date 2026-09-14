@@ -2,8 +2,9 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Options;
-using System.Net;
+using Serilog.Extensions.Logging;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
+using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -18,7 +19,7 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// </summary>
 public class ProxyServer : IAsyncDisposable, IDisposable
 {
-    /// <summary>Default port for the TLS-secured gRPC telemetry endpoint. See the constructor's <c>grpcPort</c> remarks.</summary>
+    /// <summary>Default port for the TLS-secured gRPC telemetry endpoint. See <see cref="ProxyListenerOptions.GrpcPort"/>'s remarks.</summary>
     public const int DefaultGrpcPort = 5002;
 
     private readonly IHost _host;
@@ -40,18 +41,14 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     /// own copy of application-level hosted service registrations (which previously caused unbounded recursive
     /// construction of <see cref="TotallyHot.ArcRouter.Hosting.ProxyHostedService"/>).
     /// </param>
-    /// <param name="port">
-    /// The localhost port Kestrel listens on for plain HTTP/1.1 LLM-forwarding traffic. Defaults to 5001.
-    /// Pass 0 to bind an ephemeral port (useful in tests to avoid flaking when the default port is already in
-    /// use); the resolved address is available via <see cref="Addresses"/> once <see cref="StartAsync"/>
-    /// completes.
-    /// </param>
-    /// <param name="grpcPort">
-    /// A second, dedicated localhost port for the TLS-secured gRPC telemetry endpoint (<see cref="DefaultGrpcPort"/>
-    /// by default). Deliberately a separate port from <paramref name="port"/>, not a second protocol sharing the
-    /// same port: <paramref name="port"/> must stay plain, unencrypted HTTP/1.1 for existing LLM-forwarding
-    /// clients that already connect to it that way, so it cannot also become an HTTPS/2 endpoint. Pass 0 to bind
-    /// an ephemeral port, mirroring <paramref name="port"/>'s test-friendly behavior.
+    /// <param name="listenerOptions">
+    /// The proxy's port and bind-address configuration - see <see cref="ProxyListenerOptions"/>. Defaults to
+    /// <see langword="null"/>, which behaves identically to a freshly-constructed
+    /// <see cref="ProxyListenerOptions"/>: port 5001, loopback-bound, gRPC on <see cref="DefaultGrpcPort"/>,
+    /// and the opt-in plain-HTTP listener off. Pass <see cref="ProxyListenerOptions.Port"/>/
+    /// <see cref="ProxyListenerOptions.GrpcPort"/> as 0 to bind ephemeral ports (useful in tests to avoid
+    /// flaking when the default ports are already in use); the resolved addresses are available via
+    /// <see cref="Addresses"/> once <see cref="StartAsync"/> completes.
     /// </param>
     /// <param name="dependencies">
     /// Everything that has to be hand-carried across the boundary into the inner host's own DI container,
@@ -63,16 +60,19 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     public ProxyServer(
         ILogger<ProxyServer> logger,
         ProxyMiddleware proxyMiddleware,
-        int port = 5001,
-        int grpcPort = DefaultGrpcPort,
+        ProxyListenerOptions? listenerOptions = null,
         ProxyServerDependencies? dependencies = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(proxyMiddleware);
-        ArgumentOutOfRangeException.ThrowIfNegative(port);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: port, 65535);
-        ArgumentOutOfRangeException.ThrowIfNegative(grpcPort);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: grpcPort, 65535);
+
+        var listener = listenerOptions ?? new ProxyListenerOptions();
+        var port = listener.Port;
+        var grpcPort = listener.GrpcPort;
+        ArgumentOutOfRangeException.ThrowIfNegative(port, paramName: nameof(listenerOptions));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: port, 65535, paramName: nameof(listenerOptions));
+        ArgumentOutOfRangeException.ThrowIfNegative(grpcPort, paramName: nameof(listenerOptions));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: grpcPort, 65535, paramName: nameof(listenerOptions));
 
         var broadcaster = dependencies?.Telemetry ?? new TelemetryBroadcaster();
         var managementToken = dependencies?.ManagementToken;
@@ -112,21 +112,43 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         _ownedManagementHttpClient = managementApi?.HttpClient is null ? new HttpClient() : null;
         var managementClient = managementApi?.HttpClient ?? _ownedManagementHttpClient!;
 
+        var serilogLogger = dependencies?.SerilogLogger;
+
         _host = Host.CreateDefaultBuilder()
-            // This inner host is an implementation detail of ProxyServer: the outer application host
-            // owns the process's lifecycle logging. Without this filter a bind failure is reported
-            // twice - once here with a full stack through the default console provider (this host never
-            // gets Serilog), and again by the outer host as ProxyHostedService's start failure - so the
-            // inner copy is suppressed and ProxyHostedService is left to report the condition once.
-            // The "Microsoft" filter mirrors the outer host's Serilog "Microsoft": "Warning" override
-            // (see src/TotallyHotArcRouter/appsettings.json) - this inner host never reads that Serilog
-            // config, so without it Microsoft.AspNetCore.Routing.EndpointMiddleware's per-request
-            // "Executed endpoint" Information logs would flood the default console provider.
-            .ConfigureLogging(logging => logging
-                .AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None)
-                .AddFilter(category: "Microsoft", level: LogLevel.Warning))
+            // This inner host is an implementation detail of ProxyServer, but its logs matter - Kestrel
+            // bind failures and per-request routing among them - so when the outer host handed across its
+            // Serilog logger (see ProxyServerDependencies.SerilogLogger's remarks), route everything
+            // through it instead of the default console provider, matching how the rest of the
+            // application logs. A caller that built this server directly with no Serilog pipeline
+            // available (most unit tests) falls back to the pre-existing filtered default console
+            // provider so a bind failure is still reported once, not twice: without the filter it would
+            // otherwise surface both here (full stack, default console provider) and again through the
+            // outer host as ProxyHostedService's own start-failure log line.
+            .ConfigureLogging(logging =>
+            {
+                if (serilogLogger is not null)
+                {
+                    logging.ClearProviders();
+                    logging.AddProvider(new SerilogLoggerProvider(logger: serilogLogger, dispose: false));
+                }
+                else
+                {
+                    logging
+                        .AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None)
+                        .AddFilter(category: "Microsoft", level: LogLevel.Warning);
+                }
+            })
             .ConfigureWebHostDefaults(webBuilder =>
             {
+                // A Windows Service's working directory is C:\Windows\System32, not the install
+                // directory - without an explicit content root, static-asset serving (the web GUI,
+                // migration plan Phase P2/P6) would resolve wwwroot from there and 404 everything.
+                // ApplicationName likewise defaults from the entry assembly in a plain console run, but
+                // an explicit value keeps the static-web-assets manifest lookup independent of how the
+                // process was launched (dotnet run, the installed service, a test host).
+                webBuilder.UseContentRoot(AppContext.BaseDirectory);
+                webBuilder.UseSetting(key: WebHostDefaults.ApplicationKey, value: "TotallyHotArcRouter.ProxyServer");
+
                 webBuilder.UseKestrel(options =>
                 {
                     // Plain HTTP/1.1 only - this port is exclusively LLM-forwarding proxy traffic and
@@ -136,14 +158,9 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // connection failed with the HTTP/2-level HTTP_1_1_REQUIRED error, consistent with
                     // something on the network path not understanding or mangling the h2c preface), so the
                     // gRPC endpoint moved to its own dedicated TLS port instead of trying to fix h2c itself.
-                    if (port == 0)
-                        // ListenLocalhost throws for port 0. Bind a single IPv4 loopback address instead of
-                        // dual-stack, since binding IPv4 and IPv6 separately for an ephemeral port would
-                        // assign two different port numbers.
-                        options.Listen(address: IPAddress.Loopback, port: port);
-                    else
-                        // Preserve dual-stack (IPv4 + IPv6) localhost binding for fixed ports.
-                        options.ListenLocalhost(port);
+                    // BindAddress lets this move off loopback for a Docker deployment (migration plan D6a's
+                    // sibling decision); see KestrelBindAddress's remarks for the ephemeral-port special case.
+                    KestrelBindAddress.Listen(options: options, bindAddress: listener.BindAddress, port: port);
 
                     // The dedicated TLS/gRPC endpoint. HTTP/2 is negotiated via standard TLS ALPN here, not
                     // h2c prior-knowledge - the whole point of this port existing is to avoid the h2c
@@ -151,17 +168,13 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // machine/user so the client doesn't need to re-trust a new one on every proxy restart.
                     // Certificate initialization is non-essential (telemetry is not critical to proxy operation),
                     // so catch any exceptions and skip binding the gRPC port if the cert fails to load/generate.
+                    // Always loopback, independent of BindAddress - see ProxyListenerOptions.GrpcPort's
+                    // remarks: it is being retired (migration plan Phase P9), not extended.
                     try
                     {
                         var certificate = TelemetryTlsCertificate.GetOrCreate();
-                        if (grpcPort == 0)
-                            options.Listen(address: IPAddress.Loopback, port: grpcPort, configure: listenOptions =>
-                            {
-                                listenOptions.Protocols = HttpProtocols.Http2;
-                                listenOptions.UseHttps(certificate);
-                            });
-                        else
-                            options.ListenLocalhost(port: grpcPort, configure: listenOptions =>
+                        KestrelBindAddress.Listen(options: options, bindAddress: "loopback", port: grpcPort,
+                            configure: listenOptions =>
                             {
                                 listenOptions.Protocols = HttpProtocols.Http2;
                                 listenOptions.UseHttps(certificate);
@@ -343,6 +356,13 @@ public class ProxyServer : IAsyncDisposable, IDisposable
             return addresses is null ? [] : new List<string>(addresses);
         }
     }
+
+    /// <summary>
+    /// The inner host's service provider. Internal - exists so tests can verify hosting configuration
+    /// (e.g. content root independence from the process's current directory) that has no other externally
+    /// observable surface, without exposing the inner container as public API.
+    /// </summary>
+    internal IServiceProvider Services => _host.Services;
 
     /// <summary>
     /// Disposes the inner host and, when this server created it, the management <see cref="HttpClient"/>,

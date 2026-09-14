@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Serilog;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
@@ -275,6 +276,25 @@ internal static class ProxyServiceCollectionExtensions
     /// </summary>
     internal static IServiceCollection AddProxyHost(this IServiceCollection services)
     {
+        // The proxy's own port/bind-address configuration (web GUI migration plan Phase P1). Validated
+        // on start (not just on first resolution) so a bad appsettings.json value is caught at startup,
+        // not on the first request. IValidateOptions cross-checks the opt-in plain-HTTP listener's port
+        // against WebInterfaceOptions/McpOptions below, so registration order between the three doesn't
+        // matter - see ProxyListenerOptionsValidator.
+        services.AddOptions<ProxyListenerOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(ProxyListenerOptions.SectionName).Bind(options))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<ProxyListenerOptions>, ProxyListenerOptionsValidator>();
+
+        // The router-hosted web GUI's listener configuration (Phase P1). Not yet consumed by a running
+        // listener - Phase P2 adds that - but bound and validated from Phase P1 onward, same reasoning
+        // as ProxyListenerOptions above.
+        services.AddOptions<WebInterfaceOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(WebInterfaceOptions.SectionName).Bind(options))
+            .ValidateOnStart();
+
         // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
         // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
         // can never end up recursively constructing another ProxyHostedService.
@@ -293,6 +313,7 @@ internal static class ProxyServiceCollectionExtensions
                 // Lets a port clash stop the host in an orderly way instead of throwing out of
                 // StartAsync - see ProxyHostedService.StartAsync.
                 hostLifetime: sp.GetRequiredService<IHostApplicationLifetime>(),
+                listenerOptions: sp.GetRequiredService<IOptions<ProxyListenerOptions>>().Value,
                 dependencies: new ProxyServerDependencies
                 {
                     Telemetry = sp.GetRequiredService<TelemetryBroadcaster>(),
@@ -300,6 +321,12 @@ internal static class ProxyServiceCollectionExtensions
                     // call by default - the same token the MCP endpoint requires, so both management
                     // surfaces are gated identically out of the box.
                     ManagementToken = ManagementAccessToken.GetOrCreate(),
+                    // Routes the inner Kestrel host's own logs (routing, endpoint dispatch, bind
+                    // failures) through the same Serilog pipeline (console + file) the rest of the
+                    // application uses - see ProxyServerDependencies.SerilogLogger's remarks. Read once
+                    // here, at the explicit hand-off point, rather than reached for deep inside
+                    // ProxyServer itself.
+                    SerilogLogger = Log.Logger,
                     // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
                     RoutingOptions = sp.GetRequiredService<IOptions<RoutingOptions>>(),
 

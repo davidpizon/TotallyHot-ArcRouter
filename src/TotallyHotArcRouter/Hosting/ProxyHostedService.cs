@@ -29,8 +29,7 @@ public class ProxyHostedService : IHostedService
     /// Used to request an orderly shutdown when the proxy's port is already taken - see
     /// <see cref="StartAsync"/> for why that case stops the host instead of throwing.
     /// </param>
-    /// <param name="port">The localhost port Kestrel listens on for plain HTTP/1.1 LLM-forwarding traffic.</param>
-    /// <param name="grpcPort">The dedicated localhost port for the TLS-secured gRPC endpoint.</param>
+    /// <param name="listenerOptions">The proxy's port and bind-address configuration, forwarded verbatim to <see cref="ProxyServer"/>.</param>
     /// <param name="dependencies">
     /// The feature groups hand-carried into <see cref="ProxyServer"/>'s inner DI container; see
     /// <see cref="ProxyServerDependencies"/>. Defaults to <see langword="null"/>, giving a plain
@@ -41,16 +40,15 @@ public class ProxyHostedService : IHostedService
         ILogger<ProxyServer> proxyLogger,
         ProxyMiddleware proxyMiddleware,
         IHostApplicationLifetime hostLifetime,
-        int port = 5001,
-        int grpcPort = ProxyServer.DefaultGrpcPort,
+        ProxyListenerOptions? listenerOptions = null,
         ProxyServerDependencies? dependencies = null)
     {
         ArgumentNullException.ThrowIfNull(hostLifetime);
 
         _logger = logger;
         _hostLifetime = hostLifetime;
-        _proxyServer = new ProxyServer(logger: proxyLogger, proxyMiddleware: proxyMiddleware, port: port,
-            grpcPort: grpcPort, dependencies: dependencies);
+        _proxyServer = new ProxyServer(logger: proxyLogger, proxyMiddleware: proxyMiddleware,
+            listenerOptions: listenerOptions, dependencies: dependencies);
     }
 
     /// <summary>

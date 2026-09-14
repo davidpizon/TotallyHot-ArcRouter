@@ -1,8 +1,13 @@
 # 0007. ProviderAdminClient stays on HTTP; document the split instead of migrating it
 
-**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** superseded by ADR-0011 <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-02
 **Deciders:** David Pizon
+
+> **Superseded 2026-09-14:** the web GUI migration
+> ([ADR-0011](0011-router-served-blazor-webassembly-gui-over-grpc-web.md)) deletes REST `/admin`
+> entirely, so the HTTP-vs-gRPC transport split this ADR documented no longer exists. This record is
+> kept for history; it is no longer the operative decision.
 
 ## Context and Problem Statement
 

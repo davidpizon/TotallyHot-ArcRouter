@@ -49,8 +49,7 @@ public sealed class UsageAdminEndpointsTests
         return new ProxyServer(
             logger: NullLogger<ProxyServer>.Instance,
             proxyMiddleware: middleware,
-            0,
-            0,
+            listenerOptions: new ProxyListenerOptions { Port = 0, GrpcPort = 0 },
             dependencies: new ProxyServerDependencies
             {
                 ManagementToken = managementToken,

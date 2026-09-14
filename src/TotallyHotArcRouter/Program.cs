@@ -4,6 +4,7 @@ using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Telemetry;
@@ -138,6 +139,16 @@ public static class Program
             // and every other CreateHostBuilder test are unaffected - see the auto-update plan's
             // Phase 1 for the Install-RouterService.ps1 script that registers this service name.
             .UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")
+            // Optional operator overlay (web GUI migration plan Phase P1): appsettings.json under the
+            // install directory is re-laid to its packaged defaults on every MSI upgrade
+            // (docs/router/packaging-and-distribution.md), so a port or bind-address an operator changed
+            // there would silently revert on the next update. This file lives in the machine-shared data
+            // directory instead - the same directory ManagementAccessToken/StorageOptions already use,
+            // which an MSI upgrade never touches (see StorageOptions' remarks) - and layers over the
+            // packaged defaults; a missing file is a no-op, not a startup failure.
+            .ConfigureAppConfiguration((_, config) => config.AddJsonFile(
+                path: Path.Combine(StorageOptions.ResolveMachineSharedDirectory(), "appsettings.local.json"),
+                optional: true, reloadOnChange: true))
             .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
                 .ReadFrom.Configuration(context.Configuration)
                 .ReadFrom.Services(services)

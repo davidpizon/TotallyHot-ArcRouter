@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.Options;
+using Serilog;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -118,7 +119,11 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
                 benchmarkSyncService: _benchmarkSyncService,
                 benchmarkSyncOptions: _benchmarkSyncOptions,
                 accessToken: accessToken,
-                port: _options.Port);
+                port: _options.Port,
+                bindAddress: _options.BindAddress,
+                // Routes this inner host's own logs through the same Serilog pipeline the rest of the
+                // application uses - see McpServer's serilogLogger remarks.
+                serilogLogger: Log.Logger);
 
             await _server.StartAsync(cancellationToken).ConfigureAwait(false);
             // Log the actual bound address(es) rather than the configured port: when Port is 0 (an

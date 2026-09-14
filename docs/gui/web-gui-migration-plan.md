@@ -1,0 +1,558 @@
+# Web GUI Migration Plan
+
+> **Status: P1 shipped 2026-09-14 — P0's ADRs 0011-0014 remain proposed (pending owner review); spikes
+> S1-S7 run, see [Spike results](#p0-spike-results). Retires the Windows-only MAUI Blazor Hybrid GUI
+> (`src/TotallyHotArcRouter.Gui`, WebView2) in favor of a Blazor WebAssembly dashboard served by the
+> router itself, cross-platform, with a small Windows-only tray exe as the only remaining
+> platform-specific component.
+> **End condition:** this plan closes when Phase P11 ships (docs sweep) and the plan's Status line is
+> updated to closed. Findings after that start a new document.
+
+**Builds on:** ADR-0007 (superseded by ADR-0011 in this plan), the existing gRPC admin surface
+(`GrpcAdminClientBase`, `IAdminServiceModule`), and `TelemetryTlsCertificate`'s self-signed-cert
+generation, which becomes the local-CA leaf issuer.
+**Does not touch:** the proxy request-routing hot path (`ProxyMiddleware.InvokeAsync`) beyond the
+listener/TLS changes called out per phase; `ManagementFacade`'s public method set stays frozen per
+AGENTS.md.
+
+## Context
+
+The dashboard today is `src/TotallyHotArcRouter.Gui`, a Windows-only .NET MAUI Blazor Hybrid app (`net10.0-windows`, `UseMaui`, `BlazorWebView`/WebView2) that lives in the system tray and talks gRPC to the router on `https://localhost:5002`. That makes the whole product Windows-bound. It also carries WebView2-specific failure modes: blank dashboards, user-data-folder hacks, `SetWebViewVisible` workarounds. Its tests can't run on Linux CI either; the `windows-gui-build-and-test` job is disabled.
+
+**Goal:** the router (`src/TotallyHotArcRouter`, already `Microsoft.NET.Sdk.Web`) serves the existing Razor dashboard to any browser on a port configured in `appsettings.json`. The router and the GUI become cross-platform. The only Windows-specific piece left is a small system-tray app.
+
+**Deliverable of executing this plan:** a checked-in plan doc (`docs/gui/web-gui-migration-plan.md`, same structure as `docs/router/counterfactual-token-estimation-plan.md`), ADRs 0011–0014, and then phases P1–P11 below.
+
+**Tooling note:** CodeGraph was used for structural discovery (ProxyServer / McpServer / TrayWindowManager / MauiProgram call paths). **Serena was skipped:** the MCP connection timed out. Per ADR-0008's fallback, classification was done CodeGraph-only. This is feature work, not a smell survey, so nothing is filed to the refactoring plan.
+
+## Settled decisions (from clarifying Q&A)
+
+| # | Decision |
+|---|---|
+| D1 | **Blazor WebAssembly** (not Server). Browser → router over **gRPC-Web** on the same origin as the static files (no CORS). Existing generated gRPC clients reused via `GrpcWebHandler`. |
+| D2 | New **`WebInterface`** section in router appsettings: `Port` (default **5004**) and `BindAddress` (default loopback). **HTTPS only**, with no plain-HTTP switch. Proxy (5001) and MCP (5003) also get bind-address settings so Docker can work. |
+| D3 | **Retire port 5002.** All gRPC services move to the web port (HTTP/1.1 + HTTP/2, TLS). **Delete REST `/admin/*` and `/admin/usage/*`** (`ProviderAdminEndpoints`, `UsageAdminEndpoints`). CodeGraph shows no production callers: the GUI uses gRPC and MCP calls `ManagementFacade` in-process. 5001 keeps only the LLM proxy. 5003 keeps MCP. |
+| D4 | Auth = **loopback session cookie**. The router issues an HttpOnly, Secure, SameSite=Strict `__Host-` cookie when Host is localhost/127.0.0.1/[::1], Origin matches (or is absent for native clients), and the remote IP is loopback. Non-loopback clients (Docker) get a token login page. The tray uses the same mechanism. |
+| D5 | **Delete `management-token.txt`.** The token moves into the encrypted secret store. The existing file is imported once, so MCP client configs keep working. System Settings gets **Copy MCP token / Regenerate**. CLI `--print-management-token` for headless and Docker. |
+| D6 | **HTTPS everywhere the router listens**, using a router-generated, name-constrained local CA (permitted: localhost, 127.0.0.1, ::1). Installers add it to the OS trust store. |
+| D6a | **LLM proxy 5001 is HTTPS by default.** An **opt-in plain-HTTP listener** exists for tools that refuse custom CAs: `Proxy:PlainHttp:Enabled=false` by default, its own `Port` (default 5005), always loopback-bound. It serves **LLM proxy routes only**, never gRPC, GUI, auth or MCP. The router logs a Warning at startup when it is enabled. |
+| D6b | **Upstream `http://` provider base URLs: warn, don't block.** Non-loopback `http://` upstreams are allowed, but the router logs a Warning (static template) at startup and on save, and Governance → Providers shows an "unencrypted" badge. Loopback `http://` (local Ollama :11434, LM Studio :1234) is silent, because those servers only speak HTTP. |
+| D7 | **Tray = small separate exe** (WinForms `NotifyIcon`, `net10.0-windows`): Show Dashboard opens the default browser, Enable/Disable Routing, service-state balloon, **Install update** (the MSI apply moves here). |
+| D8 | Router cross-platform scope: runs correctly on Linux/macOS, cross-platform secret storage, **machine-wide** services (systemd system unit with a dedicated user; macOS LaunchDaemon), packages **linux-x64, linux-arm64, osx-arm64 tarballs plus a Docker image on GHCR**, GUI tests on Linux CI. |
+| D9 | WASM logging: Serilog in the browser (configured from `wwwroot/appsettings.json`) writes to the browser console. Warning+ events are forwarded over gRPC-Web into the router's Serilog. |
+| D10 | **One release, clean swap.** Phases merge to main individually (always compiling and green), but nothing is tagged until P10. |
+| D11 | Web GUI update panel: status and check only. On Windows it points to the tray's Install update; elsewhere it links to the release. |
+
+**Refinements from design review, adopted:**
+- The tray and scripts find the URL through a **discovery file** the router writes at startup (effective URL plus CA thumbprint), not by parsing `appsettings.json`. Env overrides and MSI upgrades make that file unreliable.
+- An **operator config overlay** in the data directory survives MSI upgrades. MajorUpgrade re-lays `Program Files\...\appsettings.json`, so a changed port would otherwise be lost.
+- A **local CA rather than a trusted leaf**, so leaf renewal needs no re-trust.
+
+## Plain-HTTP inventory (end state)
+
+| Surface | Today | End state |
+|---|---|---|
+| Web GUI + gRPC-Web + native gRPC (5004) | — | HTTPS only |
+| Native gRPC (5002) | HTTPS | Removed |
+| MCP (5003) | HTTPS | HTTPS, same trusted leaf |
+| REST `/admin/*` (5001) | HTTP | **Deleted** |
+| LLM proxy `/v1/*`, `/api/*` (5001) | HTTP | HTTPS |
+| Opt-in legacy-tool listener (5005) | — | Plain HTTP, **off by default**, loopback-only, LLM routes only |
+| Router → cloud providers, GitHub, model downloads | HTTPS | HTTPS |
+| Router → local Ollama/LM Studio | HTTP (loopback) | Unchanged; those servers can't do TLS |
+| Router → remote `http://` upstream | Allowed silently | Allowed, with Warning log and GUI badge |
+
+"HTTP" as a *protocol* stays: gRPC runs over HTTP/2, and gRPC-Web runs over HTTP/1.1 or HTTP/2. Everything above is about removing *unencrypted* HTTP.
+
+## Ground rules (every phase)
+
+- Zero warnings/errors (`TreatWarningsAsErrors`), accurate XML docs, Serilog static templates, ≥80% coverage per assembly, unit tests ≤5 s, Mermaid-only diagrams.
+- xUnit v3: run the **built test executables**, not `dotnet test`; use `dotnet-coverage` for coverage.
+- Before touching `ProxyServer`, `ProxyMiddleware`, `ManagementFacade` or `RequestInterceptor`: re-run `codegraph_explore` and list production callers. Never change `ManagementFacade`'s public method set. Any `ProxyServer.Configure` change runs the golden-path proxy smoke.
+- New security-boundary, transport or public-surface changes need their ADR accepted first.
+- Each phase updates the docs it invalidates. Record deviations in the plan doc's "Deviations" section.
+
+## Phase map
+
+```mermaid
+flowchart LR
+  P0[P0 ADRs + spikes] --> P1[P1 Hosting seams]
+  P1 --> P2[P2 Web listener + gRPC-Web + port scoping]
+  P1 --> P3[P3 X-plat paths + secret backend]
+  P2 --> P4[P4 Auth]
+  P3 --> P4
+  P4 --> P5[P5 GUI libs + Razor class library]
+  P5 --> P6[P6 WASM host]
+  P4 --> P7[P7 Local CA + OS trust]
+  P4 --> P8[P8 Tray exe]
+  P6 --> P9[P9 Windows cutover]
+  P7 --> P9
+  P8 --> P9
+  P9 --> P10[P10 X-plat runtime + packaging]
+  P10 --> P11[P11 Docs close-out]
+```
+
+---
+
+## P0 — Decisions and spikes
+
+**Deliverables**
+- `docs/gui/web-gui-migration-plan.md` (status banner with end condition: "closed when P11 ships").
+- ADRs (use the `adr-writer` skill; `docs/adr/adr-template.md`):
+  - **0011** — WASM GUI served by the router on a configurable web port. Covers gRPC-Web, retiring 5002, deleting REST `/admin`, port scoping, HTTPS-default proxy with the opt-in plain-HTTP listener, and the upstream-`http://` warning policy. Supersedes **0007**, which is already stale: `ProviderAdminClient` is on gRPC.
+  - **0012** — Loopback session auth, token login, token moved to the secret store, and Copy/Regenerate. This is an explicit carve-out from secrets-at-rest §4, "the management surface is write-only". Threat model: the boundary stays "any local account", the same as today's Users-readable token file. It must name loopback tunnels (ngrok, `tailscale serve`, VS Code port forwarding, WSL mirrored networking) and add `WebInterface:TrustLoopback=false` for them.
+  - **0013** — Name-constrained local CA and OS trust.
+  - **0014** — Cross-platform service layout: data dirs, dedicated service user, DPAPI vs ASP.NET Data Protection, stated honestly (off Windows, protection comes down to file permissions).
+- Spikes, with pass/fail recorded in the plan doc:
+  - **S1 Native runtime identifiers (RIDs).** Self-contained publish plus smoke on linux-x64, linux-arm64 (`ubuntu-24.04-arm`) and osx-arm64 runners, and inside the candidate Docker base image. Exercise OnnxRuntime (BGE embedding), OnnxRuntimeGenAI (one generated token), SQLitePCLRaw 3.0.5, FastBertTokenizer and ML.Tokenizers. If a native library is missing, the voter must abstain cleanly.
+  - **S2 Static web assets through the inner host.** Router references the WASM project. Check for CS0433 duplicates of the `*.Contract` proto types (try `ReferenceOutputAssembly=false`), Development serving, publish-layout `MapStaticAssets`, and a real Windows service with cwd = System32.
+  - **S3 gRPC-Web streaming.** `StreamEvents` plus one long server stream in Chrome, Edge, Firefox and Safari. Messages must arrive incrementally. Tab close must cancel the server call, and the broadcaster's subscriber count must return to 0. Also confirm browsers negotiate HTTP/2 via ALPN on the TLS web port (so the HTTP/1.1 six-connection limit doesn't apply), including on macOS Kestrel, and cover sleep/resume.
+  - **S4 WASM trimming.** `dotnet publish -c Release` with Grpc.Net.Client.Web, Google.Protobuf and Serilog (Settings.Configuration + BrowserConsole) under TreatWarningsAsErrors. List every IL2xxx warning and a containment strategy (root assemblies, not global suppression).
+  - **S5 Trust matrix.** Windows LocalMachine\Root (Edge, Chrome, Firefox enterprise roots); Ubuntu `update-ca-certificates` (Chrome NSS, Firefox deb/snap policies); Fedora `trust anchor`; macOS System keychain (Safari, Chrome, Firefox). Name constraints must be honored everywhere.
+  - **S6 Cookies.** `__Host-`/Secure/SameSite=Strict behavior on `https://localhost:5004` across browsers.
+  - **S7 LLM-client CA trust.** For each client the docs name (Claude Code/Node via `NODE_EXTRA_CA_CERTS` and `--use-system-ca`; OpenAI/Anthropic Python SDKs via `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE`; curl; .NET; Rust/Go CLIs), verify an HTTPS `/v1/chat/completions` works against a local-CA leaf. Also verify Ollama-API clients accept an `https://` base URL. Clients that can't are the documented users of the opt-in plain-HTTP listener.
+
+**Exit:** ADRs Proposed, spike results recorded, the owner accepts ADRs 0011–0014.
+
+### P0 spike results
+
+Run 2026-09-14. Serena MCP failed to connect (`CONNECT_TIMEOUT`, same as the earlier research pass) —
+findings below are CodeGraph-plus-direct-verification only, per ADR-0008's fallback. Two spikes (S2,
+S4) were actually **executed** on this machine with real toolchains; the rest need infrastructure this
+session doesn't have (other OS/arch runners, multiple real browsers, a live server) and are marked
+**research** — evidence-based, but not measured. Do not read a "research" result as equivalent to a
+"executed" one; re-verify research items against the real toolchain before relying on them past P0.
+
+| Spike | Result | Method |
+|---|---|---|
+| S1 Native RIDs | **Research — pass** | NuGet cache inspection |
+| S2 Duplicate proto types | **Executed — confirmed risk, mitigation verified** | Scratch build |
+| S3 gRPC-Web streaming | **Deferred to P2/P6** | n/a — no server exists yet |
+| S4 WASM trimming | **Executed — pass** | Real publish, wasm-tools workload |
+| S5 OS/browser trust matrix | **Research — partial pass, 2 real gaps found** | Package inspection + search |
+| S6 Cookies on localhost | **Research — pass (well-established browser behavior)** | Not executed |
+| S7 LLM-client CA trust | **Deferred to P7** | n/a — no CA exists yet |
+
+**S1 — Native RIDs.** Inspected the actual `.nupkg` contents restored in this repo's NuGet cache rather
+than publishing on real arm64 hardware (not available here). `Microsoft.ML.OnnxRuntime` 1.30.0 and
+`Microsoft.ML.OnnxRuntimeGenAI` 0.16.0 both ship `runtimes/{linux-arm64,linux-x64,osx-arm64,win-x64,win-arm64}`
+native assets. `SQLitePCLRaw.bundle_e_sqlite3` 3.0.5 pulls in `SQLitePCLRaw.lib.e_sqlite3` 2.1.12, which
+ships `linux-arm64`, `linux-musl-arm64`, and `osx-arm64` (plus many more) native assets — the "musl"
+variant matters if the chosen Docker base is Alpine rather than Debian/Ubuntu; pin the base image
+accordingly. `FastBertTokenizer` and `Microsoft.ML.Tokenizers` are pure-managed (no `runtimes/` folder
+at all), so they carry no RID risk. **Verdict: no missing-native-asset blocker found**, but this is
+package-metadata evidence only — S1 must be re-run as an actual self-contained publish-and-smoke on
+real `ubuntu-24.04-arm`/`macos-14` runners (and inside the chosen Docker base) before P10 ships, per the
+plan's original spike definition.
+
+**S2 — Duplicate proto types (executed).** Reproduced the exact CS0433 collision the design review
+flagged: built a scratch project referencing both `TotallyHotArcRouter.csproj` (compiles
+`telemetry.proto` with `GrpcServices="Server"`) and `TotallyHotArcRouter.Gui.Telemetry.csproj`
+(compiles the same file with `GrpcServices="Client"`) — both emit
+`TotallyHot.ArcRouter.Telemetry.Contract.TelemetryEvent` into the same namespace in two different
+assemblies. Any unqualified use of that type name failed with
+`error CS0433: The type 'TelemetryEvent' exists in both 'TotallyHotArcRouter.Gui.Telemetry, ...' and
+'TotallyHotArcRouter, ...'`. Since the router's own gRPC service implementations already use these
+Contract types unqualified throughout, this would be a build-breaking, repo-wide collision the moment
+the router transitively references the client-codegen assembly (router → `Gui.Web` → `Gui.Telemetry`/`Gui.Admin`).
+**Confirmed mitigation:** adding `ReferenceOutputAssembly="false"` to the `Gui.Web` project reference
+eliminates the collision — the referenced assembly no longer flows into the router's compilation
+closure, while the reference still orders the build so `Gui.Web`'s publish output exists before the
+router needs to serve it. This is the standard ASP.NET "Hosted Blazor WebAssembly" pattern, now
+validated against this repo's actual generated types rather than assumed. **P6's router-references-Gui.Web
+step must use `ReferenceOutputAssembly="false"`**, or reference the published output directory directly
+instead of a live `ProjectReference`, if `ReferenceOutputAssembly="false"` turns out to interfere with
+the static-web-assets manifest flow (not yet tested — that's still open work for P6, not fully closed by
+this spike).
+
+**S3 — gRPC-Web streaming.** Deferred: exercising this for real requires a running gRPC-Web server and
+several real browsers, which means standing up P1/P2's listener first. Not attempted as a pre-code
+spike; folded into P2's exit criteria (already specified) instead of being treated as separate P0 work.
+
+**S4 — WASM trimming (executed).** Scaffolded a `Microsoft.NET.Sdk.BlazorWebAssembly` project (net10.0)
+with `Grpc.Net.Client`, `Grpc.Net.Client.Web`, `Google.Protobuf`, `Serilog`, `Serilog.Settings.Configuration`,
+and `Serilog.Sinks.BrowserConsole` (confirmed this package exists on NuGet — 8.0.0, resolves cleanly for
+net10.0), `TreatWarningsAsErrors=true`. `Program.cs` exercised: `LoggerConfiguration.ReadFrom.Configuration`
++ `WriteTo.BrowserConsole()`, a real generated protobuf message round-trip (`Google.Protobuf.WellKnownTypes.Timestamp.ToByteArray()`/`Parser.ParseFrom`),
+and `GrpcChannel.ForAddress(..., new GrpcChannelOptions { HttpHandler = new GrpcWebHandler(new HttpClientHandler()) })`.
+First publish attempt ran without the `wasm-tools` workload installed and produced **no trim analysis at
+all** (`dotnet publish` printed "we strongly recommend using `wasm-tools` workload" and skipped full IL
+linking) — a false-negative trap worth calling out explicitly, since a CI runner without that workload
+would silently report zero warnings without actually having checked. Installed `wasm-tools`
+(`dotnet workload install wasm-tools`) on this machine, republished with the real Emscripten/AOT
+toolchain and the IL linker — **zero `IL2xxx` warnings** across all listed dependencies.
+**Verdict: pass**, with the caveat that CI must have `wasm-tools` installed (`dotnet workload restore`
+or an explicit `dotnet workload install wasm-tools` step) or this exact false-negative will recur; add
+an explicit assertion to P6's CI step that trim analysis actually ran (e.g. grep the build log for
+"Optimizing assemblies" appearing after the linker step, not the pre-workload short-circuit message).
+
+**S5 — OS/browser trust matrix (research).** Two concrete gaps confirmed via search, refining the
+"documented per-user fallback" risk into specific, actionable steps rather than a vague caveat:
+- **Firefox's `ImportEnterpriseRoots` policy — Windows and macOS only, not Linux** (tracked upstream as
+  Bugzilla 1600509). `update-ca-certificates` trusting the CA machine-wide does **not** make Firefox on
+  Linux trust it. The documented workaround is `p11-kit-trust.so` via Firefox's `SecurityDevices`
+  policy, or per-profile `certutil -A` into Firefox's own NSS profile database. This must be a scripted
+  step in `packaging/linux/install.sh` (P10) and named explicitly in `docs/router/client-tls-setup.md`
+  (P7), not left as "should work."
+- **Chrome/Chromium on Linux uses its own NSS Shared DB** (`$HOME/.pki/nssdb`), not the system
+  `/etc/ssl/certs` store `update-ca-certificates` maintains. Trusting the CA system-wide does not
+  automatically trust it for Chrome either; it needs `certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n
+  <name> -i <ca.pem>` per user profile. Same action item as Firefox: script it, document it.
+- Windows `LocalMachine\Root` and macOS System keychain trust (Edge/Chrome/Safari on those platforms)
+  were not independently re-verified here; existing knowledge treats both as reliably honored by every
+  browser on those platforms via the OS trust store, with no known per-browser carve-out comparable to
+  the two Linux gaps above.
+- Name-constraint (`pathLen:0`, restricted to `localhost`/`127.0.0.1`/`::1`) enforcement by these trust
+  stores was not independently re-verified; this remains open for P7's actual CA implementation and its
+  unit tests, not closed by this research pass.
+
+**S6 — Cookies on `https://localhost` (research).** Not executed against a live server. Relying on
+well-established, stable browser platform behavior: `localhost` (and its loopback IPs) is treated as a
+[secure context](https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy) by Chrome,
+Firefox, and Safari regardless of scheme, and a `Secure` cookie is accepted over both `http://localhost`
+and `https://localhost` in all three. `__Host-` prefix cookies require `Secure`, `Path=/`, and no
+`Domain` attribute — all satisfiable by the design in ADR-0012. This is treated as a low-risk item; S6
+should still get a real cross-browser check during P4's implementation (it's cheap once the auth
+endpoint exists) rather than resting solely on this research pass for anything security-critical.
+
+**S7 — LLM-client CA trust (deferred to P7).** No CA exists yet to test against — this is inherently
+gated on P7's CA implementation. Retained in P7's deliverables list as originally planned; not
+attempted here. `client-tls-setup.md`'s content depends on P7's actual CLI flags (`--export-ca`), so
+drafting it now would likely go stale before it's used.
+
+## P1 — Router hosting seams (no user-visible change)
+
+**Deliverables**
+- `WebInterfaceOptions` (Port 5004, BindAddress, AllowedHosts, TrustLoopback). `ProxyListenerOptions` (Port 5001, BindAddress, `PlainHttp { Enabled=false, Port=5005 }`). MCP bind address. Options validation, including that the plain-HTTP port can't collide with any TLS port and can't be bound to a non-loopback address.
+- Replace `ProxyServer`'s positional `port`/`grpcPort` constructor ints with a listener-options object. Update `ProxyHostedService`, `ProxyServiceCollectionExtensions.AddProxyHost`, and the test helpers (`ProxyServerTests`, `ProviderAdminEndpointsTests`, `UsageAdminEndpointsTests`, `ProxyHostedServiceTests`).
+- Inner hosts (`ProxyServer`, `McpServer`) get `UseContentRoot(AppContext.BaseDirectory)` and an explicit ApplicationName. Otherwise a Windows service resolves web root from System32. They also get the outer `ILoggerFactory` via `ProxyServerDependencies`, so inner-host logs reach Serilog.
+- Optional operator overlay `appsettings.local.json` in the data dir. `WebInterfaceDiscoveryFile` writer (effective URL, CA thumbprint), machine-readable.
+
+**Key files:** `Proxy/ProxyServer.cs`, `Hosting/ProxyHostedService.cs`, `Proxy/ProxyServiceCollectionExtensions.cs`, `Proxy/ProxyServerDependencies.cs`, `Mcp/McpServer.cs`, `Mcp/McpOptions.cs`, `Program.cs`.
+
+**Exit:** all suites green. A test proves web root is independent of cwd. Golden-path smoke passes.
+
+### P1 status: shipped 2026-09-14
+
+Implemented as designed, with one deliberate scope trim (see Deviations). New/changed files:
+`Proxy/ProxyListenerOptions.cs`, `Proxy/WebInterfaceOptions.cs`, `Proxy/ProxyListenerOptionsValidator.cs`,
+`Proxy/WebInterfaceDiscoveryFile.cs`, `Hosting/KestrelBindAddress.cs`, plus edits to `ProxyServer.cs`,
+`ProxyServerDependencies.cs`, `ProxyServiceCollectionExtensions.cs`, `Hosting/ProxyHostedService.cs`,
+`Mcp/McpServer.cs`, `Mcp/McpHostedService.cs`, `Mcp/McpOptions.cs`, `Program.cs`, and the four listener
+tests the plan named plus three new test files
+(`ProxyListenerOptionsValidatorTests`, `WebInterfaceDiscoveryFileTests`, `KestrelBindAddressTests`).
+
+**Deviations from the plan as written:**
+- **`WebInterfaceDiscoveryFile` is built and tested but not yet called from `ProxyServer`/`Program`.**
+  It has nothing true to write until Phase P2 gives the web port a real address and Phase P7 gives it a
+  real CA thumbprint - writing placeholder/null fields now would be a file a consumer could mistake for
+  live data. The writer/reader and their tests exist so P2 only has to add one call site.
+- **Serilog forwarding is `ProxyServerDependencies.SerilogLogger` (a `Serilog.ILogger`, not an
+  `ILoggerFactory`).** `ILoggerFactory` has no supported way to "adopt" another host's already-built
+  provider set short of writing a forwarding `ILoggerProvider` by hand; passing the same `Serilog.ILogger`
+  both inner hosts already reach for elsewhere in the codebase (`Log.Logger`) into a
+  `SerilogLoggerProvider` accomplishes the plan's actual goal - inner-host logs reach the same Serilog
+  sinks - with less new code, and is still handed across explicitly at the DI boundary rather than
+  reached for as an ambient static inside `ProxyServer`/`McpServer` themselves.
+- **`GrpcPort` (not just `Port`) moved into `ProxyListenerOptions`**, since the plan's own instruction
+  ("replace the positional `port`/`grpcPort` constructor ints with a listener-options object") requires
+  somewhere for both to live; it keeps its own `BindAddress` fixed to loopback rather than gaining one,
+  since it is being retired in P9 rather than extended.
+
+**Verified:**
+- Full router test suite: 2800 tests (2800 pass; the 1 pre-existing `[Skip]` is unrelated -
+  `Integration testing disabled`), 0 failures, 0 errors, `-parallelMode collections`.
+- `dotnet build src/TotallyHotArcRouter.slnx -c Release`: 0 warnings, 0 errors (includes the MAUI GUI,
+  unaffected).
+- Cobertura coverage: `TotallyHotArcRouter` assembly 83.4% (≥80% gate); every new file individually
+  ≥89% except `KestrelBindAddress.cs` at 73.5% (the fixed-port "any"/literal-IP branches are exercised
+  directly by `KestrelBindAddressTests`, which call `KestrelServerOptions.Listen`/etc. without a live
+  socket bind, rather than through a full `ProxyServer` integration test for every mode).
+- **Manual golden-path smoke** (the built `TotallyHotArcRouter.exe`, real `appsettings.json`, no mocks):
+  started clean, bound 5001/5002/5003 dual-stack (IPv4 loopback + IPv6 `[::1]`) exactly as before,
+  `curl http://127.0.0.1:5001/v1/models` → `200`, proxy middleware logged the request, MCP reported
+  `https://localhost:5003`, clean shutdown. Not exercised: a real upstream LLM call (needs a live
+  provider key) and streaming - deferred to a phase that actually changes proxy request handling; P1
+  changes hosting/listener plumbing only.
+
+## P2 — Web listener, gRPC-Web, port scoping (5002 still live, token auth only)
+
+**Deliverables**
+- Web-port Kestrel listener: Http1AndHttp2, TLS with the current `TelemetryTlsCertificate` for now.
+- `UseGrpcWeb()` + `EnableGrpcWeb()`.
+- **Delete REST `/admin`:** `Proxy/Management/ProviderAdminEndpoints.cs`, `UsageAdminEndpoints.cs`, their `ProxyServer.Configure` mapping, and `ProviderAdminEndpointsTests`/`UsageAdminEndpointsTests`. First move any assertion that isn't already covered to `ProviderAdminGrpcServiceTests`/`UsageAdminGrpcServiceTests`, so `ManagementFacade` coverage doesn't drop. `ManagementFacade`'s public method set is unchanged.
+- **Port scoping by `HttpContext.Connection.LocalPort`, not `RequireHost`**, which matches the Host header and can be spoofed:
+  - gRPC and GUI endpoints only on the web port (plus native gRPC on 5002 until P9).
+  - The proxy terminal `app.Run(proxyMiddleware…)` only on the proxy port(s): 5001, plus 5005 when enabled.
+  - This must land together with gRPC-Web, or gRPC-Web becomes reachable over cleartext on 5001.
+- The opt-in plain-HTTP proxy listener (off by default) with its startup Warning. 5001 itself stays plain HTTP until P7 switches it to TLS, so tools keep working throughout.
+- Web-port security headers: CSP `script-src 'self' 'wasm-unsafe-eval'; frame-ancestors 'none'`, nosniff, no-cache on index.html. HTTP/2 keep-alive pings so dead browser streams get reaped.
+
+**Exit (integration tests on ephemeral ports):**
+- gRPC-Web unary call plus ≥2 `StreamEvents` messages on the web port.
+- gRPC-Web to 5001 or 5005 does not reach a service.
+- `/admin/providers` returns 404 on every port.
+- `/v1/chat/completions` on the web port returns 404.
+- The opt-in listener, when enabled, serves `/v1/models` and 404s everything else.
+- Native gRPC on 5002 is unchanged.
+- Golden-path smoke passes.
+
+## P3 — Cross-platform data paths and secret backend (must precede token relocation)
+
+**Deliverables**
+- `AppDataPaths` resolver:
+  - Windows: `%ProgramData%\TotallyHotArcRouter`
+  - Linux: `$STATE_DIRECTORY` or `/var/lib/totallyhot-arcrouter`
+  - macOS: `/Library/Application Support/TotallyHotArcRouter`
+  - Dev fallback: per-user
+- Adopt the resolver in:
+  - `ManagementAccessToken`
+  - `Router/RoutingGateStore.cs`: both use `CommonApplicationData`, which is `/usr/share` on Linux
+  - `PriceCatalog/StorageOptions.cs`: it currently maps `%PROGRAMDATA%` to per-user off Windows
+  - `Models/EmbeddingOptions.cs` and `LlmRouterOptions.cs`: `%LOCALAPPDATA%` tokens
+  - `ProtectedSecretStore`
+  - `TelemetryTlsCertificate`
+- `ProtectedSecretStore` gets a pluggable protector:
+  - Windows keeps DPAPI; the file format is unchanged.
+  - Elsewhere, ASP.NET Data Protection with `PersistKeysToFileSystem(<data>/keys)`: key dir mode 0700, fixed application name, versioned `secrets.dat` header.
+  - Refuse to write secrets if the key dir is missing or too permissive.
+- Remove the plaintext cert-password fallback in `TelemetryTlsCertificate`. Reuse `SecureFile.cs` for permissions.
+
+**Exit:**
+- Linux CI: a provider credential save/read round-trips through `ManagementFacade`.
+- Windows fixture: an existing DPAPI `secrets.dat` still reads.
+- Key ring survives a restart.
+
+## P4 — Auth (ADR-0012)
+
+**Deliverables**
+- Rotatable `IManagementTokenProvider` shared by the outer host (MCP) and the inner host. It replaces the captured token strings in:
+  - `ProxyServiceCollectionExtensions.cs:302`
+  - `McpHostedService.cs:108`
+  - `TelemetryAuthInterceptor`
+  - `McpBearerAuthMiddleware`
+
+  The REST filters are already gone as of P2.
+- Session endpoints on the web port:
+  - `POST /auth/session`: loopback issuance, 204, no body.
+  - `POST /auth/login`: token login, rate-limited.
+  - `POST /auth/logout`.
+  - Tickets are HMAC-signed with an in-memory key plus a token generation, so no key ring is needed. A restart means silent re-issue on loopback.
+- Per-request guard:
+  - Host allowlist (DNS-rebinding defense).
+  - Origin equals the web origin, or is absent with no `Sec-Fetch-Site`.
+  - Loopback remote IP, with IPv4-mapped IPv6 normalized.
+  - Never enable ForwardedHeaders.
+- `TelemetryAuthInterceptor`: cookie or token, on the web port only (the only port gRPC is mapped on after P2).
+
+**Exit (test matrix):**
+- `Host: attacker.test` → 403
+- Foreign Origin → 403
+- Non-loopback client → login required
+- `::ffff:127.0.0.1` → loopback
+- Cookie or token on 5001/5005 → no management surface reachable
+- Token rotation invalidates token-login sessions
+- Login throttling works
+
+## P5 — GUI library hygiene and Razor class library (MAUI still builds and ships)
+
+**P5a:**
+- Move browser-unsafe code into a native-only library (later referenced by the MAUI app, then the tray):
+  - the `TelemetryChannelFactory` cert callback
+  - `TelemetryAuthClientInterceptor`
+  - `Gui.Admin/ManagementTokenReader`
+  - `Gui.Telemetry/MsiUpdateApplier`
+  - `LiveDataStore.WriteDiagnosticLog` (a leftover debug file writer, deleted)
+- `GrpcAdminClientBase`, `ProviderAdminClient`, `UsageQueryClient` and all stores take an injected `CallInvoker` from a new `IRouterChannelProvider`. This replaces the ~15 per-client `GrpcChannel`s.
+- Introduce `IClipboardService` in place of `Clipboard.Default` at `Components/ConsoleTab.razor:141`.
+- Remove the `PointerEventArgs` alias workaround in `PriceSourcesAdmin.razor.cs`.
+
+**P5b:**
+- New `TotallyHotArcRouter.Gui.Components` project (`Microsoft.NET.Sdk.Razor`, `net10.0`, `<SupportedPlatform Include="browser"/>`, CA1416 as error, `GenerateDocumentationFile`). It holds `Components/*`, `Services/*` stores, `Models`, `Utils`, and `wwwroot` (css, js, vendored echarts).
+- Retarget `Gui.Tests` to `net10.0` against it. Add it to the ubuntu job and the coverage gate in `.github/workflows/dotnet-ci.yml`, and to both `.slnx` files.
+- Add the new project to AGENTS.md's doc-enforcement list.
+
+**Exit:** MAUI app behavior unchanged. `Gui.Components` ≥80% on Linux. Qodana green.
+
+## P6 — WASM host served by the router
+
+**Deliverables**
+- `TotallyHotArcRouter.Gui.Web` (`Microsoft.NET.Sdk.BlazorWebAssembly`):
+  - `Program.cs` excluded from coverage with a reason
+  - `index.html` with `blazor.webassembly.js` and asset fingerprinting
+  - singleton stores; per-tab state is naturally isolated in WASM
+  - gRPC-Web channel on `NavigationManager.BaseUri`
+  - session bootstrap: on Unauthenticated, call `/auth/session` and retry, otherwise show a login view
+  - stream reconnect with backoff
+  - version-mismatch banner against the router version
+  - browser `IClipboardService` via `navigator.clipboard`
+- Serilog in WASM (explicit `ConfigurationReaderOptions` sink assemblies) → BrowserConsole, plus a forwarding sink to a new `ClientLogService.Report` RPC:
+  - batched, size-capped, rate-limited, recursion-guarded
+  - the server logs with a static template, e.g. `"Browser GUI reported {ClientLevel}: {ClientMessage}"`
+- Drop the telemetry-address setting from `GuiSettingsStore` (same origin now).
+- `UpdateStore`: remove apply and `Environment.Exit`; Windows shows "Install from the tray", elsewhere a release link.
+- Router serves framework files, `MapStaticAssets`, and `MapFallbackToFile("index.html")` on the web port only. Router's `ProjectReference` to `Gui.Web` sets `ReferenceOutputAssembly="false"` — **confirmed by spike S2** to be required, not optional: without it, every unqualified use of a `*.Contract` proto type already present throughout the router's own gRPC services becomes a build-breaking CS0433 (`TelemetryEvent`/etc. exist in both assemblies). Verify the static-web-assets manifest still flows correctly with that flag set (S2 did not test this half); if it doesn't, fall back to copying `Gui.Web`'s publish output into the router's wwwroot via an MSBuild target instead of a live reference. `UseWebAssemblyDebugging` in Development.
+
+**Exit:**
+- CI `dotnet publish` of Gui.Web with zero trim warnings.
+- Playwright (.NET; Chromium plus Firefox) smoke job:
+  - published router on a temp data dir
+  - dashboard loads
+  - a synthetic telemetry event renders
+  - one RPC per admin service succeeds (catches trimmed-protobuf failures)
+  - version banner shows when build numbers differ
+
+## P7 — Local CA, OS trust, HTTPS on every listener (5001/5003/5004)
+
+**Deliverables**
+- **5001 switches to TLS** (Http1AndHttp2) with the shared leaf. Update the integration fixtures (`ProxyInterceptionTests`, `ProxyServerTests`, golden-path smoke) to trust the test CA through their `HttpClientHandler`, not the plain listener. Re-run CodeGraph on `ProxyMiddleware` first.
+- **Upstream `http://` warning (D6b):**
+  - a pure helper deciding "non-loopback http" (reuse `ProviderUrlBuilder` host parsing)
+  - a static-template Warning at startup, in `StartupHealthCheckHostedService`, and on upsert via `ManagementFacade`'s existing result path, with no new public method
+  - an `unencrypted_upstream` flag on the provider wire model in `admin.proto`
+  - a badge in `ProvidersAdmin.razor`
+- New doc `docs/router/client-tls-setup.md`: per-tool CA setup from S7, `--export-ca`, and when to enable the plain-HTTP listener.
+- Router CLI flags `--install-certificate`, `--uninstall-certificate`, `--export-ca`, stripped via the existing `Program.ExtractFlag`.
+- Name-constrained CA (pathLen 0) with its key in the secret store. Leaf auto-renewal via Kestrel `ServerCertificateSelector` hot swap.
+- MSI deferred custom action runs the router exe with the flag as LocalSystem, the same DPAPI account as the service, plus rollback/uninstall. Linux/macOS scripts run the flag as the service user (`sudo -u arcrouter`). Firefox enterprise-roots policy.
+- MCP 5003 uses the same leaf.
+- The discovery file carries the CA thumbprint. The native trust callback in `TelemetryChannelFactory` becomes thumbprint-pinned until trust is proven, then is deleted in P9.
+
+**Exit:**
+- Unit tests for CA extensions and renewal, and the upstream-http classifier (loopback v4/v6/`localhost` vs remote).
+- Windows CI job builds the MSI and installs it.
+  - `curl https://localhost:5004` and `curl https://localhost:5001/v1/models` succeed **without `-k`**.
+  - `curl http://localhost:5001` fails.
+  - Uninstall removes the root.
+- Golden-path smoke passes over HTTPS.
+
+## P8 — Tray exe (parallel with P6 after P4)
+
+**Deliverables**
+- **`TotallyHotArcRouter.Tray.Core`** (`net10.0`, Linux-testable):
+  - router status → label/balloon mapping ported from `Platforms/Windows/TrayWindowManager.cs` (`BuildRouterStatusLabel`, balloon messages)
+  - `RoutingGateStore` logic
+  - discovery-file reader
+  - cookie session handler
+  - update-apply orchestration reusing `MsiUpdateApplier`
+- **`TotallyHotArcRouter.Tray`** (`net10.0-windows`, WinForms, `[ExcludeFromCodeCoverage]` shell):
+  - `NotifyIcon` + `ContextMenuStrip`: status line, Show Dashboard (`Process.Start` default browser), Enable/Disable Routing, Install update, Exit
+  - `ServiceController("TotallyHotArcRouter")` state
+  - single instance per session (`Local\` mutex)
+  - `appicon.ico`
+  - native gRPC over HTTP/2 to the web port with a `CookieContainer`
+- Confirm Qodana's Linux container builds the WinForms project with `EnableWindowsTargeting`; otherwise exclude only the shell project.
+
+**Exit:** Tray.Core ≥80%. Manual script run: toggle routing, stop service → balloon, Install update → UAC → upgrade.
+
+## P9 — Windows cutover
+
+**Deliverables**
+- **Installer** (`src/TotallyHotArcRouter.Installer/Package.wxs`, `.wixproj`, `scripts/build-installer.ps1`):
+  - replace the `GuiFiles`/`GuiExeComponent`/`GuiAutoStartComponent` components with Tray components (HKLM Run value, Start Menu shortcut)
+  - add an "Open Dashboard" URL shortcut
+  - `util:CloseApplication` for running tray instances
+  - add the P7 cert custom action
+  - MajorUpgrade already removes the old GUI folder and Run key; per-user WebView2/gui-settings leftovers are documented, not cleaned
+- **Delete MAUI:**
+  - `TotallyHotArcRouter.Gui` host files: `MauiProgram.cs`, `App.cs`, `MainPage.cs`, `Platforms/`, `WebViewUserData.cs`, `GuiLogging.cs`, GUI `appsettings.json`, `Resources/`
+  - their tests
+  - the disabled `windows-gui-build-and-test` job
+  - the `maui-windows` workload in `release.yml`
+  - Gui/Gui.Tests exclusions from `TotallyHotArcRouter.Qodana.slnx` (both solutions now match)
+- **Retire 5002:** remove `ProxyServer.DefaultGrpcPort`, the `grpcPort` parameters, `TelemetryChannelFactory.DefaultServerAddress`, and the remaining trust callback.
+- **Token relocation:**
+  - import `management-token.txt` into the secret store, then delete the file
+  - new dedicated `ManagementTokenAdminGrpcService` (Get/Regenerate); not a `ManagementFacade` method
+  - System Settings **Copy MCP token / Regenerate** row inside the existing `SettingsModal` (confirm dialog via `DialogShell`)
+  - CLI `--print-management-token`
+- `Update/GitHubReleaseCheckClient.cs`: platform-aware asset selection. Keep exactly one `.msi` and a `checksums.txt` line per asset. Note that release `1.0.0` has no assets and no `v` tag, so there is no installed MSI updater base to stay compatible with.
+
+**Release notes (breaking):** tools must change `http://localhost:5001` to `https://localhost:5001` (plus CA setup per `client-tls-setup.md`), or enable the plain-HTTP listener. REST `/admin` is gone; use MCP or gRPC.
+
+**Exit (clean Windows VM):**
+1. Install a locally built MAUI-era MSI.
+2. Upgrade with the new MSI.
+3. Old GUI folder and Run key are gone.
+4. Tray starts at logon.
+5. An MCP client with the old token still works.
+6. Dashboard opens with no certificate warning in Edge, Chrome and Firefox.
+7. Routing toggle works from the tray.
+
+## P10 — Cross-platform runtime and packaging
+
+**Deliverables**
+- `UseSystemd()` next to `UseWindowsService()` in `Program.cs`.
+- Serilog file path set per platform: env-expanded, supplied by the unit, plist or MSI. Replace `C:\\Logs\\ArcRouter` in `appsettings.json`.
+- `packaging/linux/`:
+  - systemd unit: dedicated `arcrouter` user, `StateDirectory=`, `LogsDirectory=`, `ProtectSystem=strict`, `NoNewPrivileges`
+  - `install.sh`/`uninstall.sh`: user creation, the cert flag, `update-ca-certificates`
+- `packaging/macos/`: LaunchDaemon plist, `install.sh` (dedicated user, quarantine `xattr` removal for the unsigned build, System keychain trust).
+- `src/TotallyHotArcRouter/Dockerfile`:
+  - non-root user
+  - volumes for data and the model cache
+  - `WebInterface__BindAddress=0.0.0.0` plus proxy/MCP bind env vars. The plain-HTTP listener stays loopback-only, so it's unusable from outside a container by design.
+  - docs: `-p 127.0.0.1:5001:5001 -p 127.0.0.1:5004:5004`, `--export-ca`, token login via `docker exec … --print-management-token`
+  - replace or remove the stale Docker leftovers in the csproj and `launchSettings.json`
+- `release.yml` matrix:
+  - win MSI, linux-x64/linux-arm64/osx-arm64 self-contained tar.gz, a single `checksums.txt`
+  - buildx multi-arch image to `ghcr.io/davidpizon/totallyhot-arcrouter:<version>` (`packages: write`)
+  - `promote.yml` validates all assets and tags the image `latest`
+- Router `Service` publish profile gains the non-Windows RIDs.
+
+**Exit:** release dry run on a fork. Smoke on each runner and in the container: service starts, dashboard reachable over trusted HTTPS, credential save works, secrets survive a restart.
+
+## P11 — Docs close-out
+
+Mark ADRs 0011–0014 Accepted and 0007 Superseded. Close the plan status. Update:
+- `README.md`: stack, license exception text for WebView2/Windows App SDK, plus `LICENSE.exceptions.md` and `THIRD-PARTY-NOTICES.md`
+- `src/README.md`: ports (`https://localhost:5001`), Docker, the REST `/admin` removal
+- `docs/router/mcp-endpoint.md` port table: drop REST `/admin`
+- `src/TotallyHotArcRouter.Gui/README.md`: rewrite or relocate
+- `docs/gui/dashboard.md`
+- `docs/gui/DESIGN.md` §4.1: DialogShell rule unchanged; drop WebView2 drag and overflow notes
+- `docs/gui/MOTION.md`: Firefox and Safari are now supported engines
+- `docs/gui/provider-management.md`, `docs/gui/backlog.md`
+- `docs/router/grpc-migration.md`, `auto-update-plan.md`, `packaging-and-distribution.md`, `mcp-endpoint.md`, `secrets-at-rest.md`, `proxy-coexistence.md`
+- stale remarks in `AdminStoreBase` and `TelemetryTlsCertificate`
+- AGENTS.md project lists
+
+## Reuse (do not rebuild)
+
+- `Program.ExtractFlag` — CLI flags. `SecureFile` — ACL/unix modes. `ProtectedSecretStore` — the storage format, wrapped rather than replaced.
+- `TelemetryTlsCertificate.GetOrCreate` — the generation code becomes the leaf issuer.
+- `GrpcAdminClientBase`, the generated clients, and `IAdminServiceModule` Register/Map pairs — unchanged services, new transport.
+- All `Components/*.razor` and `DialogShell` — moved, not rewritten. The `wwwroot/js/*` globals and vendored echarts carry over as-is.
+- `TrayWindowManager` status and balloon wording, `MsiUpdateApplier`, `RoutingGateStore` (GUI copy) — ported to the tray.
+- bUnit test patterns in `Gui.Tests` (`GrpcStubClients.cs`, loose JSInterop).
+
+## Top risks → verification
+
+| Risk | Verification |
+|---|---|
+| Duplicate proto types when the router references the WASM project | **S2 confirmed the collision and its fix** (executed 2026-09-14): `ReferenceOutputAssembly="false"` on the `Gui.Web` reference. P6 still owes: verify static-web-assets manifest flow with that flag set; fall back to publish-and-copy if it doesn't |
+| Trimming breaks protobuf/Serilog, or IL warnings fail the build | **S4 passed with zero IL2xxx** (executed 2026-09-14, real `wasm-tools` toolchain). CI must assert the linker actually ran (grep for the post-workload "Optimizing assemblies" line) — a missing workload silently skips trim analysis and would report a false pass |
+| gRPC-Web streaming buffering or leaked subscribers | S3 deferred to P2 (needs a live server); subscriber-count test; keep-alive pings |
+| Static assets 404 under a Windows service (cwd = System32) | P1 content-root test; P9 VM install |
+| Cert trust gaps (Chrome-on-Linux NSS, Firefox) | **S5 confirmed two concrete gaps** (research): Firefox `ImportEnterpriseRoots` is Windows/macOS-only (no Linux support, tracked as Mozilla bug 1600509); Chrome-on-Linux uses its own NSS DB (`~/.pki/nssdb`), not `/etc/ssl/certs`. Both need a scripted per-user `certutil -A` step in `packaging/linux/install.sh` (P10), documented in `client-tls-setup.md` (P7) |
+| DNS rebinding / CSRF against the loopback cookie | P4 matrix; CSP `frame-ancestors`; Origin/Host guard |
+| Data Protection key-ring loss making secrets unreadable | P3 restart test; refuse-on-bad-permissions |
+| Native libraries missing on linux-arm64/osx-arm64 | S1 research pass: OnnxRuntime/OnnxRuntimeGenAI/SQLitePCLRaw all ship linux-arm64 and osx-arm64 native assets per NuGet package inspection — no missing-asset blocker found, but **not yet smoke-tested on real hardware**; S1 must be re-run for real on P10's actual runners before shipping. Voter abstains cleanly if anything is still missing there |
+| Proxy hot-path regression from port scoping or the TLS switch | CodeGraph re-check on `ProxyMiddleware`; golden-path smoke over HTTPS |
+| AI tools ignore the OS trust store and break on HTTPS 5001 | S7 matrix; `client-tls-setup.md`; opt-in plain-HTTP listener as the escape hatch |
+| Unknown external scripts using REST `/admin` | Search docs/issues before P2; documented in release notes; MCP is the scripted replacement |
+
+## Verification (end-to-end, final gate)
+
+1. `dotnet build src/TotallyHotArcRouter.slnx -c Release` → 0 warnings, 0 errors, on Windows and Ubuntu.
+2. Run every built xUnit v3 test executable (router, Quality, Gui.Components tests, Gui.Admin/Charts/Console/Telemetry tests, Tray.Core tests) under `dotnet-coverage`. Each assembly ≥80% via the CI reportgenerator gate.
+3. `dotnet publish` Gui.Web Release → zero trim warnings.
+4. Playwright smoke (Chromium, Firefox) against the published router; manual Safari pass on macOS.
+5. Golden-path proxy smoke through 5001.
+6. Windows VM MSI upgrade script (P9 exit list).
+7. Linux (x64 and arm64), macOS and Docker install smokes (P10 exit list), including `curl https://localhost:5004` and `https://localhost:5001/v1/models` without `-k`.
+8. Plain-HTTP audit:
+   - `curl http://localhost:5001`, `:5003` and `:5004` all fail.
+   - With `Proxy:PlainHttp:Enabled=true`, `curl http://localhost:5005/v1/models` works, `http://localhost:5005/` and gRPC paths return 404, and the startup Warning is logged.
+   - A provider with a remote `http://` base URL logs the Warning and shows the badge.
+8. Qodana green on the unified solution.
