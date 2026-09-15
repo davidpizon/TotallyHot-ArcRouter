@@ -5,6 +5,7 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
@@ -39,12 +40,30 @@ public sealed class ProviderAdminGrpcServiceTests
     }
 
     private static ProviderAdminGrpcService CreateService(ModelRoutingOptions? options = null,
-        ManagementFacadeDependencies? dependencies = null)
+        ManagementFacadeDependencies? dependencies = null, HttpClient? httpClient = null)
     {
         var store = new InMemoryProviderConfigStore(options ?? SeedOptions());
         var facade = new ManagementFacade(store: store, environment: Mock.Of<IEnvironmentVariableProvider>(),
-            httpClient: new HttpClient(), dependencies: dependencies);
+            httpClient: httpClient ?? new HttpClient(), dependencies: dependencies);
         return new ProviderAdminGrpcService(facade);
+    }
+
+    /// <summary>Always answers the same OpenAI-shaped model-list body, regardless of the requested path.</summary>
+    private static HttpClient AlwaysOkModelList()
+    {
+        const string body = """{"object":"list","data":[{"id":"gpt-5.4"}]}""";
+        return new HttpClient(new DelegatingHandlerStub(_ =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body) })));
+    }
+
+    private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return handler(request);
+        }
     }
 
     private static ServerCallContext CreateContext()
@@ -198,5 +217,127 @@ public sealed class ProviderAdminGrpcServiceTests
             new Contract.DiscoverModelsRequest { ProviderKey = "unknown" }, CreateContext()));
 
         Assert.Equal(expected: StatusCode.NotFound, actual: ex.StatusCode);
+    }
+
+    // Web GUI migration plan Phase P2: these five cover the RPC wire-mapping this class itself performs
+    // (request -> facade call -> ManagementResult -> wire response) for the methods that used to be
+    // exercised only indirectly, through the now-deleted REST /admin/* integration tests hitting the
+    // same underlying ManagementFacade. ManagementFacade's own business-logic edge cases (masking,
+    // cascading, budget math) stay covered by ManagementFacadeTests/SetBudgetTests/
+    // ProviderOptionsPreservationTests et al., which this class only delegates to.
+
+    [Fact]
+    public async Task UpsertProvider_UpdatesBaseUrlAndReplacesHeaders_ReturnsRefreshedList()
+    {
+        var service = CreateService();
+        var request = new Contract.UpsertProviderRequest
+        {
+            Key = "openai",
+            BaseUrl = "https://api.openai.example",
+            ReplaceHeaders = true
+        };
+        request.Headers.Add(new Contract.HeaderWrite { Name = "Authorization", Value = "sk-test" });
+
+        var response = await service.UpsertProvider(request, CreateContext());
+
+        var provider = Assert.Single(response.Providers);
+        Assert.Equal(expected: "https://api.openai.example", actual: provider.BaseUrl);
+        var header = Assert.Single(provider.Headers);
+        Assert.Equal(expected: "Authorization", actual: header.Name);
+    }
+
+    [Fact]
+    public async Task UpsertModel_AddsModel_ReturnsRefreshedList()
+    {
+        var service = CreateService();
+        var request = new Contract.UpsertModelRequest
+        {
+            ProviderKey = "openai",
+            ModelName = "gpt-6",
+            Model = new Contract.ModelWrite { ProviderModelId = "gpt-6-preview" }
+        };
+
+        var response = await service.UpsertModel(request, CreateContext());
+
+        var provider = Assert.Single(response.Providers);
+        Assert.Contains(provider.Models, m => m.ModelName == "gpt-6" && m.ProviderModelId == "gpt-6-preview");
+    }
+
+    [Fact]
+    public async Task RemoveModel_RemovesModel_ReturnsRefreshedList()
+    {
+        var service = CreateService();
+
+        var response = await service.RemoveModel(new Contract.RemoveModelRequest { ModelName = "gpt-5.4" },
+            CreateContext());
+
+        var provider = Assert.Single(response.Providers);
+        Assert.Empty(provider.Models);
+    }
+
+    [Fact]
+    public async Task SetModelEnabled_TogglesFlag_ReturnsRefreshedList()
+    {
+        var service = CreateService();
+
+        var response = await service.SetModelEnabled(
+            new Contract.SetModelEnabledRequest { ModelName = "gpt-5.4", Enabled = false }, CreateContext());
+
+        var provider = Assert.Single(response.Providers);
+        var model = Assert.Single(provider.Models);
+        Assert.False(model.Enabled);
+    }
+
+    [Fact]
+    public async Task ScanCapabilities_UpdatesAndReturnsRefreshedList()
+    {
+        using var temp = new TempDatabase();
+        var service = CreateService(
+            options: new ModelRoutingOptions
+            {
+                Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["lmstudio"] = new() { BaseUrl = "http://localhost:1234/v1" }
+                }
+            },
+            dependencies: new ManagementFacadeDependencies
+            {
+                EndpointScanner = new ProviderEndpointScanner(httpClient: AlwaysOkModelList(),
+                    environment: Mock.Of<IEnvironmentVariableProvider>()),
+                CapabilityStore = temp.CreateToolCallCapabilityStore()
+            });
+
+        var response = await service.ScanCapabilities(
+            new Contract.ScanCapabilitiesRequest { ProviderKey = "lmstudio" }, CreateContext());
+
+        var provider = Assert.Single(response.Providers);
+        Assert.NotNull(provider.EndpointCapabilities);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_DiscoversAndReconciles_ReturnsRefreshedList()
+    {
+        using var temp = new TempDatabase();
+        var service = CreateService(
+            options: new ModelRoutingOptions
+            {
+                Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                }
+            },
+            dependencies: new ManagementFacadeDependencies
+            {
+                EndpointScanner = new ProviderEndpointScanner(httpClient: AlwaysOkModelList(),
+                    environment: Mock.Of<IEnvironmentVariableProvider>()),
+                CapabilityStore = temp.CreateToolCallCapabilityStore()
+            },
+            httpClient: AlwaysOkModelList());
+
+        var response = await service.RefreshFromEndpoint(
+            new Contract.RefreshFromEndpointRequest { ProviderKey = "openai" }, CreateContext());
+
+        var provider = Assert.Single(response.Providers);
+        Assert.Contains(provider.Models, m => m.ModelName == "gpt-5.4");
     }
 }

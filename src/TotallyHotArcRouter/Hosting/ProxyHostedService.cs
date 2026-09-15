@@ -30,6 +30,7 @@ public class ProxyHostedService : IHostedService
     /// <see cref="StartAsync"/> for why that case stops the host instead of throwing.
     /// </param>
     /// <param name="listenerOptions">The proxy's port and bind-address configuration, forwarded verbatim to <see cref="ProxyServer"/>.</param>
+    /// <param name="webInterfaceOptions">The web GUI/gRPC-Web listener's configuration, forwarded verbatim to <see cref="ProxyServer"/>.</param>
     /// <param name="dependencies">
     /// The feature groups hand-carried into <see cref="ProxyServer"/>'s inner DI container; see
     /// <see cref="ProxyServerDependencies"/>. Defaults to <see langword="null"/>, giving a plain
@@ -41,6 +42,7 @@ public class ProxyHostedService : IHostedService
         ProxyMiddleware proxyMiddleware,
         IHostApplicationLifetime hostLifetime,
         ProxyListenerOptions? listenerOptions = null,
+        WebInterfaceOptions? webInterfaceOptions = null,
         ProxyServerDependencies? dependencies = null)
     {
         ArgumentNullException.ThrowIfNull(hostLifetime);
@@ -48,7 +50,7 @@ public class ProxyHostedService : IHostedService
         _logger = logger;
         _hostLifetime = hostLifetime;
         _proxyServer = new ProxyServer(logger: proxyLogger, proxyMiddleware: proxyMiddleware,
-            listenerOptions: listenerOptions, dependencies: dependencies);
+            listenerOptions: listenerOptions, webInterfaceOptions: webInterfaceOptions, dependencies: dependencies);
     }
 
     /// <summary>

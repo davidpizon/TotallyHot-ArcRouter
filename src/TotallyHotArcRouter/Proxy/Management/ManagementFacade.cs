@@ -5,8 +5,8 @@ using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
 /// <summary>
-/// The single security boundary and source of truth for provider/model/budget management, shared by the
-/// REST <c>/admin/*</c> API (<see cref="ProviderAdminEndpoints"/>) and the MCP provider tools
+/// The single security boundary and source of truth for provider/model/budget management, shared by
+/// <see cref="ProviderAdminGrpcService"/> and the MCP provider tools
 /// (<c>TotallyHot.ArcRouter.Mcp.Tools.ProviderMcpTools</c>). Every read this facade returns is a masked
 /// projection: a literal API key or a literal custom-header value is never present in anything it hands
 /// back, on either surface - <see cref="HeaderView.Source"/>/<see cref="HeaderView.ValueEnvVar"/> are the

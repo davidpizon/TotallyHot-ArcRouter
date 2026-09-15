@@ -297,6 +297,84 @@ tests the plan named plus three new test files
 - Native gRPC on 5002 is unchanged.
 - Golden-path smoke passes.
 
+### P2 status: shipped 2026-09-14
+
+Implemented as designed, with two implementation choices that deviate from the literal plan wording (both explained below) and one pre-existing gap fixed as a side effect. New/changed files:
+`Proxy/ProxyServerWebInterfaceTests.cs` (new), `ProviderAdminGrpcServiceTests.cs`/`UsageAdminGrpcServiceTests.cs`
+(extended), `ProxyServer.cs`, `ProxyServerDependencies.cs`, `ProxyServiceCollectionExtensions.cs`,
+`ProxyHostedService.cs`, `ManagementFacade.cs`/`ProviderAdminGrpcService.cs`/`UsageAdminGrpcService.cs`
+(doc-comment fixes only), `TelemetryAuthInterceptor.cs` (doc-comment fix), `TotallyHotArcRouter.csproj`
+(+`Grpc.AspNetCore.Web`), `TotallyHotArcRouter.Tests.csproj` (+`Grpc.Net.Client`/`Grpc.Net.Client.Web`).
+**Deleted:** `Proxy/Management/ProviderAdminEndpoints.cs`, `UsageAdminEndpoints.cs`,
+`ProviderAdminEndpointsTests.cs`, `UsageAdminEndpointsTests.cs`.
+
+**Deviations from the plan as written:**
+- **Port scoping uses a per-connection feature marker set by Kestrel listener middleware
+  (`ListenOptions.Use`), not a `HttpContext.Connection.LocalPort` integer comparison.** The plan named
+  `LocalPort` explicitly, but a raw port comparison needs the *actual* bound port resolved after Kestrel
+  starts (several ports bind ephemeral `0` in tests, and the DI-bound production ports could too if an
+  operator ever set one to `0`). Tagging each listener directly - a `ProxyPortMarker` set once per
+  accepted connection, read via `HttpContext.Features.Get<ProxyPortMarker>()` (which falls back to the
+  underlying connection's own feature collection, a documented ASP.NET Core pattern) - achieves the exact
+  same security property the plan wanted (scope by which physical listener accepted the connection, immune
+  to a spoofed `Host` header) with no ephemeral-port bookkeeping at all. Verified directly: the ephemeral
+  fixed-port integration tests in `ProxyServerWebInterfaceTests.cs` and the real golden-path smoke below
+  both confirm gRPC is unreachable on the proxy ports and proxy traffic is unreachable (404) on the web
+  port.
+- **`AddGrpcWeb()` (the exit criterion's own wording for the service-registration half) doesn't exist as a
+  separate call.** `Grpc.AspNetCore.Web` needs no DI registration beyond referencing the package -
+  `app.UseGrpcWeb(new GrpcWebOptions { DefaultEnabled = true })` is the whole integration, applied once
+  rather than per-service (`.EnableGrpcWeb()` on each of the ~12 `MapGrpcService` calls would have been
+  pure repetition for the same effect).
+
+**Side effect - a pre-existing gap fixed:** `TelemetryGrpcService` (mapped unconditionally, like
+`RoutingModeAdminGrpcService`) needs `ITranscriptStore`/`IOptions<TranscriptOptions>` in the inner
+container to be constructible at all, but unlike every other unconditionally-mapped service (`RoutingGateStore`,
+`UpdateStateStore`, `NullRegretHarnessRunner`, `NullJudgeCalibrationAnalyzer`), `ProxyServer` had no
+fallback registration for them - production is unaffected only because `AddProxyHost` always supplies a
+full `ClusterModelAdmin` group, which happens to carry both. This was invisible until now because no
+prior test ever called `StreamEvents` against a live, minimally-constructed `ProxyServer` (the
+established `TestServerCallContext` pattern in `TelemetryGrpcServiceTests` bypasses the host entirely).
+Worked around locally in the new test's `ProxyServerDependencies` (loose Moq stubs) rather than changed
+in `ProxyServer.cs` itself - a real fallback (mirroring the `RoutingGateStore`-style null object pattern)
+is a legitimate small hardening item, but it's `TelemetryGrpcService`'s own design question, unrelated to
+port scoping, and out of this phase's scope; flagged here for a future pass rather than filed to the
+code-smell tracker (no observed production cost - `AddProxyHost` always supplies the dependency, so
+ADR-0008's stop rule applies).
+
+**Verified:**
+- Full router test suite: 2783/2783 pass, 0 failures, 0 errors, `-parallelMode collections` (1
+  pre-existing unrelated skip). New/extended: 7 real-network tests in `ProxyServerWebInterfaceTests.cs`
+  (gRPC-Web unary + ≥2-message streaming on the web port over a real `Grpc.Net.Client.Web` channel;
+  proxy-port and plain-HTTP-listener gRPC-Web calls proven not to reach a service; REST/proxy 404s on the
+  web port; native gRPC on 5002 unchanged), plus 5 new `ProviderAdminGrpcServiceTests`/1 new
+  `UsageAdminGrpcServiceTests` covering the RPC wire-mapping methods (`UpsertProvider`, `UpsertModel`,
+  `RemoveModel`, `SetModelEnabled`, `ScanCapabilities`, `RefreshFromEndpoint`, `GetRoutingRoi`) that were
+  previously exercised only indirectly through the now-deleted REST tests.
+- `dotnet build src/TotallyHotArcRouter.slnx -c Release`: 0 warnings, 0 errors.
+- Cobertura coverage: `TotallyHotArcRouter` assembly 83.1% (≥80% gate, unchanged from P1's 83.4% despite
+  deleting ~24 REST tests, because the new gRPC-level tests replaced their coverage almost exactly).
+  `KestrelBindAddress.cs` rose from P1's 73.5% to 94.1% now that real requests exercise every bind mode.
+  `ProxyServer.cs` at 95.1%/100% across its two coverage-tracked partitions.
+- **Manual golden-path smoke** (the built `TotallyHotArcRouter.exe`, real `appsettings.json`, real
+  `curl`, no mocks): started clean, bound 5001/5002/5003/**5004** dual-stack. Confirmed every exit
+  criterion by hand:
+  - `curl http://127.0.0.1:5001/v1/models` → `200` (proxy golden path unaffected).
+  - `curl http://127.0.0.1:5001/admin/providers` → `400` via `proxyMiddleware` (REST admin gone; not a
+    404 specifically, but confirmed via the log line "Proxy middleware caught request" that it never
+    reached an admin handler - exactly what port scoping promises).
+  - `curl -k https://127.0.0.1:5004/admin/providers` → `404`.
+  - `curl -k https://127.0.0.1:5004/v1/chat/completions` → `404`.
+  - A real gRPC-Web-framed `POST` to `RoutingModeAdminService/GetRoutingMode` on `5004` → `200`,
+    `content-type: application/grpc-web` (a genuine gRPC-Web response).
+  - The identical gRPC-Web-framed request against `5001` → `400`, `content-type: application/json`, with
+    the log confirming it was intercepted by `proxyMiddleware` as ordinary (malformed) LLM traffic, never
+    reaching `RoutingModeAdminGrpcService`.
+  - Not exercised: an actual upstream LLM call (needs a live provider key, same caveat as P1) and a
+    browser client specifically (S3's cross-browser matrix stays deferred to P6, per the P0 spike
+    results) - `Grpc.Net.Client.Web` and `curl` both confirm the wire protocol works, which is what P2
+    owns.
+
 ## P3 — Cross-platform data paths and secret backend (must precede token relocation)
 
 **Deliverables**

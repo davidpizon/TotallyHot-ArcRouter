@@ -60,6 +60,12 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <!-- Wraps the native gRPC services mapped in ProxyServer.cs in a gRPC-Web-compatible handler on the
+         web-interface port (web GUI migration plan Phase P2), so a browser (which cannot speak
+         trailers-based HTTP/2 gRPC directly) can call them via grpc-web's HTTP/1.1-or-HTTP/2-safe
+         framing. No IDL/codegen change - it wraps the same generated service types the native gRPC
+         listener (port 5002, retired in Phase P9) already serves. -->
+    <PackageReference Include="Grpc.AspNetCore.Web" Version="2.83.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <!-- First database dependency in the repo: the model price catalog's SQLite store
          (docs/router/model-price-catalog.md). Nothing used a database before - router memory is a

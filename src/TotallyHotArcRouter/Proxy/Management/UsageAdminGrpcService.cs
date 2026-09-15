@@ -8,9 +8,10 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 
 /// <summary>
 /// gRPC service backing the Governance/Model Distribution/Cost Analytics GUI tabs' usage-query surface
-/// (docs/router/tracked-todos.md #7). Replaces <see cref="UsageAdminEndpoints"/>'s plain-HTTP
-/// <c>/admin/usage/*</c> surface, which shared the LLM-forwarding proxy port with real traffic; this
-/// service is mapped onto the same loopback TLS endpoint as <c>TelemetryService</c> instead. All logic
+/// (docs/router/tracked-todos.md #7). Replaced the plain-HTTP <c>/admin/usage/*</c> REST surface this
+/// once shared a port with real LLM-forwarding traffic (deleted in
+/// <see href="../../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase
+/// P2); this service is mapped onto the same loopback TLS endpoint as <c>TelemetryService</c> instead. All logic
 /// lives in <see cref="ManagementReportingService"/>; this class only translates gRPC requests into
 /// service calls and <see cref="ManagementResult{T}"/> outcomes into gRPC responses/status codes,
 /// mirroring <see cref="ProviderAdminGrpcService"/>.

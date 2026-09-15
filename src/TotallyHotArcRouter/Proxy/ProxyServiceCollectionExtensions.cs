@@ -314,6 +314,7 @@ internal static class ProxyServiceCollectionExtensions
                 // StartAsync - see ProxyHostedService.StartAsync.
                 hostLifetime: sp.GetRequiredService<IHostApplicationLifetime>(),
                 listenerOptions: sp.GetRequiredService<IOptions<ProxyListenerOptions>>().Value,
+                webInterfaceOptions: sp.GetRequiredService<IOptions<WebInterfaceOptions>>().Value,
                 dependencies: new ProxyServerDependencies
                 {
                     Telemetry = sp.GetRequiredService<TelemetryBroadcaster>(),

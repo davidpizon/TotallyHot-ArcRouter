@@ -8,9 +8,8 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// Gates every call to the telemetry gRPC endpoint - <see cref="TelemetryGrpcService"/> and
 /// <see cref="TotallyHot.ArcRouter.PriceCatalog.PriceSourceAdminGrpcService"/>, which share the same TLS
 /// port - behind the shared per-user management token, presented in the <c>x-admin-token</c> metadata
-/// entry. This is the gRPC analog of the REST <c>/admin/*</c> API's <c>X-Admin-Token</c> header
-/// (<see cref="ProviderAdminEndpoints"/>) and the MCP endpoint's bearer token
-/// (<see cref="TotallyHot.ArcRouter.Mcp.McpBearerAuthMiddleware"/>), all backed by the same
+/// entry. This is the same pattern the MCP endpoint's bearer token uses
+/// (<see cref="TotallyHot.ArcRouter.Mcp.McpBearerAuthMiddleware"/>), both backed by the same
 /// <see cref="ManagementAccessToken"/> so every management surface is gated identically. TLS on this
 /// port is defense-in-depth on top of this check, not a substitute for it - see
 /// <see cref="TelemetryTlsCertificate"/>'s remarks on the loopback trust model, and

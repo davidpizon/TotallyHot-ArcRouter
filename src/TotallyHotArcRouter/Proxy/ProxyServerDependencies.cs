@@ -200,8 +200,10 @@ public interface IAdminServiceModule
 }
 
 /// <summary>
-/// Backs the <c>/admin/*</c> REST management API (see <see cref="ProviderAdminEndpoints"/>), which shares
-/// the plain-HTTP forwarding port - real LLM traffic never targets <c>/admin</c>, so it is never intercepted.
+/// Backs <see cref="ProviderAdminGrpcService"/>/<see cref="UsageAdminGrpcService"/>, the Governance UI's
+/// provider/credential/model management and usage-query APIs (the REST <c>/admin/*</c> surface these
+/// once shared a group with was deleted in
+/// <see href="../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase P2).
 /// Everything optional here is forwarded to <see cref="ManagementFacade"/>, the shared security boundary the
 /// MCP provider tools use too; an absent member makes its endpoints answer
 /// <see cref="ManagementErrorType.Unavailable"/> rather than failing the whole API.
