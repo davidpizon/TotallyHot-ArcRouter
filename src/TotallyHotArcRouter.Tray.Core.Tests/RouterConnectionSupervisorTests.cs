@@ -43,7 +43,12 @@ public sealed class RouterConnectionSupervisorTests
     {
         // Succeeds once, then the underlying client starts failing (simulating a router restart) while
         // every reconnect attempt also fails (the router still isn't back) - proves the stale-but-only
-        // monitor is never torn down just because a reconnect attempt failed.
+        // monitor is never torn down just because a reconnect attempt failed. FailNextConnects is armed
+        // before the monitor is allowed to go unusable, not after: the supervisor's own background loop
+        // polls on the same FastRetry cadence as this test, so if it were armed afterwards there would be
+        // a window where the supervisor could win a reconnect race using the still-healthy connector
+        // (swapping in a second monitor) before the test ever forced a failure - an intermittent failure
+        // of the BeSameAs assertion below with no code change between runs.
         var connector = new FakeConnector();
         await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
             retryInterval: FastRetry, monitorFactory: FakeMonitor);
@@ -51,8 +56,8 @@ public sealed class RouterConnectionSupervisorTests
         var firstMonitor = supervisor.Monitor;
 
         ((FakeRoutingGateAdminClient)connector.LastClient!).GetFailure = new GrpcAdminException("bad session");
-        await WaitUntilAsync(() => !firstMonitor!.IsUsable, WaitTimeout);
         connector.FailNextConnects = int.MaxValue;
+        await WaitUntilAsync(() => !firstMonitor!.IsUsable, WaitTimeout);
         await Task.Delay(FastRetry * 10, TestContext.Current.CancellationToken);
 
         supervisor.Monitor.Should().BeSameAs(firstMonitor, "a failed reconnect attempt must not discard the only monitor there is");
