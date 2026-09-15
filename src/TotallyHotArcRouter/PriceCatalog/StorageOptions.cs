@@ -51,6 +51,26 @@ public sealed class StorageOptions
 
     // The token every default above leads with. On non-Windows hosts (the project's Docker default is
     // Linux) PROGRAMDATA is unset, so Environment.ExpandEnvironmentVariables leaves it literal.
+    //
+    // web GUI migration plan Phase P10 real-container-testing note: each default below used to be
+    // "%PROGRAMDATA%\TotallyHotArcRouter\<file>", with ResolvePath's %PROGRAMDATA% substitution
+    // deliberately resolving to AppDataPaths.ResolveMachineSharedDirectory()'s PARENT directory (peeling
+    // one segment via Path.GetDirectoryName) so the literal "TotallyHotArcRouter\" each default already
+    // carried would re-supply exactly that segment. That silently assumed
+    // AppDataPaths.ResolveMachineSharedDirectory() always ends in the exact string "TotallyHotArcRouter" -
+    // true on Windows/macOS and Linux's own per-user fallback, but false for the Linux machine-wide
+    // default ("/var/lib/totallyhot-arcrouter", lowercase-hyphenated) and false for any operator-supplied
+    // STATE_DIRECTORY (a Docker image setting STATE_DIRECTORY=/data, say) that doesn't itself end in that
+    // name. A real `podman build`+`podman run` against this project's own Dockerfile hit exactly that:
+    // Path.GetDirectoryName("/data") is "/", so every one of these five paths resolved to
+    // "/TotallyHotArcRouter/<file>" - outside the mounted volume and unwritable, crashing startup with
+    // UnauthorizedAccessException. Every OTHER machine-shared consumer (ManagementAccessToken,
+    // ProtectedSecretStore, RoutingGateStore, TelemetryTlsCertificate) already called
+    // AppDataPaths.ResolveMachineSharedDirectory() directly with no such peel, so they were never affected
+    // - only this class's five paths silently diverged from where the token/secrets/CA actually live.
+    // Fixed by dropping the redundant "TotallyHotArcRouter\" segment from each default (below) and having
+    // %PROGRAMDATA% expand to AppDataPaths.ResolveMachineSharedDirectory()'s own return value directly -
+    // identical output on Windows/macOS (nothing changes there), and now correct everywhere else too.
     private const string ProgramDataToken = "%PROGRAMDATA%";
 
     // Still recognized even though no default uses it any more: an operator's existing appsettings.json
@@ -78,7 +98,7 @@ public sealed class StorageOptions
     /// <see cref="ResolveDatabasePath"/>. A relative path is resolved against the application base
     /// directory, matching <c>SpendTracker</c>'s handling of its log path.
     /// </summary>
-    public string DatabasePath { get; init; } = @"%PROGRAMDATA%\TotallyHotArcRouter\agent_telemetry.db";
+    public string DatabasePath { get; init; } = @"%PROGRAMDATA%\agent_telemetry.db";
 
     /// <summary>
     /// Gets the CodeRouterBench corpus database's file path (docs/router/coderouterbench-sqlite-migration-plan.md).
@@ -87,7 +107,7 @@ public sealed class StorageOptions
     /// corpus is read-only, bulk, and freely re-downloadable, so it does not share a WAL writer lock or a
     /// backup with the operational database.
     /// </summary>
-    public string BenchmarkDatabasePath { get; init; } = @"%PROGRAMDATA%\TotallyHotArcRouter\coderouterbench.db";
+    public string BenchmarkDatabasePath { get; init; } = @"%PROGRAMDATA%\coderouterbench.db";
 
     /// <summary>
     /// Gets the trained <c>logreg</c> voter model artifact's file path
@@ -96,7 +116,7 @@ public sealed class StorageOptions
     /// and never checked in: it is derived from the operator's own synced corpus and live traffic, unlike
     /// the deleted placeholder this replaces (Phase 6).
     /// </summary>
-    public string LogRegModelPath { get; init; } = @"%PROGRAMDATA%\TotallyHotArcRouter\logreg_voter_model.json";
+    public string LogRegModelPath { get; init; } = @"%PROGRAMDATA%\logreg_voter_model.json";
 
     /// <summary>
     /// Gets the opt-in transcript store's file path
@@ -107,7 +127,7 @@ public sealed class StorageOptions
     /// lifecycle (creation gated on <c>TranscriptOptions.Enabled</c>, retention-bounded) stays independent
     /// of both.
     /// </summary>
-    public string TranscriptDatabasePath { get; init; } = @"%PROGRAMDATA%\TotallyHotArcRouter\transcripts.db";
+    public string TranscriptDatabasePath { get; init; } = @"%PROGRAMDATA%\transcripts.db";
 
     /// <summary>
     /// Gets the trained self-organizing cluster model artifact's file path
@@ -115,7 +135,7 @@ public sealed class StorageOptions
     /// separators as <see cref="DatabasePath"/>, resolved by <see cref="ResolveClusterModelPath"/>.
     /// Per-installation and never checked in, mirroring <see cref="LogRegModelPath"/>'s lifecycle.
     /// </summary>
-    public string ClusterModelPath { get; init; } = @"%PROGRAMDATA%\TotallyHotArcRouter\cluster_model.json";
+    public string ClusterModelPath { get; init; } = @"%PROGRAMDATA%\cluster_model.json";
 
     /// <summary>
     /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
@@ -147,9 +167,10 @@ public sealed class StorageOptions
     /// Cross-platform hardening: on Linux, <c>%PROGRAMDATA%</c> and <c>%LOCALAPPDATA%</c> are both
     /// undefined (so they would survive expansion literally) and backslashes are ordinary filename
     /// characters (so directory creation would be skipped and the file created with an odd name). This
-    /// substitutes a real folder for either unexpanded token - see <see cref="AppDataPaths"/> (via
-    /// <see cref="MachineSharedRoot"/>) for the full platform/fallback story - and rewrites backslashes to
-    /// the platform separator, so the same default works on Windows, Linux, and macOS.
+    /// substitutes a real folder for either unexpanded token - see <see cref="AppDataPaths"/>'s
+    /// <see cref="AppDataPaths.ResolveMachineSharedDirectory"/> for the full platform/fallback story - and
+    /// rewrites backslashes to the platform separator, so the same default works on Windows, Linux, and
+    /// macOS.
     /// </remarks>
     public string ResolveDatabasePath()
     {
@@ -198,19 +219,35 @@ public sealed class StorageOptions
     /// </summary>
     private static string ResolvePath(string rawPath)
     {
-        var expanded = Environment.ExpandEnvironmentVariables(rawPath);
+        // %PROGRAMDATA%/%LOCALAPPDATA% are substituted against rawPath BEFORE calling
+        // Environment.ExpandEnvironmentVariables, not after (web GUI migration plan Phase P10 fix - see
+        // ProgramDataToken's remarks for the real-container-testing bug this replaces). On Windows,
+        // PROGRAMDATA is a genuine OS environment variable, so ExpandEnvironmentVariables would otherwise
+        // resolve it FIRST to the bare "C:\ProgramData" - with no "TotallyHotArcRouter" suffix, since
+        // that's not part of the real OS value - silently skipping our own substitution below (whose
+        // token would already be gone by the time this method's old ordering checked for it) and giving
+        // every default a different, ApplicationDirectoryName-less directory than every other
+        // machine-shared consumer (ManagementAccessToken, ProtectedSecretStore, RoutingGateStore,
+        // TelemetryTlsCertificate) resolves to. Doing our own replacement first makes
+        // AppDataPaths.ResolveMachineSharedDirectory() the one source of truth on every platform,
+        // Windows included - a real regression this exact reordering was needed to catch and fix.
+        var withTokensExpanded = rawPath;
 
-        // Fall back to the platform's shared-application-data folder if the token survived (PROGRAMDATA
-        // unset), rather than creating a file literally named "%PROGRAMDATA%".
-        if (expanded.Contains(value: ProgramDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
-            expanded = expanded.Replace(oldValue: ProgramDataToken, newValue: MachineSharedRoot(),
+        if (withTokensExpanded.Contains(value: ProgramDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
+            withTokensExpanded = withTokensExpanded.Replace(oldValue: ProgramDataToken,
+                newValue: AppDataPaths.ResolveMachineSharedDirectory(),
                 comparisonType: StringComparison.OrdinalIgnoreCase);
 
         // Same substitution for the pre-move token, which no default uses any more but a pinned
         // appsettings.json value (and every path LegacyStorageMigration probes) still can.
-        if (expanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
-            expanded = expanded.Replace(oldValue: LocalAppDataToken, newValue: PerUserRoot(),
+        if (withTokensExpanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
+            withTokensExpanded = withTokensExpanded.Replace(oldValue: LocalAppDataToken, newValue: PerUserRoot(),
                 comparisonType: StringComparison.OrdinalIgnoreCase);
+
+        // Still run the real expander afterward, for any other environment-variable token an operator's
+        // own override might embed (our two tokens above are already gone by this point, so this cannot
+        // re-expand PROGRAMDATA/LOCALAPPDATA out from under the substitution above).
+        var expanded = Environment.ExpandEnvironmentVariables(withTokensExpanded);
 
         // Treat Windows-style backslashes as separators everywhere, so a backslash path resolves (and its
         // directory is created) on Linux too.
@@ -222,27 +259,8 @@ public sealed class StorageOptions
     }
 
     /// <summary>
-    /// Resolves the machine-wide application-data root a <c>%PROGRAMDATA%</c> token stands for, trimmed of
-    /// any trailing separator so the substitution never produces a doubled one.
-    /// </summary>
-    /// <remarks>
-    /// Delegates to <see cref="AppDataPaths.ResolveMachineSharedDirectory"/> (web GUI migration plan Phase
-    /// P3), which replaced this method's own independent Linux/macOS handling - see that type's remarks
-    /// for the full platform/fallback story, including why a genuinely machine-wide location off Windows
-    /// (not a per-user stand-in) is now attempted first.
-    /// </remarks>
-    private static string MachineSharedRoot()
-    {
-        // AppDataPaths.ResolveMachineSharedDirectory() already returns <root>\TotallyHotArcRouter; every
-        // caller here appends its own "\TotallyHotArcRouter\<file>" default path segment, so only the
-        // root half is wanted back.
-        var resolved = AppDataPaths.ResolveMachineSharedDirectory();
-        return Path.GetDirectoryName(resolved) ?? resolved;
-    }
-
-    /// <summary>
-    /// Resolves the per-user application-data root a <c>%LOCALAPPDATA%</c> token stands for, with the same
-    /// empty-folder fallback and trailing-separator trim as <see cref="MachineSharedRoot"/>.
+    /// Resolves the per-user application-data root a <c>%LOCALAPPDATA%</c> token stands for, with an
+    /// empty-folder fallback and a trailing-separator trim.
     /// </summary>
     private static string PerUserRoot()
     {

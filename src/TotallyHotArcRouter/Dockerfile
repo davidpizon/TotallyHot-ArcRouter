@@ -25,26 +25,19 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy just the project/solution files first so `dotnet restore`'s layer caches across source-only
-# changes - TotallyHotArcRouter.csproj's own ProjectReference/Protobuf items pull in Quality,
-# Gui.Web (ReferenceOutputAssembly=false, but its static wwwroot assets still need publishing),
-# Gui.Components, and Gui.Telemetry, plus the out-of-tree Protos/ directory.
-COPY src/TotallyHotArcRouter/TotallyHotArcRouter.csproj src/TotallyHotArcRouter/
-COPY src/TotallyHotArcRouter.Quality/TotallyHotArcRouter.Quality.csproj src/TotallyHotArcRouter.Quality/
-COPY src/TotallyHotArcRouter.Gui.Web/TotallyHotArcRouter.Gui.Web.csproj src/TotallyHotArcRouter.Gui.Web/
-COPY src/TotallyHotArcRouter.Gui.Components/TotallyHotArcRouter.Gui.Components.csproj src/TotallyHotArcRouter.Gui.Components/
-COPY src/TotallyHotArcRouter.Gui.Telemetry/TotallyHotArcRouter.Gui.Telemetry.csproj src/TotallyHotArcRouter.Gui.Telemetry/
-COPY src/Directory.Build.props src/Directory.Build.props
-COPY src/Protos/ src/Protos/
-RUN dotnet restore src/TotallyHotArcRouter/TotallyHotArcRouter.csproj -r linux-x64
-
-COPY src/TotallyHotArcRouter/ src/TotallyHotArcRouter/
-COPY src/TotallyHotArcRouter.Quality/ src/TotallyHotArcRouter.Quality/
-COPY src/TotallyHotArcRouter.Gui.Web/ src/TotallyHotArcRouter.Gui.Web/
-COPY src/TotallyHotArcRouter.Gui.Components/ src/TotallyHotArcRouter.Gui.Components/
-COPY src/TotallyHotArcRouter.Gui.Telemetry/ src/TotallyHotArcRouter.Gui.Telemetry/
+# No separate `dotnet restore` layer: a standalone "dotnet restore -r linux-x64" on
+# TotallyHotArcRouter.csproj was tried here and found (by a real `podman build`, not just reasoning
+# about it) to fail with NU1102 hunting for a nonexistent "Microsoft.NETCore.App.Runtime.Mono.linux-x64"
+# package - NuGet's restore-graph walk visits every ProjectReference regardless of
+# ReferenceOutputAssembly, so the explicit "-r linux-x64" got force-applied to the Gui.Web WASM sibling
+# too (which must always restore for its own browser-wasm target, never the outer RID). `dotnet publish
+# -r linux-x64` in one shot - verified for real, both here and as a plain `dotnet publish` outside any
+# container during this phase's own local verification - does not hit this, because its restore honors
+# each project's own target/RID rather than a single CLI-wide override. The cost is losing this layer's
+# restore-result caching across source-only rebuilds; correctness won over that here.
+COPY src/ src/
 RUN dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj \
-    -c Release -r linux-x64 --self-contained false --no-restore -o /app/publish
+    -c Release -r linux-x64 --self-contained false -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app

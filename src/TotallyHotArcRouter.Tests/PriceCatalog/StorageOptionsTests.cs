@@ -48,6 +48,21 @@ public class StorageOptionsTests
     }
 
     [Fact]
+    public void ResolveDatabasePath_ProgramDataToken_ResolvesToTheFullMachineSharedDirectory()
+    {
+        // Regression coverage for a real bug (web GUI migration plan Phase P10, caught by an actual
+        // `podman run` crash): %PROGRAMDATA% must expand to AppDataPaths.ResolveMachineSharedDirectory()'s
+        // own full return value, not that directory's PARENT - an earlier version peeled one segment off,
+        // relying on the caller's own path string to re-supply a literal "TotallyHotArcRouter" segment,
+        // which silently assumed AppDataPaths always ends in exactly that string. It doesn't when
+        // AppDataPaths is driven by an environment override (STATE_DIRECTORY=/data, say), so this asserts
+        // the substitution directly rather than only through a compiled default that happens to still work.
+        var resolved = new StorageOptions { DatabasePath = @"%PROGRAMDATA%\custom.db" }.ResolveDatabasePath();
+
+        Assert.Equal(expected: StorageOptions.ResolveMachineSharedDirectory(), actual: Path.GetDirectoryName(resolved));
+    }
+
+    [Fact]
     public void ResolveLegacyDirectories_CoverBothPreMoveSpellings()
     {
         var legacy = StorageOptions.ResolveLegacyDirectories();

@@ -1432,10 +1432,13 @@ own superseded numbers in place - they describe what was true when written, not 
 
 ### P10 status: shipped 2026-09-15, with real deferrals named below
 
-All six deliverables were implemented and, where this environment allows it, verified for real. Two
-categories of the exit criterion were **not** run - a real Linux/macOS machine and a Docker daemon are
-both unavailable here - and are deferred honestly rather than claimed, the same category of gap as P7's
-and P9's own "no clean Windows VM in this environment" deferrals.
+All six deliverables were implemented and, where this environment allows it, verified for real - which,
+once Podman turned out to be installed here after all (initially assumed absent, then found and used), now
+includes an actual container build/run/restart cycle against a real Docker daemon (see the Dockerfile
+section below), catching two genuine bugs. A real Linux/macOS machine is still unavailable here, so the
+`packaging/linux`/`packaging/macos` scripts and a real `release.yml` workflow run remain deferred honestly
+rather than claimed - the same category of gap as P7's and P9's own "no clean Windows VM in this
+environment" deferrals.
 
 **`UseSystemd()` and per-platform log paths - shipped, verified for real:**
 - `Program.cs` gained `.UseSystemd()` next to `.UseWindowsService(...)` (Microsoft.Extensions.Hosting.Systemd
@@ -1480,8 +1483,8 @@ verified, but never run on a real Linux/macOS machine (none available in this en
   of environment-imposed gap P7 and P9 already named for their own Windows-VM exit criteria, restated
   honestly rather than silently skipped.
 
-**Dockerfile - shipped, authored carefully, but never run through a real `docker build` (no Docker daemon
-available in this environment):**
+**Dockerfile - shipped, and, once Podman turned out to be available in this environment after all, built
+and run for real, catching two genuine bugs a "no Docker here" deferral would have shipped silently:**
 - Multi-stage (`dotnet/sdk:10.0` build, `dotnet/aspnet:10.0` runtime), non-root `arcrouter` account,
   `STATE_DIRECTORY=/data` as the only environment variable needed to relocate every piece of router state
   (secrets, the local CA, SQLite databases, trained models, and - via `ResolveLogsDirectory()`'s own
@@ -1492,19 +1495,55 @@ available in this environment):**
   Docker tooling at the project's own directory - which was silently wrong for a Dockerfile that `COPY`s
   sibling projects (`Quality`, `Gui.Web`, `Gui.Components`, `Gui.Telemetry`); it now points at the repo
   root (`..\..`), matching the actual build context this Dockerfile needs.
-- **Verified for real**: every `dotnet publish -c Release -r <rid> --self-contained true` command the
-  Dockerfile's build stage and `release.yml`'s tarball jobs both run was executed directly on this
-  machine for all three non-Windows RIDs (`linux-x64`, `linux-arm64`, `osx-arm64`) - each produced a
-  working publish output with the correct native ONNX Runtime assets for its platform
-  (`libonnxruntime.so`/`.dylib` etc.), confirming the `TotallyHotArcRouter.csproj` RID-override change
-  below actually works, not just that it reads plausibly. The `tar --numeric-owner` packaging step
-  `release.yml`'s tarball jobs run was also executed locally against a real `linux-x64` publish and its
-  output inspected (`tar -tzf`) to confirm `TotallyHotArcRouter` extracts at the archive root, matching
-  what `packaging/linux/install.sh` expects.
-- **Not verified**: the Dockerfile itself was never actually built (`docker build`/`buildx`) - no Docker
-  daemon is available in this environment. Everything the Dockerfile's `RUN dotnet publish` line does was
-  exercised for real outside the container, but the container assembly, the non-root `USER` switch, and
-  the image actually starting and answering `https://localhost:47104` were not.
+- **Bug 1, caught by a real `podman build`**: an early draft ran a separate `dotnet restore -r linux-x64`
+  layer before the build layer, for Docker-layer caching. It failed NU1102 hunting a nonexistent
+  `Microsoft.NETCore.App.Runtime.Mono.linux-x64` package - NuGet's restore-graph walk visits every
+  `ProjectReference` regardless of `ReferenceOutputAssembly`, so the explicit `-r linux-x64` got
+  force-applied to the `Gui.Web` WASM sibling too, which must always restore for its own `browser-wasm`
+  target. Fixed by dropping the separate restore layer entirely - `dotnet publish -r linux-x64` in one
+  shot honors each project's own target/RID and doesn't hit this - at the cost of that layer's own
+  restore-result caching across source-only rebuilds.
+- **Bug 2, caught by the container actually crashing on `podman run`**: `StorageOptions.ResolvePath`'s
+  `%PROGRAMDATA%` substitution had a real, pre-existing latent bug, invisible until this phase's own
+  `STATE_DIRECTORY`-driven packaging existed to expose it. It resolved the token to
+  `AppDataPaths.ResolveMachineSharedDirectory()`'s *parent* directory (`Path.GetDirectoryName`, peeling one
+  segment), relying on each of the five `Storage` defaults still carrying its own literal
+  `TotallyHotArcRouter\` suffix to re-supply exactly that segment - which silently assumed
+  `AppDataPaths.ResolveMachineSharedDirectory()` always ends in the exact string `"TotallyHotArcRouter"`.
+  True on Windows/macOS and Linux's per-user fallback; false for Linux's own machine-wide default
+  (`/var/lib/totallyhot-arcrouter`, lowercase-hyphenated) and false for this image's own
+  `STATE_DIRECTORY=/data`. With `/data` as the shared directory, `Path.GetDirectoryName("/data")` is `/`,
+  so `PriceCatalogDatabase.EnsureCreated()` tried to create `/TotallyHotArcRouter` - outside the mounted
+  volume, permission-denied, `Hosting failed to start`, container exits 1. Every *other* machine-shared
+  consumer (`ManagementAccessToken`, `ProtectedSecretStore`, `RoutingGateStore`, `TelemetryTlsCertificate`)
+  already called `AppDataPaths.ResolveMachineSharedDirectory()` directly with no such peel, so only these
+  five `Storage` paths were ever affected - and existing unit tests never caught it, because
+  `StorageOptionsTests` constructs `new StorageOptions()` directly (bypassing `appsettings.json`'s own
+  separate `Storage:DatabasePath` override, which carried the same stale literal), and this repo's Linux CI
+  runner has no `STATE_DIRECTORY` set, so it always fell into the per-user fallback branch that happens to
+  satisfy the broken assumption. **Fixed** in two parts: `StorageOptions.ResolvePath` now substitutes
+  `%PROGRAMDATA%`/`%LOCALAPPDATA%` against the raw, un-expanded string *before* calling
+  `Environment.ExpandEnvironmentVariables` (which would otherwise let Windows' own real `PROGRAMDATA`
+  variable silently pre-empt the substitution, another real regression caught mid-fix by a test failure),
+  using `AppDataPaths.ResolveMachineSharedDirectory()`'s full return value with no peeling; and each of the
+  five `Storage` defaults (both the C# property initializers and `appsettings.json`'s own
+  `Storage:DatabasePath` override, which needed the identical fix separately) dropped their now-redundant
+  `TotallyHotArcRouter\` literal. Byte-identical output on Windows/macOS; now correct everywhere else too.
+- **Verified for real, end to end**: `podman build --no-cache` on this Dockerfile succeeds. A container run
+  from the resulting image (`podman run -v arcrouter-data:/data -p 47101:47101 -p 47104:47104 ...`) starts
+  cleanly, creates `/data/agent_telemetry.db` and `/data/transcripts.db` side by side (no more split
+  directories), and `curl -sk https://localhost:47104/` and `.../v1/models` on 47101 both return `200`.
+  `--print-management-token` via `podman exec` printed a token; `podman restart` and re-running
+  `--print-management-token` printed the *same* token, confirming secrets and databases survive a restart -
+  satisfying this phase's own exit criterion in full, not just by reasoning about the Dockerfile's text.
+  Every `dotnet publish -c Release -r <rid> --self-contained true` command `release.yml`'s tarball jobs run
+  was also executed directly on this machine for all three non-Windows RIDs (`linux-x64`, `linux-arm64`,
+  `osx-arm64`), each producing correct per-platform native ONNX Runtime assets, and the tar.gz packaging
+  step was verified against a real `linux-x64` publish output.
+- **Still not verified**: `release.yml`'s actual multi-arch `buildx` push to GHCR (needs a real tag push
+  and registry credentials this environment doesn't have) and the packaging scripts against a real
+  systemd/launchd install, named honestly below rather than silently assumed to work the same way the
+  Dockerfile itself turned out to.
 
 **`release.yml` matrix and `promote.yml` - shipped, restructured, YAML-validated, but never actually run
 (would require pushing a real tag to trigger it):**
