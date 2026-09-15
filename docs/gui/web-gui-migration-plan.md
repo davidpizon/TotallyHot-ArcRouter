@@ -1,6 +1,6 @@
 # Web GUI Migration Plan
 
-> **Status: P7 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5, P6 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
+> **Status: P8 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5, P6, P7 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
 > (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retires the
 > Windows-only MAUI Blazor Hybrid GUI
 > (`src/TotallyHotArcRouter.Gui`, WebView2) in favor of a Blazor WebAssembly dashboard served by the
@@ -1039,6 +1039,110 @@ Several installer/OS-integration bullets are explicitly deferred; see below.
 - Confirm Qodana's Linux container builds the WinForms project with `EnableWindowsTargeting`; otherwise exclude only the shell project.
 
 **Exit:** Tray.Core ≥80%. Manual script run: toggle routing, stop service → balloon, Install update → UAC → upgrade.
+
+### P8 status: shipped 2026-09-15
+
+The core deliverable - a cross-platform, unit-tested `Tray.Core` library and a thin WinForms shell built on
+it, launched for real against the actual running router and shown to hold a live native gRPC connection to
+the web port - is shipped. One design choice deviates from the plan's literal wording (the auth mechanism);
+two exit-criteria items are deferred until P9's installer work exists to exercise them for real.
+
+**Shipped:**
+- **`TotallyHotArcRouter.Tray.Core`** (plain `net10.0`, references only `TotallyHotArcRouter.Gui.Telemetry`):
+  - `RoutingGateMonitor` - a tray-owned port of `TotallyHot.ArcRouter.Gui.Services.RoutingGateStore`'s
+    background poll loop (`ConnectionState`/`IsReachable`/`IsUsable`/`IsEnabled`/`LastFailureMessage`,
+    `EnableAsync`/`DisableAsync`, the one-time `BecameUnusable` event). A genuine port, not a shared
+    reference: the original lives in `TotallyHotArcRouter.Gui.Components`, a Razor class library, and
+    pulling that project's Blazor-facing dependencies into a WinForms-adjacent library to reuse one poll
+    loop would couple two projects that otherwise share nothing - the same "one fact, two copies because
+    of the process boundary" tradeoff this codebase already accepts for
+    `TotallyHot.ArcRouter.Gui.Admin.ManagementTokenReader` and `TelemetryChannelFactory`'s certificate-trust
+    callback.
+  - `TrayStatusPresenter` - `BuildStatusLabel`/`BuildBalloonMessage`, a direct port of
+    `TrayWindowManager.BuildRouterStatusLabel`/`ShowRouterUnavailableBalloon`'s classification switch,
+    extracted out of that file's raw Win32 P/Invoke shell so it is unit-testable without a live Windows
+    service or a native window. `RouterServiceStatus` is a decoupled mirror of
+    `ServiceControllerStatus`'s values, so `Tray.Core` never needs a `System.ServiceProcess.ServiceController`
+    reference.
+  - `TrayDiscoveryReader`/`TrayDiscoveryInfo` - reads the router's discovery file
+    (`%ProgramData%\TotallyHotArcRouter\web-interface.json`), mirroring `ManagementTokenReader`'s
+    independent-copy pattern rather than referencing the router executable (which would pull SQLite, ONNX
+    Runtime, and the full proxy pipeline into a tray icon's dependency graph for one small JSON read).
+  - `TrayUpdateCoordinator` - the "Install update" menu item's flow (check → confirm → notify the router
+    best-effort → download/verify/launch via the reused, unmodified `IMsiUpdateApplier` → exit on success),
+    a slimmed sibling of `TotallyHot.ArcRouter.Gui.Services.UpdateStore`'s apply flow without
+    `AdminStoreBase`'s Blazor-facing busy/error tracking.
+- **`TotallyHotArcRouter.Tray`** (`net10.0-windows`, `UseWindowsForms`, `[ExcludeFromCodeCoverage]`
+  throughout): `NotifyIcon` + `ContextMenuStrip` (status caption, Show Dashboard, the single
+  Enable/Disable-Routing toggle item, Install update, Exit), a `ServiceController("TotallyHotArcRouter")`
+  poll on a WinForms `Timer` plus a refresh on every menu open, a `Local\` named-mutex single-instance
+  guard, and `appicon.ico` (copied from the MAUI GUI's own generated icon - the same image, not a new
+  design asset).
+- Both new projects added to `TotallyHotArcRouter.slnx`; `Tray.Core` and `Tray.Core.Tests` also added to
+  `TotallyHotArcRouter.Qodana.slnx` (the Linux-representative solution) since both build cross-platform.
+  `TotallyHotArcRouter.Tray` itself is **not** added to the Qodana solution - see the deferral below.
+- `AGENTS.md`'s doc-enforcement list updated to include `TotallyHotArcRouter.Tray.Core`/`.Tray`.
+
+**Verified for real:**
+- `TotallyHotArcRouter.Tray.Core.Tests`: 38 tests, 0 failed, covering every
+  (`RouterServiceStatus`?, `RouterConnectionState`) case `TrayStatusPresenter` can hit, the full
+  `RoutingGateMonitor` poll/failure-classification/recovery matrix (mirroring
+  `RoutingGateStoreTests`'s own coverage shape), `TrayDiscoveryReader` against the exact camelCase JSON
+  `WebInterfaceDiscoveryFile.Write` produces plus missing/empty/corrupt-file tolerance, and
+  `TrayUpdateCoordinator`'s check/apply/notify-failure/exit-only-on-success flow.
+- **`TotallyHotArcRouter.Tray.Core.dll` line coverage: 86.8%** (`dotnet-coverage` + `reportgenerator`
+  against the built test exe) - above this phase's own ≥80% exit bar.
+- **A real end-to-end launch against the actual running router exe**, not just unit tests: with a genuine
+  router instance already listening on 5001-5004 (the same instance this session's earlier phases had been
+  using) and a real discovery file on disk, `TotallyHotArcRouter.Tray.exe` was launched directly. `netstat`
+  confirmed an `ESTABLISHED` TCP connection from the tray's process to `[::1]:5004` - the router's web
+  port - proving `NativeRouterChannelProvider`/`TelemetryChannelFactory` actually completed a TLS
+  handshake against the P7 local-CA leaf and the routing-gate poll loop is live, not just constructed.
+  The process stayed alive and stable (no crash, growing-then-flat memory) for the duration of the test.
+- **The single-instance mutex verified for real**: launching a second `TotallyHotArcRouter.Tray.exe` while
+  the first was still running exited immediately with code 0 and left exactly one tray process running,
+  confirmed via `tasklist`.
+- Full solution build (`TotallyHotArcRouter.slnx`) and the Linux-representative `Qodana.slnx`: both 0
+  warnings, 0 errors. All 8 test executables in the solution, run directly: 3975 tests total, 0 failed, 2
+  skipped (pre-existing, unrelated) - 38 of those in the new `Tray.Core.Tests`, the rest unchanged from P7.
+
+**Deviation from the plan's literal wording:**
+- **The tray authenticates over the existing `x-admin-token` gRPC header
+  (`TelemetryAuthClientInterceptor`/`management-token.txt`), not a `CookieContainer`.** The plan's P8
+  bullet names "native gRPC over HTTP/2 to the web port with a `CookieContainer`", which describes
+  ADR-0012's browser-facing loopback-session-cookie design - but ADR-0012 is still **Proposed**, and
+  today's only implemented native-client auth path (what `NativeRouterChannelProvider`/
+  `RoutingGateAdminClient`/`UpdateAdminClient` already do for the MAUI GUI) is the token header, read
+  fresh from `management-token.txt` on every call. Building a second, parallel auth mechanism for the tray
+  alone - one ADR-0012 doesn't yet specify for native clients even in its proposed form - was judged out of
+  scope for a phase whose deliverable is the tray shell, not a new auth design. `Tray.Core` reuses the
+  identical, already-shipped `TelemetryChannelFactory.Authenticated`/`TelemetryAuthClientInterceptor` path
+  the MAUI GUI uses today, unchanged. If ADR-0012 is later accepted with a native-client cookie story, the
+  tray's auth wiring is a contained, one-file change (`TrayApplicationContext`'s channel construction).
+
+**Deferred (explicit gaps, not silently dropped):**
+1. **The manual "stop service → balloon" and "Install update → UAC → upgrade" exit-criteria scripts were
+   not run.** Both require a real installed Windows service (`ServiceController("TotallyHotArcRouter")`
+   resolving to an actual service, which does not exist until P9's MSI installs one) and, for the update
+   path, a real published GitHub release asset to download - neither exists yet in this repository's
+   lifecycle (confirmed in P6's own smoke test: no releases are published). What *was* verified for real is
+   everything these two scripts don't need a service or a release for: the tray launching, connecting,
+   polling, and the single-instance guard (see above). The status-caption/balloon *formatting* for every
+   service state is unit-tested exhaustively in `TrayStatusPresenterTests`; only the live
+   Service-Control-Manager and update-download integration is unexercised.
+2. **`TotallyHotArcRouter.Tray` (the WinForms shell) was excluded from the Qodana solution rather than
+   confirmed to build under `EnableWindowsTargeting` in the Linux container**, per the plan's own
+   "otherwise exclude" fallback. This was a judgment call following the existing precedent
+   (`TotallyHotArcRouter.Gui`/`.Gui.Tests` are excluded the same way for the same reason: a Windows-only
+   UI-framework project inside the Linux Qodana container), not a confirmed Linux build failure - no Linux
+   container was available in this environment to actually test the `EnableWindowsTargeting` path. If a
+   future CI run shows the WinForms project genuinely builds under Qodana, it can be added back.
+3. **No Playwright-equivalent UI automation of the tray's actual menu interactions** (clicking "Enable
+   Routing", watching the balloon appear, opening "Show Dashboard" in a real browser). The Windows
+   environment this session runs in has no interactive desktop session to drive `NotifyIcon`/
+   `ContextMenuStrip` click automation from here, the same category of gap P6's Playwright deferral and
+   P5/P6's ubuntu-CI-job deferrals already documented. The process-level verification above (real TLS
+   connection, real single-instance behavior, zero crashes) is what this environment could exercise.
 
 ## P9 — Windows cutover
 

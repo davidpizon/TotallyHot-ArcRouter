@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Plain net10.0 (not net10.0-windows), mirroring TotallyHotArcRouter.Gui.Telemetry/.Admin: the tray's
+         status/balloon formatting, routing-gate polling, discovery-file reading, and update-apply
+         orchestration are all OS-agnostic logic, so they build and unit-test on any platform even though
+         the only project that ever references this one (TotallyHotArcRouter.Tray, net10.0-windows WinForms)
+         is Windows-only (web GUI migration plan Phase P8). -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TotallyHot.ArcRouter.Tray</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Gui.Telemetry already carries everything the tray talks to the router through: RoutingGateAdminClient/
+         IRoutingGateAdminClient, UpdateAdminClient/IUpdateAdminClient, MsiUpdateApplier/IMsiUpdateApplier,
+         NativeRouterChannelProvider, TelemetryChannelFactory (cert trust + the shared x-admin-token
+         authentication - see RoutingGateMonitor's remarks for why the tray reuses this rather than the
+         cookie scheme ADR-0012 describes for the browser GUI). Reused, not rebuilt, per the plan's own
+         "Reuse (do not rebuild)" list. -->
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Telemetry\TotallyHotArcRouter.Gui.Telemetry.csproj" />
+  </ItemGroup>
+
+</Project>
