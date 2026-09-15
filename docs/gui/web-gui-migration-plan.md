@@ -1,7 +1,8 @@
 # Web GUI Migration Plan
 
-> **Status: P1 shipped 2026-09-14 — P0's ADRs 0011-0014 remain proposed (pending owner review); spikes
-> S1-S7 run, see [Spike results](#p0-spike-results). Retires the Windows-only MAUI Blazor Hybrid GUI
+> **Status: P3 shipped 2026-09-15 (P1, P2 shipped 2026-09-14) — P0's ADRs 0011-0014 remain proposed
+> (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retires the
+> Windows-only MAUI Blazor Hybrid GUI
 > (`src/TotallyHotArcRouter.Gui`, WebView2) in favor of a Blazor WebAssembly dashboard served by the
 > router itself, cross-platform, with a small Windows-only tray exe as the only remaining
 > platform-specific component.
@@ -400,6 +401,100 @@ ADR-0008's stop rule applies).
 - Linux CI: a provider credential save/read round-trips through `ManagementFacade`.
 - Windows fixture: an existing DPAPI `secrets.dat` still reads.
 - Key ring survives a restart.
+
+### P3 status: shipped 2026-09-15
+
+Implemented as designed, with one significant scope addition (a real migration gap this phase's own
+path change created, found and fixed during implementation - see below) and real Linux verification via
+a local container, not just Windows testing. New/changed files: `Hosting/AppDataPaths.cs` (new),
+`Proxy/Management/ProtectedSecretStore.cs`, `Telemetry/TelemetryTlsCertificate.cs`,
+`Proxy/Management/ManagementAccessToken.cs`, `Router/RoutingGateStore.cs`, `PriceCatalog/StorageOptions.cs`,
+`PriceCatalog/LegacyStorageMigration.cs`, `Models/EmbeddingOptions.cs`, `Models/LlmRouterOptions.cs`,
+`Hosting/ServiceCollectionExtensions.cs`, plus `ProtectedSecretStoreTests.cs` (extended) and
+`Hosting/AppDataPathsTests.cs` (new).
+
+**`AppDataPaths`** (`Hosting/AppDataPaths.cs`): one memoized resolver replacing three independent,
+subtly different ones (`StorageOptions.MachineSharedRoot`, `RoutingGateStore.DefaultPath`,
+`ManagementAccessToken.DefaultPath`, each hand-rolling its own version of "where does machine-wide
+state live"). Windows: `%ProgramData%\TotallyHotArcRouter`, unchanged. Linux: `$STATE_DIRECTORY`
+(systemd, Phase P10) or `/var/lib/totallyhot-arcrouter`. macOS: `/Library/Application
+Support/TotallyHotArcRouter`. Falls back to a per-user directory when the machine-wide candidate isn't
+writable (the common unprivileged-developer case), and once more to
+`<BaseDirectory>/data/TotallyHotArcRouter` if even that fails. `StorageOptions.MachineSharedRoot` now
+delegates to it rather than duplicating platform logic.
+
+**`ProtectedSecretStore`** gets the pluggable protector exactly as planned: Windows keeps DPAPI with its
+on-disk format byte-for-byte unchanged (verified by a new test that writes a raw pre-P3
+`ProtectedData`-encrypted blob directly, bypassing the store, and confirms `TryRead` still decodes it).
+Off Windows, `Write` no longer throws `PlatformNotSupportedException` - it uses ASP.NET Core Data
+Protection with a file-system key ring under `<data-dir>/keys` (created at mode `0700`; an existing key
+directory with broader permissions is refused, not silently used), with a one-byte format-version prefix
+on the ciphertext (a genuinely new format, nothing to be backward-compatible with, since `Write` could
+never previously succeed there). `TelemetryTlsCertificate`'s plaintext cert-password fallback is
+removed - the `PlatformNotSupportedException` catch it existed for can no longer be thrown - while its
+one-time migration of an already-existing legacy plaintext password file into the store is kept.
+
+**Deviations / additions beyond the plan as written:**
+- **A second, unplanned migration gap, found and fixed.** Moving `ProtectedSecretStore`/
+  `TelemetryTlsCertificate` off their old per-user location (`%LOCALAPPDATA%\TotallyHotArcRouter\`) means
+  an operator upgrading past this phase would find their saved provider credentials silently gone - a
+  fresh, empty `secrets.dat` at the new shared location - unless something adopts the old file. Extended
+  `LegacyStorageMigration.Run` (previously scoped to `StorageOptions`' five files only) to also adopt
+  `secrets.dat` and `telemetry-cert.pfx` from the same legacy directory, guarded so it only ever touches
+  the real machine-shared location (never a test's temp-directory override) the same way the existing
+  five migrations already are.
+- **A real hosted-service ordering bug, found only by running the actual router.** `LegacyStorageMigration`
+  only adopts a legacy file if the destination doesn't exist yet - by design, so it never overwrites newer
+  data. `McpHostedService` creates the shared TLS certificate (and therefore a fresh `secrets.dat` entry)
+  as a side effect of binding its own listener, and was registered (`AddManagement()`) *before*
+  `AddBackgroundServices()` (which contains `StartupHealthCheckHostedService`, where the migration runs).
+  The generic host starts hosted services sequentially in registration order, so MCP's fresh cert was
+  already sitting at the destination by the time migration ran, and the adoption silently no-opped -
+  reproduced live against this developer's own real pre-P3 files (below), not caught by any unit test,
+  since none of them boot the real, fully-wired host. Fixed by moving `services.AddManagement()` after
+  `services.AddBackgroundServices()` in `ServiceCollectionExtensions.AddTotallyHotArcRouter`, matching the
+  identical, already-documented constraint that section's own comments state for `AddProxyHost`'s
+  `ProxyHostedService`. Re-verified live after the fix (below) - the log now shows the "Migrated
+  secrets.dat..." / "Migrated telemetry-cert.pfx..." lines before MCP's "listening on" line, and the old
+  per-user files are correctly renamed `.migrated`, not silently orphaned.
+
+**Verified:**
+- Full router test suite: 2787/2787 pass, 0 failures, 0 errors, `-parallelMode collections` (2
+  pre-existing/expected skips: the unrelated integration-disabled test, and
+  `OnnxTextGenerationClientTests` self-skipping because no llm_router model is cached at the *new*
+  shared-directory location yet on this machine - expected, not a regression).
+- `dotnet build src/TotallyHotArcRouter.slnx -c Release`: 0 warnings, 0 errors.
+- Cobertura coverage: `TotallyHotArcRouter` assembly 82.8% (≥80% gate). `AppDataPaths.cs` shows only
+  ~29% in this Windows-only coverage run - expected, not a gap: roughly half its logic (the Linux/macOS
+  candidate selection, per-user fallback, last-resort collision avoidance) is structurally unreachable
+  from a Windows test process, and was verified for real instead (next item), not merely left untested.
+- **Real Linux verification**, via a local Podman container (`mcr.microsoft.com/dotnet/sdk:10.0`) rather
+  than reasoning about the Unix code paths from a Windows machine - this caught a real bug a Windows-only
+  review would have missed entirely:
+  - A small throwaway harness referencing the router project directly exercised
+    `AppDataPaths.ResolveMachineSharedDirectory()`, a full `ProtectedSecretStore` write/read/exists/delete
+    round-trip, the `keys` directory landing at exactly mode `0700`, a **restart-survival** check (a
+    *second*, freshly-constructed `ProtectedSecretStore` - a fresh Data Protection key-ring load, not an
+    in-memory cache - still decrypting a value written by a different instance), and the **refuse, don't
+    silently use** behavior when the key directory's permissions were widened after creation.
+  - Run as root: resolved to `/var/lib/totallyhot-arcrouter` (the machine-wide candidate); all checks
+    passed.
+  - Run as an unprivileged user (`/var/lib` not writable): resolved to
+    `/home/devuser/.local/share/TotallyHotArcRouter` (the per-user fallback); all checks passed.
+  - **Bug found and fixed by this run**: the per-user-fallback run's *last-resort* path collided with the
+    published router's own Linux apphost binary - `dotnet publish`'s native launcher for an `OutputType=Exe`
+    project is named exactly `TotallyHotArcRouter` (no extension) and sits directly in
+    `AppContext.BaseDirectory`, the same path `AppDataPaths`' original last-resort fallback tried to
+    `Directory.CreateDirectory` over. Fixed by nesting the last-resort directory one level deeper
+    (`<BaseDirectory>/data/TotallyHotArcRouter`), which can never collide with a file sitting directly in
+    `BaseDirectory`. This is exactly the kind of defect real execution catches and code review alone does
+    not.
+- **Manual golden-path smoke** (the built `TotallyHotArcRouter.exe`, real `appsettings.json`, this
+  developer's own real pre-P3 `secrets.dat`/`telemetry-cert.pfx`): after the ordering fix, startup
+  correctly logged both `Migrated secrets.dat...` and `Migrated telemetry-cert.pfx...` before MCP's
+  "listening on" line; the legacy per-user files were renamed `.migrated` (recoverable, not deleted); the
+  new shared-directory copies matched the originals byte-for-byte (`File.Copy`, not regenerated) and the
+  router continued to start normally afterward.
 
 ## P4 — Auth (ADR-0012)
 

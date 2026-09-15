@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Hosting;
+
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
@@ -59,9 +61,11 @@ public sealed class StorageOptions
     /// The single machine-wide directory every file above lives in, shared with
     /// <c>RoutingGateStore</c>'s state file and <c>ManagementAccessToken</c>'s token. Public so
     /// <see cref="LegacyStorageMigration"/> can tell a default-located file (which it may migrate) from
-    /// one an operator deliberately pointed somewhere else (which it must leave alone).
+    /// one an operator deliberately pointed somewhere else (which it must leave alone). Mirrors
+    /// <see cref="AppDataPaths.ApplicationDirectoryName"/>, which <see cref="ResolveMachineSharedDirectory"/>
+    /// now delegates to.
     /// </summary>
-    public const string MachineSharedDirectoryName = "TotallyHotArcRouter";
+    public const string MachineSharedDirectoryName = AppDataPaths.ApplicationDirectoryName;
 
     // The two per-user directories these files lived in before the move to %ProgramData%. Both spellings
     // existed at once: appsettings.json pinned DatabasePath under the dotless name while the four
@@ -143,10 +147,9 @@ public sealed class StorageOptions
     /// Cross-platform hardening: on Linux, <c>%PROGRAMDATA%</c> and <c>%LOCALAPPDATA%</c> are both
     /// undefined (so they would survive expansion literally) and backslashes are ordinary filename
     /// characters (so directory creation would be skipped and the file created with an odd name). This
-    /// substitutes a real folder for either unexpanded token - see <see cref="MachineSharedRoot"/> for why
-    /// the <c>%PROGRAMDATA%</c> fallback is not <c>CommonApplicationData</c> off Windows - and rewrites
-    /// backslashes to the platform separator, so the same default works on Windows and in the Linux
-    /// container.
+    /// substitutes a real folder for either unexpanded token - see <see cref="AppDataPaths"/> (via
+    /// <see cref="MachineSharedRoot"/>) for the full platform/fallback story - and rewrites backslashes to
+    /// the platform separator, so the same default works on Windows, Linux, and macOS.
     /// </remarks>
     public string ResolveDatabasePath()
     {
@@ -223,23 +226,18 @@ public sealed class StorageOptions
     /// any trailing separator so the substitution never produces a doubled one.
     /// </summary>
     /// <remarks>
-    /// Deliberately <em>not</em> <see cref="Environment.SpecialFolder.CommonApplicationData"/> off Windows:
-    /// there it resolves to <c>/usr/share</c>, which the unprivileged account in this project's Linux
-    /// container cannot write. The container has no LocalSystem/interactive-user split to bridge in the
-    /// first place - that split is the only reason these files are machine-wide - so the per-user root is
-    /// both writable and correct there.
+    /// Delegates to <see cref="AppDataPaths.ResolveMachineSharedDirectory"/> (web GUI migration plan Phase
+    /// P3), which replaced this method's own independent Linux/macOS handling - see that type's remarks
+    /// for the full platform/fallback story, including why a genuinely machine-wide location off Windows
+    /// (not a per-user stand-in) is now attempted first.
     /// </remarks>
     private static string MachineSharedRoot()
     {
-        var root = OperatingSystem.IsWindows()
-            ? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)
-            : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        // Some minimal Linux environments (e.g. a CI runner with no XDG/HOME) return an empty folder here;
-        // fall back to the writable application base directory rather than rooting at "/".
-        if (string.IsNullOrEmpty(root)) root = AppContext.BaseDirectory;
-
-        return root.TrimEnd('/', '\\');
+        // AppDataPaths.ResolveMachineSharedDirectory() already returns <root>\TotallyHotArcRouter; every
+        // caller here appends its own "\TotallyHotArcRouter\<file>" default path segment, so only the
+        // root half is wanted back.
+        var resolved = AppDataPaths.ResolveMachineSharedDirectory();
+        return Path.GetDirectoryName(resolved) ?? resolved;
     }
 
     /// <summary>
@@ -257,11 +255,12 @@ public sealed class StorageOptions
 
     /// <summary>
     /// Gets the resolved machine-wide directory the defaults above live in
-    /// (<c>%ProgramData%\TotallyHotArcRouter</c> on Windows).
+    /// (<c>%ProgramData%\TotallyHotArcRouter</c> on Windows; see <see cref="AppDataPaths"/> for every
+    /// other platform).
     /// </summary>
     public static string ResolveMachineSharedDirectory()
     {
-        return Path.Combine(path1: MachineSharedRoot(), path2: MachineSharedDirectoryName);
+        return AppDataPaths.ResolveMachineSharedDirectory();
     }
 
     /// <summary>

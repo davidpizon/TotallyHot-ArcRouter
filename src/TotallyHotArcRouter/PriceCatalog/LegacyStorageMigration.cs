@@ -1,12 +1,22 @@
 using Microsoft.Data.Sqlite;
+using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
 /// One-time adoption of the per-user files <see cref="StorageOptions"/>' defaults used before they moved
-/// to the machine-wide <c>%ProgramData%\TotallyHotArcRouter\</c> directory. Runs at startup, ahead of the
-/// first <c>EnsureCreated</c>, so an existing install keeps its usage ledger, provider spend, synced
-/// benchmark corpus, and trained voter models instead of silently starting from empty.
+/// to the machine-wide <c>%ProgramData%\TotallyHotArcRouter\</c> directory (Windows; see
+/// <see cref="AppDataPaths"/> for every other platform). Runs at startup, ahead of the first
+/// <c>EnsureCreated</c>, so an existing install keeps its usage ledger, provider spend, synced benchmark
+/// corpus, and trained voter models instead of silently starting from empty. Also adopts
+/// <see cref="ProtectedSecretStore"/>'s <c>secrets.dat</c> and
+/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s <c>telemetry-cert.pfx</c> - both
+/// lived in this same legacy per-user directory before
+/// <see href="../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase P3
+/// moved them here too, and without this, an operator upgrading past Phase P3 would find their saved
+/// provider credentials silently gone (a fresh, empty <c>secrets.dat</c> at the new shared location) until
+/// they noticed and re-entered them.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -58,6 +68,22 @@ public static class LegacyStorageMigration
             false, logger: logger);
         migrated += Migrate(destinationPath: options.ResolveClusterModelPath(), fileName: "cluster_model.json", false,
             logger: logger);
+
+        // Not StorageOptions-owned, so they have no options-supplied path of their own for Migrate's usual
+        // "did the caller override this destination" guard to check - only attempted when options itself
+        // is already pointed at the real default directory (never in a test that points options at a temp
+        // directory), so a test run can never touch this developer's actual secrets.dat/telemetry-cert.pfx.
+        if (string.Equals(
+                a: Path.GetDirectoryName(options.ResolveDatabasePath())?.TrimEnd('/', '\\'),
+                b: StorageOptions.ResolveMachineSharedDirectory().TrimEnd('/', '\\'),
+                comparisonType: StringComparison.OrdinalIgnoreCase))
+        {
+            migrated += Migrate(destinationPath: ProtectedSecretStore.DefaultPath(), fileName: "secrets.dat", false,
+                logger: logger);
+            migrated += Migrate(
+                destinationPath: Path.Combine(AppDataPaths.ResolveMachineSharedDirectory(), "telemetry-cert.pfx"),
+                fileName: "telemetry-cert.pfx", false, logger: logger);
+        }
 
         return migrated;
     }

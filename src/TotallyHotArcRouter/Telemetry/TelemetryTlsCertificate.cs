@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -17,12 +18,20 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// connection until decrypted. See docs/router/grpc-migration.md's "Transport" section.
 /// </summary>
 /// <remarks>
-/// Persisted under <c>%LOCALAPPDATA%\TotallyHotArcRouter\</c> (the same per-user directory
-/// docs/router/signalr-hub-security.md proposed for this exact purpose) as a password-protected
-/// <c>.pfx</c>, with the random runtime password stored alongside it - so the certificate survives
+/// Persisted under the machine-shared data directory (<see cref="AppDataPaths"/>; web GUI migration plan
+/// Phase P3 moved this off the per-user <c>%LOCALAPPDATA%\TotallyHotArcRouter\</c> location
+/// docs/router/signalr-hub-security.md originally proposed) as a password-protected <c>.pfx</c>, with the
+/// random runtime password stored in <see cref="ProtectedSecretStore"/> - so the certificate survives
 /// process restarts instead of being regenerated (and thus needing the client to re-trust a new one)
-/// every launch. The client side (<c>TotallyHot.ArcRouter.Gui.Services.LiveDataStore</c>) trusts any
-/// certificate presented with subject <c>CN=localhost</c> rather than pinning this exact
+/// every launch. The move to a shared directory is purely for consistency with every other piece of
+/// router state (one data directory, one mental model) - only the router process itself ever reads this
+/// <c>.pfx</c>, so there was no cross-account correctness reason to keep it per-user the way there was for
+/// the management token. The password itself is unaffected: on Windows it stays sealed with user-scoped
+/// DPAPI (<see cref="DataProtectionScope.CurrentUser"/>), tied to the encrypting account regardless of the
+/// file's directory - if a different account ever starts the router, password resolution fails cleanly and
+/// a fresh certificate/password pair is generated (see <see cref="TryResolvePassword"/>), rather than
+/// silently succeeding with the wrong owner. The client side (<c>TotallyHot.ArcRouter.Gui.Services.LiveDataStore</c>)
+/// trusts any certificate presented with subject <c>CN=localhost</c> rather than pinning this exact
 /// certificate's thumbprint - both processes are the same OS user on the same machine, so this is a
 /// pragmatic, adequate trust boundary for a personal local dev tool, not a hardened one. A stronger
 /// follow-up would have the client read this same <c>.pfx</c> file's public certificate and pin its
@@ -46,8 +55,7 @@ public static class TelemetryTlsCertificate
     /// </summary>
     public static X509Certificate2 GetOrCreate()
     {
-        var directory = Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            path2: "TotallyHotArcRouter");
+        var directory = AppDataPaths.ResolveMachineSharedDirectory();
         return GetOrCreate(
             certificatePath: Path.Combine(path1: directory, path2: CertificateFileName),
             passwordPath: Path.Combine(path1: directory, path2: PasswordFileName),
@@ -101,7 +109,7 @@ public static class TelemetryTlsCertificate
         var certificateBytes = certificate.Export(contentType: X509ContentType.Pkcs12, password: password);
 
         File.WriteAllBytes(path: certificatePath, bytes: certificateBytes);
-        StorePassword(passwordPath: passwordPath, secretStore: secretStore, password: password);
+        StorePassword(secretStore: secretStore, password: password);
 
         return X509CertificateLoader.LoadPkcs12(data: certificateBytes, password: password,
             keyStorageFlags: X509KeyStorageFlags.Exportable);
@@ -109,8 +117,10 @@ public static class TelemetryTlsCertificate
 
     /// <summary>
     /// Resolves the certificate's password: the protected store first, falling back to (and migrating in)
-    /// the legacy plaintext file. Returns <see langword="false"/> when neither holds a password - a
-    /// certificate file with no recoverable password must be regenerated, not opened with a guessed one.
+    /// a legacy plaintext password file from before <see cref="ProtectedSecretStore"/> supported every
+    /// platform (web GUI migration plan Phase P3). Returns <see langword="false"/> when neither holds a
+    /// password - a certificate file with no recoverable password must be regenerated, not opened with a
+    /// guessed one.
     /// </summary>
     private static bool TryResolvePassword(string passwordPath, ProtectedSecretStore secretStore, out string password)
     {
@@ -124,33 +134,20 @@ public static class TelemetryTlsCertificate
 
         password = File.ReadAllText(passwordPath);
 
-        // Migrate the legacy file into the store, then remove it - best-effort: on a platform where the
-        // store is unavailable, the legacy file stays exactly where it is and keeps working.
-        try
-        {
-            secretStore.Write(name: PasswordSecretName, value: password);
-            File.Delete(passwordPath);
-        }
-        catch (PlatformNotSupportedException)
-        {
-        }
+        // One-time migration of a pre-Phase-P3 plaintext file into the now-always-available protected
+        // store. Deliberately no longer catches PlatformNotSupportedException here - the whole point of
+        // Phase P3's pluggable protector is that ProtectedSecretStore.Write works on every platform, so a
+        // failure here is a real problem (a locked-down key directory, a full disk) that should surface,
+        // not be silently downgraded back to "leave the plaintext file in place".
+        secretStore.Write(name: PasswordSecretName, value: password);
+        File.Delete(passwordPath);
 
         return true;
     }
 
-    /// <summary>
-    /// Persists a freshly generated password to the protected store, falling back to the legacy plaintext file when
-    /// the store is unavailable on this platform.
-    /// </summary>
-    private static void StorePassword(string passwordPath, ProtectedSecretStore secretStore, string password)
+    /// <summary>Persists a freshly generated password to the protected store.</summary>
+    private static void StorePassword(ProtectedSecretStore secretStore, string password)
     {
-        try
-        {
-            secretStore.Write(name: PasswordSecretName, value: password);
-        }
-        catch (PlatformNotSupportedException)
-        {
-            File.WriteAllText(path: passwordPath, contents: password);
-        }
+        secretStore.Write(name: PasswordSecretName, value: password);
     }
 }

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using TotallyHot.ArcRouter.Hosting;
 
 namespace TotallyHot.ArcRouter.Models;
 
@@ -41,7 +42,7 @@ public sealed class LlmRouterOptions
     // above is this root plus this build's own subpath; LlmRouterModelOverrideStore resolves a distinct
     // leaf directory per model URL under this same root, so switching models never mixes one model's
     // files with another's.
-    private const string ModelsRootDirectory = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\models";
+    private const string ModelsRootDirectory = @"%LOCALAPPDATA%\models";
 
     // The execution-provider build the default URLs below pin. Kept as a single constant so the five
     // artifact URLs can never drift onto different builds - mixing, say, a cuda-fp16 model.onnx with a
@@ -58,7 +59,7 @@ public sealed class LlmRouterOptions
     /// </summary>
     [Required]
     public string ModelCacheDirectory { get; init; } =
-        @"%LOCALAPPDATA%\TotallyHot.ArcRouter\models\qwen2.5-0.5b-instruct-onnx-genai\cpu-int4-rtn-block-32-acc-level-4";
+        @"%LOCALAPPDATA%\models\qwen2.5-0.5b-instruct-onnx-genai\cpu-int4-rtn-block-32-acc-level-4";
 
     /// <summary>
     /// Gets the URL <c>genai_config.json</c> (the ONNX Runtime GenAI model/generation configuration) is
@@ -165,22 +166,20 @@ public sealed class LlmRouterOptions
     }
 
     /// <summary>
-    /// Expands the <c>%LOCALAPPDATA%</c> token (falling back to <see cref="AppContext.BaseDirectory"/> if
-    /// unavailable) and any other environment variables in <paramref name="path"/>.
+    /// Expands the <c>%LOCALAPPDATA%</c> token - kept for backward compatibility with an operator's
+    /// existing override, but now expanding to the machine-shared data directory
+    /// (<see cref="AppDataPaths"/>; web GUI migration plan Phase P3) rather than the per-user special
+    /// folder, since this cache is re-downloadable, not per-account state - and any other environment
+    /// variables in <paramref name="path"/>.
     /// </summary>
     private static string ResolvePath(string path)
     {
         var expanded = Environment.ExpandEnvironmentVariables(path);
 
         if (expanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
-        {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(localAppData)) localAppData = AppContext.BaseDirectory;
-
-            localAppData = localAppData.TrimEnd('/', '\\');
-            expanded = expanded.Replace(oldValue: LocalAppDataToken, newValue: localAppData,
+            expanded = expanded.Replace(oldValue: LocalAppDataToken,
+                newValue: AppDataPaths.ResolveMachineSharedDirectory(),
                 comparisonType: StringComparison.OrdinalIgnoreCase);
-        }
 
         expanded = expanded.Replace('\\', newChar: Path.DirectorySeparatorChar);
 

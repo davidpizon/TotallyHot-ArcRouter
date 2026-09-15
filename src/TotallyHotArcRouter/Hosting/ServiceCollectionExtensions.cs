@@ -33,9 +33,18 @@ public static class ServiceCollectionExtensions
         services.AddQualityAndObservability();
         services.AddProxyMiddlewareCore();
         services.AddPriceCatalog();
-        services.AddManagement();
         services.AddUpdate();
+        // AddBackgroundServices (StartupHealthCheckHostedService in particular) must start before
+        // anything that creates TelemetryTlsCertificate.GetOrCreate()'s shared cert or a
+        // ProtectedSecretStore entry at the machine-shared default path - web GUI migration plan Phase
+        // P3 added those two files to LegacyStorageMigration.Run's sweep, so whichever hosted service
+        // touches them first now decides whether a pre-P3 per-user copy gets adopted or silently
+        // orphaned. AddManagement's McpHostedService is the earliest such toucher (it creates the shared
+        // cert for its own TLS listener), so it must be registered - and therefore started - after
+        // AddBackgroundServices, not before it. See this method's own hosted-service-ordering remarks,
+        // which already documented the identical constraint for AddProxyHost's ProxyHostedService.
         services.AddBackgroundServices();
+        services.AddManagement();
         services.AddProxyHost();
 
         return services;

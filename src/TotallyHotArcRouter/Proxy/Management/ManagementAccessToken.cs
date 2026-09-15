@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using TotallyHot.ArcRouter.Hosting;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
@@ -11,14 +12,17 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// one on every launch.
 /// </summary>
 /// <remarks>
-/// Persisted machine-wide under <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>, alongside
+/// Persisted machine-wide under <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c> (see
+/// <see cref="AppDataPaths"/> for every other platform), alongside
 /// <see cref="TotallyHot.ArcRouter.Router.RoutingGateStore"/>'s state file and for exactly the same reason:
 /// the installed service runs as <c>LocalSystem</c> while the GUI runs as the interactive user, so the
 /// per-user <c>%LOCALAPPDATA%</c> this used to live in resolved to a <em>different file per account</em>.
 /// Each side minted or read its own token, every management call came back 401, and the GUI's tray reported
-/// the (perfectly healthy) service as stopped. Note this is not the same choice as the telemetry
-/// certificate's, which correctly stays per-user: only the router ever reads that <c>.pfx</c>, and its
-/// password is sealed with user-scoped DPAPI, so moving it would break rather than fix it.
+/// the (perfectly healthy) service as stopped. The telemetry certificate (<see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>)
+/// now shares this same directory too (web GUI migration plan Phase P3) - only the router ever reads that
+/// <c>.pfx</c>, so there was never a cross-account correctness reason to keep it separate, only a historical
+/// one; its password stays sealed with user-scoped DPAPI on Windows regardless of where the file itself
+/// lives, since DPAPI's protection is tied to the encrypting account, not the file's directory.
 /// <para>
 /// This file is access-restricted on write - a bearer token is the whole credential (there is no separate
 /// password protecting it the way the certificate's <c>.pfx</c> has), so its ACL is the only thing standing
@@ -96,15 +100,15 @@ public static class ManagementAccessToken
     }
 
     /// <summary>
-    /// Gets the default token file path (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>), the
-    /// same machine-wide directory <see cref="TotallyHot.ArcRouter.Router.RoutingGateStore"/> persists to.
-    /// Machine-wide rather than per-user because the router and the GUI do not run as the same OS account in
-    /// the installed configuration - see this type's remarks.
+    /// Gets the default token file path (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c> on
+    /// Windows; see <see cref="AppDataPaths"/> for every other platform), the same machine-shared directory
+    /// <see cref="TotallyHot.ArcRouter.Router.RoutingGateStore"/> persists to. Machine-wide rather than
+    /// per-user because the router and the GUI do not run as the same OS account in the installed
+    /// configuration - see this type's remarks.
     /// </summary>
     public static string DefaultPath()
     {
-        return Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            path2: "TotallyHotArcRouter", path3: TokenFileName);
+        return Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: TokenFileName);
     }
 
     /// <summary>
