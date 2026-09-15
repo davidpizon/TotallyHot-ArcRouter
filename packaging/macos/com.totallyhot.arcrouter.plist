@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LaunchDaemon for TotallyHot Arc Router (web GUI migration plan Phase P10). Installed by install.sh
+     to /Library/LaunchDaemons/com.totallyhot.arcrouter.plist. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.totallyhot.arcrouter</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/opt/totallyhot-arcrouter/TotallyHotArcRouter</string>
+    </array>
+
+    <!-- Dedicated, non-root service account created by install.sh - never runs as root. -->
+    <key>UserName</key>
+    <string>_arcrouter</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Raw launchd-level stdout/stderr (process start failures before Serilog's own Console/File sinks
+         are even initialized) - not the router's application log, which
+         AppDataPaths.ResolveLogsDirectory() resolves independently to
+         "/Library/Application Support/TotallyHotArcRouter/logs" on macOS. -->
+    <key>StandardOutPath</key>
+    <string>/Library/Application Support/TotallyHotArcRouter/logs/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Application Support/TotallyHotArcRouter/logs/launchd-stderr.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/usr/local/opt/totallyhot-arcrouter</string>
+</dict>
+</plist>

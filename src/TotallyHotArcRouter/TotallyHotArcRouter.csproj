@@ -16,15 +16,28 @@
          self-suppresses CS1591 via its own `#pragma warning disable 1591`, so this doesn't fight codegen. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>.</DockerfileContext>
+    <!-- Relative to this project's own directory, per VS/dotnet Docker tooling convention - the repo
+         root, since the Dockerfile (web GUI migration plan Phase P10) COPYs several sibling projects
+         (Quality, Gui.Web, Gui.Components, Gui.Telemetry) this project references. -->
+    <DockerfileContext>..\..</DockerfileContext>
   </PropertyGroup>
 
-  <!-- Self-contained win-x64 publish for the Windows Service deployment (auto-update plan Phase 1/6),
-       gated behind the "Service" publish profile so ordinary `dotnet build`/CI unit-test restores
-       aren't forced into a win-x64-only graph. -->
+  <!-- Self-contained publish for the packaged-service deployment (auto-update plan Phase 1/6; web GUI
+       migration plan Phase P10 extended this beyond Windows), gated behind the "Service" publish profile
+       so ordinary `dotnet build`/CI unit-test restores aren't forced into a single-RID graph. -->
   <PropertyGroup Condition="'$(PublishProfile)' == 'Service'">
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
+  </PropertyGroup>
+  <!-- win-x64 is only the DEFAULT RuntimeIdentifier for the Service profile, not a hardcoded one: an
+       explicit "-r <rid>"/"-p:RuntimeIdentifier=<rid>" on the dotnet publish command line is set before
+       project evaluation and so wins over this conditional default, leaving the MSI/Tray publish path
+       (which passes no RuntimeIdentifier override) unaffected. release.yml's Phase P10 tar.gz matrix
+       jobs (linux-x64/linux-arm64/osx-arm64) publish this same project directly with their own "-r"
+       flag and no PublishProfile at all, so this condition doesn't even apply to them - it exists so the
+       Service profile itself stays reusable for a non-Windows packaged-service RID, should one need it,
+       without a second publish profile file. -->
+  <PropertyGroup Condition="'$(PublishProfile)' == 'Service' AND '$(RuntimeIdentifier)' == ''">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>
@@ -54,6 +67,10 @@
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
+    <!-- Backs Program.cs's UseSystemd() call (web GUI migration plan Phase P10) so the host can run
+         under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
+         when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
     <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.6" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
     <PackageReference Include="Grpc.Tools" Version="2.83.0">

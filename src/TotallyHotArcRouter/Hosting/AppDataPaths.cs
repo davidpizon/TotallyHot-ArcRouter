@@ -74,6 +74,26 @@ public static class AppDataPaths
         return lastResort;
     }
 
+    /// <summary>
+    /// Resolves the directory Serilog's file sink writes into (web GUI migration plan Phase P10),
+    /// replacing the router's old hardcoded <c>C:\Logs\ArcRouter</c> default. Prefers systemd's own
+    /// <c>LOGS_DIRECTORY</c> environment variable when set - the packaged unit declares
+    /// <c>LogsDirectory=totallyhot-arcrouter</c>, and systemd creates, owns, and passes the resulting
+    /// absolute path before the process starts, mirroring <see cref="ResolveMachineSharedDirectory"/>'s
+    /// own <c>STATE_DIRECTORY</c> handling (including the same colon-separated multi-directory rule).
+    /// Falls back to a <c>logs</c> subdirectory of <see cref="ResolveMachineSharedDirectory"/> everywhere
+    /// else - Windows, macOS, and a non-systemd Linux run. Not memoized and performs no directory
+    /// creation of its own: Serilog's file sink creates its target directory on first write.
+    /// </summary>
+    public static string ResolveLogsDirectory()
+    {
+        var logsDirectory = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
+        if (!string.IsNullOrWhiteSpace(logsDirectory))
+            return logsDirectory.Split(separator: ':', count: 2)[0];
+
+        return Path.Combine(ResolveMachineSharedDirectory(), "logs");
+    }
+
     private static string MachineWideCandidate()
     {
         if (OperatingSystem.IsWindows())

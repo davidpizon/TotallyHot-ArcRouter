@@ -1,6 +1,6 @@
 # Web GUI Migration Plan
 
-> **Status: P9 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5, P6, P7, P8 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
+> **Status: P10 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5, P6, P7, P8, P9 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
 > (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retired the
 > Windows-only MAUI Blazor Hybrid GUI
 > (`src/TotallyHotArcRouter.Gui`, WebView2, deleted in P9) in favor of a Blazor WebAssembly dashboard
@@ -1429,6 +1429,111 @@ own superseded numbers in place - they describe what was true when written, not 
 - Router `Service` publish profile gains the non-Windows RIDs.
 
 **Exit:** release dry run on a fork. Smoke on each runner and in the container: service starts, dashboard reachable over trusted HTTPS, credential save works, secrets survive a restart.
+
+### P10 status: shipped 2026-09-15, with real deferrals named below
+
+All six deliverables were implemented and, where this environment allows it, verified for real. Two
+categories of the exit criterion were **not** run - a real Linux/macOS machine and a Docker daemon are
+both unavailable here - and are deferred honestly rather than claimed, the same category of gap as P7's
+and P9's own "no clean Windows VM in this environment" deferrals.
+
+**`UseSystemd()` and per-platform log paths - shipped, verified for real:**
+- `Program.cs` gained `.UseSystemd()` next to `.UseWindowsService(...)` (Microsoft.Extensions.Hosting.Systemd
+  package added), and `AppDataPaths` gained `ResolveLogsDirectory()` - prefers systemd's own
+  `LOGS_DIRECTORY` when set, otherwise a `logs` subdirectory of `ResolveMachineSharedDirectory()`, mirroring
+  `STATE_DIRECTORY`'s existing handling exactly (including the colon-separated multi-directory rule).
+- The old hardcoded `C:\Logs\ArcRouter` default in `appsettings.json` is gone. The File sink is now
+  constructed in code in `Program.cs`'s `.UseSerilog(...)` callback via `AppDataPaths.ResolveLogsDirectory()`,
+  not read from JSON config - a deliberate deviation from a literal reading of "Serilog file path set...
+  supplied by the unit, plist, or MSI", because `Serilog.Settings.Configuration` passes `Args` straight to
+  a sink with no token-expansion hook the way `StorageOptions.ResolvePath` has for its own `%PROGRAMDATA%`
+  tokens; moving construction to code was the smallest change that kept the path genuinely cross-platform
+  rather than inventing a second, parallel token-expansion mechanism just for this one setting.
+- **Verified for real**: `dotnet build` on both `.slnx` files - 0 warnings, 0 errors. Full suite re-run:
+  8/8 built xUnit v3 executables, only one failure across 3971+3=3974 tests, and it reproduced as flaky
+  and unrelated - `RouterConnectionSupervisorTests.Supervisor_ReconnectFailsAfterTheMonitorGoesUnusable_NeverExposesANullMonitorRegression`
+  (a pre-existing P8 test, untouched this phase) failed once then passed twice on immediate re-runs; not
+  investigated further here since it's orthogonal to every P10 change, but worth a look before P11 closes.
+
+**`packaging/linux/` and `packaging/macos/` - shipped, authored against the same mechanisms P3/P7 already
+verified, but never run on a real Linux/macOS machine (none available in this environment):**
+- `packaging/linux/totallyhot-arcrouter.service`: `Type=notify`, dedicated `arcrouter` user,
+  `StateDirectory=`/`LogsDirectory=totallyhot-arcrouter` (which is exactly `AppDataPaths`' own Linux
+  defaults - `/var/lib/totallyhot-arcrouter`/`/var/log/totallyhot-arcrouter` - so the unit needs no
+  Linux-specific router configuration), `ProtectSystem=strict`, `NoNewPrivileges`, plus `PrivateTmp`/
+  `ProtectHome` hardening the plan didn't ask for but cost nothing to add.
+- `packaging/linux/install.sh`/`uninstall.sh`: creates the service account, installs the unit, runs
+  `--install-certificate` as root with `STATE_DIRECTORY` pointed at the exact directory the unit later
+  grants the service (chowned to the service account afterward), matching
+  `LinuxCertificateTrustStore`'s own documented "run via sudo or the dedicated service user's install
+  script (Phase P10)" contract verbatim. Uninstall deliberately preserves operational data, the local CA
+  trust entry, and the service account - matching `docs/router/packaging-and-distribution.md` §3.1's own
+  reasoning for the MSI, restated in each script's header rather than assumed.
+- `packaging/macos/com.totallyhot.arcrouter.plist`/`install.sh`/`uninstall.sh`: LaunchDaemon running as a
+  dedicated `_arcrouter` account (never root), `xattr -dr com.apple.quarantine` for the unsigned build,
+  `--install-certificate` run as root against `AppDataPaths`' fixed macOS path (no env-var override
+  exists there, unlike Linux - the script deliberately does not invent one). A `.gitattributes` addition
+  keeps every script/unit/plist LF-only regardless of this repo's Windows-checkout `core.autocrlf`, since
+  a CRLF shebang line silently breaks on both platforms.
+- **Not verified**: no real Linux or macOS machine was available to actually run `install.sh`, start the
+  service/daemon, or confirm `systemctl status`/`launchctl print` shows it healthy. This is the same kind
+  of environment-imposed gap P7 and P9 already named for their own Windows-VM exit criteria, restated
+  honestly rather than silently skipped.
+
+**Dockerfile - shipped, authored carefully, but never run through a real `docker build` (no Docker daemon
+available in this environment):**
+- Multi-stage (`dotnet/sdk:10.0` build, `dotnet/aspnet:10.0` runtime), non-root `arcrouter` account,
+  `STATE_DIRECTORY=/data` as the only environment variable needed to relocate every piece of router state
+  (secrets, the local CA, SQLite databases, trained models, and - via `ResolveLogsDirectory()`'s own
+  fallback - logs) onto one mounted volume, `WebInterface__BindAddress`/`Proxy__BindAddress`/
+  `Mcp__BindAddress` widened to `0.0.0.0` (the plain-HTTP fallback deliberately left un-widened and
+  un-published - see `ProxyListenerOptions`' remarks on why it can't be).
+- `TotallyHotArcRouter.csproj`'s `DockerfileContext` was `.` before this phase - pointing Visual Studio's
+  Docker tooling at the project's own directory - which was silently wrong for a Dockerfile that `COPY`s
+  sibling projects (`Quality`, `Gui.Web`, `Gui.Components`, `Gui.Telemetry`); it now points at the repo
+  root (`..\..`), matching the actual build context this Dockerfile needs.
+- **Verified for real**: every `dotnet publish -c Release -r <rid> --self-contained true` command the
+  Dockerfile's build stage and `release.yml`'s tarball jobs both run was executed directly on this
+  machine for all three non-Windows RIDs (`linux-x64`, `linux-arm64`, `osx-arm64`) - each produced a
+  working publish output with the correct native ONNX Runtime assets for its platform
+  (`libonnxruntime.so`/`.dylib` etc.), confirming the `TotallyHotArcRouter.csproj` RID-override change
+  below actually works, not just that it reads plausibly. The `tar --numeric-owner` packaging step
+  `release.yml`'s tarball jobs run was also executed locally against a real `linux-x64` publish and its
+  output inspected (`tar -tzf`) to confirm `TotallyHotArcRouter` extracts at the archive root, matching
+  what `packaging/linux/install.sh` expects.
+- **Not verified**: the Dockerfile itself was never actually built (`docker build`/`buildx`) - no Docker
+  daemon is available in this environment. Everything the Dockerfile's `RUN dotnet publish` line does was
+  exercised for real outside the container, but the container assembly, the non-root `USER` switch, and
+  the image actually starting and answering `https://localhost:47104` were not.
+
+**`release.yml` matrix and `promote.yml` - shipped, restructured, YAML-validated, but never actually run
+(would require pushing a real tag to trigger it):**
+- Split the old single Windows-only job into `verify-version` (now OS-agnostic bash/grep instead of
+  PowerShell/XML, so it can run on the `ubuntu-latest` runners the new jobs need) → `build-msi` (unchanged
+  MSI logic) / `build-tarball` (a `linux-x64`/`linux-arm64`/`osx-arm64` matrix, each cross-published from
+  an `ubuntu-latest` runner - self-contained publish only needs that RID's NuGet runtime pack, not a
+  matching host OS, which the local verification above confirmed for real) / `build-docker` (buildx
+  multi-arch `linux/amd64,linux/arm64` push to `ghcr.io/<owner>/totallyhot-arcrouter:<version>`, never
+  `:latest` - that's `promote.yml`'s job) → `publish-release` (downloads every job's artifact, computes
+  ONE combined `checksums.txt` covering the MSI and all three tarballs, creates the GitHub Release as a
+  prerelease exactly as before). Assets are deliberately routed through job-scoped
+  `actions/upload-artifact` rather than each job attaching to the release directly - several parallel jobs
+  racing to attach files (and, worse, each trying to write its own `checksums.txt`) to the same release is
+  exactly the kind of "worked once in testing" bug a single aggregating job avoids structurally.
+- `promote.yml` gained a tar.gz-presence check per RID (packaging-matrix completeness, not yet a
+  functional requirement for any client - only the MSI has a real apply path today, per
+  `GitHubReleaseCheckClient`'s own remarks) and a `docker buildx imagetools create` step that retags the
+  already-pushed version manifest as `:latest` with no rebuild, preserving the same "the promoted artifact
+  is byte-identical to the tested RC" guarantee the MSI/tarball promotion already had.
+- **Verified**: both workflow files parse as valid YAML (`python -c "import yaml; yaml.safe_load(...)"`)
+  and every job/step name was inspected. **Not verified**: no actual workflow run - that needs a real tag
+  push against a repo with `packages: write` and GHCR access, which this environment cannot do.
+
+**`TotallyHotArcRouter.csproj`'s `Service` publish profile - shipped, verified for real:** the profile's
+`RuntimeIdentifier` is now the profile's *default* (only applied when no RID was already set), not a
+hardcoded `win-x64`, so the same profile stays reusable for a future non-Windows packaged-service RID
+without a second `.pubxml`; `SelfContained` was split into its own always-applies block. Confirmed for
+real above - the three non-Windows `dotnet publish -r <rid>` runs all succeeded on this project.
 
 ## P11 — Docs close-out
 

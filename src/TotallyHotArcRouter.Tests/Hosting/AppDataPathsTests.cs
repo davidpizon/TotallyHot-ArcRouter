@@ -47,4 +47,41 @@ public sealed class AppDataPathsTests
         Assert.StartsWith(expectedStartString: programData, actualString: directory,
             comparisonType: StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void ResolveLogsDirectory_WithNoLogsDirectoryVariable_IsALogsSubdirectoryOfMachineShared()
+    {
+        var original = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
+        Environment.SetEnvironmentVariable("LOGS_DIRECTORY", null);
+        try
+        {
+            var directory = AppDataPaths.ResolveLogsDirectory();
+
+            Assert.Equal(expected: Path.Combine(AppDataPaths.ResolveMachineSharedDirectory(), "logs"),
+                actual: directory);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LOGS_DIRECTORY", original);
+        }
+    }
+
+    [Fact]
+    public void ResolveLogsDirectory_WithLogsDirectoryVariable_UsesItVerbatim()
+    {
+        var original = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
+        // systemd's LogsDirectory= can be colon-separated when a unit names more than one directory -
+        // only the first is used, matching ResolveMachineSharedDirectory's own STATE_DIRECTORY handling.
+        Environment.SetEnvironmentVariable("LOGS_DIRECTORY", "/var/log/totallyhot-arcrouter:/var/log/extra");
+        try
+        {
+            var directory = AppDataPaths.ResolveLogsDirectory();
+
+            Assert.Equal(expected: "/var/log/totallyhot-arcrouter", actual: directory);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LOGS_DIRECTORY", original);
+        }
+    }
 }

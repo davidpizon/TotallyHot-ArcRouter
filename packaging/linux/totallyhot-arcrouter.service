@@ -1,0 +1,37 @@
+# systemd unit for TotallyHot Arc Router (web GUI migration plan Phase P10). Installed by install.sh to
+# /etc/systemd/system/totallyhot-arcrouter.service.
+[Unit]
+Description=TotallyHot Arc Router - LLM routing proxy
+Documentation=https://github.com/davidpizon/TotallyHot-ArcRouter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/opt/totallyhot-arcrouter/TotallyHotArcRouter
+User=arcrouter
+Group=arcrouter
+
+# AppDataPaths.ResolveMachineSharedDirectory() prefers the STATE_DIRECTORY environment variable when
+# set, and AppDataPaths.ResolveLogsDirectory() prefers LOGS_DIRECTORY the same way - both directives
+# below make systemd create /var/lib/totallyhot-arcrouter and /var/log/totallyhot-arcrouter (owned by
+# User=/Group= above) and export their absolute paths as $STATE_DIRECTORY/$LOGS_DIRECTORY before the
+# process starts, so the router needs no Linux-specific configuration beyond this unit.
+StateDirectory=totallyhot-arcrouter
+LogsDirectory=totallyhot-arcrouter
+
+# Hardening: ProtectSystem=strict makes the whole filesystem read-only except for the State/Logs
+# directories above (which systemd exempts automatically); NoNewPrivileges blocks privilege escalation
+# via setuid/setcap binaries; PrivateTmp/ProtectHome keep /tmp and other users' home directories out of
+# reach. The router itself never needs to escalate or touch another account's files.
+ProtectSystem=strict
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

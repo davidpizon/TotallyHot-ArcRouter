@@ -184,6 +184,11 @@ public static class Program
             // and every other CreateHostBuilder test are unaffected - see the auto-update plan's
             // Phase 1 for the Install-RouterService.ps1 script that registers this service name.
             .UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")
+            // Web GUI migration plan Phase P10's Linux counterpart to UseWindowsService above: a no-op
+            // unless launched under systemd (detected via the NOTIFY_SOCKET environment variable systemd
+            // sets), in which case it wires sd_notify readiness/stop signaling and redirects console
+            // logging to the journal's structured format - see packaging/linux/totallyhot-arcrouter.service.
+            .UseSystemd()
             // Optional operator overlay (web GUI migration plan Phase P1): appsettings.json under the
             // install directory is re-laid to its packaged defaults on every MSI upgrade
             // (docs/router/packaging-and-distribution.md), so a port or bind-address an operator changed
@@ -198,8 +203,20 @@ public static class Program
                 .ReadFrom.Configuration(context.Configuration)
                 .ReadFrom.Services(services)
                 .Enrich.FromLogContext()
+                // File sink path resolved in code, not appsettings.json (web GUI migration plan Phase
+                // P10): AppDataPaths.ResolveLogsDirectory() picks the right per-platform directory
+                // (systemd's LOGS_DIRECTORY when packaged that way, otherwise a "logs" subfolder of the
+                // machine-shared data directory), which Serilog.Settings.Configuration has no token-
+                // expansion hook to express from a plain JSON string - replaces the old hardcoded
+                // Windows-only "C:\Logs\ArcRouter" default.
+                .WriteTo.File(
+                    path: Path.Combine(AppDataPaths.ResolveLogsDirectory(), "arcrouter-.log"),
+                    rollingInterval: RollingInterval.Day,
+                    retainedFileCountLimit: 30,
+                    outputTemplate:
+                    "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
                 // Streams every log event to the GUI's Console tab over the same telemetry hub as
-                // routing events - additive, doesn't replace the Console sink configured above.
+                // routing events - additive, doesn't replace the Console/File sinks above.
                 // DeferredTelemetryPublisher (not a direct services.GetRequiredService<ITelemetryPublisher>()
                 // here) avoids a circular dependency on the logging system itself being built - see its
                 // remarks for why that circularity silently breaks every sink, not just this one.
