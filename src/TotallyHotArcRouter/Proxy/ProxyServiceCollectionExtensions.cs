@@ -248,6 +248,11 @@ internal static class ProxyServiceCollectionExtensions
         // this outer container) can resolve it; ProxyServer builds its own instance from the same
         // underlying stores for REST - the facade is stateless, so the two instances behave identically.
         services.AddSingleton<HttpClient>();
+        // The shared, rotatable management token (web GUI migration plan Phase P4): a single outer-
+        // container singleton passed by reference into both McpHostedService (below, resolved via
+        // ordinary constructor injection) and the proxy inner host (via ProxyServerDependencies in
+        // AddProxyHost), so a Regenerate call from either surface is visible to both without a restart.
+        services.AddSingleton<IManagementTokenProvider, ManagementTokenProvider>();
         // Probes a provider's well-known paths for which API flavors it answers
         // (docs/router/tool-call-normalization.md §3.3). Registered before the facade so the container
         // injects it into the facade's optional constructor parameters.
@@ -318,10 +323,10 @@ internal static class ProxyServiceCollectionExtensions
                 dependencies: new ProxyServerDependencies
                 {
                     Telemetry = sp.GetRequiredService<TelemetryBroadcaster>(),
-                    // The always-present per-user token that gates every /admin request and every gRPC
-                    // call by default - the same token the MCP endpoint requires, so both management
-                    // surfaces are gated identically out of the box.
-                    ManagementToken = ManagementAccessToken.GetOrCreate(),
+                    // The same shared, rotatable token provider MCP uses (see AddManagement above) - both
+                    // management surfaces are gated identically out of the box, and a rotation from either
+                    // one is visible to both immediately.
+                    ManagementTokenProvider = sp.GetRequiredService<IManagementTokenProvider>(),
                     // Routes the inner Kestrel host's own logs (routing, endpoint dispatch, bind
                     // failures) through the same Serilog pipeline (console + file) the rest of the
                     // application uses - see ProxyServerDependencies.SerilogLogger's remarks. Read once

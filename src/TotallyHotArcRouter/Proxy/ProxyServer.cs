@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Auth;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
@@ -95,7 +96,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                 paramName: nameof(listenerOptions));
 
         var broadcaster = dependencies?.Telemetry ?? new TelemetryBroadcaster();
-        var managementToken = dependencies?.ManagementToken;
+        var managementTokenProvider = dependencies?.ManagementTokenProvider;
         var routingOptions = dependencies?.RoutingOptions;
 
         var managementApi = dependencies?.ManagementApi;
@@ -257,19 +258,29 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                 webBuilder.ConfigureServices(services =>
                 {
                     // Gate every gRPC call (telemetry stream and price-source admin alike) behind the
-                    // same shared management token the REST /admin/* API and MCP endpoint require -
-                    // see TelemetryAuthInterceptor's remarks. Only registered when a token is
-                    // configured, mirroring managementToken's REST/MCP gating: a null token means "no
-                    // inbound auth", used by tests exercising forwarding only.
-                    if (!string.IsNullOrWhiteSpace(managementToken))
+                    // shared management token or an ADR-0012 session cookie - see
+                    // TelemetryAuthInterceptor's remarks. Also backs the web port's /auth/* endpoints
+                    // below. Only registered when a token provider is configured, mirroring the previous
+                    // managementToken gating: a null provider means "no inbound auth", used by tests
+                    // exercising forwarding only.
+                    if (managementTokenProvider is not null)
                     {
-                        services.AddSingleton(new TelemetryAuthInterceptor(managementToken));
+                        services.AddSingleton(managementTokenProvider);
+                        services.AddSingleton<ManagementSessionTicketService>();
+                        services.AddSingleton<LoginRateLimiter>();
+                        services.AddSingleton(sp => new TelemetryAuthInterceptor(
+                            tokenProvider: sp.GetRequiredService<IManagementTokenProvider>(),
+                            sessionTickets: sp.GetRequiredService<ManagementSessionTicketService>()));
                         services.AddGrpc(options => options.Interceptors.Add<TelemetryAuthInterceptor>());
                     }
                     else
                     {
                         services.AddGrpc();
                     }
+
+                    // Backs the web port's Host allowlist guard (WebPortRequestGuardMiddleware) and the
+                    // /auth/session loopback-fast-path check (ManagementAuthEndpoints).
+                    services.AddSingleton(webInterface);
 
                     services.AddSingleton(broadcaster);
 
@@ -363,6 +374,12 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // Everything below only ever runs for a gRPC/web-port connection (grpcPort or webPort) -
                     // proxy-port connections returned via the gate above and never reach here.
 
+                    // ADR-0012's per-request guard (Phase P4): Host allowlist and Origin/same-origin check,
+                    // ahead of everything else on this pipeline - gRPC-Web calls and the /auth/* endpoints
+                    // mapped below alike. See WebPortRequestGuardMiddleware's remarks for why this never
+                    // enables ForwardedHeaders.
+                    app.UseMiddleware<WebPortRequestGuardMiddleware>(webInterface);
+
                     // Lets a browser call the gRPC services mapped below over grpc-web framing (HTTP/1.1-
                     // or HTTP/2-safe, unlike trailers-based native gRPC) without opting in per service -
                     // DefaultEnabled applies it to every MapGrpcService call, native gRPC callers on
@@ -428,6 +445,11 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                             endpoints.MapGrpcService<ProviderAdminGrpcService>();
                             endpoints.MapGrpcService<UsageAdminGrpcService>();
                         }
+
+                        // ADR-0012's session endpoints (Phase P4): loopback fast-path issuance, token
+                        // login, and logout. Only mapped alongside real inbound auth - see
+                        // ManagementAuthEndpoints' and managementTokenProvider's remarks.
+                        if (managementTokenProvider is not null) ManagementAuthEndpoints.Map(endpoints);
                     });
                     // Reached only on a gRPC/web-port connection that matched no mapped endpoint - the gate
                     // above already sent every proxy-port connection to proxyMiddleware, so this is never

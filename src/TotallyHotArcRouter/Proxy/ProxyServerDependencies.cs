@@ -40,13 +40,15 @@ public sealed record ProxyServerDependencies
     public TelemetryBroadcaster? Telemetry { get; init; }
 
     /// <summary>
-    /// The shared secret required in the <c>X-Admin-Token</c> header on every <c>/admin/*</c> request and,
-    /// via <see cref="TelemetryAuthInterceptor"/>, on every call to the TLS gRPC endpoint. Deliberately not
-    /// a member of <see cref="ManagementApi"/>: it gates both surfaces independently, so burying it there
-    /// would wrongly couple gRPC authentication to the REST API being enabled. <see langword="null"/> means
-    /// no inbound auth, which only a test exercising plain forwarding should choose.
+    /// The rotatable management token shared with MCP (see <see cref="Mcp.McpHostedService"/>), gating the
+    /// <c>x-admin-token</c> metadata entry <see cref="TelemetryAuthInterceptor"/> checks on every TLS gRPC
+    /// call, and (web GUI migration plan Phase P4) the web port's <c>/auth/login</c> and session-cookie
+    /// checks. Deliberately not a member of <see cref="ManagementApi"/>: it gates the gRPC/web surfaces
+    /// independently of whichever admin feature groups happen to be enabled. <see langword="null"/> means
+    /// no inbound auth and no <c>/auth/*</c> endpoints mapped, which only a test exercising plain
+    /// forwarding should choose.
     /// </summary>
-    public string? ManagementToken { get; init; }
+    public IManagementTokenProvider? ManagementTokenProvider { get; init; }
 
     /// <summary>
     /// The outer host's Serilog logger, so this inner host's own framework/request logs (routing,

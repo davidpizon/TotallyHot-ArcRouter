@@ -90,6 +90,44 @@ public static class ManagementAccessToken
     }
 
     /// <summary>
+    /// Unconditionally generates a fresh token, persists it at <paramref name="path"/> (or the default
+    /// location), and returns it - overwriting whatever was there. Backs
+    /// <see cref="IManagementTokenProvider.Regenerate"/> (web GUI migration plan Phase P4): unlike
+    /// <see cref="GetOrCreate"/>, which only ever creates a token the first time, this always mints a new
+    /// one, so every caller holding the old value stops authenticating.
+    /// </summary>
+    /// <param name="path">The token file path, or <see langword="null"/> for <see cref="DefaultPath"/>.</param>
+    public static string Regenerate(string? path = null)
+    {
+        var tokenPath = string.IsNullOrWhiteSpace(path) ? DefaultPath() : path;
+
+        var directory = Path.GetDirectoryName(tokenPath);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+
+        // Same cross-process serialization as GetOrCreate - see its remarks.
+        using var mutex = new Mutex(false, name: MutexName(tokenPath));
+        try
+        {
+            mutex.WaitOne();
+        }
+        catch (AbandonedMutexException)
+        {
+            // See GetOrCreate's identical catch: safe to proceed with ownership.
+        }
+
+        try
+        {
+            var token = GenerateToken();
+            WriteRestricted(path: tokenPath, token: token);
+            return token;
+        }
+        finally
+        {
+            mutex.ReleaseMutex();
+        }
+    }
+
+    /// <summary>
     /// Derives a stable, path-scoped mutex name so concurrent callers targeting different token paths (e.g. in tests)
     /// don't contend on each other.
     /// </summary>

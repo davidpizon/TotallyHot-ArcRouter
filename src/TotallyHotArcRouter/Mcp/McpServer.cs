@@ -20,7 +20,7 @@ namespace TotallyHot.ArcRouter.Mcp;
 /// over MCP's Streamable-HTTP transport on its own loopback port. Reuses
 /// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s self-signed <c>CN=localhost</c>
 /// certificate (one trust story for every TLS management port), and gates every request behind
-/// <see cref="McpBearerAuthMiddleware"/> using the shared <see cref="ManagementAccessToken"/>.
+/// <see cref="McpBearerAuthMiddleware"/> using the shared, rotatable <see cref="IManagementTokenProvider"/>.
 /// </summary>
 /// <remarks>
 /// Built as its own generic host with its own DI container, deliberately separate from the outer
@@ -45,7 +45,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     /// <param name="benchmarkDataStatusService">The CodeRouterBench corpus freshness cache.</param>
     /// <param name="benchmarkSyncService">The CodeRouterBench corpus sync service.</param>
     /// <param name="benchmarkSyncOptions">The CodeRouterBench sync configuration (its dataset ref).</param>
-    /// <param name="accessToken">The bearer token every request must present (see <see cref="ManagementAccessToken"/>).</param>
+    /// <param name="tokenProvider">The rotatable bearer token every request must present (see <see cref="IManagementTokenProvider"/>).</param>
     /// <param name="port">The TLS port to listen on. Defaults to <c>5003</c>.</param>
     /// <param name="bindAddress">
     /// The address <paramref name="port"/> binds to: <c>"loopback"</c> (the default), <c>"any"</c>/
@@ -71,7 +71,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         BenchmarkDataStatusService benchmarkDataStatusService,
         BenchmarkSyncService benchmarkSyncService,
         BenchmarkSyncOptions benchmarkSyncOptions,
-        string accessToken,
+        IManagementTokenProvider tokenProvider,
         int port = 5003,
         string bindAddress = "loopback",
         Serilog.ILogger? serilogLogger = null)
@@ -86,7 +86,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(benchmarkDataStatusService);
         ArgumentNullException.ThrowIfNull(benchmarkSyncService);
         ArgumentNullException.ThrowIfNull(benchmarkSyncOptions);
-        ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
+        ArgumentNullException.ThrowIfNull(tokenProvider);
         ArgumentException.ThrowIfNullOrWhiteSpace(bindAddress);
         ArgumentOutOfRangeException.ThrowIfNegative(port);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(value: port, 65535);
@@ -167,7 +167,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                     // Every request - list or mutate - must present the shared token; there is no unauthenticated
                     // route on this host (unlike the plain-HTTP proxy port, this one carries only management
                     // traffic, so there's nothing that needs to fall through ungated).
-                    app.UseMiddleware<McpBearerAuthMiddleware>(accessToken);
+                    app.UseMiddleware<McpBearerAuthMiddleware>(tokenProvider);
                     app.UseRouting();
                     app.UseEndpoints(endpoints => endpoints.MapMcp());
                 });

@@ -69,6 +69,43 @@ public sealed class ManagementAccessTokenTests
     }
 
     [Fact]
+    public void Regenerate_ReturnsADifferentTokenAndPersistsIt()
+    {
+        var path = TempTokenPath();
+        try
+        {
+            var original = ManagementAccessToken.GetOrCreate(path);
+
+            var regenerated = ManagementAccessToken.Regenerate(path);
+
+            Assert.NotEqual(expected: original, actual: regenerated);
+            Assert.Equal(expected: regenerated, actual: File.ReadAllText(path).Trim());
+            Assert.Equal(expected: regenerated, actual: ManagementAccessToken.GetOrCreate(path));
+        }
+        finally
+        {
+            CleanUp(path);
+        }
+    }
+
+    [Fact]
+    public void Regenerate_NoExistingFile_StillCreatesOne()
+    {
+        var path = TempTokenPath();
+        try
+        {
+            var token = ManagementAccessToken.Regenerate(path);
+
+            Assert.False(string.IsNullOrWhiteSpace(token));
+            Assert.True(File.Exists(path));
+        }
+        finally
+        {
+            CleanUp(path);
+        }
+    }
+
+    [Fact]
     public void Verify_MatchingToken_ReturnsTrue()
     {
         Assert.True(ManagementAccessToken.Verify(presented: "abc123", expected: "abc123"));

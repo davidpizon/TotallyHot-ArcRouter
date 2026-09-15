@@ -1,6 +1,6 @@
 # Web GUI Migration Plan
 
-> **Status: P3 shipped 2026-09-15 (P1, P2 shipped 2026-09-14) — P0's ADRs 0011-0014 remain proposed
+> **Status: P4 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3 shipped 2026-09-15) — P0's ADRs 0011-0014 remain proposed
 > (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retires the
 > Windows-only MAUI Blazor Hybrid GUI
 > (`src/TotallyHotArcRouter.Gui`, WebView2) in favor of a Blazor WebAssembly dashboard served by the
@@ -526,6 +526,96 @@ one-time migration of an already-existing legacy plaintext password file into th
 - Cookie or token on 5001/5005 → no management surface reachable
 - Token rotation invalidates token-login sessions
 - Login throttling works
+
+### P4 status: shipped 2026-09-15
+
+Implemented as scoped, with one deliberate deferral and one deviation, both recorded below.
+
+- **`IManagementTokenProvider`** (`Proxy/Management/IManagementTokenProvider.cs`,
+  `ManagementTokenProvider.cs`): wraps `ManagementAccessToken`'s persisted file, adds an in-memory
+  `Generation` counter, and a `Regenerate()` that persists a fresh token and bumps the generation.
+  Registered as a single outer-container singleton in `AddManagement()` and handed by reference into
+  both `McpHostedService` (constructor-injected, replacing its own `ManagementAccessToken.GetOrCreate()`
+  call) and the proxy inner host via `ProxyServerDependencies.ManagementTokenProvider` (renamed from the
+  old `string? ManagementToken`) - one instance, so a rotation from either surface is visible to both
+  without a restart. `TelemetryAuthInterceptor` and `McpBearerAuthMiddleware` both take the provider
+  instead of a captured string, exactly the four call sites the plan named.
+  `ManagementAccessToken` gained a `Regenerate(string? path)` static method (unconditionally mints and
+  persists a new token, unlike `GetOrCreate`'s create-once semantics) that `ManagementTokenProvider`
+  delegates to.
+- **Session tickets** (`Proxy/Auth/ManagementSessionTicketService.cs`): a per-inner-host-instance random
+  HMAC-SHA256 key (never persisted - a restart silently invalidates every cookie, matching the plan's
+  "silent re-issue on loopback") signs a ticket carrying only the token's current `Generation`. Validation
+  checks the signature and that the embedded generation still matches - so `Regenerate()` invalidates
+  every outstanding ticket (loopback and token-login sessions alike; a harmless superset of the exit
+  criterion's "token rotation invalidates token-login sessions", since a loopback caller just silently
+  re-issues on its next `/auth/session` call).
+- **Session endpoints** (`Proxy/Auth/ManagementAuthEndpoints.cs`, `ManagementSessionCookie.cs`): `POST
+  /auth/session` (loopback fast path, checks `WebInterfaceOptions.TrustLoopback` and the normalized
+  remote IP, 204 + `__Host-arcrouter-session` cookie), `POST /auth/login` (JSON `{"token":"..."}` body,
+  rate-limited via `LoginRateLimiter` - a 5-attempts/5-minute fixed-window counter per remote address,
+  cleared on success), `POST /auth/logout` (clears the cookie, always 204). Mapped only when the inner
+  host was given a token provider, mirroring the old `managementToken`-present gating.
+- **Per-request guard** (`Proxy/Auth/LoopbackRequestGuard.cs` - pure, unit-tested checks -
+  `WebPortRequestGuardMiddleware.cs` - the live-request wrapper): Host allowlist and Origin-equals-own-
+  origin-or-absent-with-no-`Sec-Fetch-Site`, applied to every request on the shared gRPC/web-port
+  pipeline (both `grpcPort` and `webPort`, since they share one Kestrel `Configure` callback) ahead of
+  `UseGrpcWeb`/routing. Never touches `ForwardedHeaders`, as the plan requires.
+- **`TelemetryAuthInterceptor`**: now accepts either the `x-admin-token` metadata entry (unchanged) or
+  the session cookie, read off the call's `HttpContext` via `Grpc.AspNetCore.Server`'s
+  `GetHttpContext()` extension (wrapped in a try/catch for
+  `Grpc.Core.Testing.TestServerCallContext`-based unit tests, which have no supported way to attach an
+  `HttpContext` - production's `Grpc.AspNetCore.Server` pipeline always has one).
+
+**Deviation from the plan text:** `IManagementTokenProvider.Regenerate()` exists and is exercised
+directly (by `ManagementTokenProviderTests` and `ProxyServerAuthTests.TokenRotation_...`), satisfying
+the exit criterion "token rotation invalidates token-login sessions" - but no RPC or CLI surface calls
+it yet. The plan's own P9 section (not P4's) is where `ManagementTokenAdminGrpcService` (Get/Regenerate)
+and `--print-management-token` are scoped ("Token relocation: ... new dedicated
+`ManagementTokenAdminGrpcService` ... CLI `--print-management-token`"), and ADR-0012's "Auth mechanics"
+section describes that service as reading/rotating an already-token-store-backed value. Since P4's own
+deliverables list (reproduced above) does not mention either, both are left for P9 rather than
+implemented now; P4 ships the rotation primitive they will call. The token itself also stays on
+`ManagementAccessToken`'s existing plaintext-file-with-restricted-ACL storage, not `ProtectedSecretStore`
+- that data migration is explicitly P9's "import `management-token.txt` ... then delete" step, and moving
+storage backends without the accompanying import step would orphan already-configured MCP clients.
+
+**Deviation in mechanism, not outcome:** the plan describes Host/Origin checks as part of the generic
+"Per-request guard" without specifying scope; this implementation applies them to the whole shared
+gRPC/web-port pipeline (both `grpcPort` and `webPort`) rather than only the `/auth/*` endpoints, since
+DNS rebinding/CSRF are pipeline-wide concerns and the two ports already share one Kestrel `Configure`
+callback (see P2's port-scoping notes). Verified this does not regress `NativeGrpcPort_UnaryCall_StillWorks`
+(`ProxyServerWebInterfaceTests`) - a native gRPC client with no `Origin`/`Sec-Fetch-Site` headers passes
+both checks.
+
+**Verification:**
+- `dotnet build src/TotallyHotArcRouter.slnx -c Debug` - 0 warnings, 0 errors.
+- Full xUnit v3 suite via the built `TotallyHotArcRouter.Tests.exe` (not `dotnet test`): 2835 total, 0
+  failed, 2 skipped (pre-existing, unrelated - a model-download-gated test and a disabled integration
+  test), ~15.5s.
+- `dotnet-coverage collect -f cobertura` over the same run: every new/changed file in
+  `Proxy/Auth/`, `Proxy/Management/`, `Telemetry/TelemetryAuthInterceptor.cs`, and
+  `Mcp/McpBearerAuthMiddleware.cs` is 85-100% line-covered.
+- New tests: `LoopbackRequestGuardTests`, `ManagementSessionTicketServiceTests`, `LoginRateLimiterTests`,
+  `ManagementTokenProviderTests`, two new `ManagementAccessTokenTests` cases for `Regenerate`, and
+  `ProxyServerAuthTests` - ten real-Kestrel integration tests exercising the exit matrix end to end
+  (attacker Host → 403, foreign Origin → 403, loopback `/auth/session` issuing a cookie that authorizes a
+  real gRPC-Web call, `TrustLoopback=false` blocking the fast path, an uncredentialed gRPC call getting
+  `Unauthenticated`, correct/wrong token login, login throttling after `MaxAttempts` failures, token
+  rotation invalidating an outstanding session cookie, and logout). `TelemetryAuthInterceptorTests` was
+  updated for the new constructor signature; the cookie-acceptance path specifically is left to the real
+  Kestrel test above rather than faked, since `Grpc.Core.Testing.TestServerCallContext` has no supported
+  way to attach an `HttpContext` (confirmed by first attempting it: `GetHttpContext()` throws
+  `InvalidOperationException` there, which is exactly why the interceptor's cookie lookup treats that
+  exception as "no cookie" rather than propagating it).
+- Manual golden-path smoke against the real built router exe (`TotallyHotArcRouter.exe`, not just the
+  test suite): started with a real `management-token.txt`, then via `curl -k` against the live web port -
+  `Host: attacker.test` → 403, foreign `Origin` → 403, `POST /auth/session` → 204 +
+  `Set-Cookie: __Host-arcrouter-session=...; secure; samesite=strict; httponly`, `POST /auth/login` with
+  the wrong token → 401, with the real token → 204 + the same cookie shape, `POST /auth/logout` → 204.
+  Also re-confirmed P2's port scoping still holds after this phase's pipeline changes: the plain-HTTP
+  proxy port still serves `/v1/models` (200), the web port still 404s `/v1/chat/completions` and
+  `/admin/providers`.
 
 ## P5 — GUI library hygiene and Razor class library (MAUI still builds and ships)
 
