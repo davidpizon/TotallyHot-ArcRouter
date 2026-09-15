@@ -36,15 +36,6 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class LiveDataStore : IAsyncDisposable
 {
     /// <summary>
-    /// Default gRPC server address - <c>TotallyHot.ArcRouter.Proxy.ProxyServer.DefaultGrpcPort</c> (5002), a
-    /// dedicated TLS port separate from the plain-HTTP proxy port (5001). Not currently configurable
-    /// from the GUI - there is no existing settings storage mechanism to persist a custom address;
-    /// see docs/gui/dashboard.md for this known limitation. HTTPS, not HTTP: see the constructor's
-    /// remarks on why this moved off unencrypted h2c.
-    /// </summary>
-    public const string DefaultServerAddress = TelemetryChannelFactory.DefaultServerAddress;
-
-    /// <summary>
     /// Fixed delay between reconnect attempts. See "Known gap: no built-in reconnect" in
     /// docs/router/grpc-migration.md.
     /// </summary>

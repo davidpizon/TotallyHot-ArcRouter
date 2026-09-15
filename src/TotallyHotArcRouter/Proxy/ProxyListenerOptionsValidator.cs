@@ -26,15 +26,14 @@ public sealed class ProxyListenerOptionsValidator(
         var failures = new List<string>();
 
         ValidatePortRange(port: options.Port, name: nameof(ProxyListenerOptions.Port), failures: failures);
-        ValidatePortRange(port: options.GrpcPort, name: nameof(ProxyListenerOptions.GrpcPort), failures: failures);
 
         if (options.PlainHttp.Enabled)
         {
             var plainHttpPort = options.PlainHttp.Port;
 
-            // 0 (ephemeral) is meaningful for the primary/gRPC ports in tests, but never for this
-            // opt-in listener: an operator points an already-configured tool at a stable port, so a
-            // port that moves on every restart defeats the feature entirely.
+            // 0 (ephemeral) is meaningful for the primary port in tests, but never for this opt-in
+            // listener: an operator points an already-configured tool at a stable port, so a port that
+            // moves on every restart defeats the feature entirely.
             if (plainHttpPort is <= 0 or > 65535)
                 failures.Add(
                     $"{nameof(ProxyListenerOptions.PlainHttp)}.{nameof(PlainHttpListenerOptions.Port)} must be between 1 and 65535 when enabled, but was {plainHttpPort}.");
@@ -42,10 +41,6 @@ public sealed class ProxyListenerOptionsValidator(
             if (plainHttpPort == options.Port)
                 failures.Add(
                     $"{nameof(ProxyListenerOptions.PlainHttp)}.{nameof(PlainHttpListenerOptions.Port)} ({plainHttpPort}) collides with {nameof(ProxyListenerOptions.Port)}.");
-
-            if (plainHttpPort == options.GrpcPort)
-                failures.Add(
-                    $"{nameof(ProxyListenerOptions.PlainHttp)}.{nameof(PlainHttpListenerOptions.Port)} ({plainHttpPort}) collides with {nameof(ProxyListenerOptions.GrpcPort)}.");
 
             if (plainHttpPort == webInterfaceOptions.CurrentValue.Port)
                 failures.Add(
@@ -61,7 +56,7 @@ public sealed class ProxyListenerOptionsValidator(
 
     private static void ValidatePortRange(int port, string name, List<string> failures)
     {
-        // 0 (ephemeral) is valid for these two - see ProxyServer's remarks on port: 0's test-only use.
+        // 0 (ephemeral) is valid here - see ProxyServer's remarks on port: 0's test-only use.
         if (port is < 0 or > 65535)
             failures.Add($"{name} must be between 0 and 65535, but was {port}.");
     }

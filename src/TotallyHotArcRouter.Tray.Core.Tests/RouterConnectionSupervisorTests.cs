@@ -18,7 +18,7 @@ public sealed class RouterConnectionSupervisorTests
     public async Task Supervisor_FirstTick_ConnectsAndExposesAMonitor()
     {
         var connector = new FakeConnector();
-        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5002",
+        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
             retryInterval: FastRetry, monitorFactory: FakeMonitor);
 
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
@@ -30,7 +30,7 @@ public sealed class RouterConnectionSupervisorTests
     public async Task Supervisor_ConnectFails_RetriesUntilItSucceeds()
     {
         var connector = new FakeConnector { FailNextConnects = 2 };
-        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5002",
+        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
             retryInterval: FastRetry, monitorFactory: FakeMonitor);
 
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
@@ -45,7 +45,7 @@ public sealed class RouterConnectionSupervisorTests
         // every reconnect attempt also fails (the router still isn't back) - proves the stale-but-only
         // monitor is never torn down just because a reconnect attempt failed.
         var connector = new FakeConnector();
-        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5002",
+        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
             retryInterval: FastRetry, monitorFactory: FakeMonitor);
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
         var firstMonitor = supervisor.Monitor;
@@ -62,7 +62,7 @@ public sealed class RouterConnectionSupervisorTests
     public async Task Supervisor_ReconnectsWhenTheCurrentMonitorStopsBeingUsable_AndRaisesReconnected()
     {
         var connector = new FakeConnector();
-        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5002",
+        await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
             retryInterval: FastRetry, monitorFactory: FakeMonitor);
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
         var firstMonitor = supervisor.Monitor;

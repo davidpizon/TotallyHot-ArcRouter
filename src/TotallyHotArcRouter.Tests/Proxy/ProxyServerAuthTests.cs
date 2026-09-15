@@ -66,10 +66,9 @@ public sealed class ProxyServerAuthTests
     private static (ProxyServer Server, int WebPort, IManagementTokenProvider TokenProvider) BuildServer(
         bool trustLoopback = true)
     {
-        var ports = GetFreePorts(3);
+        var ports = GetFreePorts(2);
         var proxyPort = ports[0];
-        var grpcPort = ports[1];
-        var webPort = ports[2];
+        var webPort = ports[1];
 
         var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
             modelRouteResolver: ModelRouteResolverTestFactory.Empty());
@@ -80,7 +79,7 @@ public sealed class ProxyServerAuthTests
         var server = new ProxyServer(
             logger: NullLogger<ProxyServer>.Instance,
             proxyMiddleware: proxyMiddleware,
-            listenerOptions: new ProxyListenerOptions { Port = proxyPort, GrpcPort = grpcPort },
+            listenerOptions: new ProxyListenerOptions { Port = proxyPort },
             webInterfaceOptions: new WebInterfaceOptions { Port = webPort, TrustLoopback = trustLoopback },
             dependencies: new ProxyServerDependencies
             {

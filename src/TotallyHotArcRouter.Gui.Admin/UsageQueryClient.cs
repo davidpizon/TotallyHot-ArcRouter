@@ -25,7 +25,7 @@ public sealed class UsageQueryClient
     /// </summary>
     /// <param name="channel">
     /// The gRPC channel to send requests over. Must target the proxy's TLS gRPC endpoint (e.g.
-    /// <c>https://localhost:5002</c>) - the same channel <see cref="ProviderAdminClient"/> uses.
+    /// <c>https://localhost:5004</c>) - the same channel <see cref="ProviderAdminClient"/> uses.
     /// </param>
     /// <param name="adminToken">
     /// Optional management token; when set, it is sent in the <c>x-admin-token</c> gRPC metadata entry on

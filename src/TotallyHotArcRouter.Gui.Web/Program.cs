@@ -64,6 +64,9 @@ builder.Services.AddSingleton<RouterSettingsAdminStore>();
 builder.Services.AddSingleton<UpdateStore>();
 // Backs the System Settings window's Cost Reconciliation section. See Services/CostReconciliationStore.cs.
 builder.Services.AddSingleton<CostReconciliationStore>();
+// Backs the System Settings window's "Copy MCP token / Regenerate" row (web GUI migration plan Phase P9).
+// See Services/ManagementTokenAdminStore.cs.
+builder.Services.AddSingleton<ManagementTokenAdminStore>();
 // Backs the Model Distribution / Cost Analytics history / header ticker's real data. See
 // Services/UsageStore.cs.
 builder.Services.AddSingleton<UsageStore>();

@@ -6,7 +6,7 @@
     The one command to run when you want the installed application to actually change. It exists because
     two separate things silently produce an MSI that installs nothing new:
 
-      1. The installer harvests <RouterPublishDir>/<GuiPublishDir> (src/TotallyHotArcRouter.Installer/
+      1. The installer harvests <RouterPublishDir>/<TrayPublishDir> (src/TotallyHotArcRouter.Installer/
          TotallyHotArcRouter.Installer.wixproj), which point at each project's `Service` publish profile
          output - bin\Publish\Service. A plain `dotnet build` never writes those directories, so the MSI
          happily packages whatever publish output was left there last time.
@@ -150,9 +150,9 @@ Invoke-DotNet -Description "Publish Router" -Arguments @(
     "-p:Version=$buildVersion"
 )
 
-Invoke-DotNet -Description "Publish GUI" -Arguments @(
+Invoke-DotNet -Description "Publish Tray" -Arguments @(
     "publish"
-    (Join-Path $repoRoot "src\TotallyHotArcRouter.Gui\TotallyHotArcRouter.Gui.csproj")
+    (Join-Path $repoRoot "src\TotallyHotArcRouter.Tray\TotallyHotArcRouter.Tray.csproj")
     "-c", $Configuration
     "-p:PublishProfile=Service"
     "-p:Version=$buildVersion"

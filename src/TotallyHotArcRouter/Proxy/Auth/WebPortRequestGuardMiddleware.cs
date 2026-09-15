@@ -1,12 +1,12 @@
 namespace TotallyHot.ArcRouter.Proxy.Auth;
 
 /// <summary>
-/// ADR-0012's per-request guard: rejects any request on the gRPC/web-port pipeline whose <c>Host</c>
+/// ADR-0012's per-request guard: rejects any request on the web-port pipeline whose <c>Host</c>
 /// header is not in <see cref="WebInterfaceOptions.AllowedHosts"/> (DNS-rebinding defense), or whose
 /// <c>Origin</c> header (when present) does not match the request's own origin (CSRF defense). Applied
-/// unconditionally to every gRPC/web-port connection - native gRPC callers on
-/// <see cref="ProxyListenerOptions.GrpcPort"/> included, since they share this same Kestrel pipeline and
-/// typically send neither header, which both checks treat as acceptable.
+/// unconditionally to every web-port connection - native gRPC callers included, since they share this
+/// same Kestrel pipeline (Phase P9 retired the formerly-dedicated native-gRPC port) and typically send
+/// neither header, which both checks treat as acceptable.
 /// </summary>
 /// <remarks>
 /// Deliberately never enables ASP.NET Core's <c>ForwardedHeaders</c> middleware (ADR-0012): trusting a

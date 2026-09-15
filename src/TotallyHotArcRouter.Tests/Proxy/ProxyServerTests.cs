@@ -21,12 +21,8 @@ public class ProxyServerTests
         var proxyMiddleware =
             new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance, interceptor: interceptor);
 
-        // GrpcPort: 0 too - without this, the TLS/gRPC listener would still bind the fixed default
-        // port (ProxyServer.DefaultGrpcPort) even in this ephemeral-port test, defeating the point of
-        // Port: 0 (test-to-test port-conflict flakiness) and generating/persisting a real self-signed
-        // certificate under %LOCALAPPDATA% on every test run.
         await using var server = new ProxyServer(logger: new NullLogger<ProxyServer>(),
-            proxyMiddleware: proxyMiddleware, listenerOptions: new ProxyListenerOptions { Port = 0, GrpcPort = 0 });
+            proxyMiddleware: proxyMiddleware, listenerOptions: new ProxyListenerOptions { Port = 0 });
 
         await server.StartAsync(TestContext.Current.CancellationToken);
 
@@ -73,7 +69,7 @@ public class ProxyServerTests
         // depending on a specific non-loopback interface being present on the test runner.
         await using var server = new ProxyServer(logger: new NullLogger<ProxyServer>(),
             proxyMiddleware: proxyMiddleware,
-            listenerOptions: new ProxyListenerOptions { Port = 0, GrpcPort = 0, BindAddress = "any" });
+            listenerOptions: new ProxyListenerOptions { Port = 0, BindAddress = "any" });
 
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
@@ -123,7 +119,7 @@ public class ProxyServerTests
 
             await using var server = new ProxyServer(logger: new NullLogger<ProxyServer>(),
                 proxyMiddleware: proxyMiddleware,
-                listenerOptions: new ProxyListenerOptions { Port = 0, GrpcPort = 0 });
+                listenerOptions: new ProxyListenerOptions { Port = 0 });
 
             await server.StartAsync(TestContext.Current.CancellationToken);
             try

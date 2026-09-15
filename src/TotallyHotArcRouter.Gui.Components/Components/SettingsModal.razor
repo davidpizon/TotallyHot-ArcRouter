@@ -10,6 +10,8 @@
 @inject RouterSettingsAdminStore RouterSettingsStore
 @inject UpdateStore UpdateStore
 @inject CostReconciliationStore CostReconciliationStore
+@inject ManagementTokenAdminStore ManagementTokenStore
+@inject IClipboardService ClipboardService
 <DialogShell Title="System Settings" CloseAriaLabel="Close system settings" OnClose="OnClose">
 @* Connection settings. Unlike the router settings below, this is local-only (no round trip to
                the router) and needs an app restart to take effect, so it keeps its own explicit Save/Undo
@@ -261,6 +263,39 @@
         <p class="text-xs text-red-400">@_updateErrorMessage</p>
     }
 </div>
+
+@* MCP token (web GUI migration plan Phase P9): the shared bearer token gating every gRPC admin
+               service and MCP, now that it lives in the encrypted secret store rather than a plaintext file
+               the GUI could read directly. Copy needs no confirmation; Regenerate is gated behind
+               RegenerateManagementTokenDialog since it invalidates every already-configured MCP client's
+               saved token immediately. *@
+<div class="space-y-2">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        MCP Token
+    </label>
+    @if (ManagementTokenStore.IsLoaded && !ManagementTokenStore.IsReachable)
+    {
+        <p class="text-xs text-amber-400">Could not reach the router. Is the proxy running?</p>
+    }
+    <div class="flex gap-2">
+        <button @onclick="CopyManagementToken" disabled="@(ManagementTokenStore.Token is null)" class="flex-1 btn btn-ghost">
+            @(_managementTokenCopied ? "Copied" : "Copy MCP token")
+        </button>
+        <button @onclick="StartRegenerateManagementToken" disabled="@(ManagementTokenStore.Token is null)" class="flex-1 btn btn-ghost-warning">
+            Regenerate
+        </button>
+    </div>
+    @if (_managementTokenMessage is not null)
+    {
+        <p class="text-xs @(_managementTokenFailed ? "text-red-400" : "text-emerald-400")">@_managementTokenMessage</p>
+    }
+</div>
+
+@if (_confirmingRegenerateManagementToken)
+{
+    <RegenerateManagementTokenDialog OnCancel="@(() => _confirmingRegenerateManagementToken = false)"
+                                      OnConfirm="RegenerateManagementTokenConfirmed"/>
+}
 
 @* Cost Reconciliation (docs/router/agent-cost-tracking.md §5.8). Read-only status for every provider
                with a resolvable reconciliation Admin API key, plus a manual trigger - the background poll loop

@@ -25,9 +25,11 @@ public static class TelemetryChannelFactory
     /// at least one managed/corporate Windows machine, where every connection failed with the HTTP/2-level
     /// <c>HTTP_1_1_REQUIRED</c> error - consistent with something on the network path (VPN client, endpoint
     /// security agent, TLS-inspecting proxy) mangling the h2c preface even on loopback. See
-    /// docs/router/grpc-migration.md's "Transport" section.
+    /// docs/router/grpc-migration.md's "Transport" section. <c>5004</c>, not the former dedicated <c>5002</c>
+    /// gRPC port Phase P9 retired as fully redundant once every gRPC admin service was dual-mapped onto the
+    /// web port.
     /// </summary>
-    public const string DefaultServerAddress = "https://localhost:5002";
+    public const string DefaultServerAddress = "https://localhost:5004";
 
     /// <summary>
     /// Creates a channel to <paramref name="serverAddress"/> that trusts the proxy's self-signed loopback

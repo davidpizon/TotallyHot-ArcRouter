@@ -133,6 +133,48 @@ public sealed class GitHubReleaseCheckClientTests
     }
 
     [Fact]
+    public async Task CheckAsync_ReleaseHasOnlyNonWindowsAssets_ReportsAssetOrChecksumMissing()
+    {
+        // Phase P9's platform-aware selection: on this (Windows) test host, a release publishing only
+        // non-Windows tarballs must not be mistaken for an installable release just because *an* asset
+        // besides checksums.txt exists.
+        var assets = $"{Asset("totallyhotarcrouter-1.2.3-linux-x64.tar.gz")}," +
+                     $"{Asset("totallyhotarcrouter-1.2.3-linux-arm64.tar.gz")}," +
+                     $"{Asset("totallyhotarcrouter-1.2.3-osx-arm64.tar.gz")},{Asset("checksums.txt")}";
+        var client = CreateClient(_ => Json($$"""{"tag_name": "v9.0.0", "assets": [{{assets}}]}"""));
+
+        var result = await client.CheckAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsUpdateAvailable);
+        Assert.Equal(expected: ReleaseCheckUnavailableReason.AssetOrChecksumMissing, actual: result.UnavailableReason);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ReleaseHasMsiAlongsideOtherPlatformAssets_SelectsOnlyTheMsi()
+    {
+        // The non-Windows tarballs sit right next to the MSI in the same release (the real shape once
+        // P10 ships its multi-platform matrix) - selection must still land on the MSI's own checksum,
+        // not get confused by the other assets' similarly-shaped names.
+        var assets = $"{Asset(MsiAssetName)},{Asset("totallyhotarcrouter-1.2.3-linux-x64.tar.gz")}," +
+                     $"{Asset("totallyhotarcrouter-1.2.3-osx-arm64.tar.gz")},{Asset("checksums.txt")}";
+        var client = CreateClient(request =>
+            request.RequestUri!.AbsolutePath.EndsWith(value: "checksums.txt", comparisonType: StringComparison.Ordinal)
+                ? PlainText($"""
+                             deadbeef00000000000000000000000000000000000000000000000000  {MsiAssetName}
+                             1111111111111111111111111111111111111111111111111111111111  totallyhotarcrouter-1.2.3-linux-x64.tar.gz
+                             """)
+                : Json($$"""{"tag_name": "v9.0.0", "assets": [{{assets}}]}"""));
+
+        var result = await client.CheckAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsUpdateAvailable);
+        Assert.Equal(expected: "deadbeef00000000000000000000000000000000000000000000000000",
+            actual: result.AssetSha256);
+        Assert.Contains(expectedSubstring: MsiAssetName, actualString: result.AssetDownloadUrl!,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckAsync_MalformedTag_ReportsUnavailable()
     {
         var client = CreateClient(_ => Json(ReleasePayload("not-a-version")));

@@ -19,7 +19,8 @@ public sealed class SettingsModalTests
         out IGuiSettingsStore settingsStore,
         out RouterSettingsAdminStore routerSettingsStore,
         FakeRouterSettingsAdminClient? routerSettingsClient = null,
-        FakeUpdateAdminClient? updateClient = null)
+        FakeUpdateAdminClient? updateClient = null,
+        FakeManagementTokenAdminClient? managementTokenClient = null)
     {
         var ctx = new BunitContext();
         liveDataStore = new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996"));
@@ -32,6 +33,9 @@ public sealed class SettingsModalTests
         ctx.Services.AddSingleton(new UpdateStore(client: updateClient ?? new FakeUpdateAdminClient(),
             applier: new FakeMsiUpdateApplier()));
         ctx.Services.AddSingleton(new CostReconciliationStore(new FakeCostReconciliationAdminClient()));
+        ctx.Services.AddSingleton(
+            new ManagementTokenAdminStore(managementTokenClient ?? new FakeManagementTokenAdminClient()));
+        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         ctx.Services.AddSingleton(_ => new TempFileCleanup(settingsPath));
         ctx.Services.GetRequiredService<TempFileCleanup>();
         return ctx;
@@ -59,6 +63,54 @@ public sealed class SettingsModalTests
 
         cut.Markup.Should().Contain("Router v1.0.2");
         cut.Markup.Should().NotContain("Router unknown");
+    }
+
+    [Fact]
+    public void CopyMcpToken_CopiesTheLoadedTokenToTheClipboard()
+    {
+        var tokenClient = new FakeManagementTokenAdminClient { Token = "the-real-token" };
+        using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _,
+            managementTokenClient: tokenClient);
+        var clipboard = (FakeClipboardService)ctx.Services.GetRequiredService<IClipboardService>();
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.FindAll("button").First(b => b.TextContent.Contains("Copy MCP token")).Click();
+
+        clipboard.LastCopiedText.Should().Be("the-real-token");
+    }
+
+    [Fact]
+    public void RegenerateMcpToken_OpensAConfirmDialog_AndDoesNotRegenerateUntilConfirmed()
+    {
+        var tokenClient = new FakeManagementTokenAdminClient { Token = "original-token" };
+        using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _,
+            managementTokenClient: tokenClient);
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Regenerate").Click();
+
+        cut.Markup.Should().Contain("Regenerate Management Token");
+        tokenClient.Token.Should().Be("original-token");
+    }
+
+    [Fact]
+    public void RegenerateMcpToken_Confirmed_RotatesTheTokenAndClosesTheDialog()
+    {
+        // The token itself is never rendered into the markup - Copy is how an operator actually gets it -
+        // so this asserts on the confirmation message, the dialog closing, and the underlying client
+        // having been driven to mint a new value, not on the (deliberately absent) token text on screen.
+        var tokenClient = new FakeManagementTokenAdminClient { Token = "original-token" };
+        using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _,
+            managementTokenClient: tokenClient);
+        var cut = ctx.Render<SettingsModal>();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Regenerate").Click();
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Regenerate" && b.ClassList.Contains("btn-critical"))
+            .Click();
+
+        tokenClient.Token.Should().Be("fake-regenerated-token");
+        cut.Markup.Should().Contain("Regenerated.");
+        cut.Markup.Should().NotContain("Regenerate Management Token");
     }
 
     [Fact]
@@ -774,6 +826,25 @@ public sealed class SettingsModalTests
             return Failure is null
                 ? Task.FromResult(Status)
                 : Task.FromException<IReadOnlyList<ProviderReconciliationStatus>>(Failure);
+        }
+    }
+
+    private sealed class FakeManagementTokenAdminClient : IManagementTokenAdminClient
+    {
+        public GrpcAdminException? Failure { get; set; }
+        public string Token { get; set; } = "fake-management-token";
+
+        public Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
+        {
+            return Failure is null ? Task.FromResult(Token) : Task.FromException<string>(Failure);
+        }
+
+        public Task<string> RegenerateAsync(CancellationToken cancellationToken = default)
+        {
+            if (Failure is not null) return Task.FromException<string>(Failure);
+
+            Token = "fake-regenerated-token";
+            return Task.FromResult(Token);
         }
     }
 }

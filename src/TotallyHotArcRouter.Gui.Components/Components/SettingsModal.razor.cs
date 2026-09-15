@@ -51,6 +51,10 @@ public partial class SettingsModal
     private bool _focusPending;
     private bool _judgeEnabled;
     private string _judgeModelName = string.Empty;
+    private bool _confirmingRegenerateManagementToken;
+    private bool _managementTokenCopied;
+    private bool _managementTokenFailed;
+    private string? _managementTokenMessage;
     private string _persistedTelemetryAddress = string.Empty;
     private string? _routerSettingsMessage;
     private bool _routerSettingsSaveFailed;
@@ -107,6 +111,7 @@ public partial class SettingsModal
     {
         UpdateStore.Changed -= OnUpdateStoreChanged;
         CostReconciliationStore.Changed -= OnCostReconciliationStoreChanged;
+        ManagementTokenStore.Changed -= OnManagementTokenStoreChanged;
     }
 
     /// <inheritdoc/>
@@ -124,6 +129,9 @@ public partial class SettingsModal
 
         CostReconciliationStore.Changed += OnCostReconciliationStoreChanged;
         await CostReconciliationStore.LoadAsync();
+
+        ManagementTokenStore.Changed += OnManagementTokenStoreChanged;
+        await ManagementTokenStore.LoadAsync();
     }
 
     // Shared by the initial load and every instant save's post-mutation refresh (success re-syncs to the
@@ -463,6 +471,49 @@ public partial class SettingsModal
                 ? ex.Message
                 : "Could not reach the router. Is the proxy running?";
             _costReconciliationFailed = true;
+        }
+    }
+
+    /// <summary>Re-renders when the management-token store's state changes.</summary>
+    private void OnManagementTokenStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Copies the current token to the clipboard - needs no confirmation, unlike Regenerate.</summary>
+    private async Task CopyManagementToken()
+    {
+        if (ManagementTokenStore.Token is not { } token) return;
+
+        await ClipboardService.SetTextAsync(token);
+        _managementTokenCopied = true;
+        _managementTokenMessage = null;
+    }
+
+    /// <summary>Opens the regenerate confirmation dialog.</summary>
+    private void StartRegenerateManagementToken()
+    {
+        _confirmingRegenerateManagementToken = true;
+        _managementTokenMessage = null;
+    }
+
+    /// <summary>Mints and persists a fresh token once the operator confirms via <see cref="RegenerateManagementTokenDialog"/>.</summary>
+    private async Task RegenerateManagementTokenConfirmed()
+    {
+        _confirmingRegenerateManagementToken = false;
+        _managementTokenCopied = false;
+        try
+        {
+            await ManagementTokenStore.RegenerateAsync();
+            _managementTokenMessage = "Regenerated.";
+            _managementTokenFailed = false;
+        }
+        catch (GrpcAdminException)
+        {
+            _managementTokenMessage = ManagementTokenStore.IsReachable
+                ? ManagementTokenStore.LastError
+                : "Could not reach the router. Is the proxy running?";
+            _managementTokenFailed = true;
         }
     }
 }

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace TotallyHot.ArcRouter.Update;
@@ -17,11 +18,17 @@ namespace TotallyHot.ArcRouter.Update;
 /// </summary>
 /// <remarks>
 /// <b>Checksum-publishing convention.</b> A release must publish exactly two assets for this client to
-/// consider it installable: one <c>.msi</c> installer asset, and one asset named exactly
+/// consider it installable: one installer/archive asset matching this process's own platform (see
+/// <see cref="MatchesCurrentPlatform"/> - a <c>.msi</c> on Windows, a platform-tagged <c>.tar.gz</c>
+/// elsewhere, per the web GUI migration plan's Phase P10 packaging matrix), and one asset named exactly
 /// <see cref="ChecksumsAssetName"/> (<c>checksums.txt</c>) containing a
 /// <c>&lt;sha256 hex&gt; &lt;two spaces&gt; &lt;filename&gt;</c> line for it (the conventional
-/// <c>sha256sum</c> output format). A release missing either, or missing the MSI's checksum line, is
-/// reported as <see cref="ReleaseCheckUnavailableReason.AssetOrChecksumMissing"/>.
+/// <c>sha256sum</c> output format). A release missing either, or missing that asset's checksum line, is
+/// reported as <see cref="ReleaseCheckUnavailableReason.AssetOrChecksumMissing"/>. Phase P9 made asset
+/// selection platform-aware ahead of P10's actual non-Windows release assets existing, so this class
+/// needs no further change once they do - only Windows ships an MSI and an apply path
+/// (<c>IMsiUpdateApplier</c>) today; a non-Windows install can detect an available update but has no
+/// in-process way to apply one yet (a P10 concern, tracked there, not silently unsupported here).
 /// </remarks>
 public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
 {
@@ -161,8 +168,8 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
                 reason: ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
                 detail: "Release has no assets array.");
 
-        string? msiAssetUrl = null;
-        string? msiAssetName = null;
+        string? platformAssetUrl = null;
+        string? platformAssetName = null;
         string? checksumsUrl = null;
 
         foreach (var asset in assetsElement.EnumerateArray())
@@ -184,25 +191,53 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
                 continue;
             }
 
-            if (name.EndsWith(value: ".msi", comparisonType: StringComparison.OrdinalIgnoreCase))
+            if (MatchesCurrentPlatform(name))
             {
-                msiAssetUrl = downloadUrl;
-                msiAssetName = name;
+                platformAssetUrl = downloadUrl;
+                platformAssetName = name;
             }
         }
 
-        if (msiAssetUrl is null || checksumsUrl is null)
+        if (platformAssetUrl is null || checksumsUrl is null)
             return ReleaseCheckResult.Unavailable(
                 currentVersion: _currentVersion,
                 reason: ReleaseCheckUnavailableReason.AssetOrChecksumMissing,
-                detail: $"Release '{tag}' does not publish an installer .msi asset and '{ChecksumsAssetName}'.");
+                detail:
+                $"Release '{tag}' does not publish an installer asset for this platform and '{ChecksumsAssetName}'.");
 
         if (!isNewer)
             return ReleaseCheckResult.Resolved(currentVersion: _currentVersion, latestVersion: versionText, false, null,
                 null);
 
-        return await ResolveWithChecksumAsync(versionText: versionText, assetUrl: msiAssetUrl, assetName: msiAssetName!,
-            checksumsUrl: checksumsUrl, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return await ResolveWithChecksumAsync(versionText: versionText, assetUrl: platformAssetUrl,
+            assetName: platformAssetName!, checksumsUrl: checksumsUrl, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="assetName"/> is the installer/archive this process's own OS and
+    /// architecture should install, per the web GUI migration plan's Phase P10 packaging matrix: a
+    /// <c>.msi</c> on Windows (architecture-agnostic - the MSI is x64-only today, matching this codebase's
+    /// only supported Windows architecture), or a <c>totallyhotarcrouter-&lt;rid&gt;.tar.gz</c>-shaped
+    /// asset elsewhere, where <c>&lt;rid&gt;</c> is <c>linux-x64</c>/<c>linux-arm64</c>/<c>osx-arm64</c>.
+    /// Matched case-insensitively and by substring (not exact name), so this survives the release
+    /// pipeline changing the asset's base filename or version-tagging convention as long as the RID
+    /// segment stays put.
+    /// </summary>
+    private static bool MatchesCurrentPlatform(string assetName)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return assetName.EndsWith(value: ".msi", comparisonType: StringComparison.OrdinalIgnoreCase);
+
+        if (!assetName.EndsWith(value: ".tar.gz", comparisonType: StringComparison.OrdinalIgnoreCase)) return false;
+
+        var rid = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            ? "osx-arm64"
+            : RuntimeInformation.OSArchitecture == Architecture.Arm64
+                ? "linux-arm64"
+                : "linux-x64";
+
+        return assetName.Contains(value: rid, comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

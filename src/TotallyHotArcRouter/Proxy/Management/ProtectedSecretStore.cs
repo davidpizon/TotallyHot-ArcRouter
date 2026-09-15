@@ -166,6 +166,34 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         SaveMap(map);
     }
 
+    /// <summary>
+    /// Atomically reads the secret named <paramref name="name"/>, or - if none is stored - computes one
+    /// via <paramref name="valueFactory"/>, persists it, and returns it. The whole check-then-write
+    /// sequence runs under one held mutex, unlike a caller composing <see cref="TryRead"/> and
+    /// <see cref="Write"/> itself (which would leave a race window between the two calls: two callers
+    /// both observing "not stored yet" and each writing a competing value). Use this whenever "create the
+    /// first time, reuse afterward" is the actual requirement - <see cref="ManagementAccessToken.GetOrCreate"/>
+    /// is exactly that case.
+    /// </summary>
+    /// <param name="name">The secret's name.</param>
+    /// <param name="valueFactory">Computes the value to store, invoked at most once, only when nothing is stored yet.</param>
+    public string GetOrAdd(string name, Func<string> valueFactory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(valueFactory);
+
+        using var mutex = OpenMutex();
+        using var guard = new MutexGuard(mutex);
+
+        var map = LoadMap();
+        if (map.TryGetValue(key: name, value: out var existing) && !string.IsNullOrEmpty(existing)) return existing;
+
+        var value = valueFactory();
+        map[name] = value;
+        SaveMap(map);
+        return value;
+    }
+
     /// <inheritdoc/>
     public bool Delete(string name)
     {

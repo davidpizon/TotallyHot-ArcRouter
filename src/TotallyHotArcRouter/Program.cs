@@ -89,11 +89,24 @@ public static class Program
                 return;
             }
 
-            var (uninstallCertificate, remainingArgs) =
+            var (uninstallCertificate, afterUninstallCertificateFlag) =
                 ExtractFlag(args: afterInstallCertificateFlag, flagName: "--uninstall-certificate");
             if (uninstallCertificate)
             {
                 RunUninstallCertificate();
+                return;
+            }
+
+            // Web GUI migration plan Phase P9: prints the shared management token gating every gRPC admin
+            // surface and MCP, so an operator can hand it to an MCP client config by hand rather than
+            // needing filesystem access to the (now encrypted, no-longer-plaintext-file) secret store.
+            // Host-independent like the two flags above - ManagementAccessToken resolves its own default
+            // ProtectedSecretStore.
+            var (printManagementToken, remainingArgs) =
+                ExtractFlag(args: afterUninstallCertificateFlag, flagName: "--print-management-token");
+            if (printManagementToken)
+            {
+                RunPrintManagementToken();
                 return;
             }
 
@@ -341,6 +354,27 @@ public static class Program
         catch (Exception ex)
         {
             Log.Error(exception: ex, messageTemplate: "Could not uninstall the local CA certificate.");
+            Environment.ExitCode = 1;
+        }
+    }
+
+    /// <summary>
+    /// Prints the shared management token - the router's <c>--print-management-token</c> flag (web GUI
+    /// migration plan Phase P9). Loads (creating, or importing from the legacy plaintext file, if
+    /// necessary) via <see cref="Proxy.Management.ManagementAccessToken.GetOrCreate"/> exactly as the
+    /// running router's own <see cref="Proxy.Management.ManagementTokenProvider"/> would, so this always
+    /// prints the same token an already-running instance is actually enforcing.
+    /// </summary>
+    private static void RunPrintManagementToken()
+    {
+        try
+        {
+            var token = Proxy.Management.ManagementAccessToken.GetOrCreate();
+            Console.WriteLine(token);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(exception: ex, messageTemplate: "Could not print the management token.");
             Environment.ExitCode = 1;
         }
     }

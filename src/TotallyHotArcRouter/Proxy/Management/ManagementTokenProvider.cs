@@ -2,25 +2,26 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 
 /// <summary>
 /// Default <see cref="IManagementTokenProvider"/>: wraps <see cref="ManagementAccessToken"/>'s persisted
-/// file and adds the in-memory rotation generation Phase P4's session tickets key off. A process-lifetime
-/// singleton (see <see cref="ProxyServiceCollectionExtensions.AddManagement"/>) - every management surface
-/// in this process shares one instance, so <see cref="Regenerate"/> is visible everywhere immediately.
+/// secret-store entry and adds the in-memory rotation generation Phase P4's session tickets key off. A
+/// process-lifetime singleton (see <see cref="ProxyServiceCollectionExtensions.AddManagement"/>) - every
+/// management surface in this process shares one instance, so <see cref="Regenerate"/> is visible
+/// everywhere immediately.
 /// </summary>
 public sealed class ManagementTokenProvider : IManagementTokenProvider
 {
     private readonly Lock _lock = new();
-    private readonly string? _path;
+    private readonly ProtectedSecretStore? _store;
     private string _currentToken;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ManagementTokenProvider"/> class, loading (or
-    /// creating) the token at <paramref name="path"/>.
+    /// creating) the token in <paramref name="store"/>.
     /// </summary>
-    /// <param name="path">The token file path, or <see langword="null"/> for the default location.</param>
-    public ManagementTokenProvider(string? path = null)
+    /// <param name="store">The secret store to read/write, or <see langword="null"/> for the default store.</param>
+    public ManagementTokenProvider(ProtectedSecretStore? store = null)
     {
-        _path = path;
-        _currentToken = ManagementAccessToken.GetOrCreate(path);
+        _store = store;
+        _currentToken = ManagementAccessToken.GetOrCreate(store);
     }
 
     /// <inheritdoc/>
@@ -47,7 +48,7 @@ public sealed class ManagementTokenProvider : IManagementTokenProvider
     /// <inheritdoc/>
     public string Regenerate()
     {
-        var token = ManagementAccessToken.Regenerate(_path);
+        var token = ManagementAccessToken.Regenerate(_store);
         lock (_lock)
         {
             _currentToken = token;

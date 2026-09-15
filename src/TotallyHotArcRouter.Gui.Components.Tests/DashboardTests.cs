@@ -26,6 +26,7 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton(new RouterSettingsAdminStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59995")));
         ctx.Services.AddSingleton(new UpdateStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59992")));
         ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59991")));
+        ctx.Services.AddSingleton(new ManagementTokenAdminStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59990")));
         ctx.Services.AddSingleton(new ToastService());
         ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         var settingsPath = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".json");

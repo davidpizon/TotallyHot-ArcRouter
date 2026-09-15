@@ -5,148 +5,72 @@ using TotallyHot.ArcRouter.Hosting;
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
 /// <summary>
-/// Generates, persists, and verifies the single per-user bearer/shared-secret token that gates every
-/// management surface (the REST <c>/admin/*</c> API and the MCP endpoint alike). Mirrors
-/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s persist-or-create shape: the token is
-/// generated once and reused across restarts, so a caller that stored it doesn't need to re-trust a new
-/// one on every launch.
+/// Generates, persists, and verifies the single per-machine bearer/shared-secret token that gates every
+/// management surface (gRPC admin services and the MCP endpoint alike).
 /// </summary>
 /// <remarks>
-/// Persisted machine-wide under <c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c> (see
-/// <see cref="AppDataPaths"/> for every other platform), alongside
-/// <see cref="TotallyHot.ArcRouter.Router.RoutingGateStore"/>'s state file and for exactly the same reason:
-/// the installed service runs as <c>LocalSystem</c> while the GUI runs as the interactive user, so the
-/// per-user <c>%LOCALAPPDATA%</c> this used to live in resolved to a <em>different file per account</em>.
-/// Each side minted or read its own token, every management call came back 401, and the GUI's tray reported
-/// the (perfectly healthy) service as stopped. The telemetry certificate (<see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>)
-/// now shares this same directory too (web GUI migration plan Phase P3) - only the router ever reads that
-/// <c>.pfx</c>, so there was never a cross-account correctness reason to keep it separate, only a historical
-/// one; its password stays sealed with user-scoped DPAPI on Windows regardless of where the file itself
-/// lives, since DPAPI's protection is tied to the encrypting account, not the file's directory.
 /// <para>
-/// This file is access-restricted on write - a bearer token is the whole credential (there is no separate
-/// password protecting it the way the certificate's <c>.pfx</c> has), so its ACL is the only thing standing
-/// between "loopback-only" and "anything on the machine". <see cref="SecureFile.WriteMachineShared"/> grants
-/// full control to <c>LocalSystem</c>/administrators and read-only access to <c>Users</c>. The boundary is
-/// therefore "any interactive account on this machine" rather than "one user account" - the minimum that
-/// makes the cross-account handoff work at all.
+/// Persisted in <see cref="ProtectedSecretStore"/> under <see cref="SecretName"/> (web GUI migration plan
+/// Phase P9) - the same DPAPI-on-Windows/Data-Protection-elsewhere-protected store every provider
+/// credential already lives in, rather than the plaintext, ACL-restricted-but-still-plaintext
+/// <c>management-token.txt</c> file this replaces. <see cref="GetOrCreate"/> imports that legacy file
+/// once, on the first call after upgrading past this phase: an install that already handed its token to
+/// MCP clients must not silently mint a fresh one and invalidate every one of them. The legacy file is
+/// deleted only after a successful import, so a failed import (the store's key ring not yet writable, say)
+/// leaves the old file in place to retry from next time rather than losing the token outright.
+/// </para>
+/// <para>
+/// <see cref="ProtectedSecretStore"/> already serializes its own read-modify-write cycle with a path-scoped
+/// named <see cref="Mutex"/> (see its remarks), so this type no longer needs one of its own the way its
+/// pre-P9, plain-file-based predecessor did.
 /// </para>
 /// </remarks>
 public static class ManagementAccessToken
 {
-    private const string TokenFileName = "management-token.txt";
+    /// <summary>The secret name this token is stored under in <see cref="ProtectedSecretStore"/>.</summary>
+    internal const string SecretName = "management:token";
+
+    /// <summary>The legacy plaintext file name <see cref="GetOrCreate"/> imports from, once, if found.</summary>
+    private const string LegacyTokenFileName = "management-token.txt";
 
     /// <summary>
-    /// Loads the persisted token if one already exists at <paramref name="path"/> (or the default
-    /// location), otherwise generates a new cryptographically random one, persists it with a restricted
-    /// ACL/file mode, and returns it.
+    /// Loads the persisted token if one already exists in <paramref name="store"/>, importing it from the
+    /// legacy plaintext file if that is where it still lives, otherwise generates a new cryptographically
+    /// random one, persists it, and returns it.
     /// </summary>
-    /// <param name="path">
-    /// The token file path, or <see langword="null"/> for the default
-    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c>.
+    /// <param name="store">The secret store to read/write; defaults to the machine-shared default store.</param>
+    /// <param name="legacyTokenPath">
+    /// The legacy plaintext token file to import from if present; only meant for tests (which must not
+    /// touch this machine's real <c>management-token.txt</c>). Production callers omit it, getting the
+    /// real default machine-shared path.
     /// </param>
-    public static string GetOrCreate(string? path = null)
+    public static string GetOrCreate(ProtectedSecretStore? store = null, string? legacyTokenPath = null)
     {
-        var tokenPath = string.IsNullOrWhiteSpace(path) ? DefaultPath() : path;
+        var secretStore = store ?? new ProtectedSecretStore();
+        var resolvedLegacyPath = legacyTokenPath ?? DefaultLegacyPath();
 
-        var directory = Path.GetDirectoryName(tokenPath);
-        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-
-        // A named, per-path mutex serializes the whole check-read-generate-write sequence across
-        // processes - e.g. two router instances (or the router and something else calling GetOrCreate)
-        // starting at the same moment. Without it, one process could observe the other's file mid-write
-        // (empty or partial), conclude no valid token exists, and generate a competing one - split-brain
-        // auth between whichever surfaces ended up trusting each token.
-        using var mutex = new Mutex(false, name: MutexName(tokenPath));
-        try
-        {
-            mutex.WaitOne();
-        }
-        catch (AbandonedMutexException)
-        {
-            // A prior owner crashed while holding the mutex without releasing it - .NET still grants
-            // ownership to this caller when this is thrown, so it's safe to proceed rather than fail
-            // router startup. Whatever state the abandoned owner left the token file in (absent,
-            // complete, or - rarely - mid-write) is exactly what the read/generate logic below already
-            // handles.
-        }
-
-        try
-        {
-            if (File.Exists(tokenPath))
-            {
-                var existing = File.ReadAllText(tokenPath).Trim();
-                if (!string.IsNullOrEmpty(existing)) return existing;
-            }
-
-            var token = GenerateToken();
-            WriteRestricted(path: tokenPath, token: token);
-            return token;
-        }
-        finally
-        {
-            mutex.ReleaseMutex();
-        }
+        // GetOrAdd - not a separate TryRead-then-Write - holds one mutex across the whole check, import,
+        // and (if neither found anything) generate-and-persist sequence, so two callers racing to be
+        // "the first" (two router instances starting together, say) can never both conclude "nothing
+        // stored yet" and each write a competing token.
+        return secretStore.GetOrAdd(name: SecretName,
+            valueFactory: () => TryImportLegacyToken(legacyTokenPath: resolvedLegacyPath) ?? GenerateToken());
     }
 
     /// <summary>
-    /// Unconditionally generates a fresh token, persists it at <paramref name="path"/> (or the default
-    /// location), and returns it - overwriting whatever was there. Backs
-    /// <see cref="IManagementTokenProvider.Regenerate"/> (web GUI migration plan Phase P4): unlike
-    /// <see cref="GetOrCreate"/>, which only ever creates a token the first time, this always mints a new
-    /// one, so every caller holding the old value stops authenticating.
+    /// Unconditionally generates a fresh token, persists it in <paramref name="store"/>, and returns it -
+    /// overwriting whatever was there. Backs <see cref="IManagementTokenProvider.Regenerate"/> (web GUI
+    /// migration plan Phase P4): unlike <see cref="GetOrCreate"/>, which only ever creates a token the
+    /// first time, this always mints a new one, so every caller holding the old value stops authenticating.
     /// </summary>
-    /// <param name="path">The token file path, or <see langword="null"/> for <see cref="DefaultPath"/>.</param>
-    public static string Regenerate(string? path = null)
+    /// <param name="store">The secret store to write to; defaults to the machine-shared default store.</param>
+    public static string Regenerate(ProtectedSecretStore? store = null)
     {
-        var tokenPath = string.IsNullOrWhiteSpace(path) ? DefaultPath() : path;
+        var secretStore = store ?? new ProtectedSecretStore();
 
-        var directory = Path.GetDirectoryName(tokenPath);
-        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-
-        // Same cross-process serialization as GetOrCreate - see its remarks.
-        using var mutex = new Mutex(false, name: MutexName(tokenPath));
-        try
-        {
-            mutex.WaitOne();
-        }
-        catch (AbandonedMutexException)
-        {
-            // See GetOrCreate's identical catch: safe to proceed with ownership.
-        }
-
-        try
-        {
-            var token = GenerateToken();
-            WriteRestricted(path: tokenPath, token: token);
-            return token;
-        }
-        finally
-        {
-            mutex.ReleaseMutex();
-        }
-    }
-
-    /// <summary>
-    /// Derives a stable, path-scoped mutex name so concurrent callers targeting different token paths (e.g. in tests)
-    /// don't contend on each other.
-    /// </summary>
-    private static string MutexName(string tokenPath)
-    {
-        return "TotallyHot.ArcRouter.ManagementAccessToken." +
-               Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenPath)))[..32];
-    }
-
-    /// <summary>
-    /// Gets the default token file path (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c> on
-    /// Windows; see <see cref="AppDataPaths"/> for every other platform), the same machine-shared directory
-    /// <see cref="TotallyHot.ArcRouter.Router.RoutingGateStore"/> persists to. Machine-wide rather than
-    /// per-user because the router and the GUI do not run as the same OS account in the installed
-    /// configuration - see this type's remarks.
-    /// </summary>
-    public static string DefaultPath()
-    {
-        return Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: TokenFileName);
+        var token = GenerateToken();
+        secretStore.Write(name: SecretName, value: token);
+        return token;
     }
 
     /// <summary>
@@ -168,6 +92,44 @@ public static class ManagementAccessToken
                && CryptographicOperations.FixedTimeEquals(left: presentedBytes, right: expectedBytes);
     }
 
+    /// <summary>
+    /// Reads the token from <paramref name="legacyTokenPath"/> if that file still exists and is
+    /// non-empty, deleting it afterward so a later call never re-imports it. Returns
+    /// <see langword="null"/> (leaving the legacy file untouched) when there is nothing to import or the
+    /// read/delete itself fails, so <see cref="GetOrCreate"/>'s factory falls through to minting a fresh
+    /// token rather than losing an operator's already-distributed one to a transient failure. Only ever
+    /// called from inside <see cref="ProtectedSecretStore.GetOrAdd"/>'s held mutex, so there is no race
+    /// with another caller also trying to import the same file.
+    /// </summary>
+    private static string? TryImportLegacyToken(string legacyTokenPath)
+    {
+        try
+        {
+            if (!File.Exists(legacyTokenPath)) return null;
+
+            var imported = File.ReadAllText(legacyTokenPath).Trim();
+            if (string.IsNullOrEmpty(imported)) return null;
+
+            File.Delete(legacyTokenPath);
+            return imported;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the default legacy plaintext token file path
+    /// (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c> on Windows; see
+    /// <see cref="AppDataPaths"/> for every other platform) - the file a pre-P9 install wrote via the now-
+    /// retired file-based <c>ManagementAccessToken</c>.
+    /// </summary>
+    private static string DefaultLegacyPath()
+    {
+        return Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: LegacyTokenFileName);
+    }
+
     /// <summary>Generates a fresh 32-byte cryptographically random token, base64url-encoded (no padding).</summary>
     private static string GenerateToken()
     {
@@ -175,17 +137,5 @@ public static class ManagementAccessToken
             .Replace('+', '-')
             .Replace('/', '_')
             .TrimEnd('=');
-    }
-
-    /// <summary>
-    /// Restricts <paramref name="path"/> to this machine's system/administrator accounts (write) and
-    /// <c>Users</c> (read), then writes <paramref name="token"/> to it, via the shared
-    /// <see cref="SecureFile.WriteMachineShared(string, byte[])"/> sequence. Deliberately not the per-user
-    /// <see cref="SecureFile.WriteRestricted(string, byte[])"/>: the GUI reads this file from a different OS
-    /// account than the service that writes it - see this type's remarks.
-    /// </summary>
-    private static void WriteRestricted(string path, string token)
-    {
-        SecureFile.WriteMachineShared(path: path, content: Encoding.UTF8.GetBytes(token));
     }
 }

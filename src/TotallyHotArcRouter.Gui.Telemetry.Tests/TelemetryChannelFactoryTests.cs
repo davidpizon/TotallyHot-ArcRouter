@@ -19,7 +19,7 @@ public class TelemetryChannelFactoryTests
     [Fact]
     public void Rejects_a_null_certificate()
     {
-        Validate(null, requestUri: "https://localhost:5002").Should().BeFalse();
+        Validate(null, requestUri: "https://localhost:5004").Should().BeFalse();
     }
 
     [Fact]
@@ -29,14 +29,14 @@ public class TelemetryChannelFactoryTests
 
         // Chain-trust errors are expected and normal here: it is self-signed, and no CA issues certificates
         // for a loopback address.
-        Validate(certificate: certificate, requestUri: "https://localhost:5002",
+        Validate(certificate: certificate, requestUri: "https://localhost:5004",
                 errors: SslPolicyErrors.RemoteCertificateChainErrors)
             .Should().BeTrue();
     }
 
     [Theory]
     [InlineData("https://127.0.0.1:5002")]
-    [InlineData("https://localhost:5002")]
+    [InlineData("https://localhost:5004")]
     public void Accepts_loopback_hosts(string requestUri)
     {
         using var certificate = SelfSigned("CN=localhost");
@@ -51,7 +51,7 @@ public class TelemetryChannelFactoryTests
         // "localhost.evil.com" must not be accepted just because its subject begins with the right word.
         using var certificate = SelfSigned("CN=localhost.evil");
 
-        Validate(certificate: certificate, requestUri: "https://localhost:5002").Should().BeFalse();
+        Validate(certificate: certificate, requestUri: "https://localhost:5004").Should().BeFalse();
     }
 
     [Theory]
@@ -61,7 +61,7 @@ public class TelemetryChannelFactoryTests
     {
         using var certificate = SelfSigned(subject);
 
-        Validate(certificate: certificate, requestUri: "https://localhost:5002").Should().BeFalse();
+        Validate(certificate: certificate, requestUri: "https://localhost:5004").Should().BeFalse();
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class TelemetryChannelFactoryTests
     {
         // Pinned because the proxy binds 5002 for gRPC over TLS while 5001 stays plain HTTP for LLM
         // forwarding; pointing this at the wrong one fails in a way that looks like the proxy being down.
-        TelemetryChannelFactory.DefaultServerAddress.Should().Be("https://localhost:5002");
+        TelemetryChannelFactory.DefaultServerAddress.Should().Be("https://localhost:5004");
     }
 
     private static bool Validate(

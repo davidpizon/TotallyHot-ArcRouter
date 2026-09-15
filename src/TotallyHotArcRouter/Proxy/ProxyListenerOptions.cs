@@ -5,7 +5,7 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// Replaces the plain <c>port</c>/<c>grpcPort</c> constructor integers
 /// <see href="../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase P1
 /// retires, so bind address and the opt-in plain-HTTP listener have somewhere to live alongside the
-/// ports themselves.
+/// port itself.
 /// </summary>
 public sealed class ProxyListenerOptions
 {
@@ -20,21 +20,10 @@ public sealed class ProxyListenerOptions
     public int Port { get; init; } = 5001;
 
     /// <summary>
-    /// Gets the dedicated port for the TLS-secured gRPC telemetry/admin endpoint. Defaults to
-    /// <see cref="ProxyServer.DefaultGrpcPort"/> (<c>5002</c>). Retired once the web GUI migration plan's
-    /// Phase P9 moves every gRPC service onto the web port - kept here only until then, so the two
-    /// former constructor parameters both live in this one options object as the migration plan's Phase
-    /// P1 calls for.
-    /// </summary>
-    public int GrpcPort { get; init; } = ProxyServer.DefaultGrpcPort;
-
-    /// <summary>
     /// Gets the address <see cref="Port"/> binds to: <c>"loopback"</c> (the default - dual-stack
     /// 127.0.0.1/::1, matching today's behavior), <c>"any"</c>/<c>"0.0.0.0"</c>/<c>"::"</c> (dual-stack
     /// all-interfaces, for the Docker case where "loopback" means the container's own network
-    /// namespace), or a literal IP address. <see cref="GrpcPort"/> always binds loopback regardless of
-    /// this setting - it has no independent bind-address knob, since it is being retired rather than
-    /// extended.
+    /// namespace), or a literal IP address.
     /// </summary>
     public string BindAddress { get; init; } = "loopback";
 

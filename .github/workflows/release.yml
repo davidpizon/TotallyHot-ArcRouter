@@ -34,11 +34,6 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      # TotallyHotArcRouter.Gui.csproj is the only project needing this - see dotnet-ci.yml's identical
-      # step and its own comment.
-      - name: Install MAUI workload
-        run: dotnet workload install maui-windows
-
       # Directory.Build.props' <Version> is this repo's single source of truth for the release version
       # (see its own comment); the tag is expected to be "v<Version>" exactly. Fail fast here rather than
       # publishing a release asset whose embedded ProductVersion silently disagrees with the tag that
@@ -69,17 +64,17 @@ jobs:
       - name: Restore
         run: |
           dotnet restore src/TotallyHotArcRouter/TotallyHotArcRouter.csproj
-          dotnet restore src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj
+          dotnet restore src/TotallyHotArcRouter.Tray/TotallyHotArcRouter.Tray.csproj
 
       # Publishes both apps with their `Service` publish profile (RuntimeIdentifier=win-x64,
-      # SelfContained=true) - the exact layout the installer project's RouterPublishDir/GuiPublishDir
+      # SelfContained=true) - the exact layout the installer project's RouterPublishDir/TrayPublishDir
       # default to, and what TotallyHotArcRouter.Installer.wixproj packages via <Files Include="...">
       # harvesting (Package.wxs).
       - name: Publish Router
         run: dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj -c Release -p:PublishProfile=Service
 
-      - name: Publish GUI
-        run: dotnet publish src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj -c Release -p:PublishProfile=Service
+      - name: Publish Tray
+        run: dotnet publish src/TotallyHotArcRouter.Tray/TotallyHotArcRouter.Tray.csproj -c Release -p:PublishProfile=Service
 
       - name: Build MSI
         run: dotnet build src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj -c Release

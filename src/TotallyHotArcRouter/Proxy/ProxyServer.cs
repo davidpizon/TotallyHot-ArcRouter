@@ -21,9 +21,6 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// </summary>
 public class ProxyServer : IAsyncDisposable, IDisposable
 {
-    /// <summary>Default port for the TLS-secured gRPC telemetry endpoint. See <see cref="ProxyListenerOptions.GrpcPort"/>'s remarks.</summary>
-    public const int DefaultGrpcPort = 5002;
-
     private readonly IHost _host;
 
     // Non-null only when this server created its own management HttpClient (no caller-supplied one), so
@@ -46,18 +43,17 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     /// <param name="listenerOptions">
     /// The proxy's port and bind-address configuration - see <see cref="ProxyListenerOptions"/>. Defaults to
     /// <see langword="null"/>, which behaves identically to a freshly-constructed
-    /// <see cref="ProxyListenerOptions"/>: port 5001, loopback-bound, gRPC on <see cref="DefaultGrpcPort"/>,
-    /// and the opt-in plain-HTTP listener off. Pass <see cref="ProxyListenerOptions.Port"/>/
-    /// <see cref="ProxyListenerOptions.GrpcPort"/> as 0 to bind ephemeral ports (useful in tests to avoid
-    /// flaking when the default ports are already in use); the resolved addresses are available via
+    /// <see cref="ProxyListenerOptions"/>: port 5001, loopback-bound, and the opt-in plain-HTTP listener
+    /// off. Pass <see cref="ProxyListenerOptions.Port"/> as 0 to bind an ephemeral port (useful in tests to
+    /// avoid flaking when the default port is already in use); the resolved address is available via
     /// <see cref="Addresses"/> once <see cref="StartAsync"/> completes.
     /// </param>
     /// <param name="webInterfaceOptions">
-    /// The router-hosted web GUI/gRPC-Web listener's port and bind-address configuration - see
+    /// The router-hosted web GUI/gRPC-Web/native-gRPC listener's port and bind-address configuration - see
     /// <see cref="WebInterfaceOptions"/>. Defaults to <see langword="null"/>, which behaves identically to
     /// a freshly-constructed <see cref="WebInterfaceOptions"/>: port 5004, loopback-bound. Shares its TLS
-    /// certificate with the gRPC endpoint (<see cref="ProxyListenerOptions.GrpcPort"/>), so both fail to
-    /// bind together if certificate initialization fails.
+    /// certificate with the primary proxy port, so both fail to bind together if certificate
+    /// initialization fails.
     /// </param>
     /// <param name="dependencies">
     /// Everything that has to be hand-carried across the boundary into the inner host's own DI container,
@@ -79,12 +75,9 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         var listener = listenerOptions ?? new ProxyListenerOptions();
         var webInterface = webInterfaceOptions ?? new WebInterfaceOptions();
         var port = listener.Port;
-        var grpcPort = listener.GrpcPort;
         var webPort = webInterface.Port;
         ArgumentOutOfRangeException.ThrowIfNegative(port, paramName: nameof(listenerOptions));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(value: port, 65535, paramName: nameof(listenerOptions));
-        ArgumentOutOfRangeException.ThrowIfNegative(grpcPort, paramName: nameof(listenerOptions));
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: grpcPort, 65535, paramName: nameof(listenerOptions));
         ArgumentOutOfRangeException.ThrowIfNegative(webPort, paramName: nameof(webInterfaceOptions));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(value: webPort, 65535, paramName: nameof(webInterfaceOptions));
         // 0 (ephemeral) stays allowed here, same as port/grpcPort/webPort above, so tests can bind the
@@ -243,24 +236,13 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                             });
                     }
 
-                    // The dedicated TLS/gRPC endpoint. HTTP/2 is negotiated via standard TLS ALPN here, not
-                    // h2c prior-knowledge - the whole point of this port existing is to avoid the h2c
-                    // reliability problem the proxy port itself now also avoids by being TLS. Always
-                    // loopback, independent of BindAddress - see ProxyListenerOptions.GrpcPort's remarks:
-                    // it is being retired (migration plan Phase P9), not extended.
-                    KestrelBindAddress.Listen(options: options, bindAddress: "loopback", port: grpcPort,
-                        configure: listenOptions =>
-                        {
-                            listenOptions.Protocols = HttpProtocols.Http2;
-                            listenOptions.UseHttps(httpsOptions =>
-                                httpsOptions.ServerCertificateSelector =
-                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
-                        });
-
-                    // The web GUI/gRPC-Web endpoint (Phase P2). Http1AndHttp2 (not Http2-only like the
-                    // native gRPC port above): browsers negotiate HTTP/2 via ALPN where they can, but
-                    // gRPC-Web itself works equally over HTTP/1.1, and the WASM static assets (Phase P6)
-                    // are ordinary HTTP/1.1 GETs. BindAddress lets this move off loopback for Docker,
+                    // The web GUI/gRPC-Web/native-gRPC endpoint (Phase P2, native gRPC joined it in Phase
+                    // P9 when the formerly-dedicated gRPC port was retired as fully redundant - every gRPC
+                    // admin service was already dual-mapped onto this port). Http1AndHttp2 (not
+                    // Http2-only): browsers negotiate HTTP/2 via ALPN where they can, but gRPC-Web itself
+                    // works equally over HTTP/1.1, the WASM static assets (Phase P6) are ordinary
+                    // HTTP/1.1 GETs, and native gRPC clients (the tray) negotiate HTTP/2 via ALPN the same
+                    // way the old dedicated port did. BindAddress lets this move off loopback for Docker,
                     // same as the primary proxy port.
                     KestrelBindAddress.Listen(options: options, bindAddress: webInterface.BindAddress,
                         port: webPort,
@@ -392,8 +374,11 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         await next(context).ConfigureAwait(false);
                     });
 
-                    // Everything below only ever runs for a gRPC/web-port connection (grpcPort or webPort) -
-                    // proxy-port connections returned via the gate above and never reach here.
+                    // Everything below only ever runs for a webPort connection - proxy-port connections
+                    // returned via the gate above and never reach here. webPort now carries native gRPC,
+                    // gRPC-Web, and the WASM static assets together (Phase P9 retired the formerly-
+                    // dedicated native-gRPC port as fully redundant, since every gRPC admin service was
+                    // already dual-mapped here).
 
                     // ADR-0012's per-request guard (Phase P4): Host allowlist and Origin/same-origin check,
                     // ahead of everything else on this pipeline - gRPC-Web calls and the /auth/* endpoints
@@ -401,38 +386,29 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // enables ForwardedHeaders.
                     app.UseMiddleware<WebPortRequestGuardMiddleware>(webInterface);
 
-                    // Serves the WASM dashboard's static assets (web GUI migration plan Phase P6) - the
-                    // web port only. grpcPort accepts native gRPC and (until Phase P9) exists purely for
-                    // that, so a browser never requests a static file from it; UseWhen keeps this branch
-                    // out of that connection's pipeline entirely rather than relying on every asset
-                    // request happening to 404 on its own. UseDefaultFiles rewrites a bare "/" to
-                    // "/index.html" before UseStaticFiles serves it - the dashboard has no server- or
-                    // client-side routing of its own (no @page/<Router> anywhere in Gui.Components; every
-                    // "tab" is in-component state, not a navigable URL), so unlike a typical Blazor SPA
-                    // this needs no MapFallbackToFile for arbitrary deep links - only "/" itself ever
-                    // needs to resolve to index.html. Deliberately NOT a broader "unmatched GET with no
-                    // file extension" heuristic: that shape also matches the deleted REST /admin/* and
-                    // the LLM-proxy /v1/* paths, which must keep 404ing on the web port (see
-                    // WebPort_RestAdminPath_Returns404/WebPort_ProxyPath_Returns404).
-                    app.UseWhen(
-                        predicate: context => context.Connection.LocalPort == webPort,
-                        configuration: webApp =>
-                        {
-                            webApp.UseDefaultFiles();
-                            webApp.UseStaticFiles();
-                        });
+                    // Serves the WASM dashboard's static assets (web GUI migration plan Phase P6).
+                    // UseDefaultFiles rewrites a bare "/" to "/index.html" before UseStaticFiles serves it -
+                    // the dashboard has no server- or client-side routing of its own (no @page/<Router>
+                    // anywhere in Gui.Components; every "tab" is in-component state, not a navigable URL),
+                    // so unlike a typical Blazor SPA this needs no MapFallbackToFile for arbitrary deep
+                    // links - only "/" itself ever needs to resolve to index.html. A gRPC call's path never
+                    // matches a static file or the bare "/", so both middlewares fall through to routing
+                    // for every gRPC/gRPC-Web request untouched - no port-based gating is needed now that
+                    // native gRPC and the WASM assets share this one port.
+                    app.UseDefaultFiles();
+                    app.UseStaticFiles();
 
                     // Lets a browser call the gRPC services mapped below over grpc-web framing (HTTP/1.1-
                     // or HTTP/2-safe, unlike trailers-based native gRPC) without opting in per service -
-                    // DefaultEnabled applies it to every MapGrpcService call, native gRPC callers on
-                    // grpcPort included (grpc-web detection is by content-type, so a native gRPC client's
-                    // ordinary requests pass through unaffected).
+                    // DefaultEnabled applies it to every MapGrpcService call, native gRPC callers included
+                    // (grpc-web detection is by content-type, so a native gRPC client's ordinary requests
+                    // pass through unaffected).
                     app.UseGrpcWeb(new GrpcWebOptions { DefaultEnabled = true });
 
-                    // Baseline hardening for the one browser-reachable listener among these (webPort);
-                    // harmless on grpcPort, which no browser ever talks to directly. frame-ancestors 'none'
-                    // and script-src 'self' 'wasm-unsafe-eval' anticipate Phase P6's WASM GUI; nosniff
-                    // guards the eventual static assets against content-type sniffing.
+                    // Baseline hardening for this browser-reachable listener. frame-ancestors 'none' and
+                    // script-src 'self' 'wasm-unsafe-eval' anticipate Phase P6's WASM GUI; nosniff guards
+                    // the static assets against content-type sniffing. Harmless on a native gRPC request,
+                    // which never reads these headers.
                     app.Use(async (context, next) =>
                     {
                         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -492,6 +468,12 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         // login, and logout. Only mapped alongside real inbound auth - see
                         // ManagementAuthEndpoints' and managementTokenProvider's remarks.
                         if (managementTokenProvider is not null) ManagementAuthEndpoints.Map(endpoints);
+
+                        // The System Settings "Copy MCP token / Regenerate" row API (Phase P9). Only
+                        // mapped alongside real inbound auth, same condition as the session endpoints
+                        // above - a router with no token provider configured has no token to administer.
+                        if (managementTokenProvider is not null)
+                            endpoints.MapGrpcService<ManagementTokenAdminGrpcService>();
 
                         // The WASM dashboard's fingerprinted assets (web GUI migration plan Phase P6) -
                         // endpoint-routing metadata (cache headers, content negotiation) on top of the

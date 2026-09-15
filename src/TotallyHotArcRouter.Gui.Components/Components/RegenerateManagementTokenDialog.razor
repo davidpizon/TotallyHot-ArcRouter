@@ -1,0 +1,52 @@
+@* Confirms regenerating the shared management token (web GUI migration plan Phase P9) before minting a
+   new one. A single, machine-wide value every MCP client is configured with, so this states the
+   consequence before the click - the same smaller-blast-radius Continue/Cancel shape as
+   UnlockSecretFieldDialog rather than RemoveProviderDialog's type-to-confirm, since there is no
+   per-instance name to type. Follows SettingsModal shell (docs/gui/DESIGN.md 4.1). *@
+<DialogShell Title="Regenerate Management Token" CloseAriaLabel="Close regenerate token dialog" OnClose="OnCancel" EnableEscapeToClose="true">
+    <div class="flex items-center gap-2 text-xs text-amber-400 font-medium uppercase tracking-widest">
+        <Icon Name="alert-triangle" Size="20"/>
+        <span>Destructive Action</span>
+    </div>
+
+    <div class="space-y-3 ds-destructive-box">
+        <p class="text-xs text-slate-400 leading-5">
+            This will mint a new token and
+            <span class="text-red-400 font-semibold">invalidate the current one immediately</span>.
+            Every MCP client configured with the old token will stop authenticating until you update it.
+        </p>
+        <div class="flex gap-2">
+            <button @ref="_cancelButton" @onclick="OnCancel" class="flex-1 btn btn-ghost">
+                Cancel
+            </button>
+            <button @onclick="OnConfirm" class="flex-1 btn btn-critical">
+                Regenerate
+            </button>
+        </div>
+    </div>
+</DialogShell>
+
+@code {
+
+    /// <summary>Invoked when the user confirms - the caller mints and persists a new token.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Invoked when the modal should close without regenerating - backdrop, the X, Cancel, or Escape.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private ElementReference _cancelButton;
+    private bool _focusPending = true;
+
+    // Cancel gets initial focus (not Regenerate) since it is the non-destructive default.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPending)
+        {
+            _focusPending = false;
+            await _cancelButton.FocusAsync();
+        }
+    }
+
+}

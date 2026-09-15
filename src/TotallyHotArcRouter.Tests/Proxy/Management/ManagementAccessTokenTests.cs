@@ -1,108 +1,117 @@
-using System.Runtime.Versioning;
-using System.Security.AccessControl;
-using System.Security.Principal;
 using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
-/// <summary>Covers <see cref="ManagementAccessToken"/>: generation, persistence, and constant-time verification.</summary>
+/// <summary>
+/// Covers <see cref="ManagementAccessToken"/>: generation, persistence in <see cref="ProtectedSecretStore"/>,
+/// the one-time legacy-file import (web GUI migration plan Phase P9), and constant-time verification.
+/// </summary>
 public sealed class ManagementAccessTokenTests
 {
     [Fact]
-    public void GetOrCreate_NoExistingFile_GeneratesAStrongToken()
+    public void GetOrCreate_NoExistingSecret_GeneratesAStrongToken()
     {
-        var path = TempTokenPath();
-        try
-        {
-            var token = ManagementAccessToken.GetOrCreate(path);
+        var store = new ProtectedSecretStore(TempStorePath());
 
-            Assert.False(string.IsNullOrWhiteSpace(token));
-            // 32 random bytes, base64url-encoded without padding, is at least 42 characters.
-            Assert.True(condition: token.Length >= 40,
-                userMessage: $"Expected a long random token; got '{token}' ({token.Length} chars).");
-            Assert.True(File.Exists(path));
-        }
-        finally
-        {
-            CleanUp(path);
-        }
+        var token = ManagementAccessToken.GetOrCreate(store);
+
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        // 32 random bytes, base64url-encoded without padding, is at least 42 characters.
+        Assert.True(condition: token.Length >= 40,
+            userMessage: $"Expected a long random token; got '{token}' ({token.Length} chars).");
+        Assert.True(store.Exists(ManagementAccessToken.SecretName));
     }
 
     [Fact]
     public void GetOrCreate_CalledTwice_ReturnsTheSamePersistedToken()
     {
-        var path = TempTokenPath();
-        try
-        {
-            var first = ManagementAccessToken.GetOrCreate(path);
-            var second = ManagementAccessToken.GetOrCreate(path);
+        var store = new ProtectedSecretStore(TempStorePath());
 
-            Assert.Equal(expected: first, actual: second);
-        }
-        finally
-        {
-            CleanUp(path);
-        }
+        var first = ManagementAccessToken.GetOrCreate(store);
+        var second = ManagementAccessToken.GetOrCreate(store);
+
+        Assert.Equal(expected: first, actual: second);
     }
 
     [Fact]
     public async Task GetOrCreate_ConcurrentFirstCalls_AllReturnTheSameToken()
     {
-        // Simulates two processes racing to create the token file at the same moment (e.g. two router
-        // instances starting together). The per-path Mutex in GetOrCreate must serialize them so exactly
-        // one token is generated and every caller observes it - not each generating its own competing one.
-        var path = TempTokenPath();
-        try
-        {
-            var tasks = Enumerable.Range(0, 8)
-                .Select(_ => Task.Run(() => ManagementAccessToken.GetOrCreate(path)))
-                .ToArray();
+        // Simulates two processes racing to create the token at the same moment (e.g. two router
+        // instances starting together). ProtectedSecretStore's own per-path Mutex must serialize the
+        // underlying read-modify-write cycles so exactly one token is generated and every caller
+        // observes it - not each generating its own competing one.
+        var path = TempStorePath();
+        var tasks = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => ManagementAccessToken.GetOrCreate(new ProtectedSecretStore(path))))
+            .ToArray();
 
-            var tokens = await Task.WhenAll(tasks);
+        var tokens = await Task.WhenAll(tasks);
 
-            Assert.Single(tokens.Distinct());
-        }
-        finally
-        {
-            CleanUp(path);
-        }
+        Assert.Single(tokens.Distinct());
     }
 
     [Fact]
     public void Regenerate_ReturnsADifferentTokenAndPersistsIt()
     {
-        var path = TempTokenPath();
-        try
-        {
-            var original = ManagementAccessToken.GetOrCreate(path);
+        var store = new ProtectedSecretStore(TempStorePath());
+        var original = ManagementAccessToken.GetOrCreate(store);
 
-            var regenerated = ManagementAccessToken.Regenerate(path);
+        var regenerated = ManagementAccessToken.Regenerate(store);
 
-            Assert.NotEqual(expected: original, actual: regenerated);
-            Assert.Equal(expected: regenerated, actual: File.ReadAllText(path).Trim());
-            Assert.Equal(expected: regenerated, actual: ManagementAccessToken.GetOrCreate(path));
-        }
-        finally
-        {
-            CleanUp(path);
-        }
+        Assert.NotEqual(expected: original, actual: regenerated);
+        Assert.Equal(expected: regenerated, actual: ManagementAccessToken.GetOrCreate(store));
     }
 
     [Fact]
-    public void Regenerate_NoExistingFile_StillCreatesOne()
+    public void Regenerate_NoExistingSecret_StillCreatesOne()
     {
-        var path = TempTokenPath();
-        try
-        {
-            var token = ManagementAccessToken.Regenerate(path);
+        var store = new ProtectedSecretStore(TempStorePath());
 
-            Assert.False(string.IsNullOrWhiteSpace(token));
-            Assert.True(File.Exists(path));
-        }
-        finally
-        {
-            CleanUp(path);
-        }
+        var token = ManagementAccessToken.Regenerate(store);
+
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        Assert.True(store.Exists(ManagementAccessToken.SecretName));
+    }
+
+    [Fact]
+    public void GetOrCreate_LegacyFileExists_ImportsItAndDeletesTheFile()
+    {
+        var store = new ProtectedSecretStore(TempStorePath());
+        var legacyPath = TempLegacyTokenPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
+        File.WriteAllText(path: legacyPath, contents: "legacy-token-value");
+
+        var token = ManagementAccessToken.GetOrCreate(store: store, legacyTokenPath: legacyPath);
+
+        Assert.Equal(expected: "legacy-token-value", actual: token);
+        Assert.True(store.TryRead(name: ManagementAccessToken.SecretName, value: out var stored));
+        Assert.Equal(expected: "legacy-token-value", actual: stored);
+        Assert.False(File.Exists(legacyPath), "the legacy file must be deleted once its token has been imported");
+    }
+
+    [Fact]
+    public void GetOrCreate_LegacyFileExists_ButSecretAlreadyStored_IgnoresTheLegacyFile()
+    {
+        var store = new ProtectedSecretStore(TempStorePath());
+        ManagementAccessToken.GetOrCreate(store);
+        var legacyPath = TempLegacyTokenPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
+        File.WriteAllText(path: legacyPath, contents: "legacy-token-value");
+
+        var token = ManagementAccessToken.GetOrCreate(store: store, legacyTokenPath: legacyPath);
+
+        Assert.NotEqual(expected: "legacy-token-value", actual: token);
+        Assert.True(File.Exists(legacyPath), "an already-migrated store must never touch a leftover legacy file");
+    }
+
+    [Fact]
+    public void GetOrCreate_NoLegacyFile_GeneratesAFreshTokenNormally()
+    {
+        var store = new ProtectedSecretStore(TempStorePath());
+
+        var token = ManagementAccessToken.GetOrCreate(store: store, legacyTokenPath: TempLegacyTokenPath());
+
+        Assert.False(string.IsNullOrWhiteSpace(token));
     }
 
     [Fact]
@@ -136,94 +145,15 @@ public sealed class ManagementAccessTokenTests
         Assert.Throws<ArgumentException>(() => ManagementAccessToken.Verify(presented: "abc", expected: string.Empty));
     }
 
-    /// <summary>
-    /// The token is the one credential the <c>LocalSystem</c> service and the interactive-user GUI must
-    /// both read, so its ACL is deliberately machine-wide rather than current-user-only: system and
-    /// administrators write it, <c>Users</c> may only read it. A regression to a per-user ACL here is
-    /// exactly what made the two processes mint separate tokens and every management call return 401.
-    /// </summary>
-    [Fact]
-    public void GetOrCreate_OnWindows_GrantsSystemWriteAndUsersReadOnly()
+    private static string TempStorePath()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
-        var path = TempTokenPath();
-        try
-        {
-            ManagementAccessToken.GetOrCreate(path);
-            AssertMachineSharedAcl(path);
-        }
-        finally
-        {
-            CleanUp(path);
-        }
+        return Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
+            path4: "secrets.dat");
     }
 
-    /// <summary>
-    /// The Windows-only half of <see cref="GetOrCreate_OnWindows_GrantsSystemWriteAndUsersReadOnly"/>, split
-    /// out so the platform annotation is on the method CA1416 actually analyzes - the analyzer doesn't treat
-    /// an early-return guard in the caller as narrowing the platform.
-    /// </summary>
-    /// <param name="path">The token file whose ACL to assert on.</param>
-    [SupportedOSPlatform("windows")]
-    private static void AssertMachineSharedAcl(string path)
-    {
-        var security = new FileInfo(path).GetAccessControl();
-        var rules = security
-            .GetAccessRules(true, true, targetType: typeof(SecurityIdentifier))
-            .Cast<FileSystemAccessRule>()
-            .ToList();
-
-        // Inheritance from the parent directory must be broken - otherwise "restricted" is a lie and
-        // whatever ACL the parent (or its parent, up to the drive root) happens to carry still applies.
-        Assert.True(security.AreAccessRulesProtected);
-
-        var system = new SecurityIdentifier(sidType: WellKnownSidType.LocalSystemSid, null);
-        var users = new SecurityIdentifier(sidType: WellKnownSidType.BuiltinUsersSid, null);
-
-        Assert.Contains(collection: rules, filter: rule =>
-            rule.IdentityReference.Equals(system) &&
-            rule.AccessControlType == AccessControlType.Allow &&
-            rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
-
-        var usersRules = rules.Where(rule => rule.IdentityReference.Equals(users)).ToList();
-        Assert.NotEmpty(usersRules);
-
-        // Read, never write: the interactive user presents this credential but must not be able to
-        // replace the one the service trusts.
-        Assert.All(collection: usersRules, action: rule =>
-        {
-            Assert.Equal(expected: AccessControlType.Allow, actual: rule.AccessControlType);
-            Assert.False(rule.FileSystemRights.HasFlag(FileSystemRights.Write));
-            Assert.False(rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
-        });
-    }
-
-    /// <summary>
-    /// The path itself is the contract between the two processes: <c>ManagementTokenReader</c> and
-    /// <c>TelemetryAuthClientInterceptor</c> hardcode their own copies of it across the assembly boundary,
-    /// so a change here that isn't mirrored there silently breaks authentication in the installed build.
-    /// </summary>
-    [Fact]
-    public void DefaultPath_IsMachineWideNotPerUser()
-    {
-        var expected = Path.Combine(
-            path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            path2: "TotallyHotArcRouter",
-            path3: "management-token.txt");
-
-        Assert.Equal(expected: expected, actual: ManagementAccessToken.DefaultPath());
-    }
-
-    private static string TempTokenPath()
+    private static string TempLegacyTokenPath()
     {
         return Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
             path4: "management-token.txt");
-    }
-
-    private static void CleanUp(string path)
-    {
-        var directory = Path.GetDirectoryName(path);
-        if (directory is not null && Directory.Exists(directory)) Directory.Delete(path: directory, true);
     }
 }

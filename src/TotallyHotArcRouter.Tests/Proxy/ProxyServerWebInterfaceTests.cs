@@ -59,9 +59,9 @@ public sealed class ProxyServerWebInterfaceTests
     /// Reserves <paramref name="count"/> distinct free loopback ports by briefly binding a
     /// <see cref="TcpListener"/> to each (port 0 asks the OS for an unused one) and releasing them
     /// together - the same trick <see cref="Hosting.ProxyHostedServiceTests"/> uses for its
-    /// port-already-in-use test. Needed here (rather than each listener taking its own port: 0) because,
-    /// unlike the primary/gRPC ports, several of these tests must know in advance which fixed port is
-    /// the web port vs. the gRPC port vs. the two proxy-purpose ports, to target requests precisely.
+    /// port-already-in-use test. Needed here (rather than each listener taking its own port: 0) because
+    /// several of these tests must know in advance which fixed port is the web port vs. the two
+    /// proxy-purpose ports, to target requests precisely.
     /// </summary>
     private static int[] GetFreePorts(int count)
     {
@@ -82,14 +82,13 @@ public sealed class ProxyServerWebInterfaceTests
         }
     }
 
-    private static (ProxyServer Server, TelemetryBroadcaster Broadcaster, int ProxyPort, int GrpcPort, int WebPort,
+    private static (ProxyServer Server, TelemetryBroadcaster Broadcaster, int ProxyPort, int WebPort,
         int PlainHttpPort) BuildServer(bool plainHttpEnabled = false)
     {
-        var ports = GetFreePorts(plainHttpEnabled ? 4 : 3);
+        var ports = GetFreePorts(plainHttpEnabled ? 3 : 2);
         var proxyPort = ports[0];
-        var grpcPort = ports[1];
-        var webPort = ports[2];
-        var plainHttpPort = plainHttpEnabled ? ports[3] : 0;
+        var webPort = ports[1];
+        var plainHttpPort = plainHttpEnabled ? ports[2] : 0;
 
         var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
             modelRouteResolver: ModelRouteResolverTestFactory.Empty());
@@ -103,7 +102,6 @@ public sealed class ProxyServerWebInterfaceTests
             listenerOptions: new ProxyListenerOptions
             {
                 Port = proxyPort,
-                GrpcPort = grpcPort,
                 PlainHttp = new PlainHttpListenerOptions { Enabled = plainHttpEnabled, Port = plainHttpPort }
             },
             webInterfaceOptions: new WebInterfaceOptions { Port = webPort },
@@ -124,7 +122,7 @@ public sealed class ProxyServerWebInterfaceTests
                     StorageOptions: Options.Create(new StorageOptions()))
             });
 
-        return (server, broadcaster, proxyPort, grpcPort, webPort, plainHttpPort);
+        return (server, broadcaster, proxyPort, webPort, plainHttpPort);
     }
 
     /// <summary>An <see cref="HttpClient"/> that trusts any certificate - the self-signed dev cert isn't otherwise trusted in a test process.</summary>
@@ -137,7 +135,7 @@ public sealed class ProxyServerWebInterfaceTests
     [Fact]
     public async Task WebPort_GrpcWebUnaryCall_Succeeds()
     {
-        var (server, _, _, _, webPort, _) = BuildServer();
+        var (server, _, _, webPort, _) = BuildServer();
         await using var _ = server;
         await server.StartAsync(Ct);
         try
@@ -162,7 +160,7 @@ public sealed class ProxyServerWebInterfaceTests
     [Fact]
     public async Task WebPort_GrpcWebStreamEvents_ReceivesAtLeastTwoMessages()
     {
-        var (server, broadcaster, _, _, webPort, _) = BuildServer();
+        var (server, broadcaster, _, webPort, _) = BuildServer();
         await using var _ = server;
         await server.StartAsync(Ct);
         try
@@ -209,7 +207,7 @@ public sealed class ProxyServerWebInterfaceTests
     [Fact]
     public async Task ProxyPort_GrpcWebCall_DoesNotReachAService()
     {
-        var (server, _, proxyPort, _, _, _) = BuildServer();
+        var (server, _, proxyPort, _, _) = BuildServer();
         await using var _ = server;
         await server.StartAsync(Ct);
         try
@@ -238,7 +236,7 @@ public sealed class ProxyServerWebInterfaceTests
     [Fact]
     public async Task WebPort_RestAdminPath_Returns404()
     {
-        var (server, _, _, _, webPort, _) = BuildServer();
+        var (server, _, _, webPort, _) = BuildServer();
         await using var _ = server;
         await server.StartAsync(Ct);
         try
@@ -260,7 +258,7 @@ public sealed class ProxyServerWebInterfaceTests
     [Fact]
     public async Task WebPort_ProxyPath_Returns404()
     {
-        var (server, _, _, _, webPort, _) = BuildServer();
+        var (server, _, _, webPort, _) = BuildServer();
         await using var _ = server;
         await server.StartAsync(Ct);
         try
@@ -287,7 +285,7 @@ public sealed class ProxyServerWebInterfaceTests
         // CS0433 proto-codegen collision) plus UseStaticWebAssets/UseDefaultFiles/UseStaticFiles in
         // ProxyServer.cs. This is the regression guard for that pipeline actually resolving Gui.Web's
         // static web assets at runtime - the exact thing the plan flagged as unverified by spike S2.
-        var (server, _, _, _, webPort, _) = BuildServer();
+        var (server, _, _, webPort, _) = BuildServer();
         await using var _ = server;
         await server.StartAsync(Ct);
         try
@@ -312,18 +310,19 @@ public sealed class ProxyServerWebInterfaceTests
     }
 
     [Fact]
-    public async Task NativeGrpcPort_UnaryCall_StillWorks()
+    public async Task NativeGrpcOnWebPort_UnaryCall_Succeeds()
     {
-        // The native (non-web) gRPC port (grpcPort/5002-in-production) is unchanged by Phase P2 - it
-        // keeps serving plain (non-grpc-web) gRPC exactly as before the web port existed.
-        var (server, _, _, grpcPort, _, _) = BuildServer();
+        // Phase P9 retired the formerly-dedicated native-gRPC port: native (non-grpc-web) gRPC now shares
+        // the web port with gRPC-Web and the WASM static assets. This proves that merge didn't break
+        // plain trailers-based gRPC framing on the shared port.
+        var (server, _, _, webPort, _) = BuildServer();
         await using var _ = server;
         await server.StartAsync(Ct);
         try
         {
             using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
             using var httpClient = new HttpClient(handler);
-            using var channel = GrpcChannel.ForAddress($"https://localhost:{grpcPort}",
+            using var channel = GrpcChannel.ForAddress($"https://localhost:{webPort}",
                 new GrpcChannelOptions { HttpClient = httpClient });
             var invoker = channel.CreateCallInvoker();
 
@@ -342,7 +341,7 @@ public sealed class ProxyServerWebInterfaceTests
     [Fact]
     public async Task PlainHttpListener_WhenEnabled_ServesProxyPath_ButNotGrpc()
     {
-        var (server, _, proxyPort, _, _, plainHttpPort) = BuildServer(plainHttpEnabled: true);
+        var (server, _, proxyPort, _, plainHttpPort) = BuildServer(plainHttpEnabled: true);
         await using var _ = server;
         await server.StartAsync(Ct);
         try

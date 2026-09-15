@@ -42,13 +42,11 @@ public sealed class ProxyListenerOptionsValidatorTests
 
     [Theory]
     [InlineData(5001)] // collides with Port
-    [InlineData(5002)] // collides with GrpcPort
     public void Validate_PlainHttpEnabled_CollidesWithProxyListenerPorts_Fails(int plainHttpPort)
     {
         var options = new ProxyListenerOptions
         {
             Port = 5001,
-            GrpcPort = 5002,
             PlainHttp = new PlainHttpListenerOptions { Enabled = true, Port = plainHttpPort }
         };
 

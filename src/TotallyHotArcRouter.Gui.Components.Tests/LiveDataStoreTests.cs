@@ -56,10 +56,4 @@ public sealed class LiveDataStoreTests
 
         await store.DisposeAsync();
     }
-
-    [Fact]
-    public void DefaultServerAddress_is_the_documented_TLS_telemetry_port()
-    {
-        LiveDataStore.DefaultServerAddress.Should().Be("https://localhost:5002");
-    }
 }

@@ -259,4 +259,71 @@ public sealed class ProtectedSecretStoreTests
             CleanUp(path);
         }
     }
+
+    [Fact]
+    public void GetOrAdd_NoExistingValue_InvokesFactoryAndPersistsIt()
+    {
+        var path = TempStorePath();
+        try
+        {
+            var store = new ProtectedSecretStore(path);
+
+            var value = store.GetOrAdd(name: "name", valueFactory: () => "generated");
+
+            Assert.Equal(expected: "generated", actual: value);
+            Assert.True(store.TryRead(name: "name", value: out var stored));
+            Assert.Equal(expected: "generated", actual: stored);
+        }
+        finally
+        {
+            CleanUp(path);
+        }
+    }
+
+    [Fact]
+    public void GetOrAdd_ExistingValue_ReturnsItWithoutInvokingTheFactory()
+    {
+        var path = TempStorePath();
+        try
+        {
+            var store = new ProtectedSecretStore(path);
+            store.Write(name: "name", value: "existing");
+            var factoryCalled = false;
+
+            var value = store.GetOrAdd(name: "name", valueFactory: () =>
+            {
+                factoryCalled = true;
+                return "generated";
+            });
+
+            Assert.Equal(expected: "existing", actual: value);
+            Assert.False(factoryCalled);
+        }
+        finally
+        {
+            CleanUp(path);
+        }
+    }
+
+    [Fact]
+    public async Task GetOrAdd_ConcurrentFirstCalls_AllObserveTheSameValue()
+    {
+        // The whole reason GetOrAdd exists rather than a caller composing TryRead+Write itself: the
+        // check-then-write must be atomic, or two racing callers can both observe "nothing stored yet"
+        // and each persist a competing value.
+        var path = TempStorePath();
+        var tasks = Enumerable.Range(0, 8)
+            .Select(i => Task.Run(() => new ProtectedSecretStore(path).GetOrAdd(name: "name", valueFactory: () => $"generated-{i}")))
+            .ToArray();
+        try
+        {
+            var values = await Task.WhenAll(tasks);
+
+            Assert.Single(values.Distinct());
+        }
+        finally
+        {
+            CleanUp(path);
+        }
+    }
 }

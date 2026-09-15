@@ -1,10 +1,10 @@
 # Web GUI Migration Plan
 
-> **Status: P8 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5, P6, P7 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
-> (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retires the
+> **Status: P9 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5, P6, P7, P8 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
+> (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retired the
 > Windows-only MAUI Blazor Hybrid GUI
-> (`src/TotallyHotArcRouter.Gui`, WebView2) in favor of a Blazor WebAssembly dashboard served by the
-> router itself, cross-platform, with a small Windows-only tray exe as the only remaining
+> (`src/TotallyHotArcRouter.Gui`, WebView2, deleted in P9) in favor of a Blazor WebAssembly dashboard
+> served by the router itself, cross-platform, with a small Windows-only tray exe as the only remaining
 > platform-specific component.
 > **End condition:** this plan closes when Phase P11 ships (docs sweep) and the plan's Status line is
 > updated to closed. Findings after that start a new document.
@@ -1209,6 +1209,175 @@ loopback, it qualifies for ADR-0012's fast path (`POST /auth/session`, no creden
 5. An MCP client with the old token still works.
 6. Dashboard opens with no certificate warning in Edge, Chrome and Firefox.
 7. Routing toggle works from the tray.
+
+### P9 status: shipped 2026-09-15
+
+All four deliverables shipped and were verified for real against the actual built router/tray/installer.
+The one exit criterion this environment cannot satisfy (a clean Windows VM install/upgrade cycle) is
+explicitly deferred with reasoning, the same category of gap as every earlier phase's CI/VM limitations.
+
+**Retire 5002 - shipped:**
+- Removed `ProxyServer.DefaultGrpcPort`, the `grpcPort` constructor-path validation, the dedicated Kestrel
+  listener block, and `ProxyListenerOptions.GrpcPort` entirely (not deprecated - deleted, since nothing
+  ever needed the property once native gRPC moved onto the web port). `TelemetryChannelFactory.DefaultServerAddress`
+  repointed from `https://localhost:5002` to `https://localhost:5004`.
+- **`ValidateLoopbackCertificate` was kept, not removed** - a deliberate deviation from the plan's literal
+  "and the remaining trust callback" wording. `TelemetryChannelFactory.CreateSessionAuthenticatedAsync`
+  (P8's cookie-auth channel construction, still the Tray's only production channel path) still needs a
+  certificate-trust callback whenever the router's CA hasn't been installed into the OS trust store -
+  which, per P7's own deferral, it never has been in this environment. Removing the callback would have
+  broken the Tray's own HTTPS connection here and in any install that hasn't run `--install-certificate`.
+  `Create()`/`Authenticated()`/`TelemetryAuthClientInterceptor`/`NativeRouterChannelProvider` (the
+  `x-admin-token` native-gRPC path P8 replaced with the session-cookie scheme) were also kept rather than
+  deleted: they are real, tested, documented library surface with their own dedicated test coverage, and
+  nothing in the plan names them for removal - only 5002 itself and `DefaultServerAddress`'s stale value.
+- **Verified for real**: built and ran the actual router exe - `netstat` showed 5001/5003/5004 bound and
+  **5002 entirely absent**. Full suite re-run clean.
+
+**Delete MAUI - shipped, with one judgment call beyond the plan's literal scope:**
+- Deleted `src/TotallyHotArcRouter.Gui/` and `src/TotallyHotArcRouter.Gui.Tests/` outright (not just the
+  plan's named files - everything in the MAUI project was either named or was scaffolding the deletion
+  implies, like the `.csproj` itself).
+- **`TotallyHotArcRouter.Gui.Tests` was retargeted to a new `TotallyHotArcRouter.Gui.Components.Tests`
+  project instead of being deleted wholesale**, which is what the plan's "their tests" bullet literally
+  says. Investigating first (rather than just deleting) found that only 2 of its 48 files
+  (`GuiLoggingTests.cs`, `WebViewUserDataTests.cs`) actually tested MAUI-shell-specific code - the other
+  46 were bUnit coverage for `TotallyHotArcRouter.Gui.Components`, the shared Razor library the deleted
+  MAUI host and the still-live WASM `Gui.Web` both depend on. Deleting the whole project as literally
+  instructed would have silently dropped 425 tests' worth of real, non-MAUI-specific coverage - exactly
+  the kind of unannounced regression this session's standing practice is to catch and flag, not execute.
+  The two genuinely MAUI-only files were dropped; the rest moved verbatim (same namespace, so no per-file
+  edit) into a new plain-`net10.0` project referencing `Gui.Components` directly instead of hopping
+  through the deleted MAUI host - one fix needed (`Microsoft.Extensions.DependencyInjection` as an
+  explicit global `Using`, previously supplied implicitly by MAUI's own SDK targets). Added to both
+  `.slnx` files, since it now builds cross-platform.
+- `.github/workflows/dotnet-ci.yml`: removed the disabled `windows-gui-build-and-test` job outright (not
+  left disabled - its entire reason to exist, the MAUI project, is gone) and added
+  `Gui.Components.Tests`/`Tray.Core.Tests` to the Linux job's `$PROJECTS`, so both are now covered by the
+  same 80% bar every other cross-platform project already is - a strictly better position than the plan's
+  own bullet asked for (it only named removing the disabled job, not extending coverage to the new
+  projects).
+- `.github/workflows/release.yml`: removed the `maui-windows` workload install step; "Publish GUI" became
+  "Publish Tray" against `TotallyHotArcRouter.Tray.csproj`.
+- `TotallyHotArcRouter.Qodana.slnx`: `Gui`/`Gui.Tests` exclusions replaced with `Gui.Components.Tests`
+  (cross-platform, listed like everything else) - **the two solutions do not fully "match"** as the
+  plan's bullet phrased it, because `TotallyHotArcRouter.Tray` (P8's new WinForms shell) is itself
+  Windows-only and still needs the same kind of exclusion the MAUI pair used to need. Stated plainly
+  rather than silently declared "matching" when they aren't quite.
+- AGENTS.md's doc-enforcement list: removed `TotallyHot.ArcRouter.Gui`.
+- **Verified for real**: full solution build (`TotallyHotArcRouter.slnx`, now 18 projects with no MAUI
+  pair) and the Linux-representative `Qodana.slnx`, both 0 warnings/errors. All 8 test executables run
+  directly (`Gui.Components.Tests` replacing `Gui.Tests`): 3971 tests total, 0 failed, 2 skipped
+  (pre-existing).
+
+**Token relocation - shipped:**
+- `ManagementAccessToken` rewritten to persist in `ProtectedSecretStore` under `management:token` instead
+  of a standalone ACL-restricted plaintext file. `GetOrCreate` imports the legacy `management-token.txt`
+  once (if present), deletes it only after a successful import, and falls back to minting fresh otherwise
+  - an install that already handed its token to MCP clients keeps working rather than silently rotating
+  out from under them.
+- **A real concurrency bug caught and fixed mid-implementation, not just reasoned about**: the first cut
+  composed `ProtectedSecretStore.TryRead` then `.Write` as two separately-mutex-guarded calls, leaving a
+  race window where two callers could both observe "nothing stored yet" and each persist a competing
+  token - exactly the split-brain-auth bug the pre-P9 file-based version's own single held mutex was
+  built to prevent, silently reintroduced by the rewrite. Caught by
+  `GetOrCreate_ConcurrentFirstCalls_AllReturnTheSameToken` actually failing on a real run (2 distinct
+  tokens across 8 racing callers), not by inspection. Fixed by adding `ProtectedSecretStore.GetOrAdd(name,
+  valueFactory)` - a genuinely atomic check-then-write held under one mutex acquisition - and routing both
+  the store's own new test and `ManagementAccessToken.GetOrCreate` through it.
+- New `ManagementTokenAdminGrpcService` (`GetManagementToken`/`RegenerateManagementToken`), a new
+  `ManagementTokenAdminService` block in `telemetry.proto`, mapped unconditionally alongside the other
+  always-present admin services whenever a token provider is configured (mirrors `ManagementAuthEndpoints`'
+  own condition).
+- New `--print-management-token` CLI flag, host-independent like `--export-ca`, printing the bare token to
+  stdout (not through Serilog, which would prepend a timestamp/level prefix a script capturing the output
+  doesn't want).
+- System Settings gained an **MCP Token** row: Copy (no confirmation - just clipboard) and Regenerate
+  (gated behind a new `RegenerateManagementTokenDialog` on `DialogShell`, matching the plan's explicit
+  "confirm dialog via `DialogShell`" instruction and mirroring `UnlockSecretFieldDialog`'s
+  Continue/Cancel shape rather than `RemoveProviderDialog`'s type-to-confirm, since there is no
+  per-instance name to type). New `ManagementTokenAdminClient`/`ManagementTokenAdminStore` follow the
+  existing `RoutingGateAdminClient`/`AdminStoreBase<TClient>` patterns exactly. The token itself is
+  deliberately never rendered into the page markup - Copy is the only way to actually see it.
+- **Verified for real**: `TotallyHotArcRouter.exe --print-management-token` against the real built exe
+  printed a real token with no other output. New unit tests: 3 for `ProtectedSecretStore.GetOrAdd`
+  (including the concurrency regression test), 3 for `ManagementAccessToken`'s legacy-import behavior, 3
+  for `ManagementTokenAdminGrpcService`, 6 for `ManagementTokenAdminStore`, 3 bUnit tests for the new
+  SettingsModal row (Copy copies the loaded token; Regenerate opens the confirm dialog and does nothing
+  until confirmed; confirming rotates the token and closes the dialog) - all passing, all real network-free
+  unit/component tests, not smoke-only.
+
+**`GitHubReleaseCheckClient` platform-aware asset selection - shipped, scoped:**
+- Replaced the hardcoded "match the one `.msi`" selector with `MatchesCurrentPlatform`: on Windows,
+  unchanged (`.msi`); elsewhere, a `<rid>`-tagged `.tar.gz` name match (`linux-x64`/`linux-arm64`/`osx-arm64`),
+  matching P10's own packaging matrix ahead of P10 actually publishing those assets. Real, testable today
+  via synthetic multi-asset JSON fixtures (no dependency on P10 shipping first) - added
+  `CheckAsync_ReleaseHasOnlyNonWindowsAssets_ReportsAssetOrChecksumMissing` and
+  `CheckAsync_ReleaseHasMsiAlongsideOtherPlatformAssets_SelectsOnlyTheMsi` (proving the matcher correctly
+  ignores same-release non-Windows assets rather than false-matching on a shared filename prefix).
+- **Scoped deliberately**: only asset *selection* changed. `IMsiUpdateApplier`/`MsiUpdateApplier` remain
+  MSI-specific by name and design - a non-Windows apply path is explicitly P10's own scope (no tarball
+  release exists yet to apply from, and no consumer other than the Windows-only Tray calls apply today).
+- **Verified for real**: 18 tests total (16 pre-existing + 2 new) all pass on this Windows test host, which
+  exercises the `.msi` branch; the non-Windows branch is exercised by the synthetic-payload tests'
+  selection logic but not by a real non-Windows OS run in this environment (no such run was available in
+  any earlier phase either).
+
+**Installer - shipped, and a real MSI was actually built from it:**
+- `Package.wxs`: `GuiFiles`/`GuiExeComponent`/`GuiAutoStartComponent` replaced by
+  `TrayFiles`/`TrayExeComponent`/`TrayAutoStartComponent` (same shapes: HKLM Run value, Start Menu
+  shortcut, non-advertised). Added `OpenDashboardShortcutComponent` (`util:InternetShortcut`, pointed at
+  the default `https://localhost:5004` - a real, documented limitation for an operator who changed
+  `WebInterfaceOptions.Port`, since a static install-time shortcut can't know a runtime config value; the
+  tray's own "Show Dashboard" menu item, which reads the discovery file at click time, has no such
+  limitation and is the recommended path). Added `util:CloseApplication` for a running tray instance ahead
+  of the file swap. Added the P7 cert custom action: `InstallCertificate`/`UninstallCertificate`, both
+  `Execute="deferred"` + `Impersonate="no"` (so they run as `LocalSystem`, matching the Windows Service's
+  own account) via `FileRef="RouterServiceExe"`, scheduled in `InstallExecuteSequence` after
+  `InstallFiles` (the router exe must exist on disk first) and before `StartServices` (so the leaf the
+  router mints on its first real start is already trusted). Install runs on every install/upgrade
+  (`Condition="NOT Installed"`); uninstall runs only on a genuine final removal
+  (`Condition="REMOVE=&quot;ALL&quot;"`), not on a major upgrade's internal remove-then-reinstall pass.
+  `.wixproj` gained a `WixToolset.Util.wixext` package reference for `util:CloseApplication`/`util:InternetShortcut`.
+- `RouterPublishDir`/`GuiPublishDir` renamed to `RouterPublishDir`/`TrayPublishDir` throughout the
+  `.wixproj`, `scripts/build-installer.ps1`, and `release.yml`.
+- **Verified for real, not just reasoned about**: published both `TotallyHotArcRouter` and
+  `TotallyHotArcRouter.Tray` with a locally-created `Service` publish profile (the repo's own convention -
+  `*.pubxml` is gitignored, so every publish target's profile is expected to exist locally rather than be
+  committed; TotallyHotArcRouter's own profile was equally absent before this phase), then ran
+  `dotnet build` on `TotallyHotArcRouter.Installer.wixproj` for real. **It built a genuine 115 MB MSI** -
+  WiX validates every component/directory reference and `CustomAction FileRef` at build time, so this is
+  real structural verification of the WXS authoring, not just XML that parses. One real bug this caught:
+  an XML comment containing `--install-certificate` tripped WiX's XML-comment-cannot-contain-`--` rule
+  (WIX0104) - fixed by rewording the comment, not the functional markup.
+
+**Deferred (explicit gaps, not silently dropped):**
+1. **The MSI was never installed, upgraded, or uninstalled for real, on this or any machine.** This is
+   the same firm, self-imposed boundary P7 already stated for `--install-certificate`/
+   `--uninstall-certificate`: installing an MSI writes to `Program Files`, registers a Windows Service,
+   modifies the registry, and (via the new cert custom action) writes to the machine's trust store - all
+   squarely "modifying system or security settings," which this assistant does not do to a real machine
+   regardless of who asks. The MSI's *construction* was verified for real (see above); its *execution* was
+   not, and the plan's "clean Windows VM" exit criteria (install a MAUI-era MSI, upgrade, confirm the old
+   GUI folder/Run key are gone, confirm an old MCP token still works, confirm no cert warning in three
+   browsers, confirm the tray's routing toggle) could not be run here for the same reason no earlier
+   phase's VM/CI exit criteria could be: no VM, and installation itself is out of bounds even if one
+   existed.
+2. **No Windows CI job builds the MSI**, for the same reason no earlier phase could add one: no
+   Windows-hosted GitHub Actions runner available to configure from this environment, and `release.yml`
+   already builds it (tag-triggered, real CI, just not exercised here).
+3. **Per-user WebView2/MAUI GUI-settings leftovers from a prior MAUI-era install are not cleaned up** -
+   matches the plan's own "documented, not cleaned" language verbatim; no new gap introduced.
+4. **The broader documentation sweep (README.md, `docs/gui/*`, most of `docs/router/*`) was not done** -
+   that is P11's own explicit scope ("Docs close-out"), not P9's. Only `docs/router/packaging-and-distribution.md`'s
+   two directly-stale component-name references (`GuiAutoStartComponent`/`GuiExeComponent`, which no
+   longer exist after this phase's WXS rename) were fixed, since leaving a doc pointing at deleted XML
+   element IDs is a different kind of error than "not yet updated for the new architecture" - the rest of
+   that file, and every other doc naming the MAUI GUI, stays exactly as stale as the plan already expected
+   it to be until P11.
+5. **`docs/router/client-tls-setup.md`'s CLI section was not updated to mention `--print-management-token`**
+   - real, small, and simply not reached before context/time ran out on this already-large phase; flagged
+   explicitly rather than left for a reader to discover the gap on their own.
 
 ## P10 — Cross-platform runtime and packaging
 
