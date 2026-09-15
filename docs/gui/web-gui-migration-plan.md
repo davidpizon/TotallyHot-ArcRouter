@@ -1,13 +1,12 @@
 # Web GUI Migration Plan
 
-> **Status: P10 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5, P6, P7, P8, P9 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
-> (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retired the
-> Windows-only MAUI Blazor Hybrid GUI
-> (`src/TotallyHotArcRouter.Gui`, WebView2, deleted in P9) in favor of a Blazor WebAssembly dashboard
-> served by the router itself, cross-platform, with a small Windows-only tray exe as the only remaining
-> platform-specific component.
-> **End condition:** this plan closes when Phase P11 ships (docs sweep) and the plan's Status line is
-> updated to closed. Findings after that start a new document.
+> **Status: CLOSED 2026-09-15.** All eleven phases (P1-P11) shipped, ADRs 0011-0014 are Accepted, and
+> ADR-0007 is Superseded by ADR-0011. Spikes S1-S7 run, see [Spike results](#p0-spike-results). Retired
+> the Windows-only MAUI Blazor Hybrid GUI (`src/TotallyHotArcRouter.Gui`, WebView2, deleted in P9) in
+> favor of a Blazor WebAssembly dashboard served by the router itself, cross-platform, with a small
+> Windows-only tray exe as the only remaining platform-specific component.
+> **This plan is closed per its own end condition** (P11's docs sweep shipped). Findings after this point
+> start a new document rather than extending this one.
 
 **Builds on:** ADR-0007 (superseded by ADR-0011 in this plan), the existing gRPC admin surface
 (`GrpcAdminClientBase`, `IAdminServiceModule`), and `TelemetryTlsCertificate`'s self-signed-cert
@@ -1588,6 +1587,55 @@ Mark ADRs 0011–0014 Accepted and 0007 Superseded. Close the plan status. Updat
 - `docs/router/grpc-migration.md`, `auto-update-plan.md`, `packaging-and-distribution.md`, `mcp-endpoint.md`, `secrets-at-rest.md`, `proxy-coexistence.md`
 - stale remarks in `AdminStoreBase` and `TelemetryTlsCertificate`
 - AGENTS.md project lists
+
+### P11 status: shipped 2026-09-15 - plan closed
+
+All bullets above were addressed. Notable findings and deliberate scoping decisions:
+
+- **`src/TotallyHotArcRouter.Gui/README.md`: nothing to rewrite or relocate** - the file (and the whole
+  MAUI project) was deleted outright in Phase P9, ahead of this phase existing. `docs/gui/backlog.md`,
+  which cited that README as one of its sources, had its citation removed instead.
+- **`AdminStoreBase`/`TelemetryTlsCertificate`: a real, previously-undiscovered dead-code finding, not
+  just stale prose.** `TelemetryTlsCertificate.GetOrCreate()` is no longer called by any production
+  listener - both `ProxyServer` and `McpServer` issue certificates from `LocalCertificateAuthority`
+  instead since Phase P7 - yet `ServiceCollectionExtensions.cs`'s hosted-service-ordering comment still
+  named it as "the shared cert" `McpHostedService` creates. Fixed both: `TelemetryTlsCertificate`'s own
+  class remarks now state plainly that it is unused in production (kept only for its still-passing unit
+  tests and its historical h2c-unreliability finding), and the ordering comment now names
+  `LocalCertificateAuthority.GetOrCreateCa()`'s `ProtectedSecretStore` write as the real reason the
+  ordering constraint still holds. `AdminStoreBase`'s own remarks were already accurate on inspection -
+  no change needed there.
+- **`mcp-endpoint.md`, `provider-management.md`, `secrets-at-rest.md`: full architecture rewrites, not
+  spot-fixes.** All three described the REST `/admin/*` API, the plaintext management-token file, and
+  Windows-only DPAPI-or-refuse secret protection as current - all three were replaced by gRPC/gRPC-Web,
+  the encrypted secret store, and cross-platform Data Protection respectively, well before P11 started.
+  A port-table edit alone would have left the surrounding prose materially wrong, so each got rewritten
+  to describe the shipped P1-P10 architecture, with the original historical content that's still true
+  (naming conventions, the write-only-secrets invariant, the loopback threat model) preserved.
+- **`grpc-migration.md`, `auto-update-plan.md`, `docs/gui/backlog.md`: banner-note pattern, not
+  line-by-line rewrites.** These are long documents whose value is largely in a real, dated
+  bug-investigation or feature-history narrative (a real MAUI Grpc.Tools codegen failure, the
+  Updater.exe-to-MSI transition, per-item "Done"/"Shipped" feature history). Rewriting every historical
+  sentence to present tense would destroy that record for no accuracy gain, so each got one clarifying
+  banner/note pointing at what changed and where the current architecture actually lives, matching the
+  precedent `auto-update-plan.md` had already set for its own MSI-transition banner.
+- **`proxy-coexistence.md`: mechanical port/scheme substitution only** (`http://127.0.0.1:5001` →
+  `https://127.0.0.1:47101` throughout, matching the proxy's Phase P7 HTTPS-by-default). Its
+  troubleshooting narrative and worked examples were not independently fact-checked beyond that
+  substitution - in particular, its `curl .../api/health` example names an endpoint that does not appear
+  to exist in this codebase at all, a pre-existing inaccuracy unrelated to this migration and out of
+  scope for this pass.
+- **Deliberately deferred, flagged as separate follow-up tasks rather than done here**: a full
+  version-number and license audit of `THIRD-PARTY-NOTICES.md` (this phase corrected the MAUI-specific
+  rows and added the packages this migration introduced, using confident-but-unverified license
+  inferences for the additions, while leaving pre-existing version drift on unrelated packages
+  untouched); and the flaky `RouterConnectionSupervisorTests` test surfaced during P10's verification
+  (fixed in a separate PR during this session, unrelated to P11 itself).
+- **Verified for real**: `dotnet build` on both `.slnx` files - 0 warnings, 0 errors - after every code
+  change this phase made (the two `TelemetryTlsCertificate`/`ProtectedSecretStore`/`ProviderAdminClient`
+  doc-comment edits touch compiled XML docs, which `GenerateDocumentationFile`/`TreatWarningsAsErrors`
+  would fail the build on if a `<see cref>` didn't resolve - confirmed by a real build, not just review).
+  Full suite re-run: 8/8 built xUnit v3 executables, all passing.
 
 ## Reuse (do not rebuild)
 

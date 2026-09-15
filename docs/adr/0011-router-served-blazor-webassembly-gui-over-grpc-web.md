@@ -1,8 +1,12 @@
 # 0011. Router-served Blazor WebAssembly GUI over gRPC-Web; retire port 5002 and REST `/admin`
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-14
 **Deciders:** David Pizon
+
+> **Accepted 2026-09-15**, on completion of the web GUI migration plan's Phases P1-P10: the router serves
+> the WASM dashboard, port 5002 and REST `/admin` are both retired, and the plan's P11 "Docs close-out"
+> phase is what marks this ADR accepted rather than leaving it perpetually "proposed" after the fact.
 
 ## Context and Problem Statement
 

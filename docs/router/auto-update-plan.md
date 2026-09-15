@@ -15,6 +15,15 @@
 > to the GUI downloading/verifying/launching the MSI elevated. This document is kept for its still-accurate
 > parts and as a historical record of the design that was tried first; do not implement anything below
 > that packaging-and-distribution.md's Status banner says was deleted.
+>
+> **Further update (2026-09-15, web GUI migration plan P8/P9/P11):** "the GUI downloads/verifies/launches
+> the installer" above is itself now historical. The Windows-only MAUI GUI this whole document was written
+> against is deleted; the MSI-apply responsibility moved to `TotallyHotArcRouter.Tray` (a small WinForms
+> system-tray app, `MsiUpdateApplier` ported into `Tray.Core`) - see the web GUI migration plan's P8
+> status. `GitHubReleaseCheckClient`'s detection half is unchanged in shape but is now platform-aware
+> (`MatchesCurrentPlatform`, Phase P9/P10): a `.msi` on Windows, a `totallyhotarcrouter-<rid>.tar.gz` on
+> Linux/macOS - non-Windows installs can detect an update but have no in-process apply path yet (tracked
+> in the migration plan's P10 section, not silently unsupported).
 
 Status: **Phases 0-2 shipped, Phase 2's apply mechanism since superseded (see banner above).** Phase 0
 (versioning source of truth) and Phase 1 (Windows Service hosting) shipped on an earlier commit (`8d46a7e`)
@@ -73,9 +82,12 @@ configuration:
 ```
 %ProgramFiles%\TotallyHotArcRouter\
   Router\    <- TotallyHotArcRouter.exe (this Windows Service)
-  Gui\       <- TotallyHotArcRouter.Gui.exe (the MAUI tray app)
-  Updater\   <- TotallyHotArcRouter.Updater.exe (Phase 2)
+  Gui\       <- TotallyHotArcRouter.Gui.exe (the MAUI tray app; Phase 2-era layout, historical)
+  Updater\   <- TotallyHotArcRouter.Updater.exe (Phase 2; deleted, see banner above)
 ```
+
+The current (Phase P9) MSI layout has no `Gui\` or `Updater\` directory at all - only `Router\` and
+`Tray\`, per `docs/router/packaging-and-distribution.md`.
 
 ## Phase 2 — Router self-update (shipped)
 

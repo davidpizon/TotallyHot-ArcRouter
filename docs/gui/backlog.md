@@ -1,9 +1,17 @@
-# TotallyHotArcRouter.Gui: Not-Yet-Implemented Work
+# Dashboard: Not-Yet-Implemented Work
 
-A backlog of gaps between what the GUI docs describe/design and what `src/TotallyHotArcRouter.Gui/`
-actually does today. Originally sourced from explicit statements in [`dashboard.md`](dashboard.md)'s
-"Known gaps" section, [`src/TotallyHotArcRouter.Gui/README.md`](../../src/TotallyHotArcRouter.Gui/README.md)'s
-"Current limitations," and deferred/optional items in
+> **Updated for the web GUI migration plan's P11 docs close-out (2026-09-15).** The dashboard is now
+> `src/TotallyHotArcRouter.Gui.Web`/`src/TotallyHotArcRouter.Gui.Components` (browser-hosted Blazor
+> WebAssembly), not the retired `src/TotallyHotArcRouter.Gui` MAUI project this backlog was originally
+> tracking gaps against; that project's own README - one of this file's cited sources - was deleted
+> along with it in Phase P9. Item-level entries below that describe REST `/admin/*` as the live transport
+> are dated: that surface was deleted in Phase P2 in favor of gRPC/gRPC-Web on the router's single web
+> port (see [`../router/mcp-endpoint.md`](../router/mcp-endpoint.md)) - the underlying feature status
+> each entry reports is otherwise unaffected and left as originally written.
+
+A backlog of gaps between what the dashboard docs describe/design and what
+`src/TotallyHotArcRouter.Gui.Components/` actually does today. Originally sourced from explicit
+statements in [`dashboard.md`](dashboard.md)'s "Known gaps" section and deferred/optional items in
 [`livestream-redesign-plan.md`](livestream-redesign-plan.md).
 
 ## Open
@@ -82,10 +90,12 @@ data sources in
 - ~~**Settings modal actions**~~ **Done.** Reset Stats calls `LiveDataStore.ClearEvents()`; Clear
   History also clears the log buffer (`ClearLogLines()`). Both act on this session's live view only —
   the proxy's own durable history is untouched by design (see `LiveDataStore.ClearEvents`'s remarks).
-- ~~**Configurable telemetry server address**~~ **Done.** `GuiSettingsStore` persists the address as
-  JSON under `%LOCALAPPDATA%\TotallyHotArcRouter\gui-settings.json` (the same per-user directory the
-  telemetry certificate and management token already use), editable from a new field in
-  `SettingsModal.razor`; `MauiProgram` builds `LiveDataStore` from the persisted address.
+- ~~**Configurable telemetry server address**~~ **Done, then removed as unnecessary (Phase P6).** This
+  setting let a MAUI-era GUI process point at a router running as a separate process on a different
+  address. Once the dashboard became a WASM app served *by* the router it talks to, there was no longer
+  a second address to configure - it always uses `NavigationManager.BaseUri` (same origin). The
+  `GuiSettingsStore` field, `SettingsModal.razor`'s UI for it, and `LiveDataStore`'s
+  `DefaultServerAddress` constant were all deleted rather than kept dormant.
 
 ### ✅ 2. Authenticate the telemetry gRPC stream
 
@@ -229,8 +239,11 @@ security gap this makes more pressing.
 Fully specified in [`console-tab-plan.md`](console-tab-plan.md) and now implemented: a fifth tab
 showing a real-time, color-coded (`DEBUG`/`INFO`/`WARN`/`ERROR`/`FATAL`) log stream with a
 toggleable auto-scroll (and smart-disengage on manual scroll-up), a copy-all-to-clipboard action
-(via MAUI's native `Clipboard`, not the browser `navigator.clipboard`, since clipboard-write from a
-WebView2 page can be blocked by permission prompts), and a clear-buffer action. The missing
+(originally via MAUI's native `Clipboard` rather than the browser `navigator.clipboard`, since
+clipboard-write from a WebView2 page could be blocked by permission prompts; since Phase P6 it goes
+through `IClipboardService`, whose real browser-backed implementation uses `navigator.clipboard`
+directly - no permission-prompt workaround needed once the app itself runs as an ordinary page in the
+browser it's copying from), and a clear-buffer action. The missing
 proxy-side source noted here previously is closed by
 `src/TotallyHotArcRouter/Telemetry/TelemetryLogEventSink.cs` (renamed from `SignalRLogEventSink.cs` when
 the transport migrated to gRPC - see the item above), a custom Serilog `ILogEventSink` that forwards
@@ -278,8 +291,8 @@ stays in the accessibility tree. Every `data-tip` element not nested inside a `<
 `TurnCard` header's sub-badges) intentionally skip `tabindex` — nesting a focusable element inside a
 button is an ARIA anti-pattern — and the outer button carries a comprehensive `aria-label` instead.
 Smoke-tested against a standalone HTML harness with Playwright/Chromium, since the behavior is pure
-JS and needs no MAUI host - see `dashboard.md`'s "Verification limitation" note for how the Gui
-project itself is built and tested.
+JS and needed no MAUI host even before the dashboard itself moved into a real browser - see
+`dashboard.md`'s verification section for how the dashboard project is built and tested today.
 
 ## Minor / cosmetic (low priority)
 

@@ -1,35 +1,37 @@
 # Governance Tab: Provider & Credential Management
 
-> **Status: Implemented.** The Governance tab's **Providers** sub-view adds/removes/edits provider
-> endpoints and credentials and manages each provider's models, backed by the `/admin/*` management API
-> on the proxy that reloads the router live. Each provider card also carries an optional **monthly
-> budget** — a `$` cap and/or token cap persisted to SQLite (`provider_budgets`), the current month's
-> spend (`provider_spend`, accumulated by `ProviderBudgetStore` on the telemetry path), and two ECharts
-> utilization bars. A breached provider is skipped in routing and an all-breached request is rejected
-> with 402. This replaced the former mock **Budgets** sub-view (`MockData.Providers`).
+> **Status: Implemented.** Updated for the web GUI migration plan's P11 docs close-out (2026-09-15) - the
+> transport moved from HTTP/JSON REST to gRPC/gRPC-Web, and the dashboard moved from a Windows-only MAUI
+> process to a browser-hosted Blazor WebAssembly app; the feature behavior described below is unchanged.
+> The Governance tab's **Providers** sub-view adds/removes/edits provider endpoints and credentials and
+> manages each provider's models, backed by the router's `ProviderAdminService` gRPC service that reloads
+> the router live. Each provider card also carries an optional **monthly budget** — a `$` cap and/or token
+> cap persisted to SQLite (`provider_budgets`), the current month's spend (`provider_spend`, accumulated
+> by `ProviderBudgetStore` on the telemetry path), and two ECharts utilization bars. A breached provider is
+> skipped in routing and an all-breached request is rejected with 402. This replaced the former mock
+> **Budgets** sub-view (`MockData.Providers`).
 
 ## Architecture
 
-The GUI is a separate process from the proxy and, per
-[`../router/telemetry.md`](../router/telemetry.md#gui-consumption), only ever talks to the proxy —
-never to configuration files or providers directly. Provider management follows that rule over a new
-HTTP channel:
+The dashboard only ever talks to the router - never to configuration files or providers directly - per
+[`../router/telemetry.md`](../router/telemetry.md#gui-consumption). Provider management follows that
+rule over gRPC (native from the Windows Tray, gRPC-Web from the browser-hosted WASM dashboard):
 
 ```mermaid
 flowchart LR
     subgraph gui["Governance tab (Providers sub-view)"]
         razor["ProvidersAdmin.razor"]
-        store["ProviderAdminStore"]
+        store["ProviderAdminStore<br/>(TotallyHot.ArcRouter.Gui.Components)"]
         client["ProviderAdminClient<br/>(TotallyHot.ArcRouter.Gui.Admin)"]
         razor --> store --> client
     end
-    subgraph proxy["Proxy (port 5001, localhost)"]
-        api["/admin/providers<br/>(minimal API)"]
+    subgraph router["Router (web port 47104, localhost)"]
+        api["ProviderAdminService<br/>(gRPC, gRPC-Web-wrapped)"]
         cfg["IProviderConfigStore<br/>(validate + persist +<br/>atomic version bump)"]
         resolver["ModelRouteResolver<br/>(rebuilds live on<br/>version change)"]
         api --> cfg --> resolver
     end
-    client -- "HTTP/JSON" --> api
+    client -- "gRPC / gRPC-Web" --> api
 ```
 
 - **`IProviderConfigStore`** (`src/TotallyHotArcRouter/Proxy/ProviderConfigStore.cs`) is the writable source
@@ -38,13 +40,14 @@ flowchart LR
   `model-routing.json` and becomes the source of truth on later startups. `ModelRouteResolver` reads
   its snapshots and rebuilds its lookup whenever the version advances, so edits take effect **without
   restarting the proxy**.
-- **`/admin/*` API** (`src/TotallyHotArcRouter/Proxy/Management/ProviderAdminEndpoints.cs`) is mapped on the
-  plain-HTTP proxy port (5001), alongside LLM forwarding. Endpoints: `GET /admin/providers`,
-  `PUT`/`DELETE /admin/providers/{key}`, `PUT`/`DELETE /admin/providers/{key}/models/{modelName}`,
-  `PUT /admin/providers/{key}/models/{modelName}/enabled` (per-model Start/Stop, the model-level twin
-  of `PUT /admin/providers/{key}/enabled`), and three related model-discovery routes:
-  `discover-models` and `scan-capabilities` are independently callable building blocks, while
-  `POST /admin/providers/{key}/refresh-from-endpoint` is the one the GUI actually calls — see below.
+- **`ProviderAdminService`** (`src/Protos/admin.proto`, implemented by
+  `src/TotallyHotArcRouter/Proxy/Management/ProviderAdminGrpcService.cs`) is mapped on the router's single
+  web port, wrapped in gRPC-Web so the browser dashboard can call it directly - there is no separate REST
+  `/admin/*` API any more (deleted in Phase P2). RPCs: `ListProviders`, `UpsertProvider`/`RemoveProvider`,
+  `UpsertModel`/`RemoveModel`, `SetModelEnabled` (per-model Start/Stop, the model-level twin of
+  `SetProviderEnabled`), and three related model-discovery RPCs: `DiscoverModels` and `ScanCapabilities`
+  are independently callable building blocks, while `RefreshFromEndpoint` is the one the GUI actually
+  calls — see below.
 - **Refresh from endpoint is a single router-side operation**, not the GUI orchestrating several calls.
   `ManagementFacade.RefreshFromEndpointAsync` discovers the provider's live model list, **reconciles it
   into `ModelRouting:ModelList`** (a model the endpoint newly reports is added automatically but starts
@@ -52,16 +55,17 @@ flowchart LR
   and greyed out — **never deleted**, since e.g. LM Studio's `/v1/models` only lists the currently
   *loaded* model, not everything downloaded), then re-probes endpoint flavors and re-runs tiers 1-3
   tool-call dialect detection (`docs/router/tool-call-normalization.md` §3.2-3.3). One click, one
-  request; the response is the same `GET /admin/providers` shape (`ModelView` now also carries
-  `Enabled`/`PresentUpstream` alongside `Dialect`/`Confidence`, and `ProviderView` carries
-  `EndpointCapabilities`), so the GUI just re-renders. `ModelRouteEntry.Enabled`/`PresentUpstream` are
+  request; the response is the same `ListProviders`/`ProviderListResponse` shape every other mutation
+  returns (`ModelView` now also carries `Enabled`/`PresentUpstream` alongside `Dialect`/`Confidence`, and
+  `ProviderView` carries `EndpointCapabilities`), so the GUI just re-renders. `ModelRouteEntry.Enabled`/`PresentUpstream` are
   independent signals: `Enabled` is the operator's own Start/Stop intent and is never touched by a scan;
   `PresentUpstream` is fully scan-managed, so a model the operator started resumes routable the moment
   it's rediscovered, with no extra click. Both are enforced on the very next request via
   `IModelRouteResolver.IsModelEnabled` — a stopped or not-currently-upstream model is treated exactly
   like an unconfigured one for routing purposes.
-- **`TotallyHot.ArcRouter.Gui.Admin`** (plain `net10.0`) holds the DTOs and `ProviderAdminClient` HTTP logic,
-  unit-tested in CI. **`ProviderAdminStore`** (MAUI) is the thin singleton the UI binds to, mirroring
+- **`TotallyHot.ArcRouter.Gui.Admin`** (plain `net10.0`) holds the DTOs and `ProviderAdminClient`'s gRPC
+  logic, unit-tested in CI. **`ProviderAdminStore`** (`TotallyHot.ArcRouter.Gui.Components`, also plain
+  `net10.0` - cross-platform since Phase P5) is the thin singleton the UI binds to, mirroring
   `LiveDataStore`.
 - **A failed refresh/scan/discovery is visible, not silent.** `RefreshFromEndpointAsync` still returns
   `200 OK` even when the provider rejected the request outright (e.g. an expired API key) - the model
@@ -164,30 +168,32 @@ than hidden in the dialog: the flag's state should be visible without opening an
 
 ## Security
 
-The `/admin/*` endpoints inherit the proxy's loopback-only posture, and are additionally gated by a
-shared token on every request — **always on, not configurable off**. `ManagementAccessToken.GetOrCreate`
-generates a cryptographically random token on first run and persists it to
-`%ProgramData%\TotallyHotArcRouter\management-token.txt` with an access-restricted ACL (Windows: system,
-administrators, and the writing account get full control, `Users` read-only) / file mode 644 (POSIX); the
-GUI reads the same file to attach it as `X-Admin-Token` on every call, verified server-side in constant
-time (`ManagementAccessToken.Verify`). The location is machine-wide rather than per-user because the
-installed router runs as `LocalSystem` while the GUI runs as the interactive user — under `%LOCALAPPDATA%`
-the two processes read different files and every call came back 401.
-There is no `Management:Token` configuration key — the token is never entered or stored in
-`appsettings.json`.
+Every RPC on the router's web port inherits its loopback-session-cookie/token gate (ADR-0012) - the
+browser dashboard's own gRPC-Web calls are covered by whichever the current session used to authenticate,
+and there is no separate, weaker check for provider management specifically. `ManagementAccessToken.GetOrCreate`
+generates a cryptographically random token on first run and persists it through `ProtectedSecretStore`
+(DPAPI-protected on Windows, ASP.NET Data Protection-protected elsewhere - Phase P3/P9), not the plaintext
+`management-token.txt` file this section originally described. A non-loopback client (the Tray's native
+gRPC channel, a Docker deployment) presents it as `Authorization: Bearer <token>`, verified server-side in
+constant time (`ManagementAccessToken.Verify`); a same-machine browser session instead gets a session
+cookie with no manual token handling at all. There is no `Management:Token` configuration key — the token
+is never entered or stored in `appsettings.json`.
 
-## Manual verification (Windows / MAUI)
+## Manual verification
 
-The MAUI Gui project is Windows-only and its CI job is currently disabled (see `dashboard.md`'s
-verification note), so the UI is verified manually; all
-extractable logic (the `ProviderAdminClient` and the store/resolver) is covered by CI tests
-(`TotallyHot.ArcRouter.Gui.Admin.Tests`, `ProviderConfigStoreTests`, `ProviderAdminEndpointsTests`).
+`TotallyHot.ArcRouter.Gui.Components` (the Razor components) and `TotallyHot.ArcRouter.Gui.Web` (the WASM
+host) both target plain `net10.0` and build/test on the Linux CI job like every other library - this
+section's original "MAUI is Windows-only and its CI job is disabled" caveat no longer applies (see
+`dashboard.md`'s verification note). The UI is still additionally verified manually for real end-to-end
+behavior; all extractable logic (the `ProviderAdminClient` and the store/resolver) is covered by CI tests
+(`TotallyHot.ArcRouter.Gui.Admin.Tests`, `TotallyHot.ArcRouter.Gui.Components.Tests`,
+`ProviderConfigStoreTests`, `ProviderAdminGrpcServiceTests`).
 
-1. Start the proxy, then run the Gui. Open **Governance → Providers**.
+1. Start the router, then open the dashboard in a browser. Open **Governance → Providers**.
 2. **Add** a provider with type *Ollama / LM Studio / llama.cpp*; confirm the base URL fills in and
    **Free provider** ticks itself, with no header suggested under Custom Headers.
-3. **Add** a model under it (`llama3`), then confirm `GET http://localhost:5001/v1/models` lists it
-   with no proxy restart.
+3. **Add** a model under it (`llama3`), then confirm `GET https://localhost:47101/v1/models` lists it
+   with no router restart.
 4. **Edit** a provider's base URL without re-entering a locked header's value; confirm the value is
    preserved.
 4b. Select type *Anthropic* on a new provider: confirm the Custom Headers hint names `x-api-key`, and

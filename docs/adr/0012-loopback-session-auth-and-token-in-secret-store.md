@@ -1,8 +1,12 @@
 # 0012. Loopback session-cookie auth for the web GUI; management token moves into the encrypted secret store
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-14
 **Deciders:** David Pizon
+
+> **Accepted 2026-09-15**, on completion of the web GUI migration plan's Phases P1-P10: the loopback
+> session-cookie scheme and the encrypted-secret-store-backed management token both shipped and were
+> verified against a real running router (P4, P9).
 
 ## Context and Problem Statement
 

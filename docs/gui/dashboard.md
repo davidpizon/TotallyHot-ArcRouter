@@ -1,8 +1,18 @@
-# TotallyHotArcRouter.Gui Dashboard
+# Dashboard
 
-This document describes the dashboard UI rendered inside `TotallyHot.ArcRouter.Gui`'s window
-(`src/TotallyHotArcRouter.Gui/Components/`). For the tray-app shell itself (tray icon, show/hide behavior,
-build/run instructions), see [`src/TotallyHotArcRouter.Gui/README.md`](../../src/TotallyHotArcRouter.Gui/README.md).
+> **Updated for the web GUI migration plan's P11 docs close-out (2026-09-15).** The dashboard is now a
+> Blazor **WebAssembly** app (`src/TotallyHotArcRouter.Gui.Web`) served directly by the router over HTTPS
+> on the web port, opened in any browser - not the retired Windows-only .NET MAUI Blazor Hybrid app this
+> document originally described (ADR-0011). The Razor components themselves moved essentially unchanged
+> into `src/TotallyHotArcRouter.Gui.Components/Components/` (plan's "Reuse" section: "moved, not
+> rewritten"), so most of this document's tab-by-tab UI description below is still accurate; the sections
+> that described the old MAUI/WebView2 shell, ports, and CI story have been updated in place.
+
+This document describes the dashboard UI rendered by `src/TotallyHotArcRouter.Gui.Web`'s WASM host, using
+components from `src/TotallyHotArcRouter.Gui.Components/Components/`. There is no longer a separate
+tray-app README to link to for the shell itself: the small Windows-only system-tray companion
+(`src/TotallyHotArcRouter.Tray`) just opens the dashboard in the default browser, toggles routing, and
+shows service status - it renders none of the UI below itself.
 
 ## Purpose
 
@@ -33,18 +43,21 @@ sub-view.
 
 | Layer | Choice |
 | --- | --- |
-| App shell | .NET MAUI (Windows-only, single window, tray-resident via Win32 interop) |
-| UI framework | Razor components in a MAUI `BlazorWebView` (Blazor Hybrid) |
+| App shell | Blazor WebAssembly (`src/TotallyHotArcRouter.Gui.Web`, cross-platform - any modern browser), served by the router over gRPC-Web on the same origin as the static files (ADR-0011); the router-hosted files are on the web port (`WebInterfaceOptions.Port`, default `47104`) |
+| UI framework | Razor components (`src/TotallyHotArcRouter.Gui.Components/Components/`), running client-side in the browser's WASM runtime rather than a `BlazorWebView` host process |
 | Styling | A static stylesheet (`wwwroot/css/app.css`) containing the dashboard's compiled Tailwind utility classes plus custom rules; state-driven colors are inline styles in the components |
 | Charts | [Apache ECharts](https://echarts.apache.org/) (`echarts.min.js` vendored under `wwwroot/lib/echarts`, Apache-2.0), driven by `wwwroot/js/echarts-interop.js` via the shared `<EChart>` host - the seven bespoke Cost Analytics charts plus Model Distribution's grouped bars and donut; plus a hand-rolled inline SVG sparkline (no chart library) for the Sessions summary card |
 | Icons | Small inline SVG glyphs (`Components/Icon.razor`) |
-| Chart data logic | `src/TotallyHotArcRouter.Gui.Charts/` - a plain `net10.0` class library (no MAUI/Blazor dependency) holding the pure data-transformation math behind the charts (cumulative token series, sparkline coordinate normalization), so it's unit-testable on any platform even though the Gui project itself is Windows-only. See `TotallyHotArcRouter.Gui.Charts.Tests/`. |
+| Chart data logic | `src/TotallyHotArcRouter.Gui.Charts/` - a plain `net10.0` class library holding the pure data-transformation math behind the charts (cumulative token series, sparkline coordinate normalization). See `TotallyHotArcRouter.Gui.Charts.Tests/`. |
 | Console tab logic | `src/TotallyHotArcRouter.Gui.Console/` - same pattern as the chart data logic above: a plain `net10.0` class library holding `LogLevelColorMapper` and the bounded `LogBuffer`. See `TotallyHotArcRouter.Gui.Console.Tests/`. |
 
-The dashboard has no web build step: the Razor components compile with the .NET project, the stylesheet
-is checked-in static content, and the chart JavaScript ships inside the NuGet package's static web
-assets (so everything works offline). All navigation is client-side component state (`_activeTab` in
-`Components/Dashboard.razor`); there is no router, dev server, or backend API.
+The dashboard has a real publish step now (`dotnet publish` trims and AOT-ish-optimizes the WASM
+payload, per the migration plan's P0 spike S4/P6), but no separate JS bundler: the Razor components
+compile with the .NET project, the stylesheet is checked-in static content, and the chart JavaScript
+ships as ordinary static web assets the router serves via `MapStaticAssets`. All navigation is
+client-side component state (`_activeTab` in `Components/Dashboard.razor`); there is still no
+client-side router, dev server, or separate backend API - the browser talks to the router itself over
+gRPC-Web on the same origin.
 
 The UI is a conversion of an earlier React/Vite/Tailwind implementation of the same design; the visual
 design, layout, colors, and mock data carry over unchanged. Because the stylesheet is the *compiled*
@@ -130,7 +143,7 @@ flowchart TD
      is effectively dead code, kept alive only by `TurnCardTests.cs`.
    - Tooltips: metric tooltips across the tab are floating tooltips driven by `data-tip` attributes
      (`wwwroot/js/tooltips.js`, a single body-level element) rather than native `title` attributes,
-     so they render reliably inside the BlazorWebView and are never clipped by scroll containers.
+     so they render reliably and are never clipped by scroll containers.
      Keyboard-accessible: every `data-tip` element not nested inside a `<button>` also carries
      `tabindex="0"` and a static `aria-describedby="ls-tooltip"`, and `tooltips.js` shows/hides on
      `focusin`/`focusout` (in addition to hover) and dismisses on Escape. The shared tooltip element
@@ -187,15 +200,16 @@ flowchart TD
 
    - **Providers** (default, `ProvidersAdmin.razor`, full spec in
      [`provider-management.md`](provider-management.md)) - add/remove/edit provider endpoints,
-     credentials, and models against the proxy's `/admin` REST API on :5001. Each provider card also
-     carries an optional **monthly budget**: a `$` cap and/or token cap (persisted to SQLite via
-     `PUT /admin/providers/{key}/budget`), the current month's spend, and two ECharts utilization bars
-     ("% $ spent" and "% tokens utilized") colored `OK`/`WARNING`/`CRITICAL` at the 80%/100% thresholds.
-     A breached provider is skipped in routing; a request whose every candidate provider is over budget is
-     rejected with 402 (see [`provider-management.md`](provider-management.md)).
+     credentials, and models against the router's `ProviderAdminGrpcService` (gRPC-Web, on the web port -
+     REST `/admin` was deleted in Phase P2; see [`../router/mcp-endpoint.md`](../router/mcp-endpoint.md)).
+     Each provider card also carries an optional **monthly budget**: a `$` cap and/or token cap, the
+     current month's spend, and two ECharts utilization bars ("% $ spent" and "% tokens utilized")
+     colored `OK`/`WARNING`/`CRITICAL` at the 80%/100% thresholds. A breached provider is skipped in
+     routing; a request whose every candidate provider is over budget is rejected with 402 (see
+     [`provider-management.md`](provider-management.md)).
    - **Price Sources** (`PriceSourcesAdmin.razor`) - enable/disable each model price feed, reorder which
-     one wins a contested price, and pull fresh data on demand, over the `PriceSourceAdminService` gRPC
-     API on :5002 (`Services/PriceSourceStore.cs`). Two sources today, LiteLLM and OpenRouter. Each card
+     one wins a contested price, and pull fresh data on demand, over the `PriceSourceAdminService` gRPC-Web
+     API on the same web port (`Services/PriceSourceStore.cs`). Two sources today, LiteLLM and OpenRouter. Each card
      shows the source's toggle, rank, and how many prices it owns - **feed metadata only, never prices**,
      per
      [`../router/model-price-catalog.md`](../router/model-price-catalog.md)'s D5 licensing rule. The
@@ -217,12 +231,13 @@ flowchart TD
 
 5. **Console** (`ConsoleTab.razor`, full spec in [`console-tab-plan.md`](console-tab-plan.md)) - a
    real-time, color-coded log stream: every Serilog log event the proxy emits, normalized to
-   DEBUG/INFO/WARN/ERROR/FATAL and pushed over the telemetry gRPC stream's `log_line` case by
+   DEBUG/INFO/WARN/ERROR/FATAL and pushed over the telemetry gRPC-Web stream's `log_line` case by
    `src/TotallyHotArcRouter/Telemetry/TelemetryLogEventSink.cs`, buffered client-side (1,000-line cap,
    `TotallyHot.ArcRouter.Gui.Console.LogBuffer`) by `Services/LiveDataStore.cs`. A toolbar toggles
    Auto-Scroll (with "Smart-Disengage" - scrolling up with the wheel/trackpad switches it off, see
-   `wwwroot/js/console-scroll.js`), copies every buffered line to the clipboard (MAUI's native
-   `Clipboard`, with a briefly-shown "Copied!" confirmation), and clears the buffer. Unlike the other
+   `wwwroot/js/console-scroll.js`), copies every buffered line to the clipboard (via `IClipboardService`,
+   the browser `navigator.clipboard`-backed implementation since Phase P6 - MAUI's native `Clipboard` is
+   gone, with a briefly-shown "Copied!" confirmation), and clears the buffer. Unlike the other
    tabs this one never reads `MockData` - it's live-only, since a log line has no meaningful
    mock/demo equivalent.
 
@@ -324,23 +339,22 @@ These match the source design as received and are called out so they aren't mist
   `GroupedBarsModel.DynamicYMax`, and the Cost Analytics explorer auto-scales its axes.)
 - The chart tooltips are custom dark-themed HTML built in `wwwroot/js/echarts-interop.js` to match the
   card styling; minor visual differences from the original React implementation are expected there.
-- The telemetry gRPC server address (`https://localhost:5002` - a dedicated TLS port, separate from
-  the plain-HTTP proxy port 5001) defaults to the proxy's default port but is configurable:
-  `GuiSettingsStore` persists it (`%LOCALAPPDATA%\TotallyHotArcRouter\gui-settings.json`), editable
-  from a field in `SettingsModal.razor`.
+- The telemetry gRPC-Web server address is no longer a separately configurable setting: since the
+  dashboard is now served by the same router process it talks to, it always uses
+  `NavigationManager.BaseUri` (same-origin), and `GuiSettingsStore`'s telemetry-address field was
+  dropped in Phase P6 along with the dedicated telemetry port it used to point at (`LiveDataStore`'s
+  `DefaultServerAddress` dead constant, also removed).
 - Several `ConversationTurn` fields have no live-data source and are shown as their "nothing to
   report" state (e.g. ROI/cache rate render as `—`) when viewing live conversations: Routing ROI,
   Tool Steps, Cache Hit Rate, and Context Buffer. See [`../router/telemetry.md`](../router/telemetry.md)'s
   field table for why each one, and Time to First Token / Request+Response text for the turn-level
   fields that *are* real in live mode.
-- **Verification limitation**: `TotallyHot.ArcRouter.Gui` targets `net10.0-windows` (MAUI), so it is not
-  built by `dotnet-ci.yml`'s Linux job. A `windows-gui-build-and-test` job that *does* build it, run
-  `TotallyHotArcRouter.Gui.Tests` (bUnit), and enforce AGENTS.md's 80% coverage bar exists in that
-  workflow but is **deliberately disabled** (`if: false`, the repo owner's decision) - re-enabling it is
-  a one-line revert. In practice that means the Razor components and the Windows/MAUI-only glue
-  (`Services/LiveDataStore.cs`, `Services/LiveConversationMapper.cs`) are built and tested on a Windows
-  dev box rather than on every push, and their coverage is not gated. The plain `net10.0` sibling
-  libraries - `TotallyHot.ArcRouter.Gui.Admin`, `.Charts`, `.Console`, `.Telemetry` - each have their own
-  test project on the Linux job and are fully covered there. `wwwroot/js/tooltips.js`'s keyboard-focus
-  behavior was additionally smoke-tested against a standalone HTML harness with Playwright/Chromium.
+- **Verification, resolved by the migration**: `TotallyHot.ArcRouter.Gui.Components` (the Razor
+  components themselves) and `TotallyHot.ArcRouter.Gui.Web` (the WASM host) both target plain `net10.0`
+  - no MAUI, no `net10.0-windows` - so they build and their bUnit tests
+  (`TotallyHotArcRouter.Gui.Components.Tests`) run on `dotnet-ci.yml`'s Linux job like every other
+  library, with AGENTS.md's 80% coverage bar enforced on every push. The `windows-gui-build-and-test`
+  job this section used to describe as deliberately disabled was deleted outright in Phase P9 along with
+  the MAUI project it built. `wwwroot/js/tooltips.js`'s keyboard-focus behavior was additionally
+  smoke-tested against a standalone HTML harness with Playwright/Chromium.
 

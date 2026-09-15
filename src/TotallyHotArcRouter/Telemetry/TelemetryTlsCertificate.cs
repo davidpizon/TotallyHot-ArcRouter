@@ -7,10 +7,9 @@ using TotallyHot.ArcRouter.Proxy.Management;
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// Generates, persists, and reloads a self-signed TLS certificate for the telemetry gRPC endpoint
-/// (<see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>'s HTTPS/2 listener). Introduced after unencrypted
-/// HTTP/2 (h2c) turned out to be unreliable in practice: on at least one managed/corporate Windows
-/// machine, every <c>StreamEvents</c> connection attempt failed with the HTTP/2-level
+/// Generates, persists, and reloads a self-signed <c>CN=localhost</c> TLS certificate. Introduced after
+/// unencrypted HTTP/2 (h2c) turned out to be unreliable in practice: on at least one managed/corporate
+/// Windows machine, every <c>StreamEvents</c> connection attempt failed with the HTTP/2-level
 /// <c>HTTP_1_1_REQUIRED</c> error, consistent with something on the network path (VPN client,
 /// endpoint security agent, TLS-inspecting proxy - common on managed machines, even for loopback
 /// traffic) not understanding or silently mangling the h2c connection preface. Real TLS + ALPN
@@ -18,24 +17,33 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// connection until decrypted. See docs/router/grpc-migration.md's "Transport" section.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>No longer wired into any production Kestrel listener as of the web GUI migration plan's Phase P7.</b>
+/// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/> and <c>McpServer</c> both issue their TLS
+/// certificates from <see cref="LocalCertificateAuthority.GetOrCreateLeaf()"/> instead - a router-generated,
+/// name-constrained local CA whose leaf every listener shares, trusted once per machine via
+/// <c>--install-certificate</c> (ADR-0013), rather than each listener/client pair negotiating its own
+/// self-signed-and-hand-trusted certificate the way this class's <c>CN=localhost</c> callback-based trust
+/// model required. This class is kept only for its own still-passing unit tests
+/// (<c>TelemetryTlsCertificateTests</c>) and as the historical record of the h2c-unreliability finding
+/// above, which is still true and still the reason every listener uses TLS at all - nothing currently
+/// calls <see cref="GetOrCreate()"/> in production. The client-side trust callback this remarks section
+/// used to describe (<c>TotallyHot.ArcRouter.Gui.Services.LiveDataStore</c>) belonged to the retired MAUI
+/// GUI; its closest surviving analog is <c>TotallyHot.ArcRouter.Gui.Telemetry.TelemetryChannelFactory
+/// .ValidateLoopbackCertificate</c>, kept for the Tray's own native-gRPC channel (see that type's remarks).
+/// </para>
+/// <para>
 /// Persisted under the machine-shared data directory (<see cref="AppDataPaths"/>; web GUI migration plan
 /// Phase P3 moved this off the per-user <c>%LOCALAPPDATA%\TotallyHotArcRouter\</c> location
 /// docs/router/signalr-hub-security.md originally proposed) as a password-protected <c>.pfx</c>, with the
 /// random runtime password stored in <see cref="ProtectedSecretStore"/> - so the certificate survives
 /// process restarts instead of being regenerated (and thus needing the client to re-trust a new one)
-/// every launch. The move to a shared directory is purely for consistency with every other piece of
-/// router state (one data directory, one mental model) - only the router process itself ever reads this
-/// <c>.pfx</c>, so there was no cross-account correctness reason to keep it per-user the way there was for
-/// the management token. The password itself is unaffected: on Windows it stays sealed with user-scoped
-/// DPAPI (<see cref="DataProtectionScope.CurrentUser"/>), tied to the encrypting account regardless of the
+/// every launch. The password itself: on Windows it stays sealed with user-scoped DPAPI
+/// (<see cref="DataProtectionScope.CurrentUser"/>), tied to the encrypting account regardless of the
 /// file's directory - if a different account ever starts the router, password resolution fails cleanly and
 /// a fresh certificate/password pair is generated (see <see cref="TryResolvePassword"/>), rather than
-/// silently succeeding with the wrong owner. The client side (<c>TotallyHot.ArcRouter.Gui.Services.LiveDataStore</c>)
-/// trusts any certificate presented with subject <c>CN=localhost</c> rather than pinning this exact
-/// certificate's thumbprint - both processes are the same OS user on the same machine, so this is a
-/// pragmatic, adequate trust boundary for a personal local dev tool, not a hardened one. A stronger
-/// follow-up would have the client read this same <c>.pfx</c> file's public certificate and pin its
-/// thumbprint specifically.
+/// silently succeeding with the wrong owner.
+/// </para>
 /// </remarks>
 public static class TelemetryTlsCertificate
 {

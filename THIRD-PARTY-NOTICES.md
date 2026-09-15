@@ -4,18 +4,23 @@ TotallyHot Arc Router incorporates and depends on third-party software. This fil
 satisfy the attribution and notice-retention requirements of those components' licenses.
 
 TotallyHot Arc Router itself is licensed under the GNU Affero General Public License v3.0
-(see [`LICENSE`](LICENSE)) with an additional permission for Microsoft platform components
-(see [`LICENSE.exceptions.md`](LICENSE.exceptions.md)). Nothing in this file alters the license of
+(see [`LICENSE`](LICENSE)) with an additional permission for Microsoft platform components, currently
+dormant (see [`LICENSE.exceptions.md`](LICENSE.exceptions.md)). Nothing in this file alters the license of
 this project; each component below remains under its own license.
 
+> **Updated for the web GUI migration plan (2026-09-15).** The Windows-only MAUI GUI this file
+> originally described is retired; the dashboard is now a Blazor WebAssembly app served by the router and
+> rendered in the user's own browser, plus a small Windows-only system-tray companion
+> (`TotallyHotArcRouter.Tray`, plain WinForms - no MAUI, no WebView2). §1's MAUI-specific package rows
+> and §2 (the WebView2/Windows App SDK platform prerequisites) are updated accordingly.
+
 **License summary of everything this project redistributes** (§1 - the components that ship inside the
-router service, the MAUI GUI, or the published installer): MIT, Apache-2.0, and BSD-3-Clause only.
+router service, the web dashboard, the Tray, or the published installer): MIT, Apache-2.0, and
+BSD-3-Clause only.
 
 Two categories fall outside that summary because this project does not redistribute them:
 
-- **Microsoft platform prerequisites** (§2 - Edge WebView2 Runtime, Windows App SDK) are governed by
-  Microsoft's own license terms. End users obtain them from Microsoft; the AGPL §7 additional
-  permission in [`LICENSE.exceptions.md`](LICENSE.exceptions.md) covers linking against them.
+- **Microsoft platform prerequisites** (§2) - now dormant; see the note there.
 - **One build- and test-time only package**
   (`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`, §3) is under the Microsoft Software
   License Terms. It supplies MSBuild targets, ships in no distributed artifact, and is not
@@ -31,7 +36,7 @@ license compels the licensing choice made for this project.
 
 ## 1. Components redistributed in binary or source form
 
-These ship inside the router service, the MAUI GUI, or the published installer.
+These ship inside the router service, the web dashboard, the Tray, or the published installer.
 
 ### Apache License 2.0
 
@@ -48,7 +53,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 | Serilog.Settings.Configuration | 10.0.1 | Copyright Serilog Contributors |
 | Serilog.Sinks.Console | 6.1.1 | Copyright Serilog Contributors |
 | Grpc.AspNetCore | 2.83.0 | Copyright The gRPC Authors |
+| Grpc.AspNetCore.Web | 2.83.0 | Copyright The gRPC Authors |
 | Grpc.Net.Client | 2.83.0 | Copyright The gRPC Authors |
+| Serilog.Sinks.File | 7.0.0 | Copyright Serilog Contributors |
 | AWSSDK.BedrockRuntime | 4.0.101.1 | Copyright Amazon.com, Inc. or its affiliates |
 | ModelContextProtocol | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
 | ModelContextProtocol.AspNetCore | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
@@ -81,14 +88,15 @@ PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 | Component | Version | Copyright |
 |---|---|---|
 | .NET Runtime, ASP.NET Core, and BCL | 10.0 | Copyright (c) .NET Foundation and Contributors |
-| Microsoft.Maui.Controls | 10.0.90 | Copyright (c) Microsoft Corporation |
-| Microsoft.AspNetCore.Components.WebView.Maui | 10.0.90 | Copyright (c) Microsoft Corporation |
-| Microsoft.CodeAnalysis.CSharp (Roslyn) | 5.6.0 | Copyright (c) Microsoft Corporation |
-| Microsoft.Data.Sqlite | 10.0.11 | Copyright (c) Microsoft Corporation |
-| Microsoft.ML.OnnxRuntime | 1.29.0 | Copyright (c) Microsoft Corporation |
-| Microsoft.SemanticKernel | 1.79.0 | Copyright (c) Microsoft Corporation |
-| System.Security.Cryptography.ProtectedData | 10.0.11 | Copyright (c) Microsoft Corporation |
-| Microsoft.Extensions.* (DI, Hosting, Logging, Options) | 10.0.11 | Copyright (c) Microsoft Corporation |
+| Microsoft.CodeAnalysis.CSharp (Roslyn) | 5.9.0 | Copyright (c) Microsoft Corporation |
+| Microsoft.Data.Sqlite | 10.0.12 | Copyright (c) Microsoft Corporation |
+| Microsoft.ML.OnnxRuntime | 1.30.0 | Copyright (c) Microsoft Corporation |
+| Microsoft.ML.OnnxRuntimeGenAI | 0.16.0 | Copyright (c) Microsoft Corporation |
+| Microsoft.ML.Tokenizers (+ .Data.Cl100kBase / .Data.O200kBase) | 2.0.0 | Copyright (c) Microsoft Corporation |
+| Microsoft.Bcl.Memory | 10.0.12 | Copyright (c) Microsoft Corporation |
+| Microsoft.SemanticKernel | 1.80.1 | Copyright (c) Microsoft Corporation |
+| System.Security.Cryptography.ProtectedData | 10.0.12 | Copyright (c) Microsoft Corporation |
+| Microsoft.Extensions.* (DI, Hosting, Logging, Options, WindowsServices, Systemd) | 10.0.12 | Copyright (c) Microsoft Corporation |
 | FastBertTokenizer | 1.0.28 | Copyright (c) Georg Jung |
 | Tailwind CSS (compiled output in `wwwroot/css/app.css`) | build output | Copyright (c) Tailwind Labs, Inc. |
 
@@ -107,12 +115,14 @@ THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS".
 
 ---
 
-## 2. Platform prerequisites (not redistributed)
+## 2. Platform prerequisites (dormant - not redistributed, and nothing currently links against them)
 
-These are Microsoft components the Windows GUI requires at runtime. They are governed by Microsoft's
-own license terms and are **not** redistributed by this project; end users obtain them from
-Microsoft. See [`LICENSE.exceptions.md`](LICENSE.exceptions.md) for the AGPL §7 additional
-permission that covers linking against them.
+This section described Microsoft components the retired Windows-only MAUI GUI required at runtime. The
+web GUI migration plan (2026-09-15) replaced that GUI with a Blazor WebAssembly dashboard rendered in the
+user's own browser, so nothing this project ships today links against a WebView2 Runtime or Windows App
+SDK component. Kept for historical completeness and because
+[`LICENSE.exceptions.md`](LICENSE.exceptions.md)'s AGPL §7 additional permission - also dormant, not
+revoked - still names them:
 
 | Component | Terms |
 |---|---|

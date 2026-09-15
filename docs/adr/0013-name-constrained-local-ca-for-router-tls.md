@@ -1,8 +1,12 @@
 # 0013. Router-generated, name-constrained local CA for trusted HTTPS on every listener
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-14
 **Deciders:** David Pizon
+
+> **Accepted 2026-09-15**, on completion of the web GUI migration plan's Phases P1-P10: the local CA and
+> leaf issuance ship, every listener (proxy, web, MCP) is HTTPS by default, and `--install-certificate`/
+> `--export-ca` are real, working CLI flags with Windows/Linux/macOS trust-store implementations.
 
 ## Context and Problem Statement
 

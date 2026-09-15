@@ -196,20 +196,28 @@ does this).
 dotnet run
 ```
 
-By default, the proxy listens on `http://localhost:47101`. Point your
-coding-agent client's base URL at the proxy instead of the provider directly,
-and request whichever `model` alias you configured in `ModelList`. The
-proxy forwards the path and query string unchanged, rewrites the `model`
-field to the provider's `ProviderModelId`, and injects the resolved auth
-header before sending the request upstream.
+By default, the proxy listens on `https://localhost:47101` - HTTPS by
+default since Phase P7 of the web GUI migration, using a router-generated
+local CA (see [`docs/router/client-tls-setup.md`](../docs/router/client-tls-setup.md)
+for trusting it, or pass `curl --cacert`/`-k` for local testing without
+trusting it system-wide). An opt-in, always-loopback plain-HTTP fallback
+exists at `Proxy:PlainHttp:Enabled` (default port `47105`) for tools that
+cannot be pointed at a custom CA - see `client-tls-setup.md`'s "opt-in
+plain-HTTP listener" section. Point your coding-agent client's base URL at
+the proxy instead of the provider directly, and request whichever `model`
+alias you configured in `ModelList`. The proxy forwards the path and query
+string unchanged, rewrites the `model` field to the provider's
+`ProviderModelId`, and injects the resolved auth header before sending the
+request upstream.
 
 ## 5. Verify
 
 With the proxy running, send a request using one of your configured model
-aliases:
+aliases (`-k` skips certificate verification for local testing; drop it
+once you've trusted the local CA):
 
 ```bash
-curl http://localhost:47101/v1/chat/completions \
+curl -k https://localhost:47101/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "kimi-k2.5", "messages": [{"role": "user", "content": "hello"}]}'
 ```
@@ -227,7 +235,7 @@ configuration — mirroring how LiteLLM's proxy handles the same endpoint —
 rather than forwarding it anywhere:
 
 ```bash
-curl http://localhost:47101/v1/models
+curl -k https://localhost:47101/v1/models
 ```
 
 ```json
@@ -246,20 +254,34 @@ timestamp for a statically configured route.
 
 ## Running with Docker
 
-A `Dockerfile` is provided for containerized runs:
+A `Dockerfile` is provided for containerized runs (web GUI migration plan
+Phase P10). Build from the **repository root**, not this directory - the
+image also packages the web dashboard, a sibling project referenced from
+`TotallyHotArcRouter.csproj`:
 
 ```bash
-docker build -t agentic-router -f src/TotallyHotArcRouter/Dockerfile src/TotallyHotArcRouter
-docker run -p 47101:47101 \
+docker build -t totallyhot-arcrouter -f src/TotallyHotArcRouter/Dockerfile .
+docker run -d --name arcrouter \
+  -p 127.0.0.1:47101:47101 -p 127.0.0.1:47104:47104 \
+  -v arcrouter-data:/data \
   -e ANTHROPIC_API_KEY="<your-anthropic-key>" \
   -e OPENAI_API_KEY="<your-openai-key>" \
-  agentic-router
+  totallyhot-arcrouter
 ```
+
+Only loopback-bound ports are published by default; see the `Dockerfile`'s
+own header comment for the full first-time trust setup
+(`--export-ca`/`--print-management-token` via `docker exec`) and
+`docs/router/client-tls-setup.md`.
 
 ## Running tests
 
+xUnit v3's own `dotnet test` integration is unreliable in this repo (it has
+flipped between working and broken across .NET SDK updates several times).
+Build, then run the built test executable directly:
+
 ```bash
-cd src/TotallyHotArcRouter.Tests
-dotnet test
+dotnet build src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj -c Release
+src/TotallyHotArcRouter.Tests/bin/Release/net10.0/TotallyHotArcRouter.Tests.exe
 ```
 

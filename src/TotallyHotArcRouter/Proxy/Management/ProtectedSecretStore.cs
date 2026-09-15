@@ -115,8 +115,9 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     private readonly string _path;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over the default per-user store
-    /// file.
+    /// Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over the default
+    /// machine-shared store file (see <see cref="DefaultPath"/> - moved off the per-user location by the
+    /// web GUI migration plan's Phase P3).
     /// </summary>
     public ProtectedSecretStore() : this(DefaultPath())
     {

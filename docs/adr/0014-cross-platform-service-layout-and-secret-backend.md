@@ -1,8 +1,13 @@
 # 0014. Cross-platform data paths, machine-wide service layout, and a non-Windows secret backend
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-14
 **Deciders:** David Pizon
+
+> **Accepted 2026-09-15**, on completion of the web GUI migration plan's Phases P1-P10:
+> `AppDataPaths`/cross-platform secret backend shipped in P3, and systemd/LaunchDaemon packaging plus a
+> real Docker image shipped in P10 - verified end to end with `podman build`/`podman run`, including a
+> restart-survives-with-secrets-intact check (see the plan doc's P10 status section).
 
 ## Context and Problem Statement
 
