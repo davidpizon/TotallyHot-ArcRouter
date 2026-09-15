@@ -3,6 +3,7 @@ using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -25,7 +26,7 @@ public sealed class ModelDistributionTests
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new UsageStore(managementAddress: UnreachableAddress));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress)));
         return ctx;
     }
 

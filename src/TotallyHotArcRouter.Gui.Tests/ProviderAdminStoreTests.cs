@@ -3,6 +3,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
@@ -23,7 +24,7 @@ public sealed class ProviderAdminStoreTests
     [Fact]
     public void Providers_and_IsLoaded_start_empty_before_any_load()
     {
-        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
 
         store.Providers.Should().BeEmpty();
         store.IsLoaded.Should().BeFalse();
@@ -34,7 +35,7 @@ public sealed class ProviderAdminStoreTests
     [Fact]
     public async Task LoadAsync_surfaces_unreachability_instead_of_throwing()
     {
-        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
 
         await store.LoadAsync(TestContext.Current.CancellationToken);
 
@@ -47,7 +48,7 @@ public sealed class ProviderAdminStoreTests
     [Fact]
     public async Task LoadAsync_raises_Changed_even_on_failure()
     {
-        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
         var raised = false;
         store.Changed += () => raised = true;
 
@@ -59,7 +60,7 @@ public sealed class ProviderAdminStoreTests
     [Fact]
     public async Task UpsertProviderAsync_propagates_a_ProviderAdminException_when_unreachable()
     {
-        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
         var body = new ProviderWriteRequest(
             BaseUrl: "https://example.com", AuthHeaderName: "Authorization");
 
@@ -73,14 +74,14 @@ public sealed class ProviderAdminStoreTests
     {
         // GrpcChannel.ForAddress validates and resolves the address eagerly enough that a malformed one
         // would throw here rather than only on first send - this guards the constructor path itself.
-        var act = () => new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var act = () => new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
         act.Should().NotThrow();
     }
 
     [Fact]
     public async Task LoadRateLimitHistoryAsync_unreachable_does_not_throw()
     {
-        var store = new ProviderAdminStore(managementAddress: UnreachableAddress);
+        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
 
         var act = () =>
             store.LoadRateLimitHistoryAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);

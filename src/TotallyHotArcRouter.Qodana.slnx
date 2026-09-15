@@ -23,6 +23,7 @@
   </Folder>
   <Project Path="TotallyHotArcRouter.Gui.Admin/TotallyHotArcRouter.Gui.Admin.csproj" />
   <Project Path="TotallyHotArcRouter.Gui.Charts/TotallyHotArcRouter.Gui.Charts.csproj" />
+  <Project Path="TotallyHotArcRouter.Gui.Components/TotallyHotArcRouter.Gui.Components.csproj" />
   <Project Path="TotallyHotArcRouter.Gui.Console/TotallyHotArcRouter.Gui.Console.csproj" />
   <Project Path="TotallyHotArcRouter.Gui.Telemetry/TotallyHotArcRouter.Gui.Telemetry.csproj" />
   <Project Path="TotallyHotArcRouter.Quality/TotallyHotArcRouter.Quality.csproj" />

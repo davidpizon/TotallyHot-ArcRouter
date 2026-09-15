@@ -18,8 +18,8 @@ public sealed class GovernanceTests
     {
         var ctx = new BunitContext();
         // Every sub-view points at an unreachable address - these tests only need each to mount.
-        ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59994"));
-        ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59989"));
+        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59994")));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59989")));
         ctx.Services.AddSingleton(new PriceSourceStore(new StubPriceSourceAdminClient()));
         ctx.Services.AddSingleton(new BenchmarkDataStore(new StubBenchmarkDataAdminClient()));
         ctx.Services.AddSingleton(new LlmRouterModelStore(new StubLlmRouterModelAdminClient()));

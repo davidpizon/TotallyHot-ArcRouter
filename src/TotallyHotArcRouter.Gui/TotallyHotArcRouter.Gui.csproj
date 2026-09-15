@@ -101,28 +101,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- MockData's literal fixture data (Models/DashboardData.cs) lives here instead of as C# object
-         initializers; embedded (not copied to output) so Models/DashboardData.cs's LoadFixture reads it
-         via Assembly.GetManifestResourceStream regardless of the process's working directory - unlike
-         appsettings.json above, this never needs to be edited by hand outside the build, so there is no
-         reason to expose it as a loose file next to the executable. -->
-    <EmbeddedResource Include="Models\DashboardMockData.json">
-      <LogicalName>TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Plain net10.0 libraries: pure data-transformation logic kept out of this Windows-only
-         project so it's unit-testable on any platform. See the matching .Tests projects.
-         TotallyHotArcRouter.Gui.Telemetry also compiles Protos/telemetry.proto's gRPC client stub
-         (GrpcChannel/TelemetryServiceClient/Contract.* types Services/LiveDataStore.cs uses) - not
-         this project directly - because .NET MAUI's SingleProject build doesn't reliably run
-         Grpc.Tools' codegen; see TotallyHotArcRouter.Gui.Telemetry.csproj's comment for why. Grpc.Net.Client/
-         Google.Protobuf therefore reach this project transitively through that ProjectReference,
-         with no PackageReference of their own needed here. -->
+    <!-- Components/*, Services/* stores, Models, and Utils moved into this browser-targetable Razor
+         class library in Phase P5b, so they can also be referenced by the future WASM host (Phase P6)
+         and the tray (Phase P8). Transitively brings in Gui.Admin/.Charts/.Console/.Telemetry, which
+         this project no longer needs to reference directly - MauiClipboardService.cs and MauiProgram.cs
+         (this project's remaining native composition-root code) reference Gui.Admin/.Telemetry types
+         directly enough to still need them listed explicitly below, though. -->
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Components\TotallyHotArcRouter.Gui.Components.csproj" />
     <ProjectReference Include="..\TotallyHotArcRouter.Gui.Admin\TotallyHotArcRouter.Gui.Admin.csproj" />
-    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Charts\TotallyHotArcRouter.Gui.Charts.csproj" />
-    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Console\TotallyHotArcRouter.Gui.Console.csproj" />
     <ProjectReference Include="..\TotallyHotArcRouter.Gui.Telemetry\TotallyHotArcRouter.Gui.Telemetry.csproj" />
   </ItemGroup>
 

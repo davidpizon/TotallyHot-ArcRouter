@@ -22,7 +22,7 @@ public sealed class SettingsModalTests
         FakeUpdateAdminClient? updateClient = null)
     {
         var ctx = new BunitContext();
-        liveDataStore = new LiveDataStore(serverAddress: "https://127.0.0.1:59996");
+        liveDataStore = new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996"));
         var settingsPath = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".json");
         settingsStore = new GuiSettingsStore(settingsPath);
         routerSettingsStore = new RouterSettingsAdminStore(routerSettingsClient ?? new FakeRouterSettingsAdminClient());

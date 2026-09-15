@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -16,7 +17,7 @@ public sealed class ProvidersAdminTests
     private static BunitContext NewContext()
     {
         var ctx = new BunitContext();
-        ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59995"));
+        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59995")));
         return ctx;
     }
 

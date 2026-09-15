@@ -1,4 +1,3 @@
-using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
@@ -25,36 +24,39 @@ public sealed class ProviderAdminStore : IDisposable
     private readonly ProviderAdminClient _client;
     private readonly ILogger<ProviderAdminStore>? _logger;
 
-    // Non-null only when this store built its own channel (the production path) - see Dispose. A
-    // test-injected client (built over a fake generated client with no real channel) owns nothing here to
-    // dispose.
-    private readonly GrpcChannel? _ownedChannel;
-
     private readonly ConcurrentDictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = new();
     private readonly ToastService? _toasts;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderAdminStore"/> class.</summary>
+    /// <param name="channelProvider">
+    /// Supplies the shared call invoker this store's client is constructed over (web GUI migration plan
+    /// Phase P5a) - see <see cref="TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider"/>'s remarks.
+    /// Required unless <paramref name="client"/> is supplied, in which case it is never consulted.
+    /// </param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="managementAddress">The proxy's gRPC endpoint; defaults to <see cref="DefaultManagementAddress"/>.</param>
     /// <param name="adminToken">
-    /// Optional management token override; when null (the default), the token is read from the shared
-    /// <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c> file the proxy generates (see
-    /// <see cref="ManagementTokenReader"/>). Sent as the <c>x-admin-token</c> gRPC metadata entry.
+    /// Optional management token; the composition root (<c>MauiProgram</c>) resolves it once from the
+    /// shared <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c> file (see
+    /// <see cref="ManagementTokenReader"/>) and passes it in here - this store no longer reads the file
+    /// itself, since that call is native-only and this class moves into the browser-targeted
+    /// <c>TotallyHot.ArcRouter.Gui.Components</c> library in Phase P5b. Sent as the <c>x-admin-token</c>
+    /// gRPC metadata entry.
     /// </param>
     /// <param name="client">
-    /// A pre-built client to use instead of creating a channel from <paramref name="managementAddress"/>;
+    /// A pre-built client to use instead of constructing one from <paramref name="channelProvider"/>;
     /// <see langword="null"/> (the default, and always the case in production) builds one. This exists so
-    /// tests can render the Governance tab against a canned provider list: without it the store builds its
-    /// own <see cref="GrpcChannel"/> and the only reachable state in a test process is "unavailable", which
-    /// leaves the entire loaded UI - the provider cards, the dialogs, every mutation - unexercised.
+    /// tests can render the Governance tab against a canned provider list: without it the only reachable
+    /// state in a test process is "unavailable", which leaves the entire loaded UI - the provider cards,
+    /// the dialogs, every mutation - unexercised.
     /// </param>
     /// <param name="toasts">
     /// App-wide error-toast notifications; <see langword="null"/> (a test's default) simply skips raising
     /// toasts. See <see cref="ToastService"/>.
     /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="channelProvider"/> and <paramref name="client"/> are both null.</exception>
     public ProviderAdminStore(
+        IRouterChannelProvider? channelProvider = null,
         ILogger<ProviderAdminStore>? logger = null,
-        string managementAddress = DefaultManagementAddress,
         string? adminToken = null,
         ProviderAdminClient? client = null,
         ToastService? toasts = null)
@@ -65,13 +67,11 @@ public sealed class ProviderAdminStore : IDisposable
         if (client is not null)
         {
             _client = client;
-            _ownedChannel = null;
         }
         else
         {
-            var channel = TelemetryChannelFactory.Create(managementAddress);
-            _ownedChannel = channel;
-            _client = new ProviderAdminClient(channel, adminToken ?? ManagementTokenReader.TryRead());
+            ArgumentNullException.ThrowIfNull(channelProvider);
+            _client = new ProviderAdminClient(channelProvider.CallInvoker, adminToken);
         }
     }
 
@@ -113,13 +113,14 @@ public sealed class ProviderAdminStore : IDisposable
     public string? LastError { get; private set; }
 
     /// <summary>
-    /// Disposes the <see cref="GrpcChannel"/> this store built for itself, when it built one - a
-    /// test-injected client owns no channel here to dispose. Registered as a DI singleton in
-    /// <c>MauiProgram</c>, so the container invokes this at shutdown.
+    /// No-op since Phase P5a: the shared channel behind <see cref="_client"/> is now owned by
+    /// <see cref="TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider"/>, not this store. Kept
+    /// implementing <see cref="IDisposable"/> so callers registered as a DI singleton in
+    /// <c>MauiProgram</c> need no change, and in case this store takes on its own disposable state again
+    /// later.
     /// </summary>
     public void Dispose()
     {
-        _ownedChannel?.Dispose();
     }
 
     /// <summary>Raised after <see cref="Providers"/>, <see cref="IsReachable"/>, or <see cref="LastError"/> change.</summary>

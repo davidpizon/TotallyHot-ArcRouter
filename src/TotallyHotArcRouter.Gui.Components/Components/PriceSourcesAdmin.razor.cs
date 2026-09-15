@@ -1,7 +1,7 @@
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
-using PointerEventArgs = Microsoft.AspNetCore.Components.Web.PointerEventArgs;
 
 namespace TotallyHot.ArcRouter.Gui.Components;
 

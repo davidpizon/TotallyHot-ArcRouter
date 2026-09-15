@@ -4,39 +4,37 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
-/// Singleton view-model backing the Governance tab's Cluster Model panel. Wraps
-/// <see cref="ClusterModelAdminClient"/> (the tested, platform-agnostic logic in
+/// Singleton view-model backing the Governance tab's Router Model panel. Wraps
+/// <see cref="LogRegModelAdminClient"/> (the tested, platform-agnostic logic in
 /// TotallyHot.ArcRouter.Gui.Telemetry) in the shared <see cref="AdminStoreBase{TClient}"/> shape, so the
 /// UI survives tab switches and degrades gracefully when the proxy isn't running. Registered in
 /// <c>MauiProgram</c>.
 /// </summary>
-public sealed class ClusterModelAdminStore : AdminStoreBase<IClusterModelAdminClient>
+public sealed class LogRegModelAdminStore : AdminStoreBase<ILogRegModelAdminClient>
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="ClusterModelAdminStore"/> class, creating and owning a
-    /// client to <paramref name="serverAddress"/>.
+    /// Initializes a new instance of the <see cref="LogRegModelAdminStore"/> class, over the shared
+    /// <see cref="IRouterChannelProvider"/> every admin client and store talks through (web GUI
+    /// migration plan Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
     /// </summary>
+    /// <param name="channelProvider">Supplies the shared call invoker this store's client is constructed over.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">
-    /// The proxy's TLS gRPC endpoint; defaults to
-    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
-    /// </param>
-    public ClusterModelAdminStore(
-        ILogger<ClusterModelAdminStore>? logger = null,
-        string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(client: new ClusterModelAdminClient(serverAddress), logger: logger, ownsClient: true)
+    public LogRegModelAdminStore(
+        IRouterChannelProvider channelProvider,
+        ILogger<LogRegModelAdminStore>? logger = null)
+        : base(client: new LogRegModelAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
     {
-        ServerAddress = serverAddress;
+        ServerAddress = channelProvider.ServerAddress;
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ClusterModelAdminStore"/> class over a caller-supplied
+    /// Initializes a new instance of the <see cref="LogRegModelAdminStore"/> class over a caller-supplied
     /// client. The seam tests use to drive the store without a live proxy; the caller owns the client's
     /// lifetime.
     /// </summary>
     /// <param name="client">The admin client to drive.</param>
     /// <param name="logger">Optional logger.</param>
-    public ClusterModelAdminStore(IClusterModelAdminClient client, ILogger<ClusterModelAdminStore>? logger = null)
+    public LogRegModelAdminStore(ILogRegModelAdminClient client, ILogger<LogRegModelAdminStore>? logger = null)
         : base(client: client, logger: logger)
     {
     }
@@ -48,8 +46,8 @@ public sealed class ClusterModelAdminStore : AdminStoreBase<IClusterModelAdminCl
     /// </summary>
     public string? ServerAddress { get; }
 
-    /// <summary>The cluster model's last-known status, or <see langword="null"/> before the first load.</summary>
-    public ClusterModelStatusInfo? Status { get; private set; }
+    /// <summary>The logreg model's last-known status, or <see langword="null"/> before the first load.</summary>
+    public LogRegModelStatusInfo? Status { get; private set; }
 
     /// <summary>Whether a retrain is currently running, so the UI can disable the button and show progress.</summary>
     public bool IsRetraining { get; private set; }
@@ -61,7 +59,7 @@ public sealed class ClusterModelAdminStore : AdminStoreBase<IClusterModelAdminCl
     public string? LastRetrainMessage { get; private set; }
 
     /// <summary>
-    /// Loads the cluster model's current status. Failures are swallowed and surfaced via
+    /// Loads the logreg model's current status. Failures are swallowed and surfaced via
     /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
     /// rather than thrown, so the tab renders an error state instead of crashing when the proxy isn't
     /// running.
@@ -77,7 +75,7 @@ public sealed class ClusterModelAdminStore : AdminStoreBase<IClusterModelAdminCl
     {
         return LoadGuardedAsync(
             async ct => Status = await Client.GetStatusAsync(ct),
-            "load the cluster model status",
+            "load the logreg model status",
             cancellationToken);
     }
 
@@ -118,11 +116,11 @@ public sealed class ClusterModelAdminStore : AdminStoreBase<IClusterModelAdminCl
         }
         catch (GrpcAdminException ex)
         {
-            // recordRejectionMessage: true because this panel's own catch (see ClusterModelAdmin.razor.cs)
+            // recordRejectionMessage: true because this panel's own catch (see RouterModelAdmin.razor.cs)
             // swallows the exception without capturing its message anywhere else - LastRetrainMessage is
             // only ever set from a streamed Result event, never from a caught exception - so LastError is
             // the only place a rejection's text survives for the markup to render.
-            RecordFailure(exception: ex, description: "a cluster-model operation", recordRejectionMessage: true,
+            RecordFailure(exception: ex, description: "a logreg-model operation", recordRejectionMessage: true,
                 beforeNotify: () =>
                 {
                     IsRetraining = false;

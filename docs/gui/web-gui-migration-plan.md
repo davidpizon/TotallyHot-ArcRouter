@@ -1,6 +1,6 @@
 # Web GUI Migration Plan
 
-> **Status: P4 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3 shipped 2026-09-15) — P0's ADRs 0011-0014 remain proposed
+> **Status: P5 shipped 2026-09-14 (P1, P2 shipped 2026-09-14; P3, P4 shipped 2026-09-15) — P0's ADRs 0011-0014 remain proposed
 > (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retires the
 > Windows-only MAUI Blazor Hybrid GUI
 > (`src/TotallyHotArcRouter.Gui`, WebView2) in favor of a Blazor WebAssembly dashboard served by the
@@ -636,6 +636,107 @@ both checks.
 - Add the new project to AGENTS.md's doc-enforcement list.
 
 **Exit:** MAUI app behavior unchanged. `Gui.Components` ≥80% on Linux. Qodana green.
+
+### P5 status: shipped 2026-09-14
+
+Both P5a and P5b landed together. Real deviations from the plan text are called out below rather than
+silently substituted.
+
+**P5a — `IRouterChannelProvider` and the browser-unsafe seams:**
+- **`IRouterChannelProvider`** (`Gui.Telemetry/IRouterChannelProvider.cs`) - `CallInvoker CallInvoker` +
+  `string ServerAddress` - and **`NativeRouterChannelProvider`** (`Gui.Telemetry/NativeRouterChannelProvider.cs`),
+  the real-socket implementation wrapping `TelemetryChannelFactory`. Registered once as a singleton in
+  `MauiProgram`, replacing the ~15 independent `GrpcChannel`s every admin client and `LiveDataStore` used
+  to open for itself (one per store) with one shared, authenticated channel.
+- Every `GrpcAdminClientBase<T>`-derived client (13 of them: `BenchmarkDataAdminClient`,
+  `ClusterModelAdminClient`, `CostReconciliationAdminClient`, `JudgeCalibrationAdminClient`,
+  `LlmRouterModelAdminClient`, `LogRegModelAdminClient`, `PersistedSessionsClient`,
+  `PriceSourceAdminClient`, `RegretHarnessAdminClient`, `RoutingModeAdminClient`, `RoutingGateAdminClient`,
+  `RouterSettingsAdminClient`, `UpdateAdminClient`) plus `ProviderAdminClient`/`UsageQueryClient`
+  (`Gui.Admin`) gained a `CallInvoker`-based constructor alongside their existing channel-owning one - the
+  existing `GrpcAdminClientBase(TGeneratedClient client)` test-seam constructor already covered this case
+  with zero base-class changes needed. Every corresponding `Gui/Services/*Store.cs` (15 of them, including
+  `LiveDataStore`, `ProviderAdminStore`, `UsageStore`, `UpdateStore`, `RoutingGateStore`) now takes
+  `IRouterChannelProvider channelProvider` instead of a `string serverAddress`/`managementAddress`.
+- `ManagementTokenReader.TryRead()` moved out of `ProviderAdminStore`/`UsageStore`'s constructors into
+  `MauiProgram` (resolved once, passed in as `adminToken`) - the plan's third bullet ("Gui.Admin/
+  ManagementTokenReader"), satisfied by relocating the *call site* rather than the file, since the reader
+  itself already lived in the separate, already-native-only `Gui.Admin` project.
+- `LiveDataStore.WriteDiagnosticLog` deleted, along with every call site, per the plan.
+- `IClipboardService`/`MauiClipboardService` replace `Clipboard.Default` in `ConsoleTab.razor`.
+- The `PointerEventArgs` alias workaround in `PriceSourcesAdmin.razor.cs` was removed as part of the P5b
+  file move below (the MAUI-global-using ambiguity it worked around only exists inside the `Gui` project;
+  it could not be removed before the move without breaking today's build).
+
+**Deviation:** `TelemetryChannelFactory`'s cert callback and `TelemetryAuthClientInterceptor` (`Gui.Telemetry`)
+and `MsiUpdateApplier` (`Gui.Telemetry`) are not physically relocated - the plan's phrasing ("move
+browser-unsafe code into a native-only library") is already satisfied by the existing project structure:
+all three already live in `Gui.Telemetry`/`Gui.Admin`, separate assemblies from the `Gui` project's own
+`Components`/`Services`/`Models`/`Utils` that move into `Gui.Components` below. `UpdateStore`'s own direct
+`new MsiUpdateApplier(...)` construction is deliberately untouched - the plan's P6 section, not P5's, owns
+"remove apply and `Environment.Exit`".
+
+**P5b — the `TotallyHotArcRouter.Gui.Components` project:**
+- New project as specified: `Microsoft.NET.Sdk.Razor`, `net10.0`, `<SupportedPlatform Include="browser"/>`,
+  `GenerateDocumentationFile`. Holds `Components/*` (29 `.razor` plus their `.razor.cs` partials),
+  `Services/*` stores, `Models/DashboardData.cs` (+ its embedded `DashboardMockData.json`), and
+  `Utils/ColorUtils.cs` - moved with `git mv` to preserve history. Namespaces are unchanged
+  (`TotallyHot.ArcRouter.Gui.Components`/`.Services`/`.Models`/`.Utils`), so no call site anywhere in the
+  repo needed a `using` change; `Gui.csproj` now references `Gui.Components.csproj` instead of compiling
+  those folders itself. Added to `TotallyHotArcRouter.slnx` and `TotallyHotArcRouter.Qodana.slnx`,
+  confirmed building standalone on the Qodana solution (which already excludes the Windows-only `Gui`/
+  `Gui.Tests` pair) as real evidence this project is genuinely cross-platform-buildable. Added to
+  AGENTS.md's `GenerateDocumentationFile` enforcement list; fixed `DialogShell.razor`'s two stale path
+  references in `docs/gui/DESIGN.md` (the file it names actually moved).
+- `GuiLogging.cs` and `WebViewUserData.cs` were swept up by the initial `Services/*` move but do **not**
+  belong in a browser-targeted library - both are native composition-root concerns (Serilog file-sink
+  bootstrap; the WebView2 user-data-folder environment variable) with no browser equivalent, confirmed by
+  `Gui.Components` failing to build with `Serilog`/MAUI-adjacent symbols unresolved the moment they landed
+  there. Both moved back to a `Gui/Services/` folder that now holds exactly these two files, alongside the
+  already-present root-level `MauiClipboardService.cs`.
+
+**Deferred (not silently dropped - explicit gaps for a focused follow-up):**
+1. **`wwwroot` stays in `Gui`, not `Gui.Components`.** `index.html` references `css/app.css`,
+   `lib/echarts/echarts.min.js`, and `js/*.js` as plain root-relative paths, which is how MAUI's
+   `BlazorWebView` serves a host project's own `wwwroot` today. Moving those assets into an RCL changes
+   their runtime location to the `_content/TotallyHotArcRouter.Gui.Components/...` static-web-assets
+   convention, which `index.html` would need to be updated to match - a change this environment has no
+   way to verify against a real WebView2 window (no interactive Windows GUI session, and the Browser tool
+   only drives web URLs, not a native WinExe's embedded browser control). Given this exact codebase's
+   documented history of blank-dashboard bugs from WebView2 asset-resolution failures
+   (`WebViewUserData.cs`'s remarks), guessing at this without a real render is the wrong trade here. Left
+   for P6, which has to solve wwwroot sharing between the MAUI host and the new WASM host for real anyway.
+2. **`Gui.Tests` was not retargeted to plain `net10.0` or split.** It still targets
+   `net10.0-windows10.0.19041.0` and references `Gui` (not `Gui.Components` directly, though it gets it
+   transitively) - unchanged, and still fully green (441 tests). Retargeting cleanly requires first
+   separating its two genuinely Windows/MAUI-only test files (`WebViewUserDataTests.cs`,
+   `GuiLoggingTests.cs`) from the ~430 that only touch `Gui.Components` content, which is exactly the kind
+   of split this environment cannot validate against a real `ubuntu-latest` GitHub Actions run before
+   merging. `.github/workflows/dotnet-ci.yml` and the coverage gate are therefore also untouched - there
+   is currently no dedicated Linux-run test project for `Gui.Components` (it is only exercised today by
+   `Gui.Tests` on Windows), so the ubuntu job does not yet cover it. This is the plan's own "Add it to the
+   ubuntu job" bullet, explicitly not done.
+3. A broader doc sweep (`docs/router/*.md`'s many stale `TotallyHotArcRouter.Gui/Components` path
+   references) was left alone: those are dated, historical phase-completion records the plan's own P11
+   ("Docs close-out") is the designated place to touch, not a live reference like `DESIGN.md` (fixed above).
+
+**Verification:**
+- `dotnet build src/TotallyHotArcRouter.slnx -c Debug` and `dotnet build src/TotallyHotArcRouter.Qodana.slnx
+  -c Debug` - both 0 warnings, 0 errors. The Qodana build is real evidence `Gui.Components` builds without
+  the Windows-only `Gui`/`Gui.Tests` pair present at all.
+- Every test executable in the solution, run directly (not `dotnet test`): `TotallyHotArcRouter.Tests`
+  (2835 passed), `.Quality.Tests` (195), `.Gui.Admin.Tests` (102), `.Gui.Charts.Tests` (71),
+  `.Gui.Console.Tests` (30), `.Gui.Telemetry.Tests` (239, including 5 new
+  `NativeRouterChannelProviderTests`), `.Gui.Tests` (441, unchanged pass count from before P5 - direct
+  evidence for "MAUI app behavior unchanged"). Zero failures across all seven.
+- `dotnet-coverage collect -f cobertura` over `Gui.Tests.exe`: `TotallyHotArcRouter.Gui.Components`
+  measures 81.3% line coverage - meets the ≥80% exit criterion, though only measured on Windows via the
+  existing bUnit suite (see deferred item 2 above for why an actual `ubuntu-latest` run is not yet wired
+  up).
+- 28 test call sites across 13 `Gui.Tests` files that previously passed a raw `serverAddress`/
+  `managementAddress` string were updated to construct a real (never-connecting)
+  `NativeRouterChannelProvider` instead - a mechanical, verified-by-full-suite-pass change, not a
+  behavioral one.
 
 ## P6 — WASM host served by the router
 

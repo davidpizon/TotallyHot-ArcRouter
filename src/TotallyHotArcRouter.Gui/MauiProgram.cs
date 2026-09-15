@@ -3,8 +3,10 @@ using Microsoft.Maui.LifecycleEvents;
 using Serilog;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Platforms.Windows;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui;
 
@@ -52,25 +54,42 @@ public static class MauiProgram
 
         builder.Services.AddMauiBlazorWebView();
         // Local, per-user GUI settings (currently just the telemetry server address) - see
-        // Services/GuiSettingsStore.cs. Registered before LiveDataStore so its factory below can read
-        // the persisted address.
+        // Services/GuiSettingsStore.cs. Registered before IRouterChannelProvider so its factory below can
+        // read the persisted address.
         builder.Services.AddSingleton<IGuiSettingsStore>(_ => new GuiSettingsStore());
         // App-wide error-toast notifications (see Services/ToastService.cs and Components/ToastHost.razor).
         // Registered before ProviderAdminStore so DI can inject it there.
         builder.Services.AddSingleton<ToastService>();
+        // Copies text to the system clipboard (Components/ConsoleTab.razor). MAUI's native
+        // Clipboard.Default - see IClipboardService's remarks on why this indirection exists.
+        builder.Services.AddSingleton<IClipboardService, MauiClipboardService>();
+        // The one shared, authenticated call invoker every admin client and store talks through (web GUI
+        // migration plan Phase P5a) - see IRouterChannelProvider's remarks. Replaces the ~15 independent
+        // per-client channels every store below used to open for itself. The server address comes from
+        // GuiSettingsStore rather than the hardcoded default, so a change in Settings takes effect on the
+        // next launch (the singleton factory below runs once, on first resolution).
+        builder.Services.AddSingleton<IRouterChannelProvider>(sp =>
+            new NativeRouterChannelProvider(
+                sp.GetRequiredService<IGuiSettingsStore>().Load().TelemetryServerAddress));
+        // The shared management token every gRPC admin call presents (see ManagementTokenReader's
+        // remarks) - resolved exactly once here, at the native composition root, and handed explicitly
+        // into ProviderAdminStore/UsageStore below. Neither store reads the token file itself anymore
+        // (Phase P5a): that read is native-only, and both classes move into the browser-targeted
+        // TotallyHot.ArcRouter.Gui.Components library in Phase P5b.
+        var adminToken = ManagementTokenReader.TryRead();
         // Live routing telemetry from the TotallyHot.ArcRouter proxy (see Services/LiveDataStore.cs). A
         // singleton so the gRPC stream and accumulated conversation state survive navigation between
-        // tabs; Dashboard.razor starts the connection on first render. The server address comes from
-        // GuiSettingsStore rather than the hardcoded default, so a change in Settings takes effect on
-        // the next launch (the singleton factory below runs once, on first resolution).
-        builder.Services.AddSingleton(sp =>
-            new LiveDataStore(
-                logger: sp.GetRequiredService<ILogger<LiveDataStore>>(),
-                serverAddress: sp.GetRequiredService<IGuiSettingsStore>().Load().TelemetryServerAddress));
+        // tabs; Dashboard.razor starts the connection on first render.
+        builder.Services.AddSingleton<LiveDataStore>();
         // Backs the Governance tab's provider/credential/model manager. A singleton so its loaded
         // provider list survives tab switches; it talks to the proxy's /admin API (port 5001) via the
         // tested TotallyHot.ArcRouter.Gui.Admin client. See Services/ProviderAdminStore.cs.
-        builder.Services.AddSingleton<ProviderAdminStore>();
+        builder.Services.AddSingleton(sp =>
+            new ProviderAdminStore(
+                channelProvider: sp.GetRequiredService<IRouterChannelProvider>(),
+                logger: sp.GetRequiredService<ILogger<ProviderAdminStore>>(),
+                adminToken: adminToken,
+                toasts: sp.GetRequiredService<ToastService>()));
         // Backs the Sessions tab's persisted-history view (docs/router/sessions-tab-training-data-plan.md
         // Phase 2). A singleton for the same reason, sharing the TLS gRPC port (5002) with LiveDataStore.
         // See Services/PersistedSessionStore.cs.
@@ -115,7 +134,11 @@ public static class MauiProgram
         // Backs the Model Distribution / Cost Analytics history / header ticker's real data (Phase 4,
         // §5.15). A singleton so its range-keyed cache survives tab switches; talks to the proxy's
         // /admin/usage API (port 5001), same as ProviderAdminStore. See Services/UsageStore.cs.
-        builder.Services.AddSingleton<UsageStore>();
+        builder.Services.AddSingleton(sp =>
+            new UsageStore(
+                channelProvider: sp.GetRequiredService<IRouterChannelProvider>(),
+                logger: sp.GetRequiredService<ILogger<UsageStore>>(),
+                adminToken: adminToken));
         // Backs the tray icon's "Enable Routing"/"Disable Routing" toggle and its service-down detection
         // (right-click while the router is unreachable shows a toast instead of the menu). A singleton,
         // like every store above, but unlike them it polls continuously in the background rather than

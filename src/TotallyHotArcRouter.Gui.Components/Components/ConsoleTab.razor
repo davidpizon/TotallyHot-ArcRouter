@@ -8,6 +8,7 @@
 @implements IAsyncDisposable
 @inject LiveDataStore LiveDataStore
 @inject IJSRuntime Js
+@inject IClipboardService Clipboard
 
 <div class="flex flex-col h-full min-h-0">
     @* Toolbar *@
@@ -125,10 +126,10 @@
         LiveDataStore.ClearLogLines();
     }
 
-    // Uses MAUI's native Clipboard rather than the browser's navigator.clipboard via JS interop:
-    // clipboard-write from inside a WebView2 page can be blocked by permission prompts/secure-context
-    // rules, while the native API always works since this app is a MAUI Blazor Hybrid host, not a
-    // real browser tab.
+    // Goes through the injected IClipboardService rather than the browser's navigator.clipboard via JS
+    // interop directly: clipboard-write from inside a WebView2 page can be blocked by permission
+    // prompts/secure-context rules, while MAUI's native Clipboard.Default (this host's IClipboardService
+    // implementation) always works. See IClipboardService's remarks.
     /// <summary>Copies every visible log line to the clipboard and briefly shows a "Copied!" confirmation.</summary>
     private async Task CopyAllToClipboard()
     {
@@ -138,7 +139,7 @@
             return;
         }
 
-        await Clipboard.Default.SetTextAsync(LogLineFormatter.FormatAll(lines));
+        await Clipboard.SetTextAsync(LogLineFormatter.FormatAll(lines));
 
         _justCopied = true;
         StateHasChanged();

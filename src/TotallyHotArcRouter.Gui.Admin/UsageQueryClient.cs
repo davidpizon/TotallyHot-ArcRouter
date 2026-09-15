@@ -39,6 +39,22 @@ public sealed class UsageQueryClient
     }
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="UsageQueryClient"/> class over a shared call invoker
+    /// (web GUI migration plan Phase P5a) - see
+    /// <c>TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider</c>'s remarks for why production now
+    /// goes through this constructor instead of the channel-owning one above. The caller owns the
+    /// invoker's underlying channel.
+    /// </summary>
+    /// <param name="callInvoker">The shared call invoker.</param>
+    /// <param name="adminToken">Optional management token; see the primary constructor's remarks.</param>
+    public UsageQueryClient(CallInvoker callInvoker, string? adminToken = null)
+    {
+        ArgumentNullException.ThrowIfNull(callInvoker);
+        _client = new Contract.UsageAdminService.UsageAdminServiceClient(callInvoker);
+        _adminToken = adminToken;
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="UsageQueryClient"/> class over a caller-supplied
     /// generated client. The seam tests use to substitute a fake without a live server - see
     /// <see cref="ProviderAdminClient"/>'s identical constructor for the full rationale. The caller owns

@@ -266,7 +266,7 @@ dense repeated row actions.
 ### 4.1 New windows follow the System Settings pattern
 
 Any new modal, dialog, or window builds on
-[`DialogShell.razor`](../../src/TotallyHotArcRouter.Gui/Components/DialogShell.razor) rather than
+[`DialogShell.razor`](../../src/TotallyHotArcRouter.Gui.Components/Components/DialogShell.razor) rather than
 inventing its own chrome. `DialogShell` is the extracted, shared implementation of the shell every
 dialog in this app already followed by convention (`SettingsModal.razor` "System Settings",
 `ProviderEditDialog.razor`, `RemoveProviderDialog.razor`, `UnlockSecretFieldDialog.razor`) - that
@@ -816,7 +816,7 @@ Earlier round of classes:
   `inert` while collapsed. Motion contract: [`MOTION.md`](MOTION.md) §6 Disclosure Collapse
 - `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
 
-Every remaining `style=` attribute in `TotallyHotArcRouter.Gui/Components` is one of the sanctioned
+Every remaining `style=` attribute in `TotallyHotArcRouter.Gui.Components/Components` is one of the sanctioned
 exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
 `share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
 property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s

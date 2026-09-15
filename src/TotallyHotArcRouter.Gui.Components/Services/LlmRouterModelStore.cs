@@ -15,20 +15,18 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
     private Dictionary<string, LlmRouterModelSyncProgressInfo> _syncProgress = [];
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LlmRouterModelStore"/> class, creating and owning a
-    /// client to <paramref name="serverAddress"/>.
+    /// Initializes a new instance of the <see cref="LlmRouterModelStore"/> class, over the shared
+    /// <see cref="IRouterChannelProvider"/> every admin client and store talks through (web GUI
+    /// migration plan Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
     /// </summary>
+    /// <param name="channelProvider">Supplies the shared call invoker this store's client is constructed over.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">
-    /// The proxy's TLS gRPC endpoint; defaults to
-    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
-    /// </param>
     public LlmRouterModelStore(
-        ILogger<LlmRouterModelStore>? logger = null,
-        string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(client: new LlmRouterModelAdminClient(serverAddress), logger: logger, ownsClient: true)
+        IRouterChannelProvider channelProvider,
+        ILogger<LlmRouterModelStore>? logger = null)
+        : base(client: new LlmRouterModelAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
     {
-        ServerAddress = serverAddress;
+        ServerAddress = channelProvider.ServerAddress;
     }
 
     /// <summary>

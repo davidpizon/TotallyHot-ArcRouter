@@ -1,4 +1,3 @@
-using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using TotallyHot.ArcRouter.Gui.Admin;
@@ -18,10 +17,6 @@ public sealed class UsageStore : IDisposable
     private readonly UsageQueryClient _client;
     private readonly ILogger<UsageStore>? _logger;
 
-    // Non-null only when this store built its own channel (the production path) - see Dispose and
-    // ProviderAdminStore's identical field.
-    private readonly GrpcChannel? _ownedChannel;
-
     // Keyed per distinct range/width/groupBy so repeated filter-bar clicks over an already-seen range don't
     // re-fetch. Small and unbounded by design: a session's worth of distinct filter selections is a handful
     // of entries, nowhere near large enough to need eviction. Concurrent, not a plain Dictionary: callers
@@ -30,21 +25,24 @@ public sealed class UsageStore : IDisposable
     private readonly ConcurrentDictionary<RollupCacheKey, IReadOnlyList<UsageRollupBucketView>> _rollupCache = new();
 
     /// <summary>Initializes a new instance of the <see cref="UsageStore"/> class.</summary>
-    /// <param name="logger">Optional logger.</param>
-    /// <param name="managementAddress">
-    /// The proxy's gRPC endpoint; defaults to <see cref="ProviderAdminStore.DefaultManagementAddress"/>.
+    /// <param name="channelProvider">
+    /// Supplies the shared call invoker this store's client is constructed over (web GUI migration plan
+    /// Phase P5a) - see <see cref="TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider"/>'s remarks.
+    /// Required unless <paramref name="client"/> is supplied, in which case it is never consulted.
     /// </param>
+    /// <param name="logger">Optional logger.</param>
     /// <param name="adminToken">
-    /// Optional management token override; when null (the default), the token is read from the shared
-    /// management-token file the proxy generates (see <see cref="ManagementTokenReader"/>).
+    /// Optional management token; see <see cref="ProviderAdminStore"/>'s identical parameter for why the
+    /// composition root resolves it, not this store.
     /// </param>
     /// <param name="client">
-    /// A pre-built client to use instead of creating a channel from <paramref name="managementAddress"/>;
-    /// see <see cref="ProviderAdminStore"/>'s identical parameter for the full rationale.
+    /// A pre-built client to use instead of constructing one from <paramref name="channelProvider"/>; see
+    /// <see cref="ProviderAdminStore"/>'s identical parameter for the full rationale.
     /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="channelProvider"/> and <paramref name="client"/> are both null.</exception>
     public UsageStore(
+        IRouterChannelProvider? channelProvider = null,
         ILogger<UsageStore>? logger = null,
-        string managementAddress = ProviderAdminStore.DefaultManagementAddress,
         string? adminToken = null,
         UsageQueryClient? client = null)
     {
@@ -53,13 +51,11 @@ public sealed class UsageStore : IDisposable
         if (client is not null)
         {
             _client = client;
-            _ownedChannel = null;
         }
         else
         {
-            var channel = TelemetryChannelFactory.Create(managementAddress);
-            _ownedChannel = channel;
-            _client = new UsageQueryClient(channel, adminToken ?? ManagementTokenReader.TryRead());
+            ArgumentNullException.ThrowIfNull(channelProvider);
+            _client = new UsageQueryClient(channelProvider.CallInvoker, adminToken);
         }
     }
 
@@ -79,13 +75,14 @@ public sealed class UsageStore : IDisposable
     public string? LastError { get; private set; }
 
     /// <summary>
-    /// Disposes the <see cref="GrpcChannel"/> this store built for itself, when it built one - see
-    /// <see cref="ProviderAdminStore.Dispose"/>'s identical note. Registered as a DI singleton in
-    /// <c>MauiProgram</c>, so the container invokes this at shutdown.
+    /// No-op since Phase P5a: the shared channel behind <see cref="_client"/> is now owned by
+    /// <see cref="TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider"/>, not this store - see
+    /// <see cref="ProviderAdminStore.Dispose"/>'s identical note. Kept implementing
+    /// <see cref="IDisposable"/> so callers registered as a DI singleton in <c>MauiProgram</c> need no
+    /// change, and in case this store takes on its own disposable state again later.
     /// </summary>
     public void Dispose()
     {
-        _ownedChannel?.Dispose();
     }
 
     /// <summary>Raised after <see cref="Summary"/>, <see cref="IsReachable"/>, or <see cref="LastError"/> change.</summary>

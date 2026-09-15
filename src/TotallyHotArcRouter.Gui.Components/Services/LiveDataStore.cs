@@ -50,7 +50,6 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// </summary>
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(2);
 
-    private readonly GrpcChannel _channel;
     private readonly Contract.TelemetryService.TelemetryServiceClient _client;
     private readonly List<RoutingTelemetryEventDto> _events = [];
 
@@ -79,17 +78,17 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// same OS user on the same machine and there's no CA to issue a "real" certificate for a loopback
     /// address anyway.
     /// </remarks>
-    public LiveDataStore(ILogger<LiveDataStore>? logger = null, string serverAddress = DefaultServerAddress)
+    public LiveDataStore(IRouterChannelProvider channelProvider, ILogger<LiveDataStore>? logger = null)
     {
-        _logger = logger;
-        _serverAddress = serverAddress;
+        ArgumentNullException.ThrowIfNull(channelProvider);
 
-        // Channel construction and the self-signed-certificate trust decision live in
-        // TelemetryChannelFactory, shared with PriceSourceAdminClient - both talk to the same process over
-        // the same certificate, and two copies of a validation callback is how they drift apart.
-        _channel = TelemetryChannelFactory.Create(serverAddress);
-        _client = new Contract.TelemetryService.TelemetryServiceClient(TelemetryChannelFactory.Authenticated(_channel));
-        WriteDiagnosticLog($"LiveDataStore constructed. serverAddress={serverAddress}");
+        _logger = logger;
+        _serverAddress = channelProvider.ServerAddress;
+
+        // The shared call invoker (web GUI migration plan Phase P5a) - channel construction and the
+        // self-signed-certificate trust decision live behind IRouterChannelProvider, shared with every
+        // other admin client, rather than this store opening its own channel to the same process.
+        _client = new Contract.TelemetryService.TelemetryServiceClient(channelProvider.CallInvoker);
     }
 
     /// <summary>Conversations reconstructed from telemetry received so far. Empty until the proxy sends events.</summary>
@@ -98,42 +97,17 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// <summary>Log lines received so far for the Console tab, oldest first, bounded by <see cref="LogBuffer.Capacity"/>.</summary>
     public IReadOnlyList<LogLineDto> LogLines => _logBuffer.Snapshot();
 
-    /// <summary>Cancels the live telemetry stream and releases the gRPC channel.</summary>
+    /// <summary>Cancels the live telemetry stream.</summary>
+    /// <remarks>
+    /// Does not dispose a channel - <see cref="IRouterChannelProvider"/> owns the shared channel's
+    /// lifetime (web GUI migration plan Phase P5a); this store no longer opens one of its own.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (_streamCts is not null)
         {
             await _streamCts.CancelAsync();
             _streamCts.Dispose();
-        }
-
-        // GrpcChannel (Grpc.Net.Client) doesn't expose ShutdownAsync - disposing is sufficient
-        // to tear down active calls once the CTS is cancelled.
-        _channel.Dispose();
-    }
-
-    /// <summary>
-    /// Temporary diagnostic aid for the live-telemetry-not-arriving investigation: appends a
-    /// timestamped line to a per-user log file, independent of <see cref="ILogger{TCategoryName}"/>
-    /// (which only surfaces anywhere visible - the Debug Output window - when a debugger is attached,
-    /// e.g. Visual Studio F5). Best-effort: a failure to write here must never affect the caller, so
-    /// every failure mode is swallowed. Remove once the connection issue is root-caused.
-    /// </summary>
-    private static void WriteDiagnosticLog(string message)
-    {
-        try
-        {
-            var directory =
-                Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    path2: "TotallyHotArcRouter");
-            Directory.CreateDirectory(directory);
-            File.AppendAllText(
-                path: Path.Combine(path1: directory, path2: "gui-telemetry-debug.log"),
-                contents: $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff} {message}{Environment.NewLine}");
-        }
-        catch
-        {
-            // Best-effort diagnostic logging only - never let a failure to write it affect anything.
         }
     }
 
@@ -170,7 +144,6 @@ public sealed class LiveDataStore : IAsyncDisposable
         _streamCts?.Cancel();
 
         _streamCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        WriteDiagnosticLog("StartAsync called.");
         _ = ConsumeStreamWithReconnectAsync(_streamCts.Token);
         return Task.CompletedTask;
     }
@@ -187,14 +160,10 @@ public sealed class LiveDataStore : IAsyncDisposable
             while (!cancellationToken.IsCancellationRequested)
                 try
                 {
-                    WriteDiagnosticLog($"Calling StreamEvents against {_serverAddress}...");
                     using var call = _client.StreamEvents(request: new Contract.StreamEventsRequest(),
                         cancellationToken: cancellationToken);
-                    WriteDiagnosticLog("StreamEvents call started; awaiting first event.");
                     await foreach (var telemetryEvent in call.ResponseStream.ReadAllAsync(cancellationToken))
                     {
-                        WriteDiagnosticLog($"Received event: {telemetryEvent.EventCase}.");
-
                         // Isolated per-event: a single malformed message (e.g. a cost string that
                         // fails decimal.Parse) must not tear down and reconnect the whole stream -
                         // it just skips that one event and keeps reading the next.
@@ -206,11 +175,8 @@ public sealed class LiveDataStore : IAsyncDisposable
                         {
                             _logger?.LogWarning(exception: ex,
                                 message: "Failed to process a telemetry event; skipping it.");
-                            WriteDiagnosticLog($"Failed to process event: {ex.GetType().Name}: {ex.Message}");
                         }
                     }
-
-                    WriteDiagnosticLog("StreamEvents call ended (server completed the call).");
                 }
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -227,8 +193,6 @@ public sealed class LiveDataStore : IAsyncDisposable
                         ex.GetType().Name,
                         ex.Message,
                         ReconnectDelay.TotalSeconds);
-                    WriteDiagnosticLog(
-                        $"StreamEvents failed: {ex.GetType().FullName}: {ex.Message}{Environment.NewLine}{ex}");
                     await Task.Delay(delay: ReconnectDelay, cancellationToken: cancellationToken);
                 }
         }

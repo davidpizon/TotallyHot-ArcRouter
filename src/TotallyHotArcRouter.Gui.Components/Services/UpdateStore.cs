@@ -17,19 +17,19 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
     private readonly Action _exitApplication;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="UpdateStore"/> class, creating and owning both a client
-    /// to <paramref name="serverAddress"/> and the <see cref="HttpClient"/> its installer applier downloads
-    /// through.
+    /// Initializes a new instance of the <see cref="UpdateStore"/> class, over the shared
+    /// <see cref="IRouterChannelProvider"/> (web GUI migration plan Phase P5a), and owning the
+    /// <see cref="HttpClient"/> its installer applier downloads through.
     /// </summary>
-    /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">
-    /// The proxy's TLS gRPC endpoint; defaults to
-    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// <param name="channelProvider">
+    /// Supplies the shared call invoker this store's client is constructed over - see
+    /// <see cref="IRouterChannelProvider"/>'s remarks.
     /// </param>
+    /// <param name="logger">Optional logger.</param>
     public UpdateStore(
-        ILogger<UpdateStore>? logger = null,
-        string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(client: new UpdateAdminClient(serverAddress), logger: logger, ownsClient: true)
+        IRouterChannelProvider channelProvider,
+        ILogger<UpdateStore>? logger = null)
+        : base(client: new UpdateAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
     {
         var httpClient = Own(new HttpClient());
         _applier = new MsiUpdateApplier(httpClient: httpClient, logger: NullLogger<MsiUpdateApplier>.Instance);

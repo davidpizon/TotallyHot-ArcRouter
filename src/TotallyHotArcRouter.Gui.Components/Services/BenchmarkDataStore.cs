@@ -14,20 +14,18 @@ public sealed class BenchmarkDataStore : AdminStoreBase<IBenchmarkDataAdminClien
     private Dictionary<string, BenchmarkSyncProgressInfo> _syncProgress = [];
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="BenchmarkDataStore"/> class, creating and owning a
-    /// client to <paramref name="serverAddress"/>.
+    /// Initializes a new instance of the <see cref="BenchmarkDataStore"/> class, over the shared
+    /// <see cref="IRouterChannelProvider"/> every admin client and store talks through (web GUI
+    /// migration plan Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
     /// </summary>
+    /// <param name="channelProvider">Supplies the shared call invoker this store's client is constructed over.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">
-    /// The proxy's TLS gRPC endpoint; defaults to
-    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
-    /// </param>
     public BenchmarkDataStore(
-        ILogger<BenchmarkDataStore>? logger = null,
-        string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(client: new BenchmarkDataAdminClient(serverAddress), logger: logger, ownsClient: true)
+        IRouterChannelProvider channelProvider,
+        ILogger<BenchmarkDataStore>? logger = null)
+        : base(client: new BenchmarkDataAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
     {
-        ServerAddress = serverAddress;
+        ServerAddress = channelProvider.ServerAddress;
     }
 
     /// <summary>

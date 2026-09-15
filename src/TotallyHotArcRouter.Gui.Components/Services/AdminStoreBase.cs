@@ -22,9 +22,9 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <c>RoutingGateStore</c> polls continuously on a background loop behind its own lock, derives
 /// <c>IsReachable</c> from a three-valued connection state, is <see cref="IAsyncDisposable"/>, and raises
 /// <c>Changed</c> only on an actual change — it shares the name "Store" but none of the shape.
-/// <c>ProviderAdminStore</c> and <c>UsageStore</c> speak HTTP, not gRPC (see
-/// <see href="../../../docs/adr/0007-provider-admin-client-stays-on-http.md">ADR-0007</see>): their
-/// <c>ProviderAdminException</c> carries no unavailable-versus-rejected distinction for
+/// <c>ProviderAdminStore</c> and <c>UsageStore</c> moved from plain-HTTP/JSON to gRPC in
+/// docs/router/tracked-todos.md #7 (ADR-0007 is now stale on this point), but their
+/// <c>ProviderAdminException</c> still carries no unavailable-versus-rejected distinction for
 /// <see cref="GrpcAdminException.IsUnavailable"/> to key off, and they surface failures through
 /// <c>ToastService</c> rather than <see cref="LastError"/>. Bending this base to fit them would mean
 /// adding a toast hook and an exception-typed failure callback for two callers, which is how a useful

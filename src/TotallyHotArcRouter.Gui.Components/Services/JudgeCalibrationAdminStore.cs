@@ -19,20 +19,18 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class JudgeCalibrationAdminStore : AdminStoreBase<IJudgeCalibrationAdminClient>
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="JudgeCalibrationAdminStore"/> class, creating and
-    /// owning a client to <paramref name="serverAddress"/>.
+    /// Initializes a new instance of the <see cref="JudgeCalibrationAdminStore"/> class, over the shared
+    /// <see cref="IRouterChannelProvider"/> every admin client and store talks through (web GUI
+    /// migration plan Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
     /// </summary>
+    /// <param name="channelProvider">Supplies the shared call invoker this store's client is constructed over.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">
-    /// The proxy's TLS gRPC endpoint; defaults to
-    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
-    /// </param>
     public JudgeCalibrationAdminStore(
-        ILogger<JudgeCalibrationAdminStore>? logger = null,
-        string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(client: new JudgeCalibrationAdminClient(serverAddress), logger: logger, ownsClient: true)
+        IRouterChannelProvider channelProvider,
+        ILogger<JudgeCalibrationAdminStore>? logger = null)
+        : base(client: new JudgeCalibrationAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
     {
-        ServerAddress = serverAddress;
+        ServerAddress = channelProvider.ServerAddress;
     }
 
     /// <summary>

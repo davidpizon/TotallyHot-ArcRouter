@@ -4,6 +4,7 @@ using Google.Protobuf.WellKnownTypes;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
@@ -60,8 +61,8 @@ public sealed class GovernanceModelCardsTests
         {
             // Unreachable addresses - the store's own LoadAsync/LoadRollupAsync resolve to their
             // "unreachable" branch, exercising the empty-state markup.
-            ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59987"));
-            ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59987"));
+            ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59987")));
+            ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59987")));
         }
 
         return ctx;

@@ -54,23 +54,25 @@ public sealed class RoutingGateStore : IAsyncDisposable
     private bool _wasUsable;
 
     /// <summary>Initializes a new instance of the <see cref="RoutingGateStore"/> class and starts polling.</summary>
-    /// <param name="logger">Optional logger.</param>
-    /// <param name="serverAddress">
-    /// The proxy's TLS gRPC endpoint; defaults to
-    /// <see cref="TelemetryChannelFactory.DefaultServerAddress"/>.
+    /// <param name="channelProvider">
+    /// Supplies the shared call invoker this store's client is constructed over (web GUI migration plan
+    /// Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
     /// </param>
+    /// <param name="logger">Optional logger.</param>
     /// <param name="pollInterval">
     /// How often to re-poll the router; defaults to <see cref="DefaultPollInterval"/>. Overridable
     /// so a test can assert on the poll loop without waiting out the real cadence.
     /// </param>
     public RoutingGateStore(
+        IRouterChannelProvider channelProvider,
         ILogger<RoutingGateStore>? logger = null,
-        string serverAddress = TelemetryChannelFactory.DefaultServerAddress,
         TimeSpan? pollInterval = null)
     {
+        ArgumentNullException.ThrowIfNull(channelProvider);
+
         _logger = logger;
         _pollInterval = pollInterval ?? DefaultPollInterval;
-        var client = new RoutingGateAdminClient(serverAddress);
+        var client = new RoutingGateAdminClient(channelProvider.CallInvoker);
         _client = client;
         _ownedClient = client;
         _pollTask = PollLoopAsync(_pollCts.Token);

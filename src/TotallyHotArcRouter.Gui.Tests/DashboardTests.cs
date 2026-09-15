@@ -18,15 +18,16 @@ public sealed class DashboardTests
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new LiveDataStore(serverAddress: "https://127.0.0.1:59996"));
+        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996")));
         ctx.Services.AddSingleton(persistedSessionStore ??
-                                  new PersistedSessionStore(serverAddress: "https://127.0.0.1:59996"));
-        ctx.Services.AddSingleton(new ProviderAdminStore(managementAddress: "http://127.0.0.1:59994"));
-        ctx.Services.AddSingleton(new UsageStore(managementAddress: "http://127.0.0.1:59993"));
-        ctx.Services.AddSingleton(new RouterSettingsAdminStore(serverAddress: "https://127.0.0.1:59995"));
-        ctx.Services.AddSingleton(new UpdateStore(serverAddress: "https://127.0.0.1:59992"));
-        ctx.Services.AddSingleton(new CostReconciliationStore(serverAddress: "https://127.0.0.1:59991"));
+                                  new PersistedSessionStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996")));
+        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59994")));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59993")));
+        ctx.Services.AddSingleton(new RouterSettingsAdminStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59995")));
+        ctx.Services.AddSingleton(new UpdateStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59992")));
+        ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59991")));
         ctx.Services.AddSingleton(new ToastService());
+        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         var settingsPath = Path.Combine(path1: Path.GetTempPath(), path2: Guid.NewGuid() + ".json");
         ctx.Services.AddSingleton<IGuiSettingsStore>(new GuiSettingsStore(settingsPath));
         ctx.Services.AddSingleton(_ => new TempFileCleanup(settingsPath));
