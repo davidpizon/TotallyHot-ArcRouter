@@ -1096,9 +1096,11 @@ two exit-criteria items are deferred until P9's installer work exists to exercis
   router instance already listening on 5001-5004 (the same instance this session's earlier phases had been
   using) and a real discovery file on disk, `TotallyHotArcRouter.Tray.exe` was launched directly. `netstat`
   confirmed an `ESTABLISHED` TCP connection from the tray's process to `[::1]:5004` - the router's web
-  port - proving `NativeRouterChannelProvider`/`TelemetryChannelFactory` actually completed a TLS
-  handshake against the P7 local-CA leaf and the routing-gate poll loop is live, not just constructed.
-  The process stayed alive and stable (no crash, growing-then-flat memory) for the duration of the test.
+  port - proving `TelemetryChannelFactory` actually completed a TLS handshake against the P7 local-CA leaf
+  and the routing-gate poll loop is live, not just constructed. The process stayed alive and stable (no
+  crash, growing-then-flat memory) for the duration of the test. (This first pass predates the auth-scheme
+  addendum below and used the token header; the addendum's own verification repeats this against the
+  shipped cookie scheme.)
 - **The single-instance mutex verified for real**: launching a second `TotallyHotArcRouter.Tray.exe` while
   the first was still running exited immediately with code 0 and left exactly one tray process running,
   confirmed via `tasklist`.
@@ -1106,19 +1108,49 @@ two exit-criteria items are deferred until P9's installer work exists to exercis
   warnings, 0 errors. All 8 test executables in the solution, run directly: 3975 tests total, 0 failed, 2
   skipped (pre-existing, unrelated) - 38 of those in the new `Tray.Core.Tests`, the rest unchanged from P7.
 
-**Deviation from the plan's literal wording:**
-- **The tray authenticates over the existing `x-admin-token` gRPC header
-  (`TelemetryAuthClientInterceptor`/`management-token.txt`), not a `CookieContainer`.** The plan's P8
-  bullet names "native gRPC over HTTP/2 to the web port with a `CookieContainer`", which describes
-  ADR-0012's browser-facing loopback-session-cookie design - but ADR-0012 is still **Proposed**, and
-  today's only implemented native-client auth path (what `NativeRouterChannelProvider`/
-  `RoutingGateAdminClient`/`UpdateAdminClient` already do for the MAUI GUI) is the token header, read
-  fresh from `management-token.txt` on every call. Building a second, parallel auth mechanism for the tray
-  alone - one ADR-0012 doesn't yet specify for native clients even in its proposed form - was judged out of
-  scope for a phase whose deliverable is the tray shell, not a new auth design. `Tray.Core` reuses the
-  identical, already-shipped `TelemetryChannelFactory.Authenticated`/`TelemetryAuthClientInterceptor` path
-  the MAUI GUI uses today, unchanged. If ADR-0012 is later accepted with a native-client cookie story, the
-  tray's auth wiring is a contained, one-file change (`TrayApplicationContext`'s channel construction).
+**Addendum 2026-09-15: swapped to the session-cookie scheme, matching the plan's literal wording after all.**
+The paragraph above originally shipped as a deviation: the tray used the shared `x-admin-token` header
+(`TelemetryAuthClientInterceptor`), reasoning that ADR-0012's cookie design was still Proposed and had no
+native-client story. On review, that reasoning undersold what already existed: `TelemetryAuthInterceptor`
+(server-side) already accepted a session cookie as an alternative to the token
+(`TryReadSessionCookie`/`ManagementSessionCookie.Read` off `ServerCallContext.GetHttpContext()`), and
+`Grpc.Net.Client`'s `HttpHandler` option accepts an ordinary `HttpClientHandler`/`CookieContainer` over
+native HTTP/2 exactly as well as it does over gRPC-Web - the cookie scheme was never actually
+browser-only, just previously only *exercised* by a browser-shaped test. Since the tray always runs
+loopback, it qualifies for ADR-0012's fast path (`POST /auth/session`, no credential presented, no
+`management-token.txt` file dependency) for free. This was reworked before commit:
+- **`TelemetryChannelFactory.CreateSessionAuthenticatedAsync`** (new, `Gui.Telemetry` - additive, the
+  existing `Create`/`Authenticated` pair the MAUI GUI still uses is untouched): issues a session via
+  `POST {serverAddress}/auth/session` over an `HttpClientHandler` with `UseCookies`/`CookieContainer` set,
+  then reuses that same handler as the returned `GrpcChannel`'s transport. No client-side interceptor is
+  needed - the cookie rides the ordinary `Cookie` header the interceptor already reads server-side.
+- **`ISessionRouterConnector`/`SessionRouterConnector`/`SessionRouterChannelProvider`** (new, `Tray.Core`):
+  the `IRouterChannelProvider` this produces.
+- **`RouterConnectionSupervisor`** (new, `Tray.Core`, 91.5% covered) - the piece the token scheme never
+  needed: a session cookie is only as durable as the router process (ADR-0012: "a restart means silent
+  re-issue on loopback"), so a router restart while the tray keeps running would otherwise strand it
+  authenticating against a ticket the router no longer recognizes, polling `Rejected` forever. The
+  supervisor runs one background loop for the tray's lifetime, reconnecting (fresh session, fresh
+  `RoutingGateMonitor`) whenever the current monitor is missing or unusable, and never lets `Monitor`
+  regress to `null` once it has succeeded once (the new monitor replaces the old only after connecting
+  successfully). 4 new tests cover first-connect, retry-on-failure, no-regression-on-a-failed-reconnect,
+  and reconnect-on-rejection via a fake `ISessionRouterConnector`.
+- `TrayApplicationContext` no longer holds a persistent `TrayUpdateCoordinator`/`NativeRouterChannelProvider`;
+  "Install update" builds a fresh coordinator from `_supervisor.Provider.CallInvoker` on each click, since a
+  held one would go stale across a reconnect the same way a held `RoutingGateMonitor` would.
+- **Verified for real, a second time**: with the same live router instance, `curl -X POST
+  https://localhost:5004/auth/session -k -c cookies.txt` confirmed the server issues the exact
+  `__Host-arcrouter-session` cookie shape production code expects (204, `Set-Cookie` present). Launching
+  the rebuilt `TotallyHotArcRouter.Tray.exe` against that same router showed two `ESTABLISHED` TCP
+  connections to the web port (the session `POST` plus the gRPC channel reusing the same handler), and the
+  router's own log file - which logs every `Unauthenticated` gRPC rejection at `[INF]` level (confirmed
+  elsewhere in this session's test runs) - recorded zero such errors for the whole window the tray was
+  connected, where the pre-swap token scheme would have looked identical if it had also worked. Full
+  solution rebuild and all 8 test executables re-run clean: 3979 tests, 0 failed.
+- `TotallyHotArcRouter.Tray.Core.dll` line coverage after the swap: **83.0%** (still above this phase's
+  ≥80% bar) - `SessionRouterConnector`/`SessionRouterChannelProvider` themselves are 0%-covered (thin
+  wrappers around a real network call, better exercised live than mocked - see the manual verification
+  above), pulling down what would otherwise be a higher number.
 
 **Deferred (explicit gaps, not silently dropped):**
 1. **The manual "stop service → balloon" and "Install update → UAC → upgrade" exit-criteria scripts were

@@ -15,10 +15,11 @@ namespace TotallyHot.ArcRouter.Tray;
 /// </summary>
 /// <remarks>
 /// Every formatting/classification decision (the status caption, the balloon text) is delegated to
-/// <see cref="TrayStatusPresenter"/>; every router interaction is delegated to
-/// <see cref="RoutingGateMonitor"/>/<see cref="TrayUpdateCoordinator"/> - this class is deliberately thin
-/// glue, matching AGENTS.md's <c>[ExcludeFromCodeCoverage]</c> convention for platform shells whose logic
-/// has already been extracted and tested elsewhere.
+/// <see cref="TrayStatusPresenter"/>; every router connection/reconnection decision is delegated to
+/// <see cref="RouterConnectionSupervisor"/>; every routing-gate/update interaction goes through the
+/// monitor/coordinator it hands back - this class is deliberately thin glue, matching AGENTS.md's
+/// <c>[ExcludeFromCodeCoverage]</c> convention for platform shells whose logic has already been extracted
+/// and tested elsewhere.
 /// </remarks>
 [ExcludeFromCodeCoverage]
 public sealed class TrayApplicationContext : ApplicationContext
@@ -27,43 +28,34 @@ public sealed class TrayApplicationContext : ApplicationContext
     private static readonly TimeSpan ServiceStatusPollInterval = TimeSpan.FromSeconds(3);
 
     private readonly ToolStripMenuItem _installUpdateItem;
-    private readonly NativeRouterChannelProvider? _channelProvider;
-    private readonly IMsiUpdateApplier? _msiUpdateApplier;
+    private readonly IMsiUpdateApplier _msiUpdateApplier;
     private readonly NotifyIcon _notifyIcon;
-    private readonly RoutingGateMonitor? _routingGateMonitor;
     private readonly ToolStripMenuItem _routingToggleItem;
     private readonly ToolStripMenuItem _statusCaptionItem;
     private readonly System.Windows.Forms.Timer _statusTimer;
-    private readonly TrayUpdateCoordinator? _updateCoordinator;
+    private readonly RouterConnectionSupervisor _supervisor;
 
     /// <summary>
-    /// Builds the tray icon and starts its background pollers. If the router has never started (no
-    /// discovery file yet), the icon still appears - the menu just reports the router as unreachable
-    /// rather than the whole tray failing to launch.
+    /// Builds the tray icon and starts its background connection supervisor. If the router has never
+    /// started (no discovery file yet), the icon still appears - the menu just reports the router as
+    /// unreachable, and <see cref="RouterConnectionSupervisor"/> keeps retrying, rather than the whole
+    /// tray failing to launch.
     /// </summary>
     public TrayApplicationContext()
     {
         var discovery = TrayDiscoveryReader.TryRead();
         var serverAddress = discovery?.WebUrl ?? TelemetryChannelFactory.DefaultServerAddress;
 
-        try
-        {
-            _channelProvider = new NativeRouterChannelProvider(serverAddress);
-            _routingGateMonitor = new RoutingGateMonitor(_channelProvider);
-            _routingGateMonitor.BecameUnusable += OnRoutingGateBecameUnusable;
+        // ADR-0012 loopback session cookie, not the shared x-admin-token file: the tray always runs on the
+        // same machine as the router, so it qualifies for the loopback fast path with no credential of its
+        // own to manage - see RouterConnectionSupervisor's remarks for why a *supervisor* (not a one-shot
+        // connect) is needed: the session is only as durable as the router process, so a router restart
+        // needs to be noticed and re-authenticated automatically.
+        _supervisor = new RouterConnectionSupervisor(new SessionRouterConnector(), serverAddress);
+        _supervisor.Reconnected += OnReconnected;
 
-            _msiUpdateApplier = new MsiUpdateApplier(httpClient: new HttpClient(),
-                logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<MsiUpdateApplier>.Instance);
-            _updateCoordinator = new TrayUpdateCoordinator(
-                client: new UpdateAdminClient(_channelProvider.CallInvoker),
-                applier: _msiUpdateApplier,
-                exitApplication: ExitApplication);
-        }
-        catch (UriFormatException)
-        {
-            // A malformed WebUrl in the discovery file (a stale/corrupt write mid-crash) - fall back to
-            // an unreachable-router tray rather than crash the whole process on startup.
-        }
+        _msiUpdateApplier = new MsiUpdateApplier(httpClient: new HttpClient(),
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<MsiUpdateApplier>.Instance);
 
         _statusCaptionItem = new ToolStripMenuItem("Router: not responding") { Enabled = false };
         _routingToggleItem = new ToolStripMenuItem("Routing Unavailable") { Enabled = false };
@@ -140,9 +132,10 @@ public sealed class TrayApplicationContext : ApplicationContext
     /// </summary>
     private void RefreshMenuState()
     {
+        var monitor = _supervisor.Monitor;
         var serviceStatus = TryGetServiceStatus();
-        var connectionState = _routingGateMonitor?.ConnectionState ?? RouterConnectionState.Unreachable;
-        var isUsable = _routingGateMonitor?.IsUsable ?? false;
+        var connectionState = monitor?.ConnectionState ?? RouterConnectionState.Unreachable;
+        var isUsable = monitor?.IsUsable ?? false;
 
         _statusCaptionItem.Visible = !isUsable;
         _statusCaptionItem.Text = TrayStatusPresenter.BuildStatusLabel(serviceStatus, connectionState);
@@ -150,13 +143,26 @@ public sealed class TrayApplicationContext : ApplicationContext
         if (isUsable)
         {
             _routingToggleItem.Enabled = true;
-            _routingToggleItem.Text = _routingGateMonitor!.IsEnabled ? "Disable Routing" : "Enable Routing";
+            _routingToggleItem.Text = monitor!.IsEnabled ? "Disable Routing" : "Enable Routing";
         }
         else
         {
             _routingToggleItem.Enabled = false;
             _routingToggleItem.Text = "Routing Unavailable";
         }
+    }
+
+    /// <summary>
+    /// Re-subscribes <see cref="OnRoutingGateBecameUnusable"/> to the fresh
+    /// <see cref="RouterConnectionSupervisor.Monitor"/> a reconnect just installed - the previous
+    /// instance's own subscription died with it - and refreshes the menu immediately rather than waiting
+    /// for the next timer tick, so a reconnect after a router restart is reflected right away.
+    /// </summary>
+    private void OnReconnected()
+    {
+        if (_supervisor.Monitor is { } monitor) monitor.BecameUnusable += OnRoutingGateBecameUnusable;
+
+        RefreshMenuState();
     }
 
     /// <summary>
@@ -170,7 +176,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void OnRoutingGateBecameUnusable()
     {
         var serviceStatus = TryGetServiceStatus();
-        var connectionState = _routingGateMonitor?.ConnectionState ?? RouterConnectionState.Unreachable;
+        var connectionState = _supervisor.Monitor?.ConnectionState ?? RouterConnectionState.Unreachable;
 
         _notifyIcon.ShowBalloonTip(timeout: 10_000, tipTitle: "TotallyHot Arc Router",
             tipText: TrayStatusPresenter.BuildBalloonMessage(serviceStatus, connectionState),
@@ -187,18 +193,19 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void ToggleRouting()
     {
-        if (_routingGateMonitor is null || !_routingGateMonitor.IsUsable) return;
+        var monitor = _supervisor.Monitor;
+        if (monitor is null || !monitor.IsUsable) return;
 
-        var enable = !_routingGateMonitor.IsEnabled;
-        _ = ToggleRoutingAsync(enable);
+        var enable = !monitor.IsEnabled;
+        _ = ToggleRoutingAsync(monitor, enable);
     }
 
-    private async Task ToggleRoutingAsync(bool enable)
+    private async Task ToggleRoutingAsync(RoutingGateMonitor monitor, bool enable)
     {
         try
         {
-            if (enable) await _routingGateMonitor!.EnableAsync().ConfigureAwait(true);
-            else await _routingGateMonitor!.DisableAsync().ConfigureAwait(true);
+            if (enable) await monitor.EnableAsync().ConfigureAwait(true);
+            else await monitor.DisableAsync().ConfigureAwait(true);
         }
         catch (GrpcAdminException)
         {
@@ -209,13 +216,23 @@ public sealed class TrayApplicationContext : ApplicationContext
         RefreshMenuState();
     }
 
+    /// <summary>
+    /// Builds a fresh <see cref="TrayUpdateCoordinator"/> over the supervisor's current connection each
+    /// time this runs, rather than holding one for the tray's whole lifetime - the coordinator's
+    /// <see cref="UpdateAdminClient"/> is bound to one specific call invoker, which goes stale the moment
+    /// <see cref="RouterConnectionSupervisor"/> reconnects (a router restart, most likely - the same event
+    /// that invalidates the session cookie an old coordinator's calls would otherwise keep presenting).
+    /// </summary>
     private async Task ApplyUpdateAsync()
     {
-        if (_updateCoordinator is null) return;
+        if (_supervisor.Provider is not { } provider) return;
+
+        var coordinator = new TrayUpdateCoordinator(client: new UpdateAdminClient(provider.CallInvoker),
+            applier: _msiUpdateApplier, exitApplication: ExitApplication);
 
         try
         {
-            var status = await _updateCoordinator.CheckNowAsync().ConfigureAwait(true);
+            var status = await coordinator.CheckNowAsync().ConfigureAwait(true);
             if (!status.UpdateAvailable) return;
 
             var confirmed = MessageBox.Show(
@@ -224,7 +241,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 icon: MessageBoxIcon.Question);
             if (confirmed != DialogResult.Yes) return;
 
-            await _updateCoordinator.ApplyAsync().ConfigureAwait(true);
+            await coordinator.ApplyAsync().ConfigureAwait(true);
         }
         catch (GrpcAdminException ex)
         {
@@ -238,8 +255,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _statusTimer.Stop();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
-        _routingGateMonitor?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _channelProvider?.Dispose();
+        _supervisor.DisposeAsync().AsTask().GetAwaiter().GetResult();
         Application.Exit();
     }
 }
