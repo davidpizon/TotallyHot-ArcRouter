@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Serilog;
+using System.Security.Cryptography;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
@@ -62,8 +63,39 @@ public static class Program
             // docs/router/geval-shadow-scoring-plan.md Phase G2: headless judge-calibration report
             // trigger, stripped for the same reason - it must never reach the command-line configuration
             // provider as a stray "run-judge-calibration-report" key.
-            var (runJudgeCalibrationReport, remainingArgs) =
+            var (runJudgeCalibrationReport, afterJudgeCalibrationFlag) =
                 ExtractFlag(args: afterGraderReliabilityFlag, flagName: "--run-judge-calibration-report");
+
+            // Web GUI migration plan Phase P7 (ADR-0013): prints the router's local CA's public
+            // certificate path so an operator or install script can hand it to a browser/OS trust
+            // store. Host-independent (LocalCertificateAuthority resolves its own default paths), so
+            // dispatched before CreateHostBuilder even runs, unlike the retrain/sync flags above - no
+            // reason to pay for loading the price catalog and embedding model just to export a
+            // certificate.
+            var (exportCa, afterExportCaFlag) = ExtractFlag(args: afterJudgeCalibrationFlag, flagName: "--export-ca");
+            if (exportCa)
+            {
+                RunExportCa();
+                return;
+            }
+
+            // Adds the local CA to this OS's trust store - see ICertificateTrustStore's remarks on the
+            // elevation each platform's implementation requires. Also host-independent.
+            var (installCertificate, afterInstallCertificateFlag) =
+                ExtractFlag(args: afterExportCaFlag, flagName: "--install-certificate");
+            if (installCertificate)
+            {
+                RunInstallCertificate();
+                return;
+            }
+
+            var (uninstallCertificate, remainingArgs) =
+                ExtractFlag(args: afterInstallCertificateFlag, flagName: "--uninstall-certificate");
+            if (uninstallCertificate)
+            {
+                RunUninstallCertificate();
+                return;
+            }
 
             // `using` (not a bare local) so the sync/retrain paths below, which return without ever calling
             // RunAsync, still dispose the container and everything singleton-scoped in it - SQLite
@@ -238,6 +270,91 @@ public static class Program
         var remaining = args.Where(arg =>
             !string.Equals(a: arg, b: flagName, comparisonType: StringComparison.OrdinalIgnoreCase)).ToArray();
         return (true, remaining);
+    }
+
+    /// <summary>
+    /// Writes the router's local CA's public certificate (PEM, no private key) to the machine-shared
+    /// data directory and prints its path - the router's <c>--export-ca</c> flag (web GUI migration plan
+    /// Phase P7). Generates the CA first if none exists yet, the same as starting the router normally
+    /// would. Sets a non-zero <see cref="Environment.ExitCode"/> on failure (e.g. an unwritable data
+    /// directory), so a script invoking this headlessly can detect it.
+    /// </summary>
+    private static void RunExportCa()
+    {
+        try
+        {
+            using var ca = LocalCertificateAuthority.GetOrCreateCa();
+            var path = Path.Combine(AppDataPaths.ResolveMachineSharedDirectory(), "router-ca.crt");
+            File.WriteAllText(path: path, contents: ca.ExportCertificatePem());
+
+            Log.Information(messageTemplate: "Exported the router's local CA certificate to {Path}.", path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            Log.Error(exception: ex, messageTemplate: "Could not export the local CA certificate.");
+            Environment.ExitCode = 1;
+        }
+    }
+
+    /// <summary>
+    /// Adds the router's local CA to this OS's trust store - the router's <c>--install-certificate</c>
+    /// flag (web GUI migration plan Phase P7). Generates the CA first if none exists yet. Requires
+    /// whatever elevation this OS's <see cref="ICertificateTrustStore"/> implementation needs (an
+    /// Administrator/LocalSystem token on Windows, root on Linux/macOS) - a failure here is reported,
+    /// not swallowed, since a silent no-op would leave an operator believing the certificate is trusted
+    /// when it is not.
+    /// </summary>
+    private static void RunInstallCertificate()
+    {
+        try
+        {
+            using var ca = LocalCertificateAuthority.GetOrCreateCa();
+            ResolveCertificateTrustStore().Install(ca);
+
+            Log.Information(
+                messageTemplate: "Installed the router's local CA certificate (thumbprint {Thumbprint}) into the trust store.",
+                ca.Thumbprint);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(exception: ex, messageTemplate: "Could not install the local CA certificate.");
+            Environment.ExitCode = 1;
+        }
+    }
+
+    /// <summary>
+    /// Removes the router's local CA from this OS's trust store - the router's
+    /// <c>--uninstall-certificate</c> flag (web GUI migration plan Phase P7). A no-op (not an error) if
+    /// no CA has ever been generated, or if the trust store holds no matching entry.
+    /// </summary>
+    private static void RunUninstallCertificate()
+    {
+        try
+        {
+            using var ca = LocalCertificateAuthority.GetOrCreateCa();
+            ResolveCertificateTrustStore().Uninstall(ca);
+
+            Log.Information(
+                messageTemplate: "Removed the router's local CA certificate (thumbprint {Thumbprint}) from the trust store.",
+                ca.Thumbprint);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(exception: ex, messageTemplate: "Could not uninstall the local CA certificate.");
+            Environment.ExitCode = 1;
+        }
+    }
+
+    /// <summary>Picks the OS-appropriate <see cref="ICertificateTrustStore"/> - see each implementation's own remarks.</summary>
+    /// <exception cref="PlatformNotSupportedException">The current OS is none of Windows, Linux, or macOS.</exception>
+    private static ICertificateTrustStore ResolveCertificateTrustStore()
+    {
+        if (OperatingSystem.IsWindows()) return new WindowsCertificateTrustStore();
+        if (OperatingSystem.IsLinux()) return new LinuxCertificateTrustStore();
+        if (OperatingSystem.IsMacOS()) return new MacCertificateTrustStore();
+
+        throw new PlatformNotSupportedException(
+            "No certificate trust store integration exists for this operating system.");
     }
 
     /// <summary>

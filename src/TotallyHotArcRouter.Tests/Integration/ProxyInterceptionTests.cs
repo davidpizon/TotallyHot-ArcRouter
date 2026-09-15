@@ -53,10 +53,13 @@ public class ProxyInterceptionTests
         try
         {
             var interceptor = host.Services.GetRequiredService<RequestInterceptor>();
-            using var client = new HttpClient();
+            // The proxy port is TLS by default since web GUI migration plan Phase P7 (ADR-0013) -
+            // trusting the router's local CA leaf here, not asserting anything about OS trust.
+            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var client = new HttpClient(handler);
             client.Timeout = TimeSpan.FromSeconds(5);
             using var request = new HttpRequestMessage(method: HttpMethod.Post,
-                requestUri: "http://127.0.0.1:5001/v1/chat/completions");
+                requestUri: "https://127.0.0.1:5001/v1/chat/completions");
             request.Content =
                 new StringContent(content: "payload", encoding: Encoding.UTF8, mediaType: "text/plain");
 

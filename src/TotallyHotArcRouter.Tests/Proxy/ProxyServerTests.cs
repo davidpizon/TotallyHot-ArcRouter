@@ -30,11 +30,10 @@ public class ProxyServerTests
 
         await server.StartAsync(TestContext.Current.CancellationToken);
 
-        // Two listeners now (plain HTTP for LLM-forwarding, HTTPS for gRPC) - pick the plain HTTP one,
-        // since that's what this test's plain TcpClient connection exercises.
-        var boundPort =
-            new Uri(server.Addresses.Single(a =>
-                a.StartsWith(value: "http://", comparisonType: StringComparison.Ordinal))).Port;
+        // Two listeners now, both HTTPS since Phase P7 (ADR-0013) - either one proves the lifecycle
+        // this test cares about (starts, accepts a connection, stops); this is a raw TCP connect with
+        // no TLS handshake, so which listener answers doesn't matter.
+        var boundPort = new Uri(server.Addresses.First()).Port;
 
         using var tcpClient = new TcpClient();
         await tcpClient.ConnectAsync(host: "127.0.0.1", port: boundPort,
@@ -79,9 +78,7 @@ public class ProxyServerTests
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
         {
-            var boundPort =
-                new Uri(server.Addresses.Single(a =>
-                    a.StartsWith(value: "http://", comparisonType: StringComparison.Ordinal))).Port;
+            var boundPort = new Uri(server.Addresses.First()).Port;
 
             using var tcpClient = new TcpClient();
             await tcpClient.ConnectAsync(host: "127.0.0.1", port: boundPort,

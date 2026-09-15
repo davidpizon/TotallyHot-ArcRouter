@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>
@@ -172,5 +174,40 @@ internal static class ProviderUrlBuilder
         return string.IsNullOrEmpty(path)
             ? []
             : path.Split('/', options: StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="baseUrl"/> is an unencrypted (<c>http://</c>) upstream reaching
+    /// somewhere other than this machine - the D6b warning condition (web GUI migration plan Phase P7).
+    /// </summary>
+    /// <remarks>
+    /// A loopback <c>http://</c> base (local Ollama on <c>:11434</c>, LM Studio on <c>:1234</c>) is
+    /// deliberately <em>not</em> flagged: those servers only speak plain HTTP, traffic to them never
+    /// leaves the machine, and warning on every default local install would train operators to ignore
+    /// the warning rather than act on it. An unparsable <paramref name="baseUrl"/> is not flagged either
+    /// - provider validation elsewhere in <see cref="Proxy.Management.ManagementFacade"/> is responsible
+    /// for rejecting a malformed base URL; this classifier only judges shape it can actually parse.
+    /// </remarks>
+    /// <param name="baseUrl">The provider's configured base URL.</param>
+    public static bool IsUnencryptedNonLoopbackUpstream(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, uriKind: UriKind.Absolute, out var uri)) return false;
+        if (!string.Equals(a: uri.Scheme, b: Uri.UriSchemeHttp, comparisonType: StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return !IsLoopbackHost(uri.Host);
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="host"/> - a URI's host component, not a socket's remote address -
+    /// names this machine: the literal <c>localhost</c> (case-insensitive), or an IPv4/IPv6 loopback
+    /// address in any of the forms a provider base URL might carry (<c>127.0.0.1</c>, <c>::1</c>, a
+    /// bracketed <c>[::1]</c> already stripped of its brackets by <see cref="Uri.Host"/>).
+    /// </summary>
+    private static bool IsLoopbackHost(string host)
+    {
+        if (string.Equals(a: host, b: "localhost", comparisonType: StringComparison.OrdinalIgnoreCase)) return true;
+
+        return IPAddress.TryParse(ipString: host, address: out var address) && IPAddress.IsLoopback(address);
     }
 }

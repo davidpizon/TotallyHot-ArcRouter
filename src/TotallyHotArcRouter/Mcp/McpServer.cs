@@ -17,9 +17,9 @@ namespace TotallyHot.ArcRouter.Mcp;
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>'s dedicated TLS gRPC listener - that exposes
 /// <see cref="ProviderMcpTools"/>, <see cref="PriceSourceMcpTools"/>, <see cref="TelemetryMcpTools"/>, and
 /// <see cref="BenchmarkDataMcpTools"/>
-/// over MCP's Streamable-HTTP transport on its own loopback port. Reuses
-/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s self-signed <c>CN=localhost</c>
-/// certificate (one trust story for every TLS management port), and gates every request behind
+/// over MCP's Streamable-HTTP transport on its own loopback port. Presents a leaf issued by
+/// <see cref="TotallyHot.ArcRouter.Telemetry.LocalCertificateAuthority"/> - the same locally-trusted CA
+/// every other TLS listener uses (web GUI migration plan Phase P7; ADR-0013) - and gates every request behind
 /// <see cref="McpBearerAuthMiddleware"/> using the shared, rotatable <see cref="IManagementTokenProvider"/>.
 /// </summary>
 /// <remarks>
@@ -128,12 +128,14 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                     // Letting this throw fails the whole McpServer construction, which McpHostedService's
                     // own try/catch logs and swallows at the top level - the same "MCP is non-essential,
                     // don't fail the process" posture, just enforced one level up.
-                    var certificate = TelemetryTlsCertificate.GetOrCreate();
+                    LocalCertificateAuthority.GetOrCreateLeaf();
                     KestrelBindAddress.Listen(options: options, bindAddress: bindAddress, port: port,
                         configure: listenOptions =>
                         {
                             listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
-                            listenOptions.UseHttps(certificate);
+                            listenOptions.UseHttps(httpsOptions =>
+                                httpsOptions.ServerCertificateSelector =
+                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
                         });
                 });
 

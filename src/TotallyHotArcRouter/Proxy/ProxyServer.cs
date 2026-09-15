@@ -188,30 +188,51 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     options.Limits.Http2.KeepAlivePingDelay = TimeSpan.FromSeconds(30);
                     options.Limits.Http2.KeepAlivePingTimeout = TimeSpan.FromSeconds(10);
 
-                    // Plain HTTP/1.1 only - this port is exclusively LLM-forwarding proxy traffic and
-                    // /v1/models, both HTTP/1.1 clients today. gRPC no longer shares this port (see grpcPort
-                    // below) - see docs/router/grpc-migration.md's "Transport" section for why: unencrypted
-                    // HTTP/2 (h2c) turned out to be unreliable on at least one managed/corporate machine (every
-                    // connection failed with the HTTP/2-level HTTP_1_1_REQUIRED error, consistent with
-                    // something on the network path not understanding or mangling the h2c preface), so the
-                    // gRPC endpoint moved to its own dedicated TLS port instead of trying to fix h2c itself.
-                    // BindAddress lets this move off loopback for a Docker deployment (migration plan D6a's
-                    // sibling decision); see KestrelBindAddress's remarks for the ephemeral-port special case.
-                    // Tagged as a proxy-port connection (see TagAsProxyPort) so the pipeline below routes it
-                    // straight to proxyMiddleware and never through gRPC/admin endpoint routing.
+                    // The router's own name-constrained local CA (ADR-0013, web GUI migration plan Phase
+                    // P7) issues every leaf below. Resolved once per Kestrel configuration (not once per
+                    // connection) purely to fail loudly and immediately if certificate generation is
+                    // fundamentally broken (e.g. the data directory is unwritable) - the leaf itself is
+                    // still re-resolved on every TLS handshake via ServerCertificateSelector below, which
+                    // is the actual hot-swap mechanism: LocalCertificateAuthority.GetOrCreateLeaf()
+                    // transparently mints and persists a replacement once the cached leaf enters its
+                    // renewal window, with no restart and no re-trust needed by an already-trusting
+                    // client. Deliberately not caught here the way the old TelemetryTlsCertificate call
+                    // was: with the LLM proxy port now also TLS-only by default, a certificate failure
+                    // means the router cannot serve its core purpose at all, not just that telemetry is
+                    // unavailable - so this now fails ProxyServer construction outright rather than
+                    // silently degrading.
+                    LocalCertificateAuthority.GetOrCreateLeaf();
+
+                    // The primary LLM-forwarding proxy port (Phase P7): HTTPS by default (D6), with the
+                    // same shared leaf every other listener presents - ADR-0013's whole point is one
+                    // trusted root instead of per-port trust. Http1AndHttp2: existing HTTP/1.1 clients
+                    // are unaffected, and TLS ALPN (not h2c) is exactly what made the dedicated gRPC port
+                    // reliable in the first place, so there's no reason to withhold HTTP/2 here now that
+                    // this port is TLS too. BindAddress lets this move off loopback for a Docker
+                    // deployment (migration plan D6a's sibling decision); see KestrelBindAddress's
+                    // remarks for the ephemeral-port special case. Tagged as a proxy-port connection (see
+                    // TagAsProxyPort) so the pipeline below routes it straight to proxyMiddleware and
+                    // never through gRPC/admin endpoint routing.
                     KestrelBindAddress.Listen(options: options, bindAddress: listener.BindAddress, port: port,
-                        configure: TagAsProxyPort);
+                        configure: listenOptions =>
+                        {
+                            listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
+                            listenOptions.UseHttps(httpsOptions =>
+                                httpsOptions.ServerCertificateSelector =
+                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
+                            TagAsProxyPort(listenOptions);
+                        });
 
                     // The opt-in plain-HTTP LLM-proxy listener (D6a): an escape hatch for tools that
-                    // ignore the OS trust store and cannot be pointed at the router's future local CA
-                    // (Phase P7). Always loopback, regardless of the primary port's BindAddress - see
+                    // ignore the OS trust store and cannot be pointed at the router's local CA. Always
+                    // loopback, regardless of the primary port's BindAddress - see
                     // PlainHttpListenerOptions' remarks for why it has no bind-address setting of its own.
                     // Tagged as a proxy-port connection, same as the primary port above.
                     if (listener.PlainHttp.Enabled)
                     {
                         logger.LogWarning(
                             message:
-                            "The opt-in plain-HTTP LLM-proxy listener is enabled on port {Port}. Traffic to it is unencrypted (loopback-only, but plaintext on the wire to that first hop). Prefer the HTTPS proxy port unless your client cannot trust a custom CA.",
+                            "The opt-in plain-HTTP LLM-proxy listener is enabled on port {Port}. Traffic to it is unencrypted (loopback-only, but plaintext on the wire to that first hop). Prefer the HTTPS proxy port unless your client cannot trust the router's local CA.",
                             listener.PlainHttp.Port);
                         KestrelBindAddress.Listen(options: options, bindAddress: "loopback",
                             port: listener.PlainHttp.Port,
@@ -224,42 +245,32 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 
                     // The dedicated TLS/gRPC endpoint. HTTP/2 is negotiated via standard TLS ALPN here, not
                     // h2c prior-knowledge - the whole point of this port existing is to avoid the h2c
-                    // reliability problem above. TelemetryTlsCertificate persists a self-signed cert per
-                    // machine/user so the client doesn't need to re-trust a new one on every proxy restart.
-                    // Certificate initialization is non-essential (telemetry is not critical to proxy operation),
-                    // so catch any exceptions and skip binding the gRPC/web ports if the cert fails to
-                    // load/generate - both share the one certificate. Always loopback, independent of
-                    // BindAddress - see ProxyListenerOptions.GrpcPort's remarks: it is being retired
-                    // (migration plan Phase P9), not extended.
-                    try
-                    {
-                        var certificate = TelemetryTlsCertificate.GetOrCreate();
-                        KestrelBindAddress.Listen(options: options, bindAddress: "loopback", port: grpcPort,
-                            configure: listenOptions =>
-                            {
-                                listenOptions.Protocols = HttpProtocols.Http2;
-                                listenOptions.UseHttps(certificate);
-                            });
+                    // reliability problem the proxy port itself now also avoids by being TLS. Always
+                    // loopback, independent of BindAddress - see ProxyListenerOptions.GrpcPort's remarks:
+                    // it is being retired (migration plan Phase P9), not extended.
+                    KestrelBindAddress.Listen(options: options, bindAddress: "loopback", port: grpcPort,
+                        configure: listenOptions =>
+                        {
+                            listenOptions.Protocols = HttpProtocols.Http2;
+                            listenOptions.UseHttps(httpsOptions =>
+                                httpsOptions.ServerCertificateSelector =
+                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
+                        });
 
-                        // The web GUI/gRPC-Web endpoint (Phase P2). Http1AndHttp2 (not Http2-only like the
-                        // native gRPC port above): browsers negotiate HTTP/2 via ALPN where they can, but
-                        // gRPC-Web itself works equally over HTTP/1.1, and the eventual WASM static assets
-                        // (Phase P6) are ordinary HTTP/1.1 GETs. BindAddress lets this move off loopback for
-                        // Docker, same as the primary proxy port.
-                        KestrelBindAddress.Listen(options: options, bindAddress: webInterface.BindAddress,
-                            port: webPort,
-                            configure: listenOptions =>
-                            {
-                                listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
-                                listenOptions.UseHttps(certificate);
-                            });
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(exception: ex,
-                            message:
-                            "Failed to initialize the telemetry gRPC/web-interface listeners (certificate generation/load failed). Telemetry and the web interface will be unavailable.");
-                    }
+                    // The web GUI/gRPC-Web endpoint (Phase P2). Http1AndHttp2 (not Http2-only like the
+                    // native gRPC port above): browsers negotiate HTTP/2 via ALPN where they can, but
+                    // gRPC-Web itself works equally over HTTP/1.1, and the WASM static assets (Phase P6)
+                    // are ordinary HTTP/1.1 GETs. BindAddress lets this move off loopback for Docker,
+                    // same as the primary proxy port.
+                    KestrelBindAddress.Listen(options: options, bindAddress: webInterface.BindAddress,
+                        port: webPort,
+                        configure: listenOptions =>
+                        {
+                            listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
+                            listenOptions.UseHttps(httpsOptions =>
+                                httpsOptions.ServerCertificateSelector =
+                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
+                        });
                 });
 
                 // gRPC and the shared broadcaster are registered into this inner host's own DI container

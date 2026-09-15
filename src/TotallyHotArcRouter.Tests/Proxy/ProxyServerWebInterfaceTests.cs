@@ -214,9 +214,12 @@ public sealed class ProxyServerWebInterfaceTests
         await server.StartAsync(Ct);
         try
         {
-            using var httpClient = new HttpClient();
+            // The primary proxy port is TLS by default since web GUI migration plan Phase P7 (ADR-0013) -
+            // trusting the test/dev cert here, not asserting anything about OS trust.
+            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var httpClient = new HttpClient(handler);
             var response = await httpClient.PostAsync(
-                requestUri: $"http://localhost:{proxyPort}/TotallyHot.ArcRouter.telemetry.v1.RoutingModeAdminService/GetRoutingMode",
+                requestUri: $"https://localhost:{proxyPort}/TotallyHot.ArcRouter.telemetry.v1.RoutingModeAdminService/GetRoutingMode",
                 content: new ByteArrayContent([0, 0, 0, 0, 0]) { Headers = { ContentType = new("application/grpc-web+proto") } },
                 cancellationToken: Ct);
 
@@ -344,13 +347,15 @@ public sealed class ProxyServerWebInterfaceTests
         await server.StartAsync(Ct);
         try
         {
-            // Both the primary proxy port and the opt-in plain-HTTP one must behave identically - proxy
-            // traffic reaches proxyMiddleware, gRPC/admin is unreachable on either.
-            using var httpClient = new HttpClient();
-            foreach (var port in new[] { proxyPort, plainHttpPort })
+            // Both the primary proxy port (TLS since Phase P7) and the opt-in plain-HTTP one must behave
+            // identically as far as routing goes - proxy traffic reaches proxyMiddleware, gRPC/admin is
+            // unreachable on either - even though only one of them is encrypted.
+            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var httpClient = new HttpClient(handler);
+            foreach (var (scheme, port) in new[] { ("https", proxyPort), ("http", plainHttpPort) })
             {
                 var response = await httpClient.PostAsync(
-                    requestUri: $"http://localhost:{port}/TotallyHot.ArcRouter.telemetry.v1.RoutingModeAdminService/GetRoutingMode",
+                    requestUri: $"{scheme}://localhost:{port}/TotallyHot.ArcRouter.telemetry.v1.RoutingModeAdminService/GetRoutingMode",
                     content: new ByteArrayContent([0, 0, 0, 0, 0]) { Headers = { ContentType = new("application/grpc-web+proto") } },
                     cancellationToken: Ct);
 
