@@ -169,6 +169,16 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                 // process was launched (dotnet run, the installed service, a test host).
                 webBuilder.UseContentRoot(AppContext.BaseDirectory);
                 webBuilder.UseSetting(key: WebHostDefaults.ApplicationKey, value: "TotallyHotArcRouter.ProxyServer");
+                // Resolves the WASM dashboard's static assets (Phase P6) from Gui.Web's generated
+                // staticwebassets manifest at development-time run (dotnet run / the built exe run
+                // directly, neither of which is a `dotnet publish` output). WebApplication.CreateBuilder
+                // calls this automatically; the older Host.CreateDefaultBuilder().ConfigureWebHostDefaults
+                // pattern this inner host uses does not, and IWebHostEnvironment.WebRootFileProvider
+                // resolves to nothing without it (confirmed empirically: omitting this line logs "The
+                // WebRootPath was not found" and 404s every dashboard asset). A published build's static
+                // web assets are physically copied into this app's own wwwroot at publish time, so this
+                // call is a no-op there, not a behavior difference between dev and published.
+                webBuilder.UseStaticWebAssets();
 
                 webBuilder.UseKestrel(options =>
                 {
@@ -380,6 +390,27 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // enables ForwardedHeaders.
                     app.UseMiddleware<WebPortRequestGuardMiddleware>(webInterface);
 
+                    // Serves the WASM dashboard's static assets (web GUI migration plan Phase P6) - the
+                    // web port only. grpcPort accepts native gRPC and (until Phase P9) exists purely for
+                    // that, so a browser never requests a static file from it; UseWhen keeps this branch
+                    // out of that connection's pipeline entirely rather than relying on every asset
+                    // request happening to 404 on its own. UseDefaultFiles rewrites a bare "/" to
+                    // "/index.html" before UseStaticFiles serves it - the dashboard has no server- or
+                    // client-side routing of its own (no @page/<Router> anywhere in Gui.Components; every
+                    // "tab" is in-component state, not a navigable URL), so unlike a typical Blazor SPA
+                    // this needs no MapFallbackToFile for arbitrary deep links - only "/" itself ever
+                    // needs to resolve to index.html. Deliberately NOT a broader "unmatched GET with no
+                    // file extension" heuristic: that shape also matches the deleted REST /admin/* and
+                    // the LLM-proxy /v1/* paths, which must keep 404ing on the web port (see
+                    // WebPort_RestAdminPath_Returns404/WebPort_ProxyPath_Returns404).
+                    app.UseWhen(
+                        predicate: context => context.Connection.LocalPort == webPort,
+                        configuration: webApp =>
+                        {
+                            webApp.UseDefaultFiles();
+                            webApp.UseStaticFiles();
+                        });
+
                     // Lets a browser call the gRPC services mapped below over grpc-web framing (HTTP/1.1-
                     // or HTTP/2-safe, unlike trailers-based native gRPC) without opting in per service -
                     // DefaultEnabled applies it to every MapGrpcService call, native gRPC callers on
@@ -450,11 +481,18 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         // login, and logout. Only mapped alongside real inbound auth - see
                         // ManagementAuthEndpoints' and managementTokenProvider's remarks.
                         if (managementTokenProvider is not null) ManagementAuthEndpoints.Map(endpoints);
+
+                        // The WASM dashboard's fingerprinted assets (web GUI migration plan Phase P6) -
+                        // endpoint-routing metadata (cache headers, content negotiation) on top of the
+                        // UseStaticFiles branch above, which already scopes physical file serving to the
+                        // web port; this only adds routing information for the same files.
+                        endpoints.MapStaticAssets();
                     });
-                    // Reached only on a gRPC/web-port connection that matched no mapped endpoint - the gate
-                    // above already sent every proxy-port connection to proxyMiddleware, so this is never
-                    // real LLM traffic. An explicit 404 (ASP.NET Core's own unmatched-endpoint default is
-                    // 200 with an empty body, not 404) rather than silently falling through to the proxy.
+                    // Reached only on a gRPC/web-port connection that matched no mapped endpoint and no
+                    // static file (including "/", via UseDefaultFiles above) - the gate above already
+                    // sent every proxy-port connection to proxyMiddleware, so this is never real LLM
+                    // traffic. An explicit 404 (ASP.NET Core's own unmatched-endpoint default is 200 with
+                    // an empty body, not 404) rather than silently falling through to the proxy.
                     app.Run(context =>
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;

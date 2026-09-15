@@ -123,6 +123,18 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TotallyHotArcRouter.Quality\TotallyHotArcRouter.Quality.csproj" />
+    <!-- The WASM dashboard (web GUI migration plan Phase P6), served on the web port via
+         MapStaticAssets/MapFallbackToFile in ProxyServer.cs. ReferenceOutputAssembly="false" is
+         required, not optional - confirmed by spike S2 (docs/gui/web-gui-migration-plan.md P0): without
+         it, Gui.Web's Grpc.Net.Client.Web-consuming code pulls Gui.Telemetry's GrpcServices="Client"
+         codegen of telemetry.proto into this project's own assembly-reference closure, which collides
+         (CS0433) with this project's own GrpcServices="Server" codegen of the identical file above -
+         every *.Contract type (TelemetryEvent, etc.) would exist in two assemblies at once. Static web
+         assets (the actual wwwroot files MapStaticAssets serves) still flow through a ProjectReference
+         with this flag set - that is a separate MSBuild item flow from the compiled-assembly reference
+         the flag suppresses. -->
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Web\TotallyHotArcRouter.Gui.Web.csproj"
+                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

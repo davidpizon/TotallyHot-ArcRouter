@@ -1,6 +1,6 @@
 # Web GUI Migration Plan
 
-> **Status: P5 shipped 2026-09-14 (P1, P2 shipped 2026-09-14; P3, P4 shipped 2026-09-15) — P0's ADRs 0011-0014 remain proposed
+> **Status: P6 shipped 2026-09-15 (P1, P2 shipped 2026-09-14; P3, P4, P5 shipped 2026-09-14/15) — P0's ADRs 0011-0014 remain proposed
 > (pending owner review); spikes S1-S7 run, see [Spike results](#p0-spike-results). Retires the
 > Windows-only MAUI Blazor Hybrid GUI
 > (`src/TotallyHotArcRouter.Gui`, WebView2) in favor of a Blazor WebAssembly dashboard served by the
@@ -765,6 +765,132 @@ all three already live in `Gui.Telemetry`/`Gui.Admin`, separate assemblies from 
   - a synthetic telemetry event renders
   - one RPC per admin service succeeds (catches trimmed-protobuf failures)
   - version banner shows when build numbers differ
+
+### P6 status: shipped 2026-09-15
+
+The core deliverable - a real browser loading the dashboard from the router and driving it over
+gRPC-Web, end to end - is shipped and verified against the actual built router exe. Several secondary
+bullets are explicitly deferred; see below.
+
+**Shipped:**
+- **`TotallyHotArcRouter.Gui.Web`** (`Microsoft.NET.Sdk.BlazorWebAssembly`, `net10.0`): `Program.cs`
+  roots `Dashboard` (from `Gui.Components`, unmodified - the whole point of Phase P5b's extraction) at
+  `#root`, registers every store `Gui.Components` needs exactly as `MauiProgram` does, and runs the
+  ADR-0012 session bootstrap (`POST auth/session`, best-effort, before `host.RunAsync()`). `index.html`
+  is a copy of the MAUI host's, plus `blazor.webassembly.js`; `wwwroot/css`, `/js`, `/lib/echarts` are
+  copies too, not references - see the wwwroot deviation below.
+- **`WasmRouterChannelProvider`** (`Gui.Web/WasmRouterChannelProvider.cs`): the browser
+  `IRouterChannelProvider` - a `Grpc.Net.Client.Web` `GrpcWebHandler` channel to
+  `NavigationManager.BaseUri`, always same-origin, never a configurable address (unlike
+  `NativeRouterChannelProvider`). No explicit cookie handling needed - the browser's own same-origin
+  fetch policy carries the ADR-0012 session cookie automatically.
+- **`WasmClipboardService`** (`Gui.Web/WasmClipboardService.cs` + `wwwroot/js/clipboard-interop.js`):
+  the browser `IClipboardService` via `navigator.clipboard.writeText`.
+- **Router-side serving** (`ProxyServer.cs`): a `ReferenceOutputAssembly="false"` `ProjectReference` to
+  `Gui.Web` (confirmed required, exactly as spike S2 predicted - without it, `Gui.Web`'s
+  `Grpc.Net.Client.Web`-consuming closure pulls `Gui.Telemetry`'s client-side `telemetry.proto` codegen
+  into the router's own assembly-reference graph, colliding (CS0433) with the router's own server-side
+  codegen of the identical file). `webBuilder.UseStaticWebAssets()`, `UseDefaultFiles()` +
+  `UseStaticFiles()` (web port only, gated by `Connection.LocalPort == webPort` the same way the P2
+  port-scoping gate already works), and `endpoints.MapStaticAssets()`.
+- **Real, verified static-web-assets flow** - the exact half of the `ReferenceOutputAssembly="false"`
+  mitigation spike S2 did not test. Confirmed empirically that it does **not** work without an explicit
+  `UseStaticWebAssets()` call: the built router logged `"The WebRootPath was not found"` and 404'd every
+  asset until that line was added, because this inner host uses the older
+  `Host.CreateDefaultBuilder().ConfigureWebHostDefaults(...)` pattern, which - unlike
+  `WebApplication.CreateBuilder()` - does not call it automatically. A published build (where referenced
+  static web assets are physically copied into the app's own `wwwroot` at publish time) would likely not
+  have shown this gap, which is exactly why running the actual built exe (not just `dotnet publish`)
+  mattered here.
+- **Deleted-surface regression fixed for real**, not just reasoned about: the first implementation of
+  the web-port static/SPA-fallback logic used a broad "unmatched GET with no file extension → serve
+  `index.html`" heuristic, modeled on a generic Blazor Router `MapFallbackToFile` pattern. That heuristic
+  also matched `/admin/providers` and `/v1/chat/completions` - both deliberately-404 paths per P2's own
+  exit criteria - and broke `WebPort_RestAdminPath_Returns404`/`WebPort_ProxyPath_Returns404` immediately
+  on a real test run. Root cause: `Gui.Components` has no `@page`/`<Router>` anywhere (confirmed via
+  `codegraph`/grep) - the dashboard's "tabs" are in-component state, not navigable URLs - so there are no
+  arbitrary client-side routes to fall back for in the first place. Fixed by narrowing to
+  `UseDefaultFiles()` (rewrites bare `"/"` to `"/index.html"` before `UseStaticFiles` serves it) with no
+  custom fallback middleware at all; added `ProxyServerWebInterfaceTests.WebPort_Root_ServesTheWasmDashboard`
+  as a permanent regression guard alongside the two pre-existing 404 tests, all three now green together.
+- CI `dotnet publish -c Release` of `Gui.Web`: verified via a real publish run - zero `IL2xxx`/`IL3xxx`
+  trim warnings, fingerprinted `_framework/*.wasm` assemblies with `.br`/`.gz` precompression, matching
+  spike S4's finding that the `wasm-tools` workload must be (and is, in this environment) installed for
+  trim analysis to run at all rather than silently skip.
+- Added to both `.slnx` files (`Gui.Web` builds cross-platform, so it belongs in the Qodana solution too
+  - confirmed by a real `dotnet build` of that solution).
+
+**Verified for real (this phase's whole point, given P5's WebView2 verification gap):**
+- A real end-to-end gRPC-Web call against the actual built router exe: `POST /auth/session` (loopback,
+  204 + session cookie) followed by a `POST` to `RoutingModeAdminService/GetRoutingMode` in
+  `application/grpc-web-text+proto` framing with only the cookie for auth - `200 OK` with a real decoded
+  routing-mode payload (`dim_best`). This is exactly what `WasmRouterChannelProvider` does from inside a
+  browser tab, exercised here without one.
+- `curl -k` against the real router exe for every path that matters: `/` (200, `text/html`),
+  `/_framework/blazor.webassembly.js` (200, `text/javascript`), `/css/app.css` (200, `text/css`),
+  `/governance` (404 - confirms no accidental SPA-fallback overreach), `/admin/providers` (404),
+  `/v1/chat/completions` on the web port (404), `/v1/models` on the plain-HTTP proxy port (200 - P2's
+  routing untouched).
+- Full solution build (`TotallyHotArcRouter.slnx`) and the Linux-representative `Qodana.slnx`: both 0
+  warnings, 0 errors. Every test executable in the solution, run directly: 3914 tests total, 0 failed
+  (2836 in the router suite, including the two now-passing 404 regression tests plus the new
+  `WebPort_Root_ServesTheWasmDashboard`; 441 in `Gui.Tests`, confirming the MAUI host is unaffected;
+  the rest unchanged from P5).
+
+**Real environment limitation - not a gap in the implementation, a gap in what this environment can
+render:** a genuine interactive browser render of the dashboard (screenshotting it, clicking a tab,
+watching a live telemetry event arrive) could not be performed. The router's TLS certificate is
+self-signed (`TelemetryTlsCertificate`) and not in any trust store - Phase P7 is what adds the local CA
+and OS/browser trust story. Every browser available to this session (this includes the one driving the
+session itself) refuses to render a page behind an untrusted certificate, with no way to click through
+the interstitial from here, so `navigate` to `https://localhost:<webPort>` returned an empty page. This
+is the reason the verification above leans on `curl -k` (which happily ignores certificate trust) and a
+real gRPC-Web call built the same way `ProxyServerAuthTests`/`ProxyServerWebInterfaceTests` already do,
+rather than a screenshot - those tools prove the actual bytes-on-the-wire behavior a browser would also
+see, just without the pixels. A real interactive smoke pass (the kind P1-P5's "golden-path smoke" language
+usually means) is worth doing once Phase P7 makes `https://localhost:5004` trusted.
+
+**Deferred (explicit gaps, not silently dropped):**
+1. **No dedicated login view.** Per the plan's "session bootstrap: on Unauthenticated, call `/auth/session`
+   and retry, otherwise show a login view", a non-loopback caller (or `WebInterface:TrustLoopback=false`)
+   should see a token-login form. This phase implements only the loopback fast path (an eager
+   `POST /auth/session` at startup, not a reactive retry-on-Unauthenticated interceptor on every gRPC
+   call either) - a non-loopback browser today just sees every store's ordinary "router unreachable"
+   state, not a login prompt. Both the login view and the reactive retry-interceptor are real, scoped
+   follow-up work, not accidentally dropped.
+2. **`wwwroot` is duplicated, not shared, between `Gui` and `Gui.Web`.** P5's status section already
+   deferred moving `Gui`'s `wwwroot` into an RCL (BlazorWebView's asset-resolution risk); this phase
+   copies (not references) `css/app.css`, `js/*.js`, and `lib/echarts/*` into `Gui.Web/wwwroot` instead
+   of solving the sharing problem the plan implicitly expected P6 to resolve. A future edit to `app.css`
+   or the JS interop files needs to land in both places until this is unified - a real, tracked paper cut,
+   not a hidden one.
+3. **Serilog in WASM (browser-console sink and the `ClientLogService.Report` forwarding RPC) - not
+   implemented.** `Gui.Web` gets Blazor WebAssembly's own default browser-console logging (wired
+   automatically by `WebAssemblyHostBuilder`, so `ILogger<T>` calls already reach the browser console)
+   but no explicit Serilog pipeline and no forwarding sink, and the router gained no new
+   `ClientLogService` RPC to receive one. This is a real, scoped subsystem (a new proto service, a new
+   server-side gRPC implementation, a batched/rate-limited/recursion-guarded client sink) left for a
+   focused follow-up rather than rushed in alongside the core hosting work.
+4. **Version-mismatch banner - not implemented.** No client-reported build number exists yet to compare
+   against the router's; `SettingsModal`'s existing `RouterVersionLabel` (reads `UpdateStore.Status`)
+   already show the router's own version, but nothing compares it against the GUI bundle's build number.
+5. **`UpdateStore.ApplyAsync`/`Environment.Exit` were not removed**, and `SettingsModal`'s "Apply Update"
+   button is unchanged and shared verbatim between both hosts. In `Gui.Web`, clicking it (only reachable
+   when `UpdateStore.Status.UpdateAvailable` is true - never the case today, since this repo has
+   published no releases yet, confirmed live in Phase P4's own smoke test) would attempt to launch
+   `msiexec` via `Gui.Telemetry`'s `IElevatedProcessLauncher`, which is a real `PlatformNotSupportedException`
+   waiting to happen in a browser sandbox. Left deliberately deferred rather than redesigning a
+   468-line, host-shared component's public contract (and MAUI's own working "Apply Update" flow along
+   with it) without being able to interactively re-verify the MAUI side against a live render - the same
+   reasoning as P5's wwwroot deferral. Flagged here with its real (if currently unreachable) blast radius
+   named, not silently left as a landmine no one is watching for.
+6. **No Playwright CI job.** Cannot be authored against a real `ubuntu-latest`/Chromium+Firefox run from
+   this environment any more than the ubuntu test-job wiring deferred in P5 could be - same category of
+   gap, for the same reason.
+7. **`WebInterfaceOptions.AllowedHosts`/CSP were not revisited for the WASM host specifically** - Phase
+   P4's existing Host-allowlist guard and `Content-Security-Policy` header already cover this pipeline
+   unconditionally (they run for every gRPC/web-port request, static assets included), and nothing here
+   needed to change them; noted only so a reader doesn't wonder why they are absent from this section.
 
 ## P7 — Local CA, OS trust, HTTPS on every listener (5001/5003/5004)
 

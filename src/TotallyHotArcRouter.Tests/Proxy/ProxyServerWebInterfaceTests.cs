@@ -277,6 +277,38 @@ public sealed class ProxyServerWebInterfaceTests
     }
 
     [Fact]
+    public async Task WebPort_Root_ServesTheWasmDashboard()
+    {
+        // Web GUI migration plan Phase P6: the WASM dashboard is served on the web port via a
+        // ReferenceOutputAssembly="false" ProjectReference to Gui.Web (S2's mitigation for the
+        // CS0433 proto-codegen collision) plus UseStaticWebAssets/UseDefaultFiles/UseStaticFiles in
+        // ProxyServer.cs. This is the regression guard for that pipeline actually resolving Gui.Web's
+        // static web assets at runtime - the exact thing the plan flagged as unverified by spike S2.
+        var (server, _, _, _, webPort, _) = BuildServer();
+        await using var _ = server;
+        await server.StartAsync(Ct);
+        try
+        {
+            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var trustingClient = new HttpClient(handler);
+
+            var index = await trustingClient.GetAsync(requestUri: $"https://localhost:{webPort}/", cancellationToken: Ct);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: index.StatusCode);
+            Assert.StartsWith(expectedStartString: "text/html",
+                actualString: index.Content.Headers.ContentType?.MediaType, comparisonType: StringComparison.Ordinal);
+
+            var script = await trustingClient.GetAsync(requestUri: $"https://localhost:{webPort}/_framework/blazor.webassembly.js",
+                cancellationToken: Ct);
+            Assert.Equal(expected: HttpStatusCode.OK, actual: script.StatusCode);
+        }
+        finally
+        {
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await server.StopAsync(stopCts.Token);
+        }
+    }
+
+    [Fact]
     public async Task NativeGrpcPort_UnaryCall_StillWorks()
     {
         // The native (non-web) gRPC port (grpcPort/5002-in-production) is unchanged by Phase P2 - it
