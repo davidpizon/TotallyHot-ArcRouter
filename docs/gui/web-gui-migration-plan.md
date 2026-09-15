@@ -1379,6 +1379,34 @@ explicitly deferred with reasoning, the same category of gap as every earlier ph
    - real, small, and simply not reached before context/time ran out on this already-large phase; flagged
    explicitly rather than left for a reader to discover the gap on their own.
 
+**Addendum 2026-09-15: moved off the 5000-5005 range to avoid real-world port collisions.**
+
+Renumbered every default port: Proxy (LLM) `5001` → `47101`, MCP `5003` → `47103`, Web dashboard
+`5004` → `47104`, opt-in plain-HTTP fallback `5005` → `47105`. Port `5002` stays retired (not
+reused) from earlier in P9. Reasoning: the old 5000s range collides with real, commonly-installed
+software on developer machines - iperf/iperf2 default to TCP/UDP `5001`, Synology DSM's default
+HTTPS admin port is `5001`, macOS AirPlay Receiver claims the adjacent `5000`, and JDWP (the Java
+Debug Wire Protocol used by Android Studio/JVM debuggers) defaults to `5005`. No port in that
+range was ever industry-standard for an LLM proxy or an MCP server specifically, so there was no
+compatibility reason to stay. The 47100s land inside IANA's dynamic/private range (49152-65535
+is the formal IANA range; the chosen block sits below it but well clear of the well-known/registered
+ranges below 5000 and away from the named collisions above) and keeps the same relative spacing
+between the four ports.
+
+Touched: every listener's default (`ProxyListenerOptions.Port`/`PlainHttpListenerOptions.Port`,
+`WebInterfaceOptions.Port`, `McpOptions.Port`), `appsettings.json`,
+`TelemetryChannelFactory.DefaultServerAddress`, the installer's dashboard shortcut target
+(`Package.wxs`), the port-number tests that assert these production defaults, two latent
+fixed-web-port test collisions this change exposed (`ProxyServerTests`, `ProxyHostedServiceTests`
+now all pass `webInterfaceOptions: new WebInterfaceOptions { Port = 0 }` explicitly rather than
+relying on the old default), and `docs/router/client-tls-setup.md`/`src/README.md`'s port
+references. Left alone deliberately: `docs/router/mcp-endpoint.md`, which is already broadly stale
+on other dimensions (the deleted REST `/admin/*` surface, the retired port `5002`) - a port-number-only
+patch there would imply an accuracy the rest of the file doesn't have; it stays P11's "Docs
+close-out" scope. ADRs, `docs/gui/*`, and the remaining `docs/router/*` planning/historical docs
+were left as a dated historical record for the same reason the P9 status section above leaves its
+own superseded numbers in place - they describe what was true when written, not the current state.
+
 ## P10 — Cross-platform runtime and packaging
 
 **Deliverables**

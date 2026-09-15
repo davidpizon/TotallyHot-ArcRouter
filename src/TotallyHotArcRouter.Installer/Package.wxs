@@ -162,7 +162,7 @@
       <util:InternetShortcut Id="OpenDashboardShortcut"
                               Directory="ProgramMenuFolder"
                               Name="TotallyHot Arc Router Dashboard"
-                              Target="https://localhost:5004"
+                              Target="https://localhost:47104"
                               Type="url" />
     </Component>
 

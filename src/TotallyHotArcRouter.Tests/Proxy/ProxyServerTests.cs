@@ -22,7 +22,8 @@ public class ProxyServerTests
             new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance, interceptor: interceptor);
 
         await using var server = new ProxyServer(logger: new NullLogger<ProxyServer>(),
-            proxyMiddleware: proxyMiddleware, listenerOptions: new ProxyListenerOptions { Port = 0 });
+            proxyMiddleware: proxyMiddleware, listenerOptions: new ProxyListenerOptions { Port = 0 },
+            webInterfaceOptions: new WebInterfaceOptions { Port = 0 });
 
         await server.StartAsync(TestContext.Current.CancellationToken);
 
@@ -69,7 +70,8 @@ public class ProxyServerTests
         // depending on a specific non-loopback interface being present on the test runner.
         await using var server = new ProxyServer(logger: new NullLogger<ProxyServer>(),
             proxyMiddleware: proxyMiddleware,
-            listenerOptions: new ProxyListenerOptions { Port = 0, BindAddress = "any" });
+            listenerOptions: new ProxyListenerOptions { Port = 0, BindAddress = "any" },
+            webInterfaceOptions: new WebInterfaceOptions { Port = 0 });
 
         await server.StartAsync(TestContext.Current.CancellationToken);
         try
@@ -119,7 +121,8 @@ public class ProxyServerTests
 
             await using var server = new ProxyServer(logger: new NullLogger<ProxyServer>(),
                 proxyMiddleware: proxyMiddleware,
-                listenerOptions: new ProxyListenerOptions { Port = 0 });
+                listenerOptions: new ProxyListenerOptions { Port = 0 },
+                webInterfaceOptions: new WebInterfaceOptions { Port = 0 });
 
             await server.StartAsync(TestContext.Current.CancellationToken);
             try

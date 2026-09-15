@@ -14,10 +14,12 @@ public sealed class ProxyListenerOptions
 
     /// <summary>
     /// Gets the port Kestrel listens on for plain HTTP/1.1 LLM-forwarding traffic and <c>/v1/models</c>.
-    /// Defaults to <c>5001</c>. <c>0</c> binds an ephemeral port (test-only; see <see cref="ProxyServer"/>'s
-    /// remarks).
+    /// Defaults to <c>47101</c> - inside IANA's dynamic/private range, chosen to avoid the well-known
+    /// collisions the router's original 5000s-range ports had (iperf's default of 5001, Synology DSM's
+    /// default HTTPS admin port, macOS AirPlay Receiver on the adjacent 5000). <c>0</c> binds an
+    /// ephemeral port (test-only; see <see cref="ProxyServer"/>'s remarks).
     /// </summary>
-    public int Port { get; init; } = 5001;
+    public int Port { get; init; } = 47101;
 
     /// <summary>
     /// Gets the address <see cref="Port"/> binds to: <c>"loopback"</c> (the default - dual-stack
@@ -54,8 +56,10 @@ public sealed class PlainHttpListenerOptions
     public bool Enabled { get; init; }
 
     /// <summary>
-    /// Gets the loopback-only port the listener binds when <see cref="Enabled"/>. Defaults to <c>5005</c>,
-    /// the next port after MCP's default (5003) and the reserved gRPC-Web port (5004).
+    /// Gets the loopback-only port the listener binds when <see cref="Enabled"/>. Defaults to
+    /// <c>47105</c>, the next port after MCP's default (47103) and the web port (47104) - also chosen to
+    /// avoid the Java Debug Wire Protocol's near-universal default debug port of 5005, the original
+    /// scheme's equivalent value.
     /// </summary>
-    public int Port { get; init; } = 5005;
+    public int Port { get; init; } = 47105;
 }

@@ -43,7 +43,7 @@ public sealed class McpServiceRegistrationTests
     }
 
     [Fact]
-    public void AddTotallyHotArcRouter_McpOptions_DefaultsToEnabledOnPort5003()
+    public void AddTotallyHotArcRouter_McpOptions_DefaultsToEnabledOnPort47103()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -57,7 +57,7 @@ public sealed class McpServiceRegistrationTests
         var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
 
         Assert.True(options.Enabled);
-        Assert.Equal(5003, actual: options.Port);
+        Assert.Equal(47103, actual: options.Port);
     }
 
     [Fact]

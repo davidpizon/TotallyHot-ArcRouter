@@ -101,11 +101,12 @@ public class TelemetryChannelFactoryTests
     }
 
     [Fact]
-    public void DefaultServerAddress_is_the_tls_grpc_port()
+    public void DefaultServerAddress_is_the_web_port()
     {
-        // Pinned because the proxy binds 5002 for gRPC over TLS while 5001 stays plain HTTP for LLM
-        // forwarding; pointing this at the wrong one fails in a way that looks like the proxy being down.
-        TelemetryChannelFactory.DefaultServerAddress.Should().Be("https://localhost:5004");
+        // Pinned to the router's web port (WebInterfaceOptions.Port's default) - every gRPC admin service
+        // is dual-mapped there since Phase P2/P9; pointing this at the wrong port fails in a way that
+        // looks like the proxy being down.
+        TelemetryChannelFactory.DefaultServerAddress.Should().Be("https://localhost:47104");
     }
 
     private static bool Validate(

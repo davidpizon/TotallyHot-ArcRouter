@@ -1,8 +1,8 @@
 # Trusting the router's local CA
 
 The router generates its own name-constrained local certificate authority (CA) and issues short-lived
-leaf certificates under it for every TLS listener it binds: the web dashboard (`5004`), MCP (`5003`),
-and the LLM proxy (`5001`, HTTPS by default since the web GUI migration plan's Phase P7 - see
+leaf certificates under it for every TLS listener it binds: the web dashboard (`47104`), MCP (`47103`),
+and the LLM proxy (`47101`, HTTPS by default since the web GUI migration plan's Phase P7 - see
 [ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md)). The CA is trusted once per
 machine; every leaf rotation after that is silent and needs no re-trust.
 
@@ -63,31 +63,31 @@ importing it per profile.
 ## Pointing an LLM client at the HTTPS proxy port
 
 Once the CA is trusted (system-wide, or per-tool below), point your client at
-`https://localhost:5001` instead of the old `http://localhost:5001`.
+`https://localhost:47101` instead of the old plain `http://` scheme.
 
 | Client | How it discovers trust |
 |---|---|
 | Claude Code / any Node-based CLI | System trust store by default. If it ignores that, set `NODE_EXTRA_CA_CERTS=<path to router-ca.crt>` (or Node ≥18's `--use-system-ca`). |
 | OpenAI/Anthropic Python SDKs | `httpx`'s default `truststore`/`certifi` bundle; point it at the CA with `SSL_CERT_FILE=<path to router-ca.crt>` or `REQUESTS_CA_BUNDLE=<path to router-ca.crt>`. |
-| curl | System trust store by default (Windows: Schannel, reads the OS store directly). To point at the CA explicitly without installing it: `curl --cacert router-ca.crt https://localhost:5001/v1/models`. |
+| curl | System trust store by default (Windows: Schannel, reads the OS store directly). To point at the CA explicitly without installing it: `curl --cacert router-ca.crt https://localhost:47101/v1/models`. |
 | .NET clients | System trust store (`X509Store`) automatically once `--install-certificate` has run. |
 | Rust/Go CLIs | Most use the OS trust store by default; check for a `--cacert`/`SSL_CERT_FILE`-equivalent flag if the tool vendors its own root bundle instead. |
-| Ollama-API-compatible clients pointed at the router | Same as above - these are ordinary HTTPS clients once pointed at `https://localhost:5001`, with no protocol difference from talking to a real Ollama server over HTTP. |
+| Ollama-API-compatible clients pointed at the router | Same as above - these are ordinary HTTPS clients once pointed at `https://localhost:47101`, with no protocol difference from talking to a real Ollama server over HTTP. |
 
 ## When to use the opt-in plain-HTTP listener instead
 
 Some tools hard-code `http://` or otherwise cannot be configured to trust a custom CA at all. For those,
-set `Proxy:PlainHttp:Enabled=true` (default port `5005`, always loopback-only, LLM-proxy routes only -
+set `Proxy:PlainHttp:Enabled=true` (default port `47105`, always loopback-only, LLM-proxy routes only -
 never gRPC, the dashboard, auth, or MCP). The router logs a Warning at startup whenever this listener is
 enabled, since traffic to it is unencrypted on the wire to that first hop. Prefer the HTTPS port
-(`5001`) for every other client.
+(`47101`) for every other client.
 
 ## Verifying trust worked
 
 ```
-curl https://localhost:5004        # the dashboard - should succeed with no -k
-curl https://localhost:5001/v1/models   # the LLM proxy - should succeed with no -k
-curl http://localhost:5001          # should fail outright - the plain listener is off by default
+curl https://localhost:47104        # the dashboard - should succeed with no -k
+curl https://localhost:47101/v1/models   # the LLM proxy - should succeed with no -k
+curl http://localhost:47101          # should fail outright - the plain listener is off by default
 ```
 
 A certificate warning in a browser, or `curl` requiring `-k`, means the CA is not yet trusted by that

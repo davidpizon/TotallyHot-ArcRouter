@@ -15,9 +15,10 @@ public sealed class WebInterfaceOptions
 
     /// <summary>
     /// Gets the port the web GUI, gRPC-Web, and (from Phase P9) native gRPC listen on. Defaults to
-    /// <c>5004</c>.
+    /// <c>47104</c> - see <see cref="ProxyListenerOptions.Port"/>'s remarks for why the router moved off
+    /// the 5000s range.
     /// </summary>
-    public int Port { get; init; } = 5004;
+    public int Port { get; init; } = 47104;
 
     /// <summary>
     /// Gets the address <see cref="Port"/> binds to, using the same values as

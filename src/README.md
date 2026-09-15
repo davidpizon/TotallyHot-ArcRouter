@@ -196,7 +196,7 @@ does this).
 dotnet run
 ```
 
-By default, the proxy listens on `http://localhost:5001`. Point your
+By default, the proxy listens on `http://localhost:47101`. Point your
 coding-agent client's base URL at the proxy instead of the provider directly,
 and request whichever `model` alias you configured in `ModelList`. The
 proxy forwards the path and query string unchanged, rewrites the `model`
@@ -209,7 +209,7 @@ With the proxy running, send a request using one of your configured model
 aliases:
 
 ```bash
-curl http://localhost:5001/v1/chat/completions \
+curl http://localhost:47101/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "kimi-k2.5", "messages": [{"role": "user", "content": "hello"}]}'
 ```
@@ -227,7 +227,7 @@ configuration — mirroring how LiteLLM's proxy handles the same endpoint —
 rather than forwarding it anywhere:
 
 ```bash
-curl http://localhost:5001/v1/models
+curl http://localhost:47101/v1/models
 ```
 
 ```json
@@ -250,7 +250,7 @@ A `Dockerfile` is provided for containerized runs:
 
 ```bash
 docker build -t agentic-router -f src/TotallyHotArcRouter/Dockerfile src/TotallyHotArcRouter
-docker run -p 5001:5001 \
+docker run -p 47101:47101 \
   -e ANTHROPIC_API_KEY="<your-anthropic-key>" \
   -e OPENAI_API_KEY="<your-openai-key>" \
   agentic-router

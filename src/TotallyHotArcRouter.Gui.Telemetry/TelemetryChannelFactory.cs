@@ -25,11 +25,13 @@ public static class TelemetryChannelFactory
     /// at least one managed/corporate Windows machine, where every connection failed with the HTTP/2-level
     /// <c>HTTP_1_1_REQUIRED</c> error - consistent with something on the network path (VPN client, endpoint
     /// security agent, TLS-inspecting proxy) mangling the h2c preface even on loopback. See
-    /// docs/router/grpc-migration.md's "Transport" section. <c>5004</c>, not the former dedicated <c>5002</c>
-    /// gRPC port Phase P9 retired as fully redundant once every gRPC admin service was dual-mapped onto the
-    /// web port.
+    /// docs/router/grpc-migration.md's "Transport" section. <c>47104</c>, the router's web port
+    /// (<c>WebInterfaceOptions.Port</c>'s default) - not the former dedicated <c>5002</c> gRPC port Phase
+    /// P9 retired as fully redundant once every gRPC admin service was dual-mapped onto the web port, nor
+    /// the original 5000s-range web port a later phase moved off of to avoid common port collisions
+    /// (iperf's default on 5001, Synology DSM's admin port, macOS AirPlay on the adjacent 5000).
     /// </summary>
-    public const string DefaultServerAddress = "https://localhost:5004";
+    public const string DefaultServerAddress = "https://localhost:47104";
 
     /// <summary>
     /// Creates a channel to <paramref name="serverAddress"/> that trusts the proxy's self-signed loopback

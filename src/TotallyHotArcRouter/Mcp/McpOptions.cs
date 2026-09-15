@@ -15,10 +15,11 @@ public sealed class McpOptions
     public bool Enabled { get; init; } = true;
 
     /// <summary>
-    /// Gets the loopback TLS port the MCP Streamable-HTTP endpoint listens on. Defaults to <c>5003</c>,
-    /// the port immediately after the telemetry/price-source-admin gRPC port (5002).
+    /// Gets the loopback TLS port the MCP Streamable-HTTP endpoint listens on. Defaults to <c>47103</c> -
+    /// see <see cref="Proxy.ProxyListenerOptions.Port"/>'s remarks for why the router moved off the 5000s
+    /// range.
     /// </summary>
-    public int Port { get; init; } = 5003;
+    public int Port { get; init; } = 47103;
 
     /// <summary>
     /// Gets the address <see cref="Port"/> binds to, using the same values as

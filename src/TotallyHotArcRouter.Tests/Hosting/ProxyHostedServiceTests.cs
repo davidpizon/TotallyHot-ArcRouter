@@ -86,7 +86,8 @@ public class ProxyHostedServiceTests
             proxyLogger: NullLogger<ProxyServer>.Instance,
             proxyMiddleware: proxyMiddleware,
             hostLifetime: lifetime,
-            listenerOptions: new ProxyListenerOptions { Port = port });
+            listenerOptions: new ProxyListenerOptions { Port = port },
+            webInterfaceOptions: new WebInterfaceOptions { Port = 0 });
     }
 
     private static void VerifyLogContains(Mock<ILogger<ProxyHostedService>> loggerMock, LogLevel level,
