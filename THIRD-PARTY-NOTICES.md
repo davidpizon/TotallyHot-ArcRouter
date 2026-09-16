@@ -21,10 +21,11 @@ BSD-3-Clause only.
 Two categories fall outside that summary because this project does not redistribute them:
 
 - **Microsoft platform prerequisites** (§2) - now dormant; see the note there.
-- **One build- and test-time only package**
-  (`Microsoft.VisualStudio.Azure.Containers.Tools.Targets`, §3) is under the Microsoft Software
-  License Terms. It supplies MSBuild targets, ships in no distributed artifact, and is not
-  redistributable as a standalone offering.
+- **Two build- and test-time only packages**
+  (`Microsoft.VisualStudio.Azure.Containers.Tools.Targets` and `Microsoft.Testing.Extensions.CodeCoverage`,
+  §3) are under the Microsoft Software License Terms. They supply MSBuild targets and test-run
+  coverage collection respectively, ship in no distributed artifact, and are not redistributable as
+  a standalone offering.
 
 Data and models fetched at runtime (§4) are likewise not redistributed and are listed with their own
 licenses there.
@@ -50,15 +51,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 | Apache ECharts (`wwwroot/lib/echarts/echarts.min.js`) | vendored | Copyright 2017–2024 The Apache Software Foundation |
 | Serilog | 4.4.0 | Copyright Serilog Contributors |
 | Serilog.Extensions.Hosting | 10.0.0 | Copyright Serilog Contributors |
+| Serilog.Extensions.Logging | 10.0.0 | Copyright Serilog Contributors |
 | Serilog.Settings.Configuration | 10.0.1 | Copyright Serilog Contributors |
 | Serilog.Sinks.Console | 6.1.1 | Copyright Serilog Contributors |
+| Serilog.Sinks.File | 7.0.0 | Copyright Serilog Contributors |
 | Grpc.AspNetCore | 2.83.0 | Copyright The gRPC Authors |
 | Grpc.AspNetCore.Web | 2.83.0 | Copyright The gRPC Authors |
 | Grpc.Net.Client | 2.83.0 | Copyright The gRPC Authors |
-| Serilog.Sinks.File | 7.0.0 | Copyright Serilog Contributors |
-| AWSSDK.BedrockRuntime | 4.0.101.1 | Copyright Amazon.com, Inc. or its affiliates |
-| ModelContextProtocol | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
-| ModelContextProtocol.AspNetCore | 2.1.0 | Copyright the ModelContextProtocol C# SDK authors |
+| AWSSDK.BedrockRuntime | 4.0.101.6 | Copyright Amazon.com, Inc. or its affiliates |
+| ModelContextProtocol | 2.2.0 | © Model Context Protocol a Series of LF Projects, LLC. |
+| ModelContextProtocol.AspNetCore | 2.2.0 | © Model Context Protocol a Series of LF Projects, LLC. |
 | SQLitePCLRaw.bundle_e_sqlite3 | 3.0.5 | Copyright Eric Sink and contributors |
 
 **Apache ECharts NOTICE** — reproduced as required by Apache-2.0 §4(d). The upstream `LICENSE` and
@@ -92,11 +94,14 @@ PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 | Microsoft.Data.Sqlite | 10.0.12 | Copyright (c) Microsoft Corporation |
 | Microsoft.ML.OnnxRuntime | 1.30.0 | Copyright (c) Microsoft Corporation |
 | Microsoft.ML.OnnxRuntimeGenAI | 0.16.0 | Copyright (c) Microsoft Corporation |
-| Microsoft.ML.Tokenizers (+ .Data.Cl100kBase / .Data.O200kBase) | 2.0.0 | Copyright (c) Microsoft Corporation |
-| Microsoft.Bcl.Memory | 10.0.12 | Copyright (c) Microsoft Corporation |
+| Microsoft.ML.Tokenizers | 2.0.0 | Copyright (c) Microsoft Corporation |
+| Microsoft.ML.Tokenizers.Data.Cl100kBase | 2.0.0 | Copyright (c) Microsoft Corporation |
+| Microsoft.ML.Tokenizers.Data.O200kBase | 2.0.0 | Copyright (c) Microsoft Corporation |
 | Microsoft.SemanticKernel | 1.80.1 | Copyright (c) Microsoft Corporation |
 | System.Security.Cryptography.ProtectedData | 10.0.12 | Copyright (c) Microsoft Corporation |
-| Microsoft.Extensions.* (DI, Hosting, Logging, Options, WindowsServices, Systemd) | 10.0.12 | Copyright (c) Microsoft Corporation |
+| System.ServiceProcess.ServiceController | 10.0.11 | Copyright (c) Microsoft Corporation |
+| Microsoft.Bcl.Memory | 10.0.12 | Copyright (c) Microsoft Corporation |
+| Microsoft.Extensions.* (DI, Hosting incl. WindowsServices/Systemd, Logging, Options, Configuration) | 10.0.11-10.0.12 | Copyright (c) Microsoft Corporation |
 | FastBertTokenizer | 1.0.28 | Copyright (c) Georg Jung |
 | Tailwind CSS (compiled output in `wwwroot/css/app.css`) | build output | Copyright (c) Tailwind Labs, Inc. |
 
@@ -104,7 +109,8 @@ PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 
 | Component | Version | Copyright |
 |---|---|---|
-| Google.Protobuf | 3.35.1 | Copyright 2008 Google Inc. |
+| Google.Protobuf | 3.36.1 | Copyright 2008 Google Inc. |
+| Acornima | 1.8.0 | Copyright (c) Adam Simon |
 
 Redistribution and use in source and binary forms, with or without modification, are permitted
 provided that the conditions of the BSD 3-Clause License are met, including retention of the above
@@ -139,15 +145,15 @@ no obligation on downstream recipients of the application.
 | Component | Version | License |
 |---|---|---|
 | Grpc.Tools (protobuf/gRPC codegen; `PrivateAssets=all`, so it flows to no consumer and ships in no artifact) | 2.83.0 | Apache-2.0 |
-| xunit.v3 | 3.2.2 | Apache-2.0 |
-| xunit.runner.visualstudio | 3.1.5 | Apache-2.0 |
+| xunit.v3 | 4.0.0 | Apache-2.0 |
+| xunit.runner.visualstudio | 4.0.0 | Apache-2.0 |
 | Grpc.Core.Testing | 2.46.6 | Apache-2.0 |
-| AwesomeAssertions | 9.5.0 | Apache-2.0 |
+| AwesomeAssertions | 9.6.0 | Apache-2.0 |
 | Moq | 4.20.72 | BSD-3-Clause |
 | bunit | 2.9.0 | MIT |
-| AngleSharp | 1.7.1 | MIT |
-| coverlet.collector | 10.0.1 | MIT |
-| Microsoft.NET.Test.Sdk | 18.8.1 | MIT |
+| AngleSharp | 1.7.3 | MIT |
+| Microsoft.NET.Test.Sdk | 18.9.0 | MIT |
+| Microsoft.Testing.Extensions.CodeCoverage (test-time coverage collector; supersedes coverlet.collector) | 18.11.0 | Microsoft Software License Terms (test targets only; not redistributable as a standalone offering) |
 | Microsoft.VisualStudio.Azure.Containers.Tools.Targets | 1.23.0 | Microsoft Software License Terms (build targets only; not redistributable as a standalone offering) |
 
 > **Historical note.** This project previously used **FluentAssertions 8.10.0**, which is licensed
