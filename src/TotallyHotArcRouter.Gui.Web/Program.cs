@@ -60,10 +60,12 @@ builder.Services.AddSingleton<RegretHarnessAdminStore>();
 builder.Services.AddSingleton<JudgeCalibrationAdminStore>();
 // Backs the System Settings window's Adaptive Routing row. See Services/RouterSettingsAdminStore.cs.
 builder.Services.AddSingleton<RouterSettingsAdminStore>();
-// Backs the System Settings window's Software Update section (read-only status/check in this host -
-// see UpdateStore's remarks on ApplyAsync not being wired to any UI action here). See
-// Services/UpdateStore.cs.
-builder.Services.AddSingleton<UpdateStore>();
+// Backs the System Settings window's Software Update section. supportsApply: false - this host runs
+// sandboxed inside a browser tab and cannot launch the downloaded MSI itself (D11, web GUI migration
+// plan); SettingsModal hides "Apply Update" and links to the release page instead. See
+// Services/UpdateStore.cs's SupportsApply remarks.
+builder.Services.AddSingleton(sp =>
+    new UpdateStore(channelProvider: sp.GetRequiredService<IRouterChannelProvider>(), supportsApply: false));
 // Backs the System Settings window's Cost Reconciliation section. See Services/CostReconciliationStore.cs.
 builder.Services.AddSingleton<CostReconciliationStore>();
 // Backs the System Settings window's "Copy MCP token / Regenerate" row (web GUI migration plan Phase P9).

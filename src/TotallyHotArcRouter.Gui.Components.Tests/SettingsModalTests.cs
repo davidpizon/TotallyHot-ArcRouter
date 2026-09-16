@@ -20,7 +20,8 @@ public sealed class SettingsModalTests
         out RouterSettingsAdminStore routerSettingsStore,
         FakeRouterSettingsAdminClient? routerSettingsClient = null,
         FakeUpdateAdminClient? updateClient = null,
-        FakeManagementTokenAdminClient? managementTokenClient = null)
+        FakeManagementTokenAdminClient? managementTokenClient = null,
+        bool updateSupportsApply = true)
     {
         var ctx = new BunitContext();
         liveDataStore = new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996"));
@@ -31,7 +32,7 @@ public sealed class SettingsModalTests
         ctx.Services.AddSingleton(settingsStore);
         ctx.Services.AddSingleton(routerSettingsStore);
         ctx.Services.AddSingleton(new UpdateStore(client: updateClient ?? new FakeUpdateAdminClient(),
-            applier: new FakeMsiUpdateApplier()));
+            applier: new FakeMsiUpdateApplier(), supportsApply: updateSupportsApply));
         ctx.Services.AddSingleton(new CostReconciliationStore(new FakeCostReconciliationAdminClient()));
         ctx.Services.AddSingleton(
             new ManagementTokenAdminStore(managementTokenClient ?? new FakeManagementTokenAdminClient()));
@@ -63,6 +64,38 @@ public sealed class SettingsModalTests
 
         cut.Markup.Should().Contain("Router v1.0.2");
         cut.Markup.Should().NotContain("Router unknown");
+    }
+
+    [Fact]
+    public void SoftwareUpdate_UpdateAvailable_SupportsApply_ShowsTheApplyButton()
+    {
+        var updateClient = new FakeUpdateAdminClient();
+        updateClient.Status = updateClient.Status with { UpdateAvailable = true, LatestVersion = "2.0.0" };
+        using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _,
+            updateClient: updateClient, updateSupportsApply: true);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Markup.Should().Contain("Apply Update");
+        cut.Markup.Should().NotContain(UpdateStore.ReleasesUrl);
+    }
+
+    [Fact]
+    public void SoftwareUpdate_UpdateAvailable_DoesNotSupportApply_ShowsAReleaseLinkInstead()
+    {
+        // Regression coverage for a real bug: this host (the WASM dashboard) cannot launch the
+        // downloaded MSI - Environment.Exit and MsiUpdateApplier's file/process APIs are unsupported in
+        // the browser sandbox - but the shared SettingsModal used to show "Apply Update" unconditionally
+        // regardless of host.
+        var updateClient = new FakeUpdateAdminClient();
+        updateClient.Status = updateClient.Status with { UpdateAvailable = true, LatestVersion = "2.0.0" };
+        using var ctx = NewContext(liveDataStore: out _, settingsStore: out _, routerSettingsStore: out _,
+            updateClient: updateClient, updateSupportsApply: false);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Markup.Should().NotContain("Apply Update");
+        cut.Markup.Should().Contain(UpdateStore.ReleasesUrl);
     }
 
     [Fact]

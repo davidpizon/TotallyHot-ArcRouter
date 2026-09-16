@@ -13,6 +13,14 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// </summary>
 public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
 {
+    /// <summary>
+    /// The project's GitHub releases page, shown as a link when <see cref="SupportsApply"/> is
+    /// <see langword="false"/> and an update is available - the operator's only path to actually getting
+    /// it, since this host cannot launch the installer itself. Matches the repository
+    /// <c>GitHubReleaseCheckClient</c> checks against by default.
+    /// </summary>
+    public const string ReleasesUrl = "https://github.com/davidpizon/TotallyHot-ArcRouter/releases/latest";
+
     private readonly IMsiUpdateApplier _applier;
     private readonly Action _exitApplication;
 
@@ -25,9 +33,12 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
     /// Supplies the shared call invoker this store's client is constructed over - see
     /// <see cref="IRouterChannelProvider"/>'s remarks.
     /// </param>
+    /// <param name="supportsApply">See <see cref="SupportsApply"/>. Defaults to <see langword="true"/> -
+    /// the native MAUI host, which can actually launch an MSI.</param>
     /// <param name="logger">Optional logger.</param>
     public UpdateStore(
         IRouterChannelProvider channelProvider,
+        bool supportsApply = true,
         ILogger<UpdateStore>? logger = null)
         : base(client: new UpdateAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
     {
@@ -35,6 +46,7 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
         _applier = new MsiUpdateApplier(httpClient: httpClient, logger: NullLogger<MsiUpdateApplier>.Instance);
 
         _exitApplication = () => Environment.Exit(0);
+        SupportsApply = supportsApply;
     }
 
     /// <summary>
@@ -50,15 +62,30 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
     /// locked while the MSI replaces <c>...\Gui\</c>. Defaults to a no-op so a test can assert it was
     /// called without ending the test process.
     /// </param>
+    /// <param name="supportsApply">See <see cref="SupportsApply"/>. Defaults to <see langword="true"/>.</param>
     /// <param name="logger">Optional logger.</param>
     public UpdateStore(IUpdateAdminClient client, IMsiUpdateApplier applier, Action? exitApplication = null,
-        ILogger<UpdateStore>? logger = null)
+        bool supportsApply = true, ILogger<UpdateStore>? logger = null)
         : base(client: client, logger: logger)
     {
         ArgumentNullException.ThrowIfNull(applier);
         _applier = applier;
         _exitApplication = exitApplication ?? (() => { });
+        SupportsApply = supportsApply;
     }
+
+    /// <summary>
+    /// Whether this host can actually launch the downloaded MSI - <see langword="true"/> for the native
+    /// MAUI host, <see langword="false"/> for the WASM host (<c>TotallyHotArcRouter.Gui.Web</c>), which
+    /// runs sandboxed inside a browser tab and has no filesystem or process-launch capability to do so
+    /// (D11, web GUI migration plan). The panel is expected to hide its "Apply Update" action and show a
+    /// link to <see cref="ReleasesUrl"/> instead when this is <see langword="false"/>; <see cref="ApplyAsync"/>
+    /// itself does not check this flag; a WASM host that ignored it and called it anyway would still fail
+    /// safely - <see cref="MsiUpdateApplier"/>'s file/process APIs simply throw
+    /// <see cref="PlatformNotSupportedException"/> in the browser sandbox - but hiding the action is what
+    /// actually prevents a confusing failure.
+    /// </summary>
+    public bool SupportsApply { get; }
 
     /// <summary>The last-loaded (or freshly checked) update status, or <see langword="null"/> before the first load.</summary>
     public UpdateStatusInfo? Status { get; private set; }

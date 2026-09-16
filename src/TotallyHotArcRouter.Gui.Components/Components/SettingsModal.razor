@@ -232,9 +232,21 @@
         </button>
         @if (UpdateStore.Status?.UpdateAvailable == true)
         {
-            <button @onclick="StartApplyConfirmation" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost-warning">
-                Apply Update
-            </button>
+            @if (UpdateStore.SupportsApply)
+            {
+                <button @onclick="StartApplyConfirmation" disabled="@UpdateStore.IsBusy" class="flex-1 btn btn-ghost-warning">
+                    Apply Update
+                </button>
+            }
+            else
+            {
+                @* This host (the WASM dashboard) cannot launch the MSI itself - see UpdateStore.SupportsApply's
+                               remarks. Windows users are pointed at the tray's own Install update instead. *@
+                <a href="@UpdateStore.ReleasesUrl" target="_blank" rel="noopener noreferrer"
+                   class="flex-1 btn btn-ghost-warning text-center">
+                    Get the update
+                </a>
+            }
         }
     </div>
     @if (_confirmingApply)
