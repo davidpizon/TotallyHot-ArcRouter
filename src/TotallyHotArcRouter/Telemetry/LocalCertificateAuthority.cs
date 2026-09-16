@@ -201,14 +201,37 @@ public static class LocalCertificateAuthority
     /// so the returned instance's key storage flags are consistent regardless of whether this call created
     /// or loaded the certificate.
     /// </summary>
+    /// <remarks>
+    /// Ordered so a failure never leaves an existing on-disk certificate paired with the wrong password
+    /// in the store - the pairing a caller like <see cref="GetOrCreateCa(string, ProtectedSecretStore)"/>
+    /// relies on to load an existing certificate at all. The new PFX bytes are written to a sibling temp
+    /// file first (never touching <paramref name="certificatePath"/> itself), the password is persisted
+    /// to <paramref name="secretStore"/> second, and only once that succeeds does the temp file replace
+    /// the real one via <see cref="File.Move(string, string, bool)"/> - a fast, low-failure-probability
+    /// local rename, unlike the store write it follows. If the store write throws (an unwritable key
+    /// ring, say), the temp file is deleted and the exception propagates with the existing
+    /// certificate/password pair on disk untouched and still loadable, rather than a PFX already
+    /// overwritten under a password the store never ended up holding.
+    /// </remarks>
     private static X509Certificate2 PersistAndReload(X509Certificate2 certificate, string certificatePath,
         ProtectedSecretStore secretStore, string passwordSecretName)
     {
         var password = Guid.NewGuid().ToString("N");
         var certificateBytes = certificate.Export(contentType: X509ContentType.Pkcs12, password: password);
 
-        File.WriteAllBytes(path: certificatePath, bytes: certificateBytes);
-        secretStore.Write(name: passwordSecretName, value: password);
+        var tempPath = $"{certificatePath}.{Guid.NewGuid():N}.tmp";
+        File.WriteAllBytes(path: tempPath, bytes: certificateBytes);
+        try
+        {
+            secretStore.Write(name: passwordSecretName, value: password);
+        }
+        catch
+        {
+            File.Delete(tempPath);
+            throw;
+        }
+
+        File.Move(sourceFileName: tempPath, destFileName: certificatePath, overwrite: true);
 
         return X509CertificateLoader.LoadPkcs12(data: certificateBytes, password: password,
             keyStorageFlags: X509KeyStorageFlags.Exportable);

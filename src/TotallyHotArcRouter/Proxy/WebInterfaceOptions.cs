@@ -3,10 +3,10 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// <summary>
 /// Configuration for the router-hosted web GUI's listener, bound from the <c>WebInterface</c> section.
 /// Introduced by <see href="../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s
-/// Phase P1; not yet consumed by a running listener - Phase P2 adds the Kestrel binding and gRPC-Web
-/// pipeline this configures, and Phase P4 adds the loopback-cookie/token auth <see cref="TrustLoopback"/>
-/// and <see cref="AllowedHosts"/> gate. Validated at startup from Phase P1 onward so a configuration
-/// mistake here is caught before Phase P2 gives it any effect.
+/// Phase P1. Live since Phase P2, which added the Kestrel binding and gRPC-Web pipeline this configures;
+/// Phase P4 added the loopback-cookie/token auth <see cref="TrustLoopback"/> and
+/// <see cref="AllowedHosts"/> gate on top of it. Validated at startup so a configuration mistake here is
+/// caught before the listener ever binds.
 /// </summary>
 public sealed class WebInterfaceOptions
 {

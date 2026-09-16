@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using System.Diagnostics.CodeAnalysis;
-using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using TotallyHot.ArcRouter.Gui.Web;
@@ -13,7 +12,10 @@ using TotallyHot.ArcRouter.Gui.Web;
 [assembly: ExcludeFromCodeCoverage]
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
-builder.RootComponents.Add<Dashboard>("#root");
+// AppRoot, not Dashboard directly - it gates the dashboard behind a token-login form when the startup
+// session bootstrap below determines one is required. See AppRoot.razor/AuthGateState.cs.
+builder.RootComponents.Add<AppRoot>("#root");
+builder.Services.AddSingleton<AuthGateState>();
 
 // Local, per-user GUI settings. Reused as-is from the native host (web GUI migration plan Phase P5a) -
 // its file-backed store harmlessly no-ops to an in-memory, per-session default here (WASM has no
@@ -65,8 +67,13 @@ builder.Services.AddSingleton<UpdateStore>();
 // Backs the System Settings window's Cost Reconciliation section. See Services/CostReconciliationStore.cs.
 builder.Services.AddSingleton<CostReconciliationStore>();
 // Backs the System Settings window's "Copy MCP token / Regenerate" row (web GUI migration plan Phase P9).
-// See Services/ManagementTokenAdminStore.cs.
-builder.Services.AddSingleton<ManagementTokenAdminStore>();
+// See Services/ManagementTokenAdminStore.cs. reauthenticateAsync re-issues this tab's own session cookie
+// immediately after a successful Regenerate - rotation bumps the token's Generation and invalidates every
+// outstanding session ticket, including the one this same tab is using, so without this the tab that just
+// clicked Regenerate would lock itself out of every further management call until a manual page reload.
+builder.Services.AddSingleton(sp => new ManagementTokenAdminStore(
+    channelProvider: sp.GetRequiredService<IRouterChannelProvider>(),
+    reauthenticateAsync: _ => PostAuthSessionAsync(sp.GetRequiredService<NavigationManager>().BaseUri)));
 // Backs the Model Distribution / Cost Analytics history / header ticker's real data. See
 // Services/UsageStore.cs.
 builder.Services.AddSingleton<UsageStore>();
@@ -75,19 +82,41 @@ var host = builder.Build();
 
 // Session bootstrap (ADR-0012, web GUI migration plan Phase P6): a same-machine browser tab gets a
 // session cookie with no credential prompt via the loopback fast path. Best-effort and fire-once ahead
-// of the first render - a failure here (a non-loopback caller, or WebInterface:TrustLoopback=false)
-// just means the first admin/telemetry call each store makes comes back Unauthenticated instead, which
-// every store already renders as its ordinary "router unreachable" state; there is no dedicated login
-// view yet (see the migration plan's P6 status notes for that gap).
+// of the first render. A definite 403 (the router is reachable but refused the loopback fast path - a
+// non-loopback caller such as Docker's default WebInterface__BindAddress=0.0.0.0, or an operator who set
+// WebInterface:TrustLoopback=false) flips AuthGateState.LoginRequired so AppRoot shows the token-login
+// form instead of the dashboard (Phase P11 - the migration plan's P6 status notes had named the absence
+// of this as a known gap). A network-level failure (the router isn't reachable at all yet) leaves it
+// false: a login form would be misleading there, since no token would help - each store's own ordinary
+// "unreachable" state already covers that case. ManagementTokenAdminStore's own reauthenticateAsync
+// registration above calls the same PostAuthSessionAsync helper again after a Regenerate, for the
+// session-invalidation reason described in that store's own remarks.
 try
 {
-    using var sessionClient = new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) };
-    await sessionClient.PostAsync(requestUri: "auth/session", content: null).ConfigureAwait(false);
+    using var response = await PostAuthSessionAsync(builder.HostEnvironment.BaseAddress).ConfigureAwait(false);
+    if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        host.Services.GetRequiredService<AuthGateState>().LoginRequired = true;
 }
 catch (HttpRequestException)
 {
-    // The router isn't reachable yet, or refused the loopback check - each store's own reachability
-    // handling covers the user-facing side of this; nothing further to do at bootstrap time.
+    // The router isn't reachable at all yet - nothing further to do at bootstrap time.
 }
 
 await host.RunAsync();
+
+// Shared by the startup bootstrap above and ManagementTokenAdminStore's reauthenticateAsync registration:
+// issues (or re-issues) this tab's ADR-0012 loopback session cookie via POST {baseAddress}/auth/session.
+// A short-lived HttpClient is deliberately created per call rather than injected - this runs both before
+// and after the DI container is fully wired up (the bootstrap call happens right after builder.Build(),
+// the reauthenticateAsync call happens on demand, much later, from inside a DI factory), so there is no
+// single natural place to register a long-lived one that both call sites could share.
+static async Task<HttpResponseMessage> PostAuthSessionAsync(string baseAddress)
+{
+    // Must await inside this method's own using block, not return the unawaited Task from it: disposing
+    // sessionClient happens synchronously as this method returns, which - for a non-async method just
+    // returning PostAsync's Task directly - happened before the in-flight request actually completed
+    // (a real, latent bug this rewrite also fixes, found while touching this function for AppRoot's
+    // sake: HttpClient.Dispose() while a request is in flight can abort it under its default handler).
+    using var sessionClient = new HttpClient { BaseAddress = new Uri(baseAddress) };
+    return await sessionClient.PostAsync(requestUri: "auth/session", content: null).ConfigureAwait(false);
+}

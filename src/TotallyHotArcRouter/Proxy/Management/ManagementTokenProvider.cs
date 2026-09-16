@@ -48,10 +48,15 @@ public sealed class ManagementTokenProvider : IManagementTokenProvider
     /// <inheritdoc/>
     public string Regenerate()
     {
-        var token = ManagementAccessToken.Regenerate(_store);
+        // The persistent write and the in-memory update must happen under one held lock, not two
+        // separately-locked steps: two concurrent Regenerate() calls could otherwise persist tokens A
+        // then B (in that order) but acquire the lock to update _currentToken in the opposite order (B
+        // then A), leaving _currentToken at "A" while the store - and every other process reading it -
+        // holds "B". The same class of bug this fixes was already found and fixed once in
+        // ManagementAccessToken.GetOrCreate (see ProtectedSecretStore.GetOrAdd's remarks).
         lock (_lock)
         {
-            _currentToken = token;
+            _currentToken = ManagementAccessToken.Regenerate(_store);
             Generation++;
             return _currentToken;
         }

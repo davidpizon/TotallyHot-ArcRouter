@@ -16,8 +16,9 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// <c>management-token.txt</c> file this replaces. <see cref="GetOrCreate"/> imports that legacy file
 /// once, on the first call after upgrading past this phase: an install that already handed its token to
 /// MCP clients must not silently mint a fresh one and invalidate every one of them. The legacy file is
-/// deleted only after a successful import, so a failed import (the store's key ring not yet writable, say)
-/// leaves the old file in place to retry from next time rather than losing the token outright.
+/// deleted only once the imported value is confirmed durably persisted in the protected store - not
+/// before - so a failed persist (the store's key ring not yet writable, say) leaves the old file in
+/// place to retry from next time rather than losing the token from both places at once.
 /// </para>
 /// <para>
 /// <see cref="ProtectedSecretStore"/> already serializes its own read-modify-write cycle with a path-scoped
@@ -53,8 +54,27 @@ public static class ManagementAccessToken
         // and (if neither found anything) generate-and-persist sequence, so two callers racing to be
         // "the first" (two router instances starting together, say) can never both conclude "nothing
         // stored yet" and each write a competing token.
-        return secretStore.GetOrAdd(name: SecretName,
-            valueFactory: () => TryImportLegacyToken(legacyTokenPath: resolvedLegacyPath) ?? GenerateToken());
+        //
+        // The legacy file is NOT deleted inside the value factory itself: GetOrAdd persists the
+        // factory's return value only after the factory returns, so deleting the file first and having
+        // that persist subsequently fail (an unwritable key ring, say) would lose the token from both
+        // places at once - the next start would silently mint a fresh one and invalidate every MCP
+        // client already configured with the old one. Deletion is deferred until GetOrAdd has returned
+        // without throwing, i.e. the token is confirmed persisted in the store.
+        var importedFromLegacyFile = false;
+        var token = secretStore.GetOrAdd(name: SecretName,
+            valueFactory: () =>
+            {
+                var imported = TryReadLegacyToken(legacyTokenPath: resolvedLegacyPath);
+                if (imported is null) return GenerateToken();
+
+                importedFromLegacyFile = true;
+                return imported;
+            });
+
+        if (importedFromLegacyFile) TryDeleteLegacyToken(resolvedLegacyPath);
+
+        return token;
     }
 
     /// <summary>
@@ -94,28 +114,44 @@ public static class ManagementAccessToken
 
     /// <summary>
     /// Reads the token from <paramref name="legacyTokenPath"/> if that file still exists and is
-    /// non-empty, deleting it afterward so a later call never re-imports it. Returns
-    /// <see langword="null"/> (leaving the legacy file untouched) when there is nothing to import or the
-    /// read/delete itself fails, so <see cref="GetOrCreate"/>'s factory falls through to minting a fresh
-    /// token rather than losing an operator's already-distributed one to a transient failure. Only ever
-    /// called from inside <see cref="ProtectedSecretStore.GetOrAdd"/>'s held mutex, so there is no race
-    /// with another caller also trying to import the same file.
+    /// non-empty, without deleting it - see <see cref="GetOrCreate"/>'s remarks for why deletion is
+    /// deferred to <see cref="TryDeleteLegacyToken"/>, called only once the import is confirmed
+    /// persisted. Returns <see langword="null"/> when there is nothing to import or the read itself
+    /// fails, so <see cref="GetOrCreate"/>'s factory falls through to minting a fresh token rather than
+    /// losing an operator's already-distributed one to a transient failure. Only ever called from inside
+    /// <see cref="ProtectedSecretStore.GetOrAdd"/>'s held mutex, so there is no race with another caller
+    /// also trying to import the same file.
     /// </summary>
-    private static string? TryImportLegacyToken(string legacyTokenPath)
+    private static string? TryReadLegacyToken(string legacyTokenPath)
     {
         try
         {
             if (!File.Exists(legacyTokenPath)) return null;
 
             var imported = File.ReadAllText(legacyTokenPath).Trim();
-            if (string.IsNullOrEmpty(imported)) return null;
-
-            File.Delete(legacyTokenPath);
-            return imported;
+            return string.IsNullOrEmpty(imported) ? null : imported;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort deletes the legacy plaintext token file after <see cref="GetOrCreate"/> has confirmed
+    /// its content is durably persisted in the protected store, so a later call never re-imports it. A
+    /// failure here (the file is locked, permissions changed underneath it) is logged nowhere and simply
+    /// leaves the now-redundant file in place - the token itself is already safe in the store either way,
+    /// so this is cleanup, not a step anything else depends on.
+    /// </summary>
+    private static void TryDeleteLegacyToken(string legacyTokenPath)
+    {
+        try
+        {
+            File.Delete(legacyTokenPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

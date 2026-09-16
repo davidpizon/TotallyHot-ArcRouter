@@ -45,7 +45,7 @@ public sealed class LoopbackRequestGuardTests
     {
         Assert.True(LoopbackRequestGuard.IsOriginAllowed(
             origin: "https://localhost:5004",
-            secFetchSitePresent: true,
+            secFetchSite: "same-origin",
             expectedOrigin: "https://localhost:5004"));
     }
 
@@ -54,27 +54,51 @@ public sealed class LoopbackRequestGuardTests
     {
         Assert.False(LoopbackRequestGuard.IsOriginAllowed(
             origin: "https://evil.example",
-            secFetchSitePresent: true,
+            secFetchSite: "cross-site",
             expectedOrigin: "https://localhost:5004"));
     }
 
     [Fact]
     public void IsOriginAllowed_AbsentOriginWithNoSecFetchSite_ReturnsTrue()
     {
+        // The native/CLI case: neither header is sent at all.
         Assert.True(LoopbackRequestGuard.IsOriginAllowed(
             origin: null,
-            secFetchSitePresent: false,
+            secFetchSite: null,
             expectedOrigin: "https://localhost:5004"));
     }
 
     [Fact]
-    public void IsOriginAllowed_AbsentOriginWithSecFetchSitePresent_ReturnsFalse()
+    public void IsOriginAllowed_AbsentOriginWithSecFetchSiteNone_ReturnsTrue()
     {
-        // A browser request that stripped Origin but still carries Sec-Fetch-Site is not the native/CLI
-        // case this absence-tolerance exists for - treat it as untrusted.
+        // A real top-level browser navigation (typed URL, bookmark) never sends Origin, but a modern
+        // browser still attaches Sec-Fetch-Site: none to it - this must not be rejected (a real bug this
+        // regression test pins: the dashboard's own page load used to 403 for exactly this reason).
+        Assert.True(LoopbackRequestGuard.IsOriginAllowed(
+            origin: null,
+            secFetchSite: "none",
+            expectedOrigin: "https://localhost:5004"));
+    }
+
+    [Fact]
+    public void IsOriginAllowed_AbsentOriginWithSecFetchSiteSameOrigin_ReturnsTrue()
+    {
+        // A same-origin subresource GET (an <img>/<script> the dashboard's own page loads) commonly
+        // carries no Origin header either.
+        Assert.True(LoopbackRequestGuard.IsOriginAllowed(
+            origin: null,
+            secFetchSite: "same-origin",
+            expectedOrigin: "https://localhost:5004"));
+    }
+
+    [Fact]
+    public void IsOriginAllowed_AbsentOriginWithSecFetchSiteCrossSite_ReturnsFalse()
+    {
+        // The actual CSRF vector this check exists to stop: a plain, Origin-less GET (an <img>/<a> tag)
+        // issued from another site's page against this host.
         Assert.False(LoopbackRequestGuard.IsOriginAllowed(
             origin: null,
-            secFetchSitePresent: true,
+            secFetchSite: "cross-site",
             expectedOrigin: "https://localhost:5004"));
     }
 

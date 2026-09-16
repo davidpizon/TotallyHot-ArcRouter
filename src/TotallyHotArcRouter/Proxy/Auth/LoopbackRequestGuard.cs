@@ -13,35 +13,55 @@ public static class LoopbackRequestGuard
 {
     /// <summary>
     /// Returns whether <paramref name="host"/> (the request's <c>Host</c> header, host part only - no
-    /// port) is in <paramref name="allowedHosts"/>. Comparison is ordinal, case-insensitive; entries in
-    /// <paramref name="allowedHosts"/> that carry brackets (e.g. <c>[::1]</c>) are compared bracket-for-
-    /// bracket since that is how <see cref="WebInterfaceOptions.AllowedHosts"/> is documented and
-    /// defaulted.
+    /// port) is in <paramref name="allowedHosts"/>. Comparison is ordinal, case-insensitive, and strips a
+    /// wrapping <c>[]</c> pair from either side before comparing: ASP.NET Core's
+    /// <see cref="Microsoft.AspNetCore.Http.HostString.Host"/> returns an IPv6 literal *without* brackets
+    /// (e.g. <c>::1</c>, not <c>[::1]</c>), while <see cref="WebInterfaceOptions.AllowedHosts"/>' own
+    /// default and documentation spell IPv6 entries *with* brackets - a literal, bracket-sensitive
+    /// comparison rejected every IPv6 loopback request outright (a real bug this normalization fixes).
     /// </summary>
     public static bool IsHostAllowed(string? host, IReadOnlyList<string> allowedHosts)
     {
         if (string.IsNullOrWhiteSpace(host)) return false;
 
+        var normalizedHost = StripBrackets(host);
+
         foreach (var allowed in allowedHosts)
-            if (string.Equals(a: host, b: allowed, comparisonType: StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(a: normalizedHost, b: StripBrackets(allowed), comparisonType: StringComparison.OrdinalIgnoreCase))
                 return true;
 
         return false;
     }
 
-    /// <summary>
-    /// Returns whether <paramref name="origin"/> is acceptable for a same-origin web-port request:
-    /// either absent (a native/CLI caller with no browser <c>Sec-Fetch-Site</c> context - see
-    /// <paramref name="secFetchSitePresent"/>) or exactly equal to <paramref name="expectedOrigin"/>
-    /// (scheme, host, and port). A present <c>Origin</c> with no matching <c>Sec-Fetch-Site</c> is
-    /// treated the same as an absent one for that reason: the two headers are set by the same browser
-    /// request pipeline, so a caller offering neither is not a browser at all, and a caller offering
-    /// <c>Origin</c> without the fetch metadata is unusual enough (proxies stripping headers, older
-    /// clients) that requiring an exact match rather than guessing is the safer default.
-    /// </summary>
-    public static bool IsOriginAllowed(string? origin, bool secFetchSitePresent, string expectedOrigin)
+    /// <summary>Removes one wrapping <c>[</c>/<c>]</c> pair from an IPv6 literal, if present; returns other values unchanged.</summary>
+    private static string StripBrackets(string value)
     {
-        if (string.IsNullOrWhiteSpace(origin)) return !secFetchSitePresent;
+        return value.Length >= 2 && value[0] == '[' && value[^1] == ']' ? value[1..^1] : value;
+    }
+
+    /// <summary>
+    /// Returns whether a web-port request is acceptable for ADR-0012's CSRF defense: either
+    /// <paramref name="origin"/> is present and exactly equals <paramref name="expectedOrigin"/> (scheme,
+    /// host, and port), or <paramref name="origin"/> is absent and <paramref name="secFetchSite"/> is not
+    /// <c>"cross-site"</c>.
+    /// </summary>
+    /// <remarks>
+    /// A real, ordinary top-level browser navigation (typing the URL, following a bookmark) never sends
+    /// an <c>Origin</c> header, but a modern browser still attaches <c>Sec-Fetch-Site: none</c> to it -
+    /// this method originally treated *any* presence of <c>Sec-Fetch-Site</c> as disqualifying once
+    /// <c>Origin</c> was absent, which rejected every such navigation with 403 (verified only against
+    /// curl, which sends neither header, so this never surfaced until a real browser was tried). The
+    /// header's own *value* is what actually distinguishes a same-page/same-site/no-referrer request
+    /// (<c>"same-origin"</c>, <c>"same-site"</c>, <c>"none"</c>) from the one shape this check exists to
+    /// stop: a plain, Origin-less GET issued from another site's page (<c>"cross-site"</c>) - e.g. an
+    /// <c>&lt;img&gt;</c>/<c>&lt;a&gt;</c> pointed at this host from an attacker-controlled page. A caller
+    /// sending neither header at all (native/CLI, most non-browser HTTP clients) is treated the same as
+    /// a same-site navigation, since it isn't a browser CSRF vector in the first place.
+    /// </remarks>
+    public static bool IsOriginAllowed(string? origin, string? secFetchSite, string expectedOrigin)
+    {
+        if (string.IsNullOrWhiteSpace(origin))
+            return !string.Equals(a: secFetchSite, b: "cross-site", comparisonType: StringComparison.OrdinalIgnoreCase);
 
         return string.Equals(a: origin, b: expectedOrigin, comparisonType: StringComparison.OrdinalIgnoreCase);
     }

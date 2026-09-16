@@ -41,10 +41,13 @@ public sealed class WebPortRequestGuardMiddleware
         }
 
         var origin = context.Request.Headers.Origin.ToString();
+        var secFetchSite = context.Request.Headers.TryGetValue("Sec-Fetch-Site", out var secFetchSiteValues)
+            ? secFetchSiteValues.ToString()
+            : null;
         var expectedOrigin = $"{context.Request.Scheme}://{context.Request.Host}";
         if (!LoopbackRequestGuard.IsOriginAllowed(
                 origin: string.IsNullOrEmpty(origin) ? null : origin,
-                secFetchSitePresent: context.Request.Headers.ContainsKey("Sec-Fetch-Site"),
+                secFetchSite: string.IsNullOrEmpty(secFetchSite) ? null : secFetchSite,
                 expectedOrigin: expectedOrigin))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;

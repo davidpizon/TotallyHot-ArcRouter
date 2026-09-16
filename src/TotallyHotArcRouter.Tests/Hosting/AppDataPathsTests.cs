@@ -23,6 +23,24 @@ public sealed class AppDataPathsTests
 
         Assert.True(Path.IsPathRooted(directory));
         Assert.True(Directory.Exists(directory));
+    }
+
+    [Fact]
+    public void ResolveMachineSharedDirectory_OnWindows_EndsWithApplicationDirectoryName()
+    {
+        // Only a Windows (or macOS/per-user-fallback) guarantee, not a universal one: Linux's own
+        // machine-wide default is "/var/lib/totallyhot-arcrouter" (lowercase-hyphenated, not the literal
+        // "TotallyHotArcRouter"), and an operator-supplied STATE_DIRECTORY can be any path at all (this
+        // repo's own Dockerfile sets it to "/data" - see the web GUI migration plan's P10 status section
+        // for the real container crash that exact case caused elsewhere in this codebase). Asserting this
+        // unconditionally used to pass here only because this repo's own CI runner is unprivileged and so
+        // always fell through to the per-user fallback, which happens to end in the exact name - a
+        // coincidence of this test's own execution environment, not a contract AppDataPaths documents for
+        // every platform.
+        if (!IsWindows) return;
+
+        var directory = AppDataPaths.ResolveMachineSharedDirectory();
+
         Assert.EndsWith(expectedEndString: AppDataPaths.ApplicationDirectoryName, actualString: directory,
             comparisonType: StringComparison.Ordinal);
     }

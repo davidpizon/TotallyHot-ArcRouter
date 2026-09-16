@@ -72,7 +72,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         BenchmarkSyncService benchmarkSyncService,
         BenchmarkSyncOptions benchmarkSyncOptions,
         IManagementTokenProvider tokenProvider,
-        int port = 5003,
+        int port = 47103,
         string bindAddress = "loopback",
         Serilog.ILogger? serilogLogger = null)
     {

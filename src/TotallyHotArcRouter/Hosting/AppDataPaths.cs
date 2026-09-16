@@ -132,15 +132,31 @@ public static class AppDataPaths
     }
 
     /// <summary>
-    /// Attempts to create <paramref name="directory"/> (idempotent when it already exists), returning
-    /// whether it is usable - <see langword="false"/> on any permission or I/O failure, never throwing, so
-    /// the caller can move on to its next candidate.
+    /// Attempts to create <paramref name="directory"/> (idempotent when it already exists) and confirms
+    /// this process can actually write into it, returning whether it is usable -
+    /// <see langword="false"/> on any permission or I/O failure, never throwing, so the caller can move
+    /// on to its next candidate.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Directory.CreateDirectory(string)"/> alone is not enough: it is a silent no-op when
+    /// the directory already exists, regardless of whether *this* account can write to it - a real gap
+    /// on a machine where the machine-wide candidate was created by a previous, more-privileged install
+    /// (root, a different service account) and is now read-only to whoever is running the router today.
+    /// Without an actual write probe, that case was reported "usable" and every later write (secrets.dat,
+    /// the operational databases) failed instead of falling through to the per-user fallback this method
+    /// exists to enable. The probe creates and deletes a uniquely-named temp file inside the directory,
+    /// so it exercises the exact permission a real write needs rather than just directory metadata.
+    /// </remarks>
     private static bool TryEnsureDirectory(string directory)
     {
         try
         {
             Directory.CreateDirectory(directory);
+
+            var probePath = Path.Combine(directory, $".totallyhotarcrouter-write-probe-{Guid.NewGuid():N}");
+            File.WriteAllBytes(path: probePath, bytes: []);
+            File.Delete(probePath);
+
             return true;
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
