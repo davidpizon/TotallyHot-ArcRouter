@@ -873,16 +873,12 @@ usually means) is worth doing once Phase P7 makes `https://localhost:5004` trust
 4. **Version-mismatch banner - not implemented.** No client-reported build number exists yet to compare
    against the router's; `SettingsModal`'s existing `RouterVersionLabel` (reads `UpdateStore.Status`)
    already show the router's own version, but nothing compares it against the GUI bundle's build number.
-5. **`UpdateStore.ApplyAsync`/`Environment.Exit` were not removed**, and `SettingsModal`'s "Apply Update"
-   button is unchanged and shared verbatim between both hosts. In `Gui.Web`, clicking it (only reachable
-   when `UpdateStore.Status.UpdateAvailable` is true - never the case today, since this repo has
-   published no releases yet, confirmed live in Phase P4's own smoke test) would attempt to launch
-   `msiexec` via `Gui.Telemetry`'s `IElevatedProcessLauncher`, which is a real `PlatformNotSupportedException`
-   waiting to happen in a browser sandbox. Left deliberately deferred rather than redesigning a
-   468-line, host-shared component's public contract (and MAUI's own working "Apply Update" flow along
-   with it) without being able to interactively re-verify the MAUI side against a live render - the same
-   reasoning as P5's wwwroot deferral. Flagged here with its real (if currently unreachable) blast radius
-   named, not silently left as a landmine no one is watching for.
+5. **Resolved in review follow-up:** `UpdateStore` gained a `SupportsApply` flag (default
+   `true`, so the native host is unchanged); `Gui.Web/Program.cs` constructs it with
+   `supportsApply: false`, and `SettingsModal` now shows a link to the GitHub releases page instead of
+   the "Apply Update" button when it's `false`. `UpdateStore.ApplyAsync`/`Environment.Exit` themselves
+   were not removed - `SupportsApply` only gates the UI action that reaches them, on the reasoning that
+   the flag is the minimal fix and the store's own contract still serves the native host unchanged.
 6. **No Playwright CI job.** Cannot be authored against a real `ubuntu-latest`/Chromium+Firefox run from
    this environment any more than the ubuntu test-job wiring deferred in P5 could be - same category of
    gap, for the same reason.
