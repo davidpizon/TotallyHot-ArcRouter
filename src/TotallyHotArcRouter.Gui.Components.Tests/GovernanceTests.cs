@@ -1,8 +1,11 @@
 using AwesomeAssertions;
 using Bunit;
+using Grpc.Core;
+using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -18,7 +21,11 @@ public sealed class GovernanceTests
     {
         var ctx = new BunitContext();
         // Every sub-view points at an unreachable address - these tests only need each to mount.
-        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59994")));
+        // ProviderAdminStore uses a hangs-forever stub client rather than a real (unreachable) connection:
+        // a real loopback connection refusal can occasionally resolve fast enough on a loaded CI runner to
+        // flip ProvidersAdmin out of its "Loading providers" state before the default-sub-view test's
+        // assertion runs, the same "hangs forever" fix already applied to the other stores below.
+        ctx.Services.AddSingleton(new ProviderAdminStore(client: new ProviderAdminClient(new HangingProviderAdminServiceClient())));
         ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59989")));
         ctx.Services.AddSingleton(new PriceSourceStore(new StubPriceSourceAdminClient()));
         ctx.Services.AddSingleton(new BenchmarkDataStore(new StubBenchmarkDataAdminClient()));
@@ -89,6 +96,28 @@ public sealed class GovernanceTests
         await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Benchmark Data").Click());
 
         cut.Markup.Should().Contain("Loading benchmark data status");
+    }
+
+    /// <summary>
+    /// A <c>ProviderAdminService</c> test double whose <c>ListProviders</c> RPC never completes - so the
+    /// Providers pane stays in its "Loading providers" state for the default-sub-view smoke test,
+    /// deterministically instead of racing a real (deliberately-unreachable) connection's failure
+    /// continuation. Distinct from <see cref="StubProviderAdminServiceClient"/> (used by
+    /// <c>ProviderAdminStoreTests</c> for canned responses/failures), which always completes. Overrides
+    /// only the <c>CallOptions</c> overload: the generated convenience overloads delegate to it.
+    /// </summary>
+    private sealed class HangingProviderAdminServiceClient : Contract.ProviderAdminService.ProviderAdminServiceClient
+    {
+        public override AsyncUnaryCall<Contract.ProviderListResponse> ListProvidersAsync(
+            Contract.ListProvidersRequest request, CallOptions options)
+        {
+            return new AsyncUnaryCall<Contract.ProviderListResponse>(
+                responseAsync: new TaskCompletionSource<Contract.ProviderListResponse>().Task,
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
     }
 
     /// <summary>Hangs forever, so the panel stays in its "loading" state for the toggle smoke test.</summary>
