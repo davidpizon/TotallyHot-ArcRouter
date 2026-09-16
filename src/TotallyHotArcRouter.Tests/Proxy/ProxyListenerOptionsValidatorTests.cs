@@ -110,6 +110,121 @@ public sealed class ProxyListenerOptionsValidatorTests
     [Fact]
     public void Validate_NullOptions_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => CreateValidator().Validate(name: null, options: null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            CreateValidator().Validate(name: null, options: (ProxyListenerOptions)null!));
+    }
+
+    [Fact]
+    public void Validate_ProxyPortCollidesWithWebInterfacePort_FailsEvenWithPlainHttpDisabled()
+    {
+        // Regression coverage for a real bug: every collision check used to be nested inside
+        // `if (options.PlainHttp.Enabled)`, so with PlainHttp off (the default) a collision between the
+        // two always-active TLS listeners went uncaught entirely.
+        var options = new ProxyListenerOptions { Port = 5004 };
+
+        var result = CreateValidator(webInterfacePort: 5004).Validate(name: null, options);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Failures!, f => f.Contains(nameof(WebInterfaceOptions), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_ProxyPortCollidesWithMcpPort_WhenMcpEnabled_FailsEvenWithPlainHttpDisabled()
+    {
+        var options = new ProxyListenerOptions { Port = 5003 };
+
+        var result = new ProxyListenerOptionsValidator(
+                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 5004 }),
+                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = true, Port = 5003 }))
+            .Validate(name: null, options);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Failures!, f => f.Contains(nameof(McpOptions), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_ProxyPortCollidesWithMcpPort_WhenMcpDisabled_Succeeds()
+    {
+        // A real bug fixed alongside the above: Mcp collisions must be gated on McpOptions.Enabled, since
+        // a disabled McpHostedService never binds McpOptions.Port at all - that port is genuinely free.
+        var options = new ProxyListenerOptions { Port = 5003 };
+
+        var result = new ProxyListenerOptionsValidator(
+                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 5004 }),
+                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = false, Port = 5003 }))
+            .Validate(name: null, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void Validate_WebInterfacePortCollidesWithMcpPort_WhenMcpEnabled_Fails()
+    {
+        var result = new ProxyListenerOptionsValidator(
+                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 5003 }),
+                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = true, Port = 5003 }))
+            .Validate(name: null, new ProxyListenerOptions { Port = 47101 });
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Failures!,
+            f => f.Contains(nameof(WebInterfaceOptions), StringComparison.Ordinal) &&
+                 f.Contains(nameof(McpOptions), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_EphemeralPorts_NeverCollide()
+    {
+        var result = new ProxyListenerOptionsValidator(
+                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 0 }),
+                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = true, Port = 0 }))
+            .Validate(name: null, new ProxyListenerOptions { Port = 0 });
+
+        Assert.True(result.Succeeded);
+    }
+
+}
+
+/// <summary>
+/// Covers <see cref="PortRangeOptionsValidator"/>: the dependency-free port-range checks for
+/// <see cref="WebInterfaceOptions"/> and <see cref="McpOptions"/>, kept out of
+/// <see cref="ProxyListenerOptionsValidator"/> to avoid a circular DI dependency (see that class's own
+/// remarks).
+/// </summary>
+public sealed class PortRangeOptionsValidatorTests
+{
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void ValidateWebInterfaceOptions_PortOutOfRange_Fails(int port)
+    {
+        var result = new PortRangeOptionsValidator().Validate(name: null, new WebInterfaceOptions { Port = port });
+
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public void ValidateWebInterfaceOptions_EphemeralPort_Succeeds()
+    {
+        var result = new PortRangeOptionsValidator().Validate(name: null, new WebInterfaceOptions { Port = 0 });
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void ValidateMcpOptions_PortOutOfRange_Fails(int port)
+    {
+        var result = new PortRangeOptionsValidator().Validate(name: null, new McpOptions { Port = port });
+
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public void ValidateMcpOptions_EphemeralPort_Succeeds()
+    {
+        var result = new PortRangeOptionsValidator().Validate(name: null, new McpOptions { Port = 0 });
+
+        Assert.True(result.Succeeded);
     }
 }

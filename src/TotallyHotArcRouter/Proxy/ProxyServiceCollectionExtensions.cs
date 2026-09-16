@@ -266,9 +266,13 @@ internal static class ProxyServiceCollectionExtensions
         // MCP (Model Context Protocol) management endpoint - agent-facing access to the same
         // provider/model/budget/price-source management as REST /admin/*, over a dedicated loopback TLS
         // port. See docs/router/mcp-endpoint-plan.md.
+        // Validated on start for the same reason as ProxyListenerOptions/WebInterfaceOptions below - see
+        // ProxyListenerOptionsValidator, which also owns the pairwise collision checks against those two.
         services.AddOptions<McpOptions>()
             .Configure<IConfiguration>((options, configuration) =>
-                configuration.GetSection(McpOptions.SectionName).Bind(options));
+                configuration.GetSection(McpOptions.SectionName).Bind(options))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<McpOptions>, PortRangeOptionsValidator>();
         services.AddHostedService<McpHostedService>();
 
         return services;
@@ -299,6 +303,7 @@ internal static class ProxyServiceCollectionExtensions
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(WebInterfaceOptions.SectionName).Bind(options))
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<WebInterfaceOptions>, PortRangeOptionsValidator>();
 
         // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
         // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
