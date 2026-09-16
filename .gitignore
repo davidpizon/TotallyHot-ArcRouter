@@ -215,6 +215,11 @@ publish/
 # Note: Comment the next line if you want to checkin your web deploy settings,
 # but database connection strings (with potential passwords) will be unencrypted
 *.pubxml
+# Except the Router's and Tray's "Service" profiles: release.yml and scripts/build-installer.ps1 publish with
+# -p:PublishProfile=Service, and the installer harvests the bin\Publish\Service directory these set. They hold
+# no credentials. Left ignored, a CI checkout publishes to the default directory and the MSI packages nothing.
+!src/TotallyHotArcRouter/Properties/PublishProfiles/Service.pubxml
+!src/TotallyHotArcRouter.Tray/Properties/PublishProfiles/Service.pubxml
 *.publishproj
 
 # Microsoft Azure Web App publish settings. Comment the next line if you want to

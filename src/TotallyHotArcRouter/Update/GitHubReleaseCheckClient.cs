@@ -65,8 +65,8 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
 
         // The SDK appends "+<git-commit-sha>" (IncludeSourceRevisionInInformationalVersion, on by
         // default for a git checkout) onto InformationalVersion, which System.Version cannot parse at
-        // all. Strip it - Directory.Build.props' Version is always the plain "<major>.<minor>.<patch>"
-        // this comparison needs.
+        // all. Strip it - the build's Version (release.yml's tag-derived -p:Version, or
+        // Directory.Build.props' fallback) is always the plain "<major>.<minor>.<patch>" this comparison needs.
         var informationalVersion =
             assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
         var plusIndex = informationalVersion.IndexOf('+', comparisonType: StringComparison.Ordinal);
@@ -151,8 +151,8 @@ public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
                 detail: $"Release tag '{tag}' is not a parseable 'v<version>'.");
 
         if (!Version.TryParse(input: _currentVersion, result: out var currentVersion))
-            // The running app's own version is always Directory.Build.props' Version, which is always
-            // well-formed; this branch exists only so a corrupted build metadata attribute degrades to
+            // The running app's own version is always the build's plain MAJOR.MINOR.PATCH Version (release.yml
+            // rejects any tag that is not), so it is always well-formed; this branch exists only so a corrupted build metadata attribute degrades to
             // "unavailable" rather than throwing.
             return ReleaseCheckResult.Unavailable(
                 currentVersion: _currentVersion,

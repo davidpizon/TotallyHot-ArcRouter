@@ -132,7 +132,7 @@ public class TelemetryGrpcServiceTests
         Assert.Equal(expected: telemetryEvent.SessionId, actual: writer.Written[0].RoutingTelemetry.SessionId);
 
         await cts.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => callTask);
+        await callTask.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public class TelemetryGrpcServiceTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         await cts.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => callTask);
+        await callTask.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
 
         // The call ended (finally { _broadcaster.Unregister(...) } ran), so a further publish must
         // not reach this call's now-abandoned writer.

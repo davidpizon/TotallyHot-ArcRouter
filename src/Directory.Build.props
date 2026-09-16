@@ -45,12 +45,16 @@
   </PropertyGroup>
 
   <!--
-    Single source of truth for the combined Router/GUI release version and the GitHub repo the
-    auto-updater checks (docs: the auto-update plan). Both TotallyHotArcRouter and
-    TotallyHotArcRouter.Gui compile these into an AssemblyMetadataAttribute (see each csproj's
-    ItemGroup below) instead of hardcoding or duplicating them in appsettings.json, so the two
-    apps can never disagree about which repo/version they're comparing against. Bump Version here
-    for every combined release; the GitHub Release tag is "v<Version>".
+    The combined Router/GUI version and the GitHub repo the auto-updater checks (docs: the auto-update
+    plan). Both TotallyHotArcRouter and TotallyHotArcRouter.Gui compile these into an
+    AssemblyMetadataAttribute (see each csproj's ItemGroup below) instead of hardcoding or duplicating
+    them in appsettings.json, so the two apps can never disagree about which repo/version they're
+    comparing against.
+
+    Version here is only the LOCAL-BUILD FALLBACK - do not bump it to cut a release. A release's version
+    is its "vMAJOR.MINOR.PATCH" git tag (created by .github/workflows/cut-release.yml), which release.yml
+    passes to every build as -p:Version; a global property overrides this one, and InformationalVersion
+    and the installer's ProductVersion both follow it. See docs/router/packaging-and-distribution.md §7.
   -->
   <PropertyGroup>
     <Version>1.0.0</Version>

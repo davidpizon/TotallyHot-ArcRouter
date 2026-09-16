@@ -1,0 +1,149 @@
+name: Cut release
+
+# Stage zero of the release flow (docs/router/packaging-and-distribution.md §7): picks the next version,
+# tags main's HEAD as "v<version>", and dispatches release.yml against that tag. Nothing is committed -
+# the tag IS the release version (release.yml passes it to every build as -p:Version), which is what lets
+# this run without a version-bump PR against main's required-review branch protection.
+#
+# Why dispatch release.yml explicitly instead of relying on its `push: tags` trigger: a tag pushed with
+# this workflow's GITHUB_TOKEN deliberately does not start other workflows (GitHub's recursion guard), and
+# workflow_dispatch is the documented exception to that rule. A tag pushed by a human still triggers
+# release.yml through `push` as before, so the two paths never produce duplicate runs.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "SemVer field to increment from the latest v* tag (ignored when version is set)"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: "Explicit version instead of a bump, e.g. 1.0.0 (optional; must be above the latest tag)"
+        required: false
+        type: string
+      dry_run:
+        description: "Only compute and print the next version - create no tag and start no build"
+        required: false
+        type: boolean
+        default: false
+
+# contents:write pushes the tag; actions:write dispatches release.yml.
+permissions:
+  contents: write
+  actions: write
+
+# Two overlapping cuts would both read the same "latest tag" and race to push the same next version.
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    name: Cut ${{ inputs.version || inputs.bump }} release from main
+    runs-on: ubuntu-latest
+    steps:
+      # Always main, whichever branch the dispatch was started from: release.yml refuses any tag whose
+      # commit is not on main, so tagging anything else would only fail one workflow later.
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          # Windows Installer only compares ProductVersion's first three fields and caps them at
+          # 255.255.65535; a version past that would build an MSI whose MajorUpgrade never fires. Field
+          # LENGTH is checked before any (( )) comparison: Bash integers silently wrap past 64 bits, so an
+          # over-long field could otherwise compare as small. (release.yml's verify-version does the same.)
+          within_msi_limits() {
+            [[ "$1" =~ ${semver} ]] || return 1
+            (( ${#BASH_REMATCH[1]} <= 3 && ${#BASH_REMATCH[2]} <= 3 && ${#BASH_REMATCH[3]} <= 5 )) || return 1
+            (( BASH_REMATCH[1] <= 255 && BASH_REMATCH[2] <= 255 && BASH_REMATCH[3] <= 65535 ))
+          }
+
+          # Only strict vMAJOR.MINOR.PATCH tags within the MSI limits take part - anything else was never
+          # a release (release.yml rejects it), and must not feed the bump arithmetic below.
+          latest_tag=""
+          while read -r candidate; do
+            if within_msi_limits "${candidate#v}"; then latest_tag="${candidate}"; fi
+          done < <(git tag --list 'v*' | grep -E "^v${semver:1}" | sort -V || true)
+          latest="${latest_tag#v}"
+          latest="${latest:-0.0.0}"
+          [[ "${latest}" =~ ${semver} ]]
+          major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
+
+          if [[ -n "${EXPLICIT_VERSION}" ]]; then
+            next="${EXPLICIT_VERSION#v}"
+            if [[ ! "${next}" =~ ${semver} ]]; then
+              echo "::error::Version '${EXPLICIT_VERSION}' is not MAJOR.MINOR.PATCH (no leading zeros, no suffix)."
+              exit 1
+            fi
+            if ! within_msi_limits "${next}"; then
+              echo "::error::Version ${next} exceeds Windows Installer's ProductVersion limit of 255.255.65535."
+              exit 1
+            fi
+            if [[ -n "${latest_tag}" ]]; then
+              highest=$(printf '%s\n%s\n' "${latest}" "${next}" | sort -V | tail -n1)
+              if [[ "${next}" == "${latest}" || "${highest}" != "${next}" ]]; then
+                echo "::error::Version ${next} is not above the latest release tag ${latest_tag}."
+                exit 1
+              fi
+            fi
+          else
+            case "${BUMP}" in
+              major) next="$((major + 1)).0.0" ;;
+              minor) next="${major}.$((minor + 1)).0" ;;
+              patch) next="${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+
+          # A bump can still step past a limit (e.g. patch 65535 -> 65536).
+          if ! within_msi_limits "${next}"; then
+            echo "::error::Version ${next} exceeds Windows Installer's ProductVersion limit of 255.255.65535."
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
+            echo "::error::Tag v${next} already exists."
+            exit 1
+          fi
+
+          echo "Latest release tag: ${latest_tag:-<none>}"
+          echo "Next version:       ${next}"
+          echo "Commit:             $(git rev-parse HEAD) ($(git log -1 --format=%s))"
+          echo "version=${next}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### v${next}"
+            echo ""
+            echo "- Previous release tag: \`${latest_tag:-none}\`"
+            echo "- Commit: \`$(git rev-parse HEAD)\` - $(git log -1 --format=%s)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Tag main and start the release build
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ steps.next.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin "${TAG}"
+
+          gh workflow run release.yml --ref "${TAG}"
+          echo "Pushed ${TAG} and dispatched release.yml. It publishes a prerelease; run promote.yml once the RC is verified." \
+            | tee -a "${GITHUB_STEP_SUMMARY}"

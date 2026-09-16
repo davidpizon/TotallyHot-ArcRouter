@@ -1,7 +1,6 @@
 name: Release
 
-# Tag-triggered: pushing a "v<Directory.Build.props' Version>" tag (e.g. v1.2.3, matching this repo's
-# existing "bump Version, tag v<Version>" convention - see Directory.Build.props' comment) builds every
+# Tag-triggered: a "v<MAJOR>.<MINOR>.<PATCH>" tag (e.g. v1.2.3) on a commit reachable from main builds every
 # release asset (web GUI migration plan Phase P10's packaging matrix) and publishes them plus a single
 # combined checksums.txt as GitHub Release assets, in the shape GitHubReleaseCheckClient expects: exactly
 # one platform-matching installer/archive asset (a *.msi* on Windows, a totallyhotarcrouter-<rid>.tar.gz
@@ -20,10 +19,18 @@ name: Release
 # "worked in testing, corrupted checksums.txt in production" bug this avoids - the final publish-release
 # job downloads everything once every build has finished, computes ONE combined checksums.txt covering
 # every asset, and creates the release in a single step.
+#
+# The tag is the release version's single source of truth (docs/router/packaging-and-distribution.md §7):
+# every build below receives it as -p:Version, overriding Directory.Build.props' <Version>, which is only
+# the fallback for local builds. Tags normally come from cut-release.yml, which dispatches this workflow
+# against the tag it just pushed (a tag pushed with its GITHUB_TOKEN cannot trigger `push` below); a
+# hand-pushed tag still triggers it through `push`. A manual dispatch must select a tag ref, or
+# verify-version fails.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -31,45 +38,66 @@ permissions:
 
 jobs:
   verify-version:
-    name: Verify tag matches Directory.Build.props Version
+    name: Verify release tag
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.verify.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      # Directory.Build.props' <Version> is this repo's single source of truth for the release version
-      # (see its own comment); the tag is expected to be "v<Version>" exactly. Fail fast here rather than
-      # publishing a release asset whose embedded ProductVersion silently disagrees with the tag that
-      # triggered it - GitHubReleaseCheckClient parses the tag as the version it compares against, so a
-      # mismatch would mean an install claims a version other than the one the tag (and therefore the
-      # Router's update check) says it is.
+      # Fail fast, before any build or test minute is spent, on a ref that cannot be a release:
+      #  - not a tag at all (a workflow_dispatch started from a branch);
+      #  - not strict vMAJOR.MINOR.PATCH - GitHubReleaseCheckClient parses the tag with System.Version,
+      #    which rejects any "-rc.1"-style suffix, so such a release would surface as MalformedTag;
+      #  - beyond Windows Installer's 255.255.65535 ProductVersion range, where MajorUpgrade stops working;
+      #  - on a commit that is not on main, i.e. code that never passed review.
       - name: Verify
         id: verify
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "::error::Run against a release tag (gh workflow run release.yml --ref v1.2.3), not ${GITHUB_REF_TYPE} '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+
           tag="${GITHUB_REF_NAME}"
-          if [[ "${tag}" != v* ]]; then
-            echo "::error::Tag '${tag}' does not start with 'v'."
-            exit 1
-          fi
-          tag_version="${tag#v}"
-
-          props_version=$(grep -oP '(?<=<Version>)[^<]+' src/Directory.Build.props | head -n1)
-
-          if [[ "${tag_version}" != "${props_version}" ]]; then
-            echo "::error::Tag version '${tag_version}' does not match Directory.Build.props Version '${props_version}'. Bump Version and re-tag."
+          if [[ ! "${tag}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Tag '${tag}' is not vMAJOR.MINOR.PATCH (no leading zeros, no prerelease suffix)."
             exit 1
           fi
 
-          echo "Tag version '${tag_version}' matches Directory.Build.props."
-          echo "version=${tag_version}" >> "${GITHUB_OUTPUT}"
+          # Field length first: Bash integers silently wrap past 64 bits, so an over-long field must be
+          # rejected before (( )) ever compares it (v999999999999999999999.0.0 could otherwise pass).
+          if (( ${#BASH_REMATCH[1]} > 3 || ${#BASH_REMATCH[2]} > 3 || ${#BASH_REMATCH[3]} > 5 )) ||
+             (( BASH_REMATCH[1] > 255 || BASH_REMATCH[2] > 255 || BASH_REMATCH[3] > 65535 )); then
+            echo "::error::Tag '${tag}' exceeds Windows Installer's ProductVersion limit of 255.255.65535."
+            exit 1
+          fi
+
+          commit=$(git rev-parse "${tag}^{commit}")
+          if ! git merge-base --is-ancestor "${commit}" origin/main; then
+            echo "::error::Tag '${tag}' points at ${commit}, which is not on main. Release only reviewed code."
+            exit 1
+          fi
+
+          echo "Releasing ${tag} from ${commit}."
+          echo "version=${tag#v}" >> "${GITHUB_OUTPUT}"
+
+  # The full CI suite (build, tests, the 80% coverage bar) against the tagged commit - called, not copied,
+  # so the release gate can never drift from what pull requests are held to. Every job that publishes
+  # anything, including the container push, waits on it.
+  test:
+    name: Test
+    needs: verify-version
+    uses: ./.github/workflows/dotnet-ci.yml
 
   build-msi:
     name: Build MSI (win-x64)
-    needs: verify-version
+    needs: [verify-version, test]
     runs-on: windows-latest
     env:
       RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
@@ -91,15 +119,16 @@ jobs:
       # TotallyHotArcRouter.csproj's Phase P10 comment on why win-x64 is now only the profile's DEFAULT
       # RuntimeIdentifier, not a hardcoded one) - the exact layout the installer project's
       # RouterPublishDir/TrayPublishDir default to, and what TotallyHotArcRouter.Installer.wixproj
-      # packages via <Files Include="..."> harvesting (Package.wxs).
+      # packages via <Files Include="..."> harvesting (Package.wxs). -p:Version stamps the tag's version
+      # into both apps' assemblies and, through the .wixproj's ProductVersion=$(Version), into the MSI.
       - name: Publish Router
-        run: dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj -c Release -p:PublishProfile=Service
+        run: dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj -c Release -p:PublishProfile=Service -p:Version=$env:RELEASE_VERSION
 
       - name: Publish Tray
-        run: dotnet publish src/TotallyHotArcRouter.Tray/TotallyHotArcRouter.Tray.csproj -c Release -p:PublishProfile=Service
+        run: dotnet publish src/TotallyHotArcRouter.Tray/TotallyHotArcRouter.Tray.csproj -c Release -p:PublishProfile=Service -p:Version=$env:RELEASE_VERSION
 
       - name: Build MSI
-        run: dotnet build src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj -c Release
+        run: dotnet build src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj -c Release -p:Version=$env:RELEASE_VERSION
 
       # TODO(signing): the MSI produced here is UNSIGNED - no code-signing certificate exists yet for this
       # project (docs/router/packaging-and-distribution.md tracks this as an open prerequisite). Once one
@@ -115,6 +144,32 @@ jobs:
           Copy-Item $msiSource.FullName "release-assets/TotallyHotArcRouter-$env:RELEASE_VERSION.msi"
           Get-ChildItem release-assets
 
+      # The version arrives as a command-line override rather than a committed file, so prove it landed in
+      # both places the update pipeline reads before anything is published: the MSI's ProductVersion (what
+      # MajorUpgrade compares) and the Router assembly's informational version (what
+      # GitHubReleaseCheckClient reports as current - a mismatch there is an endless "update available").
+      - name: Verify stamped versions
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path "release-assets/TotallyHotArcRouter-$env:RELEASE_VERSION.msi").Path
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($msi, 0))
+          $view = $database.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $database, @("SELECT Value FROM Property WHERE Property = 'ProductVersion'"))
+          $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+          $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+          $productVersion = $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, 1)
+          $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
+
+          $routerDll = "src/TotallyHotArcRouter/bin/Publish/Service/TotallyHotArcRouter.dll"
+          $routerVersion = (Get-Item $routerDll).VersionInfo.ProductVersion -replace '\+.*$', ''
+
+          Write-Host "MSI ProductVersion:    $productVersion"
+          Write-Host "Router ProductVersion: $routerVersion"
+          if ($productVersion -ne $env:RELEASE_VERSION -or $routerVersion -ne $env:RELEASE_VERSION) {
+            Write-Error "Expected $env:RELEASE_VERSION in both; the -p:Version override did not flow through."
+            exit 1
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -124,7 +179,7 @@ jobs:
 
   build-tarball:
     name: Build self-contained tar.gz (${{ matrix.rid }})
-    needs: verify-version
+    needs: [verify-version, test]
     strategy:
       fail-fast: false
       matrix:
@@ -156,6 +211,7 @@ jobs:
           dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj
           -c Release -r ${{ matrix.rid }} --self-contained true
           -p:PublishDir=publish/${{ matrix.rid }}
+          -p:Version=${{ env.RELEASE_VERSION }}
 
       - name: Package tar.gz
         shell: bash
@@ -184,7 +240,7 @@ jobs:
 
   build-docker:
     name: Build and push multi-arch container image
-    needs: verify-version
+    needs: [verify-version, test]
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/totallyhot-arcrouter
@@ -216,6 +272,9 @@ jobs:
           file: src/TotallyHotArcRouter/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          # The Dockerfile's VERSION build arg becomes -p:Version, same as every other asset above.
+          build-args: |
+            VERSION=${{ env.RELEASE_VERSION }}
           tags: ${{ env.IMAGE }}:${{ env.RELEASE_VERSION }}
 
   publish-release:

@@ -60,8 +60,9 @@ instead of a second, independently-maintained value. `InformationalVersion` simi
 into `AssemblyInformationalVersionAttribute` (the SDK's default `GenerateAssemblyInfo` behavior), which
 `GitHubReleaseCheckClient` (Phase 2, below) reads as the running version.
 
-GitHub Release tags are `v<Version>` (e.g. `v1.0.0`) — bump `Version` in `Directory.Build.props` for
-every combined release; the tag is derived, never hand-typed elsewhere.
+GitHub Release tags are `vMAJOR.MINOR.PATCH` (e.g. `v1.0.0`). *Superseded 2026-09-16:* the tag is now
+the source of the version rather than derived from `Directory.Build.props` — see
+[`packaging-and-distribution.md`](packaging-and-distribution.md) §7.1.
 
 ## Phase 1 — Windows Service hosting (shipped)
 

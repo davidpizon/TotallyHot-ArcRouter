@@ -7,7 +7,7 @@ name: Promote release
 # Deliberately a promotion, not a rebuild: the MSI and checksums.txt already attached to the release are
 # left untouched, so the artifact operators install is byte-identical to the one that was tested as the
 # RC and the published SHA256 still covers it. It also means the version never changes between the two
-# stages - Directory.Build.props' Version is "1.2.3" for both, so a tester running the RC sees no
+# stages - the tag's version, "1.2.3", is stamped into both, so a tester running the RC sees no
 # spurious "update available" once the same build becomes latest (GitHubReleaseCheckClient compares
 # versions with System.Version, which cannot parse an "-rc.N" suffix at all - hence no such suffix).
 #
