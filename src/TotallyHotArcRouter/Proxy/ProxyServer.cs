@@ -42,7 +42,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     /// <param name="listenerOptions">
     /// The proxy's port and bind-address configuration - see <see cref="ProxyListenerOptions"/>. Defaults to
     /// <see langword="null"/>, which behaves identically to a freshly-constructed
-    /// <see cref="ProxyListenerOptions"/>: port 5001, loopback-bound, and the opt-in plain-HTTP listener
+    /// <see cref="ProxyListenerOptions"/>: port 47101, loopback-bound, and the opt-in plain-HTTP listener
     /// off. Pass <see cref="ProxyListenerOptions.Port"/> as 0 to bind an ephemeral port (useful in tests to
     /// avoid flaking when the default port is already in use); the resolved address is available via
     /// <see cref="Addresses"/> once <see cref="StartAsync"/> completes.
@@ -50,7 +50,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     /// <param name="webInterfaceOptions">
     /// The router-hosted web GUI/gRPC-Web/native-gRPC listener's port and bind-address configuration - see
     /// <see cref="WebInterfaceOptions"/>. Defaults to <see langword="null"/>, which behaves identically to
-    /// a freshly-constructed <see cref="WebInterfaceOptions"/>: port 5004, loopback-bound. Shares its TLS
+    /// a freshly-constructed <see cref="WebInterfaceOptions"/>: port 47104, loopback-bound. Shares its TLS
     /// certificate with the primary proxy port, so both fail to bind together if certificate
     /// initialization fails.
     /// </param>

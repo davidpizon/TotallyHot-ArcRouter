@@ -59,7 +59,7 @@ public class ProxyInterceptionTests
             using var client = new HttpClient(handler);
             client.Timeout = TimeSpan.FromSeconds(5);
             using var request = new HttpRequestMessage(method: HttpMethod.Post,
-                requestUri: "https://127.0.0.1:5001/v1/chat/completions");
+                requestUri: "https://127.0.0.1:47101/v1/chat/completions");
             request.Content =
                 new StringContent(content: "payload", encoding: Encoding.UTF8, mediaType: "text/plain");
 

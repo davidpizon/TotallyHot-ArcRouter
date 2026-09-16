@@ -46,7 +46,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     /// <param name="benchmarkSyncService">The CodeRouterBench corpus sync service.</param>
     /// <param name="benchmarkSyncOptions">The CodeRouterBench sync configuration (its dataset ref).</param>
     /// <param name="tokenProvider">The rotatable bearer token every request must present (see <see cref="IManagementTokenProvider"/>).</param>
-    /// <param name="port">The TLS port to listen on. Defaults to <c>5003</c>.</param>
+    /// <param name="port">The TLS port to listen on. Defaults to <c>47103</c>.</param>
     /// <param name="bindAddress">
     /// The address <paramref name="port"/> binds to: <c>"loopback"</c> (the default), <c>"any"</c>/
     /// <c>"0.0.0.0"</c>/<c>"::"</c>, or a literal IP address - see <c>McpOptions.BindAddress</c>'s

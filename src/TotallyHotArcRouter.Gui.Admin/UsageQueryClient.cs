@@ -24,8 +24,8 @@ public sealed class UsageQueryClient
     /// Initializes a new instance of the <see cref="UsageQueryClient"/> class.
     /// </summary>
     /// <param name="channel">
-    /// The gRPC channel to send requests over. Must target the proxy's TLS gRPC endpoint (e.g.
-    /// <c>https://localhost:5004</c>) - the same channel <see cref="ProviderAdminClient"/> uses.
+    /// The gRPC channel to send requests over. Must target the router's web-interface TLS endpoint (e.g.
+    /// <c>https://localhost:47104</c>) - the same channel <see cref="ProviderAdminClient"/> uses.
     /// </param>
     /// <param name="adminToken">
     /// Optional management token; when set, it is sent in the <c>x-admin-token</c> gRPC metadata entry on

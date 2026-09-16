@@ -14,13 +14,12 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// <c>appsettings.json</c> to its packaged defaults.
 /// </summary>
 /// <param name="WebUrl">
-/// The web GUI's effective base URL (e.g. <c>https://localhost:5004</c>), or <see langword="null"/> if
-/// the web listener never bound. <see langword="null"/> until Phase P2 gives this a real value - see
-/// that phase for the writer's actual call site.
+/// The web GUI's effective base URL (e.g. <c>https://localhost:47104</c>), or <see langword="null"/> if
+/// the web listener never bound. Written by <c>ProxyHostedService</c> once the listener actually starts.
 /// </param>
 /// <param name="CaThumbprint">
 /// The SHA-256 thumbprint of the local CA a client should trust to see a clean HTTPS connection, or
-/// <see langword="null"/> until Phase P7 introduces the CA.
+/// <see langword="null"/> if the CA could not be loaded.
 /// </param>
 public sealed record WebInterfaceDiscoveryInfo(string? WebUrl, string? CaThumbprint)
 {

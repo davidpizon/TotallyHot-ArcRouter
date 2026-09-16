@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 public sealed class ProxyListenerOptionsValidatorTests
 {
     private static ProxyListenerOptionsValidator CreateValidator(
-        int webInterfacePort = 5004, int mcpPort = 5003)
+        int webInterfacePort = 47104, int mcpPort = 47103)
     {
         return new ProxyListenerOptionsValidator(
             webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(
@@ -32,7 +32,7 @@ public sealed class ProxyListenerOptionsValidatorTests
     {
         var options = new ProxyListenerOptions
         {
-            PlainHttp = new PlainHttpListenerOptions { Enabled = false, Port = 5001 }
+            PlainHttp = new PlainHttpListenerOptions { Enabled = false, Port = 47101 }
         };
 
         var result = CreateValidator().Validate(name: null, options);
@@ -41,12 +41,12 @@ public sealed class ProxyListenerOptionsValidatorTests
     }
 
     [Theory]
-    [InlineData(5001)] // collides with Port
+    [InlineData(47101)] // collides with Port
     public void Validate_PlainHttpEnabled_CollidesWithProxyListenerPorts_Fails(int plainHttpPort)
     {
         var options = new ProxyListenerOptions
         {
-            Port = 5001,
+            Port = 47101,
             PlainHttp = new PlainHttpListenerOptions { Enabled = true, Port = plainHttpPort }
         };
 
@@ -61,10 +61,10 @@ public sealed class ProxyListenerOptionsValidatorTests
     {
         var options = new ProxyListenerOptions
         {
-            PlainHttp = new PlainHttpListenerOptions { Enabled = true, Port = 5004 }
+            PlainHttp = new PlainHttpListenerOptions { Enabled = true, Port = 47104 }
         };
 
-        var result = CreateValidator(webInterfacePort: 5004).Validate(name: null, options);
+        var result = CreateValidator(webInterfacePort: 47104).Validate(name: null, options);
 
         Assert.False(result.Succeeded);
         Assert.Contains(result.Failures!, f => f.Contains(nameof(WebInterfaceOptions), StringComparison.Ordinal));
@@ -75,10 +75,10 @@ public sealed class ProxyListenerOptionsValidatorTests
     {
         var options = new ProxyListenerOptions
         {
-            PlainHttp = new PlainHttpListenerOptions { Enabled = true, Port = 5003 }
+            PlainHttp = new PlainHttpListenerOptions { Enabled = true, Port = 47103 }
         };
 
-        var result = CreateValidator(mcpPort: 5003).Validate(name: null, options);
+        var result = CreateValidator(mcpPort: 47103).Validate(name: null, options);
 
         Assert.False(result.Succeeded);
         Assert.Contains(result.Failures!, f => f.Contains(nameof(McpOptions), StringComparison.Ordinal));
@@ -120,9 +120,9 @@ public sealed class ProxyListenerOptionsValidatorTests
         // Regression coverage for a real bug: every collision check used to be nested inside
         // `if (options.PlainHttp.Enabled)`, so with PlainHttp off (the default) a collision between the
         // two always-active TLS listeners went uncaught entirely.
-        var options = new ProxyListenerOptions { Port = 5004 };
+        var options = new ProxyListenerOptions { Port = 47104 };
 
-        var result = CreateValidator(webInterfacePort: 5004).Validate(name: null, options);
+        var result = CreateValidator(webInterfacePort: 47104).Validate(name: null, options);
 
         Assert.False(result.Succeeded);
         Assert.Contains(result.Failures!, f => f.Contains(nameof(WebInterfaceOptions), StringComparison.Ordinal));
@@ -131,11 +131,11 @@ public sealed class ProxyListenerOptionsValidatorTests
     [Fact]
     public void Validate_ProxyPortCollidesWithMcpPort_WhenMcpEnabled_FailsEvenWithPlainHttpDisabled()
     {
-        var options = new ProxyListenerOptions { Port = 5003 };
+        var options = new ProxyListenerOptions { Port = 47103 };
 
         var result = new ProxyListenerOptionsValidator(
-                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 5004 }),
-                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = true, Port = 5003 }))
+                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 47104 }),
+                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = true, Port = 47103 }))
             .Validate(name: null, options);
 
         Assert.False(result.Succeeded);
@@ -147,11 +147,11 @@ public sealed class ProxyListenerOptionsValidatorTests
     {
         // A real bug fixed alongside the above: Mcp collisions must be gated on McpOptions.Enabled, since
         // a disabled McpHostedService never binds McpOptions.Port at all - that port is genuinely free.
-        var options = new ProxyListenerOptions { Port = 5003 };
+        var options = new ProxyListenerOptions { Port = 47103 };
 
         var result = new ProxyListenerOptionsValidator(
-                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 5004 }),
-                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = false, Port = 5003 }))
+                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 47104 }),
+                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = false, Port = 47103 }))
             .Validate(name: null, options);
 
         Assert.True(result.Succeeded);
@@ -161,8 +161,8 @@ public sealed class ProxyListenerOptionsValidatorTests
     public void Validate_WebInterfacePortCollidesWithMcpPort_WhenMcpEnabled_Fails()
     {
         var result = new ProxyListenerOptionsValidator(
-                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 5003 }),
-                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = true, Port = 5003 }))
+                webInterfaceOptions: new StaticOptionsMonitor<WebInterfaceOptions>(new WebInterfaceOptions { Port = 47103 }),
+                mcpOptions: new StaticOptionsMonitor<McpOptions>(new McpOptions { Enabled = true, Port = 47103 }))
             .Validate(name: null, new ProxyListenerOptions { Port = 47101 });
 
         Assert.False(result.Succeeded);
