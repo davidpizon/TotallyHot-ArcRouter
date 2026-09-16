@@ -18,10 +18,10 @@
     ProductVersion higher than the last one, so RemoveExistingProducts uninstalls the previous build before
     the new files are laid down.
 
-    NOT the release path. Releases are tag-triggered through .github/workflows/release.yml, which verifies
-    that the "v<Version>" tag matches Directory.Build.props' <Version> exactly. That committed value is
-    therefore left untouched here - major.minor are read from it and only the build field is overridden, on
-    the command line, for this local build.
+    NOT the release path. Releases are cut by .github/workflows/cut-release.yml, which tags main and has
+    release.yml build every asset with the tag's version. Directory.Build.props' <Version> is only the
+    local-build fallback and is left untouched here - major.minor are read from it and only the build field
+    is overridden, on the command line, for this local build.
 
 .PARAMETER Configuration
     The build configuration to publish and package (default: Release, matching what release.yml builds).

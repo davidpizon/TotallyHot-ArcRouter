@@ -7,8 +7,8 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// </summary>
 /// <remarks>
 /// Read from <see cref="AssemblyInformationalVersionAttribute"/> rather than the assembly's numeric
-/// version because that attribute carries <c>Directory.Build.props</c>' shared <c>&lt;Version&gt;</c>
-/// verbatim - the same value the MSI's ProductVersion and the Router's own reported version derive
+/// version because that attribute carries the build's shared <c>&lt;Version&gt;</c> (the release tag's,
+/// or <c>Directory.Build.props</c>' fallback for a local build) verbatim - the same value the MSI's ProductVersion and the Router's own reported version derive
 /// from. That shared origin is what makes the footer's two halves comparable at a glance: when they
 /// disagree, an upgrade genuinely did not land on both halves. The strip-at-'+' step mirrors
 /// <c>GitHubReleaseCheckClient</c>'s, which needs it for the same reason - the SDK appends

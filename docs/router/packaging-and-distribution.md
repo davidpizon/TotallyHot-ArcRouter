@@ -122,9 +122,9 @@ traffic from different runs, and merging them would double-count spend.
   installing v*N*+1 over v*N* cleanly replaces it — one Add/Remove Programs entry, not two side-by-side
   installs — because `RemoveExistingProducts` runs inside the same transaction, ahead of the new files
   being laid down.
-- **`ProductVersion` is derived from `Directory.Build.props`' `<Version>`** via MSBuild property
-  passthrough into the `.wixproj` — never a second, hand-typed version (see
-  [`version-compatibility.md`](version-compatibility.md) §1).
+- **`ProductVersion` is derived from the build's `<Version>`** via MSBuild property passthrough into the
+  `.wixproj` — the release tag's version in a release build, `Directory.Build.props`' fallback locally —
+  never a second, hand-typed version (see §7.1 and [`version-compatibility.md`](version-compatibility.md) §1).
 - **Verified for real, empirically, in this repository**: the installer project was built against the
   Router's and GUI's actual `Service`-publish-profile output (self-contained `win-x64`) — 1,082 files
   packaged, `ProductVersion` correctly read back as `1.0.0` from the built MSI's `Property` table, the
@@ -211,22 +211,62 @@ apply request service control without full admin rights, and there is no Router-
 
 ## 7. Publishing a release: cut, then promote
 
+### 7.1 Release numbering
+
+A release version is **`MAJOR.MINOR.PATCH`**, and its git tag is `v` plus that version (`v1.4.2`). **The tag
+is the single source of truth.** Nothing is committed to cut a release: `release.yml` passes the tag's
+version to every build as `-p:Version`, which overrides `src/Directory.Build.props`' `<Version>` (a global
+MSBuild property always wins) and flows on into `InformationalVersion`, both apps' assemblies, the MSI's
+`ProductVersion`, and the container image. `<Version>` in `Directory.Build.props` is only the fallback a
+local build reports, and does not need bumping. This is what lets releases be cut without a version-bump
+pull request against `main`'s required review.
+
+Which field to bump:
+
+| Bump | When the release… | Example |
+|------|-------------------|---------|
+| `major` | requires operator action to upgrade: a breaking `appsettings.json`/config change, a data-store migration that cannot run automatically, or a non-additive change to the GUI↔Router gRPC contract ([`version-compatibility.md`](version-compatibility.md) §4) | `1.4.2` → `2.0.0` |
+| `minor` | adds a feature or setting, backward-compatibly | `1.4.2` → `1.5.0` |
+| `patch` | only fixes bugs, updates dependencies, or changes docs/packaging | `1.4.2` → `1.4.3` |
+
+Hard constraints, enforced by both `cut-release.yml` and `release.yml`'s `verify-version` job:
+
+- **No prerelease or build suffix** (`-rc.1`, `+build.5`) and no leading zeros. `GitHubReleaseCheckClient`
+  parses the tag with `System.Version`, which rejects suffixes — a suffixed release would surface to every
+  installed Router as `MalformedTag`. Release candidates are expressed as GitHub *prereleases* instead
+  (§7.2), at the same version.
+- **Within `255.255.65535`.** Windows Installer compares only the first three `ProductVersion` fields and
+  caps them there; beyond it, `MajorUpgrade` silently stops replacing the previous install.
+- **Never reuse a version**, even for a release candidate that was withdrawn. Someone may already have that
+  RC installed, and `MajorUpgrade` will not replace a same-version install. A bad RC is fixed forward
+  with the next `patch`.
+- **The tagged commit must be on `main`**, and must pass the same build/test/coverage gate a pull request
+  does (`release.yml` calls `dotnet-ci.yml` before building anything).
+
+### 7.2 The pipeline
+
 Publishing is deliberately **two stages**, so that "this build is a release candidate" and "this build is
-*the* release" are separate, revocable decisions rather than a single irreversible `git push --tags`.
+*the* release" are separate, revocable decisions.
 
 ```mermaid
 flowchart LR
-    A["Bump Version in<br/>Directory.Build.props"] --> B["Push tag v&lt;Version&gt;"]
-    B --> C["release.yml<br/>builds MSI + checksums.txt<br/>publishes as <b>prerelease</b>"]
-    C --> D{"RC verified<br/>by hand?"}
-    D -- "no" --> E["Delete the release,<br/>fix, re-tag"]
-    D -- "yes" --> F["Run promote.yml<br/>(gh release edit --latest)"]
-    F --> G["/releases/latest resolves to it<br/>Routers offer it on next poll"]
+    A["Run cut-release.yml<br/>(bump: patch / minor / major)"] --> B["Tags main HEAD<br/>v&lt;next&gt;"]
+    B --> C["release.yml<br/>verify tag, run CI suite,<br/>build MSI + tarballs + image"]
+    C --> D["Publishes a <b>prerelease</b><br/>+ checksums.txt"]
+    D --> E{"RC verified<br/>by hand?"}
+    E -- "no" --> F["Delete the release (keep the tag),<br/>fix on main, cut the next patch"]
+    E -- "yes" --> G["Run promote.yml<br/>(gh release edit --latest)"]
+    G --> H["/releases/latest resolves to it<br/>Routers offer it on next poll"]
 ```
 
-**Stage one — cut the RC.** Pushing a `v<Version>` tag runs
-[`release.yml`](../../.github/workflows/release.yml), which builds the MSI and `checksums.txt` and
-publishes them as a **prerelease**. `GitHubReleaseCheckClient` polls
+**Stage one — cut the RC.** Run **Actions → Cut release** (or `gh workflow run cut-release.yml -f
+bump=minor`). It reads the highest strict `vMAJOR.MINOR.PATCH` tag, computes the next version (or takes an
+explicit `version` input — use that for the very first release, e.g. `-f version=1.0.0`), tags `main`'s
+HEAD, and dispatches [`release.yml`](../../.github/workflows/release.yml) against the tag; set `dry_run` to
+see the version without tagging. A tag pushed by hand (`git tag v1.4.3 && git push origin v1.4.3`) runs the
+same `release.yml` through its `push` trigger. `release.yml` verifies the tag, runs the CI suite, builds
+every asset with the tag's version, checks that the version actually landed in the MSI and the Router
+assembly, and publishes it all plus `checksums.txt` as a **prerelease**. `GitHubReleaseCheckClient` polls
 `/repos/{owner}/{repo}/releases/latest`, and that endpoint excludes prereleases by definition — so a build
 at this stage is invisible to every installed Router, and no code in the update pipeline needed changing to
 make that true. Testers install the RC by downloading its MSI from the release page by hand.
@@ -238,8 +278,8 @@ make that true. Testers install the RC by downloading its MSI from the release p
 --latest`. Nothing is rebuilt: the MSI an operator installs is the byte-identical artifact that was tested
 as the RC, and its already-published checksum still covers it.
 
-**Why the version does not change between the stages.** Both stages are the same `Version` — there is no
-`-rc.1` suffix anywhere. `GitHubReleaseCheckClient` compares versions with `System.Version`, which cannot
+**Why the version does not change between the stages.** Both stages are the same version — there is no
+`-rc.1` suffix anywhere (§7.1). `GitHubReleaseCheckClient` compares versions with `System.Version`, which cannot
 parse a prerelease suffix at all (`Version.TryParse("1.2.3-rc.1")` returns false, which the client reports
 as `MalformedTag`), and keeping the version identical also means a tester already running the RC sees no
 spurious "update available" the moment that same build becomes latest.

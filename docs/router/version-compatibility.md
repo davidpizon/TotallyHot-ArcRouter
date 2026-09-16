@@ -18,13 +18,14 @@ when they skew.
 **Both components carry the same version number, cut from the same release, and are installed together by
 one MSI in one Windows Installer transaction.** There is no independent per-component versioning.
 
-The version is stamped exactly once, in [`src/Directory.Build.props`](../../src/Directory.Build.props)'s
-`<Version>`. The Router compiles it directly into `AssemblyInformationalVersionAttribute`; the GUI does the
-same and additionally derives `ApplicationDisplayVersion` (padded to the 4-part form Windows package
-versions require); the installer project derives the MSI's `ProductVersion` from the same property via
-MSBuild passthrough (`src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj`) — never a
-second, hand-typed version. The GitHub Release tag is `v<Version>`, and that one release publishes exactly
-one `.msi` asset plus a single `checksums.txt`.
+The version is stamped exactly once, as the MSBuild `<Version>` property: for a release, `release.yml` sets
+it from the `vMAJOR.MINOR.PATCH` git tag (`-p:Version`); for a local build it falls back to
+[`src/Directory.Build.props`](../../src/Directory.Build.props)'s value
+([`packaging-and-distribution.md`](packaging-and-distribution.md) §7.1). The Router and the GUI compile it
+directly into `AssemblyInformationalVersionAttribute`; the installer project derives the MSI's
+`ProductVersion` from the same property via MSBuild passthrough
+(`src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj`) — never a second, hand-typed
+version. That one release publishes exactly one `.msi` asset plus a single `checksums.txt`.
 
 **Why not independent versions.** Independent semver per component would buy the ability to ship a fix to
 one without touching the other — real value when components are consumed separately. They are not: the GUI
@@ -108,9 +109,9 @@ left to manifest as confusing behavior.
 
 ## 5. Consequences for contributors
 
-- **Bump `<Version>` in `Directory.Build.props` and nowhere else.** A component with its own hardcoded
-  version is a bug — this is the single source of truth for the Router, the GUI, and the installer's
-  `ProductVersion` alike.
+- **Never hand-edit a version to release.** Run `cut-release.yml`; the release tag is the single source of
+  truth for the Router, the GUI, and the installer's `ProductVersion` alike, and a component with its own
+  hardcoded version is a bug.
 - **A release publishes one `.msi` and one `checksums.txt` or it publishes nothing usable.** A partial
   release is rejected by the release check, not partially applied.
 - **Changing the gRPC contract follows proto3 additive rules.** Never renumber or repurpose a field; skew

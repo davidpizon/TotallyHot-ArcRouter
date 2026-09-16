@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # release.yml calls this as its test gate, so a release is held to exactly the bar a pull request is.
+  workflow_call:
 
 # Least-privilege default: this job only checks out code and runs dotnet build/test, it never
 # writes back to the repo or calls any other GitHub API.

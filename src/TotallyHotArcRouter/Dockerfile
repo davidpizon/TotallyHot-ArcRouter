@@ -1,8 +1,10 @@
-# TotallyHot Arc Router container image, linux-x64 (web GUI migration plan Phase P10).
+# TotallyHot Arc Router container image, linux/amd64 and linux/arm64 (web GUI migration plan Phase P10).
 #
 # Build (from the repo root - src/TotallyHotArcRouter.Gui.Web is a build-time ProjectReference, so the
 # whole src/ tree is needed in the build context, not just this project's own directory):
 #   docker build -t totallyhot-arcrouter -f src/TotallyHotArcRouter/Dockerfile .
+# or, for another architecture (release.yml builds both in one multi-platform push):
+#   docker buildx build --platform linux/arm64 -t totallyhot-arcrouter -f src/TotallyHotArcRouter/Dockerfile .
 #
 # Run - only the loopback-bound ports are published to the host by default; widen WebInterface/Proxy/Mcp
 # BindAddress to 0.0.0.0 (already this image's default - see the ENV lines below) only if you also trust
@@ -22,7 +24,12 @@
 # loopback-only inside the container's own network namespace (ProxyListenerOptions' remarks), so
 # publishing its port would just map to a listener nothing outside the container can ever reach anyway.
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# The build stage always runs on the BUILDER's own architecture and cross-publishes for the target one,
+# rather than running the SDK under QEMU emulation for arm64: a framework-dependent publish only needs the
+# target RID's native NuGet assets, not a matching host (release.yml's linux-arm64 tarball is
+# cross-published from an x64 runner the same way), and emulating the whole restore + Blazor WASM build
+# would be many times slower.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # No separate `dotnet restore` layer: a standalone "dotnet restore -r linux-x64" on
@@ -36,8 +43,25 @@ WORKDIR /src
 # each project's own target/RID rather than a single CLI-wide override. The cost is losing this layer's
 # restore-result caching across source-only rebuilds; correctness won over that here.
 COPY src/ src/
-RUN dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj \
-    -c Release -r linux-x64 --self-contained false -o /app/publish
+
+# The release version. .github/workflows/release.yml passes the release tag's version here; left empty (a
+# plain local `docker build`), the image falls back to src/Directory.Build.props' <Version> like any other
+# local build.
+ARG VERSION=
+
+# The RID must follow the image's target architecture, not be pinned. RID-specific publish copies only
+# that RID's native libraries (libe_sqlite3, libonnxruntime, libonnxruntime-genai) into the output, so a
+# pinned linux-x64 made the arm64 image ship x86-64 .so files that fail to load at startup. TARGETARCH is
+# set by BuildKit/buildah from --platform; empty (the legacy non-BuildKit builder) means amd64.
+ARG TARGETARCH
+RUN case "${TARGETARCH:-amd64}" in \
+        amd64) rid=linux-x64 ;; \
+        arm64) rid=linux-arm64 ;; \
+        *) echo "Unsupported TARGETARCH '${TARGETARCH}'; this image supports amd64 and arm64." >&2; exit 1 ;; \
+    esac \
+    && dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj \
+        -c Release -r "$rid" --self-contained false -o /app/publish \
+        ${VERSION:+-p:Version=$VERSION}
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app

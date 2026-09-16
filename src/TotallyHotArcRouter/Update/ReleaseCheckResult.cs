@@ -37,7 +37,8 @@ public enum ReleaseCheckUnavailableReason
 /// rather than an exception, per the auto-update plan's "never throw out of the poller" requirement.
 /// </summary>
 /// <param name="CurrentVersion">
-/// The running Router's own version (<c>Directory.Build.props</c>' <c>Version</c>, read from
+/// The running Router's own version (the release tag's version stamped in by <c>release.yml</c>, or
+/// <c>Directory.Build.props</c>' fallback <c>Version</c> for a local build; read from
 /// <see cref="System.Reflection.AssemblyInformationalVersionAttribute"/>).
 /// </param>
 /// <param name="LatestVersion">
