@@ -3,16 +3,20 @@ on:
     workflow_dispatch:
     pull_request:
     push:
-        branches: # Specify your branches here
-            - main # The 'main' branch
-            - master # The 'master' branch
-            - 'releases/*' # The release branches
+        branches:
+            - main
+
+# A newer push to the same pull request supersedes the scan already running for it. Runs on main are
+# never cancelled: each one refreshes the code-scanning baseline that pull request results diff against.
+concurrency:
+    group: qodana-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
     qodana:
         runs-on: ubuntu-latest
         permissions:
-            contents: write
+            contents: read  # write is only needed for the action's push-fixes mode, which is not enabled
             pull-requests: write
             checks: write
             security-events: write  # required to upload the SARIF report to GitHub code scanning
