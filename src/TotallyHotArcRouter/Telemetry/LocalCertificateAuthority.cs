@@ -48,6 +48,22 @@ public static class LocalCertificateAuthority
     private const string LeafCertificateFileName = "router-leaf.pfx";
     private const string LeafPasswordSecretName = "router-leaf:cert-password";
 
+    // Guards the whole check-renew-persist sequence in both GetOrCreateCa and GetOrCreateLeaf. Real gap
+    // this closes: GetOrCreateLeaf() is called from a ServerCertificateSelector on every TLS handshake,
+    // across every listener (proxy, web, MCP - each its own Kestrel instance/process), with no cache in
+    // front of it by design (see GetOrCreateLeaf()'s own remarks on why). PersistAndReload's
+    // temp-file-then-rename-then-persist-password ordering (see its own remarks) makes a SINGLE renewal
+    // safe against a mid-write failure, but says nothing about TWO concurrent renewals - which is
+    // exactly what happens once the cached leaf enters its renewal window and several simultaneous
+    // handshakes all decide independently "time to renew": each computes its own cert+password pair, and
+    // without serialization their file-rename and secret-store-write steps can interleave, leaving the
+    // on-disk PFX paired with a DIFFERENT renewal's password than the one actually on disk. A `Lock`, not
+    // a `Mutex`, is deliberately in-process only - concurrent handshakes across ProxyServer's own
+    // multiple listeners inside this one process are the actual race; ProtectedSecretStore's own named
+    // Mutex already covers true cross-process contention for the store half alone, but not the paired
+    // file-write this lock protects end to end.
+    private static readonly Lock RenewalLock = new();
+
     /// <summary>The CA's subject/issuer name, distinguishing it from the leaves it signs (both of which use <c>CN=localhost</c>).</summary>
     public const string CaSubjectName = "CN=TotallyHot Arc Router Local CA";
 
@@ -90,11 +106,15 @@ public static class LocalCertificateAuthority
     /// issues a fresh one under <see cref="GetOrCreateCa()"/> and persists it before returning it.
     /// </summary>
     /// <remarks>
-    /// Safe to call on every TLS handshake (see <c>ProxyServer</c>'s <c>ServerCertificateSelector</c>
-    /// wiring) - the common case is a single file-existence-and-expiry check, and renewal itself is rare
-    /// enough (at most once every <see cref="LeafValidity"/> minus <see cref="LeafRenewalWindow"/>) that
-    /// doing it inline, without a background timer, is simpler and cannot drift out of sync with what a
-    /// handshake actually presents.
+    /// Safe to call on every TLS handshake, concurrently, across every listener in this process (see
+    /// <c>ProxyServer</c>'s <c>ServerCertificateSelector</c> wiring) - the common case is a single
+    /// file-existence-and-expiry check serialized behind an in-process <c>Lock</c>, and renewal itself is
+    /// rare enough (at most once every <see cref="LeafValidity"/> minus <see cref="LeafRenewalWindow"/>)
+    /// that doing it inline, without a background timer, is simpler and cannot drift out of sync with
+    /// what a handshake actually presents. The lock exists specifically because renewal is not: without
+    /// it, several simultaneous handshakes deciding "time to renew" at the same moment could each persist
+    /// their own cert/password pair with the writes interleaved, leaving the file on disk paired with a
+    /// different renewal's password than the one that's actually there.
     /// </remarks>
     public static X509Certificate2 GetOrCreateLeaf()
     {
@@ -108,90 +128,98 @@ public static class LocalCertificateAuthority
     /// <summary>Overload taking explicit paths and a secret store, for tests. See <see cref="GetOrCreateCa()"/> for behavior.</summary>
     internal static X509Certificate2 GetOrCreateCa(string certificatePath, ProtectedSecretStore secretStore)
     {
-        var directory = Path.GetDirectoryName(certificatePath);
-        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-
-        if (File.Exists(certificatePath) &&
-            secretStore.TryRead(name: CaPasswordSecretName, value: out var existingPassword))
+        lock (RenewalLock)
         {
-            var existing = X509CertificateLoader.LoadPkcs12FromFile(path: certificatePath, password: existingPassword,
-                keyStorageFlags: X509KeyStorageFlags.Exportable);
-            if (existing.NotAfter > DateTime.UtcNow) return existing;
+            var directory = Path.GetDirectoryName(certificatePath);
+            if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
-            // An expired CA cannot be extended in place - fall through and mint a fresh one. Every leaf
-            // it ever signed is now untrusted too, but that is unavoidable: a 10-year CaValidity means
-            // this only happens if the machine has been running the same install for a decade.
-            existing.Dispose();
+            if (File.Exists(certificatePath) &&
+                secretStore.TryRead(name: CaPasswordSecretName, value: out var existingPassword))
+            {
+                var existing = X509CertificateLoader.LoadPkcs12FromFile(path: certificatePath, password: existingPassword,
+                    keyStorageFlags: X509KeyStorageFlags.Exportable);
+                if (existing.NotAfter > DateTime.UtcNow) return existing;
+
+                // An expired CA cannot be extended in place - fall through and mint a fresh one. Every leaf
+                // it ever signed is now untrusted too, but that is unavoidable: a 10-year CaValidity means
+                // this only happens if the machine has been running the same install for a decade.
+                existing.Dispose();
+            }
+
+            using var rsa = RSA.Create(3072);
+            var request = new CertificateRequest(subjectName: CaSubjectName, key: rsa,
+                hashAlgorithm: HashAlgorithmName.SHA256, padding: RSASignaturePadding.Pkcs1);
+
+            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
+                certificateAuthority: true, hasPathLengthConstraint: true, pathLengthConstraint: 0, critical: true));
+            request.CertificateExtensions.Add(new X509KeyUsageExtension(
+                keyUsages: X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, critical: true));
+            request.CertificateExtensions.Add(BuildNameConstraintsExtension());
+            request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, critical: false));
+
+            using var certificate = request.CreateSelfSigned(
+                notBefore: DateTimeOffset.UtcNow.AddDays(-1),
+                notAfter: DateTimeOffset.UtcNow.Add(CaValidity));
+
+            return PersistAndReload(certificate: certificate, certificatePath: certificatePath,
+                secretStore: secretStore, passwordSecretName: CaPasswordSecretName);
         }
-
-        using var rsa = RSA.Create(3072);
-        var request = new CertificateRequest(subjectName: CaSubjectName, key: rsa,
-            hashAlgorithm: HashAlgorithmName.SHA256, padding: RSASignaturePadding.Pkcs1);
-
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
-            certificateAuthority: true, hasPathLengthConstraint: true, pathLengthConstraint: 0, critical: true));
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(
-            keyUsages: X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, critical: true));
-        request.CertificateExtensions.Add(BuildNameConstraintsExtension());
-        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, critical: false));
-
-        using var certificate = request.CreateSelfSigned(
-            notBefore: DateTimeOffset.UtcNow.AddDays(-1),
-            notAfter: DateTimeOffset.UtcNow.Add(CaValidity));
-
-        return PersistAndReload(certificate: certificate, certificatePath: certificatePath,
-            secretStore: secretStore, passwordSecretName: CaPasswordSecretName);
     }
 
     /// <summary>Overload taking explicit paths and a secret store, for tests. See <see cref="GetOrCreateLeaf()"/> for behavior.</summary>
     internal static X509Certificate2 GetOrCreateLeaf(string caCertificatePath, string leafCertificatePath,
         ProtectedSecretStore secretStore)
     {
-        using var ca = GetOrCreateCa(certificatePath: caCertificatePath, secretStore: secretStore);
-
-        var directory = Path.GetDirectoryName(leafCertificatePath);
-        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-
-        if (File.Exists(leafCertificatePath) &&
-            secretStore.TryRead(name: LeafPasswordSecretName, value: out var existingPassword))
+        // Reentrant: GetOrCreateCa below acquires the same RenewalLock, and System.Threading.Lock (like
+        // the classic `lock` statement it replaces) allows the thread already holding it to re-enter.
+        lock (RenewalLock)
         {
-            var existing = X509CertificateLoader.LoadPkcs12FromFile(path: leafCertificatePath, password: existingPassword,
-                keyStorageFlags: X509KeyStorageFlags.Exportable);
-            if (existing.NotAfter > DateTime.UtcNow.Add(LeafRenewalWindow)) return existing;
+            using var ca = GetOrCreateCa(certificatePath: caCertificatePath, secretStore: secretStore);
 
-            existing.Dispose();
+            var directory = Path.GetDirectoryName(leafCertificatePath);
+            if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+
+            if (File.Exists(leafCertificatePath) &&
+                secretStore.TryRead(name: LeafPasswordSecretName, value: out var existingPassword))
+            {
+                var existing = X509CertificateLoader.LoadPkcs12FromFile(path: leafCertificatePath, password: existingPassword,
+                    keyStorageFlags: X509KeyStorageFlags.Exportable);
+                if (existing.NotAfter > DateTime.UtcNow.Add(LeafRenewalWindow)) return existing;
+
+                existing.Dispose();
+            }
+
+            using var rsa = RSA.Create(2048);
+            var request = new CertificateRequest(subjectName: "CN=localhost", key: rsa,
+                hashAlgorithm: HashAlgorithmName.SHA256, padding: RSASignaturePadding.Pkcs1);
+
+            var subjectAlternativeNames = new SubjectAlternativeNameBuilder();
+            subjectAlternativeNames.AddDnsName("localhost");
+            subjectAlternativeNames.AddIpAddress(IPAddress.Loopback);
+            subjectAlternativeNames.AddIpAddress(IPAddress.IPv6Loopback);
+            request.CertificateExtensions.Add(subjectAlternativeNames.Build());
+
+            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
+                certificateAuthority: false, hasPathLengthConstraint: false, pathLengthConstraint: 0, critical: true));
+            request.CertificateExtensions.Add(new X509KeyUsageExtension(
+                keyUsages: X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, critical: true));
+            request.CertificateExtensions.Add(
+                new X509EnhancedKeyUsageExtension(enhancedKeyUsages: [new Oid("1.3.6.1.5.5.7.3.1")],
+                    false)); // Server Authentication
+
+            var serialNumber = new byte[16];
+            RandomNumberGenerator.Fill(serialNumber);
+
+            using var signed = request.Create(
+                issuerCertificate: ca,
+                notBefore: DateTimeOffset.UtcNow.AddDays(-1),
+                notAfter: DateTimeOffset.UtcNow.Add(LeafValidity),
+                serialNumber: serialNumber);
+            using var leaf = signed.CopyWithPrivateKey(rsa);
+
+            return PersistAndReload(certificate: leaf, certificatePath: leafCertificatePath,
+                secretStore: secretStore, passwordSecretName: LeafPasswordSecretName);
         }
-
-        using var rsa = RSA.Create(2048);
-        var request = new CertificateRequest(subjectName: "CN=localhost", key: rsa,
-            hashAlgorithm: HashAlgorithmName.SHA256, padding: RSASignaturePadding.Pkcs1);
-
-        var subjectAlternativeNames = new SubjectAlternativeNameBuilder();
-        subjectAlternativeNames.AddDnsName("localhost");
-        subjectAlternativeNames.AddIpAddress(IPAddress.Loopback);
-        subjectAlternativeNames.AddIpAddress(IPAddress.IPv6Loopback);
-        request.CertificateExtensions.Add(subjectAlternativeNames.Build());
-
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
-            certificateAuthority: false, hasPathLengthConstraint: false, pathLengthConstraint: 0, critical: true));
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(
-            keyUsages: X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, critical: true));
-        request.CertificateExtensions.Add(
-            new X509EnhancedKeyUsageExtension(enhancedKeyUsages: [new Oid("1.3.6.1.5.5.7.3.1")],
-                false)); // Server Authentication
-
-        var serialNumber = new byte[16];
-        RandomNumberGenerator.Fill(serialNumber);
-
-        using var signed = request.Create(
-            issuerCertificate: ca,
-            notBefore: DateTimeOffset.UtcNow.AddDays(-1),
-            notAfter: DateTimeOffset.UtcNow.Add(LeafValidity),
-            serialNumber: serialNumber);
-        using var leaf = signed.CopyWithPrivateKey(rsa);
-
-        return PersistAndReload(certificate: leaf, certificatePath: leafCertificatePath,
-            secretStore: secretStore, passwordSecretName: LeafPasswordSecretName);
     }
 
     /// <summary>

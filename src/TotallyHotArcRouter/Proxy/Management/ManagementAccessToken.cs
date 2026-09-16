@@ -116,25 +116,25 @@ public static class ManagementAccessToken
     /// Reads the token from <paramref name="legacyTokenPath"/> if that file still exists and is
     /// non-empty, without deleting it - see <see cref="GetOrCreate"/>'s remarks for why deletion is
     /// deferred to <see cref="TryDeleteLegacyToken"/>, called only once the import is confirmed
-    /// persisted. Returns <see langword="null"/> when there is nothing to import or the read itself
-    /// fails, so <see cref="GetOrCreate"/>'s factory falls through to minting a fresh token rather than
-    /// losing an operator's already-distributed one to a transient failure. Only ever called from inside
-    /// <see cref="ProtectedSecretStore.GetOrAdd"/>'s held mutex, so there is no race with another caller
-    /// also trying to import the same file.
+    /// persisted. Returns <see langword="null"/> only when the file genuinely does not exist or is
+    /// empty - a case safe to fall through to minting a fresh token. A file that exists but cannot be
+    /// read (permissions, a lock held by another process) is deliberately NOT treated the same way:
+    /// swallowing that and falling through would silently mint and persist a replacement token while the
+    /// still-there, still-unread legacy one becomes permanently orphaned - invalidating every MCP client
+    /// already configured with it, which is exactly what importing this file exists to avoid. Propagating
+    /// the exception instead makes that failure loud (the caller - typically the router's own startup
+    /// path - fails visibly) rather than a silent, one-way loss discovered only when MCP clients start
+    /// getting 401s. Only ever called from inside <see cref="ProtectedSecretStore.GetOrAdd"/>'s held
+    /// mutex, so there is no race with another caller also trying to import the same file.
     /// </summary>
+    /// <exception cref="IOException">The file exists but could not be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file exists but this process lacks permission to read it.</exception>
     private static string? TryReadLegacyToken(string legacyTokenPath)
     {
-        try
-        {
-            if (!File.Exists(legacyTokenPath)) return null;
+        if (!File.Exists(legacyTokenPath)) return null;
 
-            var imported = File.ReadAllText(legacyTokenPath).Trim();
-            return string.IsNullOrEmpty(imported) ? null : imported;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
+        var imported = File.ReadAllText(legacyTokenPath).Trim();
+        return string.IsNullOrEmpty(imported) ? null : imported;
     }
 
     /// <summary>

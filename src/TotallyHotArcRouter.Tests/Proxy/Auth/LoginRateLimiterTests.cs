@@ -67,6 +67,56 @@ public sealed class LoginRateLimiterTests
         Assert.False(limiter.ShouldThrottle("1.2.3.4"));
     }
 
+    [Fact]
+    public void Sweep_RemovesBucketsWhoseWindowHasElapsed()
+    {
+        // Regression coverage for real, unbounded memory growth: an address that fails once and never
+        // returns used to leave its bucket in the dictionary forever, since nothing else ever revisits a
+        // key nobody queries again - a real concern once the web port can be reached non-loopback (e.g.
+        // Docker's BindAddress=0.0.0.0 default) and an attacker can fail logins from many distinct
+        // addresses.
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var limiter = new LoginRateLimiter(time);
+        for (var i = 0; i < 10; i++) limiter.RecordFailure($"10.0.0.{i}");
+        Assert.Equal(expected: 10, actual: limiter.BucketCount);
+
+        time.Advance(LoginRateLimiter.Window + TimeSpan.FromSeconds(1));
+        limiter.ForceSweep();
+
+        Assert.Equal(expected: 0, actual: limiter.BucketCount);
+    }
+
+    [Fact]
+    public void Sweep_LeavesStillActiveBucketsInPlace()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var limiter = new LoginRateLimiter(time);
+        limiter.RecordFailure("1.2.3.4");
+
+        limiter.ForceSweep();
+
+        Assert.Equal(expected: 1, actual: limiter.BucketCount);
+    }
+
+    [Fact]
+    public void RecordFailure_SweepsAutomaticallyEveryNCalls()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var limiter = new LoginRateLimiter(time);
+        limiter.RecordFailure("stale-address");
+
+        time.Advance(LoginRateLimiter.Window + TimeSpan.FromSeconds(1));
+
+        // Enough distinct-key failures to cross the internal sweep threshold without ever touching
+        // "stale-address" again - each of these gets its own fresh (not-yet-expired) bucket, so only the
+        // automatic sweep inside RecordFailure itself, not a call on the stale key, can be what removes
+        // it. 300 fresh buckets plus the one stale one is 301; if the sweep never ran, BucketCount would
+        // be 301.
+        for (var i = 0; i < 300; i++) limiter.RecordFailure($"fresh-{i}");
+
+        Assert.Equal(expected: 300, actual: limiter.BucketCount);
+    }
+
     private sealed class FakeTimeProvider(DateTimeOffset start) : TimeProvider
     {
         private DateTimeOffset _now = start;

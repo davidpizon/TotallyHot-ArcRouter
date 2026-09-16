@@ -105,6 +105,31 @@ public sealed class ManagementAccessTokenTests
     }
 
     [Fact]
+    public void GetOrCreate_LegacyFileExistsButCannotBeRead_ThrowsRatherThanMintingAReplacement()
+    {
+        // Regression coverage for a real bug: silently swallowing a read failure and falling through to
+        // GenerateToken() would mint and persist a brand-new token while the still-there, still-unread
+        // legacy one becomes permanently orphaned - invalidating every MCP client already configured
+        // with it, which is exactly what importing this file exists to prevent. An exclusive lock on the
+        // file (not deleting/corrupting it - the file is perfectly readable once unlocked) simulates any
+        // "exists but not readable right now" failure without depending on real OS permission plumbing.
+        var store = new ProtectedSecretStore(TempStorePath());
+        var legacyPath = TempLegacyTokenPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
+        File.WriteAllText(path: legacyPath, contents: "legacy-token-value");
+
+        using (new FileStream(path: legacyPath, mode: FileMode.Open, access: FileAccess.Read, share: FileShare.None))
+        {
+            Assert.ThrowsAny<IOException>(() =>
+                ManagementAccessToken.GetOrCreate(store: store, legacyTokenPath: legacyPath));
+        }
+
+        Assert.False(store.Exists(ManagementAccessToken.SecretName),
+            "a read failure must not fall through to minting and persisting a replacement token");
+        Assert.True(File.Exists(legacyPath), "the legacy file must be left untouched when it could not be read");
+    }
+
+    [Fact]
     public void GetOrCreate_NoLegacyFile_GeneratesAFreshTokenNormally()
     {
         var store = new ProtectedSecretStore(TempStorePath());

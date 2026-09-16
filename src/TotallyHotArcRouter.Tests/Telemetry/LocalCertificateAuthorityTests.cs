@@ -163,6 +163,70 @@ public sealed class LocalCertificateAuthorityTests
     }
 
     [Fact]
+    public async Task GetOrCreateLeaf_ConcurrentCallsDuringRenewal_AllReturnTheSameCertificate()
+    {
+        // Regression coverage for a real bug: GetOrCreateLeaf() is called from a ServerCertificateSelector
+        // on every TLS handshake, across every listener in the process, with no cache in front of it -
+        // several simultaneous handshakes can all decide "time to renew" at the same moment. Without
+        // RenewalLock serializing the whole check-renew-persist sequence, each thread would mint its own
+        // competing cert/password pair and their file-rename/secret-store-write steps could interleave,
+        // leaving the on-disk PFX paired with a different renewal's password than the one actually there
+        // - the next handshake to load it would then fail outright. Seeds a leaf already inside the
+        // renewal window (same technique as GetOrCreateLeaf_NearExpiry_IssuesAReplacement) so every
+        // concurrent caller below genuinely attempts a renewal, not just a cache hit.
+        var directory = TempDirectory();
+        try
+        {
+            var store = new ProtectedSecretStore(Path.Combine(directory, "secrets.dat"));
+            var caPath = Path.Combine(directory, "ca.pfx");
+            var leafPath = Path.Combine(directory, "leaf.pfx");
+
+            using var ca = LocalCertificateAuthority.GetOrCreateCa(certificatePath: caPath, secretStore: store);
+
+            using var rsa = RSA.Create(2048);
+            var request = new CertificateRequest(subjectName: "CN=localhost", key: rsa,
+                hashAlgorithm: HashAlgorithmName.SHA256, padding: RSASignaturePadding.Pkcs1);
+            var serialNumber = new byte[16];
+            RandomNumberGenerator.Fill(serialNumber);
+            using var soonToExpire = request.Create(issuerCertificate: ca,
+                notBefore: DateTimeOffset.UtcNow.AddHours(-1),
+                notAfter: DateTimeOffset.UtcNow.AddDays(5), // inside LeafRenewalWindow (30 days)
+                serialNumber: serialNumber);
+            using var soonToExpireWithKey = soonToExpire.CopyWithPrivateKey(rsa);
+
+            File.WriteAllBytes(leafPath, soonToExpireWithKey.Export(X509ContentType.Pkcs12, "test-password"));
+            store.Write(name: "router-leaf:cert-password", value: "test-password");
+
+            var tasks = Enumerable.Range(0, 12)
+                .Select(_ => Task.Run(() => LocalCertificateAuthority.GetOrCreateLeaf(
+                    caCertificatePath: caPath, leafCertificatePath: leafPath, secretStore: store)))
+                .ToArray();
+            var renewed = await Task.WhenAll(tasks);
+
+            try
+            {
+                var thumbprints = renewed.Select(cert => cert.Thumbprint).Distinct().ToList();
+                Assert.Single(thumbprints);
+                Assert.NotEqual(expected: soonToExpireWithKey.Thumbprint, actual: thumbprints[0]);
+
+                // The strongest check: load straight from what's actually on disk, exactly as the next
+                // real TLS handshake would - this is what a torn cert/password pair would fail.
+                using var reloaded = LocalCertificateAuthority.GetOrCreateLeaf(caCertificatePath: caPath,
+                    leafCertificatePath: leafPath, secretStore: store);
+                Assert.Equal(expected: thumbprints[0], actual: reloaded.Thumbprint);
+            }
+            finally
+            {
+                foreach (var cert in renewed) cert.Dispose();
+            }
+        }
+        finally
+        {
+            CleanUp(directory);
+        }
+    }
+
+    [Fact]
     public void NameConstraints_AcceptsALocalhostLeaf_ViaCustomRootTrust()
     {
         var directory = TempDirectory();
