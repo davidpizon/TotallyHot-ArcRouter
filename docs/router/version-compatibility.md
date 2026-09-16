@@ -6,8 +6,9 @@
 > history) with a single Windows Installer transaction. There is no Updater component anymore, so there is
 > no closed loop, no ordering invariant between a Router-launched helper and its payload, and no
 > Router→Updater compatibility surface to reason about. What remains genuinely unchanged from the prior
-> revision: `<Version>` in `Directory.Build.props` as the single source of truth (§1), and the GUI↔Router
-> gRPC contract as a compatibility surface (§4).
+> revision: one lockstep version for every component (§1) and the GUI↔Router gRPC contract as a
+> compatibility surface (§4). Updated 2026-09-16: that version's single source of truth is now the
+> `vMAJOR.MINOR.PATCH` release tag, no longer `<Version>` in `Directory.Build.props` (§1).
 
 TotallyHot ArcRouter ships as two executables — the Router (a Windows Service) and the GUI (a MAUI tray
 app) — packaged and versioned together. This document records how they relate by version and what happens
