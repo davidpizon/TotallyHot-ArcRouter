@@ -53,8 +53,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 | Grpc.AspNetCore | 2.83.0 | Copyright The gRPC Authors |
 | Grpc.Net.Client | 2.83.0 | Copyright The gRPC Authors |
 | AWSSDK.BedrockRuntime | 4.0.101.6 | Copyright Amazon.com, Inc. or its affiliates |
-| ModelContextProtocol | 2.2.0 | Copyright the ModelContextProtocol C# SDK authors |
-| ModelContextProtocol.AspNetCore | 2.2.0 | Copyright the ModelContextProtocol C# SDK authors |
+| ModelContextProtocol | 2.2.0 | © Model Context Protocol a Series of LF Projects, LLC. |
+| ModelContextProtocol.AspNetCore | 2.2.0 | © Model Context Protocol a Series of LF Projects, LLC. |
 | SQLitePCLRaw.bundle_e_sqlite3 | 3.0.5 | Copyright Eric Sink and contributors |
 
 **Apache ECharts NOTICE** — reproduced as required by Apache-2.0 §4(d). The upstream `LICENSE` and
