@@ -91,26 +91,32 @@ traffic from different runs, and merging them would double-count spend.
 - **`ServiceInstall`/`ServiceControl`** register the `TotallyHotArcRouter` Windows Service (`LocalSystem`,
   auto-start, matching `Program.cs`'s `UseWindowsService` call exactly) and stop it before / start it after
   the file swap on install, upgrade, and uninstall. The service **name** stays `TotallyHotArcRouter`
-  forever — `Program.cs`, the dev scripts, and `TrayWindowManager`'s `RouterServiceName` all address the
+  forever — `Program.cs`, the dev scripts, and `TrayApplicationContext`'s `ServiceName` all address the
   service by it. Only the **display name** carries the version (`TotallyHot Arc Router v<ProductVersion>`),
-  so `services.msc` answers "which build is running as a service" without opening the GUI; it refreshes on
+  so `services.msc` answers "which build is running as a service" without opening the tray; it refreshes on
   upgrade because `RemoveExistingProducts` deletes the old registration before this one re-creates it.
-- **The GUI starts at logon** via an `HKLM\Software\Microsoft\Windows\CurrentVersion\Run` value
-  (`GuiAutoStartComponent`). Without it a fresh install left `TotallyHotArcRouter.Gui.exe` on disk with
-  nothing to invoke it — it is a tray-resident app, so there was no visible GUI at all after installing.
-  `HKLM` rather than `HKCU` because this is a per-machine install: an MSI component writing `HKCU` writes
-  it only for the elevating account that ran the installer, not for the user who subsequently logs in.
-  This takes effect at the **next** logon; installing does not start the GUI in the current session (there
-  is deliberately no launch-on-install custom action — doing that correctly from a per-machine package
-  means a deferred-impersonated action to reach the interactive user's session rather than `LocalSystem`'s
-  session 0).
-- **A Start Menu shortcut** (`GuiExeComponent`) points at the GUI exe, so a user who picks "Exit" from the
-  tray menu can relaunch without waiting for the next logon or browsing to ProgramFiles. It is
-  **non-advertised** (`Advertise="no"`): an advertised shortcut routes every launch through Windows
-  Installer's resiliency check, which on a ~1,000-file self-contained deployment surfaces an MSI progress
-  dialog during an ordinary app launch. Giving the exe a shortcut means excluding it from the `GuiFiles`
-  `<Files>` harvest and installing it via its own explicit `Component` — the same carve-out, for the same
-  reason, that `RouterFiles` already makes for `TotallyHotArcRouter.exe`.
+- **The tray starts at logon** via an `HKLM\Software\Microsoft\Windows\CurrentVersion\Run` value
+  (`TrayAutoStartComponent`, web GUI migration plan Phase P9 - replaces the former MAUI GUI's
+  `GuiAutoStartComponent`). Without it a fresh install left `TotallyHotArcRouter.Tray.exe` on disk with
+  nothing to invoke it — it is a tray-resident app, so there was no visible tray icon at all after
+  installing. `HKLM` rather than `HKCU` because this is a per-machine install: an MSI component writing
+  `HKCU` writes it only for the elevating account that ran the installer, not for the user who subsequently
+  logs in. This takes effect at the **next** logon; installing does not start the tray in the current
+  session (there is deliberately no launch-on-install custom action — doing that correctly from a
+  per-machine package means a deferred-impersonated action to reach the interactive user's session rather
+  than `LocalSystem`'s session 0).
+- **A Start Menu shortcut** (`TrayExeComponent`) points at the tray exe, so a user who picks "Exit" from
+  the tray menu can relaunch without waiting for the next logon or browsing to ProgramFiles. A second
+  Start Menu shortcut (`OpenDashboardShortcutComponent`, via WiX's `util:InternetShortcut`) points at the
+  browser dashboard the Router itself now serves. Both are **non-advertised** (`Advertise="no"`): an
+  advertised shortcut routes every launch through Windows Installer's resiliency check, which on a
+  self-contained deployment surfaces an MSI progress dialog during an ordinary app launch. Giving the exe
+  a shortcut means excluding it from the `TrayFiles` `<Files>` harvest and installing it via its own
+  explicit `Component` — the same carve-out, for the same reason, that `RouterFiles` already makes for
+  `TotallyHotArcRouter.exe`. `util:CloseApplication` closes any running tray instance ahead of the file
+  swap, the same role `ServiceControl` plays for the Router's service. A deferred, `LocalSystem`-run
+  `--install-certificate`/`--uninstall-certificate` custom action (ADR-0013, Phase P7) trusts/untrusts the
+  Router's local CA machine-wide as part of the same transaction.
 - **A real major upgrade** (`MajorUpgrade`, WiX's documented pattern — see
   [`src/TotallyHotArcRouter.Installer/Package.wxs`](../../src/TotallyHotArcRouter.Installer/Package.wxs)):
   installing v*N*+1 over v*N* cleanly replaces it — one Add/Remove Programs entry, not two side-by-side

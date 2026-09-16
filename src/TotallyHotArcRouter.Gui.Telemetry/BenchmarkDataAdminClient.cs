@@ -126,6 +126,19 @@ public sealed class BenchmarkDataAdminClient
     }
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="BenchmarkDataAdminClient"/> class over a shared, already-
+    /// authenticated call invoker (web GUI migration plan Phase P5a) - see
+    /// <see cref="IRouterChannelProvider"/>'s remarks for why production now goes through this
+    /// constructor instead of the one above, which still exists for standalone/test use. The
+    /// caller owns the invoker's underlying channel.
+    /// </summary>
+    /// <param name="callInvoker">The shared call invoker - see <see cref="IRouterChannelProvider.CallInvoker"/>.</param>
+    public BenchmarkDataAdminClient(CallInvoker callInvoker)
+        : base(new Contract.BenchmarkDataAdminService.BenchmarkDataAdminServiceClient(callInvoker))
+    {
+    }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="BenchmarkDataAdminClient"/> class over a
     /// caller-supplied generated client. The seam tests use to substitute a fake without a live server;
     /// the caller owns the channel's lifetime.

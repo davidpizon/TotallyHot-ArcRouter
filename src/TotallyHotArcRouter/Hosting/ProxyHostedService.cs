@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Connections;
+using System.Security.Cryptography;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Hosting;
 
@@ -11,6 +13,7 @@ public class ProxyHostedService : IHostedService
     private readonly IHostApplicationLifetime _hostLifetime;
     private readonly ILogger<ProxyHostedService> _logger;
     private readonly ProxyServer _proxyServer;
+    private readonly int _webPort;
 
     // Guards StopAsync against a start that never bound a listener: when the port was already in use
     // the host still calls StopAsync on every registered service, and stopping a host that never
@@ -29,8 +32,8 @@ public class ProxyHostedService : IHostedService
     /// Used to request an orderly shutdown when the proxy's port is already taken - see
     /// <see cref="StartAsync"/> for why that case stops the host instead of throwing.
     /// </param>
-    /// <param name="port">The localhost port Kestrel listens on for plain HTTP/1.1 LLM-forwarding traffic.</param>
-    /// <param name="grpcPort">The dedicated localhost port for the TLS-secured gRPC endpoint.</param>
+    /// <param name="listenerOptions">The proxy's port and bind-address configuration, forwarded verbatim to <see cref="ProxyServer"/>.</param>
+    /// <param name="webInterfaceOptions">The web GUI/gRPC-Web listener's configuration, forwarded verbatim to <see cref="ProxyServer"/>.</param>
     /// <param name="dependencies">
     /// The feature groups hand-carried into <see cref="ProxyServer"/>'s inner DI container; see
     /// <see cref="ProxyServerDependencies"/>. Defaults to <see langword="null"/>, giving a plain
@@ -41,16 +44,17 @@ public class ProxyHostedService : IHostedService
         ILogger<ProxyServer> proxyLogger,
         ProxyMiddleware proxyMiddleware,
         IHostApplicationLifetime hostLifetime,
-        int port = 5001,
-        int grpcPort = ProxyServer.DefaultGrpcPort,
+        ProxyListenerOptions? listenerOptions = null,
+        WebInterfaceOptions? webInterfaceOptions = null,
         ProxyServerDependencies? dependencies = null)
     {
         ArgumentNullException.ThrowIfNull(hostLifetime);
 
         _logger = logger;
         _hostLifetime = hostLifetime;
-        _proxyServer = new ProxyServer(logger: proxyLogger, proxyMiddleware: proxyMiddleware, port: port,
-            grpcPort: grpcPort, dependencies: dependencies);
+        _webPort = (webInterfaceOptions ?? new WebInterfaceOptions()).Port;
+        _proxyServer = new ProxyServer(logger: proxyLogger, proxyMiddleware: proxyMiddleware,
+            listenerOptions: listenerOptions, webInterfaceOptions: webInterfaceOptions, dependencies: dependencies);
     }
 
     /// <summary>
@@ -76,6 +80,7 @@ public class ProxyHostedService : IHostedService
         {
             await _proxyServer.StartAsync(cancellationToken).ConfigureAwait(false);
             _started = true;
+            WriteDiscoveryFile();
         }
         catch (IOException ex) when (ex.InnerException is AddressInUseException)
         {
@@ -91,6 +96,31 @@ public class ProxyHostedService : IHostedService
             // handler sets this for the exceptions it catches, and this path bypasses it by design.
             Environment.ExitCode = 1;
             _hostLifetime.StopApplication();
+        }
+    }
+
+    /// <summary>
+    /// Writes the discovery file (web GUI migration plan Phase P1/P7) a companion process (the Windows
+    /// tray, an install script) reads to find the running router's actual web address and the CA
+    /// thumbprint it should trust - see <see cref="WebInterfaceDiscoveryFile"/>'s remarks for why this
+    /// cannot instead be read back out of <c>appsettings.json</c>. Best-effort: a failure to write it
+    /// (a locked-down data directory, say) never affects the caller - a companion process that finds no
+    /// discovery file degrades to "no running router found", the same as if the router simply were not
+    /// running yet.
+    /// </summary>
+    private void WriteDiscoveryFile()
+    {
+        try
+        {
+            var webAddress = _proxyServer.Addresses.FirstOrDefault(a => new Uri(a).Port == _webPort);
+            var caThumbprint = LocalCertificateAuthority.GetOrCreateCa().Thumbprint;
+
+            WebInterfaceDiscoveryFile.Write(new WebInterfaceDiscoveryInfo(WebUrl: webAddress, CaThumbprint: caThumbprint));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            _logger.LogWarning(exception: ex,
+                message: "Could not write the web interface discovery file; a companion process will not find this router.");
         }
     }
 

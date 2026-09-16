@@ -30,17 +30,18 @@
     <ProductVersion>$(Version)</ProductVersion>
 
     <!--
-      The Router's and GUI's `Service` publish profile output (TotallyHotArcRouter.csproj's and
-      TotallyHotArcRouter.Gui.csproj's Properties/PublishProfiles/Service.pubxml - both
+      The Router's and Tray's `Service` publish profile output (TotallyHotArcRouter.csproj's and
+      TotallyHotArcRouter.Tray.csproj's Properties/PublishProfiles/Service.pubxml - both
       RuntimeIdentifier=win-x64/SelfContained=true). `dotnet publish -p:PublishProfile=Service` must be
       run for both projects before this project builds - see docs/router/packaging-and-distribution.md
       and .github/workflows/release.yml for the exact sequence. Overridable so a release build can point
-      at the real publish output without editing this file.
+      at the real publish output without editing this file. Renamed from GuiPublishDir (web GUI migration
+      plan Phase P9 replaced the MAUI GUI with the tray).
     -->
     <RouterPublishDir Condition="'$(RouterPublishDir)' == ''">$(MSBuildThisFileDirectory)..\TotallyHotArcRouter\bin\Publish\Service</RouterPublishDir>
-    <GuiPublishDir Condition="'$(GuiPublishDir)' == ''">$(MSBuildThisFileDirectory)..\TotallyHotArcRouter.Gui\bin\Publish\Service</GuiPublishDir>
+    <TrayPublishDir Condition="'$(TrayPublishDir)' == ''">$(MSBuildThisFileDirectory)..\TotallyHotArcRouter.Tray\bin\Publish\Service</TrayPublishDir>
 
-    <DefineConstants>RouterPublishDir=$(RouterPublishDir);GuiPublishDir=$(GuiPublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
+    <DefineConstants>RouterPublishDir=$(RouterPublishDir);TrayPublishDir=$(TrayPublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
 
     <!--
       Suppressed empirically after a real build against the Router's and GUI's actual self-contained
@@ -53,5 +54,11 @@
     -->
     <SuppressValidation>true</SuppressValidation>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- util:CloseApplication (running-tray guard) and util:InternetShortcut (the dashboard Start Menu
+         shortcut) - both used in Package.wxs. Pinned to the same major version as the WiX SDK itself. -->
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.0" />
+  </ItemGroup>
 
 </Project>

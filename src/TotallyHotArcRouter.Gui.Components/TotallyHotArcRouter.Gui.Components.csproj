@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <!-- Browser-targetable Razor component library (web GUI migration plan Phase P5b): the dashboard's
+         Components/*, Services/* stores, Models, and Utils, extracted out of the Windows-only MAUI
+         TotallyHotArcRouter.Gui project so they can also be referenced by the future WASM host
+         (Phase P6) and the tray (Phase P8) without dragging in MAUI itself. net10.0, not
+         net10.0-windows - SupportedPlatform browser below is what lets a consuming WASM project trim
+         and publish this library for the browser. Phase P5a's IRouterChannelProvider indirection is
+         what keeps this library itself free of real sockets/TLS/filesystem code: every store here talks
+         to the router only through that interface and IClipboardService/IManagementTokenProvider-style
+         seams, never TelemetryChannelFactory or ManagementTokenReader directly. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TotallyHot.ArcRouter.Gui</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Matches TotallyHotArcRouter.csproj/.Quality.csproj/TotallyHotArcRouter.Gui.csproj: CS1591
+         (missing XML doc on a public member) becomes a build error via TreatWarningsAsErrors. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Declares this library buildable/trimmable for the browser (wasm-tools), the same annotation
+         Microsoft's own "Hosted Blazor WebAssembly" template puts on a shared Razor class library -
+         without it, a future WASM host referencing this project has no signal that browser-targeted
+         analysis/trimming should consider it at all. -->
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Provides ComponentBase, IJSRuntime, ElementReference, PointerEventArgs, etc. for Components/*.razor -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- MockData's literal fixture data (Models/DashboardData.cs) lives here instead of as C# object
+         initializers; embedded (not copied to output) so Models/DashboardData.cs's LoadFixture reads it
+         via Assembly.GetManifestResourceStream regardless of the process's working directory. -->
+    <EmbeddedResource Include="Models\DashboardMockData.json">
+      <LogicalName>TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Plain net10.0 libraries: pure data-transformation logic and generated gRPC client stubs, unit-
+         testable on any platform - see each project's own csproj comment. Mirrors
+         TotallyHotArcRouter.Gui.csproj's identical set of references, which this library takes over from
+         it (the MAUI project now depends on this one instead). -->
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Admin\TotallyHotArcRouter.Gui.Admin.csproj" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Charts\TotallyHotArcRouter.Gui.Charts.csproj" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Console\TotallyHotArcRouter.Gui.Console.csproj" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Telemetry\TotallyHotArcRouter.Gui.Telemetry.csproj" />
+  </ItemGroup>
+
+</Project>

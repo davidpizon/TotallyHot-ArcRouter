@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.Options;
+using Serilog;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -29,6 +30,7 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
     private readonly PriceSourceToggleStore _priceSourceToggleStore;
     private readonly ProviderBudgetStore _providerBudgetStore;
     private readonly ISpendTracker _spendTracker;
+    private readonly IManagementTokenProvider _tokenProvider;
 
     private McpServer? _server;
 
@@ -47,7 +49,8 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         ISpendTracker spendTracker,
         BenchmarkDataStatusService benchmarkDataStatusService,
         BenchmarkSyncService benchmarkSyncService,
-        IOptions<BenchmarkSyncOptions> benchmarkSyncOptions)
+        IOptions<BenchmarkSyncOptions> benchmarkSyncOptions,
+        IManagementTokenProvider tokenProvider)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(mcpServerLogger);
@@ -61,6 +64,7 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(benchmarkDataStatusService);
         ArgumentNullException.ThrowIfNull(benchmarkSyncService);
         ArgumentNullException.ThrowIfNull(benchmarkSyncOptions);
+        ArgumentNullException.ThrowIfNull(tokenProvider);
 
         _logger = logger;
         _mcpServerLogger = mcpServerLogger;
@@ -74,6 +78,7 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         _benchmarkDataStatusService = benchmarkDataStatusService;
         _benchmarkSyncService = benchmarkSyncService;
         _benchmarkSyncOptions = benchmarkSyncOptions.Value;
+        _tokenProvider = tokenProvider;
     }
 
     /// <summary>
@@ -103,9 +108,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
 
         try
         {
-            // No per-surface path override: MCP and REST /admin/* must always resolve to the same file
-            // (ManagementAccessToken's default path) so they share exactly one token.
-            var accessToken = ManagementAccessToken.GetOrCreate();
             _server = new McpServer(
                 logger: _mcpServerLogger,
                 managementFacade: _managementFacade,
@@ -117,8 +119,16 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
                 benchmarkDataStatusService: _benchmarkDataStatusService,
                 benchmarkSyncService: _benchmarkSyncService,
                 benchmarkSyncOptions: _benchmarkSyncOptions,
-                accessToken: accessToken,
-                port: _options.Port);
+                // The same outer-container IManagementTokenProvider singleton ProxyServiceCollectionExtensions
+                // hands into the proxy inner host (see ProxyServerDependencies.ManagementTokenProvider), so
+                // MCP and the TLS gRPC/web endpoints share exactly one live token - a Regenerate call from
+                // either surface is visible to both without a restart.
+                tokenProvider: _tokenProvider,
+                port: _options.Port,
+                bindAddress: _options.BindAddress,
+                // Routes this inner host's own logs through the same Serilog pipeline the rest of the
+                // application uses - see McpServer's serilogLogger remarks.
+                serilogLogger: Log.Logger);
 
             await _server.StartAsync(cancellationToken).ConfigureAwait(false);
             // Log the actual bound address(es) rather than the configured port: when Port is 0 (an

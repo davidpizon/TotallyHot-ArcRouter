@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using TotallyHot.ArcRouter.Mcp;
+using TotallyHot.ArcRouter.Tests.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Tests.Mcp;
 
@@ -16,7 +17,7 @@ public sealed class McpBearerAuthMiddlewareTests
         {
             nextCalled = true;
             return Task.CompletedTask;
-        }, expectedToken: Token);
+        }, tokenProvider: new FakeManagementTokenProvider(Token));
         var context = new DefaultHttpContext();
 
         await middleware.InvokeAsync(context);
@@ -33,7 +34,7 @@ public sealed class McpBearerAuthMiddlewareTests
         {
             nextCalled = true;
             return Task.CompletedTask;
-        }, expectedToken: Token);
+        }, tokenProvider: new FakeManagementTokenProvider(Token));
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = "Bearer wrong-token";
 
@@ -46,7 +47,7 @@ public sealed class McpBearerAuthMiddlewareTests
     [Fact]
     public async Task InvokeAsync_MissingBearerPrefix_Returns401()
     {
-        var middleware = new McpBearerAuthMiddleware(next: _ => Task.CompletedTask, expectedToken: Token);
+        var middleware = new McpBearerAuthMiddleware(next: _ => Task.CompletedTask, tokenProvider: new FakeManagementTokenProvider(Token));
         var context = new DefaultHttpContext();
         // The raw token without the "Bearer " scheme prefix must not be accepted.
         context.Request.Headers.Authorization = Token;
@@ -65,7 +66,7 @@ public sealed class McpBearerAuthMiddlewareTests
         {
             nextCalled = true;
             return Task.CompletedTask;
-        }, expectedToken: Token);
+        }, tokenProvider: new FakeManagementTokenProvider(Token));
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = $"bearer {Token}";
 
@@ -83,7 +84,7 @@ public sealed class McpBearerAuthMiddlewareTests
         {
             nextCalled = true;
             return Task.CompletedTask;
-        }, expectedToken: Token);
+        }, tokenProvider: new FakeManagementTokenProvider(Token));
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = $"Bearer {Token}  ";
 
@@ -101,7 +102,7 @@ public sealed class McpBearerAuthMiddlewareTests
         {
             nextCalled = true;
             return Task.CompletedTask;
-        }, expectedToken: Token);
+        }, tokenProvider: new FakeManagementTokenProvider(Token));
         var context = new DefaultHttpContext();
         context.Request.Headers.Authorization = $"Bearer {Token}";
 

@@ -17,9 +17,20 @@ license.
 
 ### Why this exists
 
-The Windows GUI (`TotallyHot.ArcRouter.Gui`) is a .NET MAUI Blazor Hybrid application. Its Razor UI
-is rendered by a `BlazorWebView`, which requires the Microsoft Edge WebView2 Runtime — proprietary
-software licensed by Microsoft, not by this project.
+> **Status update (2026-09-15): currently dormant.** This exception was written for the Windows GUI
+> (`TotallyHot.ArcRouter.Gui`), a .NET MAUI Blazor Hybrid application whose Razor UI was rendered by a
+> `BlazorWebView` requiring the Microsoft Edge WebView2 Runtime. The
+> [web GUI migration plan](docs/gui/web-gui-migration-plan.md) retired that project entirely, replacing
+> it with a Blazor **WebAssembly** dashboard served by the router itself and rendered by the user's own
+> browser - no proprietary Microsoft runtime component is linked against by anything this project ships
+> today. The exception below is kept in force, not revoked: it costs nothing to leave standing, and a
+> future Windows-specific component (the small `TotallyHotArcRouter.Tray` system-tray app is plain
+> WinForms, part of the .NET SDK itself, and needs no such exception) could plausibly need it again. If
+> that never happens, this file has no practical effect - it grants permission for a dependency nothing
+> currently has.
+
+The original Windows GUI's Razor UI was rendered by a `BlazorWebView`, which required the Microsoft
+Edge WebView2 Runtime — proprietary software licensed by Microsoft, not by this project.
 
 The AGPL's "System Libraries" definition (section 1) plausibly already covers WebView2, since it
 ships as a component of Windows and of Microsoft Edge. But "plausibly" is not a good foundation for

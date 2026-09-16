@@ -22,8 +22,6 @@ public class ProxyHostedServiceTests
     {
         var loggerMock = new Mock<ILogger<ProxyHostedService>>();
 
-        // grpcPort: 0 too - see ProxyServerTests.cs's matching comment for why (avoids fixed-port
-        // flakiness and generating/persisting a real self-signed certificate during unit test runs).
         var hostedService = CreateService(loggerMock: loggerMock, lifetime: Mock.Of<IHostApplicationLifetime>(), 0);
 
         await hostedService.StartAsync(TestContext.Current.CancellationToken);
@@ -88,8 +86,8 @@ public class ProxyHostedServiceTests
             proxyLogger: NullLogger<ProxyServer>.Instance,
             proxyMiddleware: proxyMiddleware,
             hostLifetime: lifetime,
-            port: port,
-            0);
+            listenerOptions: new ProxyListenerOptions { Port = port },
+            webInterfaceOptions: new WebInterfaceOptions { Port = 0 });
     }
 
     private static void VerifyLogContains(Mock<ILogger<ProxyHostedService>> loggerMock, LogLevel level,

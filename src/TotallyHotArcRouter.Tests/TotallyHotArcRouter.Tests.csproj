@@ -28,6 +28,13 @@
          methods (TelemetryGrpcServiceTests) without a full Grpc.Net.Client/TestServer integration
          harness - see docs/router/grpc-migration.md. -->
     <PackageReference Include="Grpc.Core.Testing" Version="2.46.6" />
+    <!-- Real client-side gRPC/gRPC-Web (web GUI migration plan Phase P2, ProxyServerWebInterfaceTests):
+         unlike TelemetryGrpcServiceTests' lightweight TestServerCallContext fake above, port scoping and
+         the gRPC-Web wrapper are properties of the real Kestrel pipeline, so they need a real bound
+         ProxyServer and a real network client to prove - the same client library the eventual Blazor
+         WASM GUI (ADR-0011) will use. -->
+    <PackageReference Include="Grpc.Net.Client" Version="2.83.0" />
+    <PackageReference Include="Grpc.Net.Client.Web" Version="2.83.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.0" />
     <PackageReference Include="Moq" Version="4.20.72" />

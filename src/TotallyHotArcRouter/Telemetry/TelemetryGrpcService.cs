@@ -70,6 +70,9 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             await foreach (var telemetryEvent in channel.Reader.ReadAllAsync(context.CancellationToken))
                 await responseStream.WriteAsync(telemetryEvent);
         }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        {
+        }
         finally
         {
             _broadcaster.Unregister(channel.Writer);

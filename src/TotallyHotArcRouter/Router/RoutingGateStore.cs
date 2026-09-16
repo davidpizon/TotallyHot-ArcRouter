@@ -1,16 +1,16 @@
 using System.Text.Json;
+using TotallyHot.ArcRouter.Hosting;
 
 namespace TotallyHot.ArcRouter.Router;
 
 /// <summary>
 /// File-backed <see cref="IRoutingGate"/>: the current enabled/disabled state persists to
-/// <c>%ProgramData%\TotallyHotArcRouter\routing-gate.json</c> so a deliberate "Disable Routing" from the
-/// tray survives the Windows Service restarting (crash, update, reboot) rather than silently resuming
-/// traffic.
+/// <c>%ProgramData%\TotallyHotArcRouter\routing-gate.json</c> (see <see cref="AppDataPaths"/> for every
+/// other platform) so a deliberate "Disable Routing" from the tray survives the Windows Service
+/// restarting (crash, update, reboot) rather than silently resuming traffic.
 /// </summary>
 /// <remarks>
-/// Machine-wide <c>%ProgramData%</c>, not the per-user <c>%LOCALAPPDATA%</c> the management token and
-/// telemetry certificate use: the service installs and runs as <c>LocalSystem</c>
+/// Machine-shared, not per-user: the service installs and runs as <c>LocalSystem</c>
 /// (<c>TotallyHotArcRouter.Installer/Package.wxs</c>), whose own profile is not the interactive user's, so a
 /// per-user path would be unreadable/unwritable in the installed configuration. This is safe only because
 /// nothing else needs to read this file directly - the GUI observes and changes this state exclusively
@@ -54,11 +54,13 @@ public sealed class RoutingGateStore : IRoutingGate
         }
     }
 
-    /// <summary>Gets the default state file path: <c>%ProgramData%\TotallyHotArcRouter\routing-gate.json</c>.</summary>
+    /// <summary>
+    /// Gets the default state file path (<c>%ProgramData%\TotallyHotArcRouter\routing-gate.json</c> on
+    /// Windows; see <see cref="AppDataPaths"/> for every other platform).
+    /// </summary>
     public static string DefaultPath()
     {
-        return Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            path2: "TotallyHotArcRouter", path3: FileName);
+        return Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: FileName);
     }
 
     /// <summary>Loads the persisted state, defaulting to enabled when no file exists yet or it can't be read.</summary>

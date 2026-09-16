@@ -33,9 +33,22 @@ public static class ServiceCollectionExtensions
         services.AddQualityAndObservability();
         services.AddProxyMiddlewareCore();
         services.AddPriceCatalog();
-        services.AddManagement();
         services.AddUpdate();
+        // AddBackgroundServices (StartupHealthCheckHostedService in particular) must start before
+        // anything that creates a ProtectedSecretStore entry at the machine-shared default path (e.g.
+        // secrets.dat) - web GUI migration plan Phase P3 added that file to LegacyStorageMigration.Run's
+        // sweep, so whichever hosted service touches it first now decides whether a pre-P3 per-user copy
+        // gets adopted or silently orphaned. AddManagement's McpHostedService is the earliest such
+        // toucher: since Phase P7 it calls LocalCertificateAuthority.GetOrCreateLeaf() (in turn
+        // GetOrCreateCa()) for its own TLS listener, which stores the CA's private-key password in
+        // ProtectedSecretStore - so it must be registered, and therefore started, after
+        // AddBackgroundServices, not before it. (This superseded TelemetryTlsCertificate.GetOrCreate(),
+        // which used to be the toucher this comment named before Phase P7 - see that class's own remarks
+        // for why it is no longer wired into any production listener.) See this method's own
+        // hosted-service-ordering remarks, which already documented the identical constraint for
+        // AddProxyHost's ProxyHostedService.
         services.AddBackgroundServices();
+        services.AddManagement();
         services.AddProxyHost();
 
         return services;

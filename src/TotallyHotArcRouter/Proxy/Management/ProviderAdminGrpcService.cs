@@ -10,12 +10,13 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// <summary>
 /// gRPC service backing the Governance UI's Providers card: provider/model CRUD, budgets, discovery,
 /// endpoint capability scanning, price overrides, rate-limit history, and secrets
-/// (docs/router/tracked-todos.md #7). Replaces <see cref="ProviderAdminEndpoints"/>'s plain-HTTP
-/// <c>/admin/*</c> surface, which shared the LLM-forwarding proxy port with real traffic; this service is
-/// mapped onto the same loopback TLS endpoint as <c>TelemetryService</c> instead. All logic - projection,
-/// merging, credential/header masking, and validation - still lives in <see cref="ManagementFacade"/>, the
-/// same facade the REST surface and the MCP endpoint's provider tools use, so every surface shares one
-/// behavior. This class only translates gRPC requests into facade calls and
+/// (docs/router/tracked-todos.md #7). Replaced the plain-HTTP <c>/admin/*</c> REST surface this once
+/// shared a port with real LLM-forwarding traffic (deleted in
+/// <see href="../../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase
+/// P2); this service is mapped onto the same loopback TLS endpoint as <c>TelemetryService</c> instead.
+/// All logic - projection, merging, credential/header masking, and validation - still lives in
+/// <see cref="ManagementFacade"/>, the same facade the MCP endpoint's provider tools use, so every
+/// surface shares one behavior. This class only translates gRPC requests into facade calls and
 /// <see cref="ManagementResult{T}"/> outcomes into gRPC responses/status codes.
 /// </summary>
 public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.ProviderAdminServiceBase

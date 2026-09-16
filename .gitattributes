@@ -1,0 +1,7 @@
+# packaging/linux and packaging/macos ship shell scripts and a systemd unit/plist that run on
+# Linux/macOS (web GUI migration plan Phase P10) - CRLF line endings would break their shebang lines
+# and Serilog-style config parsing on those platforms, so these stay LF regardless of this repo's
+# Windows-checkout core.autocrlf setting.
+packaging/**/*.sh text eol=lf
+packaging/linux/*.service text eol=lf
+packaging/macos/*.plist text eol=lf

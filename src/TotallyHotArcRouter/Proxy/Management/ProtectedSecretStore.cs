@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.DataProtection;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using TotallyHot.ArcRouter.Hosting;
 
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
@@ -58,32 +60,50 @@ public interface ISecretWriter
 
 /// <summary>
 /// The generic, name-keyed protected secret store (<c>docs/router/secrets-at-rest-plan.md</c> §3): one
-/// DPAPI-encrypted JSON map persisted to <c>%LOCALAPPDATA%\TotallyHotArcRouter\secrets.dat</c>, backing
-/// both <see cref="ISecretReader"/> (the router's resolution path) and <see cref="ISecretWriter"/> (the
-/// management surface). A single implementation satisfies both interfaces so a consumer's injected
-/// dependency type alone decides whether it can read secret material back.
+/// encrypted JSON map persisted to <c>secrets.dat</c> under the machine-shared data directory (see
+/// <see cref="AppDataPaths"/>), backing both <see cref="ISecretReader"/> (the router's resolution path)
+/// and <see cref="ISecretWriter"/> (the management surface). A single implementation satisfies both
+/// interfaces so a consumer's injected dependency type alone decides whether it can read secret material
+/// back.
 /// </summary>
 /// <remarks>
 /// The whole blob is encrypted as one unit rather than each value individually: that hides the *names*
 /// too - a name like <c>provider:anthropic:header:x-api-key</c> is itself informative - and the data is
-/// small and rarely written, so there is no cost to reading and rewriting all of it per edit. A fixed
-/// application-specific <c>optionalEntropy</c> is passed to <see cref="ProtectedData"/> so that another
-/// process running as the same user cannot trivially <c>Unprotect</c> the file on its own. Writes reuse
+/// small and rarely written, so there is no cost to reading and rewriting all of it per edit. Writes reuse
 /// <see cref="SecureFile.WriteRestricted(string, byte[])"/> - the same create-then-restrict-then-write
 /// ordering <see cref="ManagementAccessToken"/> uses - and are additionally serialized by a path-scoped
 /// named <see cref="Mutex"/> so two store instances (the router and GUI processes) editing at once cannot
 /// interleave their read-modify-write cycles and lose an entry.
 /// <para>
-/// <b>Non-Windows behavior: refuse, do not degrade.</b> DPAPI is Windows-only, so <see cref="Write"/>
-/// throws <see cref="PlatformNotSupportedException"/> and <see cref="TryRead"/>/<see cref="Exists"/>
-/// return <see langword="false"/> on every other platform - callers fall through to their existing
-/// environment-variable path. A store named "protected" that silently wrote plaintext instead would be
-/// worse than today's honest plaintext, so this never happens.
+/// <b>Pluggable protector (web GUI migration plan Phase P3).</b> On Windows, the encryption mechanism and
+/// on-disk format are <em>exactly unchanged</em> from before this phase: <see cref="ProtectedData"/> with a
+/// fixed application-specific <c>optionalEntropy</c> (so another process running as the same user cannot
+/// trivially <c>Unprotect</c> the file on its own) and <see cref="DataProtectionScope.CurrentUser"/>,
+/// producing a raw ciphertext blob with no version header - an existing pre-P3 <c>secrets.dat</c> still
+/// reads unmodified. Off Windows, DPAPI does not exist, so <see cref="Write"/> used to throw
+/// <see cref="PlatformNotSupportedException"/> and every read returned "not found" - callers fell through
+/// to their environment-variable path, honestly degraded rather than silently writing plaintext. That
+/// platform gap is what this phase closes: off Windows, the store now uses ASP.NET Core's Data Protection
+/// stack with a file-system key ring under <c>&lt;data-dir&gt;/keys</c> (mode <c>0700</c>, refused rather
+/// than used if an existing key directory is more permissive - see <see cref="EnsureKeyDirectorySecure"/>),
+/// and every value written this way carries a one-byte format version ahead of the ciphertext (a format
+/// with nothing to be backward-compatible with, since <see cref="Write"/> could never previously succeed
+/// there). "Protected" now means DPAPI-strength, user-account-bound secrecy on Windows, and
+/// file-permission-bound secrecy off Windows - a real difference in guarantee, stated plainly rather than
+/// implied to be equivalent; see <c>docs/router/secrets-at-rest.md</c>.
 /// </para>
 /// </remarks>
 public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
 {
     private const string FileName = "secrets.dat";
+    private const string KeyRingDirectoryName = "keys";
+    private const string DataProtectionApplicationName = "TotallyHotArcRouter";
+    private const string DataProtectionPurpose = "TotallyHotArcRouter.ProtectedSecretStore.v1";
+
+    // The non-Windows on-disk format's one-byte version prefix, ahead of the Data-Protection-encrypted
+    // payload. Bumping this is how a future format change would stay distinguishable from this one -
+    // there is only ever one version in play today.
+    private const byte UnixFormatVersion = 1;
 
     // Fixed, application-specific entropy folded into every DPAPI call. Not a secret in itself - it is
     // compiled into the binary - but it stops another process running as the same Windows user from
@@ -95,8 +115,9 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     private readonly string _path;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over the default per-user store
-    /// file.
+    /// Initializes a new instance of the <see cref="ProtectedSecretStore"/> class over the default
+    /// machine-shared store file (see <see cref="DefaultPath"/> - moved off the per-user location by the
+    /// web GUI migration plan's Phase P3).
     /// </summary>
     public ProtectedSecretStore() : this(DefaultPath())
     {
@@ -118,16 +139,10 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        if (!OperatingSystem.IsWindows())
-        {
-            value = string.Empty;
-            return false;
-        }
-
         using var mutex = OpenMutex();
         using var guard = new MutexGuard(mutex);
 
-        var map = LoadMapWindows();
+        var map = LoadMap();
         if (map.TryGetValue(key: name, value: out var stored))
         {
             value = stored;
@@ -144,11 +159,40 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(value);
 
-        if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException(
-                "The protected secret store requires Windows DPAPI and is unavailable on this platform.");
+        using var mutex = OpenMutex();
+        using var guard = new MutexGuard(mutex);
 
-        WriteWindows(name: name, value: value);
+        var map = LoadMap();
+        map[name] = value;
+        SaveMap(map);
+    }
+
+    /// <summary>
+    /// Atomically reads the secret named <paramref name="name"/>, or - if none is stored - computes one
+    /// via <paramref name="valueFactory"/>, persists it, and returns it. The whole check-then-write
+    /// sequence runs under one held mutex, unlike a caller composing <see cref="TryRead"/> and
+    /// <see cref="Write"/> itself (which would leave a race window between the two calls: two callers
+    /// both observing "not stored yet" and each writing a competing value). Use this whenever "create the
+    /// first time, reuse afterward" is the actual requirement - <see cref="ManagementAccessToken.GetOrCreate"/>
+    /// is exactly that case.
+    /// </summary>
+    /// <param name="name">The secret's name.</param>
+    /// <param name="valueFactory">Computes the value to store, invoked at most once, only when nothing is stored yet.</param>
+    public string GetOrAdd(string name, Func<string> valueFactory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(valueFactory);
+
+        using var mutex = OpenMutex();
+        using var guard = new MutexGuard(mutex);
+
+        var map = LoadMap();
+        if (map.TryGetValue(key: name, value: out var existing) && !string.IsNullOrEmpty(existing)) return existing;
+
+        var value = valueFactory();
+        map[name] = value;
+        SaveMap(map);
+        return value;
     }
 
     /// <inheritdoc/>
@@ -156,15 +200,13 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        if (!OperatingSystem.IsWindows()) return false;
-
         using var mutex = OpenMutex();
         using var guard = new MutexGuard(mutex);
 
-        var map = LoadMapWindows();
+        var map = LoadMap();
         if (!map.Remove(name)) return false;
 
-        SaveMapWindows(map);
+        SaveMap(map);
         return true;
     }
 
@@ -173,12 +215,10 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        if (!OperatingSystem.IsWindows()) return false;
-
         using var mutex = OpenMutex();
         using var guard = new MutexGuard(mutex);
 
-        return LoadMapWindows().ContainsKey(name);
+        return LoadMap().ContainsKey(name);
     }
 
     /// <inheritdoc/>
@@ -186,44 +226,39 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (!OperatingSystem.IsWindows()) return 0;
-
         using var mutex = OpenMutex();
         using var guard = new MutexGuard(mutex);
 
-        var map = LoadMapWindows();
+        var map = LoadMap();
         var toRemove = map.Keys.Where(k => k.StartsWith(value: prefix, comparisonType: StringComparison.Ordinal))
             .ToList();
         foreach (var key in toRemove) map.Remove(key);
 
-        if (toRemove.Count > 0) SaveMapWindows(map);
+        if (toRemove.Count > 0) SaveMap(map);
 
         return toRemove.Count;
     }
 
     /// <summary>
-    /// Gets the default store file path (<c>%LOCALAPPDATA%\TotallyHotArcRouter\secrets.dat</c>), the same per-user
-    /// directory the management token and telemetry certificate use.
+    /// Gets the default store file path (<c>secrets.dat</c> under the machine-shared data directory - see
+    /// <see cref="AppDataPaths"/>), the same directory the management token and telemetry certificate use.
     /// </summary>
     public static string DefaultPath()
     {
-        return Path.Combine(path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            path2: "TotallyHotArcRouter", path3: FileName);
+        return Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: FileName);
     }
 
-    /// <summary>
-    /// Loads the current map, upserts <paramref name="name"/>, and persists the result - the shared read-modify-write
-    /// sequence behind <see cref="Write"/>.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private void WriteWindows(string name, string value)
+    /// <summary>Loads the current map via the platform-appropriate protector - see <see cref="LoadMapWindows"/>/<see cref="LoadMapUnix"/>.</summary>
+    private Dictionary<string, string> LoadMap()
     {
-        using var mutex = OpenMutex();
-        using var guard = new MutexGuard(mutex);
+        return OperatingSystem.IsWindows() ? LoadMapWindows() : LoadMapUnix();
+    }
 
-        var map = LoadMapWindows();
-        map[name] = value;
-        SaveMapWindows(map);
+    /// <summary>Persists the map via the platform-appropriate protector - see <see cref="SaveMapWindows"/>/<see cref="SaveMapUnix"/>.</summary>
+    private void SaveMap(Dictionary<string, string> map)
+    {
+        if (OperatingSystem.IsWindows()) SaveMapWindows(map);
+        else SaveMapUnix(map);
     }
 
     /// <summary>
@@ -259,12 +294,111 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
         var encrypted = ProtectedData.Protect(userData: json, optionalEntropy: Entropy,
             scope: DataProtectionScope.CurrentUser);
 
-        // Atomic overwrite: write to a temp file in the same directory, then File.Move over the real
-        // path. A crash mid-write leaves the temp file orphaned rather than truncating secrets.dat, which
-        // would otherwise read back as "every secret is gone".
+        WriteAtomically(encrypted);
+    }
+
+    /// <summary>
+    /// Reads and decrypts the store file using the Data Protection key ring, returning an empty map when
+    /// it does not exist yet - see <see cref="LoadMapWindows"/>'s remarks for the same "missing = empty"
+    /// contract. The one-byte format-version prefix (<see cref="UnixFormatVersion"/>) is stripped before
+    /// decryption; an unrecognized version throws rather than guessing at a format this build doesn't know.
+    /// </summary>
+    [UnsupportedOSPlatform("windows")]
+    private Dictionary<string, string> LoadMapUnix()
+    {
+        if (!File.Exists(_path)) return new Dictionary<string, string>(StringComparer.Ordinal);
+
+        var stored = File.ReadAllBytes(_path);
+        if (stored.Length < 1) return new Dictionary<string, string>(StringComparer.Ordinal);
+
+        var version = stored[0];
+        if (version != UnixFormatVersion)
+            throw new InvalidOperationException(
+                $"'{_path}' has secret-store format version {version}, which this build does not recognize (expected {UnixFormatVersion}).");
+
+        var protector = CreateUnixProtector();
+        var json = protector.Unprotect(stored[1..]);
+        return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+               ?? new Dictionary<string, string>(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Encrypts and persists <paramref name="map"/> via the Data Protection key ring, prefixed with the
+    /// one-byte format version <see cref="LoadMapUnix"/> checks on read.
+    /// </summary>
+    [UnsupportedOSPlatform("windows")]
+    private void SaveMapUnix(Dictionary<string, string> map)
+    {
+        var directory = Path.GetDirectoryName(_path);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+
+        var json = JsonSerializer.SerializeToUtf8Bytes(value: map, options: SerializerOptions);
+        var protector = CreateUnixProtector();
+        var protectedPayload = protector.Protect(json);
+
+        var versioned = new byte[1 + protectedPayload.Length];
+        versioned[0] = UnixFormatVersion;
+        protectedPayload.CopyTo(array: versioned, index: 1);
+
+        WriteAtomically(versioned);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="content"/> to a temp file in the store's directory via
+    /// <see cref="SecureFile.WriteRestricted"/>, then atomically renames it over <see cref="_path"/>. A
+    /// crash mid-write leaves the temp file orphaned rather than truncating <c>secrets.dat</c>, which
+    /// would otherwise read back as "every secret is gone".
+    /// </summary>
+    private void WriteAtomically(byte[] content)
+    {
         var tempPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        SecureFile.WriteRestricted(path: tempPath, content: encrypted);
+        SecureFile.WriteRestricted(path: tempPath, content: content);
         File.Move(sourceFileName: tempPath, destFileName: _path, true);
+    }
+
+    /// <summary>
+    /// Builds the Data Protection protector this store's non-Windows format uses: a file-system key ring
+    /// under <c>&lt;data-dir&gt;/keys</c> (see <see cref="EnsureKeyDirectorySecure"/>), with a fixed
+    /// application name so the purpose string below is the only thing distinguishing this store's keys
+    /// from any other Data Protection consumer that might someday share the same directory.
+    /// </summary>
+    [UnsupportedOSPlatform("windows")]
+    private static IDataProtector CreateUnixProtector()
+    {
+        var keyDirectory = Path.Combine(AppDataPaths.ResolveMachineSharedDirectory(), KeyRingDirectoryName);
+        EnsureKeyDirectorySecure(keyDirectory);
+
+        var provider = DataProtectionProvider.Create(
+            keyDirectory: new DirectoryInfo(keyDirectory),
+            setupAction: builder => builder.SetApplicationName(DataProtectionApplicationName));
+        return provider.CreateProtector(DataProtectionPurpose);
+    }
+
+    /// <summary>
+    /// Creates <paramref name="keyDirectory"/> at mode <c>0700</c> if it doesn't exist yet. If it already
+    /// exists with broader permissions, refuses rather than silently trusting (or silently tightening) a
+    /// directory whose laxity might mean something else already depends on the wider access, or that the
+    /// environment is misconfigured in a way worth surfacing rather than papering over.
+    /// </summary>
+    /// <exception cref="UnauthorizedAccessException">
+    /// <paramref name="keyDirectory"/> already exists with permissions broader than the owner alone.
+    /// </exception>
+    [UnsupportedOSPlatform("windows")]
+    private static void EnsureKeyDirectorySecure(string keyDirectory)
+    {
+        const UnixFileMode ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+
+        if (!Directory.Exists(keyDirectory))
+        {
+            Directory.CreateDirectory(keyDirectory);
+            File.SetUnixFileMode(path: keyDirectory, mode: ownerOnly);
+            return;
+        }
+
+        var mode = File.GetUnixFileMode(keyDirectory);
+        if ((mode & ~ownerOnly) != 0)
+            throw new UnauthorizedAccessException(
+                $"Refusing to use the secret-protection key directory '{keyDirectory}': its permissions ({mode}) grant access beyond the owner. Fix its mode to 0700, or delete it to have it recreated, before retrying.");
     }
 
     /// <summary>

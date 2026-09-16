@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using TotallyHot.ArcRouter.Hosting;
 
 namespace TotallyHot.ArcRouter.Models;
 
@@ -21,7 +22,7 @@ public sealed class EmbeddingOptions
     /// resolved against the application base directory.
     /// </summary>
     [Required]
-    public string ModelCacheDirectory { get; init; } = @"%LOCALAPPDATA%\TotallyHot.ArcRouter\models\bge-large-en-v1.5";
+    public string ModelCacheDirectory { get; init; } = @"%LOCALAPPDATA%\models\bge-large-en-v1.5";
 
     /// <summary>
     /// Gets the URL the ONNX model weights are downloaded from on first use, if not already present in
@@ -72,21 +73,20 @@ public sealed class EmbeddingOptions
     /// Expands environment-variable tokens in <see cref="ModelCacheDirectory"/>, normalizes
     /// separators, and returns an absolute path, mirroring
     /// <see cref="TotallyHot.ArcRouter.PriceCatalog.StorageOptions.ResolveDatabasePath"/>'s handling of
-    /// the same <c>%LOCALAPPDATA%</c> token for the price catalog's SQLite file.
+    /// the same token. The literal <c>%LOCALAPPDATA%</c> spelling is kept for backward compatibility
+    /// with an operator's existing <c>appsettings.json</c> override, but it now expands to the
+    /// machine-shared data directory (<see cref="AppDataPaths"/>; web GUI migration plan Phase P3)
+    /// rather than the per-user special folder - this cache is re-downloadable, not per-account state, so
+    /// sharing it avoids a duplicate multi-hundred-megabyte download per OS account.
     /// </summary>
     public string ResolveModelCacheDirectory()
     {
         var expanded = Environment.ExpandEnvironmentVariables(ModelCacheDirectory);
 
         if (expanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
-        {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(localAppData)) localAppData = AppContext.BaseDirectory;
-
-            localAppData = localAppData.TrimEnd('/', '\\');
-            expanded = expanded.Replace(oldValue: LocalAppDataToken, newValue: localAppData,
+            expanded = expanded.Replace(oldValue: LocalAppDataToken,
+                newValue: AppDataPaths.ResolveMachineSharedDirectory(),
                 comparisonType: StringComparison.OrdinalIgnoreCase);
-        }
 
         expanded = expanded.Replace('\\', newChar: Path.DirectorySeparatorChar);
 

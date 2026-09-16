@@ -21,20 +21,28 @@ on:
         required: true
         type: string
 
-# Editing a release is a release write, which lives under contents.
+# Editing a release is a release write, which lives under contents. packages:write is needed to retag
+# the container image below (web GUI migration plan Phase P10).
 permissions:
   contents: write
+  packages: write
 
 jobs:
   promote:
     name: Promote ${{ inputs.tag }} to latest
     runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/totallyhot-arcrouter
     steps:
       # Guard against promoting a release the Router would then reject: GitHubReleaseCheckClient requires
-      # exactly one *.msi asset plus one asset named exactly checksums.txt, and reports anything else as
-      # AssetOrChecksumMissing - which surfaces to the operator as a silently unavailable update rather
-      # than a loud failure. Catching it here, before the release goes latest, keeps that failure mode out
-      # of the field entirely.
+      # exactly one platform-matching installer/archive asset (a *.msi* on Windows, a
+      # totallyhotarcrouter-<rid>.tar.gz elsewhere) plus one asset named exactly checksums.txt, and
+      # reports anything else as AssetOrChecksumMissing - which surfaces to the operator as a silently
+      # unavailable update rather than a loud failure. Catching it here, before the release goes latest,
+      # keeps that failure mode out of the field entirely. Only the MSI is checked byte-for-byte against
+      # checksums.txt (GitHubReleaseCheckClient's only real download-and-apply path today, per
+      # GitHubReleaseCheckClient's own remarks) - the tar.gz presence check below is a packaging-matrix
+      # completeness guard, not yet a functional requirement for any client.
       - name: Verify release assets match the update-check contract
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,6 +61,13 @@ jobs:
             exit 1
           fi
 
+          for rid in linux-x64 linux-arm64 osx-arm64; do
+            if ! echo "$names" | grep -qx "totallyhotarcrouter-${rid}.tar.gz"; then
+              echo "::error::$TAG is missing totallyhotarcrouter-${rid}.tar.gz from the P10 packaging matrix."
+              exit 1
+            fi
+          done
+
           if ! echo "$names" | grep -qx 'checksums.txt'; then
             echo "::error::$TAG has no checksums.txt asset; GitHubReleaseCheckClient cannot verify the MSI."
             exit 1
@@ -70,9 +85,9 @@ jobs:
             exit 1
           fi
 
-          echo "$TAG carries $msi_name and a matching checksums.txt line."
+          echo "$TAG carries $msi_name, every P10 tar.gz asset, and a matching checksums.txt line."
 
-      - name: Promote to latest
+      - name: Promote release to latest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -81,3 +96,22 @@ jobs:
           set -euo pipefail
           gh release edit "$TAG" --prerelease=false --draft=false --latest
           echo "Promoted $TAG. /releases/latest now resolves to it; Routers will offer it on their next poll."
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # No rebuild, same "the promoted artifact is byte-identical to the tested RC" principle as the
+      # release itself: imagetools re-tags the already-pushed multi-arch manifest release.yml built for
+      # this tag, rather than running `docker build` again.
+      - name: Retag container image as latest
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${version}"
+          echo "Retagged ${IMAGE}:${version} as ${IMAGE}:latest."

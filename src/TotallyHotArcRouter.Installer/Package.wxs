@@ -2,11 +2,13 @@
 <!--
   The signed MSI (signing pending a certificate - see docs/router/packaging-and-distribution.md) that
   replaces the deleted TotallyHotArcRouter.Updater helper. One Windows Installer transaction installs
-  both the Router and the GUI, registers the Router's Windows Service, and - via MajorUpgrade below -
-  cleanly replaces any prior version already installed. Built and verified against WiX Toolset v7.0.0 in
-  this repo (see the .wixproj's AcceptEula comment for the OSMF EULA acceptance this requires).
+  both the Router and the tray (web GUI migration plan Phase P9 - the Windows-only WinForms tray that
+  replaced the MAUI GUI; the browser dashboard it opens is served by the Router itself, not installed as
+  a separate app), registers the Router's Windows Service, and - via MajorUpgrade below - cleanly
+  replaces any prior version already installed. Built and verified against WiX Toolset v7.0.0 in this
+  repo (see the .wixproj's AcceptEula comment for the OSMF EULA acceptance this requires).
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="TotallyHot Arc Router"
            Manufacturer="TotallyHot"
            Version="$(var.ProductVersion)"
@@ -29,7 +31,7 @@
     <MediaTemplate EmbedCab="yes" />
 
     <!--
-      %ProgramFiles%\TotallyHotArcRouter\Router\ and \Gui\ - no \Updater\ directory, unlike the design
+      %ProgramFiles%\TotallyHotArcRouter\Router\ and \Tray\ - no \Updater\ directory, unlike the design
       this MSI superseded.
 
       Two runtime data locations exist and NEITHER is referenced anywhere in this file, so both are left
@@ -38,8 +40,9 @@
 
         %ProgramData%\TotallyHotArcRouter\   - machine-wide operational state: agent_telemetry.db (usage
             ledger, provider spend, price catalog), coderouterbench.db, transcripts.db, the two trained
-            voter models, routing-gate.json, and management-token.txt. Machine-wide because the service
-            runs as LocalSystem while the GUI runs as the interactive user (see StorageOptions' remarks).
+            voter models, routing-gate.json, and (as of Phase P9) the ProtectedSecretStore-held management
+            token. Machine-wide because the service runs as LocalSystem while the tray runs as the
+            interactive user (see StorageOptions' remarks).
         %LOCALAPPDATA%\TotallyHot.ArcRouter\ - the per-user ONNX model caches (~2.1 GB: bge-large-en-v1.5
             plus the llm_router Qwen artifacts), still per-user pending a separate change.
 
@@ -54,7 +57,7 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="TotallyHotArcRouter">
         <Directory Id="ROUTERFOLDER" Name="Router" />
-        <Directory Id="GUIFOLDER" Name="Gui" />
+        <Directory Id="TRAYFOLDER" Name="Tray" />
       </Directory>
     </StandardDirectory>
 
@@ -80,68 +83,102 @@
     </ComponentGroup>
 
     <!--
-      Harvests every file TotallyHotArcRouter.Gui.csproj's Service publish profile produced, except the
-      GUI's own exe - that one file carries the Start Menu Shortcut below, so it lives in its own explicit
-      Component instead. Same reason the Router's exe is excluded from RouterFiles above: a <Files>-
-      harvested file cannot be individually customized, and a non-advertised Shortcut must be nested
-      inside the <File> element it points at.
+      Harvests every file TotallyHotArcRouter.Tray.csproj's Service publish profile produced, except the
+      tray's own exe - that one file carries the Start Menu Shortcut below, so it lives in its own
+      explicit Component instead. Same reason the Router's exe is excluded from RouterFiles above: a
+      <Files>-harvested file cannot be individually customized, and a non-advertised Shortcut must be
+      nested inside the <File> element it points at.
     -->
-    <ComponentGroup Id="GuiFiles" Directory="GUIFOLDER">
-      <Files Include="$(var.GuiPublishDir)\**">
-        <Exclude Files="$(var.GuiPublishDir)\TotallyHotArcRouter.Gui.exe" />
+    <ComponentGroup Id="TrayFiles" Directory="TRAYFOLDER">
+      <Files Include="$(var.TrayPublishDir)\**">
+        <Exclude Files="$(var.TrayPublishDir)\TotallyHotArcRouter.Tray.exe" />
       </Files>
     </ComponentGroup>
 
     <!--
-      The GUI's exe plus the Start Menu shortcut that launches it. Without a shortcut the only entry
+      The tray's exe plus the Start Menu shortcut that launches it. Without a shortcut the only entry
       points to a tray-resident app were the logon Run key below and browsing to ProgramFiles by hand -
       so a user who chose "Exit" from the tray menu had no supported way to bring it back until the next
       logon.
 
       Advertise="no" (the default, stated explicitly here because it is load-bearing): an advertised
       shortcut would route every launch through Windows Installer's repair/resiliency path, which for a
-      1,000-file self-contained deployment means a visible MSI progress dialog on an ordinary app launch.
-      A plain shortcut points straight at the exe.
+      self-contained deployment means a visible MSI progress dialog on an ordinary app launch. A plain
+      shortcut points straight at the exe.
     -->
-    <Component Id="GuiExeComponent" Directory="GUIFOLDER" Guid="75e13998-dc1c-4025-bf1d-17888d68222a">
-      <File Id="GuiExe" Source="$(var.GuiPublishDir)\TotallyHotArcRouter.Gui.exe" KeyPath="yes">
-        <Shortcut Id="GuiStartMenuShortcut"
+    <Component Id="TrayExeComponent" Directory="TRAYFOLDER" Guid="75e13998-dc1c-4025-bf1d-17888d68222a">
+      <File Id="TrayExe" Source="$(var.TrayPublishDir)\TotallyHotArcRouter.Tray.exe" KeyPath="yes">
+        <Shortcut Id="TrayStartMenuShortcut"
                   Directory="ProgramMenuFolder"
-                  Name="TotallyHot Arc Router"
-                  Description="TotallyHot Arc Router dashboard and routing controls."
-                  WorkingDirectory="GUIFOLDER"
+                  Name="TotallyHot Arc Router Tray"
+                  Description="TotallyHot Arc Router tray icon: status, routing controls, and updates."
+                  WorkingDirectory="TRAYFOLDER"
                   Advertise="no" />
       </File>
     </Component>
 
     <!--
-      Starts the GUI at logon, so it is running (tray-resident - see docs/gui/dashboard.md) without the
+      Starts the tray at logon, so it is running (tray-resident - see docs/gui/dashboard.md) without the
       user having to launch it. This complements the Start Menu shortcut above rather than duplicating it:
-      the shortcut is the manual entry point, this is what makes the GUI present after a reboot. Before
-      either existed the MSI copied TotallyHotArcRouter.Gui.exe into %ProgramFiles%\TotallyHotArcRouter\Gui      and left it there - the Router's service auto-started via ServiceControl below, but nothing ever
-      launched or surfaced the GUI, so a fresh install produced no visible GUI at all.
+      the shortcut is the manual entry point, this is what makes the tray present after a reboot. Before
+      either existed the MSI copied the GUI exe into place and left it there - the Router's service
+      auto-started via ServiceControl below, but nothing ever launched or surfaced the tray, so a fresh
+      install produced no visible tray icon at all.
 
       HKLM (not HKCU) deliberately: this is a per-machine install into ProgramFiles64Folder, and an MSI
       component writing HKCU only ever writes it for the account that ran the installer - typically the
-      elevating admin, not the person who then logs in. The HKLM Run key starts the GUI for every user
+      elevating admin, not the person who then logs in. The HKLM Run key starts the tray for every user
       who logs on, matching the machine-wide service the same package installs.
 
-      The value is quoted because [GUIFOLDER] expands to a path containing spaces; an unquoted Run value
+      The value is quoted because [TRAYFOLDER] expands to a path containing spaces; an unquoted Run value
       would be parsed as the executable "C:\Program" with arguments. RegistryValue is the component's
-      KeyPath so the component has an identity independent of the harvested GuiFiles above, and MSI
+      KeyPath so the component has an identity independent of the harvested TrayFiles above, and MSI
       removes the Run entry on uninstall along with it.
 
-      Note this takes effect at the NEXT logon - installing does not itself start the GUI in the current
+      Note this takes effect at the NEXT logon - installing does not itself start the tray in the current
       session.
     -->
-    <Component Id="GuiAutoStartComponent" Directory="GUIFOLDER" Guid="d3b7b870-6fb1-41e2-9d92-b414100536eb">
+    <Component Id="TrayAutoStartComponent" Directory="TRAYFOLDER" Guid="d3b7b870-6fb1-41e2-9d92-b414100536eb">
       <RegistryValue Root="HKLM"
                      Key="Software\Microsoft\Windows\CurrentVersion\Run"
-                     Name="TotallyHotArcRouter.Gui"
-                     Value="&quot;[GUIFOLDER]TotallyHotArcRouter.Gui.exe&quot;"
+                     Name="TotallyHotArcRouter.Tray"
+                     Value="&quot;[TRAYFOLDER]TotallyHotArcRouter.Tray.exe&quot;"
                      Type="string"
                      KeyPath="yes" />
     </Component>
+
+    <!--
+      A Start Menu shortcut to the browser dashboard (web GUI migration plan Phase P6/P9) - the Router
+      serves it itself now, so there is no local exe to point a shortcut at, only a URL.
+      util:InternetShortcut writes a standard .url file (an [InternetShortcut] INI file), the same
+      artifact Windows itself creates for "Save as shortcut" from a browser. Points at the loopback web
+      port's default address; an operator who changed WebInterfaceOptions.Port needs a shortcut pointed
+      at their own configured port, which this static, install-time value cannot know - documented as a
+      known limitation rather than solved here (the tray's own "Show Dashboard" menu item, which reads
+      the discovery file at click time, is the authoritative way to open the dashboard and does not have
+      this limitation).
+    -->
+    <Component Id="OpenDashboardShortcutComponent" Directory="ProgramMenuFolder" Guid="4b8b0e0a-6b34-4b0a-9c2b-5d6a6f6a1e02">
+      <util:InternetShortcut Id="OpenDashboardShortcut"
+                              Directory="ProgramMenuFolder"
+                              Name="TotallyHot Arc Router Dashboard"
+                              Target="https://localhost:47104"
+                              Type="url" />
+    </Component>
+
+    <!--
+      Stops any running tray instance before the file swap (install/upgrade/uninstall), the same role
+      ServiceControl plays for the Router's Windows Service below - without this, an upgrade would try to
+      overwrite TotallyHotArcRouter.Tray.exe while a previous version still held it open, failing the
+      file operation. CloseMessage="yes" asks the process to exit via its own message loop
+      (Application.Exit, which TrayApplicationContext.ExitApplication reaches) rather than forcibly
+      terminating it, so the tray's own single-instance mutex and NotifyIcon cleanup still run.
+    -->
+    <util:CloseApplication Id="CloseTrayBeforeInstall"
+                            Target="TotallyHotArcRouter.Tray.exe"
+                            CloseMessage="yes"
+                            RebootPrompt="no"
+                            Timeout="5" />
 
     <Component Id="RouterServiceComponent" Directory="ROUTERFOLDER" Guid="20aa08ae-3a04-41e6-b3e7-d44768a7e3fe">
       <File Id="RouterServiceExe" Source="$(var.RouterPublishDir)\TotallyHotArcRouter.exe" KeyPath="yes" />
@@ -154,12 +191,12 @@
 
         Name and DisplayName deliberately diverge. Name is the service's identity to the SCM and is
         therefore frozen: Program.cs's UseWindowsService, ServiceControl below, the dev scripts, and
-        TrayWindowManager's RouterServiceName constant (which is how the tray reads the router's real
+        TrayApplicationContext's ServiceName constant (which is how the tray reads the router's real
         run state) all address the service by it, so versioning Name would silently break all of them
         and strand the previous version's registration behind. DisplayName is only the label
         services.msc and Task Manager show, so it can carry $(var.ProductVersion) - itself derived from
         Directory.Build.props' single-source-of-truth <Version> via the .wixproj - and makes "which
-        build is actually running as a service" answerable without opening the GUI. It refreshes on
+        build is actually running as a service" answerable without opening the tray. It refreshes on
         upgrade because MajorUpgrade's RemoveExistingProducts runs the old package's uninstall (which
         deletes the service, per ServiceControl's Remove="uninstall") before this ServiceInstall
         re-registers it.
@@ -189,11 +226,54 @@
                        Wait="yes" />
     </Component>
 
+    <!--
+      ADR-0013/web GUI migration plan Phase P7's local CA, trusted machine-wide so every client on this
+      box (browsers hitting the dashboard, LLM tools pointed at the HTTPS proxy port) sees a clean TLS
+      connection with no per-tool trust step. Deferred (Execute="deferred") and unelevated
+      (Impersonate="no") so it runs as LocalSystem - the same account the Windows Service below runs
+      as - rather than as the (possibly non-administrator) interactive user who launched the installer;
+      FileRef="RouterServiceExe" resolves the exe to run from the RouterServiceComponent File above,
+      already laid down earlier in the same transaction (see InstallExecuteSequence's scheduling below).
+      Return="ignore" - a certificate-trust failure (e.g. a locked-down machine policy blocking root-store
+      writes) must not fail the whole install; the router still works over HTTPS, a client just needs its
+      own manual trust step (docs/router/client-tls-setup.md) until this is retried, e.g. by re-running
+      the same install-certificate flag elevated by hand.
+    -->
+    <CustomAction Id="InstallCertificate"
+                  FileRef="RouterServiceExe"
+                  ExeCommand="--install-certificate"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!--
+      Uninstalling the CA is best-effort and only on a genuine uninstall, never on an upgrade's internal
+      remove-then-reinstall (upgrades must keep the CA trusted throughout - re-trusting it on every
+      version bump would be a needless UAC-adjacent operation and a window where HTTPS clients see a
+      broken chain). REMOVE="ALL" is Windows Installer's own signal for "this is the final removal", true
+      for a real uninstall and false for MajorUpgrade's internal RemoveExistingProducts pass.
+    -->
+    <CustomAction Id="UninstallCertificate"
+                  FileRef="RouterServiceExe"
+                  ExeCommand="--uninstall-certificate"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- After InstallFiles so the router exe this action runs actually exists on disk yet; before
+           StartServices so the leaf the router mints on its first real start is already trusted the
+           moment a client connects, not racing the CA install against the service's own startup. -->
+      <Custom Action="InstallCertificate" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="UninstallCertificate" After="InstallFiles" Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
     <Feature Id="Main" Title="TotallyHot ArcRouter" Level="1">
       <ComponentGroupRef Id="RouterFiles" />
-      <ComponentGroupRef Id="GuiFiles" />
-      <ComponentRef Id="GuiExeComponent" />
-      <ComponentRef Id="GuiAutoStartComponent" />
+      <ComponentGroupRef Id="TrayFiles" />
+      <ComponentRef Id="TrayExeComponent" />
+      <ComponentRef Id="TrayAutoStartComponent" />
+      <ComponentRef Id="OpenDashboardShortcutComponent" />
       <ComponentRef Id="RouterServiceComponent" />
     </Feature>
 

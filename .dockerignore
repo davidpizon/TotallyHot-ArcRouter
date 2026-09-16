@@ -1,0 +1,14 @@
+# Keeps the build context (src/TotallyHotArcRouter/Dockerfile's ". " context, from the repo root) small
+# and avoids ever COPYing local build output, IDE state, or working-tree secrets into an image layer.
+# "**/.vs/" (not a bare ".vs/", which only matches at the context root) matters for real: a bare pattern
+# missed "src/.vs/" during this phase's own `podman build` verification, and Visual Studio's .vs/ holds
+# index files the build container's user has no permission to even read, failing the COPY outright.
+**/bin/
+**/obj/
+**/.vs/
+.git/
+.vscode/
+docs/
+*.md
+**/*.pubxml
+**/appsettings.local.json

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Serilog;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
@@ -247,6 +248,11 @@ internal static class ProxyServiceCollectionExtensions
         // this outer container) can resolve it; ProxyServer builds its own instance from the same
         // underlying stores for REST - the facade is stateless, so the two instances behave identically.
         services.AddSingleton<HttpClient>();
+        // The shared, rotatable management token (web GUI migration plan Phase P4): a single outer-
+        // container singleton passed by reference into both McpHostedService (below, resolved via
+        // ordinary constructor injection) and the proxy inner host (via ProxyServerDependencies in
+        // AddProxyHost), so a Regenerate call from either surface is visible to both without a restart.
+        services.AddSingleton<IManagementTokenProvider, ManagementTokenProvider>();
         // Probes a provider's well-known paths for which API flavors it answers
         // (docs/router/tool-call-normalization.md §3.3). Registered before the facade so the container
         // injects it into the facade's optional constructor parameters.
@@ -260,9 +266,13 @@ internal static class ProxyServiceCollectionExtensions
         // MCP (Model Context Protocol) management endpoint - agent-facing access to the same
         // provider/model/budget/price-source management as REST /admin/*, over a dedicated loopback TLS
         // port. See docs/router/mcp-endpoint-plan.md.
+        // Validated on start for the same reason as ProxyListenerOptions/WebInterfaceOptions below - see
+        // ProxyListenerOptionsValidator, which also owns the pairwise collision checks against those two.
         services.AddOptions<McpOptions>()
             .Configure<IConfiguration>((options, configuration) =>
-                configuration.GetSection(McpOptions.SectionName).Bind(options));
+                configuration.GetSection(McpOptions.SectionName).Bind(options))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<McpOptions>, PortRangeOptionsValidator>();
         services.AddHostedService<McpHostedService>();
 
         return services;
@@ -275,6 +285,26 @@ internal static class ProxyServiceCollectionExtensions
     /// </summary>
     internal static IServiceCollection AddProxyHost(this IServiceCollection services)
     {
+        // The proxy's own port/bind-address configuration (web GUI migration plan Phase P1). Validated
+        // on start (not just on first resolution) so a bad appsettings.json value is caught at startup,
+        // not on the first request. IValidateOptions cross-checks the opt-in plain-HTTP listener's port
+        // against WebInterfaceOptions/McpOptions below, so registration order between the three doesn't
+        // matter - see ProxyListenerOptionsValidator.
+        services.AddOptions<ProxyListenerOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(ProxyListenerOptions.SectionName).Bind(options))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<ProxyListenerOptions>, ProxyListenerOptionsValidator>();
+
+        // The router-hosted web GUI's listener configuration (Phase P1). Not yet consumed by a running
+        // listener - Phase P2 adds that - but bound and validated from Phase P1 onward, same reasoning
+        // as ProxyListenerOptions above.
+        services.AddOptions<WebInterfaceOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(WebInterfaceOptions.SectionName).Bind(options))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<WebInterfaceOptions>, PortRangeOptionsValidator>();
+
         // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
         // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
         // can never end up recursively constructing another ProxyHostedService.
@@ -293,13 +323,21 @@ internal static class ProxyServiceCollectionExtensions
                 // Lets a port clash stop the host in an orderly way instead of throwing out of
                 // StartAsync - see ProxyHostedService.StartAsync.
                 hostLifetime: sp.GetRequiredService<IHostApplicationLifetime>(),
+                listenerOptions: sp.GetRequiredService<IOptions<ProxyListenerOptions>>().Value,
+                webInterfaceOptions: sp.GetRequiredService<IOptions<WebInterfaceOptions>>().Value,
                 dependencies: new ProxyServerDependencies
                 {
                     Telemetry = sp.GetRequiredService<TelemetryBroadcaster>(),
-                    // The always-present per-user token that gates every /admin request and every gRPC
-                    // call by default - the same token the MCP endpoint requires, so both management
-                    // surfaces are gated identically out of the box.
-                    ManagementToken = ManagementAccessToken.GetOrCreate(),
+                    // The same shared, rotatable token provider MCP uses (see AddManagement above) - both
+                    // management surfaces are gated identically out of the box, and a rotation from either
+                    // one is visible to both immediately.
+                    ManagementTokenProvider = sp.GetRequiredService<IManagementTokenProvider>(),
+                    // Routes the inner Kestrel host's own logs (routing, endpoint dispatch, bind
+                    // failures) through the same Serilog pipeline (console + file) the rest of the
+                    // application uses - see ProxyServerDependencies.SerilogLogger's remarks. Read once
+                    // here, at the explicit hand-off point, rather than reached for deep inside
+                    // ProxyServer itself.
+                    SerilogLogger = Log.Logger,
                     // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
                     RoutingOptions = sp.GetRequiredService<IOptions<RoutingOptions>>(),
 

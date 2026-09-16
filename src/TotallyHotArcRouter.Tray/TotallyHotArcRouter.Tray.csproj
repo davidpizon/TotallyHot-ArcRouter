@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Windows-only WinForms shell (web GUI migration plan Phase P8): a thin NotifyIcon/ContextMenuStrip
+         wrapper around TotallyHotArcRouter.Tray.Core's platform-agnostic status/routing/update logic.
+         net10.0-windows (not the net10.0-windows10.0.19041.0/UseMaui the old MAUI Gui project needs) -
+         WinForms doesn't need the WinUI/UWP API surface, only System.Windows.Forms. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>TotallyHot.ArcRouter.Tray</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Matches TotallyHotArcRouter.Gui: even a thin, [ExcludeFromCodeCoverage] platform shell keeps
+         accurate XML docs on its public members, enforced the same way as everywhere else in this repo. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <ApplicationIcon>Resources\appicon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TotallyHotArcRouter.Tray.Core\TotallyHotArcRouter.Tray.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Resources\appicon.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

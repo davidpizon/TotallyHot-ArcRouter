@@ -1,18 +1,25 @@
 name: Release
 
 # Tag-triggered: pushing a "v<Directory.Build.props' Version>" tag (e.g. v1.2.3, matching this repo's
-# existing "bump Version, tag v<Version>" convention - see Directory.Build.props' comment) builds the
-# signed... well, unsigned-for-now (see the signing step below) MSI installer and publishes it plus
-# checksums.txt as GitHub Release assets, in the shape GitHubReleaseCheckClient expects: exactly one
-# *.msi asset and one checksums.txt asset containing a `<sha256 hex>  <filename>` line for it
-# (docs/router/packaging-and-distribution.md).
+# existing "bump Version, tag v<Version>" convention - see Directory.Build.props' comment) builds every
+# release asset (web GUI migration plan Phase P10's packaging matrix) and publishes them plus a single
+# combined checksums.txt as GitHub Release assets, in the shape GitHubReleaseCheckClient expects: exactly
+# one platform-matching installer/archive asset (a *.msi* on Windows, a totallyhotarcrouter-<rid>.tar.gz
+# elsewhere) and one checksums.txt asset containing a `<sha256 hex>  <filename>` line for it
+# (docs/router/packaging-and-distribution.md; GitHubReleaseCheckClient.MatchesCurrentPlatform).
 #
 # This workflow is stage one of two: it always publishes the release as a PRERELEASE - a release
 # candidate - never as `latest`. GitHub's /repos/{owner}/{repo}/releases/latest endpoint, which
 # GitHubReleaseCheckClient polls, excludes prereleases by definition, so a build published here is
 # invisible to every installed Router until it is deliberately nominated. Stage two is promote.yml,
-# which flips the same release to `latest` WITHOUT rebuilding - so the MSI operators install is the
+# which flips the same release to `latest` WITHOUT rebuilding - so what operators install is the
 # byte-identical artifact that was tested as the RC, and its published checksum still covers it.
+#
+# Every platform job publishes to a job-scoped actions/upload-artifact, not straight to the GitHub
+# Release: attaching assets from several parallel jobs to the same release racily is exactly the kind of
+# "worked in testing, corrupted checksums.txt in production" bug this avoids - the final publish-release
+# job downloads everything once every build has finished, computes ONE combined checksums.txt covering
+# every asset, and creates the release in a single step.
 on:
   push:
     tags:
@@ -20,11 +27,52 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  build-and-release:
-    name: Build MSI and publish release
+  verify-version:
+    name: Verify tag matches Directory.Build.props Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.verify.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Directory.Build.props' <Version> is this repo's single source of truth for the release version
+      # (see its own comment); the tag is expected to be "v<Version>" exactly. Fail fast here rather than
+      # publishing a release asset whose embedded ProductVersion silently disagrees with the tag that
+      # triggered it - GitHubReleaseCheckClient parses the tag as the version it compares against, so a
+      # mismatch would mean an install claims a version other than the one the tag (and therefore the
+      # Router's update check) says it is.
+      - name: Verify
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${tag}" != v* ]]; then
+            echo "::error::Tag '${tag}' does not start with 'v'."
+            exit 1
+          fi
+          tag_version="${tag#v}"
+
+          props_version=$(grep -oP '(?<=<Version>)[^<]+' src/Directory.Build.props | head -n1)
+
+          if [[ "${tag_version}" != "${props_version}" ]]; then
+            echo "::error::Tag version '${tag_version}' does not match Directory.Build.props Version '${props_version}'. Bump Version and re-tag."
+            exit 1
+          fi
+
+          echo "Tag version '${tag_version}' matches Directory.Build.props."
+          echo "version=${tag_version}" >> "${GITHUB_OUTPUT}"
+
+  build-msi:
+    name: Build MSI (win-x64)
+    needs: verify-version
     runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -34,52 +82,21 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      # TotallyHotArcRouter.Gui.csproj is the only project needing this - see dotnet-ci.yml's identical
-      # step and its own comment.
-      - name: Install MAUI workload
-        run: dotnet workload install maui-windows
-
-      # Directory.Build.props' <Version> is this repo's single source of truth for the release version
-      # (see its own comment); the tag is expected to be "v<Version>" exactly. Fail fast here rather than
-      # publishing a release asset whose embedded ProductVersion silently disagrees with the tag that
-      # triggered it - GitHubReleaseCheckClient parses the tag as the version it compares against, so a
-      # mismatch would mean the MSI installs a version other than the one the tag (and therefore the
-      # Router's update check) claims.
-      - name: Verify tag matches Directory.Build.props Version
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          if (-not $tag.StartsWith("v")) {
-            Write-Error "Tag '$tag' does not start with 'v'."
-            exit 1
-          }
-          $tagVersion = $tag.Substring(1)
-
-          [xml]$props = Get-Content "src/Directory.Build.props"
-          $propsVersion = ($props.Project.PropertyGroup.Version | Where-Object { $_ }) | Select-Object -First 1
-
-          if ($tagVersion -ne $propsVersion) {
-            Write-Error "Tag version '$tagVersion' does not match Directory.Build.props Version '$propsVersion'. Bump Version and re-tag."
-            exit 1
-          }
-
-          Write-Host "Tag version '$tagVersion' matches Directory.Build.props."
-          echo "RELEASE_VERSION=$tagVersion" >> $env:GITHUB_ENV
-
       - name: Restore
         run: |
           dotnet restore src/TotallyHotArcRouter/TotallyHotArcRouter.csproj
-          dotnet restore src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj
+          dotnet restore src/TotallyHotArcRouter.Tray/TotallyHotArcRouter.Tray.csproj
 
-      # Publishes both apps with their `Service` publish profile (RuntimeIdentifier=win-x64,
-      # SelfContained=true) - the exact layout the installer project's RouterPublishDir/GuiPublishDir
-      # default to, and what TotallyHotArcRouter.Installer.wixproj packages via <Files Include="...">
-      # harvesting (Package.wxs).
+      # Publishes both apps with their `Service` publish profile (win-x64, SelfContained=true - see
+      # TotallyHotArcRouter.csproj's Phase P10 comment on why win-x64 is now only the profile's DEFAULT
+      # RuntimeIdentifier, not a hardcoded one) - the exact layout the installer project's
+      # RouterPublishDir/TrayPublishDir default to, and what TotallyHotArcRouter.Installer.wixproj
+      # packages via <Files Include="..."> harvesting (Package.wxs).
       - name: Publish Router
         run: dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj -c Release -p:PublishProfile=Service
 
-      - name: Publish GUI
-        run: dotnet publish src/TotallyHotArcRouter.Gui/TotallyHotArcRouter.Gui.csproj -c Release -p:PublishProfile=Service
+      - name: Publish Tray
+        run: dotnet publish src/TotallyHotArcRouter.Tray/TotallyHotArcRouter.Tray.csproj -c Release -p:PublishProfile=Service
 
       - name: Build MSI
         run: dotnet build src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj -c Release
@@ -87,22 +104,142 @@ jobs:
       # TODO(signing): the MSI produced here is UNSIGNED - no code-signing certificate exists yet for this
       # project (docs/router/packaging-and-distribution.md tracks this as an open prerequisite). Once one
       # exists, add a `signtool sign /fd SHA256 /a /tr <timestamp-url> /td SHA256 <msi>` step here, before
-      # the checksum is computed below, so the published checksum covers the signed artifact. Without
-      # signing, Windows SmartScreen will warn on install and MsiUpdateApplier's future Authenticode
-      # verification (its own TODO) has nothing to check yet.
-      - name: Rename MSI and compute checksums.txt
+      # the checksum is computed in publish-release below, so the published checksum covers the signed
+      # artifact. Without signing, Windows SmartScreen will warn on install and MsiUpdateApplier's future
+      # Authenticode verification (its own TODO) has nothing to check yet.
+      - name: Rename MSI
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
           $msiSource = Get-ChildItem -Path "src/TotallyHotArcRouter.Installer/bin/x64/Release" -Filter "*.msi" -Recurse | Select-Object -First 1
-          $msiName = "TotallyHotArcRouter-$env:RELEASE_VERSION.msi"
-          Copy-Item $msiSource.FullName "release-assets/$msiName"
-
-          $hash = (Get-FileHash "release-assets/$msiName" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $msiName" | Out-File -FilePath "release-assets/checksums.txt" -Encoding ascii -NoNewline
-          Add-Content -Path "release-assets/checksums.txt" -Value "" -NoNewline
-
+          Copy-Item $msiSource.FullName "release-assets/TotallyHotArcRouter-$env:RELEASE_VERSION.msi"
           Get-ChildItem release-assets
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-asset-msi
+          path: release-assets/*.msi
+          if-no-files-found: error
+
+  build-tarball:
+    name: Build self-contained tar.gz (${{ matrix.rid }})
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: linux-arm64
+            os: ubuntu-latest
+          - rid: osx-arm64
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      # Cross-published from an ubuntu-latest runner for every RID, including osx-arm64: a self-contained
+      # publish only needs that RID's runtime pack restored from NuGet, not a matching host OS/arch -
+      # Microsoft.ML.OnnxRuntime/.OnnxRuntimeGenAI and SQLitePCLRaw.bundle_e_sqlite3 (this project's native
+      # dependencies) all ship an osx-arm64 asset in the package versions already pinned here.
+      - name: Publish (${{ matrix.rid }})
+        run: >
+          dotnet publish src/TotallyHotArcRouter/TotallyHotArcRouter.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:PublishDir=publish/${{ matrix.rid }}
+
+      - name: Package tar.gz
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          name="totallyhotarcrouter-${{ matrix.rid }}.tar.gz"
+          # packaging/install.sh's own docs (and this repo's README/Dockerfile) all assume
+          # packaging/linux/install.sh or packaging/macos/install.sh sits inside the extracted archive
+          # root next to the published binaries - copy the repo's packaging/ tree in before archiving, or
+          # every release install script this workflow's own comments promise would be missing.
+          cp -r packaging "src/TotallyHotArcRouter/publish/${{ matrix.rid }}/packaging"
+          # --numeric-owner/root ownership: the archive's UID/GID must not depend on this runner's own
+          # accounts - packaging/linux/install.sh and packaging/macos/install.sh both chown the extracted
+          # tree themselves.
+          tar --numeric-owner --owner=0 --group=0 -czf "release-assets/${name}" \
+            -C "src/TotallyHotArcRouter/publish/${{ matrix.rid }}" .
+          ls -la release-assets
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-asset-tarball-${{ matrix.rid }}
+          path: release-assets/*.tar.gz
+          if-no-files-found: error
+
+  build-docker:
+    name: Build and push multi-arch container image
+    needs: verify-version
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/totallyhot-arcrouter
+      RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tagged with the version only, never "latest" - promote.yml's own job below does that, matching
+      # the two-stage MSI/tarball release exactly: no artifact this workflow builds is "the" release
+      # until promote.yml deliberately says so.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/TotallyHotArcRouter/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.RELEASE_VERSION }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [verify-version, build-msi, build-tarball, build-docker]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
+    steps:
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-asset-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Compute combined checksums.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          ls -la
+          sha256sum *.msi *.tar.gz > checksums.txt
+          cat checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -110,6 +247,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: |
             release-assets/*.msi
+            release-assets/*.tar.gz
             release-assets/checksums.txt
           generate_release_notes: true
           # See the two-stage note in this file's header: an RC, not `latest`, until promote.yml says so.

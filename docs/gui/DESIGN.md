@@ -266,7 +266,7 @@ dense repeated row actions.
 ### 4.1 New windows follow the System Settings pattern
 
 Any new modal, dialog, or window builds on
-[`DialogShell.razor`](../../src/TotallyHotArcRouter.Gui/Components/DialogShell.razor) rather than
+[`DialogShell.razor`](../../src/TotallyHotArcRouter.Gui.Components/Components/DialogShell.razor) rather than
 inventing its own chrome. `DialogShell` is the extracted, shared implementation of the shell every
 dialog in this app already followed by convention (`SettingsModal.razor` "System Settings",
 `ProviderEditDialog.razor`, `RemoveProviderDialog.razor`, `UnlockSecretFieldDialog.razor`) - that
@@ -486,12 +486,14 @@ to a different control, it *is* the control, made draggable by `@onpointerdown` 
 (see the remarks below). `grip-vertical` is the one glyph in the app not sourced from Heroicons — see
 §4.3 for why.
 
-- **Pointer events, not HTML5 drag-and-drop.** WinUI's WebView2 — the host `BlazorWebView` uses on
-  Windows — never delivers in-page `dragstart`/`dragover` events (`microsoft-ui-xaml#10576`), so a
-  `draggable="true"` card is inert in this app. Reorder gestures are built on `pointerdown` /
-  `pointermove` / `pointerup` instead, the same primitive `js/split-pane.js` already drags the
-  split-pane divider with. The move and up listeners live on `document`, not on the card or the list,
-  so a drag survives the pointer leaving the list and still ends wherever it is released.
+- **Pointer events, not HTML5 drag-and-drop.** Originally adopted because WinUI's WebView2 — the host
+  `BlazorWebView` used on Windows before the web GUI migration plan's Phase P6/P9 replaced it with a
+  Blazor WebAssembly app running in a real browser — never delivered in-page `dragstart`/`dragover`
+  events (`microsoft-ui-xaml#10576`), so a `draggable="true"` card was inert in that host. The
+  implementation carried over unchanged into the WASM app: `pointerdown`/`pointermove`/`pointerup`, the
+  same primitive `js/split-pane.js` already drags the split-pane divider with, work identically in every
+  real browser and needed no rewrite. The move and up listeners live on `document`, not on the card or
+  the list, so a drag survives the pointer leaving the list and still ends wherever it is released.
 - **Each card sits in a slot.** `.ds-card-slot` is the in-flow layout unit — it carries the card-stack
   gap, it carries `data-flip-key` for the settle, and it holds its row open at a measured height while
   the card inside is detached. The card is what gets picked up; the slot is what stays put.
@@ -816,7 +818,7 @@ Earlier round of classes:
   `inert` while collapsed. Motion contract: [`MOTION.md`](MOTION.md) §6 Disclosure Collapse
 - `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
 
-Every remaining `style=` attribute in `TotallyHotArcRouter.Gui/Components` is one of the sanctioned
+Every remaining `style=` attribute in `TotallyHotArcRouter.Gui.Components/Components` is one of the sanctioned
 exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
 `share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
 property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s

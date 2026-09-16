@@ -1,0 +1,168 @@
+@* Console tab: real-time, color-coded streaming log viewer (docs/gui/console-tab-plan.md).
+   Named ConsoleTab rather than Console to avoid colliding with System.Console in this project's
+   global usings. Reads directly from LiveDataStore's own LogLinesChanged event (instead of a
+   cascading parameter from Dashboard.razor) so a burst of log lines only re-renders this tab, not
+   the whole dashboard. *@
+@implements IDisposable
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject LiveDataStore LiveDataStore
+@inject IJSRuntime Js
+@inject IClipboardService Clipboard
+
+<div class="flex flex-col h-full min-h-0">
+    @* Toolbar *@
+    <div class="flex items-center justify-between px-3 py-2 shrink-0 ds-toolbar">
+        <button @onclick="ToggleAutoScroll"
+                class="btn-toggle @(_autoScroll ? "active" : "")">
+            <span class="w-1.5 h-1.5 rounded-full @(_autoScroll ? "pulse-dot toggle-dot-enabled" : "toggle-dot-disabled")"></span>
+            Auto-Scroll: @(_autoScroll ? "ON" : "OFF")
+        </button>
+
+        <div class="flex items-center gap-2">
+            <button @onclick="CopyAllToClipboard"
+                    class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
+                <Icon Name="@(_justCopied ? "check-circle" : "copy")" Size="20"/>
+                @(_justCopied ? "Copied!" : "Copy")
+            </button>
+
+            <button @onclick="ClearBuffer"
+                    class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
+                <Icon Name="trash" Size="20"/>
+                Clear Buffer
+            </button>
+        </div>
+    </div>
+
+    @* Viewport *@
+    <div @ref="_viewport" class="flex-1 ls-console-viewport">
+        @{ var lines = LiveDataStore.LogLines; }
+        @if (lines.Count == 0)
+        {
+            <div class="text-slate-600">Waiting for log output…</div>
+        }
+        else
+        {
+            @foreach (var line in lines)
+            {
+                @* Composite key (not just index) so a dropped-oldest-line buffer shift diffs as "one
+                   row removed, one added" rather than re-diffing every remaining row's content. *@
+                <div @key="@($"{line.TimestampUtc.Ticks}|{line.Level}|{line.Message}")"
+                     class="ls-console-line"
+                     style="color:@LogLevelColorMapper.GetColor(line.Level)">
+                    @LogLineFormatter.Format(line)
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private ElementReference _viewport;
+    private DotNetObjectReference<ConsoleTab>? _dotNetRef;
+    private bool _autoScroll = true;
+    private bool _justCopied;
+    private volatile bool _pendingScroll;
+
+    protected override void OnInitialized()
+    {
+        LiveDataStore.LogLinesChanged += HandleLogLinesChanged;
+    }
+
+    // LiveDataStore raises LogLinesChanged from whatever thread the gRPC stream delivered the event
+    // on; InvokeAsync marshals back to this component's render context before calling StateHasChanged.
+    /// <summary>Marks a pending scroll and re-renders when a new log line arrives.</summary>
+    private void HandleLogLinesChanged()
+    {
+        _pendingScroll = true;
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await Js.InvokeVoidAsync(identifier: "consoleScroll.init", _viewport, _dotNetRef);
+        }
+
+        // Only scroll when a line actually arrived (not on every unrelated re-render), and only
+        // while auto-scroll is enabled - the buffer's size plateaus once it hits capacity, so this
+        // can't rely on comparing LogLines.Count between renders.
+        if (_autoScroll && _pendingScroll)
+        {
+            _pendingScroll = false;
+            await Js.InvokeVoidAsync(identifier: "consoleScroll.scrollToBottom", _viewport);
+        }
+    }
+
+    /// <summary>
+    /// Called from JS when the user scrolls the viewport upward with a wheel/trackpad gesture while
+    /// auto-scroll is on. Implements the "Smart-Disengage" safeguard from the spec.
+    /// </summary>
+    [JSInvokable]
+    public void OnManualScrollUp()
+    {
+        if (_autoScroll)
+        {
+            _autoScroll = false;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Toggles auto-scroll and, when re-enabled, immediately jumps the viewport to the bottom.</summary>
+    private async Task ToggleAutoScroll()
+    {
+        _autoScroll = !_autoScroll;
+        if (_autoScroll)
+        {
+            await Js.InvokeVoidAsync(identifier: "consoleScroll.scrollToBottom", _viewport);
+        }
+    }
+
+    /// <summary>Empties the log buffer. Implements the toolbar's Clear Buffer button.</summary>
+    private void ClearBuffer()
+    {
+        LiveDataStore.ClearLogLines();
+    }
+
+    // Goes through the injected IClipboardService rather than the browser's navigator.clipboard via JS
+    // interop directly: clipboard-write from inside a WebView2 page can be blocked by permission
+    // prompts/secure-context rules, while MAUI's native Clipboard.Default (this host's IClipboardService
+    // implementation) always works. See IClipboardService's remarks.
+    /// <summary>Copies every visible log line to the clipboard and briefly shows a "Copied!" confirmation.</summary>
+    private async Task CopyAllToClipboard()
+    {
+        var lines = LiveDataStore.LogLines;
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        await Clipboard.SetTextAsync(LogLineFormatter.FormatAll(lines));
+
+        _justCopied = true;
+        StateHasChanged();
+        await Task.Delay(1500);
+        _justCopied = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Unsubscribes from <see cref="LiveDataStore.LogLinesChanged"/>.</summary>
+    public void Dispose()
+    {
+        LiveDataStore.LogLinesChanged -= HandleLogLinesChanged;
+    }
+
+    // Blazor prefers DisposeAsync() over Dispose() when a component implements both - it may never
+    // call Dispose() at all. Call it explicitly here so the event unsubscription always happens
+    // regardless of which teardown path Blazor takes.
+    /// <summary>Explicitly runs <see cref="Dispose"/> and releases the JS interop reference.</summary>
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        _dotNetRef?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+}

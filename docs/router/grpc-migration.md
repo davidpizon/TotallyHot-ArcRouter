@@ -251,7 +251,7 @@ var handler = new HttpClientHandler
     ServerCertificateCustomValidationCallback = (_, cert, _, _) =>
         cert is not null && cert.Subject.Contains("CN=localhost", StringComparison.Ordinal),
 };
-var channel = GrpcChannel.ForAddress("https://localhost:5002", new GrpcChannelOptions { HttpHandler = handler, DisposeHttpClient = true });
+var channel = GrpcChannel.ForAddress("https://localhost:47104", new GrpcChannelOptions { HttpHandler = handler, DisposeHttpClient = true });
 var client = new TelemetryService.TelemetryServiceClient(channel);
 ```
 
@@ -434,6 +434,14 @@ target simply never ran, silently, with no warning or error. `TotallyHotArcRoute
 Grpc package reference of `TotallyHot.ArcRouter.Gui`'s own needed. `TotallyHot.ArcRouter.Gui.Telemetry` does now
 carry a `Grpc`/`Google.Protobuf` dependency it didn't have before, purely for this build-tooling
 reason - `ConversationAggregator`'s own logic still has no gRPC awareness.
+
+**Historical note (web GUI migration plan, 2026-09-15):** `TotallyHot.ArcRouter.Gui`, the MAUI project
+this whole discovery was made against, was deleted in Phase P9. `TotallyHot.ArcRouter.Gui.Telemetry`'s
+compiled `.proto` client is now referenced by `TotallyHot.ArcRouter.Gui.Web` (the WASM dashboard) and
+`TotallyHot.ArcRouter.Tray` instead - both plain `net10.0`/`net10.0-windows` projects with no MAUI/Razor
+SDK dual-build quirk, so this specific codegen failure mode has no live reproduction path left in this
+repo. The finding itself (MAUI `SingleProject` builds silently skipping Grpc.Tools' codegen target) is
+kept as a permanent record for any future MAUI-hosted codegen tool.
 
 ### Known gap: no built-in reconnect
 

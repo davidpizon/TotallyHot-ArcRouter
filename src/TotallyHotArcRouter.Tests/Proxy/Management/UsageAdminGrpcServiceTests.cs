@@ -4,6 +4,7 @@ using Grpc.Core.Testing;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
+using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
@@ -113,6 +114,27 @@ public sealed class UsageAdminGrpcServiceTests
     }
 
     [Fact]
+    public async Task GetRoutingRoi_ValidRange_ReturnsResponse()
+    {
+        // Web GUI migration plan Phase P2: this covers the RPC wire-mapping this class itself performs
+        // for the success path - the business logic (ManagementReportingService.GetRoutingRoiAsync) is
+        // already fully covered by ManagementReportingServiceTests, which this delegates to. An empty
+        // comparison store is enough to exercise the wire response shape without duplicating that
+        // coverage.
+        var service = new UsageAdminGrpcService(
+            new ManagementReportingService(null, comparisonStore: new EmptyComparisonStore()));
+
+        var response = await service.GetRoutingRoi(new Contract.GetRoutingRoiRequest
+        {
+            From = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddDays(-1)),
+            To = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+        }, CreateContext());
+
+        Assert.NotNull(response);
+        Assert.Empty(response.Entries);
+    }
+
+    [Fact]
     public async Task ExportUsageRollup_StreamsOneMessagePerBucket()
     {
         using var temp = new TempDatabase();
@@ -165,6 +187,27 @@ public sealed class UsageAdminGrpcServiceTests
         {
             Written.Add(message);
             return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>An always-empty <see cref="ITaxonomyComparisonStore"/>, for wire-mapping tests that don't care about the data itself.</summary>
+    private sealed class EmptyComparisonStore : ITaxonomyComparisonStore
+    {
+        public Task<IReadOnlyList<long>> LoadPendingComparisonsAsync(int limit,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<long>>([]);
+        }
+
+        public Task UpsertAsync(TaxonomyComparisonRecord record, CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<TaxonomyComparisonRecord>> LoadSinceAsync(
+            DateTimeOffset since, string? sessionId = null, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<TaxonomyComparisonRecord>>([]);
         }
     }
 }

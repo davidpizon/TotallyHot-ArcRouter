@@ -40,13 +40,24 @@ public sealed record ProxyServerDependencies
     public TelemetryBroadcaster? Telemetry { get; init; }
 
     /// <summary>
-    /// The shared secret required in the <c>X-Admin-Token</c> header on every <c>/admin/*</c> request and,
-    /// via <see cref="TelemetryAuthInterceptor"/>, on every call to the TLS gRPC endpoint. Deliberately not
-    /// a member of <see cref="ManagementApi"/>: it gates both surfaces independently, so burying it there
-    /// would wrongly couple gRPC authentication to the REST API being enabled. <see langword="null"/> means
-    /// no inbound auth, which only a test exercising plain forwarding should choose.
+    /// The rotatable management token shared with MCP (see <see cref="Mcp.McpHostedService"/>), gating the
+    /// <c>x-admin-token</c> metadata entry <see cref="TelemetryAuthInterceptor"/> checks on every TLS gRPC
+    /// call, and (web GUI migration plan Phase P4) the web port's <c>/auth/login</c> and session-cookie
+    /// checks. Deliberately not a member of <see cref="ManagementApi"/>: it gates the gRPC/web surfaces
+    /// independently of whichever admin feature groups happen to be enabled. <see langword="null"/> means
+    /// no inbound auth and no <c>/auth/*</c> endpoints mapped, which only a test exercising plain
+    /// forwarding should choose.
     /// </summary>
-    public string? ManagementToken { get; init; }
+    public IManagementTokenProvider? ManagementTokenProvider { get; init; }
+
+    /// <summary>
+    /// The outer host's Serilog logger, so this inner host's own framework/request logs (routing,
+    /// endpoint dispatch, Kestrel bind failures) reach the same sinks (console, file) the rest of the
+    /// application logs through instead of the default console provider. <see langword="null"/> falls
+    /// back to the pre-existing behavior: a filtered default console provider, used by tests that build
+    /// a <see cref="ProxyServer"/> directly with no Serilog pipeline available.
+    /// </summary>
+    public Serilog.ILogger? SerilogLogger { get; init; }
 
     /// <summary>
     /// Routing configuration backing <see cref="RoutingModeAdminGrpcService"/>. Unlike every group below,
@@ -191,8 +202,10 @@ public interface IAdminServiceModule
 }
 
 /// <summary>
-/// Backs the <c>/admin/*</c> REST management API (see <see cref="ProviderAdminEndpoints"/>), which shares
-/// the plain-HTTP forwarding port - real LLM traffic never targets <c>/admin</c>, so it is never intercepted.
+/// Backs <see cref="ProviderAdminGrpcService"/>/<see cref="UsageAdminGrpcService"/>, the Governance UI's
+/// provider/credential/model management and usage-query APIs (the REST <c>/admin/*</c> surface these
+/// once shared a group with was deleted in
+/// <see href="../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase P2).
 /// Everything optional here is forwarded to <see cref="ManagementFacade"/>, the shared security boundary the
 /// MCP provider tools use too; an absent member makes its endpoints answer
 /// <see cref="ManagementErrorType.Unavailable"/> rather than failing the whole API.

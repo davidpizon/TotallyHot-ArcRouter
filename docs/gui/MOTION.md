@@ -4,15 +4,18 @@ The authoritative motion reference for `TotallyHot.ArcRouter.Gui`, companion to 
 
 Unlike `DESIGN.md` — which codifies the app's *existing* visual identity — this document is
 **prescriptive**. It defines the target motion system. Some of it ships today in
-[`wwwroot/css/app.css`](../../src/TotallyHotArcRouter.Gui/wwwroot/css/app.css); the rest is the spec that
+[`wwwroot/css/app.css`](../../src/TotallyHotArcRouter.Gui.Web/wwwroot/css/app.css); the rest is the spec that
 new and refactored components should be built against. Every section marks which is which:
 
 - **Shipping** — already in `app.css`, do not change the value
 - **Proposed** — not yet implemented; implement as specified rather than inventing a variant
 
-**Platform constraint:** this is a Blazor Hybrid app in a WebView2 (Chromium) host. There is no
-Framer Motion, no GSAP, and no JS animation library — and no Tailwind build step, so `app.css` is
-hand-maintained. **All motion is CSS.** Snippets below are CSS only; that is not an omission. The
+**Platform constraint, updated for the web GUI migration plan (Phase P6/P9):** this is now a Blazor
+WebAssembly app running in a real browser, not the retired WebView2-hosted Blazor Hybrid app this
+document originally described — Chrome, Edge, and Firefox are all confirmed-supported engines (spike
+S3), with a manual Safari pass also expected to work. There is still no Framer Motion, no GSAP, and no
+JS animation library — and still no Tailwind build step, so `app.css` remains hand-maintained. **All
+motion is CSS.** Snippets below are CSS only; that is not an omission. The
 exceptions are the two drag-list patterns in §6, Reorder Settle and Lift Detach, which both need a
 measurement CSS cannot make: where an element sat *before* a DOM reorder, and how much room an element
 actually has before it would leave the window. Both live in one small hand-rolled script
@@ -155,9 +158,9 @@ spring library:
 --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
 ```
 
-WebView2's Chromium supports the CSS `linear()` easing function if a true spring curve is ever
-required, but reach for it only with a concrete need — a cubic-bezier is cheaper to read and reason
-about.
+The CSS `linear()` easing function is available in every engine this app now targets (Chrome/Edge,
+Firefox, and Safari) if a true spring curve is ever required, but reach for it only with a concrete
+need — a cubic-bezier is cheaper to read and reason about.
 
 ---
 
@@ -374,8 +377,11 @@ thing that should feel smooth, the content has to **stay mounted** and toggle a 
 is satisfied.** The point of that rule is that `height: auto` is not an interpolable value, so
 animating it means measuring the content in JS and writing a pixel height back every time the
 content changes. `grid-template-rows: 0fr → 1fr` interpolates natively against content of unknown
-height: no measurement, no JS, no stale pixel value when a file row is added mid-transition. Chromium
-has supported it since 107 and the only host is WebView2, so there is no engine to degrade for.
+height: no measurement, no JS, no stale pixel value when a file row is added mid-transition.
+Chromium/Edge, Firefox, and Safari all support interpolating `fr` units in `grid-template-rows` in
+their current releases - this stopped being a single-engine (WebView2-only) bet once the web GUI
+migration plan moved the app into a real, multi-browser-targeted host (Phase P6/P9); no degradation
+path has been needed.
 
 Two transition declarations, not one — the base rule governs the way closed and `.open` the way
 open. That is what lets the exit be faster than the enter (§3) and use the mirrored curve (§4)

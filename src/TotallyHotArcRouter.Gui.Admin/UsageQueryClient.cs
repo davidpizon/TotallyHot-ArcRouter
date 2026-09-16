@@ -24,8 +24,8 @@ public sealed class UsageQueryClient
     /// Initializes a new instance of the <see cref="UsageQueryClient"/> class.
     /// </summary>
     /// <param name="channel">
-    /// The gRPC channel to send requests over. Must target the proxy's TLS gRPC endpoint (e.g.
-    /// <c>https://localhost:5002</c>) - the same channel <see cref="ProviderAdminClient"/> uses.
+    /// The gRPC channel to send requests over. Must target the router's web-interface TLS endpoint (e.g.
+    /// <c>https://localhost:47104</c>) - the same channel <see cref="ProviderAdminClient"/> uses.
     /// </param>
     /// <param name="adminToken">
     /// Optional management token; when set, it is sent in the <c>x-admin-token</c> gRPC metadata entry on
@@ -35,6 +35,22 @@ public sealed class UsageQueryClient
     {
         ArgumentNullException.ThrowIfNull(channel);
         _client = new Contract.UsageAdminService.UsageAdminServiceClient(channel);
+        _adminToken = adminToken;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="UsageQueryClient"/> class over a shared call invoker
+    /// (web GUI migration plan Phase P5a) - see
+    /// <c>TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider</c>'s remarks for why production now
+    /// goes through this constructor instead of the channel-owning one above. The caller owns the
+    /// invoker's underlying channel.
+    /// </summary>
+    /// <param name="callInvoker">The shared call invoker.</param>
+    /// <param name="adminToken">Optional management token; see the primary constructor's remarks.</param>
+    public UsageQueryClient(CallInvoker callInvoker, string? adminToken = null)
+    {
+        ArgumentNullException.ThrowIfNull(callInvoker);
+        _client = new Contract.UsageAdminService.UsageAdminServiceClient(callInvoker);
         _adminToken = adminToken;
     }
 

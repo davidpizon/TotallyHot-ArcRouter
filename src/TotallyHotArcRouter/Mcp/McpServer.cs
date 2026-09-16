@@ -2,8 +2,9 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Options;
-using System.Net;
+using Serilog.Extensions.Logging;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Mcp.Tools;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -16,10 +17,10 @@ namespace TotallyHot.ArcRouter.Mcp;
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>'s dedicated TLS gRPC listener - that exposes
 /// <see cref="ProviderMcpTools"/>, <see cref="PriceSourceMcpTools"/>, <see cref="TelemetryMcpTools"/>, and
 /// <see cref="BenchmarkDataMcpTools"/>
-/// over MCP's Streamable-HTTP transport on its own loopback port. Reuses
-/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s self-signed <c>CN=localhost</c>
-/// certificate (one trust story for every TLS management port), and gates every request behind
-/// <see cref="McpBearerAuthMiddleware"/> using the shared <see cref="ManagementAccessToken"/>.
+/// over MCP's Streamable-HTTP transport on its own loopback port. Presents a leaf issued by
+/// <see cref="TotallyHot.ArcRouter.Telemetry.LocalCertificateAuthority"/> - the same locally-trusted CA
+/// every other TLS listener uses (web GUI migration plan Phase P7; ADR-0013) - and gates every request behind
+/// <see cref="McpBearerAuthMiddleware"/> using the shared, rotatable <see cref="IManagementTokenProvider"/>.
 /// </summary>
 /// <remarks>
 /// Built as its own generic host with its own DI container, deliberately separate from the outer
@@ -44,8 +45,21 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     /// <param name="benchmarkDataStatusService">The CodeRouterBench corpus freshness cache.</param>
     /// <param name="benchmarkSyncService">The CodeRouterBench corpus sync service.</param>
     /// <param name="benchmarkSyncOptions">The CodeRouterBench sync configuration (its dataset ref).</param>
-    /// <param name="accessToken">The bearer token every request must present (see <see cref="ManagementAccessToken"/>).</param>
-    /// <param name="port">The loopback TLS port to listen on. Defaults to <c>5003</c>.</param>
+    /// <param name="tokenProvider">The rotatable bearer token every request must present (see <see cref="IManagementTokenProvider"/>).</param>
+    /// <param name="port">The TLS port to listen on. Defaults to <c>47103</c>.</param>
+    /// <param name="bindAddress">
+    /// The address <paramref name="port"/> binds to: <c>"loopback"</c> (the default), <c>"any"</c>/
+    /// <c>"0.0.0.0"</c>/<c>"::"</c>, or a literal IP address - see <c>McpOptions.BindAddress</c>'s
+    /// remarks. MCP's own bearer-token auth (<see cref="McpBearerAuthMiddleware"/>) gates every request
+    /// regardless of bind address, so widening this is a deliberate operator choice, not a new
+    /// unauthenticated surface.
+    /// </param>
+    /// <param name="serilogLogger">
+    /// The outer host's Serilog logger, so this inner host's own framework/request logs reach the same
+    /// sinks the rest of the application logs through instead of the default console provider.
+    /// <see langword="null"/> falls back to the pre-existing filtered default console provider, used by
+    /// tests that build a <see cref="McpServer"/> directly with no Serilog pipeline available.
+    /// </param>
     public McpServer(
         ILogger<McpServer> logger,
         ManagementFacade managementFacade,
@@ -57,8 +71,10 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         BenchmarkDataStatusService benchmarkDataStatusService,
         BenchmarkSyncService benchmarkSyncService,
         BenchmarkSyncOptions benchmarkSyncOptions,
-        string accessToken,
-        int port = 5003)
+        IManagementTokenProvider tokenProvider,
+        int port = 47103,
+        string bindAddress = "loopback",
+        Serilog.ILogger? serilogLogger = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(managementFacade);
@@ -70,23 +86,39 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(benchmarkDataStatusService);
         ArgumentNullException.ThrowIfNull(benchmarkSyncService);
         ArgumentNullException.ThrowIfNull(benchmarkSyncOptions);
-        ArgumentException.ThrowIfNullOrWhiteSpace(accessToken);
+        ArgumentNullException.ThrowIfNull(tokenProvider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(bindAddress);
         ArgumentOutOfRangeException.ThrowIfNegative(port);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(value: port, 65535);
 
         _host = Host.CreateDefaultBuilder()
-            // Same reasoning as ProxyServer's identical filter: this inner host is an implementation
-            // detail, it never gets Serilog, and its default console provider would otherwise report a
-            // bind failure with a full stack alongside McpHostedService's own one-line report of it.
-            // The "Microsoft" filter mirrors the outer host's Serilog "Microsoft": "Warning" override
-            // (see src/TotallyHotArcRouter/appsettings.json) - this inner host never reads that Serilog
-            // config, so without it Microsoft.AspNetCore.Routing.EndpointMiddleware's per-request
-            // "Executed endpoint" Information logs would flood the default console provider.
-            .ConfigureLogging(logging => logging
-                .AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None)
-                .AddFilter(category: "Microsoft", level: LogLevel.Warning))
+            // Same reasoning as ProxyServer's identical logging setup: when the outer host handed
+            // across its Serilog logger, route this inner host's own logs through it instead of the
+            // default console provider, matching how the rest of the application logs. A caller with no
+            // Serilog pipeline available (most unit tests) falls back to the pre-existing filtered
+            // default console provider, so a bind failure is still reported once, not twice, alongside
+            // McpHostedService's own one-line report of it.
+            .ConfigureLogging(logging =>
+            {
+                if (serilogLogger is not null)
+                {
+                    logging.ClearProviders();
+                    logging.AddProvider(new SerilogLoggerProvider(logger: serilogLogger, dispose: false));
+                }
+                else
+                {
+                    logging
+                        .AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None)
+                        .AddFilter(category: "Microsoft", level: LogLevel.Warning);
+                }
+            })
             .ConfigureWebHostDefaults(webBuilder =>
             {
+                // Same reasoning as ProxyServer's identical calls - a Windows Service's working
+                // directory is C:\Windows\System32, not the install directory.
+                webBuilder.UseContentRoot(AppContext.BaseDirectory);
+                webBuilder.UseSetting(key: WebHostDefaults.ApplicationKey, value: "TotallyHotArcRouter.McpServer");
+
                 webBuilder.UseKestrel(options =>
                 {
                     // A certificate failure here must NOT be swallowed: without a configured listener,
@@ -96,18 +128,14 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                     // Letting this throw fails the whole McpServer construction, which McpHostedService's
                     // own try/catch logs and swallows at the top level - the same "MCP is non-essential,
                     // don't fail the process" posture, just enforced one level up.
-                    var certificate = TelemetryTlsCertificate.GetOrCreate();
-                    if (port == 0)
-                        options.Listen(address: IPAddress.Loopback, port: port, configure: listenOptions =>
+                    LocalCertificateAuthority.GetOrCreateLeaf();
+                    KestrelBindAddress.Listen(options: options, bindAddress: bindAddress, port: port,
+                        configure: listenOptions =>
                         {
                             listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
-                            listenOptions.UseHttps(certificate);
-                        });
-                    else
-                        options.ListenLocalhost(port: port, configure: listenOptions =>
-                        {
-                            listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
-                            listenOptions.UseHttps(certificate);
+                            listenOptions.UseHttps(httpsOptions =>
+                                httpsOptions.ServerCertificateSelector =
+                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
                         });
                 });
 
@@ -141,7 +169,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                     // Every request - list or mutate - must present the shared token; there is no unauthenticated
                     // route on this host (unlike the plain-HTTP proxy port, this one carries only management
                     // traffic, so there's nothing that needs to fall through ungated).
-                    app.UseMiddleware<McpBearerAuthMiddleware>(accessToken);
+                    app.UseMiddleware<McpBearerAuthMiddleware>(tokenProvider);
                     app.UseRouting();
                     app.UseEndpoints(endpoints => endpoints.MapMcp());
                 });

@@ -1,0 +1,216 @@
+using Microsoft.Extensions.Logging;
+using TotallyHot.ArcRouter.Gui.Telemetry;
+
+namespace TotallyHot.ArcRouter.Gui.Services;
+
+/// <summary>
+/// Singleton view-model backing the Governance tab's Benchmark Data panel's "Local Voter Model" section.
+/// Wraps <see cref="LlmRouterModelAdminClient"/> (the tested, platform-agnostic logic in
+/// TotallyHot.ArcRouter.Gui.Telemetry) in the shared <see cref="AdminStoreBase{TClient}"/> shape, so
+/// the UI survives tab switches and degrades gracefully when the proxy isn't running. Registered in
+/// <c>MauiProgram</c>.
+/// </summary>
+public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminClient>
+{
+    private Dictionary<string, LlmRouterModelSyncProgressInfo> _syncProgress = [];
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LlmRouterModelStore"/> class, over the shared
+    /// <see cref="IRouterChannelProvider"/> every admin client and store talks through (web GUI
+    /// migration plan Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
+    /// </summary>
+    /// <param name="channelProvider">Supplies the shared call invoker this store's client is constructed over.</param>
+    /// <param name="logger">Optional logger.</param>
+    public LlmRouterModelStore(
+        IRouterChannelProvider channelProvider,
+        ILogger<LlmRouterModelStore>? logger = null)
+        : base(client: new LlmRouterModelAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+    {
+        ServerAddress = channelProvider.ServerAddress;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LlmRouterModelStore"/> class over a caller-supplied
+    /// client. The seam tests use to drive the store without a live proxy; the caller owns the client's
+    /// lifetime.
+    /// </summary>
+    /// <param name="client">The admin client to drive.</param>
+    /// <param name="logger">Optional logger.</param>
+    public LlmRouterModelStore(ILlmRouterModelAdminClient client, ILogger<LlmRouterModelStore>? logger = null)
+        : base(client: client, logger: logger)
+    {
+    }
+
+    /// <summary>
+    /// The proxy endpoint this store's client talks to, so the unreachable state can name the address it
+    /// actually failed to reach rather than assuming the default. <see langword="null"/> when constructed
+    /// over a caller-supplied client, whose endpoint this store has no way to know.
+    /// </summary>
+    public string? ServerAddress { get; }
+
+    /// <summary>The active model's last-known status, or <see langword="null"/> before the first load.</summary>
+    public LlmRouterModelStatusInfo? Status { get; private set; }
+
+    /// <summary>Whether a sync is currently running, so the UI can disable the button and show progress.</summary>
+    public bool IsSyncing { get; private set; }
+
+    /// <summary>
+    /// Every file's live progress during a sync, keyed by file name and refreshed as events stream in.
+    /// Cleared at the start of each sync and on a successful <see cref="SetBaseUrlAsync"/>. Not cleared
+    /// when a sync finishes - the terminal (including Failed) events remain so the panel can keep
+    /// rendering per-file errors after <see cref="IsSyncing"/> goes false.
+    /// </summary>
+    public IReadOnlyDictionary<string, LlmRouterModelSyncProgressInfo> SyncProgress => _syncProgress;
+
+    /// <summary>
+    /// The current sync's plan - which files are stale and how many bytes the run will transfer - or
+    /// <see langword="null"/> before the plan event arrives (or when no sync is running). Cleared at the
+    /// start of each <see cref="SyncAsync"/> call.
+    /// </summary>
+    public LlmRouterModelSyncPlanInfo? SyncPlan { get; private set; }
+
+    /// <summary>
+    /// The file named by the most recently received progress event of the current sync - terminal
+    /// (Completed/Failed) events included - driving the current-file progress bar's label.
+    /// <see langword="null"/> before the first progress event of a sync arrives.
+    /// </summary>
+    public string? CurrentFileName { get; private set; }
+
+    /// <summary>
+    /// The combined bytes transferred so far across every planned file, derived from <see cref="SyncPlan"/>
+    /// and <see cref="SyncProgress"/> rather than accumulated, so it stays correct under out-of-order or
+    /// repeated events: each planned file contributes its full size once its stage reaches
+    /// <see cref="LlmRouterModelSyncStageInfo.Verifying"/> or later, otherwise the lesser of its reported
+    /// bytes transferred and its planned size. 0 before the plan arrives.
+    /// </summary>
+    public long CumulativeBytesTransferred => SyncPlan is null
+        ? 0
+        : SyncPlan.Files.Sum(file =>
+        {
+            if (!_syncProgress.TryGetValue(key: file.FileName, value: out var progress)) return 0L;
+
+            return progress.Stage switch
+            {
+                LlmRouterModelSyncStageInfo.Verifying or LlmRouterModelSyncStageInfo.Completed => file.SizeBytes,
+                _ => Math.Min(val1: progress.BytesTransferred ?? 0, val2: file.SizeBytes)
+            };
+        });
+
+    /// <summary>The combined planned size of every file in <see cref="SyncPlan"/>, or 0 before the plan arrives.</summary>
+    public long CumulativeTotalBytes => SyncPlan?.TotalBytes ?? 0;
+
+    /// <summary>
+    /// Loads the active model's cached status. Failures are swallowed and surfaced via
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
+    /// rather than thrown, so the tab renders an error state instead of crashing when the proxy isn't
+    /// running.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
+    {
+        return LoadGuardedAsync(
+            async ct => Status = await Client.GetStatusAsync(ct),
+            "load the llm_router model status",
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Switches the active model to <paramref name="baseUrl"/> and publishes the refreshed (now-unsynced-
+    /// until-updated) status. Rethrows on failure - the panel has to render the rejection inline - the
+    /// same split <see cref="SyncAsync"/> and <see cref="BenchmarkDataStore.RecheckAsync"/> use.
+    /// </summary>
+    /// <exception cref="GrpcAdminException">The switch was rejected or the router is unreachable.</exception>
+    public async Task SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Status = await Client.SetBaseUrlAsync(baseUrl: baseUrl, cancellationToken: cancellationToken);
+        }
+        catch (GrpcAdminException ex)
+        {
+            RecordFailure(exception: ex, description: "a llm_router model operation");
+            throw;
+        }
+
+        // The new model's files share the old model's file names (genai_config.json, model.onnx, ...),
+        // so a leftover progress entry from the previous model would otherwise be misread as this one's.
+        _syncProgress = [];
+        SyncPlan = null;
+        CurrentFileName = null;
+        RecordSuccess();
+        NotifyChanged();
+    }
+
+    /// <summary>
+    /// Downloads and checksum-verifies (where possible) every file of the active model, publishing
+    /// per-file progress into <see cref="SyncProgress"/> as it streams in and the final status once every
+    /// file has been attempted. <see cref="IsSyncing"/> is true for the duration.
+    /// </summary>
+    /// <exception cref="GrpcAdminException">The sync could not be started or the router is unreachable.</exception>
+    public async Task SyncAsync(CancellationToken cancellationToken = default)
+    {
+        IsSyncing = true;
+        _syncProgress = [];
+        SyncPlan = null;
+        CurrentFileName = null;
+        NotifyChanged();
+
+        var syncingCleared = false;
+
+        try
+        {
+            await foreach (var syncEvent in Client.SyncAsync(cancellationToken))
+            {
+                if (syncEvent.Plan is { } plan)
+                {
+                    SyncPlan = plan;
+                }
+                else if (syncEvent.Progress is { } progress)
+                {
+                    // Certain stages (Failed, Verifying) often omit BytesTransferred/TotalBytes; carry the
+                    // prior non-null values forward so a file's cumulative progress cannot regress to 0
+                    // just because the latest event didn't repeat them.
+                    if (_syncProgress.TryGetValue(key: progress.FileName, value: out var previous))
+                        progress = progress with
+                        {
+                            BytesTransferred = progress.BytesTransferred ?? previous.BytesTransferred,
+                            TotalBytes = progress.TotalBytes ?? previous.TotalBytes
+                        };
+
+                    _syncProgress[progress.FileName] = progress;
+                    CurrentFileName = progress.FileName;
+                }
+                else if (syncEvent.FinalStatus is { } finalStatus)
+                {
+                    Status = finalStatus;
+                }
+
+                NotifyChanged();
+            }
+
+            RecordSuccess();
+        }
+        catch (GrpcAdminException ex)
+        {
+            RecordFailure(exception: ex, description: "a llm_router model operation",
+                beforeNotify: () =>
+                {
+                    IsSyncing = false;
+                    syncingCleared = true;
+                });
+            throw;
+        }
+        finally
+        {
+            // The exception still propagates for the panel to render. RecordFailure's beforeNotify already
+            // cleared IsSyncing and published the failure's one notification, so this only runs (and
+            // notifies) on the success path.
+            if (!syncingCleared)
+            {
+                IsSyncing = false;
+                NotifyChanged();
+            }
+        }
+    }
+
+}

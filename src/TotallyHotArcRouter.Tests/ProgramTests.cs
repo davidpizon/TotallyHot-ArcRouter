@@ -150,6 +150,11 @@ public class ProgramTests
         services.AddOptions();
         services.Configure<RoutingOptions>(_ => { });
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        // A raw ServiceCollection doesn't go through Host.CreateDefaultBuilder, so it never gets the
+        // generic host's own IHostApplicationLifetime the real Program.CreateHostBuilder(...).Build()
+        // path always provides - StartupHealthCheckHostedService now depends on it (skip embedding
+        // warm-up on shutdown), so this graph needs a stand-in or ValidateOnBuild fails below.
+        services.AddSingleton<IHostApplicationLifetime>(new NoOpHostApplicationLifetime());
 
         services.AddTotallyHotArcRouter();
 
@@ -219,5 +224,22 @@ public class ProgramTests
 
         Assert.True(present);
         Assert.Equal(expectedSpan: ["--model", "gpt-5.4"], actualArray: remaining);
+    }
+
+    /// <summary>
+    /// Stands in for the generic host's own <see cref="IHostApplicationLifetime"/> in a raw
+    /// <see cref="ServiceCollection"/> that never goes through <see cref="Host.CreateDefaultBuilder(string[])"/>
+    /// - never signals stopping, so a service reading <see cref="ApplicationStopping"/> at construction
+    /// time (like <c>StartupHealthCheckHostedService</c>) behaves as if the host just started.
+    /// </summary>
+    private sealed class NoOpHostApplicationLifetime : IHostApplicationLifetime
+    {
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+
+        public void StopApplication()
+        {
+        }
     }
 }

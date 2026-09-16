@@ -1,0 +1,94 @@
+@* Mounted at #root instead of Dashboard directly (web GUI migration plan Phase P6/P11): gates the real
+   dashboard behind a token-login form when the startup POST /auth/session call came back 403 - a
+   non-loopback caller (Docker's default WebInterface__BindAddress=0.0.0.0) or
+   WebInterface:TrustLoopback=false, neither of which the loopback fast path covers. Kept out of
+   TotallyHot.ArcRouter.Gui.Components deliberately: this gate is a browser-hosted-WASM-specific concern
+   (AuthGateState/the /auth/login call), not something the shared component library's other consumers
+   need. *@
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using TotallyHot.ArcRouter.Gui.Components
+@inject AuthGateState AuthGateState
+@inject NavigationManager NavigationManager
+
+@if (!AuthGateState.LoginRequired)
+{
+    <Dashboard/>
+}
+else
+{
+    <div class="flex items-center justify-center h-screen ds-surface-base">
+        <div class="w-full max-w-sm space-y-4 p-6 rounded-lg border border-slate-700 bg-slate-900">
+            <div class="space-y-1">
+                <h1 class="text-sm font-bold tracking-tight text-slate-100">🤖 Router Optimization Engine</h1>
+                <p class="text-xs text-slate-400">
+                    This connection isn't recognized as loopback, so a management token is required.
+                    Print it with <code class="text-slate-300">TotallyHotArcRouter --print-management-token</code>
+                    (or, on Docker, <code class="text-slate-300">docker exec &lt;container&gt; dotnet TotallyHotArcRouter.dll --print-management-token</code>).
+                </p>
+            </div>
+
+            <input @bind="_token" @bind:event="oninput" @onkeydown="HandleKeyDownAsync" type="password"
+                   placeholder="Management token" disabled="@_submitting"
+                   class="w-full px-3 py-2 text-xs rounded border border-slate-700 bg-slate-800 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-slate-500"/>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <p class="text-xs text-red-400">@_error</p>
+            }
+
+            <button @onclick="SubmitAsync" disabled="@(_submitting || string.IsNullOrWhiteSpace(_token))"
+                    class="w-full btn btn-primary text-xs">
+                @(_submitting ? "Signing in..." : "Sign in")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private string _token = string.Empty;
+    private string? _error;
+    private bool _submitting;
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_submitting && !string.IsNullOrWhiteSpace(_token)) await SubmitAsync();
+    }
+
+    private async Task SubmitAsync()
+    {
+        _submitting = true;
+        _error = null;
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(NavigationManager.BaseUri) };
+            using var response = await client.PostAsJsonAsync(requestUri: "auth/login", value: new { token = _token });
+
+            if (response.IsSuccessStatusCode)
+            {
+                // A full reload, not just flipping AuthGateState.LoginRequired: every store singleton
+                // that already gave up and recorded "unreachable" needs to re-run its own load from a
+                // clean slate under the cookie the browser now carries, which is simplest done by
+                // starting the WASM app over rather than threading a "retry everything" signal through
+                // each store individually.
+                NavigationManager.NavigateTo(NavigationManager.Uri, forceLoad: true);
+                return;
+            }
+
+            _error = response.StatusCode switch
+            {
+                System.Net.HttpStatusCode.TooManyRequests => "Too many attempts - wait a moment before trying again.",
+                _ => "Incorrect token."
+            };
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Could not reach the router.";
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+}

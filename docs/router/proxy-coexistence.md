@@ -119,7 +119,7 @@ fn system_proxy_points_to_loopback() -> bool {
 }
 ```
 
-**Scenario:** User already set `HTTP_PROXY=http://127.0.0.1:5001`
+**Scenario:** User already set `HTTP_PROXY=https://127.0.0.1:47101`
 - Result: TotallyHotArcRouter detects this and does NOT re-setup (prevents double-proxying)
 
 #### **Backup Corruption Detection**
@@ -155,7 +155,7 @@ If you have an existing upstream proxy, TotallyHotArcRouter chains through it au
 ```mermaid
 flowchart TD
     APP["User's Application<br/>(IDE, Terminal, etc.)"]
-    SEES["System sees: 127.0.0.1:5001"]
+    SEES["System sees: 127.0.0.1:47101"]
     ACR["<b>TotallyHotArcRouter Proxy</b><br/>(Routing decisions)"]
     DET["Detects upstream proxy"]
     UP["<b>Your Upstream Proxy</b><br/>10.0.0.1:8080<br/>(Corporate / VPN / Custom)"]
@@ -177,8 +177,8 @@ export NO_PROXY=localhost,127.0.0.1,*.internal.local
 
 ```bash
 # System proxy (managed by TotallyHotArcRouter)
-HTTP_PROXY=http://127.0.0.1:5001          # TotallyHotArcRouter's local proxy
-HTTPS_PROXY=http://127.0.0.1:5001
+HTTP_PROXY=https://127.0.0.1:47101          # TotallyHotArcRouter's local proxy
+HTTPS_PROXY=https://127.0.0.1:47101
 
 # Gateway process (chaining through upstream)
 HTTP_PROXY=http://10.0.0.1:8080           # Original upstream
@@ -242,7 +242,7 @@ export HTTPS_PROXY=$snapshot.https_proxy
 - WinHTTP proxy (via `netsh.exe`)
 
 **Setup:**
-- Sets local proxy: `127.0.0.1:5001`
+- Sets local proxy: `127.0.0.1:47101`
 - Bypass rules: `<local>` (localhost, 127.0.0.1)
 - Configures WinHTTP for curl/wget compatibility
 
@@ -277,7 +277,7 @@ export HTTPS_PROXY=$snapshot.https_proxy
 - Shell profile settings (if configured)
 
 **Setup:**
-- Sets environment: `HTTP_PROXY=http://127.0.0.1:5001`
+- Sets environment: `HTTP_PROXY=https://127.0.0.1:47101`
 - Detects and chains upstream proxy automatically
 - Falls back to direct connection if no proxy needed
 
@@ -455,7 +455,7 @@ Result:
 
 **Symptom:** TotallyHotArcRouter skips proxy setup with message "Already configured"
 
-**Cause:** Environment already has `HTTP_PROXY=http://127.0.0.1:5001`
+**Cause:** Environment already has `HTTP_PROXY=https://127.0.0.1:47101`
 
 **Solution:**
 ```bash
@@ -540,7 +540,7 @@ export NO_PROXY=localhost,127.0.0.1,*.internal.local
 2. **Monitor health status:**
    ```bash
    # Check provider health
-   curl http://127.0.0.1:5001/api/health
+   curl https://127.0.0.1:47101/api/health
    ```
 
 3. **Enable backup/restore (default):**
@@ -581,7 +581,7 @@ export NO_PROXY=localhost,127.0.0.1,*.internal.local
 ```mermaid
 flowchart TD
     subgraph SYS["User's System"]
-        APP["<b>Application / IDE / Tool</b><br/>Uses system proxy: http://127.0.0.1:5001"]
+        APP["<b>Application / IDE / Tool</b><br/>Uses system proxy: https://127.0.0.1:47101"]
         ACR["<b>TotallyHotArcRouter Proxy</b> (Routing Decision Layer)<br/>• Detects model for request<br/>• Routes to optimal provider<br/>• Chains through upstream proxy"]
         DIRECT["Direct Path<br/>(if any)"]
         UP["Upstream Proxy Path<br/>10.0.0.1:8080<br/>(Corporate / VPN)"]

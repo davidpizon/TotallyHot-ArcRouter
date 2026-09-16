@@ -461,6 +461,35 @@ message RoutingGateResponse {
   bool enabled = 1;
 }
 
+// The System Settings window's "Copy MCP token / Regenerate" row (web GUI migration plan Phase P9): the
+// shared bearer token gating every gRPC admin service and the MCP endpoint moved out of the plaintext
+// management-token.txt file (see ManagementAccessToken) into the encrypted ProtectedSecretStore, so the
+// GUI - which no longer shares a filesystem-readable location with the router once the token stops being
+// a plain file - needs a gRPC round trip to read or rotate it instead. Deliberately its own service
+// rather than a ManagementFacade method: the token gates ManagementFacade's own callers, so folding token
+// administration into the thing it protects would blur that boundary. Always mapped, like
+// RoutingGateAdminService and UpdateAdminService above: the token is core operational state whenever any
+// IManagementTokenProvider is configured, not an optional add-on.
+service ManagementTokenAdminService {
+  // Returns the current token, exactly as GetOrCreate would resolve it - never null once any management
+  // surface has started, since that resolution already ran at process startup.
+  rpc GetManagementToken (GetManagementTokenRequest) returns (ManagementTokenResponse);
+
+  // Mints and persists a fresh token, invalidating the old one everywhere immediately (the same shared
+  // IManagementTokenProvider instance every management surface in this process reads from) - the
+  // System Settings "Regenerate" button, gated behind its own confirm dialog on the GUI side since every
+  // MCP client configured with the old token stops authenticating the moment this returns.
+  rpc RegenerateManagementToken (RegenerateManagementTokenRequest) returns (ManagementTokenResponse);
+}
+
+message GetManagementTokenRequest {}
+
+message RegenerateManagementTokenRequest {}
+
+message ManagementTokenResponse {
+  string token = 1;
+}
+
 // The Governance UI's System Settings window's "Adaptive Routing", "Shadow Judge", and "Transcription
 // Capture" rows (docs/router/self-organizing-classification-plan.md Phase T6,
 // docs/router/geval-shadow-scoring-plan.md): reads and mutates the router_settings-backed overrides
