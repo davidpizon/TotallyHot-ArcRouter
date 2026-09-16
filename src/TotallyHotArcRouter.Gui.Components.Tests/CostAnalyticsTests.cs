@@ -118,7 +118,7 @@ public sealed class CostAnalyticsTests
     }
 
     [Fact]
-    public void Selecting_a_session_from_the_dropdown_scopes_the_chart()
+    public async Task Selecting_a_session_from_the_dropdown_scopes_the_chart()
     {
         using var ctx = CreateContext();
 
@@ -126,7 +126,10 @@ public sealed class CostAnalyticsTests
         var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: conversations));
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Live Session"), timeout: WaitTimeout);
 
-        cut.Find("select").Change("live-1");
+        // See Switching_metric_updates_the_chart_title's remarks on why this is InvokeAsync-wrapped -
+        // Change() dispatches an event the same way Click() does, so it races the same background
+        // UsageStore load-failure continuation.
+        await cut.InvokeAsync(() => cut.Find("select").Change("live-1"));
 
         cut.Find("select").GetAttribute("value").Should().Be("live-1");
     }
