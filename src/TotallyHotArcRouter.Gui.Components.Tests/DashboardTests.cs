@@ -62,34 +62,42 @@ public sealed class DashboardTests
     }
 
     [Fact]
-    public void Clicking_a_tab_switches_the_active_workspace()
+    public async Task Clicking_a_tab_switches_the_active_workspace()
     {
         using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
-        cut.FindAll("nav button").First(b => b.TextContent.Contains("Model Distribution")).Click();
+        // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context: Dashboard
+        // constructs several stores against deliberately-unreachable NativeRouterChannelProvider
+        // addresses (see NewContext), and any of their background connection-failure continuations can
+        // re-render between a plain Find() and Click(), leaving Click() dispatching against an event
+        // handler ID the re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
+        await cut.InvokeAsync(() =>
+            cut.FindAll("nav button").First(b => b.TextContent.Contains("Model Distribution")).Click());
 
         cut.Markup.Should().Contain("Token Volume Histogram");
     }
 
     [Fact]
-    public void Clicking_Console_tab_renders_the_console()
+    public async Task Clicking_Console_tab_renders_the_console()
     {
         using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
-        cut.FindAll("nav button").First(b => b.TextContent.Contains("Console")).Click();
+        // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
+        await cut.InvokeAsync(() => cut.FindAll("nav button").First(b => b.TextContent.Contains("Console")).Click());
 
         cut.Markup.Should().Contain("Auto-Scroll");
     }
 
     [Fact]
-    public void Clicking_Governance_tab_renders_the_providers_sub_view()
+    public async Task Clicking_Governance_tab_renders_the_providers_sub_view()
     {
         using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
-        cut.FindAll("nav button").First(b => b.TextContent.Contains("Governance")).Click();
+        // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
+        await cut.InvokeAsync(() => cut.FindAll("nav button").First(b => b.TextContent.Contains("Governance")).Click());
 
         // Governance now defaults to the Providers sub-view (ProvidersAdmin), whose two-way toggle is the
         // stable landmark regardless of whether the (unreachable) management API has answered yet.
@@ -97,16 +105,17 @@ public sealed class DashboardTests
     }
 
     [Fact]
-    public void Settings_button_opens_the_modal_and_close_removes_it()
+    public async Task Settings_button_opens_the_modal_and_close_removes_it()
     {
         using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Settings")).Click();
+        // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Contains("Settings")).Click());
         cut.Markup.Should().Contain("System Settings");
 
         // The modal's own close (X) button invokes OnClose, which Dashboard wires to hide it again.
-        cut.FindAll(".fixed.inset-0 button").First().Click();
+        await cut.InvokeAsync(() => cut.FindAll(".fixed.inset-0 button").First().Click());
 
         cut.Markup.Should().NotContain("System Settings");
     }

@@ -63,26 +63,31 @@ public sealed class CostAnalyticsTests
     }
 
     [Fact]
-    public void Switching_metric_updates_the_chart_title()
+    public async Task Switching_metric_updates_the_chart_title()
     {
         using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
             p.Add(parameterSelector: c => c.Conversations, value: []));
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click();
+        // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context: UsageStore's
+        // background rollup-history load (this class's own remarks - it "fails fast" but not always
+        // instantly) can re-render between a plain Find() and Click(), leaving Click() dispatching against
+        // an event handler ID the re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Stepped cumulative cost"),
             timeout: WaitTimeout);
     }
 
     [Fact]
-    public void Switching_range_updates_the_range_caption()
+    public async Task Switching_range_updates_the_range_caption()
     {
         using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
             p.Add(parameterSelector: c => c.Conversations, value: []));
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Day").Click();
+        // See Switching_metric_updates_the_chart_title's remarks on why this is InvokeAsync-wrapped.
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Day").Click());
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Past 24 hours"), timeout: WaitTimeout);
     }

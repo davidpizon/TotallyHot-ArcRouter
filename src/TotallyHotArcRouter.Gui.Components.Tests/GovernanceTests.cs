@@ -40,12 +40,14 @@ public sealed class GovernanceTests
     }
 
     [Fact]
-    public void Switching_to_the_models_sub_view_renders_GovernanceModelCards()
+    public async Task Switching_to_the_models_sub_view_renders_GovernanceModelCards()
     {
         using var ctx = NewContext();
 
         var cut = ctx.Render<Governance>();
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Models").Click();
+        // See Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin's remarks on why this is
+        // InvokeAsync-wrapped.
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Models").Click());
 
         cut.Markup.Should().Contain("Loading");
     }
@@ -61,23 +63,30 @@ public sealed class GovernanceTests
     }
 
     [Fact]
-    public void Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin()
+    public async Task Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin()
     {
         using var ctx = NewContext();
 
         var cut = ctx.Render<Governance>();
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Price Sources").Click();
+        // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context:
+        // ProviderAdminStore/UsageStore above are backed by real (deliberately-unreachable)
+        // NativeRouterChannelProvider connections, whose background failure continuations can re-render
+        // between a plain Find() and Click(), leaving Click() dispatching against an event handler ID the
+        // re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Price Sources").Click());
 
         cut.Markup.Should().Contain("Loading price sources");
     }
 
     [Fact]
-    public void Switching_to_the_benchmark_data_sub_view_renders_BenchmarkData()
+    public async Task Switching_to_the_benchmark_data_sub_view_renders_BenchmarkData()
     {
         using var ctx = NewContext();
 
         var cut = ctx.Render<Governance>();
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Benchmark Data").Click();
+        // See Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin's remarks on why this is
+        // InvokeAsync-wrapped.
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Benchmark Data").Click());
 
         cut.Markup.Should().Contain("Loading benchmark data status");
     }

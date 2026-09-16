@@ -1633,7 +1633,7 @@ All bullets above were addressed. Notable findings and deliberate scoping decisi
   would fail the build on if a `<see cref>` didn't resolve - confirmed by a real build, not just review).
   Full suite re-run: 8/8 built xUnit v3 executables, all passing.
 
-## Known post-close issue: flaky Gui.Components.Tests under CI's `dotnet test`
+## Post-close issue: flaky Gui.Components.Tests under CI's `dotnet test`
 
 Discovered while triaging PR review feedback on the branch that carries this plan's changes, after the
 plan itself was already closed above. Recorded here because it is real, reproducible, and would otherwise
@@ -1647,19 +1647,23 @@ a different subset of tests fails each run. Confirmed present on `9a77441`, the 
 PR-review-fix work started from, so it predates every fix in this session and is not a regression any of
 them introduced.
 
-**Root cause:** `Dashboard.OnInitializedAsync` calls `await LiveDataStore.StartAsync()`, but `StartAsync`
-itself does not await the connection - it fires `ConsumeStreamWithReconnectAsync` fire-and-forget
-(`_ = ConsumeStreamWithReconnectAsync(...)`) and returns immediately. Every test that renders `Dashboard`
-constructs `LiveDataStore` over a real `NativeRouterChannelProvider` pointed at a deliberately unreachable
-loopback address (there is no fake/null channel provider in this test project), so that background loop
-keeps attempting a real gRPC connection and retrying every `LiveDataStore.ReconnectDelay` (2s) for the rest
-of the test's lifetime. If that background loop's failure-and-retry cycle calls `NotifyChanged` (which
-`Dashboard.HandleLiveDataChanged` turns into `StateHasChanged`) between a bUnit test's `Find(...)` and the
-immediately-following `.Click()` - which bUnit's own render tree treats as an atomic pair, but which can
-still be interleaved by any async continuation completing on the renderer's synchronization context in
-between - the click fires against a stale event handler ID and throws. This reproduces reliably in CI
-(evidently slower/more variable network-failure and scheduling timing than a local dev machine) but was
-never observed running the same tests locally.
+**Root cause, corrected after further investigation:** initially misattributed to `LiveDataStore`
+specifically (see below), but the actual mechanism is broader. Many components under test in this project
+own a store constructed over a real `NativeRouterChannelProvider` pointed at a deliberately unreachable
+address (there is no fake/null channel provider in this test project), whose `OnInitializedAsync` kicks off
+a real connection attempt with a background failure continuation that re-renders on completion -
+`Dashboard.OnInitializedAsync`'s `await LiveDataStore.StartAsync()` is one instance (`StartAsync` doesn't
+actually await its own connection - it fires `ConsumeStreamWithReconnectAsync` fire-and-forget and returns
+immediately, so the reconnect loop keeps running for the test's whole lifetime), but `CostAnalyticsTests`'s
+own `UsageStore` - unrelated to `Dashboard`/`LiveDataStore` entirely - hits the identical failure mode via
+its own rollup-history load, as that test file's own pre-existing comment already noted: "a connection
+attempt against it takes a couple of seconds to fail on this host (not an instant refusal)". If that
+background failure fires between a bUnit test's `Find(...)` and the immediately-following `.Click()` -
+which bUnit's own render tree treats as an atomic pair, but which can still be interleaved by any async
+continuation completing on the renderer's synchronization context in between - the click fires against a
+stale event handler ID and throws (`Bunit.Rendering.UnknownEventHandlerIdException`). This reproduced
+reliably in CI (evidently slower/more variable network-failure and scheduling timing than a local dev
+machine) but was never observed running the same tests locally.
 
 **A first fix attempt (`56fb989`, later reverted in `16171f9`) was wrong.** It assumed the race was caused
 by CPU contention from xUnit's default parallel test execution and disabled it
@@ -1671,22 +1675,28 @@ and consistent with the real mechanism above, which is a race *within a single t
 different tests. Reverted rather than left in place once disproven, since it added real CI wall-clock cost
 (observed 427 tests: 9s parallel locally vs. 31s serialized) for no benefit.
 
-**Deferred, not silently dropped.** The correct fix is one of:
-1. Give these tests a fake/no-op `IRouterChannelProvider`+telemetry client instead of a real (if doomed)
-   network connection - the actual right fix, since a unit test performing real network I/O is the root
-   problem, not just the trigger. Requires adding a test seam to `LiveDataStore` (or a fake
-   `TelemetryService` client) that does not exist today.
-2. Wrap every racy `cut.FindAll(...).First(...).Click()` (or `cut.Find(...).Click()`) call in the affected
-   tests in `cut.InvokeAsync(() => ...)`, per bUnit's own documented guidance for this exact exception -
-   makes the find-then-click atomic on the renderer's synchronization context. Mechanical but touches
-   perhaps a dozen-plus call sites across `DashboardTests.cs`, `CostAnalyticsTests.cs`, `GovernanceTests.cs`,
-   and any other test file that renders `Dashboard` and interacts with it via a click, converting each
-   affected `[Fact] public void` to `[Fact] public async Task`.
+**Fixed** for the specific tests observed failing across four separate CI runs (three before this fix, one
+confirming the `56fb989`/`16171f9` false start above), by wrapping each racy `Find(...).Click()` (or
+`FindAll(...).First(...).Click()`) pair in `cut.InvokeAsync(() => ...)`, per bUnit's own documented
+guidance for this exact exception - this makes the find-then-click atomic on the renderer's synchronization
+context, so a background re-render can no longer land between the two. Converted each affected
+`[Fact] public void` to `[Fact] public async Task` accordingly: `DashboardTests.Clicking_a_tab_switches_the_active_workspace`,
+`.Clicking_Console_tab_renders_the_console`, `.Clicking_Governance_tab_renders_the_providers_sub_view`,
+`.Settings_button_opens_the_modal_and_close_removes_it`; `CostAnalyticsTests.Switching_metric_updates_the_chart_title`,
+`.Switching_range_updates_the_range_caption`; `GovernanceTests.Switching_to_the_models_sub_view_renders_GovernanceModelCards`,
+`.Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin`, `.Switching_to_the_benchmark_data_sub_view_renders_BenchmarkData`.
 
-Neither was attempted here: this is real, scoped test-infrastructure work, deserving the same re-verified,
-end-to-end scrutiny as the rest of this session's fixes rather than a rushed guess (see the attempt above),
-and it is unrelated to this PR's actual feature content. A CI re-run may pass or fail depending on timing
-alone until one of the above lands.
+**Not fixed, and not the same failure mode:** `GovernanceTests.Defaults_to_the_providers_sub_view` failed
+once across the observed runs despite having no `Click()` call at all - it asserts on markup immediately
+after `Render()`, so a background re-render there would manifest as a stale *content* assertion (e.g.
+"Loading providers" already replaced by an error state), not `UnknownEventHandlerIdException`, and
+`InvokeAsync`-wrapping a click doesn't apply. Left as-is: it failed only once in several runs, versus the
+`Click()`-based failures' consistent recurrence, and the real, general fix for this whole class of test -
+giving these tests a fake/no-op `IRouterChannelProvider`+client instead of a real (if doomed) network
+connection, so there is no background continuation to race in the first place - remains the properly
+scoped follow-up this section originally deferred to. The `InvokeAsync` wrapping above is the pragmatic,
+low-risk fix for the specific tests that were actually observed failing, not a claim that every test in
+this project touching a `NativeRouterChannelProvider` is now race-free.
 
 ## Reuse (do not rebuild)
 
