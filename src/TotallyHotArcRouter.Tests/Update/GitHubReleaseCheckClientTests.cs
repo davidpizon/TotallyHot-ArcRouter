@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 using TotallyHot.ArcRouter.Update;
@@ -11,10 +12,50 @@ namespace TotallyHot.ArcRouter.Tests.Update;
 /// Covers <see cref="GitHubReleaseCheckClient"/>'s version-comparison and checksum-resolution edge cases
 /// against a faked <see cref="HttpMessageHandler"/> - no real network calls.
 /// </summary>
+/// <remarks>
+/// <see cref="GitHubReleaseCheckClient.MatchesCurrentPlatform"/> branches on the OS/architecture this
+/// process is actually running on (web GUI migration plan Phase P9/P10), so every asset name below is
+/// resolved by <see cref="PlatformAssetName"/> - a test-side mirror of that same branching - rather than
+/// a hardcoded <c>.msi</c> name. A hardcoded MSI name is exactly what this file originally used, on the
+/// assumption every test host is Windows; that assumption broke the first time this suite actually ran
+/// on this repo's own Linux CI job, failing five tests that all expected an MSI-shaped asset to be
+/// selected/rejected on a runner that (correctly, per production logic) expects a
+/// <c>totallyhotarcrouter-&lt;rid&gt;.tar.gz</c> instead.
+/// </remarks>
 public sealed class GitHubReleaseCheckClientTests
 {
-    /// <summary>The realistic MSI installer asset name a release publishes.</summary>
+    /// <summary>The MSI installer asset name a Windows release publishes - Windows-specific, not
+    /// necessarily this test host's own platform asset; see <see cref="PlatformAssetName"/> for that.</summary>
     private const string MsiAssetName = "TotallyHotArcRouter-1.2.3.msi";
+
+    /// <summary>Every platform-specific asset name a release might publish, MSI included.</summary>
+    private static readonly string[] AllPlatformAssetNames =
+    [
+        MsiAssetName,
+        "totallyhotarcrouter-1.2.3-linux-x64.tar.gz",
+        "totallyhotarcrouter-1.2.3-linux-arm64.tar.gz",
+        "totallyhotarcrouter-1.2.3-osx-arm64.tar.gz",
+    ];
+
+    /// <summary>
+    /// The asset name <see cref="GitHubReleaseCheckClient.MatchesCurrentPlatform"/> would select on
+    /// *this* test-running process's own OS/architecture - mirrors that method's branching exactly, so
+    /// this suite passes on any CI runner (Windows, Linux x64/arm64, macOS) rather than only Windows.
+    /// </summary>
+    private static readonly string PlatformAssetName = ResolvePlatformAssetName();
+
+    private static string ResolvePlatformAssetName()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return MsiAssetName;
+
+        var rid = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            ? "osx-arm64"
+            : RuntimeInformation.OSArchitecture == Architecture.Arm64
+                ? "linux-arm64"
+                : "linux-x64";
+
+        return $"totallyhotarcrouter-1.2.3-{rid}.tar.gz";
+    }
 
     private static GitHubReleaseCheckClient CreateClient(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
@@ -44,12 +85,12 @@ public sealed class GitHubReleaseCheckClientTests
 
     private static string ReleasePayload(
         string tag,
-        string assetName = MsiAssetName,
+        string? assetName = null,
         bool includeChecksums = true,
-        bool includeMsiAsset = true)
+        bool includePlatformAsset = true)
     {
         var assets = string.Empty;
-        if (includeMsiAsset) assets = Asset(assetName);
+        if (includePlatformAsset) assets = Asset(assetName ?? PlatformAssetName);
 
         if (includeChecksums)
             assets = assets.Length == 0 ? Asset("checksums.txt") : assets + "," + Asset("checksums.txt");
@@ -59,10 +100,10 @@ public sealed class GitHubReleaseCheckClientTests
                  """;
     }
 
-    /// <summary>A well-formed <c>checksums.txt</c> body listing the MSI, in the <c>sha256sum</c> output format.</summary>
-    private static string ChecksumsBody(string msiSha = "abc123def456")
+    /// <summary>A well-formed <c>checksums.txt</c> body listing the platform asset, in the <c>sha256sum</c> output format.</summary>
+    private static string ChecksumsBody(string sha = "abc123def456")
     {
-        return $"{msiSha}  {MsiAssetName}\n";
+        return $"{sha}  {PlatformAssetName}\n";
     }
 
     [Fact]
@@ -100,7 +141,7 @@ public sealed class GitHubReleaseCheckClientTests
         Assert.True(result.IsUpdateAvailable);
         Assert.Equal(expected: "2.5.0", actual: result.LatestVersion);
         Assert.Equal(expected: "abc123def456", actual: result.AssetSha256);
-        Assert.Equal(expected: $"https://example.test/{MsiAssetName}", actual: result.AssetDownloadUrl);
+        Assert.Equal(expected: $"https://example.test/{PlatformAssetName}", actual: result.AssetDownloadUrl);
     }
 
     [Fact]
@@ -108,7 +149,7 @@ public sealed class GitHubReleaseCheckClientTests
     {
         // A release's Source code (zip)/other assets must not be mistaken for the installer.
         var payload = $$"""
-                        {"tag_name": "v2.5.0", "assets": [{{Asset("Source code (zip)")}},{{Asset(MsiAssetName)}},{{Asset("checksums.txt")}}]}
+                        {"tag_name": "v2.5.0", "assets": [{{Asset("Source code (zip)")}},{{Asset(PlatformAssetName)}},{{Asset("checksums.txt")}}]}
                         """;
         var client = CreateClient(request =>
             request.RequestUri!.AbsolutePath.EndsWith(value: "checksums.txt", comparisonType: StringComparison.Ordinal)
@@ -118,13 +159,13 @@ public sealed class GitHubReleaseCheckClientTests
         var result = await client.CheckAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.IsUpdateAvailable);
-        Assert.Equal(expected: $"https://example.test/{MsiAssetName}", actual: result.AssetDownloadUrl);
+        Assert.Equal(expected: $"https://example.test/{PlatformAssetName}", actual: result.AssetDownloadUrl);
     }
 
     [Fact]
-    public async Task CheckAsync_NewerButNoMsiAsset_ReportsAssetOrChecksumMissing()
+    public async Task CheckAsync_NewerButNoPlatformAsset_ReportsAssetOrChecksumMissing()
     {
-        var client = CreateClient(_ => Json(ReleasePayload(tag: "v9.0.0", includeMsiAsset: false)));
+        var client = CreateClient(_ => Json(ReleasePayload(tag: "v9.0.0", includePlatformAsset: false)));
 
         var result = await client.CheckAsync(TestContext.Current.CancellationToken);
 
@@ -133,14 +174,15 @@ public sealed class GitHubReleaseCheckClientTests
     }
 
     [Fact]
-    public async Task CheckAsync_ReleaseHasOnlyNonWindowsAssets_ReportsAssetOrChecksumMissing()
+    public async Task CheckAsync_ReleaseHasOnlyOtherPlatformAssets_ReportsAssetOrChecksumMissing()
     {
-        // Phase P9's platform-aware selection: on this (Windows) test host, a release publishing only
-        // non-Windows tarballs must not be mistaken for an installable release just because *an* asset
-        // besides checksums.txt exists.
-        var assets = $"{Asset("totallyhotarcrouter-1.2.3-linux-x64.tar.gz")}," +
-                     $"{Asset("totallyhotarcrouter-1.2.3-linux-arm64.tar.gz")}," +
-                     $"{Asset("totallyhotarcrouter-1.2.3-osx-arm64.tar.gz")},{Asset("checksums.txt")}";
+        // Phase P9's platform-aware selection: a release publishing only assets for OTHER platforms must
+        // not be mistaken for an installable release just because *an* asset besides checksums.txt
+        // exists. Deliberately excludes this test host's own PlatformAssetName from the set, so the
+        // assertion holds on every CI runner (Windows, Linux x64/arm64, macOS) rather than only Windows.
+        var otherPlatformAssets = AllPlatformAssetNames.Where(name => name != PlatformAssetName)
+            .Select(Asset);
+        var assets = string.Join(',', otherPlatformAssets) + "," + Asset("checksums.txt");
         var client = CreateClient(_ => Json($$"""{"tag_name": "v9.0.0", "assets": [{{assets}}]}"""));
 
         var result = await client.CheckAsync(TestContext.Current.CancellationToken);
@@ -150,18 +192,18 @@ public sealed class GitHubReleaseCheckClientTests
     }
 
     [Fact]
-    public async Task CheckAsync_ReleaseHasMsiAlongsideOtherPlatformAssets_SelectsOnlyTheMsi()
+    public async Task CheckAsync_ReleaseHasPlatformAssetAlongsideOtherPlatformAssets_SelectsOnlyTheMatchingOne()
     {
-        // The non-Windows tarballs sit right next to the MSI in the same release (the real shape once
-        // P10 ships its multi-platform matrix) - selection must still land on the MSI's own checksum,
-        // not get confused by the other assets' similarly-shaped names.
-        var assets = $"{Asset(MsiAssetName)},{Asset("totallyhotarcrouter-1.2.3-linux-x64.tar.gz")}," +
-                     $"{Asset("totallyhotarcrouter-1.2.3-osx-arm64.tar.gz")},{Asset("checksums.txt")}";
+        // Every platform's asset sits right next to this host's own in the same release (the real shape
+        // once P10's multi-platform matrix ships) - selection must still land on the matching asset's own
+        // checksum, not get confused by the other assets' similarly-shaped names.
+        var otherPlatformAsset = AllPlatformAssetNames.First(name => name != PlatformAssetName);
+        var assets = $"{Asset(PlatformAssetName)},{Asset(otherPlatformAsset)},{Asset("checksums.txt")}";
         var client = CreateClient(request =>
             request.RequestUri!.AbsolutePath.EndsWith(value: "checksums.txt", comparisonType: StringComparison.Ordinal)
                 ? PlainText($"""
-                             deadbeef00000000000000000000000000000000000000000000000000  {MsiAssetName}
-                             1111111111111111111111111111111111111111111111111111111111  totallyhotarcrouter-1.2.3-linux-x64.tar.gz
+                             deadbeef00000000000000000000000000000000000000000000000000  {PlatformAssetName}
+                             1111111111111111111111111111111111111111111111111111111111  {otherPlatformAsset}
                              """)
                 : Json($$"""{"tag_name": "v9.0.0", "assets": [{{assets}}]}"""));
 
@@ -170,7 +212,7 @@ public sealed class GitHubReleaseCheckClientTests
         Assert.True(result.IsUpdateAvailable);
         Assert.Equal(expected: "deadbeef00000000000000000000000000000000000000000000000000",
             actual: result.AssetSha256);
-        Assert.Contains(expectedSubstring: MsiAssetName, actualString: result.AssetDownloadUrl!,
+        Assert.Contains(expectedSubstring: PlatformAssetName, actualString: result.AssetDownloadUrl!,
             comparisonType: StringComparison.Ordinal);
     }
 
@@ -219,7 +261,7 @@ public sealed class GitHubReleaseCheckClientTests
     }
 
     [Fact]
-    public async Task CheckAsync_ChecksumsFileMissingTheMsiEntry_ReportsAssetOrChecksumMissing()
+    public async Task CheckAsync_ChecksumsFileMissingThePlatformAssetEntry_ReportsAssetOrChecksumMissing()
     {
         var client = CreateClient(request =>
             request.RequestUri!.AbsolutePath.EndsWith(value: "checksums.txt", comparisonType: StringComparison.Ordinal)
@@ -230,7 +272,7 @@ public sealed class GitHubReleaseCheckClientTests
 
         Assert.False(result.IsUpdateAvailable);
         Assert.Equal(expected: ReleaseCheckUnavailableReason.AssetOrChecksumMissing, actual: result.UnavailableReason);
-        Assert.Contains(expectedSubstring: MsiAssetName, actualString: result.UnavailableDetail!,
+        Assert.Contains(expectedSubstring: PlatformAssetName, actualString: result.UnavailableDetail!,
             comparisonType: StringComparison.Ordinal);
     }
 
