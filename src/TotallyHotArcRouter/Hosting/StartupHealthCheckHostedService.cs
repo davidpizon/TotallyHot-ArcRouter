@@ -36,6 +36,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly EmbeddingMemory _embeddingMemory;
     private readonly EmbeddingWarmupState? _embeddingWarmupState;
     private readonly PriceCatalogIngestionService _ingestionService;
+    private readonly IHostApplicationLifetime _hostLifetime;
 
     private readonly ILogger<StartupHealthCheckHostedService> _logger;
     private readonly ProbingPriorMatrixCache? _matrixCache;
@@ -73,6 +74,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         TranscriptDatabase transcriptDatabase,
         ITranscriptStore transcriptStore,
         IOptions<TranscriptOptions> transcriptOptions,
+        IHostApplicationLifetime hostLifetime,
         IEmbeddingClient? embeddingClient = null,
         EmbeddingWarmupState? embeddingWarmupState = null,
         ProbingPriorMatrixCache? matrixCache = null)
@@ -95,6 +97,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(transcriptDatabase);
         ArgumentNullException.ThrowIfNull(transcriptStore);
         ArgumentNullException.ThrowIfNull(transcriptOptions);
+        ArgumentNullException.ThrowIfNull(hostLifetime);
 
         _logger = logger;
         _database = database;
@@ -114,6 +117,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _transcriptDatabase = transcriptDatabase;
         _transcriptStore = transcriptStore;
         _transcriptOptions = transcriptOptions.Value;
+        _hostLifetime = hostLifetime;
         _embeddingClient = embeddingClient;
         _embeddingWarmupState = embeddingWarmupState;
         _matrixCache = matrixCache;
@@ -305,13 +309,13 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // one-time ~1.3 GB model/tokenizer download and load, off the request path, rather than on a
         // request's first embedding call. Started here but deliberately NOT awaited: a cold download can
         // take minutes, and awaiting it would delay Kestrel binding its port, contradicting every other
-        // check's "never block startup" contract. Runs independently of the startup cancellation token so
-        // a host-startup timeout can't abandon a partially-downloaded artifact; failure (no network access,
-        // disk full) leaves EmbeddingWarmupState.IsWarm false, which RequestInterceptor reads to skip
-        // embedding entirely rather than block a request on a cold download.
+        // check's "never block startup" contract. Runs against ApplicationStopping so a pending stop can
+        // skip starting new warm-up work; failure (no network access, disk full) leaves
+        // EmbeddingWarmupState.IsWarm false, which RequestInterceptor reads to skip embedding entirely
+        // rather than block a request on a cold download.
         if (_embeddingClient is not null && _embeddingWarmupState is not null)
             EmbeddingWarmupTask = WarmUpEmbeddingClientAsync(embeddingClient: _embeddingClient,
-                embeddingWarmupState: _embeddingWarmupState);
+                embeddingWarmupState: _embeddingWarmupState, applicationStopping: _hostLifetime.ApplicationStopping);
 
         // CodeRouterBench corpus freshness (docs/router/coderouterbench-sqlite-migration-plan.md, Phase
         // 3): ensure its own SQLite schema exists and probe Hugging Face for the corpus's
@@ -354,17 +358,25 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     /// </summary>
     /// <param name="embeddingClient">The embedding client to warm up.</param>
     /// <param name="embeddingWarmupState">The shared state flipped to warm on a successful embed call.</param>
+    /// <param name="applicationStopping">The host's stopping token, used to skip or cancel warm-up when shutdown is already underway.</param>
     private async Task WarmUpEmbeddingClientAsync(
         IEmbeddingClient embeddingClient,
-        EmbeddingWarmupState embeddingWarmupState)
+        EmbeddingWarmupState embeddingWarmupState,
+        CancellationToken applicationStopping)
     {
+        if (applicationStopping.IsCancellationRequested)
+            return;
+
         try
         {
-            await embeddingClient.EmbedAsync(EmbeddingWarmupText).ConfigureAwait(false);
+            await embeddingClient.EmbedAsync(EmbeddingWarmupText, applicationStopping).ConfigureAwait(false);
             embeddingWarmupState.MarkWarm();
             _logger.LogInformation("Embedding client warm-up complete.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (applicationStopping.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning(exception: ex,
                 message:

@@ -23,8 +23,8 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// plain-HTTP proxy ports and keeps real LLM-forwarding traffic unreachable from the web port. Drives a
 /// real bound <see cref="ProxyServer"/> over the network - port scoping and the gRPC-Web wrapper are
 /// properties of the actual Kestrel pipeline, not something a fake <see cref="ServerCallContext"/> could
-/// exercise (see <see cref="TelemetryGrpcServiceTests"/> for that lighter style, used where the
-/// distinction doesn't matter).
+/// exercise (see <see cref="TotallyHot.ArcRouter.Tests.Telemetry.TelemetryGrpcServiceTests"/> for that
+/// lighter style, used where the distinction doesn't matter).
 /// </summary>
 [Collection("ProxyLifecycle")]
 [Trait(name: "Category", value: "Integration")]

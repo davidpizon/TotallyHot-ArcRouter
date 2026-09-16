@@ -4,8 +4,8 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry.Tests;
 
 /// <summary>
 /// Tests for <see cref="NativeRouterChannelProvider"/>: construction never connects (so this is safe to
-/// run without a live proxy), it reports the address it was given, and its <see cref="CallInvoker"/> is
-/// usable after disposal-unrelated construction.
+/// run without a live proxy), it reports the address it was given, and its
+/// <see cref="NativeRouterChannelProvider.CallInvoker"/> is usable after disposal-unrelated construction.
 /// </summary>
 public sealed class NativeRouterChannelProviderTests
 {

@@ -4,8 +4,9 @@ using TotallyHot.ArcRouter.Hosting;
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 
 /// <summary>
-/// Covers <see cref="KestrelBindAddress"/>'s mode resolution. <see cref="KestrelServerOptions.Listen"/>
-/// and its dual-stack convenience methods only record configuration - no socket is actually bound until
+/// Covers <see cref="KestrelBindAddress"/>'s mode resolution.
+/// <see cref="KestrelServerOptions.Listen(System.Net.IPAddress, int)"/> and its dual-stack convenience
+/// methods only record configuration - no socket is actually bound until
 /// Kestrel starts - so these exercise every branch without needing a live listener or a free port,
 /// unlike <see cref="Proxy.ProxyServerTests"/>'s end-to-end "loopback"/"any" coverage.
 /// </summary>

@@ -109,8 +109,7 @@ public sealed class TelemetryAuthInterceptor : Interceptor
     {
         try
         {
-            var httpContext = context.GetHttpContext();
-            return httpContext is null ? null : ManagementSessionCookie.Read(httpContext.Request);
+            return ManagementSessionCookie.Read(context.GetHttpContext().Request);
         }
         catch (InvalidOperationException)
         {

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -66,7 +67,8 @@ public class StartupHealthCheckHostedServiceTests
             benchmarkStatusService: CreateBenchmarkStatusService(temp),
             transcriptDatabase: transcriptDb,
             transcriptStore: transcriptStore,
-            transcriptOptions: Options.Create(new TranscriptOptions()));
+            transcriptOptions: Options.Create(new TranscriptOptions()),
+            hostLifetime: CreateHostApplicationLifetime());
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -116,7 +118,8 @@ public class StartupHealthCheckHostedServiceTests
             benchmarkStatusService: CreateBenchmarkStatusService(temp),
             transcriptDatabase: transcriptDb,
             transcriptStore: transcriptStore,
-            transcriptOptions: Options.Create(new TranscriptOptions()));
+            transcriptOptions: Options.Create(new TranscriptOptions()),
+            hostLifetime: CreateHostApplicationLifetime());
 
         await service.StartAsync(TestContext.Current.CancellationToken);
 
@@ -205,6 +208,7 @@ public class StartupHealthCheckHostedServiceTests
             transcriptDatabase: transcriptDb,
             transcriptStore: transcriptStore,
             transcriptOptions: Options.Create(new TranscriptOptions()),
+            hostLifetime: CreateHostApplicationLifetime(),
             embeddingClient: embeddingClient,
             embeddingWarmupState: warmupState);
     }
@@ -270,6 +274,11 @@ public class StartupHealthCheckHostedServiceTests
             logger: NullLogger<BenchmarkDataStatusService>.Instance);
     }
 
+    private static IHostApplicationLifetime CreateHostApplicationLifetime()
+    {
+        return Mock.Of<IHostApplicationLifetime>(lifetime => lifetime.ApplicationStopping == CancellationToken.None);
+    }
+
     private static int CountRows(TempDatabase temp, string sessionSuffix)
     {
         using var connection = temp.Database.OpenConnection();
@@ -277,6 +286,61 @@ public class StartupHealthCheckHostedServiceTests
         command.CommandText = "SELECT COUNT(*) FROM usage_ledger WHERE session_id = $sessionId;";
         command.Parameters.AddWithValue(parameterName: "$sessionId", value: "sess-" + sessionSuffix);
         return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    [Fact]
+    public async Task StartAsync_SkipsEmbeddingWarmupWhenApplicationStoppingIsAlreadyRequested()
+    {
+        using var temp = new TempDatabase();
+        var repository = temp.CreateRepository();
+        var sourceRepository = temp.CreateSourceRepository();
+        var ledger = temp.CreateUsageLedger();
+
+        var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == Array.Empty<IPriceSourceClient>());
+        var ingestionService = new PriceCatalogIngestionService(
+            registry: registry, repository: repository, sourceRepository: sourceRepository,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
+
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var transcriptStore = new SqliteTranscriptStore(
+            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
+
+        using var stopCts = new CancellationTokenSource();
+        stopCts.Cancel();
+        var hostLifetime = Mock.Of<IHostApplicationLifetime>(lifetime => lifetime.ApplicationStopping == stopCts.Token);
+        var embeddingClient = new Mock<IEmbeddingClient>(MockBehavior.Strict);
+        var warmupState = new EmbeddingWarmupState();
+
+        var service = new StartupHealthCheckHostedService(
+            logger: NullLogger<StartupHealthCheckHostedService>.Instance,
+            database: temp.Database,
+            repository: sourceRepository,
+            ingestionService: ingestionService,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            budgetStore: temp.CreateBudgetStore(),
+            toolCallCapabilityStore: temp.CreateToolCallCapabilityStore(),
+            usageLedger: ledger,
+            rollupStore: temp.CreateRollupStore(),
+            storageOptions: Options.Create(new StorageOptions()),
+            routerMemoryDatabase: CreateRouterMemoryDatabase(temp),
+            routerMemory: new RouterMemory(),
+            embeddingMemory: CreateEmbeddingMemory(temp),
+            benchmarkDatabase: CreateBenchmarkDatabase(temp),
+            benchmarkStatusService: CreateBenchmarkStatusService(temp),
+            transcriptDatabase: transcriptDb,
+            transcriptStore: transcriptStore,
+            transcriptOptions: Options.Create(new TranscriptOptions()),
+            hostLifetime: hostLifetime,
+            embeddingClient: embeddingClient.Object,
+            embeddingWarmupState: warmupState);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+
+        embeddingClient.Verify(
+            client => client.EmbedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        Assert.False(warmupState.IsWarm);
     }
 
     private sealed class FakeEmbeddingClient(bool succeed) : IEmbeddingClient

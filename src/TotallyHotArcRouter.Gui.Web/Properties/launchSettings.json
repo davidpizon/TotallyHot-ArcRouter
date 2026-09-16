@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "TotallyHotArcRouter.Gui.Web": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:61205;http://localhost:61206"
+    }
+  }
+}

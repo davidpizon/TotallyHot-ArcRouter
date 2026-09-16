@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -76,9 +75,9 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         var webInterface = webInterfaceOptions ?? new WebInterfaceOptions();
         var port = listener.Port;
         var webPort = webInterface.Port;
-        ArgumentOutOfRangeException.ThrowIfNegative(port, paramName: nameof(listenerOptions));
+        ArgumentOutOfRangeException.ThrowIfNegative(value: port, paramName: nameof(listenerOptions));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(value: port, 65535, paramName: nameof(listenerOptions));
-        ArgumentOutOfRangeException.ThrowIfNegative(webPort, paramName: nameof(webInterfaceOptions));
+        ArgumentOutOfRangeException.ThrowIfNegative(value: webPort, paramName: nameof(webInterfaceOptions));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(value: webPort, 65535, paramName: nameof(webInterfaceOptions));
         // 0 (ephemeral) stays allowed here, same as port/grpcPort/webPort above, so tests can bind the
         // opt-in listener without picking a fixed port. ProxyListenerOptionsValidator enforces the
@@ -143,7 +142,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                 if (serilogLogger is not null)
                 {
                     logging.ClearProviders();
-                    logging.AddProvider(new SerilogLoggerProvider(logger: serilogLogger, dispose: false));
+                    logging.AddProvider(new SerilogLoggerProvider(logger: serilogLogger, false));
                 }
                 else
                 {
@@ -517,37 +516,6 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     internal IServiceProvider Services => _host.Services;
 
     /// <summary>
-    /// A per-connection marker set by <see cref="TagAsProxyPort"/> on every connection accepted by a
-    /// proxy-purpose listener (the plain-HTTP forwarding port and, when enabled, the opt-in plain-HTTP
-    /// listener). <see cref="Microsoft.AspNetCore.Http.HttpContext.Features"/> falls back to the
-    /// underlying connection's feature collection for any feature type it does not itself implement, so a
-    /// feature set here at the connection level is visible to HTTP middleware via
-    /// <c>context.Features.Get&lt;ProxyPortMarker&gt;()</c> - see the pipeline gate in the constructor's
-    /// <c>Configure</c> callback. This is what makes port scoping immune to a spoofed <c>Host</c> header:
-    /// the marker reflects which physical listener accepted the TCP connection, not anything the client
-    /// sent.
-    /// </summary>
-    private sealed class ProxyPortMarker
-    {
-        public static readonly ProxyPortMarker Instance = new();
-    }
-
-    /// <summary>
-    /// Registers connection-level middleware on <paramref name="listenOptions"/> that stamps every
-    /// connection this specific listener accepts with <see cref="ProxyPortMarker"/>. Pass as (part of) a
-    /// <c>configure</c> callback to <see cref="KestrelBindAddress.Listen"/> for a proxy-purpose listener
-    /// only - never for the gRPC or web-interface listeners.
-    /// </summary>
-    private static void TagAsProxyPort(ListenOptions listenOptions)
-    {
-        listenOptions.Use(middleware: next => context =>
-        {
-            context.Features.Set(instance: ProxyPortMarker.Instance);
-            return next(context);
-        });
-    }
-
-    /// <summary>
     /// Disposes the inner host and, when this server created it, the management <see cref="HttpClient"/>,
     /// so repeatedly creating and discarding servers (e.g. across tests) doesn't leak hosts or handlers.
     /// </summary>
@@ -571,6 +539,21 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Registers connection-level middleware on <paramref name="listenOptions"/> that stamps every
+    /// connection this specific listener accepts with <see cref="ProxyPortMarker"/>. Pass as (part of) a
+    /// <c>configure</c> callback to <see cref="KestrelBindAddress.Listen"/> for a proxy-purpose listener
+    /// only - never for the gRPC or web-interface listeners.
+    /// </summary>
+    private static void TagAsProxyPort(ListenOptions listenOptions)
+    {
+        listenOptions.Use(middleware: next => context =>
+        {
+            context.Features.Set(instance: ProxyPortMarker.Instance);
+            return next(context);
+        });
+    }
+
+    /// <summary>
     /// Starts the proxy server. Unlike the SignalR-era implementation, no post-start attachment
     /// step is needed: the constructor already registered the shared <see cref="TelemetryBroadcaster"/>
     /// into this host's DI container, so <see cref="TelemetryGrpcService"/> can receive it as soon
@@ -587,5 +570,21 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     public Task StopAsync(CancellationToken cancellationToken)
     {
         return _host.StopAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// A per-connection marker set by <see cref="TagAsProxyPort"/> on every connection accepted by a
+    /// proxy-purpose listener (the plain-HTTP forwarding port and, when enabled, the opt-in plain-HTTP
+    /// listener). <see cref="Microsoft.AspNetCore.Http.HttpContext.Features"/> falls back to the
+    /// underlying connection's feature collection for any feature type it does not itself implement, so a
+    /// feature set here at the connection level is visible to HTTP middleware via
+    /// <c>context.Features.Get&lt;ProxyPortMarker&gt;()</c> - see the pipeline gate in the constructor's
+    /// <c>Configure</c> callback. This is what makes port scoping immune to a spoofed <c>Host</c> header:
+    /// the marker reflects which physical listener accepted the TCP connection, not anything the client
+    /// sent.
+    /// </summary>
+    private sealed class ProxyPortMarker
+    {
+        public static readonly ProxyPortMarker Instance = new();
     }
 }
