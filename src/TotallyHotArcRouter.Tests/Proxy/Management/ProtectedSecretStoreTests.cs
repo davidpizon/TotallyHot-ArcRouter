@@ -492,4 +492,42 @@ public sealed class ProtectedSecretStoreTests
             CleanUp(path);
         }
     }
+
+    /// <summary>
+    /// A second quarantine must not overwrite the first. The quarantined file is the only remaining copy of
+    /// secrets this account cannot read but their author may still be able to, so two decrypt failures in
+    /// quick succession - which a crash-looping service produces by definition, and which a
+    /// seconds-resolution name plus <c>overwrite: true</c> would collapse onto one path - have to leave two
+    /// files behind, not one.
+    /// </summary>
+    [Fact]
+    public void TwoUndecryptableStoresInSuccession_AreBothPreserved()
+    {
+        if (!IsWindows) return;
+
+        var path = TempStorePath();
+        try
+        {
+            var directory = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(directory);
+            var store = new ProtectedSecretStore(path);
+
+            File.WriteAllBytes(path: path, bytes: "first unreadable store"u8.ToArray());
+            Assert.False(store.TryRead(name: "management:token", value: out _));
+
+            File.WriteAllBytes(path: path, bytes: "second unreadable store"u8.ToArray());
+            Assert.False(store.TryRead(name: "management:token", value: out _));
+
+            var quarantined = Directory.GetFiles(path: directory, searchPattern: "*.unreadable-*");
+
+            Assert.Equal(expected: 2, actual: quarantined.Length);
+            Assert.Equal(
+                expected: new[] { "first unreadable store", "second unreadable store" },
+                actual: quarantined.Select(File.ReadAllText).OrderBy(c => c, StringComparer.Ordinal).ToArray());
+        }
+        finally
+        {
+            CleanUp(path);
+        }
+    }
 }

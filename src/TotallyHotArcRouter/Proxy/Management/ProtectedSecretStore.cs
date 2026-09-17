@@ -336,9 +336,14 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     /// caller regenerates what it needs instead of failing startup.
     /// </summary>
     /// <remarks>
-    /// The file is preserved under a timestamped <c>.unreadable-*</c> name rather than deleted: this account
+    /// The file is preserved under a unique <c>.unreadable-*</c> name rather than deleted: this account
     /// cannot read it, but the account that wrote it may still be able to, and silently destroying the only
-    /// copy to reclaim a few hundred bytes is never the right trade. Moving it aside rather than leaving it
+    /// copy to reclaim a few hundred bytes is never the right trade. That guarantee is why the name carries
+    /// a random suffix as well as a timestamp, and why the move does <em>not</em> pass
+    /// <c>overwrite: true</c> - a second decrypt failure inside the same second, or two processes racing,
+    /// would otherwise land on the name the first one used and destroy exactly the copy this method exists
+    /// to keep. Quarantined files therefore accumulate rather than replace one another; each is a few
+    /// hundred bytes, which is the cheaper side of that trade by a wide margin. Moving it aside rather than leaving it
     /// in place is also what keeps the next write from overwriting it, and what stops this from re-logging on
     /// every subsequent read. If the move itself fails the store is still reported empty - a host that cannot
     /// start is strictly worse than one that regenerates its secrets - but that case logs at error, because
@@ -347,11 +352,16 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     /// <param name="failure">The decryption failure, logged as the reason the store was set aside.</param>
     private Dictionary<string, string> QuarantineUnreadableStore(CryptographicException failure)
     {
-        var quarantinePath = $"{_path}.unreadable-{DateTime.UtcNow:yyyyMMddTHHmmssZ}";
+        // Timestamp for legibility, random suffix for uniqueness - see the remarks on why this must never
+        // reuse a name.
+        var quarantinePath =
+            $"{_path}.unreadable-{DateTime.UtcNow:yyyyMMddTHHmmssZ}-{Guid.NewGuid().ToString("N")[..8]}";
 
         try
         {
-            File.Move(sourceFileName: _path, destFileName: quarantinePath, overwrite: true);
+            // No overwrite: if this name somehow already exists, failing (and logging below) is correct,
+            // because the alternative is deleting an earlier quarantined store.
+            File.Move(sourceFileName: _path, destFileName: quarantinePath);
             Log.Warning(exception: failure,
                 messageTemplate:
                 "Could not decrypt the protected secret store at {StorePath}; it has been moved to {QuarantinePath} and this process is starting with an empty store. Secrets held there are regenerated, which for the local CA means clients must trust the new certificate.",

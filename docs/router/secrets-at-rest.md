@@ -72,12 +72,32 @@ go through the router's gRPC/gRPC-Web management surface instead, never touching
 That is what ADR-0015's administrator-only ACL depends on, and it is the reason the tray needs no read
 access: ADR-0012 gave it a loopback session cookie instead of a shared credential on disk.
 
+### 2.1 What the machine-wide move exposes
+
+`%ProgramData%`'s inherited ACL grants `BUILTIN\Users` read. Nothing encrypted is affected — `secrets.dat`
+and the management token are both encrypted/hardened at rest regardless — but two databases that are
+per-machine rather than per-user are readable by **every local account**:
+
+| File | Contents newly readable by local `Users` |
+|---|---|
+| `agent_telemetry.db` | Usage ledger, provider spend, price catalog. Token counts and cost, no credentials. |
+| `transcripts.db` | **Raw prompt and response text**, when `TranscriptOptions.Enabled` turns capture on. |
+
+`transcripts.db` is the one that matters. It is retention-bounded precisely because of what it holds -
+`TranscriptOptions.RetentionDays` defaults to 30 days - but note it is **on by default**:
+`TranscriptOptions.Enabled` defaults to `true`, so text capture is opt-*out*, not opt-in as this section
+previously claimed (see `docs/router/security-hardening-plan.md` T-07, where the same stale claim is
+corrected). On a single-user machine — the deployment this tool targets — "readable by local Users" and
+"readable by me" are the same set. On a shared or multi-user machine they are not: leave transcripts off,
+or point `Storage:TranscriptDatabasePath` at a directory you have ACL'd yourself. See
+`docs/router/security-hardening-plan.md` T-07.
+
 ### 2.2 Upgrading a store written before ADR-0015
 
 A `secrets.dat` sealed under the old `CurrentUser` scope still decrypts for **the user who wrote it**, and
 the next write re-seals the whole map under the machine scope, so the store converts in place with
 nothing lost. Nothing else can read it: when the installed service (as `LocalSystem`) reaches such a store
-first, decryption fails, the file is moved aside to a timestamped `secrets.dat.unreadable-*` name, and the
+first, decryption fails, the file is moved aside to a unique `secrets.dat.unreadable-*` name, and the
 router starts with an empty store and regenerates what it needs. That is deliberately non-fatal - every
 secret here is machine-generated - but it is not free: regenerating `router-ca:cert-password` means a new
 local CA, so every client that trusted the old root must trust the new one
@@ -90,25 +110,8 @@ the store, before starting the service:
 & 'C:\Program Files\TotallyHotArcRouter\Router\TotallyHotArcRouter.exe' --print-management-token
 ```
 
-The quarantined file is preserved rather than deleted, so a store set aside by mistake can still be
-recovered by its original author.
-
-### 2.1 What the machine-wide move exposes
-
-`%ProgramData%`'s inherited ACL grants `BUILTIN\Users` read. Nothing encrypted is affected — `secrets.dat`
-and the management token are both encrypted/hardened at rest regardless — but two databases that are
-per-machine rather than per-user are readable by **every local account**:
-
-| File | Contents newly readable by local `Users` |
-|---|---|
-| `agent_telemetry.db` | Usage ledger, provider spend, price catalog. Token counts and cost, no credentials. |
-| `transcripts.db` | **Raw prompt and response text**, when `TranscriptOptions.Enabled` turns capture on. |
-
-`transcripts.db` is the one that matters. It is opt-in and retention-bounded precisely because of what it
-holds, and on a single-user machine — the deployment this tool targets — "readable by local Users" and
-"readable by me" are the same set. On a shared or multi-user machine they are not: leave transcripts off,
-or point `Storage:TranscriptDatabasePath` at a directory you have ACL'd yourself. See
-`docs/router/security-hardening-plan.md` T-07.
+Quarantined files are preserved rather than deleted, and never overwrite one another, so a store set aside
+by mistake can still be recovered by its original author.
 
 ## 3. Naming convention
 
