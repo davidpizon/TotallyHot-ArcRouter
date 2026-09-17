@@ -46,7 +46,8 @@ public sealed class RoutingOptions
     /// Gets the path to the SQLite database used for router memory persistence: both the
     /// task-embedding-keyed <c>memory_entries</c> working set (PLAN.md Phase J, research-doc §3.3) and the
     /// dimension-keyed <c>dimension_scores</c> aggregates behind <see cref="Router.RouterMemory"/>.
-    /// Relative paths are resolved from the application base directory.
+    /// Relative paths are resolved from the machine-shared data directory (see
+    /// <see cref="Router.RouterMemoryDatabase"/>'s remarks for why that is not the install directory).
     /// </summary>
     /// <remarks>
     /// The name predates the second table and now under-describes what the file holds. It is left alone

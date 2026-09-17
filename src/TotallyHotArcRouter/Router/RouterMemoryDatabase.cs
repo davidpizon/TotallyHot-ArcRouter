@@ -1,6 +1,9 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using System.Globalization;
+using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.PriceCatalog;
+using Serilog;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -94,12 +97,49 @@ public sealed class RouterMemoryDatabase
                                          ON grader_scores (created_at_utc);
                                      """;
 
+    /// <summary>
+    /// The file name <see cref="RoutingOptions.EmbeddingMemoryDatabasePath"/> defaults to, used by
+    /// <see cref="AdoptLegacyInstallDirectoryCopy"/> to recognize the default destination and to find the
+    /// legacy copy under the install directory.
+    /// </summary>
+    private const string DefaultFileName = "router_embedding_memory.db";
+
     /// <summary>The resolved absolute path of the database file.</summary>
     private readonly string _databasePath;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RouterMemoryDatabase"/> class.
     /// </summary>
+    /// <remarks>
+    /// A relative <see cref="RoutingOptions.EmbeddingMemoryDatabasePath"/> resolves against the
+    /// machine-shared data directory (<see cref="AppDataPaths"/>), the same location every other database
+    /// this application writes lives in. It previously resolved against
+    /// <see cref="AppContext.BaseDirectory"/> - the <em>install</em> directory - which was wrong three ways
+    /// and is why this changed:
+    /// <list type="number">
+    /// <item>
+    /// Only an administrator could run the router. <c>%ProgramFiles%</c> is not writable by an ordinary
+    /// account, so a developer or operator launching the exe directly got
+    /// <c>SQLite Error 14: 'unable to open database file'</c> out of <see cref="EnsureCreated"/> before the
+    /// host finished starting - while the installed <c>LocalSystem</c> service, which can write there,
+    /// worked fine and hid the problem.
+    /// </item>
+    /// <item>
+    /// The file sat in a directory the MSI owns and re-lays on every upgrade
+    /// (<c>docs/router/packaging-and-distribution.md</c>), so the router's learned memory was one
+    /// reinstall away from being orphaned or removed - the exact hazard
+    /// <see cref="PriceCatalog.StorageOptions"/>' remarks moved every other data file out of that directory
+    /// to avoid.
+    /// </item>
+    /// <item>
+    /// It contradicted ADR-0014's machine-wide state model, under which the router's data lives in one
+    /// machine-shared directory rather than partly beside the binaries.
+    /// </item>
+    /// </list>
+    /// An existing database in the old location is adopted once by
+    /// <see cref="PriceCatalog.LegacyStorageMigration"/> rather than abandoned. An absolute configured path
+    /// is still honoured exactly as before.
+    /// </remarks>
     /// <param name="routingOptions">The routing options containing the database path.</param>
     public RouterMemoryDatabase(IOptions<RoutingOptions> routingOptions)
     {
@@ -108,11 +148,114 @@ public sealed class RouterMemoryDatabase
         var configuredPath = routingOptions.Value.EmbeddingMemoryDatabasePath;
         _databasePath = Path.IsPathRooted(configuredPath)
             ? configuredPath
-            : Path.Combine(path1: AppContext.BaseDirectory, path2: configuredPath);
+            : Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: configuredPath);
     }
 
     /// <summary>Gets the resolved absolute path of the database file.</summary>
     public string DatabasePath => _databasePath;
+
+    /// <summary>
+    /// Adopts a database left in the install directory by a build that resolved a relative
+    /// <see cref="RoutingOptions.EmbeddingMemoryDatabasePath"/> against
+    /// <see cref="AppContext.BaseDirectory"/>, so an upgrading install keeps its learned memory instead of
+    /// silently starting empty. Does nothing when there is nothing to adopt, which is every run after the
+    /// first and every fresh install.
+    /// </summary>
+    /// <remarks>
+    /// This lives here rather than in <see cref="PriceCatalog.LegacyStorageMigration"/>, where the five
+    /// other relocated files are handled, purely because of ordering:
+    /// <see cref="EnsureCreated"/> is reached from <see cref="RouterSettingsStore"/>'s constructor while
+    /// the DI container is still being built, which is strictly before that migration's hosted service
+    /// starts. A migration placed there would therefore always arrive to find the empty database this very
+    /// method had already created, and decline to overwrite it - which is exactly what happened when it was
+    /// first written there, and is why it moved.
+    /// <para>
+    /// Deliberately conservative in three ways. It only adopts when the destination does not exist, so it
+    /// can never overwrite real memory. It only acts when the configured path resolved to the
+    /// machine-shared default, so an operator who pinned their own location is never silently seeded from a
+    /// file they may have abandoned. And every failure is swallowed after logging: the memory is relearned
+    /// from ordinary traffic, so failing to adopt it must degrade to "start fresh" rather than take the host
+    /// down - which, before the path itself was corrected, is precisely how an unwritable install directory
+    /// killed startup.
+    /// </para>
+    /// </remarks>
+    private void AdoptLegacyInstallDirectoryCopy()
+    {
+        if (File.Exists(_databasePath)) return;
+
+        // Only ever adopt into the default location - see the remarks.
+        var defaultPath = Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(),
+            path2: DefaultFileName);
+        if (!string.Equals(a: _databasePath, b: defaultPath, comparisonType: StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var legacyPath = Path.Combine(path1: AppContext.BaseDirectory, path2: DefaultFileName);
+        if (!File.Exists(legacyPath)) return;
+
+        try
+        {
+            // VACUUM INTO, not File.Copy: this database runs in WAL mode (see EnsureCreated's pragmas), so
+            // its committed state is spread across .db/-wal/-shm and copying only the first would silently
+            // drop everything not yet checkpointed.
+            LegacyStorageMigration.CopyDatabase(legacyPath: legacyPath, destinationPath: _databasePath);
+
+            // Microsoft.Data.Sqlite pools connections, so disposing the one CopyDatabase opened does not
+            // close the OS handle on the legacy file - it goes back to the pool still holding it, and the
+            // rename below then fails with "used by another process" even though the copy succeeded. Clearing
+            // the pool releases it. Without this the adoption still works but logs a spurious warning every
+            // time, which is exactly how this was found.
+            SqliteConnection.ClearAllPools();
+
+            // Rename rather than delete, matching LegacyStorageMigration: the operator keeps a recoverable
+            // copy, and the suffix stops a later run from adopting it a second time. A failure here is
+            // logged but not fatal - the adoption itself already succeeded, and the destination check above
+            // is what actually prevents a repeat.
+            try
+            {
+                File.Move(sourceFileName: legacyPath,
+                    destFileName: legacyPath + LegacyStorageMigration.MigratedSuffix, true);
+            }
+            catch (Exception renameFailure) when (renameFailure is IOException or UnauthorizedAccessException)
+            {
+                Log.Warning(exception: renameFailure,
+                    messageTemplate:
+                    "Adopted the router memory database from {LegacyPath} but could not rename it aside; it is left in place and will be ignored from now on.",
+                    propertyValue: legacyPath);
+            }
+
+            Log.Information(
+                messageTemplate:
+                "Adopted the router memory database from the legacy install-directory location {LegacyPath} into {DatabasePath}.",
+                propertyValue0: legacyPath, propertyValue1: _databasePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            Log.Warning(exception: ex,
+                messageTemplate:
+                "Could not adopt the router memory database from {LegacyPath}; continuing with a new, empty one.",
+                propertyValue: legacyPath);
+
+            TryDeletePartialDestination();
+        }
+    }
+
+    /// <summary>
+    /// Removes a destination file a failed adoption may have half-written, so the fresh database
+    /// <see cref="EnsureCreated"/> goes on to create is not built on a truncated copy.
+    /// </summary>
+    private void TryDeletePartialDestination()
+    {
+        try
+        {
+            if (File.Exists(_databasePath)) File.Delete(_databasePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warning(exception: ex,
+                messageTemplate: "Could not remove the partially adopted router memory database at {DatabasePath}.",
+                propertyValue: _databasePath);
+        }
+    }
 
     /// <summary>Gets the SQLite connection string for <see cref="_databasePath"/>.</summary>
     private string ConnectionString => $"Data Source={_databasePath}";
@@ -135,6 +278,8 @@ public sealed class RouterMemoryDatabase
     {
         var directory = Path.GetDirectoryName(_databasePath);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+
+        AdoptLegacyInstallDirectoryCopy();
 
         using var connection = OpenConnection();
 
