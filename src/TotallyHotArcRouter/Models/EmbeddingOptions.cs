@@ -81,12 +81,25 @@ public sealed class EmbeddingOptions
     /// </summary>
     public string ResolveModelCacheDirectory()
     {
-        var expanded = Environment.ExpandEnvironmentVariables(ModelCacheDirectory);
+        // The token is substituted BEFORE Environment.ExpandEnvironmentVariables, not after - the same
+        // ordering fix StorageOptions.ResolvePath already carries (web GUI migration plan Phase P10). On
+        // Windows LOCALAPPDATA is a genuine OS environment variable, so expanding first resolved it to the
+        // real per-user folder and left no token for the substitution below to find: the machine-shared
+        // redirection this method documents silently never happened on the one platform it matters on, and
+        // every OS account kept its own ~2.1 GB copy of the model artifacts - the installed LocalSystem
+        // service downloading a second full set into
+        // C:\Windows\system32\config\systemprofile\AppData\Local beside the interactive user's.
+        var withTokensExpanded = ModelCacheDirectory;
 
-        if (expanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
-            expanded = expanded.Replace(oldValue: LocalAppDataToken,
+        if (withTokensExpanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
+            withTokensExpanded = withTokensExpanded.Replace(oldValue: LocalAppDataToken,
                 newValue: AppDataPaths.ResolveMachineSharedDirectory(),
                 comparisonType: StringComparison.OrdinalIgnoreCase);
+
+        // Still run the real expander afterward, for any other environment-variable token an operator's
+        // own override might embed; our token is already gone, so this cannot re-expand it out from under
+        // the substitution above.
+        var expanded = Environment.ExpandEnvironmentVariables(withTokensExpanded);
 
         expanded = expanded.Replace('\\', newChar: Path.DirectorySeparatorChar);
 
