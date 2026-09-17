@@ -519,10 +519,11 @@ public sealed class ProtectedSecretStoreTests
             Assert.False(store.TryRead(name: "management:token", value: out _));
 
             var quarantined = Directory.GetFiles(path: directory, searchPattern: "*.unreadable-*");
+            string[] expectedContents = ["first unreadable store", "second unreadable store"];
 
             Assert.Equal(expected: 2, actual: quarantined.Length);
             Assert.Equal(
-                expected: new[] { "first unreadable store", "second unreadable store" },
+                expected: expectedContents,
                 actual: quarantined.Select(File.ReadAllText).OrderBy(c => c, StringComparer.Ordinal).ToArray());
         }
         finally
