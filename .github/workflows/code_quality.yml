@@ -24,7 +24,21 @@ jobs:
             - name: 'Qodana Scan'
               uses: JetBrains/qodana-action@v2026.2
               with:
-                  args: '--within-docker true'
+                  # BASELINE, NOT PR MODE, is what scopes the PR comment to what a PR introduced.
+                  #
+                  # `pr-mode` is already on (its default) and the action does pass
+                  # `--commit <merge-base>` - but the cdnet linter (InspectCode) still analyzes the
+                  # whole solution, so every PR reported the same repository-wide total: #103 and
+                  # #105 had unrelated diffs and both said "152 new problems", exactly what main said.
+                  # A baseline works regardless of what the linter scans: findings whose fingerprint
+                  # is in the file are marked `unchanged`, and only the rest count as new.
+                  #
+                  # .qodana/qodana.sarif.json is the raw report from a scan of main (ee7f3b5, 152
+                  # findings). Regenerate it the same way when it drifts: run this workflow on main,
+                  # download `qodana.sarif.json` from the `qodana-report` artifact, and commit it
+                  # verbatim. The path is relative to the project root, which the container mounts.
+                  # Fixing the baselined findings is separate work - see ADR-0008's stop rules.
+                  args: '--within-docker true --baseline .qodana/qodana.sarif.json'
                   # The action publishes its check-run annotations from inside this step, before the
                   # normalization below can run, so they carry the linter's own unusable paths and
                   # anchor to nothing. Code scanning is the channel that can be fixed, and once fixed
@@ -32,6 +46,12 @@ jobs:
                   # turned off rather than left duplicating them at broken paths. `post-pr-comment` is
                   # unaffected and still posts the summary table with the per-inspection breakdown.
                   use-annotations: false
+                  # Publishes the raw report (qodana.sarif.json, logs) as the `qodana-report` artifact.
+                  # Two reasons: findings can be inspected without re-running the scan, and a run on
+                  # main is where .qodana/qodana.sarif.json (the baseline below) is regenerated from.
+                  # The upload happens inside this step, before normalization, so the artifact carries
+                  # the linter's own paths - which is what the baseline must match against.
+                  upload-result: true
               env:
                   QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
             # The cdnet linter reports paths relative to the analyzed solution, and qodana.yaml points
