@@ -43,8 +43,20 @@ a composed `TryRead`+`Write` reintroduced during Phase P9 - see that method's re
 
 **Encryption is platform-appropriate, not Windows-only** (web GUI migration plan Phase P3 - this section
 originally described a DPAPI-only, Windows-required implementation that has since been replaced):
-- **Windows**: DPAPI, `CurrentUser` scope, with a fixed application-specific `optionalEntropy` - the
-  bytes are decryptable only by the account that wrote them.
+- **Windows**: DPAPI, `LocalMachine` scope, with a fixed application-specific `optionalEntropy`. The
+  scope is machine-wide, **not** per-user (ADR-0015): the store sits in the machine-shared directory and
+  is read both by the installed service running as `LocalSystem` and by an administrator running the same
+  exe directly, and no one user profile's key can serve both. It was `CurrentUser` until ADR-0015, which
+  meant a store written by a developer running the router directly was unreadable by the service - the
+  host failed to start and the MSI reported only "failed to start ... verify that you have sufficient
+  privileges".
+  <br>
+  Because the scope is machine-wide and `optionalEntropy` is compiled into the binary rather than secret,
+  **the file's ACL - not the encryption - is the boundary between local accounts on Windows.** The store
+  is written through `SecureFile.WriteMachineShared`, which breaks ACL inheritance and grants full control
+  to `LocalSystem`, the local administrators group, and the writing account, and nothing to
+  `BUILTIN\Users`. A local administrator can therefore decrypt the store without being the account that
+  wrote it; a non-administrator cannot read the bytes at all.
 - **Elsewhere**: ASP.NET Core Data Protection, with its own key ring persisted to a `keys/` subdirectory
   of the same machine-shared directory (`PersistKeysToFileSystem`, a fixed application name and purpose
   string so the same key ring is found again across restarts). That directory is created at mode `0700`
@@ -57,6 +69,29 @@ split into `ISecretReader` (the router's own resolution paths only) and `ISecret
 
 Only the router process ever opens this file directly - the Windows Tray and the browser dashboard both
 go through the router's gRPC/gRPC-Web management surface instead, never touching `secrets.dat` on disk.
+That is what ADR-0015's administrator-only ACL depends on, and it is the reason the tray needs no read
+access: ADR-0012 gave it a loopback session cookie instead of a shared credential on disk.
+
+### 2.2 Upgrading a store written before ADR-0015
+
+A `secrets.dat` sealed under the old `CurrentUser` scope still decrypts for **the user who wrote it**, and
+the next write re-seals the whole map under the machine scope, so the store converts in place with
+nothing lost. Nothing else can read it: when the installed service (as `LocalSystem`) reaches such a store
+first, decryption fails, the file is moved aside to a timestamped `secrets.dat.unreadable-*` name, and the
+router starts with an empty store and regenerates what it needs. That is deliberately non-fatal - every
+secret here is machine-generated - but it is not free: regenerating `router-ca:cert-password` means a new
+local CA, so every client that trusted the old root must trust the new one
+(`docs/router/client-tls-setup.md`).
+
+To convert an existing install *without* regenerating the CA, run the router once as the user who created
+the store, before starting the service:
+
+```powershell
+& 'C:\Program Files\TotallyHotArcRouter\Router\TotallyHotArcRouter.exe' --print-management-token
+```
+
+The quarantined file is preserved rather than deleted, so a store set aside by mistake can still be
+recovered by its original author.
 
 ### 2.1 What the machine-wide move exposes
 
