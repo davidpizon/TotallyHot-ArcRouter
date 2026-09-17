@@ -6,10 +6,12 @@ on:
         branches:
             - main
 
-# A newer push to the same pull request supersedes the scan already running for it. Runs on main are
-# never cancelled: each one refreshes the code-scanning baseline that pull request results diff against.
+# A newer push to the same pull request supersedes the scan already running - and any of its scans
+# still queued - for it. Runs on main each get their own group (keyed by run id) so none can ever
+# supersede another: every one refreshes the code-scanning baseline that pull request results diff
+# against, and GitHub only cancels or drops a run in favor of another one in the *same* group.
 concurrency:
-    group: qodana-${{ github.event.pull_request.number || github.ref }}
+    group: qodana-${{ github.event.pull_request.number || github.run_id }}
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
