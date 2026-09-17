@@ -80,10 +80,18 @@ public sealed class RouterConnectionSupervisorTests
         ((FakeRoutingGateAdminClient)connector.LastClient!).GetFailure = new GrpcAdminException("bad session");
         await WaitUntilAsync(() => !firstMonitor!.IsUsable, WaitTimeout);
 
-        await WaitUntilAsync(() => supervisor.Monitor is not null && !ReferenceEquals(supervisor.Monitor, firstMonitor),
-            WaitTimeout);
+        // Wait on the event, not on the monitor swap. ReconnectAsync assigns Monitor and only *then* -
+        // after awaiting the old monitor's disposal - raises Reconnected, so observing the swap does not
+        // imply the handler has run. Waiting on the swap and asserting the count immediately left a window
+        // exactly as wide as that await, which an idle dev machine closes and a loaded CI runner does not:
+        // it failed on CI with "expected reconnectedCount to be >= 1, but found 0" while passing locally.
+        // The supervisor's ordering is deliberate (swap, dispose, announce), so this is the test's
+        // assumption to fix, not the product's behaviour.
+        await WaitUntilAsync(() => Volatile.Read(ref reconnectedCount) >= 1, WaitTimeout);
 
-        reconnectedCount.Should().BeGreaterThanOrEqualTo(1);
+        supervisor.Monitor.Should().NotBeSameAs(firstMonitor,
+            "a reconnect replaces the monitor as well as announcing itself");
+        Volatile.Read(ref reconnectedCount).Should().BeGreaterThanOrEqualTo(1);
     }
 
     private static RoutingGateMonitor FakeMonitor(IRouterChannelProvider provider)
