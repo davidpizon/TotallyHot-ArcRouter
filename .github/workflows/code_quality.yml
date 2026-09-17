@@ -32,6 +32,12 @@ jobs:
                   # turned off rather than left duplicating them at broken paths. `post-pr-comment` is
                   # unaffected and still posts the summary table with the per-inspection breakdown.
                   use-annotations: false
+                  # Publishes the raw report (qodana.sarif.json, logs) as the `qodana-report` artifact.
+                  # Two reasons: findings can be inspected without re-running the scan, and a run on
+                  # main is where .qodana/qodana.sarif.json (the baseline below) is regenerated from.
+                  # The upload happens inside this step, before normalization, so the artifact carries
+                  # the linter's own paths - which is what the baseline must match against.
+                  upload-result: true
               env:
                   QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
             # The cdnet linter reports paths relative to the analyzed solution, and qodana.yaml points
