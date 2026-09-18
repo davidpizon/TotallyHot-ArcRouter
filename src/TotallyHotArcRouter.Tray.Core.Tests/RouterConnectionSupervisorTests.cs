@@ -72,8 +72,13 @@ public sealed class RouterConnectionSupervisorTests
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
         var firstMonitor = supervisor.Monitor;
 
-        var reconnectedCount = 0;
-        supervisor.Reconnected += () => Interlocked.Increment(ref reconnectedCount);
+        // A TaskCompletionSource rather than a counter local: the wait below has to *read* the signal from
+        // inside a closure, and a captured local that another closure mutates is exactly the shape static
+        // analysis flags ("access to modified captured variable"). This reference is never reassigned, so
+        // both closures share one signal without Interlocked/Volatile ceremony, and "it was announced at
+        // least once" is all the assertion ever meant.
+        var reconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        supervisor.Reconnected += () => reconnected.TrySetResult();
 
         // Simulate the router restarting: the session cookie behind the current monitor's client is now
         // rejected on every call, so IsUsable goes false and the supervisor should reconnect.
@@ -84,14 +89,16 @@ public sealed class RouterConnectionSupervisorTests
         // after awaiting the old monitor's disposal - raises Reconnected, so observing the swap does not
         // imply the handler has run. Waiting on the swap and asserting the count immediately left a window
         // exactly as wide as that await, which an idle dev machine closes and a loaded CI runner does not:
-        // it failed on CI with "expected reconnectedCount to be >= 1, but found 0" while passing locally.
+        // it failed on CI with "expected reconnectedCount to be >= 1, but found 0" - the counter this
+        // signal replaced - while passing locally.
         // The supervisor's ordering is deliberate (swap, dispose, announce), so this is the test's
         // assumption to fix, not the product's behaviour.
-        await WaitUntilAsync(() => Volatile.Read(ref reconnectedCount) >= 1, WaitTimeout);
+        await WaitUntilAsync(() => reconnected.Task.IsCompleted, WaitTimeout);
 
         supervisor.Monitor.Should().NotBeSameAs(firstMonitor,
             "a reconnect replaces the monitor as well as announcing itself");
-        Volatile.Read(ref reconnectedCount).Should().BeGreaterThanOrEqualTo(1);
+        reconnected.Task.IsCompletedSuccessfully.Should().BeTrue(
+            "the supervisor announces every reconnect it performs");
     }
 
     private static RoutingGateMonitor FakeMonitor(IRouterChannelProvider provider)
