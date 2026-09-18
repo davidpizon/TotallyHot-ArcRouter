@@ -148,3 +148,66 @@ restart-survival test) and phase P10 (systemd/launchd packaging). Feeds
 [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md) (the management token's new home)
 and [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md) (the CA private key's storage). Related
 existing doc: `docs/router/secrets-at-rest.md`.
+
+---
+
+## Amendment 1 (2026-09-17): the cross-platform guarantee gap has largely closed
+
+**Status:** accepted. Amends the Consequences above; does not change the chosen option, and does not
+re-open Options B, C, or D.
+
+### Why
+
+The Consequences section records this as the decision's main cost:
+
+> Bad, because "protected at rest" now means two different things depending on platform: DPAPI (OS
+> identity-bound encryption) on Windows, versus file-permission-gated Data Protection keys elsewhere.
+
+That framing was accurate when written, and is now largely obsolete — not because anything changed off
+Windows, but because [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) changed
+the Windows side. The Windows store is now sealed with `DataProtectionScope.LocalMachine` rather than
+`CurrentUser`, and because `optionalEntropy` is compiled into the binary rather than secret, the file's
+ACL — not the encryption — is what separates local accounts there. So both platforms now rest on the
+same shape of guarantee: a machine-scoped key that every account on the box can use, plus filesystem
+permissions deciding who reaches the ciphertext at all. The remaining difference is who holds the key
+material (the OS on Windows, a file under `<data-dir>/keys` elsewhere), not what the protection means.
+
+This is worth recording because the gap was cited as a reason to revisit the backend later.
+[T-09](../router/security-hardening-plan.md#t-09--protectedsecretstore-is-windows-only)'s first
+remediation still proposes replacing the Data Protection key ring with libsecret on Linux and Keychain
+on macOS. That should be read as **superseded, not pending**.
+
+### Why Option D stays rejected, more firmly than before
+
+The original rejection of Option D rested on **one code path per concern** — no new dependency, no
+native interop. A stronger reason went unstated and is recorded here because it is the decisive one:
+
+**the router starts before anyone logs in.** It is a boot-time service (LocalSystem on Windows, a
+systemd system unit with a dedicated `arcrouter` user on Linux, a `LaunchDaemon` on macOS — all decided
+above). Linux's Secret Service requires a D-Bus session bus, and the login keyring is unlocked by PAM
+when a human authenticates; a daemon starting at boot has neither. Option D is therefore not merely
+heavier on Linux, it cannot serve this process at all. macOS is the weaker case — its System keychain is
+usable by daemons — but a backend available on one non-Windows platform and not the other is worse than
+one mechanism that works on both, which is the same "one code path per concern" driver reaching the same
+conclusion.
+
+Option B is rejected for a reason this ADR now has direct evidence for rather than only a design
+argument: ADR-0015 exists because a store written per-user was unreadable by the machine-wide service,
+which failed the installer outright. Per-user state and a machine-wide service are not compatible, and
+that is now an observed failure rather than a predicted one.
+
+### What does not change, and the sharper edge that remains
+
+The key ring's fragility, filed above as Neutral, is the real residual cost and is *not* softened by
+ADR-0015:
+
+> the Data Protection key ring must survive process restarts or every previously-saved secret becomes
+> permanently undecryptable
+
+On Windows the machine DPAPI key is the OS's responsibility and survives reinstalls of the router. Off
+Windows, losing `<data-dir>/keys` — a partial backup restore, a container rebuilt without a persistent
+volume, a well-meaning cleanup — makes every stored secret unrecoverable, with no OS-held copy to fall
+back on. ADR-0015's quarantine behavior means the router now starts and regenerates rather than
+crash-looping when that happens, so the failure is survivable, but the secrets themselves are still
+gone. Operators running off Windows should treat that directory as backup-critical; this is the one
+place where the two platforms' guarantees genuinely still differ.

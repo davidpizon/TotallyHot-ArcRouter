@@ -64,14 +64,23 @@ public class ProxyHostedService : IHostedService
     public IReadOnlyCollection<string> Addresses => _proxyServer.Addresses;
 
     /// <summary>
-    /// Starts the proxy server. A port that is already taken is reported as a single actionable line and
+    /// Starts the proxy server. A port that cannot be bound is reported as a single actionable line and
     /// shuts the host down in an orderly way rather than propagating: the proxy is the reason the process
-    /// exists, so there is nothing useful to keep running, and the usual cause is an operator condition
-    /// (a second instance, or the installed Windows service already holding the port) rather than a defect
-    /// - Kestrel's own exception carries several frames of stack that tell an operator nothing they can
-    /// act on, and letting it escape would tear the process down through the "terminated unexpectedly"
-    /// fatal path without stopping the other hosted services first.
+    /// exists, so there is nothing useful to keep running, and the cause is an operator/environment
+    /// condition rather than a defect - Kestrel's own exception carries several frames of stack that tell
+    /// an operator nothing they can act on, and letting it escape would tear the process down through the
+    /// "terminated unexpectedly" fatal path without stopping the other hosted services first.
     /// </summary>
+    /// <remarks>
+    /// The message deliberately states the observation and lists the causes rather than naming one. It
+    /// previously asserted that another router instance was "most likely" already running, which is only
+    /// one possibility and sends an operator looking for a process that may not exist: Windows also hands
+    /// back <c>EADDRINUSE</c> for a port reserved by the Host Network Service (Hyper-V, WSL2, container
+    /// networking), and those reservations appear in neither <c>netstat</c> nor
+    /// <c>netsh interface ipv4 show excludedportrange</c>. A real diagnosis cost several wrong turns on
+    /// exactly that, so the remedy - override the port in the machine-shared <c>appsettings.local.json</c>,
+    /// which survives MSI upgrades - is named in the message itself.
+    /// </remarks>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Proxy Hosted Service is starting.");
@@ -89,7 +98,7 @@ public class ProxyHostedService : IHostedService
             // the gRPC port, so it is quoted rather than reconstructed from the configured values.
             _logger.LogError(
                 message:
-                "The proxy could not start: {Reason} Another TotallyHot ArcRouter instance is most likely already running. Shutting down.",
+                "The proxy could not start: {Reason} Either another TotallyHot ArcRouter instance (or the installed Windows service) already holds that port, or the port is reserved by this machine rather than listened on - the Host Network Service used by Hyper-V, WSL2 and container networking reserves whole TCP ranges that show up in neither netstat nor 'netsh interface ipv4 show excludedportrange'. If nothing is listening on the port, set a free one via Proxy:Port in appsettings.local.json in the machine-shared data directory. Shutting down.",
                 ex.Message);
 
             // A failed start must not report success to whatever launched the process; Program's fatal

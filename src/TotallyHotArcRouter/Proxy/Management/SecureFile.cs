@@ -13,11 +13,27 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// <see cref="ProtectedSecretStore"/> (and any future caller) does not reimplement it.
 /// </summary>
 /// <remarks>
-/// Two audiences, so two entry points. <see cref="WriteRestricted"/> is the per-user form used for secrets
-/// only one OS account ever touches (Windows ACL granting the current user, or POSIX mode 600).
-/// <see cref="WriteMachineShared"/> is the cross-account form for a credential the <c>LocalSystem</c>
-/// service and the interactive-user GUI must both read; see its remarks for why that case exists and what
-/// it costs.
+/// Two audiences, so two entry points, and <b>picking the wrong one is the failure mode this class has
+/// already produced once</b> - see ADR-0015. Choose by asking which OS accounts must read the file, not by
+/// which name sounds stricter.
+/// <list type="bullet">
+/// <item>
+/// <see cref="WriteMachineShared"/> - for a secret in the machine-shared data directory that the
+/// <c>LocalSystem</c> service and an administrator running the router directly must both read. This is what
+/// <see cref="ProtectedSecretStore"/> uses, and the only one with callers today.
+/// </item>
+/// <item>
+/// <see cref="WriteRestricted"/> - the per-user form, granting only the writing account (Windows ACL, or
+/// POSIX mode 600). <b>It currently has no callers.</b> It is retained deliberately rather than deleted as
+/// dead code: <c>docs/router/security-hardening-plan.md</c> prescribes it as the remedy for four separate
+/// findings that have not yet been implemented (the telemetry <c>.pfx</c> and its password fallback, the
+/// operational databases, and <c>model-routing.json</c>), and that plan's own header states its per-finding
+/// statuses have not been re-audited. Do not reach for it merely because a secret feels like it should be
+/// private to one account - if the installed service has to read the file, it must be
+/// <see cref="WriteMachineShared"/>, because the service runs as <c>LocalSystem</c> and a
+/// <see cref="WriteRestricted"/> file written by anyone else is unreadable to it.
+/// </item>
+/// </list>
 /// </remarks>
 internal static class SecureFile
 {
@@ -49,20 +65,31 @@ internal static class SecureFile
     }
 
     /// <summary>
-    /// Creates <paramref name="path"/>, restricts it to machine-wide accounts, and only then writes
-    /// <paramref name="content"/> - the counterpart to <see cref="WriteRestricted"/> for a secret that two
-    /// processes running as <em>different</em> OS accounts must both read.
+    /// Creates <paramref name="path"/>, restricts it to the machine's administrative accounts, and only
+    /// then writes <paramref name="content"/> - the counterpart to <see cref="WriteRestricted"/> for a
+    /// secret that processes running as <em>different</em> OS accounts must both read.
     /// </summary>
     /// <remarks>
     /// The installed configuration runs the router as <c>LocalSystem</c> (see
-    /// <c>TotallyHotArcRouter.Installer/Package.wxs</c>) while the GUI runs as the interactive user, so a
-    /// credential written with <see cref="WriteRestricted"/>'s current-user-only ACL is unreadable by the
-    /// other side - the two processes silently end up with different tokens and every management call comes
-    /// back 401. This grants full control to <c>LocalSystem</c> and the local administrators group (the
-    /// accounts that write it) and read-only access to <c>Users</c> (the interactive account that presents
-    /// it). That deliberately widens the boundary from "one user account" to "any interactive account on
-    /// this machine" - the minimum needed for the cross-account handoff to work at all, and still far
-    /// narrower than the file's default inherited ACL.
+    /// <c>TotallyHotArcRouter.Installer/Package.wxs</c>), but a developer or operator also runs the same exe
+    /// directly as themselves. A secret in the machine-shared data directory written with
+    /// <see cref="WriteRestricted"/>'s current-user-only ACL is therefore unreadable by whichever of the two
+    /// did not create it, and that is not a degraded mode but a hard startup failure: the service exits with
+    /// <see cref="UnauthorizedAccessException"/> and the SCM reports only "failed to start ... verify that
+    /// you have sufficient privileges". That is why <see cref="ProtectedSecretStore"/> must write through
+    /// this method rather than <see cref="WriteRestricted"/>.
+    /// <para>
+    /// Grants full control to <c>LocalSystem</c>, the local administrators group, and the writing account -
+    /// and nothing else. There is deliberately <em>no</em> <c>BUILTIN\Users</c> grant: this method
+    /// originally carried a read-only one so the interactive-user GUI could read the shared management
+    /// token, but ADR-0012 replaced that handoff with a loopback session cookie, so the tray now
+    /// authenticates with no credential of its own (see <c>TrayApplicationContext</c>) and every remaining
+    /// reader of the store runs inside the <c>LocalSystem</c> router process. Holding the ACL at
+    /// administrator-only matters because <see cref="ProtectedSecretStore"/> seals the store with DPAPI's
+    /// <see cref="System.Security.Cryptography.DataProtectionScope.LocalMachine"/> scope and a fixed,
+    /// compiled-in entropy value: that entropy is not a secret, so this ACL - not the encryption - is what
+    /// keeps one local account from reading another's secrets.
+    /// </para>
     /// </remarks>
     /// <param name="path">The file to create and protect.</param>
     /// <param name="content">The secret bytes to write once the file is protected.</param>
@@ -77,10 +104,12 @@ internal static class SecureFile
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             RestrictToMachineAccountsWindows(path);
         else
-            // 0644: owner writes, everyone reads - the POSIX equivalent of the Windows ACL above.
-            File.SetUnixFileMode(
-                path: path,
-                mode: UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+            // 0600, matching the Windows ACL above now that it no longer grants BUILTIN\Users read: off
+            // Windows the store is sealed by the Data Protection key ring (itself mode 0700, see
+            // ProtectedSecretStore.EnsureKeyDirectorySecure) and the only reader is the router process, so
+            // this file has nothing it needs to expose to other accounts. It was 0644 while the Windows side
+            // still granted Users read.
+            File.SetUnixFileMode(path: path, mode: UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
         using var stream = new FileStream(path: path, mode: FileMode.Create, access: FileAccess.Write,
             share: FileShare.None);
@@ -89,16 +118,17 @@ internal static class SecureFile
     }
 
     /// <summary>
-    /// Breaks ACL inheritance on <paramref name="path"/> and grants full control to the writing account,
-    /// <c>LocalSystem</c>, and the local administrators group, plus read-only access to <c>Users</c>.
+    /// Breaks ACL inheritance on <paramref name="path"/> and grants full control to <c>LocalSystem</c>, the
+    /// local administrators group, and the writing account - and to nothing else.
     /// </summary>
     /// <remarks>
-    /// The current-user grant is not redundant with the <c>Users</c> one and must not be dropped: protecting
-    /// the DACL discards the inherited rules that were the writer's only access, and <c>Users</c> is granted
-    /// <see cref="FileSystemRights.Read"/>, so without it the very next step - reopening the file to write
-    /// the secret - fails with <see cref="UnauthorizedAccessException"/> for any writer that isn't
-    /// <c>LocalSystem</c> or an administrator. That is the ordinary case for a developer running the router
-    /// directly rather than as the installed service.
+    /// The current-user grant is load-bearing and must not be dropped: protecting the DACL discards the
+    /// inherited rules that were the writer's only access, so without it the very next step - reopening the
+    /// file to write the secret - fails with <see cref="UnauthorizedAccessException"/> for any writer that
+    /// is not <c>LocalSystem</c> or an administrator, the ordinary case for a developer running the router
+    /// directly rather than as the installed service. This rule was previously documented as non-redundant
+    /// with a <c>BUILTIN\Users</c> read grant; that grant is gone (see <see cref="WriteMachineShared"/>'s
+    /// remarks), which makes this rule the writer's only access rather than merely its write access.
     /// </remarks>
     [SupportedOSPlatform("windows")]
     private static void RestrictToMachineAccountsWindows(string path)
@@ -120,15 +150,9 @@ internal static class SecureFile
             fileSystemRights: FileSystemRights.FullControl,
             type: AccessControlType.Allow));
 
-        // Read, not FullControl: the interactive user presents this credential but never mints it, so write
-        // access would let any local account replace the token the service trusts.
-        security.AddAccessRule(new FileSystemAccessRule(
-            identity: new SecurityIdentifier(sidType: WellKnownSidType.BuiltinUsersSid, null),
-            fileSystemRights: FileSystemRights.Read,
-            type: AccessControlType.Allow));
-
         // See the remarks: without this, a writer who is neither LocalSystem nor an administrator locks
-        // itself out of the file it is in the middle of creating.
+        // itself out of the file it is in the middle of creating. No BUILTIN\Users rule is added - ADR-0012
+        // removed the one reader that needed it.
         if (WindowsIdentity.GetCurrent().User is { } currentUser)
             security.AddAccessRule(new FileSystemAccessRule(
                 identity: currentUser,

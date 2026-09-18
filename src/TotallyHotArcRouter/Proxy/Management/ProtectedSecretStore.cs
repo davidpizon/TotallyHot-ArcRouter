@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.DataProtection;
+using Serilog;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
@@ -70,17 +71,20 @@ public interface ISecretWriter
 /// The whole blob is encrypted as one unit rather than each value individually: that hides the *names*
 /// too - a name like <c>provider:anthropic:header:x-api-key</c> is itself informative - and the data is
 /// small and rarely written, so there is no cost to reading and rewriting all of it per edit. Writes reuse
-/// <see cref="SecureFile.WriteRestricted(string, byte[])"/> - the same create-then-restrict-then-write
+/// <see cref="SecureFile.WriteMachineShared(string, byte[])"/> - the same create-then-restrict-then-write
 /// ordering <see cref="ManagementAccessToken"/> uses - and are additionally serialized by a path-scoped
 /// named <see cref="Mutex"/> so two store instances (the router and GUI processes) editing at once cannot
 /// interleave their read-modify-write cycles and lose an entry.
 /// <para>
-/// <b>Pluggable protector (web GUI migration plan Phase P3).</b> On Windows, the encryption mechanism and
-/// on-disk format are <em>exactly unchanged</em> from before this phase: <see cref="ProtectedData"/> with a
-/// fixed application-specific <c>optionalEntropy</c> (so another process running as the same user cannot
-/// trivially <c>Unprotect</c> the file on its own) and <see cref="DataProtectionScope.CurrentUser"/>,
-/// producing a raw ciphertext blob with no version header - an existing pre-P3 <c>secrets.dat</c> still
-/// reads unmodified. Off Windows, DPAPI does not exist, so <see cref="Write"/> used to throw
+/// <b>Pluggable protector (web GUI migration plan Phase P3).</b> On Windows the store is
+/// <see cref="ProtectedData"/> with a fixed application-specific <c>optionalEntropy</c> (so another process
+/// cannot trivially <c>Unprotect</c> the file on its own), producing a raw ciphertext blob with no version
+/// header. The scope is <see cref="DataProtectionScope.LocalMachine"/>, <em>not</em> the
+/// <see cref="DataProtectionScope.CurrentUser"/> originally used here: Phase P3 moved this file to the
+/// machine-shared directory but left its protection bound to a single user profile, so the installed
+/// <c>LocalSystem</c> service could not read a store written by the interactive user, or the reverse. See
+/// ADR-0015, and <see cref="UnprotectWindows"/> for the in-place migration that change carries. Off
+/// Windows, DPAPI does not exist, so <see cref="Write"/> used to throw
 /// <see cref="PlatformNotSupportedException"/> and every read returned "not found" - callers fell through
 /// to their environment-variable path, honestly degraded rather than silently writing plaintext. That
 /// platform gap is what this phase closes: off Windows, the store now uses ASP.NET Core's Data Protection
@@ -266,24 +270,128 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     /// unreadable file is never distinguished from an empty store - both mean "nothing stored yet" to
     /// every caller.
     /// </summary>
+    /// <remarks>
+    /// The "unreadable means empty" half of that contract is what <see cref="QuarantineUnreadableStore"/>
+    /// implements, and it is load-bearing rather than defensive tidiness: this method used to let a
+    /// <see cref="CryptographicException"/> escape, which failed host startup, which for the installed
+    /// service meant the process aborted and Windows Installer reported only "Service ... failed to start.
+    /// Verify that you have sufficient privileges" - a message naming neither this file nor the real cause.
+    /// A store this process cannot decrypt is recoverable, because every secret in it is machine-generated
+    /// and re-derivable, so it must never be fatal.
+    /// </remarks>
     [SupportedOSPlatform("windows")]
     private Dictionary<string, string> LoadMapWindows()
     {
         if (!File.Exists(_path)) return new Dictionary<string, string>(StringComparer.Ordinal);
 
         var encrypted = File.ReadAllBytes(_path);
-        var json = ProtectedData.Unprotect(encryptedData: encrypted, optionalEntropy: Entropy,
-            scope: DataProtectionScope.CurrentUser);
+
+        byte[] json;
+        try
+        {
+            json = UnprotectWindows(encrypted);
+        }
+        catch (CryptographicException failure)
+        {
+            return QuarantineUnreadableStore(failure);
+        }
+
         return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
                ?? new Dictionary<string, string>(StringComparer.Ordinal);
     }
 
     /// <summary>
-    /// Encrypts and persists <paramref name="map"/> via <see cref="SecureFile.WriteRestricted"/>, so the
-    /// on-disk file is both DPAPI-encrypted and ACL-restricted to the current user - belt and suspenders,
-    /// since DPAPI's <see cref="DataProtectionScope.CurrentUser"/> scope already ties decryption to the
-    /// user's profile, but the ACL also keeps another local account from even reading the ciphertext.
+    /// Decrypts a store blob, preferring the <see cref="DataProtectionScope.LocalMachine"/> scope this build
+    /// writes and falling back to the <see cref="DataProtectionScope.CurrentUser"/> scope written before
+    /// ADR-0015.
     /// </summary>
+    /// <remarks>
+    /// That fallback is what migrates an existing install: a legacy blob still decrypts for the user who
+    /// wrote it, and the next <see cref="SaveMapWindows"/> re-seals the whole map under the machine scope,
+    /// so the store converts in place with nothing lost and no separate migration step to run. Windows
+    /// records the scope inside the blob and largely ignores the scope argument on <c>Unprotect</c>, so the
+    /// first call often succeeds on a legacy blob by itself - this tries both rather than depending on that
+    /// undocumented behavior. When the caller is <em>not</em> the user who wrote a legacy blob - the
+    /// installed service, running as <c>LocalSystem</c> - both attempts fail and
+    /// <see cref="LoadMapWindows"/> quarantines the file instead.
+    /// </remarks>
+    /// <param name="encrypted">The raw on-disk ciphertext.</param>
+    [SupportedOSPlatform("windows")]
+    private static byte[] UnprotectWindows(byte[] encrypted)
+    {
+        try
+        {
+            return ProtectedData.Unprotect(encryptedData: encrypted, optionalEntropy: Entropy,
+                scope: DataProtectionScope.LocalMachine);
+        }
+        catch (CryptographicException)
+        {
+            return ProtectedData.Unprotect(encryptedData: encrypted, optionalEntropy: Entropy,
+                scope: DataProtectionScope.CurrentUser);
+        }
+    }
+
+    /// <summary>
+    /// Renames a store file this process cannot decrypt out of the way and reports an empty store, so the
+    /// caller regenerates what it needs instead of failing startup.
+    /// </summary>
+    /// <remarks>
+    /// The file is preserved under a unique <c>.unreadable-*</c> name rather than deleted: this account
+    /// cannot read it, but the account that wrote it may still be able to, and silently destroying the only
+    /// copy to reclaim a few hundred bytes is never the right trade. That guarantee is why the name carries
+    /// a random suffix as well as a timestamp, and why the move does <em>not</em> pass
+    /// <c>overwrite: true</c> - a second decrypt failure inside the same second, or two processes racing,
+    /// would otherwise land on the name the first one used and destroy exactly the copy this method exists
+    /// to keep. Quarantined files therefore accumulate rather than replace one another; each is a few
+    /// hundred bytes, which is the cheaper side of that trade by a wide margin. Moving it aside rather than leaving it
+    /// in place is also what keeps the next write from overwriting it, and what stops this from re-logging on
+    /// every subsequent read. If the move itself fails the store is still reported empty - a host that cannot
+    /// start is strictly worse than one that regenerates its secrets - but that case logs at error, because
+    /// the next write will then overwrite a file nobody has recovered.
+    /// </remarks>
+    /// <param name="failure">The decryption failure, logged as the reason the store was set aside.</param>
+    private Dictionary<string, string> QuarantineUnreadableStore(CryptographicException failure)
+    {
+        // Timestamp for legibility, random suffix for uniqueness - see the remarks on why this must never
+        // reuse a name.
+        var quarantinePath =
+            $"{_path}.unreadable-{DateTime.UtcNow:yyyyMMddTHHmmssZ}-{Guid.NewGuid().ToString("N")[..8]}";
+
+        try
+        {
+            // No overwrite: if this name somehow already exists, failing (and logging below) is correct,
+            // because the alternative is deleting an earlier quarantined store.
+            File.Move(sourceFileName: _path, destFileName: quarantinePath);
+            Log.Warning(exception: failure,
+                messageTemplate:
+                "Could not decrypt the protected secret store at {StorePath}; it has been moved to {QuarantinePath} and this process is starting with an empty store. Secrets held there are regenerated, which for the local CA means clients must trust the new certificate.",
+                propertyValue0: _path, propertyValue1: quarantinePath);
+        }
+        catch (Exception moveFailure) when (moveFailure is IOException or UnauthorizedAccessException)
+        {
+            Log.Error(exception: moveFailure,
+                messageTemplate:
+                "Could not decrypt the protected secret store at {StorePath}, and could not move it aside; continuing with an empty store, so the next write overwrites the existing file.",
+                propertyValue: _path);
+        }
+
+        return new Dictionary<string, string>(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Encrypts and persists <paramref name="map"/> via <see cref="SecureFile.WriteMachineShared"/>, so the
+    /// on-disk file is DPAPI-encrypted and ACL-restricted to <c>LocalSystem</c>, the local administrators
+    /// group, and the writing account.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the per-user scheme this replaced, the ACL here is doing the real work rather than backing up
+    /// the encryption. <see cref="DataProtectionScope.LocalMachine"/> means any account that can read the
+    /// bytes can also decrypt them - <see cref="Entropy"/> is compiled into the binary and so is not a
+    /// secret - which is precisely why <see cref="SecureFile.WriteMachineShared"/> grants no
+    /// <c>BUILTIN\Users</c> access. The machine scope is not optional: this store lives in the
+    /// machine-shared data directory and is read both by the service running as <c>LocalSystem</c> and by an
+    /// administrator running the same exe directly, and no one user profile's key can serve both.
+    /// </remarks>
     [SupportedOSPlatform("windows")]
     private void SaveMapWindows(Dictionary<string, string> map)
     {
@@ -292,7 +400,7 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
 
         var json = JsonSerializer.SerializeToUtf8Bytes(value: map, options: SerializerOptions);
         var encrypted = ProtectedData.Protect(userData: json, optionalEntropy: Entropy,
-            scope: DataProtectionScope.CurrentUser);
+            scope: DataProtectionScope.LocalMachine);
 
         WriteAtomically(encrypted);
     }
@@ -345,14 +453,14 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
 
     /// <summary>
     /// Writes <paramref name="content"/> to a temp file in the store's directory via
-    /// <see cref="SecureFile.WriteRestricted"/>, then atomically renames it over <see cref="_path"/>. A
+    /// <see cref="SecureFile.WriteMachineShared"/>, then atomically renames it over <see cref="_path"/>. A
     /// crash mid-write leaves the temp file orphaned rather than truncating <c>secrets.dat</c>, which
     /// would otherwise read back as "every secret is gone".
     /// </summary>
     private void WriteAtomically(byte[] content)
     {
         var tempPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        SecureFile.WriteRestricted(path: tempPath, content: content);
+        SecureFile.WriteMachineShared(path: tempPath, content: content);
         File.Move(sourceFileName: tempPath, destFileName: _path, true);
     }
 

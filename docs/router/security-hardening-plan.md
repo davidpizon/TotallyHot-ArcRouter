@@ -138,6 +138,18 @@ a later change does not undo them by accident.
 
 Ordered by remediation priority (`Today` severity first, `Exposed` as tiebreak).
 
+> **T-06, T-07, T-09 and T-10 were re-audited against the tree on 2026-09-17.** Each now carries its own
+> status block stating what is resolved, what is superseded, and what is still open, with `file:line`
+> evidence. Three of the four had **stale Evidence or Impact text that overstated the current risk** — the
+> plaintext password fallback in T-06, the "no configured retention policy" claim in T-07, and T-09's
+> premise that `ProtectedSecretStore` throws off Windows are all no longer true. The original text is kept
+> and relabelled rather than deleted, because it is the record of why the work happened. None of the four
+> is fully closed, so none is struck from this table outright.
+>
+> **Every other finding here remains unverified** in the sense the document header describes. The trigger
+> for this pass was narrow: all four were reached from `SecureFile.WriteRestricted` having no callers, and
+> the pass answered only whether deleting it was safe (it is not — four open items still name it).
+
 > **T-11, T-12, and T-18 are closed as no longer applicable.** All three were findings about the
 > sandboxed executor that ran model-generated code. That executor was removed outright — see
 > [`quality-verifier-architecture.md`](quality-verifier-architecture.md) — and nothing replaces it, so
@@ -155,16 +167,16 @@ Ordered by remediation priority (`Today` severity first, `Exposed` as tiebreak).
 | [T-04](#t-04--management-auth-fails-open-on-a-blankmissing-token) | Management auth fails **open** on blank/missing token | **High** | Critical | CWE-636, CWE-1188 | 2 |
 | [T-13](#t-13--upstream-text-is-promoted-into-executable-tool_calls) | Upstream text promoted into structured `tool_calls` | **High** | High | CWE-74, CWE-807 | 3 |
 | [T-05](#t-05--client-headers-are-forwarded-upstream-on-a-denylist) | Client headers forwarded upstream on a denylist | **Medium** | High | CWE-644 | 2 |
-| [T-06](#t-06--tls-certificate-password-written-plaintext-and-unrestricted-on-posix) | Cert password plaintext + unrestricted on POSIX | **Medium** | Medium | CWE-256, CWE-732 | 2 |
+| [T-06](#t-06--tls-certificate-password-written-plaintext-and-unrestricted-on-posix) | ~~Cert password plaintext~~ **RESOLVED**; residual: `.pfx` write unrestricted | **Medium** | Medium | CWE-256, CWE-732 | 2 |
 | [T-14](#t-14--router-memory-is-poisonable-by-unauthenticated-traffic) | Router memory poisonable by unauthenticated traffic | **Medium** | High | CWE-349 | 3 |
 | [T-15](#t-15--no-rate-limiting-or-cost-ceiling-on-the-inference-path) | No rate limit / cost ceiling on the inference path | **Medium** | High | CWE-770 | 3 |
-| [T-07](#t-07--telemetry-database-holds-prompt-and-response-text-unprotected) | Telemetry DB holds prompt/response text unprotected | **Medium** | Medium | CWE-311, CWE-532 | 4 |
+| [T-07](#t-07--telemetry-database-holds-prompt-and-response-text-unprotected) | Telemetry DB holds prompt/response text unprotected — retention **RESOLVED**; file perms + opt-in default open | **Medium** | Medium | CWE-311, CWE-532 | 4 |
 | [T-16](#t-16--output-redactor-misses-common-key-formats) | Output redactor misses Anthropic/Google key formats | **Medium** | Medium | CWE-532 | 2 |
 | [T-08](#t-08--management-token-has-no-rotation-and-no-provenance-check) | Management token has no rotation, no provenance check | **Medium** | High | CWE-798, CWE-613 | 4 |
 | [T-17](#t-17--client-supplied-tool-schemas-are-injected-into-the-system-prompt) | Client tool schemas injected verbatim into system prompt | **Medium** | Medium | CWE-74 | 3 |
-| [T-09](#t-09--protectedsecretstore-is-windows-only) | `ProtectedSecretStore` is Windows-only | **Medium** | Medium | CWE-311 | 4 |
+| [T-09](#t-09--protectedsecretstore-is-windows-only) | ~~`ProtectedSecretStore` is Windows-only~~ — **headline RESOLVED** (ADR-0014); residual: `model-routing.json` unrestricted, no startup warning | **Medium** | Medium | CWE-311 | 4 |
 | [T-18](#t-18--jail-working-directory-and-interpreter-path-are-not-hardened) | ~~Jail workdir permissions + PATH-resolved interpreters~~ — **CLOSED, not applicable** | ~~Medium~~ | — | CWE-732, CWE-426 | — |
-| [T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard) | `.pfx` private key unrestricted; GUID-derived password | **Low** | Medium | CWE-732, CWE-330 | 4 |
+| [T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard) | `.pfx` private key unrestricted; GUID-derived password — **open, now 3 files** incl. the machine-trusted CA | **Low** | Medium | CWE-732, CWE-330 | 4 |
 | [T-19](#t-19--unbounded-per-request-response-buffering) | Unbounded per-request response buffering (4 MB × N) | **Low** | Medium | CWE-770 | 4 |
 
 ---
@@ -666,7 +678,22 @@ failure is what turns that finding from "contained disclosure" into "logged disc
 
 **Today: Medium · Exposed: Medium · CWE-256, CWE-732**
 
-**Evidence.**
+> **Status (re-audited 2026-09-17).** The password half is **resolved**; the `.pfx` half is **open**. The
+> Evidence below quotes a `catch (PlatformNotSupportedException) { File.WriteAllText(...) }` fallback that
+> no longer exists.
+>
+> | Item | Status | Basis |
+> |---|---|---|
+> | Headline (password written plaintext) | **Resolved** | `StorePassword` writes only to the protected store ([`TelemetryTlsCertificate.cs:157`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs)). `TryResolvePassword` reads a legacy plaintext file once, migrates it into the store and deletes it, and its comment states it deliberately no longer catches `PlatformNotSupportedException`. Enabled by [T-09](#t-09--protectedsecretstore-is-windows-only)'s resolution: there is now a store on every platform to write to. |
+> | Remediation 1 — password through `SecureFile` | **Resolved** (superseded) | No longer applicable in the form written: the password is not in a file at all, which is stronger than the mode `0600` the acceptance criteria asked for. |
+> | Remediation 1 — `.pfx` through `SecureFile.WriteRestricted` | **Open** | [`TelemetryTlsCertificate.cs:119`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs) is still a bare `File.WriteAllBytes`. Tracked jointly with [T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard), which covers the same write plus two more `.pfx` files. |
+> | Remediation 2 — GUI pins the thumbprint | **Open, and materially de-risked** | No client pins a thumbprint; there is no `ServerCertificateCustomValidationCallback` anywhere in `src/`. But the Impact's premise — that the GUI "trusts any certificate presenting `CN=localhost`" — no longer describes the deployment: [ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md) has the router present a leaf chaining to a machine-trusted local CA carrying RFC 5280 name constraints, so ordinary chain validation applies. `CaThumbprint` is also already published for clients that want to pin ([`ProxyHostedService.cs:116-118`](../../src/TotallyHotArcRouter/Hosting/ProxyHostedService.cs)). Remaining pinning value is defence-in-depth against an attacker who can already install a trust-store root, which requires administrator rights. |
+>
+> Acceptance criteria: `telemetry-cert-pwd.txt` no longer exists at all, which exceeds the "mode `0600`"
+> bar. `telemetry-cert.pfx` is **not** mode `0600`. No test asserts a client rejects a foreign
+> `CN=localhost` certificate.
+
+**Evidence (as of the original audit; see status block above — the quoted fallback no longer exists).**
 
 ```csharp
 // src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs:139-149
@@ -950,7 +977,24 @@ Lower-urgency items that reduce standing exposure and make the system auditable.
 
 **Today: Medium · Exposed: Medium · CWE-311, CWE-532**
 
-**Evidence.** `Storage:DatabasePath` resolves to
+> **Status (re-audited 2026-09-17).** The file-permission half is **open**; retention is **resolved**; the
+> opt-in default is **open and contradicted by this finding's own text**.
+>
+> | Item | Status | Basis |
+> |---|---|---|
+> | Remediation 1 — restrict the database file | **Open** | No permission hardening reaches `agent_telemetry.db` or `transcripts.db`. The only `SetUnixFileMode` in production code is the Data Protection key directory ([`ProtectedSecretStore.cs:492`](../../src/TotallyHotArcRouter/Proxy/Management/ProtectedSecretStore.cs)); no `SetAccessControl` or `SecureFile` call touches a database. One of the four open items that keep `SecureFile.WriteRestricted` in the tree. |
+> | Remediation 2 — retention window + background prune | **Resolved** | `TranscriptOptions.RetentionDays` defaults to **30 days** — exactly what this remediation proposed — enforced by `TranscriptRetentionService`, registered at [`ServiceCollectionExtensions.cs:165`](../../src/TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs), plus a row-count cap. The usage ledger has its own `StorageOptions.UsageLedgerRetentionDays`, defaulting to 370 days (a year plus margin, deliberately longer for billing reconciliation rather than an oversight). **The Impact below is therefore wrong where it says the data "is retained indefinitely with no configured retention policy."** |
+> | Remediation 3 — `Telemetry:CaptureMessageText`, default off | **Open** | No such option exists. The nearest gate is `TranscriptOptions.Enabled`, which **defaults to `true`**, so text capture is opt-*out*. **The Evidence paragraph below contradicts the code where it calls prompt-text capture "opt-in."** It is overridable at runtime via the `router_settings` table, so an operator can turn it off without a restart — but the default is on. |
+> | Remediation 4 — redact before persistence | **Open** | Redaction exists only on logging paths (`LogRedaction.Sanitize`, called from `ProxyMiddleware`, `BedrockInvocationHandler`, `LocalEndpointResponder`); nothing redacts before a transcript row is written. Note this remediation names a type, `OutputRedactor`, that **does not exist in the tree** — the actual type is `LogRedaction`, so [T-16](#t-16--output-redactor-misses-common-key-formats) should be read as concerning that. |
+>
+> Acceptance criteria: the database file is **not** user-restricted on either platform; there is no
+> `CaptureMessageText` flag to set false; the retention criterion **is** met, with a test.
+>
+> Net effect: the residual risk is narrower than the finding reads, but its most privacy-relevant claim —
+> that capture is opt-in — is the one that is false, and it is the kind of statement someone would rely on
+> when deciding whether this tool is safe to point at production prompts.
+
+**Evidence (as of the original audit; see status block above — the retention and opt-in claims are no longer accurate).** `Storage:DatabasePath` resolves to
 `%ProgramData%\TotallyHotArcRouter\agent_telemetry.db`. `RequestTextExtractor`,
 `ResponseTextExtractor`, and `TextTruncator` capture prompt and completion text into the usage
 ledger and telemetry stream. The database is created with default permissions — it does not go
@@ -1037,7 +1081,24 @@ weakness for revocation: there is no way to invalidate it.
 
 **Today: Medium · Exposed: Medium · CWE-311**
 
-**Evidence.** Every operation is gated on `OperatingSystem.IsWindows()`
+> **Status (re-audited 2026-09-17).** The headline finding is **resolved**; the Evidence below is stale
+> and retained only as the historical record of why the work happened. Per-item:
+>
+> | Item | Status | Basis |
+> |---|---|---|
+> | Headline ("Windows-only") | **Resolved** | Web GUI migration Phase P3 / [ADR-0014](../adr/0014-cross-platform-service-layout-and-secret-backend.md) added the ASP.NET Core Data Protection backend. `Write` no longer throws off Windows; no operation is gated on `OperatingSystem.IsWindows()` returning `true`. |
+> | Remediation 1 — libsecret / Keychain | **Superseded — do not implement** | [ADR-0014](../adr/0014-cross-platform-service-layout-and-secret-backend.md) considered this as Option D and rejected it; [Amendment 1](../adr/0014-cross-platform-service-layout-and-secret-backend.md#amendment-1-2026-09-17-the-cross-platform-guarantee-gap-has-largely-closed) records the decisive reason: the router is a boot-time service, Linux's Secret Service needs a D-Bus session and a PAM-unlocked keyring, and a daemon starting at boot has neither. |
+> | Remediation 2 — `model-routing.json` mode `0600` | **Open** | Written with a bare `File.WriteAllTextAsync` at [`ProviderConfigStore.cs:382`](../../src/TotallyHotArcRouter/Proxy/ProviderConfigStore.cs) — no mode, no ACL, on any platform. This is the finding's live half, and one of four open items that keep `SecureFile.WriteRestricted` in the tree despite it having no callers. |
+> | Remediation 3 — startup warning | **Open** | No such warning exists. Lower value than when written, since the store now protects secrets on every platform, but a provider header may still hold a plaintext `Value` literal in `model-routing.json`, so naming those at startup still has a purpose. |
+>
+> Acceptance criteria: neither is met. `model-routing.json` is not mode `0600` after a credential write,
+> and no startup warning enumerates unprotected credential names.
+>
+> One premise in **Impact** below also no longer holds: it says T-06 and T-10 "have no store to fall back
+> to on POSIX." They do now. T-06's password half is fixed as a direct result; T-10 remains open for
+> unrelated reasons (the `.pfx` files' own permissions and password generation).
+
+**Evidence (as of the original audit; see status block above — no longer accurate).** Every operation is gated on `OperatingSystem.IsWindows()`
 ([`ProtectedSecretStore.cs:108, 134, 148, 171, 187`](../../src/TotallyHotArcRouter/Proxy/Management/ProtectedSecretStore.cs)):
 `TryRead` returns `false`, `Write` throws, `Delete`/`Exists` return `false`, `DeleteByPrefix`
 returns `0`.
@@ -1073,7 +1134,33 @@ in `model-routing.json`.
 
 **Today: Low · Exposed: Medium · CWE-732, CWE-330**
 
-**Evidence.**
+> **Status (re-audited 2026-09-17).** Both remediations are **open**, and the finding is **wider than
+> written**: it predates [ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md), so the same
+> two defects now apply to three `.pfx` files rather than one.
+>
+> | File | GUID-derived password | Unrestricted write |
+> |---|---|---|
+> | `telemetry-cert.pfx` | [`TelemetryTlsCertificate.cs:116`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs) | [`TelemetryTlsCertificate.cs:119`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs) |
+> | `router-ca.pfx` | [`LocalCertificateAuthority.cs:247`](../../src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs) | [`LocalCertificateAuthority.cs:251`](../../src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs) |
+> | `router-leaf.pfx` | same helper (`PersistAndReload`) | same helper |
+>
+> `router-ca.pfx` is the material case and did not exist when this was filed: it is the private key of a CA
+> **trusted machine-wide**, so reading it together with its password is enough to mint a certificate any
+> client on the box will accept for `localhost`.
+>
+> **Partially mitigated as of [ADR-0015](../adr/0015-machine-scoped-protection-for-the-shared-secret-store.md).**
+> All three passwords live in `secrets.dat`, whose ACL is now `LocalSystem` + `Administrators` + the writing
+> account, with no `BUILTIN\Users` rule. Because `%ProgramData%`'s inherited ACL grants `Users` read, a
+> non-administrator can still read the `.pfx` bytes but can no longer read the password that opens them.
+> That moves exploitability from "any local account" to "any administrator" — a real reduction, and the
+> reason this stays **Low** today — but it is a mitigation at the wrong layer. The `.pfx` files themselves
+> are still world-readable on the machine and should carry their own restriction.
+>
+> Acceptance criteria: neither is met. No `.pfx` is user-restricted on either platform, and password
+> generation still does not share a primitive with `ManagementAccessToken.GenerateToken`
+> (`RandomNumberGenerator.GetBytes(32)` versus `Guid.NewGuid().ToString("N")`).
+
+**Evidence (as of the original audit; see status block above — now applies to three `.pfx` files, not one).**
 
 ```csharp
 // src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs:95-98

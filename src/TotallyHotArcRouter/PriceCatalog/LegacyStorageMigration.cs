@@ -37,11 +37,21 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// re-polls, the benchmark corpus re-downloads, both voter models retrain) or non-essential to serving
 /// traffic, so a migration that cannot complete must degrade to "start fresh" rather than abort startup.
 /// </para>
+/// <para>
+/// <c>router_embedding_memory.db</c> deliberately does <em>not</em> migrate here, even though it relocated
+/// for the same reason. Its <c>EnsureCreated</c> runs while the DI container is still being built - it is
+/// reached from <see cref="Router.RouterSettingsStore"/>'s constructor - which is strictly before this
+/// method's own hosted service starts, so a migration placed here would always find an
+/// already-created empty destination and correctly decline to touch it.
+/// <see cref="Router.RouterMemoryDatabase.EnsureCreated"/> therefore performs that one adoption itself, at
+/// the only point where the ordering is guaranteed, reusing <see cref="CopyDatabase"/> so the WAL-safe copy
+/// is not reimplemented.
+/// </para>
 /// </remarks>
 public static class LegacyStorageMigration
 {
     /// <summary>The suffix a successfully adopted legacy file is renamed with, so it is never adopted twice.</summary>
-    private const string MigratedSuffix = ".migrated";
+    internal const string MigratedSuffix = ".migrated";
 
     /// <summary>
     /// Adopts any legacy copy of the five <see cref="StorageOptions"/> files whose destination does not
@@ -83,6 +93,7 @@ public static class LegacyStorageMigration
             migrated += Migrate(
                 destinationPath: Path.Combine(AppDataPaths.ResolveMachineSharedDirectory(), "telemetry-cert.pfx"),
                 fileName: "telemetry-cert.pfx", false, logger: logger);
+
         }
 
         return migrated;
