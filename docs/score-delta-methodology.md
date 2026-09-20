@@ -64,7 +64,8 @@ flowchart LR
 
 ## Reward
 
-Every comparison in this document uses the paper's cost-aware reward
+The two reward-based figures above - estimated regret and CumReg - use the paper's cost-aware
+reward
 
 $$r = \varepsilon_1\, s + \varepsilon_2\, \kappa$$
 
