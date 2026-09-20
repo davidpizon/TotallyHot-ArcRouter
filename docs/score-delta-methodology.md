@@ -94,10 +94,10 @@ well as utility turns, so the ledger includes requests whose selection never con
 
 Retuning \(\varepsilon_2\) therefore does **not** make every live decision optimize the same numeric
 reward the report card scores. It cannot: the two sides multiply \(\varepsilon_2\) by values in
-different units, and the default Orchestrator/Agent path never reads the weights at all — it is
-cost-blind, with cost entering only as accounting after the fact
-([`how-it-learns.md`](how-it-learns.md), "So where does cost actually come in?"). What the two share is the *form* of
-\(r\), not one objective function.
+different units, and most traffic never consults them at all. What the two share is the *form* of
+\(r\), not one objective function — cost reaches selection only on the utility path, and reaches
+everything else purely as accounting after the fact ([`how-it-learns.md`](how-it-learns.md), "So where
+does cost actually come in?").
 
 The scalar is computed by one static function:
 
