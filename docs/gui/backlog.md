@@ -50,9 +50,11 @@ data sources in
   `dim_best` voter alone would have chosen, which the router already decides on every request and now
   persists (`request_transcripts.dim_best_model`). `TaxonomyComparisonService` prices that
   counterfactual from the baseline model's own observed-average token counts and stores the net figure;
-  the tab polls `GET /admin/usage/routing-roi` every 30 seconds. Two fabricated inputs were deleted with
-  it — the baseline reconstructed from a cost-reduction percentage, and the invented `$2.50/M`
-  remediation rate for turns reporting no ROI. Every figure is labeled an estimate in its own tooltip,
+  the tab polls the `UsageAdminService.GetRoutingRoi` gRPC call every 30 seconds (the plain-HTTP
+  `/admin/usage/*` REST surface this originally shipped on has since been replaced by
+  `UsageAdminGrpcService`). Two fabricated inputs were deleted with it — the baseline reconstructed
+  from a cost-reduction percentage, and the invented `$2.50/M` remediation rate for turns reporting no
+  ROI. Every figure is labeled an estimate in its own tooltip,
   since the counterfactual model's real token count for a given request is never observed; a turn with
   no counterfactual is skipped rather than drawn at zero. Note this did **not** wire per-turn
   `ConversationTurn.RoutingRoi` (the Sessions turn card's percentage), which stays at 0 for live
@@ -80,9 +82,9 @@ data sources in
   `UsageStore.LoadSummaryAsync("all")`. Total Saved and Avg. Cost Reduction stay mock and are still
   labeled "(demo)". The blocker named here originally — the missing baseline-cost concept — is now
   resolved by Phase T4's `dim_best` counterfactual (see the resolved Routing ROI item above), so these
-  two could be sourced from `GET /admin/usage/routing-roi` the same way the chart is. Phase T4 did not
-  do it: the ticker is a separate surface with its own aggregation, and repointing it was outside that
-  phase's scope. This is now a small, unblocked follow-up rather than a deferred one.
+  two could be sourced from the `UsageAdminService.GetRoutingRoi` gRPC call the same way the chart is.
+  Phase T4 did not do it: the ticker is a separate surface with its own aggregation, and repointing it
+  was outside that phase's scope. This is now a small, unblocked follow-up rather than a deferred one.
 - ~~**Dynamic chart axis ranges**~~ **Done** for Model Distribution's token histogram
   (`GroupedBarsModel.DynamicYMax`, Phase 4 §5.15) — computed from the actual data with headroom
   instead of a hardcoded 6M ceiling. The $0–$160 Cost Analytics savings scale is unaffected (that
