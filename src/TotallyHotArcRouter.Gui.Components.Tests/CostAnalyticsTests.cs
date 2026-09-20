@@ -66,6 +66,10 @@ public sealed class CostAnalyticsTests
                 var link = cut.Find("a");
                 link.TextContent.Trim().Should().Be("Methodology");
                 link.GetAttribute("href").Should().Be(ProductDocs.ScoreDeltaMethodologyUrl);
+                // .ds-doc-link, not a bare `underline` utility: app.css is a committed, tree-shaken
+                // Tailwind build that ships no underline/underline-offset rule, so styling the
+                // citation with utilities alone renders it as unclickable-looking plain text.
+                link.ClassList.Should().Contain("ds-doc-link");
             },
             timeout: WaitTimeout);
     }

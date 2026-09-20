@@ -162,12 +162,17 @@ public sealed class RegretHarnessAdminTests
 
     /// <summary>
     /// Asserts the pane cites the public score-delta methodology (docs/score-delta-methodology.md)
-    /// rather than describing the formula in the chrome itself.
+    /// rather than describing the formula in the chrome itself, and that the citation carries
+    /// <c>.ds-doc-link</c> so it actually reads as a link. The underline matters more here than
+    /// anywhere else in the app: this anchor sits directly beside the "Regret Harness" label at the
+    /// same size and color, so without it the two are indistinguishable. A bare `underline` utility
+    /// cannot supply it - app.css is a committed, tree-shaken Tailwind build with no such rule.
     /// </summary>
     private static void AssertMethodologyLink(IRenderedComponent<RegretHarnessAdmin> cut)
     {
         var link = cut.FindAll("a").First(a => a.TextContent.Contains("Methodology", StringComparison.Ordinal));
         link.GetAttribute("href").Should().Be(ProductDocs.ScoreDeltaMethodologyUrl);
+        link.ClassList.Should().Contain("ds-doc-link");
     }
 
     private sealed class FakeClient(RegretHarnessStatusInfo? status = null) : IRegretHarnessAdminClient
