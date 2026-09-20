@@ -65,7 +65,7 @@ public sealed class CostAnalyticsTests
     [Fact]
     public async Task Switching_metric_updates_the_chart_title()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
             p.Add(parameterSelector: c => c.Conversations, value: []));
@@ -75,21 +75,22 @@ public sealed class CostAnalyticsTests
         // an event handler ID the re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
         await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
 
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Stepped cumulative cost"),
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Stepped cumulative cost"),
             timeout: WaitTimeout);
     }
 
     [Fact]
     public async Task Switching_range_updates_the_range_caption()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
             p.Add(parameterSelector: c => c.Conversations, value: []));
         // See Switching_metric_updates_the_chart_title's remarks on why this is InvokeAsync-wrapped.
         await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Day").Click());
 
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Past 24 hours"), timeout: WaitTimeout);
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Past 24 hours"),
+            timeout: WaitTimeout);
     }
 
     [Fact]
@@ -120,11 +121,12 @@ public sealed class CostAnalyticsTests
     [Fact]
     public async Task Selecting_a_session_from_the_dropdown_scopes_the_chart()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var conversations = new[] { MakeLiveConversation() };
         var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: conversations));
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Live Session"), timeout: WaitTimeout);
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Live Session"),
+            timeout: WaitTimeout);
 
         // See Switching_metric_updates_the_chart_title's remarks on why this is InvokeAsync-wrapped -
         // Change() dispatches an event the same way Click() does, so it races the same background

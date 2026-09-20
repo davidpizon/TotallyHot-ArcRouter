@@ -145,17 +145,16 @@ public sealed class RegretHarnessAdminTests
                         Message: "Completed.", RanAtUtc: DateTimeOffset.UtcNow, Splits: []))
             ]
         };
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
         var cut = ctx.Render<RegretHarnessAdmin>();
 
         cut.FindAll("button").Single(b => b.TextContent.Trim() == "Run").Click();
-        cut.WaitForState(() => cut.Markup.Contains("Embedding the OOD split"));
+        await cut.WaitForStateAsync(() => cut.Markup.Contains("Embedding the OOD split"));
 
         cut.Markup.Should().Contain("Embedding the OOD split");
 
         gate.SetResult(true);
-        cut.WaitForState(() => cut.Markup.Contains("Completed."));
-        await Task.CompletedTask;
+        await cut.WaitForStateAsync(() => cut.Markup.Contains("Completed."));
     }
 
     private sealed class FakeClient(RegretHarnessStatusInfo? status = null) : IRegretHarnessAdminClient
