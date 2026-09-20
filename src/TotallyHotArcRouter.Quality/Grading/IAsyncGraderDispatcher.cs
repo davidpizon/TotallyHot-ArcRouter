@@ -30,7 +30,7 @@ public interface IAsyncGraderDispatcher
     /// <returns>
     /// The subset of <paramref name="pendingGraderKeys"/> actually dispatched. Every key not returned is
     /// abandoned by the caller immediately rather than waiting out the full join timeout for a grade that
-    /// was never requested - the same reasoning <see cref="IQualityScoreAggregator.AbandonJudgeAsync"/>
+    /// was never requested - the same reasoning <see cref="IQualityScoreAggregator.AbandonGraderAsync"/>
     /// already documents. Returning an empty set is always safe; returning a key not present in
     /// <paramref name="pendingGraderKeys"/> has no effect.
     /// </returns>

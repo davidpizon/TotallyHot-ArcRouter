@@ -35,7 +35,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TotallyHotArcRouter.Quality\TotallyHotArcRouter.Quality.csproj" />
-    <ProjectReference Include="..\TotallyHotArcRouter\TotallyHotArcRouter.csproj" />
   </ItemGroup>
 
   <ItemGroup>

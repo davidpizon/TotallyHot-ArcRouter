@@ -1,10 +1,11 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 
-namespace TotallyHot.ArcRouter.Quality.Tests;
+namespace TotallyHot.ArcRouter.Tests.Router;
 
 /// <summary>Covers the host adapter that writes quality scores into router memory under a live namespace.</summary>
 public class RouterMemoryScoreObserverTests

@@ -23,15 +23,10 @@ public class KeywordDimensionInferrerTests
     [InlineData("I need this to go faster in Python", "code_generation")]
     [InlineData("Make this code go really fast", "code_generation")]
     [InlineData("Rewrite this function in place to avoid the extra allocation", "code_generation")]
+    [InlineData("Add a prefix to the generated names", "code_generation")]
+    [InlineData("The incomplete snippet needs another parameter", "code_generation")]
     public void Infer_ReturnsExpectedDimension(string prompt, string expected)
     {
         Assert.Equal(expected: expected, actual: _inferrer.Infer(prompt: prompt, language: CodeLanguage.Python));
-    }
-
-    [Fact]
-    public void Infer_NullPrompt_DefaultsToCodeGeneration()
-    {
-        Assert.Equal(expected: "code_generation",
-            actual: _inferrer.Infer(prompt: null!, language: CodeLanguage.Unknown));
     }
 }

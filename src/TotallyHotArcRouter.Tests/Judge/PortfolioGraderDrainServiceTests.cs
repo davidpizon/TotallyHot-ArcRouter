@@ -189,18 +189,6 @@ public class PortfolioGraderDrainServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(false);
-        }
-
-        public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(false);
-        }
-
         public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
             CancellationToken cancellationToken = default)
         {
