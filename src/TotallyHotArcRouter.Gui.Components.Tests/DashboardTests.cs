@@ -74,7 +74,7 @@ public sealed class DashboardTests
         await cut.InvokeAsync(() =>
             cut.FindAll("nav button").First(b => b.TextContent.Contains("Report Card")).Click());
 
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Spend by Model"),
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Spend by Model"),
             timeout: TimeSpan.FromSeconds(6));
     }
 
