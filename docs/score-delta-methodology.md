@@ -75,10 +75,24 @@ with the shipped defaults \((\varepsilon_1, \varepsilon_2) = (1, -0.1)\):
 - Offline: [`RewardWeights.Canonical`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RewardWeights.cs)
 
 \(\varepsilon_2\) is negative by convention, so a higher cost lowers reward. The live comparison
-reads whatever values are currently bound — an operator who changes the weights changes the
-report card, on purpose, so the figure and the selection criterion cannot disagree about what
-"better" means. The offline harness always uses the canonical pair so its tables stay comparable
-to the paper.
+reads whatever values are currently bound, so an operator who changes the weights changes the
+report card on purpose. The offline harness always uses the canonical pair so its tables stay
+comparable to the paper.
+
+**The weights are not a single system-wide objective.** Exactly two production call sites read
+\(\varepsilon_1\)/\(\varepsilon_2\), and they do not apply them to the same quantity:
+
+| Call site | \(\kappa\) is | Role |
+|---|---|---|
+| [`UtilityRoutingPolicy`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Router/UtilityRoutingPolicy.cs) | a **blended catalog rate** in USD per 1M tokens — `(input + output) / 2` | selection |
+| `TaxonomyComparisonService` → `RewardWeights.ComputeEstimatedRegret` | this request's **own cost**, in USD | accounting |
+
+Retuning \(\varepsilon_2\) therefore does **not** make every live decision optimize the same numeric
+reward the report card scores. It cannot: the two sides multiply \(\varepsilon_2\) by values in
+different units, and the default Orchestrator/Agent path never reads the weights at all — it is
+cost-blind, with cost entering only as accounting after the fact
+([`how-it-learns.md`](how-it-learns.md), "So where does cost actually come in?"). What the two share is the *form* of
+\(r\), not one objective function.
 
 The scalar is computed by one static function:
 
@@ -178,11 +192,17 @@ predicted \(s_{\text{base}} = 0.50\) at \(\kappa_{\text{base}} = \$0.10\). Canon
 
 ### What is estimated
 
-- \(s_{\text{obs}}\) and \(\kappa_{\text{act}}\) are **observed** (verifier score of the served
-  response; billed cost of that response).
+- \(s_{\text{obs}}\) is **observed** — the verifier's score of the response actually served.
+- \(\kappa_{\text{act}}\) is **recorded, not billed**. `TranscriptRecord.Cost` is documented as the
+  *estimated* dollar cost of serving the request: its observed token counts priced through the
+  catalog, never an amount read back from a provider invoice. It is far firmer than
+  \(\kappa_{\text{base}}\) below — this request really ran, and its tokens really were counted — but
+  a stale or wrong catalog row moves it, so nothing here should be quoted as settled money.
+  Reconciling against real provider billing is separate, unfinished work
+  ([`router/tracked-todos.md`](router/tracked-todos.md) item 6).
 - \(s_{\text{base}}\) is a **probing-split average**, not a grade of a counterfactual response.
   The baseline model was never asked to serve this request.
-- \(\kappa_{\text{base}}\) is **priced, not observed**. Input tokens are this turn's own billed
+- \(\kappa_{\text{base}}\) is **priced, not observed**. Input tokens are this turn's own recorded
   input, scaled by the two models' tokenizer ratio ([ADR-0009](adr/0009-per-request-counterfactual-token-estimation.md));
   output tokens stay a per-model observed average, because a model that never ran produced no
   output to count. The figure is priced at the **standard** input rate with no cache discount —
