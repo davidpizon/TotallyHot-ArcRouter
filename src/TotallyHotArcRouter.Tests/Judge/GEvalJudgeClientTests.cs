@@ -12,7 +12,8 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 /// <summary>
 /// Covers <see cref="GEvalJudgeClient"/> against a fake <see cref="HttpMessageHandler"/> - no real network
 /// call is ever made. Exercises the probability-weighted G-Eval parse, the single-sample fallback when no
-/// logprobs are present, and the failure path when neither is parseable.
+/// logprobs are present, the failure path when neither is parseable, and the fail-closed path when the
+/// user/task question is missing.
 /// </summary>
 public class GEvalJudgeClientTests
 {
@@ -47,7 +48,7 @@ public class GEvalJudgeClientTests
 
         var result =
             await client.ScoreAsync(
-                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                request: ScoreRequest(),
                 cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
@@ -70,7 +71,7 @@ public class GEvalJudgeClientTests
 
         var result =
             await client.ScoreAsync(
-                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                request: ScoreRequest(),
                 cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
@@ -93,7 +94,7 @@ public class GEvalJudgeClientTests
         var client = CreateClient(json);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.ScoreAsync(request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+            client.ScoreAsync(request: ScoreRequest(),
                 cancellationToken: TestContext.Current.CancellationToken));
     }
 
@@ -103,7 +104,7 @@ public class GEvalJudgeClientTests
         var client = CreateClient("""{ "choices": [] }""");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.ScoreAsync(request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+            client.ScoreAsync(request: ScoreRequest(),
                 cancellationToken: TestContext.Current.CancellationToken));
     }
 
@@ -118,7 +119,7 @@ public class GEvalJudgeClientTests
             logger: NullLogger<GEvalJudgeClient>.Instance);
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
-            client.ScoreAsync(request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+            client.ScoreAsync(request: ScoreRequest(),
                 cancellationToken: TestContext.Current.CancellationToken));
     }
 
@@ -137,7 +138,7 @@ public class GEvalJudgeClientTests
 
         var result =
             await client.ScoreAsync(
-                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                request: ScoreRequest(),
                 cancellationToken: TestContext.Current.CancellationToken);
 
         var request = Assert.Single(captured);
@@ -162,32 +163,37 @@ public class GEvalJudgeClientTests
             captured: out var captured, resolver: FreeResolver());
 
         await client.ScoreAsync(
-            request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response",
-                Prompt: "write a function that reverses a string"),
+            request: ScoreRequest("write a function that reverses a string"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var request = Assert.Single(captured);
+        Assert.Contains(expectedSubstring: "Task the response was written for", actualString: request.Body,
+            comparisonType: StringComparison.Ordinal);
         Assert.Contains(expectedSubstring: "write a function that reverses a string", actualString: request.Body,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "A complete answer to a different question", actualString: request.Body,
             comparisonType: StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// An empty prompt (never cached, or aged out) must not tell the judge a task existed when none could be
-    /// recovered - the task section is omitted entirely rather than filled with a placeholder.
+    /// GitHub issue #114: a missing or whitespace-only question must fail closed rather than grading the
+    /// response in isolation. No HTTP call is made, so a response-only score cannot reach memory.
     /// </summary>
-    [Fact]
-    public async Task ScoreAsync_NoPromptSupplied_OmitsTheTaskSectionEntirely()
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ScoreAsync_QuestionMissing_FailsClosedWithoutCallingTheBackbone(string prompt)
     {
         var client = CreateClient("""{ "choices": [ { "message": { "content": "4" } } ] }""",
             captured: out var captured, resolver: FreeResolver());
 
-        await client.ScoreAsync(
-            request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
-            cancellationToken: TestContext.Current.CancellationToken);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.ScoreAsync(request: ScoreRequest(prompt),
+                cancellationToken: TestContext.Current.CancellationToken));
 
-        var request = Assert.Single(captured);
-        Assert.DoesNotContain(expectedSubstring: "Task the response was written for", actualString: request.Body,
+        Assert.Contains(expectedSubstring: "without the user/task question", actualString: ex.Message,
             comparisonType: StringComparison.Ordinal);
+        Assert.Empty(captured);
     }
 
     /// <summary>
@@ -207,11 +213,21 @@ public class GEvalJudgeClientTests
 
         var result =
             await client.ScoreAsync(
-                request: new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response"),
+                request: ScoreRequest(),
                 cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(result);
         Assert.Empty(captured);
+    }
+
+    /// <summary>
+    /// A scoring request carrying the user/task question every LLM grader now requires. Tests that
+    /// specifically cover a missing question pass <paramref name="prompt"/> explicitly rather than
+    /// relying on a default-empty constructor that no longer exists.
+    /// </summary>
+    private static JudgeScoreRequest ScoreRequest(string prompt = "write a function that reverses a string")
+    {
+        return new JudgeScoreRequest(Dimension: "algorithm", ResponseText: "some response", Prompt: prompt);
     }
 
     private static GEvalJudgeClient CreateClient(string responseJson)

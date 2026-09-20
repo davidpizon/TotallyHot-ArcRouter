@@ -341,14 +341,17 @@ written; since a result needing judgment is never written until judged, that tri
 after the outcome it was meant to produce, and every judged request silently degraded to the
 `JudgeJoinTimeoutMs` row above instead of the "judge grade arrives" row.
 
-**Q2: the judge is now prompt-aware.** `JudgeScoreRequest` carries an optional `Prompt` alongside
-`ResponseText`, recovered from `PendingPromptCache` — a second cache mirroring `PendingResponseTextCache`
+**Q2: the judge is now prompt-aware, and fails closed without the question.** `JudgeScoreRequest.Prompt`
+is required, recovered from `PendingPromptCache` — a second cache mirroring `PendingResponseTextCache`
 exactly (same TTL/capacity bounds, same in-process-only lifetime) and set at the same point in
 `RequestTelemetryPublisher` the response text is, gated on the same live `JudgeOptions.Enabled` check.
-`GEvalJudgeClient.BuildPrompt` weaves it into the G-Eval prompt as a "Task the response was written for"
-section, present only when a prompt was actually recovered — an empty prompt (never cached, or aged out
-faster than the queue drained) omits the section entirely rather than filling it with a placeholder, so the
-judge is never told a task existed when none could be recovered.
+`GEvalJudgeClient.BuildPrompt` (and every Q3 portfolio grader, via `GraderQuestionText.FormatTaskSection`)
+weaves it into the backbone prompt as a "Task the response was written for" section. A missing,
+whitespace-only, or aged-out prompt does **not** omit the section and grade the response in isolation:
+the drain worker abandons with `judge-question-missing` (or `{grader}-question-missing`) and the client
+refuses to call the backbone. Response-only scoring is the gap
+`docs/research/code-quality-metrics-assessment.md` §1 named first; GitHub issue #114 is the fail-closed
+close of that gap.
 
 ### 5.1 Judge enablement
 
