@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using TestContext = Xunit.TestContext;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
