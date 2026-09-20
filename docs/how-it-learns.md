@@ -216,10 +216,16 @@ ensemble actually beat the simple baseline?**
 
 This is why every receipt stores which model the frozen baseline *would* have picked — the
 counterfactual — together with the probing-prior score that pick was based on. The comparison is
-scored as *estimated regret* under the cost-aware reward `r = ε₁·s + ε₂·κ`:
+scored as *estimated regret* under \(r = \varepsilon_1 s + \varepsilon_2 \kappa\). That is **not**
+the same objective the rest of the system uses to pick a model: `CompositeRoutingPolicy`'s
+Orchestrator and Agent paths are cost-blind and never read `Epsilon1`/`Epsilon2`. Only
+`UtilityRoutingPolicy` uses the ε-weighted cost term for *selection* (and even there, \(\kappa\) is
+a blended catalog rate in USD per million tokens, not this request's USD). `TaxonomyComparisonService`
+still records estimated regret for non-utility traffic too — the report card is accounting after the
+fact, not a replay of the live vote.
 
 ```
-routed reward    = ε₁ · observed score  + ε₂ · actual cost
+routed reward    = ε₁ · observed score  + ε₂ · recorded/estimated serving cost
 baseline reward  = ε₁ · predicted score + ε₂ · counterfactual cost
 
 regret = baseline reward − routed reward     // positive means the router lost
@@ -330,17 +336,24 @@ this whole system.
 
 Worth being precise, because it's a genuine design decision and not an obvious one.
 
-**The live vote is cost-blind.** `dim_best`, `memory_knn`, and `cluster_best` all rank purely on
-*quality score*. None of them looks at price.
+**The live general vote is cost-blind.** `dim_best`, `memory_knn`, and `cluster_best` (the
+Orchestrator/Agent path in `CompositeRoutingPolicy`) all rank purely on *quality score*. None of them
+looks at price, and none of them reads `Epsilon1`/`Epsilon2`.
 
-Cost enters in exactly two places, both of them **accounting** rather than **selection**:
+Cost enters *selection* on **one** path: `UtilityRoutingPolicy`, which ranks
+\(\varepsilon_1 \cdot\) quality \(+ \varepsilon_2 \cdot\) blended catalog rate (USD per million
+tokens — different units from the per-request USD in estimated regret).
+
+Everywhere else, cost is **accounting** rather than **selection**:
 
 1. The reward function `r = ε₁·score + ε₂·cost` used by the offline evaluation harness.
-2. The live regret report card described in Step 7, using that same formula. See
+2. The live regret report card described in Step 7, using that same *form* of \(r\) (configured
+   `RoutingOptions` weights, recorded on utility *and* non-utility traffic). See
    [score-delta versus the frozen baseline](score-delta-methodology.md) for the as-built method.
 
-In other words: **the router chases quality, then measures whether that was worth the money.** Making
-cost a first-class vote would be a change in behaviour, not a change in wiring.
+In other words: **the default router chases quality, then measures whether that was worth the money.**
+The utility policy is the exception. Making cost a first-class vote on the Orchestrator path would be
+a change in behaviour, not a change in wiring.
 
 ---
 

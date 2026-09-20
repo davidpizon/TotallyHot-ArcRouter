@@ -25,12 +25,13 @@ wired to live telemetry pushed from the `TotallyHotArcRouter` proxy over gRPC (`
 - see [`../router/telemetry.md`](../router/telemetry.md) for the routing-telemetry pipeline and this
 doc's Console tab section above for the log-line pipeline. Until the proxy is running and reachable
 (or before it has forwarded any requests / emitted any log events), those surfaces simply show no
-data rather than falling back to mock data. The **Cost Analytics** tab is **live + mock merged**: it
-plots live conversation turns when present, on top of a deterministic timestamped mock history
-(`MockData.BuildMetricHistory`) so every metric/range renders offline; the metrics that have no live
-source (ROI, tool steps, cache, context) are demonstrated by the mock history only. **Model
-Distribution** fetches real rollup buckets through `UsageStore.LoadRollupAsync` on every filter
-change, falling back to the hard-coded `MockData` class only when there is no live data to show. The
+data rather than falling back to mock data. The **Cost Analytics** tab is **live with a fallback-only
+mock**: `CostAnalytics.BuildCorpus` plots usage-rollup history and live conversation turns when either
+exists; `MockData.BuildMetricHistory` fills in only when there is neither (the chart subtitle then
+carries a **`· demo data`** marker). Routing ROI is a separate corpus from the taxonomy-comparison
+store — live turns are never merged into it. **Model Distribution** fetches real rollup buckets
+through `UsageStore.LoadRollupAsync` on every filter change, falling back to the hard-coded
+`MockData` class only when there is no live data to show. The
 **header ticker** is partly real: System Tokens comes from `UsageStore.LoadSummaryAsync`, while Total
 Saved and Avg. Cost Reduction are still mock and labelled "(demo)". [`backlog.md`](backlog.md) is the
 authority for which surfaces are live and which are still mock - when the two disagree, that doc is
@@ -194,12 +195,13 @@ flowchart TD
      conversations - so every chart still shows its special state with no proxy running. Tool steps,
      cache, and context remain 0 for *live* turns (no proxy source - see `../router/telemetry.md`),
      so the mock history is what demonstrates those; ROI is no longer in that list. Every rich
-     tooltip figure (the frozen untrained baseline's estimated cost, per-step model split,
-     cached/uncached tokens, context token counts, cold-start split) is **derived in
+     tooltip figure (the frozen untrained baseline's estimated cost — **not** a worst-case expensive
+     model; `CostChartBuilder.BuildRoi` labels it `"Baseline ({name}): … — estimate"` — plus per-step
+     model split, cached/uncached tokens, context token counts, cold-start split) is **derived in
      `CostChartBuilder`** from each turn's existing fields, so nothing new has to flow through
      telemetry. This supersedes the tab's former combo chart (a single metric line plus per-model
-     stacked bars).
-
+     stacked bars).
+
      When the corpus is that mock fallback rather than real rollups/live turns, the chart subtitle
      carries a **`· demo data`** marker (same intent as the Dashboard tab's `(demo)` labels, §3).
      Routing ROI is why this matters: it otherwise renders synthetic savings bars and a dollar
