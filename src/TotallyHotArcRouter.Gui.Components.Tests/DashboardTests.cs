@@ -41,6 +41,7 @@ public sealed class DashboardTests
 
         cut.Markup.Should().Contain("Router Optimization Engine");
         cut.Markup.Should().Contain("No conversations yet.");
+        cut.Markup.Should().Contain(OpenAiCompatibleDropIn.BaseUrl);
     }
 
     [Fact]

@@ -7,7 +7,8 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
-/// Tests for <see cref="SettingsModal"/>: the Adaptive Routing toggle and Sample Size input
+/// Tests for <see cref="SettingsModal"/>: the OpenAI-compatible client drop-in panel, the Adaptive
+/// Routing toggle and Sample Size input
 /// (docs/router/self-organizing-classification-plan.md Phase T6), the typed-confirmation gate on the
 /// destructive Reset/Purge actions and what they actually clear, the close callbacks, and the
 /// GUI/Router version footer.
@@ -104,6 +105,19 @@ public sealed class SettingsModalTests
         cut.FindAll("button").First(b => b.TextContent.Contains("Copy MCP token")).Click();
 
         clipboard.LastCopiedText.Should().Be("the-real-token");
+    }
+
+    [Fact]
+    public void Renders_the_client_drop_in_panel_with_the_canonical_base_url()
+    {
+        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.Find("[data-testid='client-drop-in-base-url']").GetAttribute("value")
+            .Should().Be(OpenAiCompatibleDropIn.BaseUrl);
+        cut.Find("[data-testid='client-drop-in-model']").GetAttribute("value")
+            .Should().Be(OpenAiCompatibleDropIn.Model);
     }
 
     [Fact]
@@ -241,8 +255,7 @@ public sealed class SettingsModalTests
 
         var cut = ctx.Render<SettingsModal>();
         cut.FindAll("button").First(b => b.TextContent.Contains("Reset Stats")).Click();
-        cut.FindAll("input").First(i => i.GetAttribute("type") == "text")
-            .Input("RESET");
+        cut.Find("#confirm-destructive-action").Input("RESET");
 
         var confirm = cut.FindAll("button").First(b => b.TextContent.Contains("Confirm Reset"));
         confirm.HasAttribute("disabled").Should().BeFalse();
@@ -261,8 +274,7 @@ public sealed class SettingsModalTests
         var cut =
             ctx.Render<SettingsModal>(p => p.Add(parameterSelector: c => c.OnClose, callback: () => closed = true));
         cut.FindAll("button").First(b => b.TextContent.Contains("Reset Stats")).Click();
-        cut.FindAll("input").First(i => i.GetAttribute("type") == "text")
-            .Input("RESET");
+        cut.Find("#confirm-destructive-action").Input("RESET");
         cut.FindAll("button").First(b => b.TextContent.Contains("Confirm Reset")).Click();
 
         closed.Should().BeTrue();
@@ -281,8 +293,7 @@ public sealed class SettingsModalTests
 
         var cut = ctx.Render<SettingsModal>();
         cut.FindAll("button").First(b => b.TextContent.Contains("Clear History")).Click();
-        cut.FindAll("input").First(i => i.GetAttribute("type") == "text")
-            .Input("PURGE");
+        cut.Find("#confirm-destructive-action").Input("PURGE");
         cut.FindAll("button").First(b => b.TextContent.Contains("Confirm Purge")).Click();
 
         changedRaised.Should().BeTrue("Clear History clears live events, which raises LiveDataStore.Changed");
@@ -311,14 +322,12 @@ public sealed class SettingsModalTests
 
         var cut = ctx.Render<SettingsModal>();
         cut.FindAll("button").First(b => b.TextContent.Contains("Clear History")).Click();
-        cut.FindAll("input").First(i => i.GetAttribute("type") == "text")
-            .Input("RESET");
+        cut.Find("#confirm-destructive-action").Input("RESET");
 
         cut.FindAll("button").First(b => b.TextContent.Contains("Confirm Purge")).HasAttribute("disabled").Should()
             .BeTrue();
 
-        cut.FindAll("input").First(i => i.GetAttribute("type") == "text")
-            .Input("PURGE");
+        cut.Find("#confirm-destructive-action").Input("PURGE");
         cut.FindAll("button").First(b => b.TextContent.Contains("Confirm Purge")).HasAttribute("disabled").Should()
             .BeFalse();
     }
