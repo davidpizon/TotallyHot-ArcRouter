@@ -7,6 +7,7 @@ using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -227,6 +228,80 @@ public class RequestInterceptorRoutingPolicyTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(policy.LastSignals);
         Assert.Equal(expected: "please refactor this function", actual: policy.LastSignals!.TaskText);
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_AutoSelect_WithVoterScores_OrdersFailoversByNextVoterPick_NotMemory()
+    {
+        // Completeness gap for issue #113: after the orchestrator picks, the failover list used to be
+        // re-ranked by RouterMemory, so a 500 on the winner retried a high-memory decoy instead of the
+        // next voter pick. Memory here strongly prefers "decoy"; voter scores prefer winner → runner-up.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("winner", "prov-a", "winner-upstream"),
+            ("runner-up", "prov-b", "runner-up-upstream"),
+            ("decoy", "prov-c", "decoy-upstream"));
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "decoy", 0.99);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "runner-up", 0.1);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "winner", 0.2);
+        var policy = new ScoredRoutingPolicy(new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["winner"] = 3,
+            ["runner-up"] = 2,
+            ["decoy"] = 1
+        });
+        var interceptor = new RequestInterceptor(
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            routerMemory: memory,
+            routingPolicy: policy);
+        var context = CreateContextWithBody("""{"model":"auto"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected: RoutingSubstitutionReason.AutoSelect, actual: result.SubstitutionReason);
+        Assert.Equal(["winner", "runner-up", "decoy"],
+            actual: result.Candidates.Select(c => c.Route.ModelName));
+    }
+
+    [Fact]
+    public async Task
+        ResolveModelRouteAsync_AutoSelect_PrimaryProviderCircuitOpen_FallsThroughToNextVoterPick()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("winner", "prov-a", "winner-upstream", "https://a.example.com"),
+            ("runner-up", "prov-b", "runner-up-upstream", "https://b.example.com"),
+            ("decoy", "prov-c", "decoy-upstream", "https://c.example.com"));
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "decoy", 0.99);
+        await memory.AddScoreAsync(dimension: DefaultLiveDimension, model: "runner-up", 0.1);
+        var circuitBreaker = new CircuitBreaker();
+        circuitBreaker.RecordProviderFailure("prov-a");
+        var policy = new ScoredRoutingPolicy(new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["winner"] = 3,
+            ["runner-up"] = 2,
+            ["decoy"] = 1
+        });
+        var interceptor = new RequestInterceptor(
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            routerMemory: memory,
+            circuitBreaker: circuitBreaker,
+            routingPolicy: policy);
+        var context = CreateContextWithBody("""{"model":"auto"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.ExplicitCircuitTripBlockMessage);
+        Assert.Equal(expected: "runner-up", actual: result.Candidates[0].Route.ModelName);
+        Assert.Equal(expected: "decoy", actual: result.Candidates[1].Route.ModelName);
+        Assert.DoesNotContain(collection: result.Candidates, filter: c => c.Route.ModelName == "winner");
+        Assert.Equal(expected: RoutingSubstitutionReason.AutoSelect, actual: result.SubstitutionReason);
     }
 
     private static void InsertProbingRow(BenchmarkDatabase database, string taskId, string dimension, string model,

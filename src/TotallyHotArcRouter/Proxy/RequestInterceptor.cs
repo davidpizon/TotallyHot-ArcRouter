@@ -433,6 +433,7 @@ public class RequestInterceptor
         string? dimBestModel = null;
         string? untrainedBaselineModel = null;
         double? untrainedBaselinePredictedScore = null;
+        IReadOnlyDictionary<string, double>? policyCandidateScores = null;
 
         if (isAutoSelectRequest)
         {
@@ -457,6 +458,7 @@ public class RequestInterceptor
             dimBestModel = autoSelected.DimBestModel;
             untrainedBaselineModel = autoSelected.UntrainedBaselineModel;
             untrainedBaselinePredictedScore = autoSelected.UntrainedBaselinePredictedScore;
+            policyCandidateScores = autoSelected.CandidateScores;
             substitutionReason = RoutingSubstitutionReason.AutoSelect;
         }
         else if (!_modelRouteResolver.TryResolve(modelName: modelName, route: out route) ||
@@ -492,6 +494,7 @@ public class RequestInterceptor
                 dimBestModel = agenticRoute.DimBestModel;
                 untrainedBaselineModel = agenticRoute.UntrainedBaselineModel;
                 untrainedBaselinePredictedScore = agenticRoute.UntrainedBaselinePredictedScore;
+                policyCandidateScores = agenticRoute.CandidateScores;
                 substitutionReason = wasResolved
                     ? RoutingSubstitutionReason.ModelStopped
                     : RoutingSubstitutionReason.UnresolvedName;
@@ -522,7 +525,8 @@ public class RequestInterceptor
             // truthful-error carve-out both live in RoutingCandidateBuilder now - see its Build's doc
             // comment for the full rationale, unchanged from when it lived inline here.
             var buildResult = _routingCandidateBuilder.Build(jsonObject: jsonObject, route: route,
-                substitutionReasonSoFar: substitutionReason, liveDimension: liveDimension);
+                substitutionReasonSoFar: substitutionReason, liveDimension: liveDimension,
+                policyCandidateScores: policyCandidateScores);
             candidates = buildResult.Candidates;
             // buildResult.Route is deliberately not read back into `route`: the resolved route reaches
             // the caller through buildResult.Candidates, which the Success(...) return below receives,
@@ -689,7 +693,8 @@ public class RequestInterceptor
                         DimBestModel: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision,
                             voterName: VoterNames.DimBest),
                         UntrainedBaselineModel: policyPathBaseline?.Model,
-                        UntrainedBaselinePredictedScore: policyPathBaseline?.Score);
+                        UntrainedBaselinePredictedScore: policyPathBaseline?.Score,
+                        CandidateScores: decision.CandidateScores);
                 }
                 else
                 {
@@ -790,11 +795,17 @@ public class RequestInterceptor
     /// the model with a score from a different snapshot. <see langword="null"/> whenever
     /// <see cref="UntrainedBaselineModel"/> is.
     /// </param>
+    /// <param name="CandidateScores">
+    /// The policy's per-model aggregates for this decision, forwarded to
+    /// <see cref="RoutingCandidateBuilder.Build"/> so a same-request failover retries the next voter
+    /// pick. <see langword="null"/> on the memory-ranking fallback (no vote happened).
+    /// </param>
     private sealed record AgenticRouteResult(
         ResolvedModelRoute Route,
         bool IsExploratory,
         double Propensity,
         string? DimBestModel = null,
         string? UntrainedBaselineModel = null,
-        double? UntrainedBaselinePredictedScore = null);
+        double? UntrainedBaselinePredictedScore = null,
+        IReadOnlyDictionary<string, double>? CandidateScores = null);
 }

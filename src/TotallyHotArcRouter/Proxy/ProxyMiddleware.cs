@@ -342,7 +342,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // silently substituting away from - a target everyone already knows is untrustworthy.
         if (resolution.ExplicitCircuitTripBlockMessage is { } blockedMessage)
         {
-            await WriteCircuitTripBlockedResponseAsync(context: context, message: blockedMessage);
+            await WriteCircuitTripBlockedResponseAsync(
+                context: context,
+                message: blockedMessage,
+                requestedModel: resolution.RequestedModelName!,
+                routedModel: resolution.Candidates[0].Route.ModelName);
             return;
         }
 
@@ -526,7 +530,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // internal hostnames, DNS/socket details, or configured base URLs. The full exception
                     // is already logged above for operators; the client only needs "upstream unavailable."
                     await WriteUpstreamErrorResponseAsync(context: context,
-                        errorMessage: "The upstream provider is unavailable.");
+                        errorMessage: "The upstream provider is unavailable.",
+                        routingHeaders: RoutingResponseHeaders.From(
+                            requestedModel: requestedModelName,
+                            routedModel: route.ModelName,
+                            substitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(
+                                isFallback: isFallback, resolutionReason: resolution.SubstitutionReason)));
 
                 return;
             }
@@ -627,11 +636,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     context: context,
                     responseMessage: responseMessage,
                     translator: translator,
-                    routingHeaders: new RoutingResponseHeaders(
-                        RequestedModel: requestedModelName,
-                        RoutedModel: route.ModelName,
-                        SubstitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback: isFallback,
-                            resolutionReason: resolution.SubstitutionReason).ToString()),
+                    routingHeaders: RoutingResponseHeaders.From(
+                        requestedModel: requestedModelName,
+                        routedModel: route.ModelName,
+                        substitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback: isFallback,
+                            resolutionReason: resolution.SubstitutionReason)),
                     preReadErrorBody: preReadErrorBody,
                     embeddedErrorMessage: embeddedErrorMessage,
                     statusCode: statusCode);
@@ -722,7 +731,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 await WriteUpstreamErrorResponseAsync(
                     context: context,
                     errorMessage: "All configured routes for this model are currently stopped.",
-                    statusCode: StatusCodes.Status503ServiceUnavailable);
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    routingHeaders: RoutingResponseHeaders.From(
+                        requestedModel: requestedModelName,
+                        routedModel: candidates[0].Route.ModelName,
+                        substitutionReason: resolution.SubstitutionReason));
             }
             else
             {
@@ -730,7 +743,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     message: "All candidate routes for model {Model} are currently circuit-broken; rejecting with 502.",
                     LogRedaction.Sanitize(requestedModelName));
                 await WriteUpstreamErrorResponseAsync(context: context,
-                    errorMessage: "All configured routes for this model are currently unavailable.");
+                    errorMessage: "All configured routes for this model are currently unavailable.",
+                    routingHeaders: RoutingResponseHeaders.From(
+                        requestedModel: requestedModelName,
+                        routedModel: candidates[0].Route.ModelName,
+                        substitutionReason: RoutingSubstitutionReason.CircuitOpen));
             }
         }
     }
@@ -952,9 +969,18 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// treated like the HTTP path's 401 handling. Callers pass a client-safe <paramref name="errorMessage"/> - never a raw
     /// transport-exception message, which can leak infrastructure detail.
     /// </summary>
+    /// <param name="context">The client request/response.</param>
+    /// <param name="errorMessage">A client-safe message; never a raw transport-exception string.</param>
+    /// <param name="statusCode">The HTTP status to write; defaults to 502.</param>
+    /// <param name="routingHeaders">
+    /// Optional requested-vs-routed headers. When omitted the envelope is unchanged from before this
+    /// parameter existed; when set, the three <c>X-ArcRouter-*</c> headers are written before the body
+    /// so an exhausted cascade still reports why it stopped.
+    /// </param>
     internal static async Task WriteUpstreamErrorResponseAsync(HttpContext context, string errorMessage,
-        int statusCode = StatusCodes.Status502BadGateway)
+        int statusCode = StatusCodes.Status502BadGateway, RoutingResponseHeaders? routingHeaders = null)
     {
+        routingHeaders?.WriteTo(context);
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
 
@@ -1018,9 +1044,20 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="ErrorDetail.Param"/>'s <c>WhenWritingNull</c> condition). <paramref name="statusCode"/> is
     /// echoed back as the envelope's string <c>code</c> field, matching every existing call site.
     /// </summary>
+    /// <param name="context">The client request/response.</param>
+    /// <param name="statusCode">The HTTP status to write.</param>
+    /// <param name="type">The OpenAI-shaped <c>error.type</c> string.</param>
+    /// <param name="message">The client-facing <c>error.message</c>.</param>
+    /// <param name="param">Optional <c>error.param</c>; omitted from JSON when null.</param>
+    /// <param name="routingHeaders">
+    /// Optional requested-vs-routed headers written before the body when this error still has a
+    /// known model identity (circuit-open block). Omitted on routing-disabled / unknown-model paths
+    /// that never resolved a route.
+    /// </param>
     private static async Task WriteErrorResponseAsync(HttpContext context, int statusCode, string type, string message,
-        string? param = null)
+        string? param = null, RoutingResponseHeaders? routingHeaders = null)
     {
+        routingHeaders?.WriteTo(context);
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
 
@@ -1074,12 +1111,23 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// substitution-on-any-circuit-trip.md). Unlike <see cref="WriteBudgetExhaustedResponseAsync"/>'s 402
     /// (a hard operator-configured cap) this is 503 (Service Unavailable): the client's own selection was
     /// valid, the router simply already knows this specific target or provider isn't answering right now
-    /// and never made a network call to find out again.
+    /// and never made a network call to find out again. Writes the same <c>X-ArcRouter-*</c> headers as a
+    /// served response so the client still sees requested vs routed (here they match - the named model
+    /// was not substituted) and <see cref="RoutingSubstitutionReason.CircuitOpen"/> as the reason.
     /// </summary>
-    private static Task WriteCircuitTripBlockedResponseAsync(HttpContext context, string message)
+    /// <param name="context">The client request/response.</param>
+    /// <param name="message">The truthful client-facing error already resolved by <see cref="RequestInterceptor"/>.</param>
+    /// <param name="requestedModel">The client's literal <c>model</c> string.</param>
+    /// <param name="routedModel">The client's named model, which was not substituted (ADR-0005).</param>
+    private static Task WriteCircuitTripBlockedResponseAsync(HttpContext context, string message,
+        string requestedModel, string routedModel)
     {
         return WriteErrorResponseAsync(context: context, statusCode: StatusCodes.Status503ServiceUnavailable,
-            type: "invalid_request_error", message: message);
+            type: "invalid_request_error", message: message,
+            routingHeaders: RoutingResponseHeaders.From(
+                requestedModel: requestedModel,
+                routedModel: routedModel,
+                substitutionReason: RoutingSubstitutionReason.CircuitOpen));
     }
 
     /// <summary>The top-level <c>{"error": {...}}</c> envelope <see cref="WriteErrorResponseAsync"/> writes.</summary>
