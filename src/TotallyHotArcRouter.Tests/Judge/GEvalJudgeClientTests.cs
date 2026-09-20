@@ -163,7 +163,7 @@ public class GEvalJudgeClientTests
             captured: out var captured, resolver: FreeResolver());
 
         await client.ScoreAsync(
-            request: ScoreRequest("write a function that reverses a string"),
+            request: ScoreRequest(),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var request = Assert.Single(captured);
