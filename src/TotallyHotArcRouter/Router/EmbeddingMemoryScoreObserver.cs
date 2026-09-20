@@ -97,8 +97,7 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         var recoveredPropensity = 1.0;
         string? recoveredDimension = null;
         if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
-            _pendingProvenanceCache.TryTake(correlationId: result.RequestCorrelationId, value: out var cachedProvenance) &&
-            cachedProvenance is not null)
+            _pendingProvenanceCache.TryTake(correlationId: result.RequestCorrelationId, value: out var cachedProvenance))
         {
             recoveredIsExploratory = cachedProvenance.IsExploratory;
             recoveredPropensity = cachedProvenance.Propensity;

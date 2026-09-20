@@ -55,7 +55,7 @@ public sealed class PendingGraderBackboneCache
     /// <returns><see langword="true"/> if an unexpired entry was found and removed.</returns>
     public bool TryTake(string correlationId, out IReadOnlyDictionary<string, string> backboneByGraderKey)
     {
-        if (_inner.TryTake(correlationId, out var map) && map is not null)
+        if (_inner.TryTake(correlationId, out var map))
         {
             backboneByGraderKey = map;
             return true;

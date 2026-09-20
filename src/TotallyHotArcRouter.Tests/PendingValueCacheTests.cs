@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using TotallyHot.ArcRouter;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Tests;
@@ -111,7 +110,7 @@ public class PendingValueCacheTests
         Assert.Equal(2, actual: cache.Count);
         Assert.False(cache.TryTake(correlationId: "corr-2", value: out _));
         Assert.True(cache.TryTake(correlationId: "corr-1", value: out var refreshed));
-        Assert.Equal(3f, actual: refreshed![0]);
+        Assert.Equal(3f, actual: refreshed[0]);
     }
 
     [Fact]
@@ -124,7 +123,7 @@ public class PendingValueCacheTests
 
         Assert.Equal(1, actual: cache.Count);
         Assert.True(cache.TryTake(correlationId: "corr-1", value: out var embedding));
-        Assert.Equal(2f, actual: embedding![0]);
+        Assert.Equal(2f, actual: embedding[0]);
     }
 
     [Fact]
@@ -142,7 +141,7 @@ public class PendingValueCacheTests
             });
 
         Assert.True(cache.TryTake("corr-1", out var map));
-        Assert.Equal(expected: "1", actual: map!["a"]);
+        Assert.Equal(expected: "1", actual: map["a"]);
         Assert.Equal(expected: "2", actual: map["b"]);
     }
 
