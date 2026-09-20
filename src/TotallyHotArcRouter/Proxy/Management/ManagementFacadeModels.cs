@@ -343,13 +343,6 @@ public sealed record ProviderWriteRequest(
 /// <param name="Enabled">The provider's new on/off state.</param>
 public sealed record ProviderEnabledWriteRequest(bool Enabled);
 
-/// <summary>
-/// The body sent to store a secret (docs/router/secrets-at-rest-plan.md §7).
-/// See <see cref="ManagementFacade.SetSecret"/> for which names are accepted.
-/// </summary>
-/// <param name="Value">The secret value to store.</param>
-public sealed record SecretWriteRequest(string Value);
-
 /// <summary>A single custom header to store for a provider.</summary>
 /// <param name="Name">The header name.</param>
 /// <param name="Value">A literal value; takes precedence over <paramref name="ValueEnvVar"/> when non-empty.</param>

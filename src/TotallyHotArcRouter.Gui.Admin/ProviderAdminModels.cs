@@ -332,9 +332,6 @@ public static class HeaderValueSource
     /// exactly like a locked <see cref="Literal"/> - see <see cref="ProviderHeaderView.Locked"/>.
     /// </summary>
     public const string Protected = "protected";
-
-    /// <summary>Neither a literal value, a protected-store reference, nor an environment variable is configured.</summary>
-    public const string None = "none";
 }
 
 /// <summary>
@@ -381,10 +378,6 @@ public sealed record ProviderHeaderView(
 /// header.
 /// </param>
 public sealed record ProviderHeaderWriteModel(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
-
-/// <summary>The <see cref="ProviderAdminClient.GetProvidersAsync"/> response envelope.</summary>
-/// <param name="Providers">All configured providers.</param>
-public sealed record ProvidersSnapshot(IReadOnlyList<ProviderAdminView> Providers);
 
 /// <summary>
 /// The body sent to add or edit a provider. Fields fall back to the existing provider's value when null.
@@ -508,14 +501,6 @@ public sealed record ProviderBudgetWriteRequest(
     long? TokenCap,
     string? WindowKind = null,
     int? WindowHours = null);
-
-/// <summary>
-/// The body sent to store a secret (docs/router/secrets-at-rest-plan.md §7).
-/// Mirrors the proxy's own <c>SecretWriteRequest</c> - this project deliberately doesn't reference the proxy assembly (see
-/// <see cref="ProviderAdminClient"/>'s remarks).
-/// </summary>
-/// <param name="Value">The secret value to store.</param>
-public sealed record SecretWriteRequest(string Value);
 
 /// <summary>
 /// The result of <see cref="ProviderAdminClient.DiscoverModelsAsync"/>: the model ids the provider's own
