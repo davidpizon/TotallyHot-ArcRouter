@@ -60,7 +60,7 @@ public sealed class DashboardTests
     [Fact]
     public async Task Clicking_a_tab_switches_the_active_workspace()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context: Dashboard
@@ -77,7 +77,7 @@ public sealed class DashboardTests
     [Fact]
     public async Task Clicking_Console_tab_renders_the_console()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
@@ -89,7 +89,7 @@ public sealed class DashboardTests
     [Fact]
     public async Task Clicking_Governance_tab_renders_the_providers_sub_view()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
@@ -103,7 +103,7 @@ public sealed class DashboardTests
     [Fact]
     public async Task Settings_button_opens_the_modal_and_close_removes_it()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
@@ -127,7 +127,7 @@ public sealed class DashboardTests
         };
         var store = new PersistedSessionStore(client);
         await store.LoadAsync(TestContext.Current.CancellationToken);
-        using var ctx = NewContext(store);
+        await using var ctx = NewContext(store);
 
         var cut = ctx.Render<Dashboard>();
 
@@ -147,7 +147,7 @@ public sealed class DashboardTests
         };
         var store = new PersistedSessionStore(client);
         await store.LoadAsync(TestContext.Current.CancellationToken);
-        using var ctx = NewContext(store);
+        await using var ctx = NewContext(store);
 
         var cut = ctx.Render<Dashboard>();
 
