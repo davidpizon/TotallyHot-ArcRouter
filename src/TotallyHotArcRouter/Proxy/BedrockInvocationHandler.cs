@@ -194,7 +194,12 @@ internal sealed class BedrockInvocationHandler
                 // region, or request-id detail. The full exception is logged above for operators.
                 await ProxyMiddleware.WriteUpstreamErrorResponseAsync(context: context,
                     errorMessage: "The upstream provider rejected the request as unauthorized.",
-                    statusCode: StatusCodes.Status401Unauthorized);
+                    statusCode: StatusCodes.Status401Unauthorized,
+                    routingHeaders: RoutingResponseHeaders.From(
+                        requestedModel: requestedModelName,
+                        routedModel: route.ModelName,
+                        substitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(
+                            isFallback: isFallback, resolutionReason: resolutionReason)));
 
             return true;
         }
@@ -224,7 +229,12 @@ internal sealed class BedrockInvocationHandler
                 // Generic client message, not ex.Message: an AWS SDK exception can carry internal endpoint,
                 // region, or request-id detail. The full exception is logged above for operators.
                 await ProxyMiddleware.WriteUpstreamErrorResponseAsync(context: context,
-                    errorMessage: "The upstream provider is unavailable.");
+                    errorMessage: "The upstream provider is unavailable.",
+                    routingHeaders: RoutingResponseHeaders.From(
+                        requestedModel: requestedModelName,
+                        routedModel: route.ModelName,
+                        substitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(
+                            isFallback: isFallback, resolutionReason: resolutionReason)));
 
             return true;
         }
