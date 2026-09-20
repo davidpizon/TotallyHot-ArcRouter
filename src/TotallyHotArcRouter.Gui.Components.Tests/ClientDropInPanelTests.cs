@@ -30,8 +30,10 @@ public sealed class ClientDropInPanelTests
             .Should().Be(OpenAiCompatibleDropIn.BaseUrl);
         cut.Find("[data-testid='client-drop-in-model']").GetAttribute("value")
             .Should().Be(OpenAiCompatibleDropIn.Model);
-        cut.Find("[data-testid='client-drop-in-env']").TextContent
-            .Should().Be(OpenAiCompatibleDropIn.BuildEnvironmentExports());
+
+        var env = cut.Find("[data-testid='client-drop-in-env']");
+        env.TagName.Should().Be("TEXTAREA");
+        env.TextContent.Should().Be(OpenAiCompatibleDropIn.BuildEnvironmentExports());
         cut.Markup.Should().Contain("Point a client");
         cut.Markup.Should().Contain($"\"model\": \"{OpenAiCompatibleDropIn.Model}\"");
     }

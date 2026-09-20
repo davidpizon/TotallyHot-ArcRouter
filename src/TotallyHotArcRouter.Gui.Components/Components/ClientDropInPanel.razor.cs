@@ -15,9 +15,6 @@ public partial class ClientDropInPanel
     /// <summary>Which copy control last succeeded, so only that button shows its confirmation label.</summary>
     private enum CopiedField
     {
-        /// <summary>No copy has happened yet in this panel instance.</summary>
-        None,
-
         /// <summary>The Base URL control was copied.</summary>
         BaseUrl,
 
@@ -28,7 +25,7 @@ public partial class ClientDropInPanel
         Env
     }
 
-    private CopiedField _copied;
+    private CopiedField? _copied;
 
     /// <summary>Copies text to the clipboard. The WASM and native hosts each register their own implementation.</summary>
     [Inject]
