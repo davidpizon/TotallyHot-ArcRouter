@@ -165,7 +165,7 @@
     private bool _expanded;
 
     /// <summary>The card's accent color, derived from the turn's agent name.</summary>
-    private string AgentColor => ColorUtils.GetColorForAgent(Turn.Agent);
+    private string AgentColor => ChartPalette.ColorFor(Turn.Agent);
 
     // §5.6: distinguishes an exact cost from a disclosed estimate (a resolution-ladder rung below Exact,
     // or a cache dimension that fell back to the standard input rate) without needing a chip per turn.

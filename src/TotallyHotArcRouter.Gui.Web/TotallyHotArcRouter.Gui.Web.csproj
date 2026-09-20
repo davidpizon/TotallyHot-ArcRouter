@@ -28,7 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Components/*, Services/* stores, Models, Utils (web GUI migration plan Phase P5b) - the same
+    <!-- Components/*, Services/* stores, and Models (web GUI migration plan Phase P5b) - the same
          library TotallyHotArcRouter.Gui (MAUI) references, so the dashboard UI itself is shared
          verbatim between the two hosts. -->
     <ProjectReference Include="..\TotallyHotArcRouter.Gui.Components\TotallyHotArcRouter.Gui.Components.csproj" />
