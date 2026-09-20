@@ -56,7 +56,7 @@ public sealed class UsageQueryClient
     {
         var request = new Contract.GetUsageSummaryRequest { Window = window };
         var response = await CallAsync(
-            (client, ct) => client.GetUsageSummaryAsync(request, ct),
+            (client, ct) => client.GetUsageSummaryAsync(request, cancellationToken: ct),
             "Could not read the usage summary",
             cancellationToken).ConfigureAwait(false);
         return new UsageSummaryView(
@@ -88,7 +88,7 @@ public sealed class UsageQueryClient
             Width = width, GroupBy = groupBy
         };
         var response = await CallAsync(
-            (client, ct) => client.GetUsageRollupAsync(request, ct),
+            (client, ct) => client.GetUsageRollupAsync(request, cancellationToken: ct),
             "Could not read usage rollups",
             cancellationToken).ConfigureAwait(false);
         return response.Buckets.Select(ToView).ToList();
@@ -113,7 +113,7 @@ public sealed class UsageQueryClient
         if (!string.IsNullOrEmpty(sessionId)) request.SessionId = sessionId;
 
         var response = await CallAsync(
-            (client, ct) => client.GetRoutingRoiAsync(request, ct),
+            (client, ct) => client.GetRoutingRoiAsync(request, cancellationToken: ct),
             "Could not read routing ROI",
             cancellationToken).ConfigureAwait(false);
         return response.Entries.Select(ToView).ToList();

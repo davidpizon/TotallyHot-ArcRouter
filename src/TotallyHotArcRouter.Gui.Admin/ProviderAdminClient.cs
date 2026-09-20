@@ -54,7 +54,7 @@ public sealed class ProviderAdminClient
     public async Task<IReadOnlyList<ProviderAdminView>> GetProvidersAsync(CancellationToken cancellationToken = default)
     {
         var response = await CallAsync(
-            (client, ct) => client.ListProvidersAsync(new Contract.ListProvidersRequest(), ct),
+            (client, ct) => client.ListProvidersAsync(new Contract.ListProvidersRequest(), cancellationToken: ct),
             "Could not read the providers",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -87,7 +87,7 @@ public sealed class ProviderAdminClient
             }));
 
         var response = await CallAsync(
-            (client, ct) => client.UpsertProviderAsync(request, ct),
+            (client, ct) => client.UpsertProviderAsync(request, cancellationToken: ct),
             "Could not save the provider",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -102,7 +102,7 @@ public sealed class ProviderAdminClient
         CancellationToken cancellationToken = default)
     {
         var response = await CallAsync(
-            (client, ct) => client.RemoveProviderAsync(new Contract.RemoveProviderRequest { Key = key }, ct),
+            (client, ct) => client.RemoveProviderAsync(new Contract.RemoveProviderRequest { Key = key }, cancellationToken: ct),
             "Could not remove the provider",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -123,7 +123,7 @@ public sealed class ProviderAdminClient
 
         var request = new Contract.UpsertModelRequest { ProviderKey = key, ModelName = modelName, Model = model };
         var response = await CallAsync(
-            (client, ct) => client.UpsertModelAsync(request, ct),
+            (client, ct) => client.UpsertModelAsync(request, cancellationToken: ct),
             "Could not save the model",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -139,7 +139,7 @@ public sealed class ProviderAdminClient
         CancellationToken cancellationToken = default)
     {
         var response = await CallAsync(
-            (client, ct) => client.RemoveModelAsync(new Contract.RemoveModelRequest { ModelName = modelName }, ct),
+            (client, ct) => client.RemoveModelAsync(new Contract.RemoveModelRequest { ModelName = modelName }, cancellationToken: ct),
             "Could not remove the model",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -157,7 +157,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.SetModelEnabledRequest { ModelName = modelName, Enabled = body.Enabled };
         var response = await CallAsync(
-            (client, ct) => client.SetModelEnabledAsync(request, ct),
+            (client, ct) => client.SetModelEnabledAsync(request, cancellationToken: ct),
             "Could not update the model",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -181,7 +181,7 @@ public sealed class ProviderAdminClient
             ProviderKey = key, ModelName = modelName, Dialect = body.Dialect ?? string.Empty
         };
         var response = await CallAsync(
-            (client, ct) => client.SetModelToolDialectAsync(request, ct),
+            (client, ct) => client.SetModelToolDialectAsync(request, cancellationToken: ct),
             "Could not pin the model dialect",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -204,7 +204,7 @@ public sealed class ProviderAdminClient
 
         var request = new Contract.SetProviderBudgetRequest { ProviderKey = key, Budget = budget };
         var response = await CallAsync(
-            (client, ct) => client.SetProviderBudgetAsync(request, ct),
+            (client, ct) => client.SetProviderBudgetAsync(request, cancellationToken: ct),
             "Could not save the budget",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -221,7 +221,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.SetProviderEnabledRequest { Key = key, Enabled = body.Enabled };
         var response = await CallAsync(
-            (client, ct) => client.SetProviderEnabledAsync(request, ct),
+            (client, ct) => client.SetProviderEnabledAsync(request, cancellationToken: ct),
             "Could not update the provider",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -240,7 +240,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.DiscoverModelsRequest { ProviderKey = key };
         var response = await CallAsync(
-            (client, ct) => client.DiscoverModelsAsync(request, ct),
+            (client, ct) => client.DiscoverModelsAsync(request, cancellationToken: ct),
             "Could not discover models",
             cancellationToken).ConfigureAwait(false);
         return new DiscoverModelsResult(Supported: response.Supported, Models: response.Models.ToList(),
@@ -263,7 +263,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.ScanCapabilitiesRequest { ProviderKey = key };
         var response = await CallAsync(
-            (client, ct) => client.ScanCapabilitiesAsync(request, ct),
+            (client, ct) => client.ScanCapabilitiesAsync(request, cancellationToken: ct),
             "Could not scan capabilities",
             cancellationToken).ConfigureAwait(false);
 
@@ -294,7 +294,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.RefreshFromEndpointRequest { ProviderKey = key };
         var response = await CallAsync(
-            (client, ct) => client.RefreshFromEndpointAsync(request, ct),
+            (client, ct) => client.RefreshFromEndpointAsync(request, cancellationToken: ct),
             "Could not refresh from the endpoint",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -311,7 +311,7 @@ public sealed class ProviderAdminClient
         CancellationToken cancellationToken = default)
     {
         var response = await CallAsync(
-            (client, ct) => client.ListPriceOverridesAsync(new Contract.ListPriceOverridesRequest(), ct),
+            (client, ct) => client.ListPriceOverridesAsync(new Contract.ListPriceOverridesRequest(), cancellationToken: ct),
             "Could not read the price overrides",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -336,7 +336,7 @@ public sealed class ProviderAdminClient
             }
         };
         var response = await CallAsync(
-            (client, ct) => client.SetPriceOverrideAsync(request, ct),
+            (client, ct) => client.SetPriceOverrideAsync(request, cancellationToken: ct),
             "Could not save the price override",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -356,7 +356,7 @@ public sealed class ProviderAdminClient
             SourceName = sourceName, AggregatorModelKey = aggregatorModelKey
         };
         var response = await CallAsync(
-            (client, ct) => client.RemovePriceOverrideAsync(request, ct),
+            (client, ct) => client.RemovePriceOverrideAsync(request, cancellationToken: ct),
             "Could not remove the price override",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
@@ -373,7 +373,7 @@ public sealed class ProviderAdminClient
         CancellationToken cancellationToken = default)
     {
         var response = await CallAsync(
-            (client, ct) => client.GetPriceResolutionAsync(new Contract.GetPriceResolutionRequest(), ct),
+            (client, ct) => client.GetPriceResolutionAsync(new Contract.GetPriceResolutionRequest(), cancellationToken: ct),
             "Could not read price resolution",
             cancellationToken).ConfigureAwait(false);
         return response.Entries.Select(e => new PriceResolutionDiagnosisView(ModelName: e.ModelName,
@@ -394,7 +394,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.GetRateLimitHistoryRequest { ProviderKey = key, Hours = hours };
         var response = await CallAsync(
-            (client, ct) => client.GetRateLimitHistoryAsync(request, ct),
+            (client, ct) => client.GetRateLimitHistoryAsync(request, cancellationToken: ct),
             "Could not read rate-limit history",
             cancellationToken).ConfigureAwait(false);
 
@@ -421,7 +421,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.SetSecretRequest { Name = AdminApiKeySecretName(provider), Value = value };
         await CallAsync(
-            (client, ct) => client.SetSecretAsync(request, ct),
+            (client, ct) => client.SetSecretAsync(request, cancellationToken: ct),
             "Could not store the admin API key",
             cancellationToken).ConfigureAwait(false);
     }
@@ -437,7 +437,7 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.DeleteSecretRequest { Name = AdminApiKeySecretName(provider) };
         await CallAsync(
-            (client, ct) => client.DeleteSecretAsync(request, ct),
+            (client, ct) => client.DeleteSecretAsync(request, cancellationToken: ct),
             "Could not clear the admin API key",
             cancellationToken).ConfigureAwait(false);
     }
