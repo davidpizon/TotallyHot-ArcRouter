@@ -3,12 +3,12 @@ using Grpc.Core;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
-/// Base for the gRPC admin clients in this namespace (<see cref="PriceSourceAdminClient"/>,
-/// <see cref="ClusterModelAdminClient"/>, <see cref="BenchmarkDataAdminClient"/>, etc.): owns the
-/// owned-channel-vs-injected-client constructor pair, channel disposal, and the "unavailable → friendly
-/// message, else → server detail" exception-wrapping rule every one of them used to reimplement
-/// identically. Each concrete client keeps its own RPC calls and DTO mapping - only this scaffolding
-/// lives here.
+/// Base for gRPC admin clients (<see cref="PriceSourceAdminClient"/>,
+/// <see cref="ClusterModelAdminClient"/>, <see cref="BenchmarkDataAdminClient"/>, and the Gui.Admin
+/// <c>ProviderAdminClient</c>/<c>UsageQueryClient</c> pair): owns the owned-channel-vs-injected-client
+/// constructor pair, channel disposal, unary <c>CallAsync</c>, and the "unavailable → friendly message,
+/// else → server detail" exception-wrapping rule every one of them used to reimplement identically.
+/// Each concrete client keeps its own RPC calls and DTO mapping - only this scaffolding lives here.
 /// </summary>
 /// <typeparam name="TGeneratedClient">The generated gRPC client type this admin client wraps.</typeparam>
 public abstract class GrpcAdminClientBase<TGeneratedClient> : IDisposable
@@ -50,6 +50,35 @@ public abstract class GrpcAdminClientBase<TGeneratedClient> : IDisposable
     public void Dispose()
     {
         _ownedChannel?.Dispose();
+    }
+
+    /// <summary>
+    /// Invokes a unary RPC through <see cref="Client"/> and wraps an <see cref="RpcException"/> via
+    /// <see cref="Wrap(RpcException, string)"/>. Concrete clients with many RPCs (provider/usage admin)
+    /// share this rather than repeating the try/catch at every call site; clients with a handful of
+    /// methods keep the inline form, which is the same wrapping rule.
+    /// </summary>
+    /// <typeparam name="TResponse">The RPC's response type.</typeparam>
+    /// <param name="call">Starts the unary call against the generated client.</param>
+    /// <param name="action">Describes the failed operation, forwarded to <see cref="Wrap(RpcException, string)"/>.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The RPC's response.</returns>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
+    protected async Task<TResponse> CallAsync<TResponse>(
+        Func<TGeneratedClient, CancellationToken, AsyncUnaryCall<TResponse>> call,
+        string action,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+
+        try
+        {
+            return await call(Client, cancellationToken).ResponseAsync.ConfigureAwait(false);
+        }
+        catch (RpcException ex)
+        {
+            throw Wrap(ex: ex, action: action);
+        }
     }
 
     /// <summary>

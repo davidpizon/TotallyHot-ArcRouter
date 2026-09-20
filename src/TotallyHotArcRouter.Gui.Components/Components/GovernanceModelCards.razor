@@ -67,8 +67,8 @@
     protected override async Task OnInitializedAsync()
     {
         // Only ProviderStore.Changed - a provider/model edit is what should re-derive the card list.
-        // UsageStore.Changed is not subscribed to: LoadRollupAsync below deliberately doesn't raise it
-        // (see its own remarks), so subscribing here would have no effect anyway.
+        // Do not subscribe to UsageStore.Changed: LoadRollupAndBuildCardsAsync uses a
+        // DateTimeOffset.UtcNow range, so a Changed raised from LoadRollupAsync would re-fetch forever.
         ProviderStore.Changed += HandleChanged;
 
         if (!ProviderStore.IsLoaded)

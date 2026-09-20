@@ -1,86 +1,62 @@
 using System.Globalization;
 using Grpc.Core;
-using Grpc.Net.Client;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
-/// A thin, platform-agnostic gRPC client for the proxy's <see cref="Contract.ProviderAdminService"/>
-/// (docs/router/tracked-todos.md #7 - replaces the earlier plain-HTTP/JSON <c>/admin/*</c> client, itself
-/// later deleted entirely by the web GUI migration plan's Phase P2). Lives in this plain <c>net10.0</c>
-/// library so its logic is unit-tested in CI; <c>TotallyHot.ArcRouter.Gui.Components.Services.ProviderAdminStore</c>
-/// wraps an instance of it, whether that store is running inside the browser-hosted WASM dashboard or the
-/// Windows Tray's native-gRPC channel. Every public method's signature is unchanged from the HTTP-era
-/// client - <c>ProviderAdminStore</c> needed no changes for this migration - only the transport underneath
-/// moved from JSON-over-HTTP to Protobuf-over-gRPC (and, for the browser, gRPC-Web).
+/// A thin, platform-agnostic gRPC client for the proxy's <see cref="Contract.ProviderAdminService"/>.
+/// Same 3-constructor + CallAsync + Unavailable wrapping as every other admin client on
+/// <see cref="GrpcAdminClientBase{TGeneratedClient}"/>. Lives in this plain <c>net10.0</c> library so
+/// its mapping logic is unit-tested in CI; <c>ProviderAdminStore</c> wraps an instance of it.
 /// </summary>
 public sealed class ProviderAdminClient
+    : GrpcAdminClientBase<Contract.ProviderAdminService.ProviderAdminServiceClient>
 {
-    private readonly string? _adminToken;
-    private readonly Contract.ProviderAdminService.ProviderAdminServiceClient _client;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class.
+    /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class, creating and owning a
+    /// channel to <paramref name="serverAddress"/>.
     /// </summary>
-    /// <param name="channel">
-    /// The gRPC channel to send requests over. Must target the router's web port (e.g.
-    /// <c>https://localhost:47104</c>, <c>TelemetryChannelFactory.DefaultServerAddress</c>) - the same
-    /// channel the telemetry client uses.
-    /// </param>
-    /// <param name="adminToken">
-    /// Optional management token; when set, it is sent in the <c>x-admin-token</c> gRPC metadata entry on
-    /// every call (required only when the proxy has <c>Management:Token</c> configured).
-    /// </param>
-    public ProviderAdminClient(GrpcChannel channel, string? adminToken = null)
+    /// <param name="serverAddress">The proxy's gRPC endpoint.</param>
+    public ProviderAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
+        : base(serverAddress: serverAddress,
+            createClient: callInvoker =>
+                new Contract.ProviderAdminService.ProviderAdminServiceClient(callInvoker))
     {
-        ArgumentNullException.ThrowIfNull(channel);
-        _client = new Contract.ProviderAdminService.ProviderAdminServiceClient(channel);
-        _adminToken = adminToken;
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class over a shared call
-    /// invoker (web GUI migration plan Phase P5a) - see
-    /// <c>TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider</c>'s remarks for why production now
-    /// goes through this constructor instead of the channel-owning one above. The caller owns the
-    /// invoker's underlying channel.
+    /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class over a shared,
+    /// already-authenticated call invoker. The caller owns the invoker's underlying channel.
     /// </summary>
-    /// <param name="callInvoker">The shared call invoker.</param>
-    /// <param name="adminToken">Optional management token; see the primary constructor's remarks.</param>
-    public ProviderAdminClient(CallInvoker callInvoker, string? adminToken = null)
+    /// <param name="callInvoker">The shared call invoker - see <see cref="IRouterChannelProvider.CallInvoker"/>.</param>
+    public ProviderAdminClient(CallInvoker callInvoker)
+        : base(new Contract.ProviderAdminService.ProviderAdminServiceClient(callInvoker))
     {
-        ArgumentNullException.ThrowIfNull(callInvoker);
-        _client = new Contract.ProviderAdminService.ProviderAdminServiceClient(callInvoker);
-        _adminToken = adminToken;
     }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class over a caller-supplied
-    /// generated client. The seam tests use to substitute a fake without a live server - the generated
-    /// client exposes a protected parameterless constructor precisely for this, mirroring
-    /// <c>TotallyHot.ArcRouter.Gui.Telemetry.PriceSourceAdminClient</c>'s identical test seam. The caller owns
-    /// any channel backing <paramref name="client"/>.
+    /// generated client. The seam tests use to substitute a fake without a live server; the caller owns
+    /// the channel's lifetime.
     /// </summary>
     /// <param name="client">The generated client (or test double) to send requests through.</param>
-    /// <param name="adminToken">Optional management token; see the primary constructor's remarks.</param>
-    public ProviderAdminClient(Contract.ProviderAdminService.ProviderAdminServiceClient client,
-        string? adminToken = null)
+    public ProviderAdminClient(Contract.ProviderAdminService.ProviderAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _adminToken = adminToken;
     }
 
     /// <summary>Lists all configured providers and their models.</summary>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The configured providers.</returns>
-    /// <exception cref="ProviderAdminException">The request failed or the proxy returned an error.</exception>
+    /// <exception cref="GrpcAdminException">The request failed or the proxy returned an error.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> GetProvidersAsync(CancellationToken cancellationToken = default)
     {
-        var response = await CallAsync((client, options) =>
-            client.ListProvidersAsync(new Contract.ListProvidersRequest(), options), cancellationToken)
-            .ConfigureAwait(false);
+        var response = await CallAsync(
+            (client, ct) => client.ListProvidersAsync(new Contract.ListProvidersRequest(), ct),
+            "Could not read the providers",
+            cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
 
@@ -89,7 +65,7 @@ public sealed class ProviderAdminClient
     /// <param name="body">The provider fields to write.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
-    /// <exception cref="ProviderAdminException">The edit was rejected (e.g. validation) or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The edit was rejected (e.g. validation) or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> UpsertProviderAsync(string key, ProviderWriteRequest body,
         CancellationToken cancellationToken = default)
     {
@@ -110,7 +86,9 @@ public sealed class ProviderAdminClient
                 return wire;
             }));
 
-        var response = await CallAsync((client, options) => client.UpsertProviderAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.UpsertProviderAsync(request, ct),
+            "Could not save the provider",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -119,13 +97,14 @@ public sealed class ProviderAdminClient
     /// <param name="key">The provider key.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
-    /// <exception cref="ProviderAdminException">The removal was rejected (e.g. the provider is unknown) or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The removal was rejected (e.g. the provider is unknown) or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> RemoveProviderAsync(string key,
         CancellationToken cancellationToken = default)
     {
-        var response = await CallAsync((client, options) =>
-            client.RemoveProviderAsync(new Contract.RemoveProviderRequest { Key = key }, options), cancellationToken)
-            .ConfigureAwait(false);
+        var response = await CallAsync(
+            (client, ct) => client.RemoveProviderAsync(new Contract.RemoveProviderRequest { Key = key }, ct),
+            "Could not remove the provider",
+            cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
 
@@ -135,7 +114,7 @@ public sealed class ProviderAdminClient
     /// <param name="body">The model fields to write.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
-    /// <exception cref="ProviderAdminException">The edit was rejected or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The edit was rejected or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> UpsertModelAsync(string key, string modelName,
         ModelWriteRequest body, CancellationToken cancellationToken = default)
     {
@@ -143,7 +122,9 @@ public sealed class ProviderAdminClient
         if (body.ProviderModelId is not null) model.ProviderModelId = body.ProviderModelId;
 
         var request = new Contract.UpsertModelRequest { ProviderKey = key, ModelName = modelName, Model = model };
-        var response = await CallAsync((client, options) => client.UpsertModelAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.UpsertModelAsync(request, ct),
+            "Could not save the model",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -153,12 +134,13 @@ public sealed class ProviderAdminClient
     /// <param name="modelName">The client-facing model name.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list.</returns>
-    /// <exception cref="ProviderAdminException">The removal was rejected or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The removal was rejected or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> RemoveModelAsync(string key, string modelName,
         CancellationToken cancellationToken = default)
     {
-        var response = await CallAsync((client, options) =>
-            client.RemoveModelAsync(new Contract.RemoveModelRequest { ModelName = modelName }, options),
+        var response = await CallAsync(
+            (client, ct) => client.RemoveModelAsync(new Contract.RemoveModelRequest { ModelName = modelName }, ct),
+            "Could not remove the model",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -169,12 +151,14 @@ public sealed class ProviderAdminClient
     /// <param name="body">The new on/off state.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the new state.</returns>
-    /// <exception cref="ProviderAdminException">The model is unknown or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The model is unknown or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> SetModelEnabledAsync(string key, string modelName,
         ModelEnabledWriteRequest body, CancellationToken cancellationToken = default)
     {
         var request = new Contract.SetModelEnabledRequest { ModelName = modelName, Enabled = body.Enabled };
-        var response = await CallAsync((client, options) => client.SetModelEnabledAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.SetModelEnabledAsync(request, ct),
+            "Could not update the model",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -188,7 +172,7 @@ public sealed class ProviderAdminClient
     /// <param name="body">The dialect to pin, or a null/empty dialect to clear the pin and resume detection.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the pinned dialect.</returns>
-    /// <exception cref="ProviderAdminException">The model is unknown, the dialect is unrecognized, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The model is unknown, the dialect is unrecognized, or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> SetModelToolDialectAsync(string key, string modelName,
         ModelToolDialectWriteRequest body, CancellationToken cancellationToken = default)
     {
@@ -196,7 +180,9 @@ public sealed class ProviderAdminClient
         {
             ProviderKey = key, ModelName = modelName, Dialect = body.Dialect ?? string.Empty
         };
-        var response = await CallAsync((client, options) => client.SetModelToolDialectAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.SetModelToolDialectAsync(request, ct),
+            "Could not pin the model dialect",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -206,7 +192,7 @@ public sealed class ProviderAdminClient
     /// <param name="body">The caps to write (null clears a dimension; both null removes the budget).</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the new caps and current-month spend.</returns>
-    /// <exception cref="ProviderAdminException">The edit was rejected (e.g. a negative cap) or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The edit was rejected (e.g. a negative cap) or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> SetBudgetAsync(string key, ProviderBudgetWriteRequest body,
         CancellationToken cancellationToken = default)
     {
@@ -217,7 +203,9 @@ public sealed class ProviderAdminClient
         if (body.WindowHours.HasValue) budget.WindowHours = body.WindowHours.Value;
 
         var request = new Contract.SetProviderBudgetRequest { ProviderKey = key, Budget = budget };
-        var response = await CallAsync((client, options) => client.SetProviderBudgetAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.SetProviderBudgetAsync(request, ct),
+            "Could not save the budget",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -227,12 +215,14 @@ public sealed class ProviderAdminClient
     /// <param name="body">The new on/off state.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, now carrying the new state.</returns>
-    /// <exception cref="ProviderAdminException">The provider is unknown or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The provider is unknown or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> SetEnabledAsync(string key, ProviderEnabledWriteRequest body,
         CancellationToken cancellationToken = default)
     {
         var request = new Contract.SetProviderEnabledRequest { Key = key, Enabled = body.Enabled };
-        var response = await CallAsync((client, options) => client.SetProviderEnabledAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.SetProviderEnabledAsync(request, ct),
+            "Could not update the provider",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -244,12 +234,14 @@ public sealed class ProviderAdminClient
     /// The discovery result (which reports <see cref="DiscoverModelsResult.Supported"/> when the provider has no
     /// OpenAI-shaped endpoint).
     /// </returns>
-    /// <exception cref="ProviderAdminException">The request itself failed (e.g. unknown provider, transport error).</exception>
+    /// <exception cref="GrpcAdminException">The request itself failed (e.g. unknown provider, transport error).</exception>
     public async Task<DiscoverModelsResult> DiscoverModelsAsync(string key,
         CancellationToken cancellationToken = default)
     {
         var request = new Contract.DiscoverModelsRequest { ProviderKey = key };
-        var response = await CallAsync((client, options) => client.DiscoverModelsAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.DiscoverModelsAsync(request, ct),
+            "Could not discover models",
             cancellationToken).ConfigureAwait(false);
         return new DiscoverModelsResult(Supported: response.Supported, Models: response.Models.ToList(),
             Error: response.HasError ? response.Error : null);
@@ -265,12 +257,14 @@ public sealed class ProviderAdminClient
     /// <param name="key">The provider key to scan.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>Which API flavors the endpoint answered, and when the scan ran.</returns>
-    /// <exception cref="ProviderAdminException">The provider is unknown, scanning is unavailable, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The provider is unknown, scanning is unavailable, or the request failed.</exception>
     public async Task<ProviderEndpointCapabilitiesView> ScanCapabilitiesAsync(string key,
         CancellationToken cancellationToken = default)
     {
         var request = new Contract.ScanCapabilitiesRequest { ProviderKey = key };
-        var response = await CallAsync((client, options) => client.ScanCapabilitiesAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.ScanCapabilitiesAsync(request, ct),
+            "Could not scan capabilities",
             cancellationToken).ConfigureAwait(false);
 
         // The RPC returns the full refreshed list (the "full state after the mutation" convention every
@@ -279,7 +273,7 @@ public sealed class ProviderAdminClient
         var provider = response.Providers.SingleOrDefault(p => string.Equals(a: p.Key, b: key,
             comparisonType: StringComparison.OrdinalIgnoreCase));
         if (provider?.EndpointCapabilities is not { } capabilities)
-            throw new ProviderAdminException($"The proxy did not report endpoint capabilities for '{key}'.");
+            throw new GrpcAdminException($"The proxy did not report endpoint capabilities for '{key}'.");
 
         return ToView(capabilities, key);
     }
@@ -294,12 +288,14 @@ public sealed class ProviderAdminClient
     /// <param name="key">The provider key to refresh.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated provider list, carrying any newly-added/flagged models and refreshed capability data.</returns>
-    /// <exception cref="ProviderAdminException">The provider is unknown or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The provider is unknown or the request failed.</exception>
     public async Task<IReadOnlyList<ProviderAdminView>> RefreshFromEndpointAsync(string key,
         CancellationToken cancellationToken = default)
     {
         var request = new Contract.RefreshFromEndpointRequest { ProviderKey = key };
-        var response = await CallAsync((client, options) => client.RefreshFromEndpointAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.RefreshFromEndpointAsync(request, ct),
+            "Could not refresh from the endpoint",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -310,13 +306,14 @@ public sealed class ProviderAdminClient
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The configured overrides.</returns>
-    /// <exception cref="ProviderAdminException">Overrides are unavailable or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">Overrides are unavailable or the request failed.</exception>
     public async Task<IReadOnlyList<PriceOverrideView>> GetPriceOverridesAsync(
         CancellationToken cancellationToken = default)
     {
-        var response = await CallAsync((client, options) =>
-            client.ListPriceOverridesAsync(new Contract.ListPriceOverridesRequest(), options), cancellationToken)
-            .ConfigureAwait(false);
+        var response = await CallAsync(
+            (client, ct) => client.ListPriceOverridesAsync(new Contract.ListPriceOverridesRequest(), ct),
+            "Could not read the price overrides",
+            cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
 
@@ -327,7 +324,7 @@ public sealed class ProviderAdminClient
     /// </param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated override list.</returns>
-    /// <exception cref="ProviderAdminException">The edit was rejected (e.g. an unknown model) or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The edit was rejected (e.g. an unknown model) or the request failed.</exception>
     public async Task<IReadOnlyList<PriceOverrideView>> SetPriceOverrideAsync(PriceOverrideWriteRequest body,
         CancellationToken cancellationToken = default)
     {
@@ -338,7 +335,9 @@ public sealed class ProviderAdminClient
                 SourceName = body.SourceName, AggregatorModelKey = body.AggregatorModelKey, ModelName = body.ModelName
             }
         };
-        var response = await CallAsync((client, options) => client.SetPriceOverrideAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.SetPriceOverrideAsync(request, ct),
+            "Could not save the price override",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -348,7 +347,7 @@ public sealed class ProviderAdminClient
     /// <param name="aggregatorModelKey">The source's own model key the override matches.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The updated override list.</returns>
-    /// <exception cref="ProviderAdminException">No override matched, overrides are unavailable, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">No override matched, overrides are unavailable, or the request failed.</exception>
     public async Task<IReadOnlyList<PriceOverrideView>> RemovePriceOverrideAsync(string sourceName,
         string aggregatorModelKey, CancellationToken cancellationToken = default)
     {
@@ -356,7 +355,9 @@ public sealed class ProviderAdminClient
         {
             SourceName = sourceName, AggregatorModelKey = aggregatorModelKey
         };
-        var response = await CallAsync((client, options) => client.RemovePriceOverrideAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.RemovePriceOverrideAsync(request, ct),
+            "Could not remove the price override",
             cancellationToken).ConfigureAwait(false);
         return ToViews(response);
     }
@@ -367,13 +368,14 @@ public sealed class ProviderAdminClient
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The resolution state of every configured model.</returns>
-    /// <exception cref="ProviderAdminException">The price catalog is unavailable or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The price catalog is unavailable or the request failed.</exception>
     public async Task<IReadOnlyList<PriceResolutionDiagnosisView>> GetPriceResolutionDiagnosisAsync(
         CancellationToken cancellationToken = default)
     {
-        var response = await CallAsync((client, options) =>
-            client.GetPriceResolutionAsync(new Contract.GetPriceResolutionRequest(), options), cancellationToken)
-            .ConfigureAwait(false);
+        var response = await CallAsync(
+            (client, ct) => client.GetPriceResolutionAsync(new Contract.GetPriceResolutionRequest(), ct),
+            "Could not read price resolution",
+            cancellationToken).ConfigureAwait(false);
         return response.Entries.Select(e => new PriceResolutionDiagnosisView(ModelName: e.ModelName,
             Provider: e.Provider, Resolved: e.Resolved, IsApproximate: e.IsApproximate)).ToList();
     }
@@ -386,12 +388,14 @@ public sealed class ProviderAdminClient
     /// <param name="hours">How far back to look, in hours (default 6).</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
     /// <returns>The per-dimension history series.</returns>
-    /// <exception cref="ProviderAdminException">The provider is unknown, history is unavailable, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The provider is unknown, history is unavailable, or the request failed.</exception>
     public async Task<RateLimitHistoryResponseAdminView> GetRateLimitHistoryAsync(string key, double hours = 6.0,
         CancellationToken cancellationToken = default)
     {
         var request = new Contract.GetRateLimitHistoryRequest { ProviderKey = key, Hours = hours };
-        var response = await CallAsync((client, options) => client.GetRateLimitHistoryAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.GetRateLimitHistoryAsync(request, ct),
+            "Could not read rate-limit history",
             cancellationToken).ConfigureAwait(false);
 
         var dimensions = response.Dimensions.ToDictionary(
@@ -412,12 +416,14 @@ public sealed class ProviderAdminClient
     /// <param name="provider">The reconciliation provider key (<c>openai</c> or <c>anthropic</c>).</param>
     /// <param name="value">The Admin API key to store.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
     public async Task SetAdminApiKeyAsync(string provider, string value, CancellationToken cancellationToken = default)
     {
         var request = new Contract.SetSecretRequest { Name = AdminApiKeySecretName(provider), Value = value };
-        await CallAsync((client, options) => client.SetSecretAsync(request, options), cancellationToken)
-            .ConfigureAwait(false);
+        await CallAsync(
+            (client, ct) => client.SetSecretAsync(request, ct),
+            "Could not store the admin API key",
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -426,12 +432,14 @@ public sealed class ProviderAdminClient
     /// </summary>
     /// <param name="provider">The reconciliation provider key (<c>openai</c> or <c>anthropic</c>).</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">The provider is unrecognized, the store is unavailable, or the request failed.</exception>
     public async Task DeleteAdminApiKeyAsync(string provider, CancellationToken cancellationToken = default)
     {
         var request = new Contract.DeleteSecretRequest { Name = AdminApiKeySecretName(provider) };
-        await CallAsync((client, options) => client.DeleteSecretAsync(request, options), cancellationToken)
-            .ConfigureAwait(false);
+        await CallAsync(
+            (client, ct) => client.DeleteSecretAsync(request, ct),
+            "Could not clear the admin API key",
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -441,46 +449,6 @@ public sealed class ProviderAdminClient
     private static string AdminApiKeySecretName(string provider)
     {
         return $"reconciliation:{provider}:admin-key";
-    }
-
-    /// <summary>
-    /// Attaches the admin token (if configured) as gRPC call metadata, invokes <paramref name="call"/>, and
-    /// translates an <see cref="RpcException"/> into a <see cref="ProviderAdminException"/> carrying the
-    /// same human-readable message the REST client used to surface.
-    /// </summary>
-    private async Task<TResponse> CallAsync<TResponse>(
-        Func<Contract.ProviderAdminService.ProviderAdminServiceClient, CallOptions, AsyncUnaryCall<TResponse>> call,
-        CancellationToken cancellationToken)
-    {
-        var options = BuildCallOptions(cancellationToken);
-        try
-        {
-            return await call(_client, options).ResponseAsync.ConfigureAwait(false);
-        }
-        catch (RpcException ex)
-        {
-            throw ToProviderAdminException(ex);
-        }
-    }
-
-    /// <summary>Builds the <see cref="CallOptions"/> shared by every call: the admin-token metadata entry and cancellation.</summary>
-    private CallOptions BuildCallOptions(CancellationToken cancellationToken)
-    {
-        var metadata = new Metadata();
-        if (!string.IsNullOrEmpty(_adminToken)) metadata.Add(key: "x-admin-token", value: _adminToken);
-        return new CallOptions(headers: metadata, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>Translates a gRPC failure into a <see cref="ProviderAdminException"/>, mirroring the REST client's error shape.</summary>
-    private static ProviderAdminException ToProviderAdminException(RpcException ex)
-    {
-        // Unavailable is what Grpc.Net.Client reports for a transport-level failure (connection refused, DNS
-        // failure, TLS handshake failure) - the gRPC equivalent of the REST-era client's HttpRequestException
-        // catch, not Cancelled (a deadline/client-initiated cancellation, an unrelated condition).
-        return ex.StatusCode == StatusCode.Unavailable
-            ? new ProviderAdminException(message: $"Could not reach the proxy management API: {ex.Status.Detail}",
-                innerException: ex)
-            : new ProviderAdminException(ex.Status.Detail);
     }
 
     private static IReadOnlyList<ProviderAdminView> ToViews(Contract.ProviderListResponse response)
