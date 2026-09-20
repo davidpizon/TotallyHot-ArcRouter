@@ -65,7 +65,7 @@ public sealed class StorageOptions
     // Path.GetDirectoryName("/data") is "/", so every one of these five paths resolved to
     // "/TotallyHotArcRouter/<file>" - outside the mounted volume and unwritable, crashing startup with
     // UnauthorizedAccessException. Every OTHER machine-shared consumer (ManagementAccessToken,
-    // ProtectedSecretStore, RoutingGateStore, TelemetryTlsCertificate) already called
+    // ProtectedSecretStore, RoutingGateStore, LocalCertificateAuthority) already called
     // AppDataPaths.ResolveMachineSharedDirectory() directly with no such peel, so they were never affected
     // - only this class's five paths silently diverged from where the token/secrets/CA actually live.
     // Fixed by dropping the redundant "TotallyHotArcRouter\" segment from each default (below) and having
@@ -228,7 +228,7 @@ public sealed class StorageOptions
         // token would already be gone by the time this method's old ordering checked for it) and giving
         // every default a different, ApplicationDirectoryName-less directory than every other
         // machine-shared consumer (ManagementAccessToken, ProtectedSecretStore, RoutingGateStore,
-        // TelemetryTlsCertificate) resolves to. Doing our own replacement first makes
+        // LocalCertificateAuthority) resolves to. Doing our own replacement first makes
         // AppDataPaths.ResolveMachineSharedDirectory() the one source of truth on every platform,
         // Windows included - a real regression this exact reordering was needed to catch and fix.
         var withTokensExpanded = rawPath;

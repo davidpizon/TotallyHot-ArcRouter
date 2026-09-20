@@ -9,7 +9,6 @@ using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Tools;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
@@ -34,8 +33,6 @@ public class ServiceCollectionExtensionsTests
             filter: d => d.ServiceType == typeof(RouterMemory) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(collection: services,
             filter: d => d.ServiceType == typeof(AgentAsARouter) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(collection: services,
-            filter: d => d.ServiceType == typeof(CheckSyntax) && d.Lifetime == ServiceLifetime.Transient);
         Assert.Contains(collection: services,
             filter: d =>
                 d.ServiceType == typeof(IEnvironmentVariableProvider) &&
@@ -77,7 +74,6 @@ public class ServiceCollectionExtensionsTests
         await using var provider = services.BuildServiceProvider();
 
         Assert.NotNull(provider.GetRequiredService<RouterMemory>());
-        Assert.NotNull(provider.GetRequiredService<CheckSyntax>());
         Assert.NotNull(provider.GetRequiredService<IModelRouteResolver>());
         Assert.NotNull(provider.GetRequiredService<RequestInterceptor>());
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());

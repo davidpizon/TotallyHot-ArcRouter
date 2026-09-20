@@ -10,9 +10,10 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// <see cref="AppDataPaths"/> for every other platform). Runs at startup, ahead of the first
 /// <c>EnsureCreated</c>, so an existing install keeps its usage ledger, provider spend, synced benchmark
 /// corpus, and trained voter models instead of silently starting from empty. Also adopts
-/// <see cref="ProtectedSecretStore"/>'s <c>secrets.dat</c> and
-/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s <c>telemetry-cert.pfx</c> - both
-/// lived in this same legacy per-user directory before
+/// <see cref="ProtectedSecretStore"/>'s <c>secrets.dat</c> and the legacy
+/// <c>telemetry-cert.pfx</c> superseded by
+/// <see cref="TotallyHot.ArcRouter.Telemetry.LocalCertificateAuthority"/> - both lived in this
+/// same legacy per-user directory before
 /// <see href="../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase P3
 /// moved them here too, and without this, an operator upgrading past Phase P3 would find their saved
 /// provider credentials silently gone (a fresh, empty <c>secrets.dat</c> at the new shared location) until

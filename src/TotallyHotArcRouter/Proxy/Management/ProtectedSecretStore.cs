@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// Resolution surface for the protected secret store - the router's own request-path/discovery/telemetry
 /// code is the only intended reader of secret material (see
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProviderCredentialResolver"/>, <c>BuildCostReconcilers</c>, and
-/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>). Public rather than internal only
+/// <see cref="TotallyHot.ArcRouter.Telemetry.LocalCertificateAuthority"/>). Public rather than internal only
 /// because it appears as an optional constructor parameter on public types
 /// (<see cref="ManagementFacade"/>, <see cref="TotallyHot.ArcRouter.Proxy.ModelRouteResolver"/>,
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>); §4's write-only invariant is upheld by

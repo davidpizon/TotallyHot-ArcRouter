@@ -188,8 +188,8 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // is the actual hot-swap mechanism: LocalCertificateAuthority.GetOrCreateLeaf()
                     // transparently mints and persists a replacement once the cached leaf enters its
                     // renewal window, with no restart and no re-trust needed by an already-trusting
-                    // client. Deliberately not caught here the way the old TelemetryTlsCertificate call
-                    // was: with the LLM proxy port now also TLS-only by default, a certificate failure
+                    // client. Deliberately not caught here: with the LLM proxy port now also TLS-only
+                    // by default, a certificate failure
                     // means the router cannot serve its core purpose at all, not just that telemetry is
                     // unavailable - so this now fails ProxyServer construction outright rather than
                     // silently degrading.
