@@ -31,7 +31,7 @@ public sealed class CompositeRouterScoreObserver : IQualityScoreObserver
 
     /// <summary>
     /// The registered fan-out, in invocation order. Internal (not private) so a DI-composition test can
-    /// assert what actually got wired in - in particular, that <c>JudgeShadowScoreDispatcher</c> is absent
+    /// assert what actually got wired in - in particular, that <c>GraderDispatcher</c> is absent
     /// (docs/router/judge-join-deadlock-fix-plan.md) - rather than only that the composite type resolves.
     /// </summary>
     internal IReadOnlyList<IQualityScoreObserver> Observers => _observers;

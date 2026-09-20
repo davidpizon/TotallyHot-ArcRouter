@@ -127,9 +127,8 @@ public class ServiceCollectionExtensionsTests
     /// at hold-time - and must be absent from the write-time <see cref="IQualityScoreObserver"/> fan-out it
     /// used to occupy. A regression back to registering it as an observer would leave both assertions below
     /// green individually but silently reintroduce the deadlock, which is why they are asserted together.
-    /// Phase Q3 wraps the single <see cref="IAsyncGraderDispatcher"/> in a
-    /// <see cref="CompositeAsyncGraderDispatcher"/> fanning out to both the judge's dispatcher and the
-    /// portfolio's, so this also pins that both component dispatchers remain reachable in their own right.
+    /// Phase Q3 registers a single <see cref="GraderDispatcher"/> as the aggregator's
+    /// <see cref="IAsyncGraderDispatcher"/>, covering the G-Eval judge and the portfolio graders.
     /// </summary>
     [Fact]
     public async Task AddTotallyHotArcRouter_ResolvesJudgeDispatcher_AbsentFromObserverFanOut()
@@ -149,16 +148,14 @@ public class ServiceCollectionExtensionsTests
         await using var provider = services.BuildServiceProvider();
 
         var dispatcher = provider.GetRequiredService<IAsyncGraderDispatcher>();
-        Assert.IsType<CompositeAsyncGraderDispatcher>(dispatcher);
-        Assert.NotNull(provider.GetRequiredService<JudgeShadowScoreDispatcher>());
-        Assert.NotNull(provider.GetRequiredService<PortfolioGraderDispatcher>());
+        Assert.IsType<GraderDispatcher>(dispatcher);
 
         var observer = provider.GetRequiredService<IQualityScoreObserver>();
         var composite = Assert.IsType<CompositeRouterScoreObserver>(observer);
 
-        // JudgeShadowScoreDispatcher no longer implements IQualityScoreObserver at all - the whole point
+        // GraderDispatcher no longer implements IQualityScoreObserver at all - the whole point
         // of the seam split - so this checks the concrete type of every fanned-out observer rather than an
-        // "is JudgeShadowScoreDispatcher" pattern the compiler would reject as always false. Asserting the
+        // "is GraderDispatcher" pattern the compiler would reject as always false. Asserting the
         // full expected membership, not just an absence, is what keeps this test meaningful rather than
         // tautological.
         Assert.Equal(

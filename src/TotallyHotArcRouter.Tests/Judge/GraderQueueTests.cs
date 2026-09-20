@@ -1,19 +1,19 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Quality;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
 /// <summary>
-/// Covers <see cref="JudgeShadowScoreQueue"/>'s bounded, non-blocking, drop-on-full behavior
-/// (docs/router/geval-shadow-scoring-plan.md's ground rule: the routing hot path never blocks on
-/// judging).
+/// Covers <see cref="GraderQueue"/>'s bounded, non-blocking, drop-on-full behavior: the routing hot path
+/// never blocks on judging.
 /// </summary>
-public class JudgeShadowScoreQueueTests
+public class GraderQueueTests
 {
     [Fact]
     public void TryEnqueue_UnderCapacity_Succeeds()
     {
-        var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 2 }));
+        var queue = new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 2 }));
 
         Assert.True(queue.TryEnqueue(MakeJob("corr-1")));
         Assert.Equal(0, actual: queue.DroppedCount);
@@ -22,7 +22,7 @@ public class JudgeShadowScoreQueueTests
     [Fact]
     public void TryEnqueue_WhenFull_ReturnsFalseAndCountsAsDropped_WithoutThrowing()
     {
-        var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 1 }));
+        var queue = new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 1 }));
 
         Assert.True(queue.TryEnqueue(MakeJob("corr-1")));
 
@@ -35,7 +35,7 @@ public class JudgeShadowScoreQueueTests
     [Fact]
     public async Task DequeueAllAsync_YieldsEnqueuedJobsInOrder()
     {
-        var queue = new JudgeShadowScoreQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
+        var queue = new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
         queue.TryEnqueue(MakeJob("corr-1"));
         queue.TryEnqueue(MakeJob("corr-2"));
 
@@ -50,9 +50,9 @@ public class JudgeShadowScoreQueueTests
         Assert.Equal(expected: ["corr-1", "corr-2"], actual: results);
     }
 
-    private static JudgeShadowScoringJob MakeJob(string correlationId)
+    private static GraderScoringJob MakeJob(string correlationId)
     {
-        return new JudgeShadowScoringJob(CorrelationId: correlationId, Dimension: "algorithm", Model: "model-a", 0.5,
-            SyntaxAuthoritative: true);
+        return new GraderScoringJob(CorrelationId: correlationId, GraderKey: GraderKeys.Judge,
+            Dimension: "algorithm", Model: "model-a", StaticScore: 0.5, SyntaxAuthoritative: true);
     }
 }
