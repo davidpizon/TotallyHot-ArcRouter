@@ -27,6 +27,25 @@ public partial class ClientDropInPanel
 
     private CopiedField? _copied;
 
+    /// <summary>
+    /// Per-instance prefix for this panel's element <c>id</c> attributes. The panel renders on the
+    /// Sessions empty state and inside System Settings, and the settings overlay opens on top of that
+    /// empty state — so both copies can be in the DOM at once. Hard-coded ids would collide there and
+    /// every <c>label for</c> would resolve to the first panel's control, silently breaking the
+    /// association for the second. The <c>data-testid</c> attributes stay stable because tests query
+    /// by those, not by id.
+    /// </summary>
+    private readonly string _idPrefix = $"client-drop-in-{Guid.NewGuid():N}";
+
+    /// <summary>Element id for the Base URL control, unique to this panel instance.</summary>
+    private string BaseUrlId => $"{_idPrefix}-base-url";
+
+    /// <summary>Element id for the Model control, unique to this panel instance.</summary>
+    private string ModelId => $"{_idPrefix}-model";
+
+    /// <summary>Element id for the environment-block control, unique to this panel instance.</summary>
+    private string EnvId => $"{_idPrefix}-env";
+
     /// <summary>Copies text to the clipboard. The WASM and native hosts each register their own implementation.</summary>
     [Inject]
     public IClipboardService ClipboardService { get; set; } = null!;

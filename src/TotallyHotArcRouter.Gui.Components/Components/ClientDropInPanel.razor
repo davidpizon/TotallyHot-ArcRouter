@@ -13,9 +13,9 @@
     </div>
 
     <div class="space-y-2">
-        <label class="text-xs text-slate-500 uppercase tracking-widest" for="client-drop-in-base-url">Base URL</label>
+        <label class="text-xs text-slate-500 uppercase tracking-widest" for="@BaseUrlId">Base URL</label>
         <div class="flex items-center gap-2">
-            <input id="client-drop-in-base-url"
+            <input id="@BaseUrlId"
                    type="text"
                    readonly
                    value="@OpenAiCompatibleDropIn.BaseUrl"
@@ -31,9 +31,9 @@
     </div>
 
     <div class="space-y-2">
-        <label class="text-xs text-slate-500 uppercase tracking-widest" for="client-drop-in-model">Model</label>
+        <label class="text-xs text-slate-500 uppercase tracking-widest" for="@ModelId">Model</label>
         <div class="flex items-center gap-2">
-            <input id="client-drop-in-model"
+            <input id="@ModelId"
                    type="text"
                    readonly
                    value="@OpenAiCompatibleDropIn.Model"
@@ -49,8 +49,8 @@
     </div>
 
     <div class="space-y-2">
-        <label class="text-xs text-slate-500 uppercase tracking-widest" for="client-drop-in-env">Environment</label>
-        <textarea id="client-drop-in-env"
+        <label class="text-xs text-slate-500 uppercase tracking-widest" for="@EnvId">Environment</label>
+        <textarea id="@EnvId"
                   readonly
                   rows="2"
                   data-testid="client-drop-in-env"

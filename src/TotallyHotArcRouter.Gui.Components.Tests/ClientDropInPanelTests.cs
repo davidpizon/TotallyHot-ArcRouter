@@ -74,4 +74,42 @@ public sealed class ClientDropInPanelTests
         clipboard.LastCopiedText.Should().Be(OpenAiCompatibleDropIn.BuildEnvironmentExports());
         cut.Find("[data-testid='client-drop-in-copy-env']").TextContent.Trim().Should().Be("Copied env");
     }
+
+    [Fact]
+    public void Each_panel_instance_gets_its_own_element_ids_so_two_can_coexist()
+    {
+        // The settings overlay opens on top of the Sessions empty state, so both panels are in the DOM
+        // together. Shared ids would point every label's for= at the first panel's control.
+        using var ctx = NewContext(out _);
+
+        var first = ctx.Render<ClientDropInPanel>();
+        var second = ctx.Render<ClientDropInPanel>();
+
+        foreach (var testId in new[] { "base-url", "model", "env" })
+        {
+            var firstId = first.Find($"[data-testid='client-drop-in-{testId}']").Id;
+            var secondId = second.Find($"[data-testid='client-drop-in-{testId}']").Id;
+
+            firstId.Should().NotBeNullOrEmpty();
+            firstId.Should().NotBe(secondId);
+        }
+    }
+
+    [Fact]
+    public void Every_label_points_at_a_control_inside_its_own_panel()
+    {
+        using var ctx = NewContext(out _);
+
+        var cut = ctx.Render<ClientDropInPanel>();
+
+        var labels = cut.FindAll("label");
+        labels.Should().HaveCount(3);
+
+        foreach (var label in labels)
+        {
+            var target = label.GetAttribute("for");
+            target.Should().NotBeNullOrEmpty();
+            cut.FindAll($"#{target}").Should().ContainSingle();
+        }
+    }
 }
