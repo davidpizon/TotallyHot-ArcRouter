@@ -164,6 +164,68 @@ public sealed class UsageQueryClientTests
         Assert.Null(point.EstimatedNetSavingsUsd);
     }
 
+    [Fact]
+    public async Task GetLearningReportCardAsync_SendsTheRange_AndMapsEveryField()
+    {
+        var stub = new StubClient
+        {
+            CannedReportCardResponse = new Contract.LearningReportCardResponse
+            {
+                MeanScoreDelta = 0.041,
+                ScoredRequests = 100,
+                ComparableRequests = 90,
+                TotalSpendUsd = "23.70"
+            }
+        };
+        stub.CannedReportCardResponse.SpendByModel.Add(new Contract.ModelSpendRow
+        {
+            Model = "gpt-4o-mini", CostUsd = "12.40", Requests = 84
+        });
+        stub.CannedReportCardResponse.GradeMix.Add(new Contract.GradeMixRow
+        {
+            Grade = "A", Count = 42, Percent = "42.0"
+        });
+        stub.CannedReportCardResponse.ScoreDeltaByModel.Add(new Contract.ModelScoreDeltaRow
+        {
+            Model = "gpt-4o-mini", MeanDelta = 0.082, SampleSize = 40
+        });
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z");
+
+        var card = await client.GetLearningReportCardAsync(from: from, to: to, cancellationToken: Ct);
+
+        Assert.Equal(expected: from, actual: stub.LastReportCardRequest!.From.ToDateTimeOffset());
+        Assert.Equal(expected: to, actual: stub.LastReportCardRequest.To.ToDateTimeOffset());
+        Assert.Equal(0.041, actual: card.MeanScoreDelta);
+        Assert.Equal(100, actual: card.ScoredRequests);
+        Assert.Equal(90, actual: card.ComparableRequests);
+        Assert.Equal(23.70m, actual: card.TotalSpendUsd);
+        var spend = Assert.Single(card.SpendByModel);
+        Assert.Equal(expected: "gpt-4o-mini", actual: spend.Model);
+        Assert.Equal(12.40m, actual: spend.CostUsd);
+        var mix = Assert.Single(card.GradeMix);
+        Assert.Equal(expected: "A", actual: mix.Grade);
+        var delta = Assert.Single(card.ScoreDeltaByModel);
+        Assert.Equal(0.082, actual: delta.MeanDelta);
+    }
+
+    [Fact]
+    public async Task GetLearningReportCardAsync_NullMeanDelta_StaysNull()
+    {
+        var stub = new StubClient
+        {
+            CannedReportCardResponse = new Contract.LearningReportCardResponse { TotalSpendUsd = "0" }
+        };
+        var client = new UsageQueryClient(stub);
+
+        var card = await client.GetLearningReportCardAsync(from: DateTimeOffset.UnixEpoch,
+            to: DateTimeOffset.UnixEpoch.AddDays(1), cancellationToken: Ct);
+
+        Assert.Null(card.MeanScoreDelta);
+        Assert.Equal(0m, actual: card.TotalSpendUsd);
+    }
+
     // --- ExportRollupAsync ---
 
     [Fact]
@@ -319,6 +381,8 @@ public sealed class UsageQueryClientTests
 
         public Contract.RoutingRoiResponse CannedRoutingRoiResponse { get; init; } = new();
 
+        public Contract.LearningReportCardResponse CannedReportCardResponse { get; init; } = new();
+
         public IReadOnlyList<Contract.UsageRollupBucketRow> ExportRows { get; init; } = [];
 
         public RpcException? Failure { get; init; }
@@ -328,6 +392,8 @@ public sealed class UsageQueryClientTests
         public Contract.GetUsageRollupRequest? LastRollupRequest { get; private set; }
 
         public Contract.GetRoutingRoiRequest? LastRoutingRoiRequest { get; private set; }
+
+        public Contract.GetLearningReportCardRequest? LastReportCardRequest { get; private set; }
 
         public CallOptions? LastCallOptions { get; private set; }
 
@@ -353,6 +419,14 @@ public sealed class UsageQueryClientTests
             LastRoutingRoiRequest = request;
             LastCallOptions = options;
             return Call(CannedRoutingRoiResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.LearningReportCardResponse> GetLearningReportCardAsync(
+            Contract.GetLearningReportCardRequest request, CallOptions options)
+        {
+            LastReportCardRequest = request;
+            LastCallOptions = options;
+            return Call(CannedReportCardResponse);
         }
 
         public override AsyncServerStreamingCall<Contract.UsageRollupBucketRow> ExportUsageRollup(

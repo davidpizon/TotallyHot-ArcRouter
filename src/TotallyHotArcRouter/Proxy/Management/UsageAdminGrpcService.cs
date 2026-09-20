@@ -7,7 +7,7 @@ using Contract = TotallyHot.ArcRouter.Admin.Contract;
 namespace TotallyHot.ArcRouter.Proxy.Management;
 
 /// <summary>
-/// gRPC service backing the Governance/Model Distribution/Cost Analytics GUI tabs' usage-query surface
+/// gRPC service backing the Governance/Model Distribution/Cost Analytics/Report Card GUI tabs' usage-query surface
 /// (docs/router/tracked-todos.md #7). Replaced the plain-HTTP <c>/admin/usage/*</c> REST surface this
 /// once shared a port with real LLM-forwarding traffic (deleted in
 /// <see href="../../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase
@@ -77,6 +77,19 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
         var response = new Contract.RoutingRoiResponse();
         response.Entries.AddRange(points.Select(ToWire));
         return response;
+    }
+
+    /// <inheritdoc/>
+    public override async Task<Contract.LearningReportCardResponse> GetLearningReportCard(
+        Contract.GetLearningReportCardRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var result = await _reportingService.GetLearningReportCardAsync(
+            from: ParseTimestamp(request.From, fieldName: "from"),
+            to: ParseTimestamp(request.To, fieldName: "to"),
+            cancellationToken: context.CancellationToken).ConfigureAwait(false);
+        var card = Unwrap(result);
+        return ToWire(card);
     }
 
     /// <inheritdoc/>
@@ -179,6 +192,37 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
             wire.BaselineEstimatedCostUsd = point.BaselineEstimatedCostUsd.Value.ToString(CultureInfo.InvariantCulture);
         if (point.EstimatedNetSavingsUsd.HasValue)
             wire.EstimatedNetSavingsUsd = point.EstimatedNetSavingsUsd.Value.ToString(CultureInfo.InvariantCulture);
+        return wire;
+    }
+
+    /// <summary>Projects a <see cref="LearningReportCard"/> into its wire shape.</summary>
+    private static Contract.LearningReportCardResponse ToWire(LearningReportCard card)
+    {
+        var wire = new Contract.LearningReportCardResponse
+        {
+            ScoredRequests = card.ScoredRequests,
+            ComparableRequests = card.ComparableRequests,
+            TotalSpendUsd = card.TotalSpendUsd.ToString(CultureInfo.InvariantCulture)
+        };
+        if (card.MeanScoreDelta.HasValue) wire.MeanScoreDelta = card.MeanScoreDelta.Value;
+        wire.SpendByModel.AddRange(card.SpendByModel.Select(row => new Contract.ModelSpendRow
+        {
+            Model = row.Model,
+            CostUsd = row.CostUsd.ToString(CultureInfo.InvariantCulture),
+            Requests = row.Requests
+        }));
+        wire.GradeMix.AddRange(card.GradeMix.Select(row => new Contract.GradeMixRow
+        {
+            Grade = row.Grade,
+            Count = row.Count,
+            Percent = row.Percent.ToString(CultureInfo.InvariantCulture)
+        }));
+        wire.ScoreDeltaByModel.AddRange(card.ScoreDeltaByModel.Select(row => new Contract.ModelScoreDeltaRow
+        {
+            Model = row.Model,
+            MeanDelta = row.MeanDelta,
+            SampleSize = row.SampleSize
+        }));
         return wire;
     }
 }

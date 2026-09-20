@@ -6,7 +6,7 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
-/// Singleton view-model backing the Model Distribution, Cost Analytics, and header-ticker surfaces' real
+/// Singleton view-model backing the Model Distribution, Cost Analytics, Report Card, and header-ticker surfaces' real
 /// data (Phase 4, §5.15). Wraps <see cref="UsageQueryClient"/> with the same "singleton + Changed event +
 /// best-effort, reachability-tolerant" shape as <see cref="ProviderAdminStore"/>, so the UI survives tab
 /// switches and degrades gracefully (falling back to demo data) when the proxy isn't running or has no
@@ -188,6 +188,44 @@ public sealed class UsageStore : IDisposable
             _logger?.LogWarning(exception: ex,
                 message: "Failed to load routing ROI comparisons from the management API.");
             return [];
+        }
+        finally
+        {
+            IsLoaded = true;
+        }
+    }
+
+    /// <summary>
+    /// Loads the Report Card tab's unified spend / grade-mix / score-delta snapshot for a range
+    /// (GitHub issue #111). Returns <see langword="null"/>, rather than throwing, when the proxy is
+    /// unreachable or neither backing store is wired up; the caller falls back to demo data.
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <remarks>
+    /// Deliberately uncached, same as <see cref="LoadRoutingRoiAsync"/>: taxonomy comparisons fill in
+    /// the background, so a fixed range's answer changes over time.
+    /// </remarks>
+    public async Task<LearningReportCardView?> LoadLearningReportCardAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _client
+                .GetLearningReportCardAsync(from: from, to: to, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            IsReachable = true;
+            LastError = null;
+            return result;
+        }
+        catch (ProviderAdminException ex)
+        {
+            IsReachable = false;
+            LastError = ex.Message;
+            _logger?.LogWarning(exception: ex,
+                message: "Failed to load the learning report card from the management API.");
+            return null;
         }
         finally
         {

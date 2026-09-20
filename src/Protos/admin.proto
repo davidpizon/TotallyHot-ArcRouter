@@ -396,7 +396,7 @@ message ProviderListResponse {
 
 // docs/router/tracked-todos.md #7: the Governance/Model Distribution/Cost Analytics GUI tabs' read-only
 // usage-query surface. Replaces the plain-HTTP /admin/usage/* REST surface (UsageAdminEndpoints). All
-// four RPCs are read-only, unlike ProviderAdminService above - no mutation, no security-boundary
+// five RPCs are read-only, unlike ProviderAdminService above - no mutation, no security-boundary
 // concerns beyond the same management-token gate every service on this endpoint shares.
 service UsageAdminService {
   // Totals for the header ticker and summary tiles over a preset window ("day", "week", "month", "all").
@@ -407,6 +407,11 @@ service UsageAdminService {
 
   // docs/router/self-organizing-classification-plan.md Phase T4: the Cost Analytics "Routing ROI" feed.
   rpc GetRoutingRoi (GetRoutingRoiRequest) returns (RoutingRoiResponse);
+
+  // Issue #111: the Report Card tab's unified spend / grade-mix / score-delta snapshot. Aggregates the
+  // existing usage-rollup (spend by model) and taxonomy-comparison (grade mix + frozen-baseline score
+  // delta) stores - not a parallel metrics pipeline.
+  rpc GetLearningReportCard (GetLearningReportCardRequest) returns (LearningReportCardResponse);
 
   // §5.12: streams the same rollup buckets GetUsageRollup returns, one message per bucket, so the GUI can
   // render a CSV or JSON download without buffering the whole range server-side first. Export is a
@@ -480,6 +485,43 @@ message RoutingRoiEntry {
 
 message RoutingRoiResponse {
   repeated RoutingRoiEntry entries = 1;
+}
+
+message GetLearningReportCardRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+}
+
+// One model's spend in the Report Card tab. Mirrors ModelSpendRow field-for-field.
+message ModelSpendRow {
+  string model = 1;
+  string cost_usd = 2;
+  int64 requests = 3;
+}
+
+// One letter-grade bucket of observed quality scores. Mirrors GradeMixRow field-for-field.
+message GradeMixRow {
+  string grade = 1;
+  int32 count = 2;
+  string percent = 3;
+}
+
+// One model's mean observed-minus-baseline score. Mirrors ModelScoreDeltaRow field-for-field.
+message ModelScoreDeltaRow {
+  string model = 1;
+  double mean_delta = 2;
+  int32 sample_size = 3;
+}
+
+// The Report Card tab's aggregated snapshot. Mirrors LearningReportCard field-for-field.
+message LearningReportCardResponse {
+  repeated ModelSpendRow spend_by_model = 1;
+  repeated GradeMixRow grade_mix = 2;
+  optional double mean_score_delta = 3;
+  int32 scored_requests = 4;
+  int32 comparable_requests = 5;
+  repeated ModelScoreDeltaRow score_delta_by_model = 6;
+  string total_spend_usd = 7;
 }
 
 message ExportUsageRollupRequest {

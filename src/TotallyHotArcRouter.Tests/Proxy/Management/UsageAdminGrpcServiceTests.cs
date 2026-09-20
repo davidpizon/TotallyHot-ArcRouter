@@ -135,6 +135,37 @@ public sealed class UsageAdminGrpcServiceTests
     }
 
     [Fact]
+    public async Task GetLearningReportCard_MissingFromField_ThrowsInvalidArgument()
+    {
+        var service = new UsageAdminGrpcService(new ManagementReportingService(null, null));
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() => service.GetLearningReportCard(
+            new Contract.GetLearningReportCardRequest { To = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow) },
+            CreateContext()));
+
+        Assert.Equal(expected: StatusCode.InvalidArgument, actual: ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetLearningReportCard_ValidRange_ReturnsResponse()
+    {
+        var service = new UsageAdminGrpcService(
+            new ManagementReportingService(null, comparisonStore: new EmptyComparisonStore()));
+
+        var response = await service.GetLearningReportCard(new Contract.GetLearningReportCardRequest
+        {
+            From = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow.AddDays(-1)),
+            To = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow)
+        }, CreateContext());
+
+        Assert.NotNull(response);
+        Assert.Empty(response.SpendByModel);
+        Assert.Equal(5, actual: response.GradeMix.Count);
+        Assert.Equal(expected: "0", actual: response.TotalSpendUsd);
+        Assert.False(response.HasMeanScoreDelta);
+    }
+
+    [Fact]
     public async Task ExportUsageRollup_StreamsOneMessagePerBucket()
     {
         using var temp = new TempDatabase();

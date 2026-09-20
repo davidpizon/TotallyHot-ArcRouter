@@ -1,0 +1,220 @@
+@* Report Card tab (GitHub issue #111): one local view of spend by model, observed-score grade mix,
+   and quality-score delta versus the frozen untrained baseline. Fed from UsageStore.LoadLearningReportCardAsync,
+   which reads the existing usage-rollup + taxonomy-comparison stores - not a parallel metrics stack.
+   MockData is the offline/no-proxy fallback, matching Model Distribution. *@
+@inject UsageStore UsageStore
+<div class="h-full flex flex-col gap-3 min-h-0">
+    <div class="flex items-center gap-2 shrink-0">
+        <div class="flex rounded overflow-hidden border border-slate-700">
+            @foreach (var filter in TimeFilters)
+            {
+                var isActive = _activeFilter == filter;
+                <button @onclick="() => SetFilterAsync(filter)"
+                        class="px-3 py-1.5 text-xs font-medium filter-button @(isActive ? "active" : "inactive") @(filter != "Year" ? "filter-button-divider" : "")">
+                    @filter
+                </button>
+            }
+        </div>
+        <div class="ml-auto text-xs font-mono text-slate-500">
+            @(_usingDemo ? "Demo data — proxy unreachable or no traffic in range" : $"{_scoredRequests} scored · {_comparableRequests} vs frozen policy")
+        </div>
+    </div>
+
+    <div class="flex gap-3 flex-1 min-h-0">
+        <div class="flex-1 rounded-lg p-4 flex flex-col min-h-0 ds-surface-card-bordered">
+            <div class="flex items-baseline justify-between mb-3 shrink-0">
+                <div>
+                    <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Spend by Model</div>
+                    <div class="text-xs text-slate-600 mt-0.5">Known USD cost from the usage ledger</div>
+                </div>
+                <div class="font-mono text-lg font-semibold mt-0.5 metric-accent">@_spendHeadline</div>
+            </div>
+            @if (_spendEmpty)
+            {
+                <div class="flex-1 flex items-center justify-center text-xs text-slate-500">No spend in this range.</div>
+            }
+            else
+            {
+                <div class="flex-1 min-h-0">
+                    <EChart ModelJson="@_spendJson"/>
+                </div>
+            }
+        </div>
+
+        <div class="rounded-lg p-4 flex flex-col min-h-0 ds-surface-card-bordered ls-model-distribution-panel">
+            <div class="flex items-baseline justify-between mb-2 shrink-0">
+                <div>
+                    <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Grade Mix</div>
+                    <div class="text-xs text-slate-600 mt-0.5">Observed quality scores, A–F</div>
+                </div>
+                <div class="font-mono text-lg font-semibold mt-0.5 metric-accent">@_gradeHeadline</div>
+            </div>
+            <div class="flex-1 min-h-0">
+                <EChart ModelJson="@_gradeJson"/>
+            </div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center shrink-0">
+                @foreach (var slice in _gradeLegend)
+                {
+                    <div class="flex items-center gap-1.5 text-xs font-mono text-slate-400">
+                        <span class="w-2 h-2 rounded-full shrink-0" style="background:@slice.Color"></span>
+                        @slice.Grade @slice.Percent.ToString("0.0", CultureInfo.InvariantCulture)%
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="flex-1 rounded-lg p-4 flex flex-col min-h-0 ds-surface-card-bordered">
+            <div class="flex items-baseline justify-between mb-3 shrink-0">
+                <div>
+                    <div class="text-xs font-semibold text-slate-400 uppercase tracking-widest">Score Delta vs Frozen Policy</div>
+                    <div class="text-xs text-slate-600 mt-0.5">Observed score minus the untrained baseline's predicted score</div>
+                </div>
+                <div class="font-mono text-lg font-semibold mt-0.5 @_deltaHeadlineClass">@_deltaHeadline</div>
+            </div>
+            @if (_deltaEmpty)
+            {
+                <div class="flex-1 flex items-center justify-center text-xs text-slate-500">No comparable scores in this range.</div>
+            }
+            else
+            {
+                <div class="flex-1 min-h-0">
+                    <EChart ModelJson="@_deltaJson"/>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly string[] TimeFilters = ["Day", "Month", "3-Month", "6-Month", "Year"];
+
+    private string _activeFilter = "Month";
+    private bool _usingDemo;
+    private int _scoredRequests;
+    private int _comparableRequests;
+    private string _spendHeadline = "$0.00";
+    private string _gradeHeadline = "—";
+    private string _deltaHeadline = "—";
+    private string _deltaHeadlineClass = "metric-accent";
+    private bool _spendEmpty = true;
+    private bool _deltaEmpty = true;
+    private string _spendJson = "{}";
+    private string _gradeJson = "{}";
+    private string _deltaJson = "{}";
+    private IReadOnlyList<GradeLegendItem> _gradeLegend = [];
+
+    /// <summary>One grade-mix legend chip: letter, fill color, and mix percent.</summary>
+    private sealed record GradeLegendItem(string Grade, string Color, decimal Percent);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    /// <summary>Switches the active time filter and reloads the three panels.</summary>
+    private async Task SetFilterAsync(string filter)
+    {
+        _activeFilter = filter;
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Loads the aggregated report card for the active filter, falling back to <see cref="MockData"/>
+    /// when the proxy is unreachable or the snapshot is empty.
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        var (from, to) = RangeFor(filter: _activeFilter, now: DateTimeOffset.UtcNow);
+        var card = await UsageStore.LoadLearningReportCardAsync(from: from, to: to);
+        var hasLive = card is not null &&
+                      (card.SpendByModel.Count > 0 || card.ScoredRequests > 0 || card.ComparableRequests > 0);
+        if (!hasLive)
+        {
+            _usingDemo = true;
+            Apply(
+                spend: MockData.ReportCardSpend,
+                mix: MockData.ReportCardGradeMix,
+                deltas: MockData.ReportCardScoreDelta,
+                meanDelta: MockData.ReportCardMeanScoreDelta,
+                scored: MockData.ReportCardScoredRequests,
+                comparable: MockData.ReportCardScoredRequests,
+                totalSpend: MockData.ReportCardSpend.Sum(row => row.CostUsd));
+        }
+        else
+        {
+            _usingDemo = false;
+            Apply(
+                spend: card!.SpendByModel,
+                mix: card.GradeMix,
+                deltas: card.ScoreDeltaByModel,
+                meanDelta: card.MeanScoreDelta,
+                scored: card.ScoredRequests,
+                comparable: card.ComparableRequests,
+                totalSpend: card.TotalSpendUsd);
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>Rebuilds headlines and chart JSON from one snapshot.</summary>
+    private void Apply(
+        IReadOnlyList<ModelSpendRowView> spend,
+        IReadOnlyList<GradeMixRowView> mix,
+        IReadOnlyList<ModelScoreDeltaRowView> deltas,
+        double? meanDelta,
+        int scored,
+        int comparable,
+        decimal totalSpend)
+    {
+        _scoredRequests = scored;
+        _comparableRequests = comparable;
+        _spendHeadline = FormattableString.Invariant($"${totalSpend:0.00}");
+        _spendEmpty = spend.Count == 0;
+        _deltaEmpty = deltas.Count == 0;
+
+        var majority = mix.OrderByDescending(row => row.Count).ThenBy(row => row.Grade, StringComparer.Ordinal)
+            .FirstOrDefault();
+        _gradeHeadline = scored == 0 || majority is null ? "—" : majority.Grade;
+
+        if (meanDelta is { } delta)
+        {
+            _deltaHeadline = delta.ToString("+0.000;-0.000;0.000", CultureInfo.InvariantCulture);
+            _deltaHeadlineClass = delta >= 0 ? "text-emerald-400" : "text-red-400";
+        }
+        else
+        {
+            _deltaHeadline = "—";
+            _deltaHeadlineClass = "metric-accent";
+        }
+
+        _spendJson = ChartJson.Serialize(LearningReportCardChartBuilder.SpendByModel(
+            models: spend.Select(row => row.Model).ToList(),
+            costs: spend.Select(row => row.CostUsd).ToList()));
+        _gradeJson = ChartJson.Serialize(LearningReportCardChartBuilder.GradeMix(
+            grades: mix.Select(row => row.Grade).ToList(),
+            percents: mix.Select(row => row.Percent).ToList()));
+        _deltaJson = ChartJson.Serialize(LearningReportCardChartBuilder.ScoreDelta(
+            models: deltas.Select(row => row.Model).ToList(),
+            deltas: deltas.Select(row => (decimal)row.MeanDelta).ToList()));
+        _gradeLegend = mix.Select(row => new GradeLegendItem(
+            Grade: row.Grade,
+            Color: LearningReportCardChartBuilder.GradeColors.TryGetValue(row.Grade, out var color)
+                ? color
+                : ChartPalette.ColorFor(row.Grade),
+            Percent: row.Percent)).ToList();
+    }
+
+    /// <summary>Maps a time-filter button to its [from, to) window anchored at <paramref name="now"/>.</summary>
+    private static (DateTimeOffset From, DateTimeOffset To) RangeFor(string filter, DateTimeOffset now)
+    {
+        return filter switch
+        {
+            "Day" => (now.AddDays(-1), now),
+            "Month" => (now.AddMonths(-1), now),
+            "3-Month" => (now.AddMonths(-3), now),
+            "6-Month" => (now.AddMonths(-6), now),
+            "Year" => (now.AddYears(-1), now),
+            _ => (now.AddMonths(-1), now)
+        };
+    }
+}
