@@ -374,8 +374,8 @@ half marked implemented. **Met.**
 
 ## Deliberately out of scope
 
-- **Routing ROI / worst-case baseline cost** (drives the ticker's Total Saved and the ROI metric) —
-  a routing-policy feature, not a token-tracking one; stays in
+- **Routing ROI / frozen-baseline counterfactual cost** (drives the ticker's Total Saved and the ROI
+  metric) — a routing-policy feature, not a token-tracking one; stays in
   [`../gui/backlog.md`](../gui/backlog.md).
 - **Fuzzy model matching** — permanently rejected (analysis §7).
 - **Active rate-limit probing, browser-cookie scraping, cloud sync, gamification** — permanently

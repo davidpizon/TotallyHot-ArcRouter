@@ -927,6 +927,24 @@ input[type="number"]:focus {
   background: rgba(77, 77, 77, 0.5);
 }
 
+/* ---- Documentation citation links (the "Methodology" anchors in CostAnalytics /
+   RegretHarnessAdmin) ----
+   Supplies only what the compiled Tailwind blob does not: it ships no `underline`,
+   `underline-offset-*`, `normal-case` or `tracking-normal` utility, and its preflight sets
+   `a { text-decoration: inherit }`, so an anchor asking for those classes silently renders as plain
+   text - indistinguishable from the label beside it, with no cue that it is clickable. Same
+   hand-authoring reason as `.ds-secret-field` above (DESIGN.md §5.1's tree-shaking rule).
+   Color deliberately stays on the Tailwind utilities at the call site (`text-slate-500`,
+   `text-slate-400`, `hover:text-slate-200` are all present in the blob) so a citation can be tuned
+   to the brightness of the copy it sits in without a second class here. */
+.ds-doc-link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-transform: none;
+  letter-spacing: normal;
+  transition: color var(--dur-fast) var(--ease-standard);
+}
+
 /* ---- Code and payload block styling ---- */
 .ds-code-block {
   background: var(--surface-base);

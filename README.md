@@ -81,6 +81,12 @@ explicitly named. An unrecognized name, an administratively stopped model, or
 a circuit-open/unhealthy provider fall back to the same routing decision as
 `auto`.
 
+How that decision is scored against the policy that never learned — estimated
+regret, score-delta, and the Cost Analytics report card — is documented in
+[`docs/score-delta-methodology.md`](docs/score-delta-methodology.md). The
+plain-language loop that produces those receipts is
+[`docs/how-it-learns.md`](docs/how-it-learns.md).
+
 Every response — streaming or buffered — carries three headers reporting what
 happened:
 
