@@ -28,8 +28,8 @@ public enum ManagementErrorType
 
 /// <summary>
 /// The outcome of a <see cref="ManagementFacade"/> write: either the refreshed <typeparamref name="T"/> on
-/// success, or an <see cref="ManagementErrorType"/> and message on failure. Both the REST endpoints and the
-/// MCP tools translate this into their own transport's error shape (HTTP status codes / MCP tool errors).
+/// success, or an <see cref="ManagementErrorType"/> and message on failure. Both the gRPC-Web admin services
+/// and the MCP tools translate this into their own transport's error shape (gRPC status codes / MCP tool errors).
 /// </summary>
 public readonly record struct ManagementResult<T>(
     bool Success,
@@ -234,7 +234,7 @@ public sealed record ProviderRateLimitView(
 /// <param name="Limit">The dimension's configured cap in this bucket, or <see langword="null"/> if unknown.</param>
 public sealed record RateLimitHistoryPointView(DateTimeOffset BucketUtc, long? Remaining, long? Limit);
 
-/// <summary>The <c>GET /admin/providers/{key}/rate-limit-history</c> response: per-dimension history series.</summary>
+/// <summary>Per-dimension rate-limit history for one provider, as returned by <see cref="ManagementFacade.GetRateLimitHistory"/>.</summary>
 /// <param name="Dimensions">History points per standard-family dimension name, chronologically ordered.</param>
 public sealed record RateLimitHistoryResponse(
     IReadOnlyDictionary<string, IReadOnlyList<RateLimitHistoryPointView>> Dimensions);
@@ -293,7 +293,7 @@ public sealed record HeaderView(
     string? Value = null,
     bool Locked = false);
 
-/// <summary>The <c>GET /admin/providers</c> (and MCP <c>list_providers</c>) response envelope.</summary>
+/// <summary>The <see cref="ManagementFacade.ListProviders"/> (and MCP <c>list_providers</c>) response envelope.</summary>
 /// <param name="Providers">All configured providers, ordered by key.</param>
 public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 
@@ -336,15 +336,15 @@ public sealed record ProviderWriteRequest(
     string? ProviderType = null);
 
 /// <summary>
-/// The body sent to switch a provider on or off (<c>PUT /admin/providers/{key}/enabled</c>). Unlike
-/// <see cref="ProviderWriteRequest.Enabled"/> this is non-nullable: the dedicated route exists to state the
+/// The body sent to switch a provider on or off. Unlike
+/// <see cref="ProviderWriteRequest.Enabled"/> this is non-nullable: the dedicated RPC exists to state the
 /// new value outright rather than leaving it optional among a full provider edit.
 /// </summary>
 /// <param name="Enabled">The provider's new on/off state.</param>
 public sealed record ProviderEnabledWriteRequest(bool Enabled);
 
 /// <summary>
-/// The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7).
+/// The body sent to store a secret (docs/router/secrets-at-rest-plan.md §7).
 /// See <see cref="ManagementFacade.SetSecret"/> for which names are accepted.
 /// </summary>
 /// <param name="Value">The secret value to store.</param>
@@ -372,13 +372,12 @@ public sealed record HeaderWriteRequest(string? Name, string? Value, string? Val
 /// <param name="ProviderModelId">The upstream model identifier; defaults to the model name when blank.</param>
 public sealed record ModelWriteRequest(string? ProviderModelId);
 
-/// <summary>The body sent to switch a model on or off (<c>PUT /admin/providers/{key}/models/{modelName}/enabled</c>).</summary>
+/// <summary>The body sent to switch a model on or off.</summary>
 /// <param name="Enabled">The model's new on/off state.</param>
 public sealed record ModelEnabledWriteRequest(bool Enabled);
 
 /// <summary>
-/// The body sent to pin how a model expresses tool calls
-/// (<c>PUT /admin/providers/{key}/models/{modelName}/tool-dialect</c>).
+/// The body sent to pin how a model expresses tool calls.
 /// </summary>
 /// <param name="Dialect">
 /// A <see cref="TotallyHot.ArcRouter.Proxy.Translation.ToolCalling.ToolCallDialect.Name"/> to pin at

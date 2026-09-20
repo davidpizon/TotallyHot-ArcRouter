@@ -1,7 +1,7 @@
 namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
-/// A provider as returned by the proxy's <c>GET /admin/providers</c> endpoint. Authentication is expressed
+/// A provider as returned by <see cref="ProviderAdminClient.GetProvidersAsync"/>. Authentication is expressed
 /// purely via <see cref="Headers"/>, which masks credentials the same way every other header does (see
 /// <see cref="ProviderHeaderView"/>).
 /// </summary>
@@ -253,7 +253,7 @@ public sealed record RateLimitExhaustionAdminView(TimeSpan TimeToExhaustion, dou
 public sealed record RateLimitHistoryPointAdminView(DateTimeOffset BucketUtc, long? Remaining, long? Limit);
 
 /// <summary>
-/// The <c>GET /admin/providers/{key}/rate-limit-history</c> response, mirroring the proxy's
+/// Per-dimension rate-limit history for one provider, mirroring the proxy's
 /// <c>RateLimitHistoryResponse</c>.
 /// </summary>
 /// <param name="Dimensions">History points per standard-family dimension name, chronologically ordered.</param>
@@ -338,7 +338,7 @@ public static class HeaderValueSource
 }
 
 /// <summary>
-/// A custom HTTP header as returned by <c>GET /admin/providers</c>. Because one provider's headers mix
+/// A custom HTTP header as returned by <see cref="ProviderAdminClient.GetProvidersAsync"/>. Because one provider's headers mix
 /// public configuration with secrets, readability is decided per header: an unlocked literal comes back in
 /// <see cref="Value"/> for the editor to show, while a locked one is write-only and reports only its
 /// <see cref="Source"/>. See <c>docs/gui/secret-field.md</c>.
@@ -362,7 +362,7 @@ public sealed record ProviderHeaderView(
     bool Locked = false);
 
 /// <summary>
-/// A custom HTTP header to write for a provider (<c>PUT /admin/providers/{key}</c>). A blank
+/// A custom HTTP header to write for a provider. A blank
 /// <see cref="Value"/> and blank <see cref="ValueEnvVar"/> together preserve whatever is already stored
 /// under this header's <see cref="Name"/>, since a locked value is never returned for the caller to resend.
 /// </summary>
@@ -382,7 +382,7 @@ public sealed record ProviderHeaderView(
 /// </param>
 public sealed record ProviderHeaderWriteModel(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
 
-/// <summary>The <c>GET /admin/providers</c> response envelope.</summary>
+/// <summary>The <see cref="ProviderAdminClient.GetProvidersAsync"/> response envelope.</summary>
 /// <param name="Providers">All configured providers.</param>
 public sealed record ProvidersSnapshot(IReadOnlyList<ProviderAdminView> Providers);
 
@@ -422,8 +422,8 @@ public sealed record ProviderWriteRequest(
     string? ProviderType = null);
 
 /// <summary>
-/// The body sent to switch a provider on or off (<c>PUT /admin/providers/{key}/enabled</c>). The dedicated
-/// route preserves every other configured field, including the AWS ones a generic provider write drops.
+/// The body sent to switch a provider on or off. The dedicated
+/// RPC preserves every other configured field, including the AWS ones a generic provider write drops.
 /// </summary>
 /// <param name="Enabled">The provider's new on/off state.</param>
 public sealed record ProviderEnabledWriteRequest(bool Enabled);
@@ -433,15 +433,14 @@ public sealed record ProviderEnabledWriteRequest(bool Enabled);
 public sealed record ModelWriteRequest(string? ProviderModelId);
 
 /// <summary>
-/// The body sent to switch a model on or off (<c>PUT /admin/providers/{key}/models/{modelName}/enabled</c>).
+/// The body sent to switch a model on or off.
 /// The per-model twin of <see cref="ProviderEnabledWriteRequest"/>.
 /// </summary>
 /// <param name="Enabled">The model's new on/off state.</param>
 public sealed record ModelEnabledWriteRequest(bool Enabled);
 
 /// <summary>
-/// The body sent to pin how a model expresses tool calls
-/// (<c>PUT /admin/providers/{key}/models/{modelName}/tool-dialect</c>), overriding automatic detection.
+/// The body sent to pin how a model expresses tool calls, overriding automatic detection.
 /// </summary>
 /// <param name="Dialect">
 /// The dialect name to pin at operator confidence, which no automatic scan may overwrite, or
@@ -450,7 +449,7 @@ public sealed record ModelEnabledWriteRequest(bool Enabled);
 public sealed record ModelToolDialectWriteRequest(string? Dialect);
 
 /// <summary>
-/// One operator-authored price override, as returned by <c>GET /admin/price-overrides</c> - the §5.7
+/// One operator-authored price override, as returned by <see cref="ProviderAdminClient.GetPriceOverridesAsync"/> - the §5.7
 /// resolution ladder's top rung. Backs the Governance price-overrides pane.
 /// </summary>
 /// <param name="SourceName">The aggregator source this override applies to (e.g. <c>LiteLLM</c>).</param>
@@ -458,14 +457,14 @@ public sealed record ModelToolDialectWriteRequest(string? Dialect);
 /// <param name="ModelName">The client-facing <c>ModelName</c> the override resolves to.</param>
 public sealed record PriceOverrideView(string SourceName, string AggregatorModelKey, string ModelName);
 
-/// <summary>The body for adding or replacing a price override (<c>PUT /admin/price-overrides</c>).</summary>
+/// <summary>The body for adding or replacing a price override.</summary>
 /// <param name="SourceName">The aggregator source this override applies to.</param>
 /// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
 /// <param name="ModelName">The client-facing <c>ModelName</c> to resolve to; must already be configured.</param>
 public sealed record PriceOverrideWriteRequest(string SourceName, string AggregatorModelKey, string ModelName);
 
 /// <summary>
-/// One configured model's current price-resolution state, as returned by <c>GET /admin/price-resolution</c>.
+/// One configured model's current price-resolution state, as returned by <see cref="ProviderAdminClient.GetPriceResolutionDiagnosisAsync"/>.
 /// Backs the Governance price-overrides pane's read-only diagnosis view.
 /// </summary>
 /// <param name="ModelName">The client-facing <c>ModelName</c>.</param>
@@ -491,7 +490,7 @@ public static class ToolCallDialectNames
 }
 
 /// <summary>
-/// The body sent to set a provider's monthly budget caps (<c>PUT /admin/providers/{key}/budget</c>). A null
+/// The body sent to set a provider's monthly budget caps. A null
 /// cap clears that dimension; both null removes the budget entirely.
 /// </summary>
 /// <param name="DollarCap">The cap for the window, or null for no dollar budget.</param>
@@ -511,7 +510,7 @@ public sealed record ProviderBudgetWriteRequest(
     int? WindowHours = null);
 
 /// <summary>
-/// The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7).
+/// The body sent to store a secret (docs/router/secrets-at-rest-plan.md §7).
 /// Mirrors the proxy's own <c>SecretWriteRequest</c> - this project deliberately doesn't reference the proxy assembly (see
 /// <see cref="ProviderAdminClient"/>'s remarks).
 /// </summary>
@@ -519,7 +518,7 @@ public sealed record ProviderBudgetWriteRequest(
 public sealed record SecretWriteRequest(string Value);
 
 /// <summary>
-/// The result of <c>POST /admin/providers/{key}/discover-models</c>: the model ids the provider's own
+/// The result of <see cref="ProviderAdminClient.DiscoverModelsAsync"/>: the model ids the provider's own
 /// endpoint reports, or an explanation when the provider doesn't support OpenAI-shaped discovery.
 /// </summary>
 /// <param name="Supported">Whether the provider answered an OpenAI-shaped model list.</param>
@@ -528,7 +527,7 @@ public sealed record SecretWriteRequest(string Value);
 public sealed record DiscoverModelsResult(bool Supported, IReadOnlyList<string> Models, string? Error);
 
 /// <summary>
-/// Totals over a preset window, as returned by <c>GET /admin/usage/summary</c> (Phase 4, §5.15). Backs the
+/// Totals over a preset window, as returned by <see cref="UsageQueryClient.GetSummaryAsync"/> (Phase 4, §5.15). Backs the
 /// header ticker's System Tokens tile and other summary displays.
 /// </summary>
 /// <param name="Requests">Total requests in the window.</param>
@@ -551,7 +550,7 @@ public sealed record UsageSummaryView(
     decimal CostUsd);
 
 /// <summary>
-/// One aggregated bucket, as returned by <c>GET /admin/usage/rollup</c> (Phase 4, §5.15) - the Model
+/// One aggregated bucket, as returned by <see cref="UsageQueryClient.GetRollupAsync"/> (Phase 4, §5.15) - the Model
 /// Distribution / Cost Analytics chart feed.
 /// </summary>
 /// <param name="BucketStartUtc">
@@ -583,7 +582,7 @@ public sealed record UsageRollupBucketView(
     decimal CostUsd);
 
 /// <summary>
-/// One request's routing return-on-investment, as returned by <c>GET /admin/usage/routing-roi</c>
+/// One request's routing return-on-investment, as returned by <see cref="UsageQueryClient.GetRoutingRoiAsync"/>
 /// (docs/router/self-organizing-classification-plan.md Phase T4) - the Cost Analytics "Routing ROI"
 /// screen's feed.
 /// </summary>

@@ -46,10 +46,8 @@
 
   <!--
     The combined Router/GUI version and the GitHub repo the auto-updater checks (docs: the auto-update
-    plan). Both TotallyHotArcRouter and TotallyHotArcRouter.Gui compile these into an
-    AssemblyMetadataAttribute (see each csproj's ItemGroup below) instead of hardcoding or duplicating
-    them in appsettings.json, so the two apps can never disagree about which repo/version they're
-    comparing against.
+    plan). TotallyHotArcRouter compiles these into an AssemblyMetadataAttribute (see that csproj's
+    ItemGroup) instead of hardcoding them in appsettings.json.
 
     Version here is only the LOCAL-BUILD FALLBACK - do not bump it to cut a release. A release's version
     is its "vMAJOR.MINOR.PATCH" git tag (created by .github/workflows/cut-release.yml), which release.yml
