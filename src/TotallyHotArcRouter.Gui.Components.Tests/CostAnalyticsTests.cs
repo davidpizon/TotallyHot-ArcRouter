@@ -60,6 +60,26 @@ public sealed class CostAnalyticsTests
             p.Add(parameterSelector: c => c.Conversations, value: []));
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Routing ROI"), timeout: WaitTimeout);
+        cut.WaitForAssertion(
+            assertion: () =>
+            {
+                var link = cut.Find("a");
+                link.TextContent.Trim().Should().Be("Methodology");
+                link.GetAttribute("href").Should().Be(ProductDocs.ScoreDeltaMethodologyUrl);
+            },
+            timeout: WaitTimeout);
+    }
+
+    [Fact]
+    public async Task Methodology_link_is_hidden_when_routing_roi_is_not_the_active_metric()
+    {
+        using var ctx = CreateContext();
+
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: []));
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
+
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().NotContain("Methodology"), timeout: WaitTimeout);
     }
 
     [Fact]

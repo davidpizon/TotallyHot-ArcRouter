@@ -46,6 +46,7 @@ public sealed class RegretHarnessAdminTests
 
         cut.Markup.Should().Contain("No run yet this session");
         cut.FindAll("button").Should().Contain(b => b.TextContent.Trim() == "Run");
+        AssertMethodologyLink(cut);
     }
 
     [Fact]
@@ -58,6 +59,7 @@ public sealed class RegretHarnessAdminTests
         cut.Markup.Should().Contain("Completed: 2919 ID-test task(s), 176 OOD task(s) replayed.");
         cut.Markup.Should().Contain("ID test");
         cut.Markup.Should().Contain("dim_best");
+        AssertMethodologyLink(cut);
     }
 
     [Fact]
@@ -156,6 +158,16 @@ public sealed class RegretHarnessAdminTests
         gate.SetResult(true);
         cut.WaitForState(() => cut.Markup.Contains("Completed."));
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Asserts the pane cites the public score-delta methodology (docs/score-delta-methodology.md)
+    /// rather than describing the formula in the chrome itself.
+    /// </summary>
+    private static void AssertMethodologyLink(IRenderedComponent<RegretHarnessAdmin> cut)
+    {
+        var link = cut.FindAll("a").First(a => a.TextContent.Contains("Methodology", StringComparison.Ordinal));
+        link.GetAttribute("href").Should().Be(ProductDocs.ScoreDeltaMethodologyUrl);
     }
 
     private sealed class FakeClient(RegretHarnessStatusInfo? status = null) : IRegretHarnessAdminClient

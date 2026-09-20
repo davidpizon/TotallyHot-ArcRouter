@@ -78,13 +78,16 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </param>
 /// <param name="EstimatedRegret">
 /// The routing decision's estimated regret against the untrained baseline under the canonical reward
-/// <c>r = ε₁·s + ε₂·κ</c> (docs/router/routing-roi-regret-plan.md, weights from
-/// <c>RoutingOptions.Epsilon1</c>/<c>Epsilon2</c>): the baseline's estimated reward
+/// <c>r = ε₁·s + ε₂·κ</c> (docs/score-delta-methodology.md, weights from
+/// <c>RoutingOptions.Epsilon1</c>/<c>Epsilon2</c>, computed by
+/// <c>RewardWeights.ComputeEstimatedRegret</c>): the baseline's estimated reward
 /// (<see cref="BaselinePredictedScore"/>, <see cref="BaselineEstimatedCostUsd"/>) minus the routed pick's
 /// observed reward (<see cref="ObservedScore"/>, <see cref="ActualCostUsd"/>). Positive means the untrained
 /// baseline would likely have earned more reward; negative means routing beat it.
 /// <see langword="null"/> whenever any input is missing - never fabricated. Inherits the estimate
-/// qualification: the baseline half is predicted, not observed.
+/// qualification: the baseline half is predicted, not observed. The quality half of this difference
+/// (observed score minus baseline predicted score) is the score-delta that document names; it is not
+/// stored as its own column.
 /// </param>
 /// <param name="BaselineInputTokens">
 /// <see cref="BaselineModel"/>'s observed-average prompt token count at the moment this row was first

@@ -169,7 +169,11 @@ flowchart TD
      persisted-history sessions or the training-data flag). Defaults to whatever session the Sessions tab
      has selected, passed in as `InitialSessionId`.
    - **Bespoke per-metric charts** (Apache ECharts, one point per turn on a time x-axis): Routing ROI
-     is a dual-directional bar chart (savings above 0, fallback remediation below, colored by model);
+     is a dual-directional bar chart (savings above 0, fallback remediation below, colored by model).
+     While that metric is selected the chart header carries a **Methodology** link to
+     [`../score-delta-methodology.md`](../score-delta-methodology.md) — the as-built method for
+     estimated regret / score-delta versus the frozen untrained baseline. The chart itself still
+     plots only the **cost** half (`estimated_net_savings_usd`); the methodology says so.
      Turn Cost a stepped cumulative area recolored per active model; Tokens a cumulative stepped area
      with exponential-runaway detection (hatched zone + rippling alert); Tool Steps a per-turn bar
      segmented by the model that handled each stretch of steps; Cache Hit a stepped % line with a

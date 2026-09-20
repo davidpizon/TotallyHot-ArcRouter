@@ -32,7 +32,15 @@
     else
     {
         <div class="flex items-center justify-between mb-3 gap-2">
-            <span class="text-xs text-slate-500 uppercase tracking-widest">Regret Harness</span>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500 uppercase tracking-widest">Regret Harness</span>
+                <a href="@ProductDocs.ScoreDeltaMethodologyUrl"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   class="text-xs text-slate-500 hover:text-slate-200 underline underline-offset-2 normal-case tracking-normal">
+                    Methodology
+                </a>
+            </div>
             <div class="flex items-center gap-2">
                 <button @onclick="Reload" disabled="@Store.IsRunning" class="btn btn-ghost flex items-center gap-1.5">
                     <Icon Name="refresh" Size="20"/> Refresh
@@ -78,6 +86,13 @@
                 <div class="text-xs text-slate-500">
                     Re-runs the N5 comparison report (Orchestrator arm vs. every baseline) over the synced
                     CodeRouterBench corpus. Read-only - it never mutates a live voter or writes an artifact.
+                    CumReg is exact regret against the per-task oracle; the
+                    <a href="@ProductDocs.ScoreDeltaMethodologyUrl"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       class="text-slate-400 hover:text-slate-200 underline underline-offset-2">
+                        score-delta methodology</a>
+                    explains how that relates to the live frozen-baseline report card.
                 </div>
             </div>
         }

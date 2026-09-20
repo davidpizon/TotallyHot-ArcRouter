@@ -1,7 +1,8 @@
 # Routing ROI: Expense + Regret vs dim_best, Fast Drain, and Hard Pause Under Load
 
 **Status:** shipped. See `docs/router/self-organizing-classification-plan.md` Phase T4's status block for
-the delivered summary.
+the delivered summary. The as-built, citable method (what the product actually computes today, including
+the frozen-baseline correction below) is [`../score-delta-methodology.md`](../score-delta-methodology.md).
 **Builds on:** [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T4 (shipped).
 
 > **Frozen-baseline correction (2026-09-09).** This plan's original "Not changing" list froze

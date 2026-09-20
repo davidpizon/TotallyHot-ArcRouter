@@ -215,7 +215,8 @@ A background service replays receipts and asks the only question that really mat
 ensemble actually beat the simple baseline?**
 
 This is why every receipt stores which model the frozen baseline *would* have picked — the
-counterfactual. The comparison is scored as *regret*:
+counterfactual — together with the probing-prior score that pick was based on. The comparison is
+scored as *estimated regret* under the same reward the rest of the system uses:
 
 ```
 routed reward    = ε₁ · observed score  + ε₂ · actual cost
@@ -224,11 +225,24 @@ baseline reward  = ε₁ · predicted score + ε₂ · counterfactual cost
 regret = baseline reward − routed reward     // positive means the router lost
 ```
 
-When the router happened to pick the same model as the baseline, the baseline's prediction is computed
-**leave-one-out** — with that observation removed — so it isn't graded on evidence it has already been
-fed. The router does not get to mark its own homework.
+The quality half of that difference — observed score minus the frozen policy's predicted score — is
+the **score-delta**. It is not stored as its own column; it is recovered from the two scores already
+on the row. The Cost Analytics "Routing ROI" chart publishes only the **cost** half (estimated net
+savings). The Governance Regret Harness publishes **exact** cumulative regret against the per-task
+oracle on CodeRouterBench, with DimensionBest as the frozen-policy column.
 
-> Source: [`TaxonomyComparisonService.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Transcripts/TaxonomyComparisonService.cs)
+There is **no leave-one-out** on the baseline half: a table-only prediction never absorbed the
+observation being compared, so there is nothing to hold out. (Leave-one-out still applies to the
+taxonomy-accuracy columns, which answer a different question.)
+
+The method, the sign convention, the qualifications (what is observed vs estimated vs null), and the
+source map are in the citable write-up:
+
+> **[Score-delta versus the frozen baseline](score-delta-methodology.md)**
+
+> Source: [`RewardWeights.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RewardWeights.cs) ·
+> [`TaxonomyComparisonService.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Transcripts/TaxonomyComparisonService.cs) ·
+> [`UntrainedBaselineSelector.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Router/UntrainedBaselineSelector.cs)
 
 ---
 
@@ -316,7 +330,8 @@ Worth being precise, because it's a genuine design decision and not an obvious o
 Cost enters in exactly two places, both of them **accounting** rather than **selection**:
 
 1. The reward function `r = ε₁·score + ε₂·cost` used by the offline evaluation harness.
-2. The live regret report card described in Step 7, using that same formula.
+2. The live regret report card described in Step 7, using that same formula. See
+   [score-delta versus the frozen baseline](score-delta-methodology.md) for the as-built method.
 
 In other words: **the router chases quality, then measures whether that was worth the money.** Making
 cost a first-class vote would be a change in behaviour, not a change in wiring.
