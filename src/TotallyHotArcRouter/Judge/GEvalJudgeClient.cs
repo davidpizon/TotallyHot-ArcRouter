@@ -123,8 +123,11 @@ public sealed class GEvalJudgeClient : IJudgeClient
         var route = _modelSelector.Resolve();
         if (route is null) return null;
 
+        // Fail closed before any HTTP: a missing question must not produce a response-only grade
+        // (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
+        var taskPrompt = GraderQuestionText.Require(request.Prompt);
         var prompt = BuildPrompt(dimension: request.Dimension, responseText: request.ResponseText,
-            taskPrompt: request.Prompt);
+            taskPrompt: taskPrompt);
         var client = _httpClientFactory.CreateClient(HttpClientName);
         client.Timeout = TimeSpan.FromSeconds(_options.CurrentValue.RequestTimeoutSeconds);
 
@@ -188,17 +191,19 @@ public sealed class GEvalJudgeClient : IJudgeClient
     }
 
     /// <summary>
-    /// Composes the G-Eval-shaped prompt: task introduction, the requirement the response was written for
-    /// (when known), per-dimension criteria, evaluation steps, and a form-filling cue asking for a single
-    /// 1-5 digit.
+    /// Composes the G-Eval-shaped prompt: task introduction, the requirement the response was written for,
+    /// per-dimension criteria, evaluation steps, and a form-filling cue asking for a single 1-5 digit.
     /// </summary>
     /// <remarks>
     /// <paramref name="taskPrompt"/> closes the gap docs/research/code-quality-metrics-assessment.md §1
     /// names first: without it, a complete, warning-free response to a <em>different</em> question than the
-    /// one asked would score identically to a correct answer to this one. Omitted from the prompt entirely
-    /// when unavailable (aged out of <see cref="PendingPromptCache"/>, or never cached) rather than filled
-    /// with a placeholder, so the judge is not told a task existed when none could be recovered.
+    /// one asked would score identically to a correct answer to this one. The caller has already
+    /// <see cref="GraderQuestionText.Require">required</see> a non-empty question; this method always
+    /// weaves it in rather than omitting the section or filling a placeholder.
     /// </remarks>
+    /// <param name="dimension">The task dimension whose G-Eval criteria should be applied.</param>
+    /// <param name="responseText">The agent's response text to score.</param>
+    /// <param name="taskPrompt">The user/task question the response was written to answer; never empty.</param>
     private static string BuildPrompt(string dimension, string responseText, string taskPrompt)
     {
         // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
@@ -208,27 +213,17 @@ public sealed class GEvalJudgeClient : IJudgeClient
             ? dimensionCriteria
             : DefaultCriteria;
 
-        var taskSection = string.IsNullOrWhiteSpace(taskPrompt)
-            ? string.Empty
-            : $"""
-
-               Task the response was written for:
-               ---
-               {taskPrompt}
-               ---
-
-               """;
-
         return $"""
                 You are an expert evaluator. Your task is to rate the quality of an AI assistant's response on a
                 scale of 1 (worst) to 5 (best), according to the following criterion:
 
                 {criteria}
-                {taskSection}
+                {GraderQuestionText.FormatTaskSection(taskPrompt)}
                 Evaluation steps:
-                1. Read the response carefully.
-                2. Judge it strictly against the criterion above (and, when given, the task above), not against
-                   unrelated qualities.
+                1. Read the task and the response carefully.
+                2. Judge the response strictly against the criterion above and the task above, not against
+                   unrelated qualities. A complete answer to a different question than the one asked must
+                   score low.
                 3. Decide on a single integer score from 1 to 5.
 
                 Response to evaluate:

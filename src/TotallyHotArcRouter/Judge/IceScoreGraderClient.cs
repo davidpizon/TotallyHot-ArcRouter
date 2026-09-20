@@ -51,21 +51,10 @@ public sealed class IceScoreGraderClient : PortfolioGraderClientBase
     /// <inheritdoc/>
     protected override string BuildPrompt(string dimension, string responseText, string taskPrompt)
     {
-        var taskSection = string.IsNullOrWhiteSpace(taskPrompt)
-            ? string.Empty
-            : $"""
-
-               Task the response was written for:
-               ---
-               {taskPrompt}
-               ---
-
-               """;
-
         return $"""
                 You are an expert evaluator rating the usefulness of an AI assistant's coding response on a
                 scale of 0 (not useful at all) to 4 (extremely useful).
-                {taskSection}
+                {GraderQuestionText.FormatTaskSection(taskPrompt)}
                 Usefulness means: would this response, as given, meaningfully help someone trying to
                 accomplish the stated task - considering whether it is complete enough to apply directly,
                 whether it addresses the actual requirement, and whether a developer would need to do
