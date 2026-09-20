@@ -500,11 +500,9 @@ internal static class ShellStructuralParser
                 return buffer.ToString();
             }
 
-            if (c == '\\' && _i + 1 < _code.Length)
-            {
-                _i++;
-                return ReadBareHereDocDelimiter();
-            }
+            // `<<\EOF` is an unquoted delimiter with the first character escaped; skip the
+            // backslash and fall through to the same bare-word walk as `<<EOF`.
+            if (c == '\\' && _i + 1 < _code.Length) _i++;
 
             return ReadBareHereDocDelimiter();
         }

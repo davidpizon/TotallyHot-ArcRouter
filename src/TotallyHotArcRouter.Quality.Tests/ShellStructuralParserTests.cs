@@ -34,6 +34,16 @@ public class ShellStructuralParserTests
     }
 
     [Fact]
+    public void Check_EscapedHereDocumentDelimiter_IsValid()
+    {
+        AssertAccepted("""
+            cat <<\EOF
+            $(not expanded) and a stray )
+            EOF
+            """);
+    }
+
+    [Fact]
     public void Check_DashHereDocumentStripsLeadingTabs_IsValid()
     {
         AssertAccepted("cat <<-EOF\n\tbody with )\n\tEOF\n");
