@@ -22,7 +22,6 @@ public static class ProviderTemplates
                 BaseUrl = "https://api.anthropic.com",
                 RequiresAuth = true,
                 AuthHeaderName = "x-api-key",
-                SuggestedEnvValue = "ANTHROPIC_API_KEY",
                 DefaultsToFree = false,
                 DefaultHeaders = [new ProviderTemplateHeader(Name: "anthropic-version", Value: "2023-06-01")]
             },
@@ -33,7 +32,6 @@ public static class ProviderTemplates
                 BaseUrl = "https://api.openai.com/v1",
                 RequiresAuth = true,
                 AuthHeaderName = "Authorization",
-                SuggestedEnvValue = "Bearer {env:OPENAI_API_KEY}",
                 DefaultsToFree = false,
                 DefaultHeaders = []
             },
@@ -44,7 +42,6 @@ public static class ProviderTemplates
                 BaseUrl = "https://generativelanguage.googleapis.com/v1beta/openai",
                 RequiresAuth = true,
                 AuthHeaderName = "Authorization",
-                SuggestedEnvValue = "Bearer {env:GEMINI_API_KEY}",
                 DefaultsToFree = false,
                 DefaultHeaders = []
             },
@@ -57,7 +54,6 @@ public static class ProviderTemplates
                 BaseUrl = string.Empty,
                 RequiresAuth = true,
                 AuthHeaderName = "api-key",
-                SuggestedEnvValue = "AZURE_OPENAI_API_KEY",
                 DefaultsToFree = false,
                 DefaultHeaders = []
             },
@@ -68,7 +64,6 @@ public static class ProviderTemplates
                 BaseUrl = "https://api.cohere.ai/compatibility/v1",
                 RequiresAuth = true,
                 AuthHeaderName = "Authorization",
-                SuggestedEnvValue = "Bearer {env:COHERE_API_KEY}",
                 DefaultsToFree = false,
                 DefaultHeaders = []
             },
@@ -81,7 +76,6 @@ public static class ProviderTemplates
                 BaseUrl = "http://localhost:11434/v1",
                 RequiresAuth = false,
                 AuthHeaderName = string.Empty,
-                SuggestedEnvValue = string.Empty,
                 DefaultsToFree = true,
                 DefaultHeaders = [],
                 AuthHint =
@@ -96,7 +90,6 @@ public static class ProviderTemplates
                 BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
                 RequiresAuth = false,
                 AuthHeaderName = string.Empty,
-                SuggestedEnvValue = string.Empty,
                 DefaultsToFree = false,
                 DefaultHeaders = [],
                 AuthHint =
@@ -111,7 +104,6 @@ public static class ProviderTemplates
                 // Bedrock) has its own type, so requiring a credential is the better default here.
                 RequiresAuth = true,
                 AuthHeaderName = "Authorization",
-                SuggestedEnvValue = string.Empty,
                 DefaultsToFree = false,
                 DefaultHeaders = []
             }
@@ -192,15 +184,6 @@ public static class ProviderTemplates
         /// when <see cref="RequiresAuth"/> is false.
         /// </summary>
         public required string AuthHeaderName { get; init; }
-
-        /// <summary>
-        /// The credential value suggested (as placeholder text, never pre-filled) when the credential is
-        /// sourced from an environment variable - either a bare variable name such as
-        /// <c>ANTHROPIC_API_KEY</c>, or a template such as <c>Bearer {env:OPENAI_API_KEY}</c> when the API
-        /// expects a scheme prefix. See <see cref="AuthValueTemplate"/> for the syntax. Empty when
-        /// <see cref="RequiresAuth"/> is false or no conventional variable name exists.
-        /// </summary>
-        public required string SuggestedEnvValue { get; init; }
 
         /// <summary>
         /// Whether this provider's requests cost nothing, seeding the editor's "Free provider" checkbox.
