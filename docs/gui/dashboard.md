@@ -192,7 +192,13 @@ flowchart TD
      from each turn's existing fields, so nothing new has to flow through telemetry. This supersedes the
      tab's former combo chart (a single metric line plus per-model stacked bars). Note that ROI, tool
      steps, cache, and context are still 0 for *live* turns (no proxy source - see
-     `../router/telemetry.md`), so the mock history is what demonstrates those metrics.
+     `../router/telemetry.md`), so the mock history is what demonstrates those metrics.
+
+     When the corpus is that mock fallback rather than real rollups/live turns, the chart subtitle
+     carries a **`· demo data`** marker (same intent as the Dashboard tab's `(demo)` labels, §3).
+     Routing ROI is why this matters: it otherwise renders synthetic savings bars and a dollar
+     headline that are indistinguishable from real frozen-baseline measurements, directly beside the
+     Methodology link vouching for how they were computed.
 
 3. **Model Distribution** (`ModelDistribution.razor`) - a time-range filter bar (Day/Month/3-Month/
    6-Month/Year - visual only, does not currently refilter data) with From/To text inputs, above:

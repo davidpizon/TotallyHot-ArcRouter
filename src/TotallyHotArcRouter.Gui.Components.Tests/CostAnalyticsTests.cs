@@ -172,4 +172,29 @@ public sealed class CostAnalyticsTests
         cut.WaitForAssertion(assertion: () => cut.FindAll("div[id^='echart-']").Should().NotBeEmpty(),
             timeout: WaitTimeout);
     }
+
+    [Fact]
+    public void Mock_backed_chart_is_labelled_demo_data()
+    {
+        using var ctx = CreateContext();
+
+        // No live conversations and an unreachable router, so the corpus falls back to MockData. Routing
+        // ROI then draws synthetic savings bars and a dollar headline that are indistinguishable from real
+        // frozen-baseline measurements - beside a Methodology link vouching for how they were computed.
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: []));
+
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("demo data"), timeout: WaitTimeout);
+    }
+
+    [Fact]
+    public void Real_conversation_data_is_not_labelled_demo_data()
+    {
+        using var ctx = CreateContext();
+
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: [MakeLiveConversation()]));
+
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().NotContain("demo data"), timeout: WaitTimeout);
+    }
 }
