@@ -24,7 +24,7 @@ were the same measurement.
 | Figure | What it answers | Where it lives | Oracle |
 |---|---|---|---|
 | **Estimated regret** | Did this live request beat the untrained baseline under the *configured* live reward \(r = \varepsilon_1 s + \varepsilon_2 \kappa\)? | `taxonomy_comparisons.estimated_regret`, computed by [`RewardWeights.ComputeEstimatedRegret`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RewardWeights.cs) | Predicted: the baseline response was never produced |
-| **Estimated net savings** | Did this live request cost less than the untrained baseline? \(\kappa_{\text{base}} - \kappa_{\text{act}}\) — cost only, **not** \(r\) | `taxonomy_comparisons.estimated_net_savings_usd`; this is the **only** half the Cost Analytics Routing ROI chart plots | Predicted baseline cost, recorded serving cost |
+| **Estimated net savings** | Did this live request cost less than the untrained baseline? \(\kappa_{\text{base}} - \kappa_{\text{act}}\) — cost only, **not** \(r\) | `taxonomy_comparisons.estimated_net_savings_usd`; this is the **only** half the Cost Analytics Routing ROI chart plots | Predicted (counterfactual) cost; recorded/estimated serving cost (`TranscriptRecord.Cost` = usage × catalog `estimatedCostUsd`, nullable — not an invoice) |
 | **CumReg** | Over a CodeRouterBench split, how far was this policy from the per-task oracle under \(r\)? | Governance → Regret Harness markdown table, via [`RegretReplayResult`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RegretReplayResult.cs) | Measured: every model was scored on every task |
 
 Estimated regret and CumReg share the *algebra* of \(r\). Their *weights* need not match: live
@@ -51,7 +51,7 @@ flowchart LR
     end
     subgraph afterGrade ["After grade, off the hot path"]
         Persist --> Cmp["TaxonomyComparisonService"]
-        Obs["Observed score + actual cost"] --> Cmp
+        Obs["Observed score + estimated serving cost"] --> Cmp
         CostEst["Estimated baseline cost"] --> Cmp
         Cmp --> Regret["estimated_regret"]
         Cmp --> Savings["estimated_net_savings_usd"]
@@ -85,7 +85,12 @@ comparable to the paper.
 | Call site | \(\kappa\) is | Role |
 |---|---|---|
 | [`UtilityRoutingPolicy`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Router/UtilityRoutingPolicy.cs) | a **blended catalog rate** in USD per 1M tokens — `(input + output) / 2` | selection |
-| `TaxonomyComparisonService` → `RewardWeights.ComputeEstimatedRegret` | this request's **own cost**, in USD | accounting |
+| `TaxonomyComparisonService` → `RewardWeights.ComputeEstimatedRegret` | this request's **own recorded/estimated serving cost**, in USD | accounting |
+
+`CompositeRoutingPolicy` wires those coefficients into `UtilityRoutingPolicy` only. Its Orchestrator
+and Agent legs never read `Epsilon1`/`Epsilon2` — they are cost-blind. `TaxonomyComparisonService`
+does **not** gate on `IsUtility`: it records estimated regret for Orchestrator and Agent turns as
+well as utility turns, so the ledger includes requests whose selection never consulted the weights.
 
 Retuning \(\varepsilon_2\) therefore does **not** make every live decision optimize the same numeric
 reward the report card scores. It cannot: the two sides multiply \(\varepsilon_2\) by values in
@@ -178,7 +183,8 @@ makes regret more negative on both terms.
 
 ### Worked example
 
-Routed model scored \(s_{\text{obs}} = 0.90\) at \(\kappa_{\text{act}} = \$0.01\). Frozen policy
+Routed model scored \(s_{\text{obs}} = 0.90\) at \(\kappa_{\text{act}} = \$0.01\) (recorded/estimated
+serving cost — `TranscriptRecord.Cost` / usage × catalog `estimatedCostUsd`, nullable). Frozen policy
 predicted \(s_{\text{base}} = 0.50\) at \(\kappa_{\text{base}} = \$0.10\). Canonical weights:
 
 | | Score | Cost | Reward |
@@ -235,9 +241,9 @@ A turn whose baseline cost is unknown is **skipped**, not drawn at zero.
 
 The feed is the `UsageAdminService.GetRoutingRoi` gRPC call
 ([`admin.proto`](../src/Protos/admin.proto)) served by `UsageAdminGrpcService`, which delegates to
-`ManagementReportingService.GetRoutingRoiAsync`. It is polled
-every 30 seconds, because comparison work is a background drain rather than request-time
-telemetry.
+`ManagementReportingService.GetRoutingRoiAsync`. It is polled every 30 seconds, because comparison
+work is a background drain rather than request-time telemetry. The former REST
+`/admin/usage/routing-roi` surface was deleted with the other `/admin` HTTP routes (Phase P2).
 
 ---
 
@@ -300,4 +306,5 @@ that the criterion has been met.
 | Baseline cost ingredients | `TaxonomyComparisonService.EstimateCounterfactual` (ADR-0009) |
 | First-write-wins | `SqliteTaxonomyComparisonStore.UpsertAsync` |
 | Dashboard bars | `CostChartBuilder.BuildRoi` over `RoutingRoiPoint` (cost half only) |
+| Dashboard ROI feed | `UsageAdminService.GetRoutingRoi` (gRPC) → `ManagementReportingService.GetRoutingRoiAsync` |
 | Offline CumReg | `RegretReplayResult.Record` |
