@@ -15,6 +15,16 @@ public sealed class TrayDiscoveryReaderTests
     }
 
     [Fact]
+    public void TryRead_DefaultPath_DoesNotThrow()
+    {
+        // Covers DefaultPath() (ProgramData\...\web-interface.json). CI has no discovery file; a
+        // developer machine with a running router is still a valid parse of WebUrl.
+        var result = TrayDiscoveryReader.TryRead();
+        if (result?.WebUrl is { } webUrl)
+            Uri.TryCreate(uriString: webUrl, uriKind: UriKind.Absolute, result: out _).Should().BeTrue();
+    }
+
+    [Fact]
     public void TryRead_MissingFile_ReturnsNull()
     {
         var result = TrayDiscoveryReader.TryRead(TempPath());

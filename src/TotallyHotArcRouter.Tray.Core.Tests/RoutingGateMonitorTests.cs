@@ -95,6 +95,27 @@ public sealed class RoutingGateMonitorTests
     }
 
     [Fact]
+    public void Constructors_NullDependencies_Throw()
+    {
+        var nullProvider = () => new RoutingGateMonitor(channelProvider: null!);
+        var nullClient = () => new RoutingGateMonitor(client: null!);
+
+        nullProvider.Should().Throw<ArgumentNullException>();
+        nullClient.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task ChannelProviderConstructor_UnreachableEndpoint_ReportsUnreachable()
+    {
+        using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://127.0.0.1:1");
+        var provider = new StubChannelProvider(channel);
+        await using var monitor = new RoutingGateMonitor(channelProvider: provider, pollInterval: FastPoll);
+
+        await WaitUntilAsync(condition: () => monitor.ConnectionState == RouterConnectionState.Unreachable,
+            timeout: WaitTimeout);
+    }
+
+    [Fact]
     public async Task EnableAsync_SetsEnabledAndReachable_AndReturnsTheConfirmedState()
     {
         var client = new FakeRoutingGateAdminClient { EnabledResult = true };
@@ -130,6 +151,19 @@ public sealed class RoutingGateMonitorTests
 
             await Task.Delay(10, cancellationToken: TestContext.Current.CancellationToken);
         }
+    }
+
+    private sealed class StubChannelProvider : IRouterChannelProvider
+    {
+        public StubChannelProvider(Grpc.Net.Client.GrpcChannel channel)
+        {
+            CallInvoker = channel.CreateCallInvoker();
+            ServerAddress = channel.Target;
+        }
+
+        public Grpc.Core.CallInvoker CallInvoker { get; }
+
+        public string ServerAddress { get; }
     }
 
     private sealed class FakeRoutingGateAdminClient : IRoutingGateAdminClient
