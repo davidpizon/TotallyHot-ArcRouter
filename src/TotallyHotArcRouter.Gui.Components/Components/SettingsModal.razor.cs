@@ -5,7 +5,8 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 namespace TotallyHot.ArcRouter.Gui.Components;
 
 /// <summary>
-/// System settings modal: the adaptive-routing toggle and sample size
+/// System settings modal: the OpenAI-compatible client drop-in (one base URL, <c>model: auto</c>),
+/// the adaptive-routing toggle and sample size
 /// (docs/router/self-organizing-classification-plan.md Phase T6), the shadow-judge toggle and backbone
 /// picker (docs/router/geval-shadow-scoring-plan.md), the transcription-capture toggle and its Clear action
 /// (docs/router/self-organizing-classification-plan.md Phase T1), the Cost Reconciliation status and

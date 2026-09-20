@@ -1,0 +1,63 @@
+@* Copy-paste card for the default OpenAI-compatible drop-in (one base URL, model: auto).
+   Rendered on the Sessions empty state and at the top of System Settings so a new user does not
+   have to leave the dashboard to point a client. Values come from OpenAiCompatibleDropIn — never
+   restated here — so the panel cannot drift from README/release notes. *@
+
+<div class="rounded-lg p-4 space-y-3 ds-surface-card-bordered" data-testid="client-drop-in">
+    <div class="space-y-1">
+        <p class="text-xs text-slate-400 font-medium uppercase tracking-widest">Point a client</p>
+        <p class="text-xs text-slate-500 leading-5">
+            One OpenAI-compatible base URL. Send <span class="font-mono text-slate-300">"model": "@OpenAiCompatibleDropIn.Model"</span>
+            and the router picks the model.
+        </p>
+    </div>
+
+    <div class="space-y-2">
+        <label class="text-xs text-slate-500 uppercase tracking-widest" for="client-drop-in-base-url">Base URL</label>
+        <div class="flex items-center gap-2">
+            <input id="client-drop-in-base-url"
+                   type="text"
+                   readonly
+                   value="@OpenAiCompatibleDropIn.BaseUrl"
+                   data-testid="client-drop-in-base-url"
+                   class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input"/>
+            <button type="button"
+                    @onclick="CopyBaseUrlAsync"
+                    data-testid="client-drop-in-copy-base-url"
+                    class="shrink-0 btn btn-ghost">
+                @(BaseUrlCopied ? "Copied" : "Copy")
+            </button>
+        </div>
+    </div>
+
+    <div class="space-y-2">
+        <label class="text-xs text-slate-500 uppercase tracking-widest" for="client-drop-in-model">Model</label>
+        <div class="flex items-center gap-2">
+            <input id="client-drop-in-model"
+                   type="text"
+                   readonly
+                   value="@OpenAiCompatibleDropIn.Model"
+                   data-testid="client-drop-in-model"
+                   class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input"/>
+            <button type="button"
+                    @onclick="CopyModelAsync"
+                    data-testid="client-drop-in-copy-model"
+                    class="shrink-0 btn btn-ghost">
+                @(ModelCopied ? "Copied" : "Copy")
+            </button>
+        </div>
+    </div>
+
+    <div class="space-y-2">
+        <label class="text-xs text-slate-500 uppercase tracking-widest" for="client-drop-in-env">Environment</label>
+        <pre id="client-drop-in-env"
+             data-testid="client-drop-in-env"
+             class="px-3 py-2 text-xs font-mono text-slate-300 overflow-x-auto ds-input">@OpenAiCompatibleDropIn.BuildEnvironmentExports()</pre>
+        <button type="button"
+                @onclick="CopyEnvAsync"
+                data-testid="client-drop-in-copy-env"
+                class="btn btn-ghost">
+            @(EnvCopied ? "Copied env" : "Copy env")
+        </button>
+    </div>
+</div>
