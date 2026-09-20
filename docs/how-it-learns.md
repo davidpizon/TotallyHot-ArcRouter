@@ -244,10 +244,10 @@ Code in the response is extracted and **parsed** — never run. The evidence col
 
 **s_syntax** is 1 if it parses, 0 if it doesn't. But with one twist that matters: the router tracks
 *whether it actually knows*. C# is parsed with Roslyn and JavaScript/TypeScript with Acornima — real
-parsers, real verdicts. Python and shell get a bracket-balance heuristic, because no in-process parser for
-them exists on .NET. So those verdicts are **flagged as non-authoritative and weighted at half**. A
-bracket count is not a compiler's opinion, and pretending otherwise would quietly inflate every Python
-score the router learns from.
+parsers, real verdicts. Python and shell get language-aware structural scanners (quoting, f-strings,
+here-documents, `case` arms), because no in-process compiler for them exists on .NET. So those verdicts
+are **flagged as non-authoritative and weighted at half**. A heuristic is not a compiler's opinion, and
+pretending otherwise would quietly inflate every Python score the router learns from.
 
 **s_analysis** is where the interesting judgement lives — four checks, each of which may *abstain*:
 
@@ -377,7 +377,8 @@ the interpreter. Nothing needs to be configured correctly for this to hold.
 - *"It compiled, ran, and exited cleanly"* was the strongest signal available, and it is gone. The judge
   partially compensates. It does not replace it.
 - Python and shell lost their real syntax check — it used to be a subprocess that actually tried to parse
-  them. They now get a heuristic, marked as such and weighted at half.
+  them. They now get language-aware heuristics (not a raw bracket count), marked as such and weighted at
+  half.
 - What is left cannot tell you the code is *correct*. It can tell you it parses, that it is not a stub,
   that it is not cut off, and what a judge model thinks of it.
 
@@ -391,9 +392,10 @@ A system that grades itself should be candid about what it doesn't yet measure.
 - **Nothing here proves correctness.** The verifier can tell you code parses, is not a stub, and is not
   truncated; the judge can tell you a model opinion of it. Neither is a test suite. For live traffic
   there is no ground truth to check against, and this document should not be read as claiming otherwise.
-- **Python and shell are graded on a bracket count.** No in-process parser exists for them on .NET, so
-  their syntax verdict is a heuristic. It is flagged and weighted at half rather than hidden, but it is
-  still the weakest link in the static axis.
+- **Python and shell are still graded by a heuristic.** No in-process compiler exists for them on .NET, so
+  their syntax verdict is a language-aware scan (quoting, interpolations, here-documents, `case` arms)
+  rather than a compiler's opinion. It is flagged and weighted at half rather than hidden, but it is still
+  the weakest link in the static axis.
 - **The judge grades what it grades.** Probability-weighted G-Eval is a real improvement over sampling one
   digit, but it is still one model opinion of another work, with whatever blind spots that implies.
 - **The graders still cannot see the question.** The prompt now travels with the request as far as the

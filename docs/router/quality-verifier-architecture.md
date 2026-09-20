@@ -44,8 +44,10 @@ The consequences are worth stating plainly rather than glossing:
 - **The strongest signal is gone.** "It compiled, ran, and exited cleanly" is more informative than
   anything static analysis can prove. The judge partially compensates; it does not replace it.
 - **Non-C#/JS languages lost their authoritative check.** A Tier-1 subprocess used to be Python's real
-  syntax verdict. There is no managed Python parser, so Python and shell now carry a heuristic verdict
-  that is *explicitly marked* as such (§3.1) and weighted at half.
+  syntax verdict. There is no managed Python parser, so Python and shell now carry a language-aware
+  heuristic verdict that is *explicitly marked* as such (§3.1) and weighted at half. The scanners exist
+  to stop common real outputs (triple-quoted apostrophes, here-documents, `${#var}`, `case` arms) from
+  looking invalid under a raw bracket count — not to promote the verdict to authoritative.
 - **The pipeline is now platform-independent.** There is no capability probe, no degraded mode, and no
   OS-gated registration. The graph is identical on Windows, Linux, and macOS.
 
@@ -123,8 +125,8 @@ scorer depends on.
 |---|---|---|
 | C# | Roslyn (`CSharpSyntaxTree.ParseText`) | yes |
 | JavaScript / TypeScript | Acornima (module grammar, then script grammar) | yes |
-| Python | `DelimiterBalance` heuristic | **no** |
-| Shell | `DelimiterBalance` heuristic | **no** |
+| Python | `PythonStructuralParser` (quoting, prefixes, f/t-strings; non-authoritative) | **no** |
+| Shell | `ShellStructuralParser` (quoting, `$(...)` / `${...}`, here-documents, `case` arms; non-authoritative) | **no** |
 | Unknown | `DelimiterBalance` heuristic | **no** |
 
 JavaScript is tried as a module first and then as a script. A model's answer is as likely to be a bare
@@ -133,8 +135,9 @@ implicit strict mode — accepting either is what stops good code failing on a t
 
 A non-authoritative verdict is **marked**, never silently promoted: the result carries
 `SyntaxAuthoritative = false` and `DegradedReason = "heuristic-syntax-check"`, and §4 halves its weight.
-Letting a bracket count pass for a compiler's verdict would quietly inflate every Python score the router
-learns from.
+Letting a heuristic pass for a compiler's verdict would quietly inflate every Python score the router
+learns from. Python and shell still get more than a raw bracket count: dedicated scanners understand
+quoting, interpolations, here-documents, and `case` arms so common real outputs do not fail the scan.
 
 ### 3.2 Static analyzers
 
@@ -180,7 +183,7 @@ small, self-contained catalog picked for being cheap to detect from text and str
 what the other analyzers already report: magic numbers, overlong lines, empty `catch`/`except` blocks, and
 long parameter/argument lists.
 
-Both are approximate by design, in the same spirit as the `DelimiterBalance` heuristic in §3.1: a token
+Both are approximate by design, in the same spirit as the Python/shell scanners in §3.1: a token
 overlap or a regex-counted magic number is a proxy, not a compiler's verdict, and neither can zero a
 snippet on its own (both floor at 0.3).
 
