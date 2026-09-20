@@ -23,7 +23,7 @@ public sealed class SettingsModalTests
         bool updateSupportsApply = true)
     {
         var ctx = new BunitContext();
-        liveDataStore = new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996"));
+        liveDataStore = new LiveDataStore(channelProvider: new StubRouterChannelProvider("https://127.0.0.1:59996"));
         routerSettingsStore = new RouterSettingsAdminStore(routerSettingsClient ?? new FakeRouterSettingsAdminClient());
         ctx.Services.AddSingleton(liveDataStore);
         ctx.Services.AddSingleton(routerSettingsStore);

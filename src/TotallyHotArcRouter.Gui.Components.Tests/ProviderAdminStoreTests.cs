@@ -3,39 +3,35 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Services;
-using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
-/// Tests for <see cref="ProviderAdminStore"/>'s reachability/error-surfacing contract. No proxy is
-/// running in the test process, so every request against the loopback address below fails fast with a
-/// connection refusal - exactly the "proxy isn't running" path the store is built to degrade gracefully
-/// on, per its own class remarks.
+/// Tests for <see cref="ProviderAdminStore"/>'s reachability/error-surfacing contract. The stub channel
+/// fails every RPC as unavailable - exactly the "proxy isn't running" path the store is built to
+/// degrade gracefully on, per its own class remarks.
 /// </summary>
 public sealed class ProviderAdminStoreTests
 {
-    // An address nothing listens on, so the underlying HttpClient.SendAsync fails fast with a
-    // connection refusal rather than depending on whether an actual proxy happens to be running
-    // on the store's real default port (5001) on the machine running this test.
     private const string UnreachableAddress = "http://127.0.0.1:59991";
 
     [Fact]
     public void Providers_and_IsLoaded_start_empty_before_any_load()
     {
-        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
 
         store.Providers.Should().BeEmpty();
         store.IsLoaded.Should().BeFalse();
         store.IsReachable.Should().BeFalse();
         store.LastError.Should().BeNull();
+        store.ServerAddress.Should().Be(UnreachableAddress);
     }
 
     [Fact]
     public async Task LoadAsync_surfaces_unreachability_instead_of_throwing()
     {
-        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
 
         await store.LoadAsync(TestContext.Current.CancellationToken);
 
@@ -48,7 +44,7 @@ public sealed class ProviderAdminStoreTests
     [Fact]
     public async Task LoadAsync_raises_Changed_even_on_failure()
     {
-        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
         var raised = false;
         store.Changed += () => raised = true;
 
@@ -60,7 +56,7 @@ public sealed class ProviderAdminStoreTests
     [Fact]
     public async Task UpsertProviderAsync_propagates_a_ProviderAdminException_when_unreachable()
     {
-        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
         var body = new ProviderWriteRequest(
             BaseUrl: "https://example.com", AuthHeaderName: "Authorization");
 
@@ -72,16 +68,14 @@ public sealed class ProviderAdminStoreTests
     [Fact]
     public void Constructor_buildingItsOwnChannel_DoesNotThrow()
     {
-        // GrpcChannel.ForAddress validates and resolves the address eagerly enough that a malformed one
-        // would throw here rather than only on first send - this guards the constructor path itself.
-        var act = () => new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var act = () => new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
         act.Should().NotThrow();
     }
 
     [Fact]
     public async Task LoadRateLimitHistoryAsync_unreachable_does_not_throw()
     {
-        var store = new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
 
         var act = () =>
             store.LoadRateLimitHistoryAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);

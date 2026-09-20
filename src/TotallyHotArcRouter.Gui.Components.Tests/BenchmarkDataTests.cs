@@ -357,9 +357,8 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void The_store_reports_the_endpoint_it_was_pointed_at()
     {
-        // Constructing a channel does not connect, so this stays offline; the panel reads this property to
-        // name the address it actually failed to reach.
-        using var store = new BenchmarkDataStore(channelProvider: new NativeRouterChannelProvider("https://localhost:65111"));
+        // The panel reads this property to name the address it actually failed to reach.
+        using var store = new BenchmarkDataStore(channelProvider: new StubRouterChannelProvider("https://localhost:65111"));
 
         store.ServerAddress.Should().Be("https://localhost:65111");
     }

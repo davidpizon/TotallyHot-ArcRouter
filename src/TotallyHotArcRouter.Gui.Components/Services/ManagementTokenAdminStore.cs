@@ -7,9 +7,7 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// Singleton view-model backing the System Settings window's "Copy MCP token / Regenerate" row (web GUI
 /// migration plan Phase P9). Wraps <see cref="IManagementTokenAdminClient"/> in the shared
 /// <see cref="AdminStoreBase{TClient}"/> shape, so the panel survives modal close/reopen and degrades
-/// gracefully when the router isn't running - see <see cref="AdminStoreBase{TClient}"/>'s remarks for why
-/// this, unlike <c>RoutingGateStore</c>, fits that base cleanly. Registered in <c>MauiProgram</c>/the WASM
-/// host's composition root.
+/// gracefully when the router isn't running. Registered in the WASM host's composition root.
 /// </summary>
 public sealed class ManagementTokenAdminStore : AdminStoreBase<IManagementTokenAdminClient>
 {

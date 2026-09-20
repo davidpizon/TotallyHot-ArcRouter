@@ -17,16 +17,13 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class ModelDistributionTests
 {
-    // An address nothing listens on, so the underlying HttpClient.SendAsync fails fast with a connection
-    // refusal rather than depending on whether an actual proxy happens to be running on the store's real
-    // default port (5001) on the machine running this test - same technique as ProviderAdminStoreTests.
     private const string UnreachableAddress = "http://127.0.0.1:59992";
 
     private static BunitContext CreateContext()
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress)));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress)));
         return ctx;
     }
 

@@ -26,7 +26,7 @@ public sealed class GovernanceTests
         // flip ProvidersAdmin out of its "Loading providers" state before the default-sub-view test's
         // assertion runs, the same "hangs forever" fix already applied to the other stores below.
         ctx.Services.AddSingleton(new ProviderAdminStore(client: new ProviderAdminClient(new HangingProviderAdminServiceClient())));
-        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59989")));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: new StubRouterChannelProvider("http://127.0.0.1:59989")));
         ctx.Services.AddSingleton(new PriceSourceStore(new StubPriceSourceAdminClient()));
         ctx.Services.AddSingleton(new BenchmarkDataStore(new StubBenchmarkDataAdminClient()));
         ctx.Services.AddSingleton(new LlmRouterModelStore(new StubLlmRouterModelAdminClient()));
@@ -76,8 +76,8 @@ public sealed class GovernanceTests
 
         var cut = ctx.Render<Governance>();
         // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context:
-        // ProviderAdminStore/UsageStore above are backed by real (deliberately-unreachable)
-        // NativeRouterChannelProvider connections, whose background failure continuations can re-render
+        // ProviderAdminStore/UsageStore above are backed by a deliberately-unavailable stub
+        // channel, whose background failure continuations can re-render
         // between a plain Find() and Click(), leaving Click() dispatching against an event handler ID the
         // re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
         await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Price Sources").Click());

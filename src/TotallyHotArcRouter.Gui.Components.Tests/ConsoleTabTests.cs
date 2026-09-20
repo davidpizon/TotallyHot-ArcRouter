@@ -19,7 +19,7 @@ public sealed class ConsoleTabTests
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59992")));
+        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: new StubRouterChannelProvider("https://127.0.0.1:59992")));
         ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         return ctx;
     }

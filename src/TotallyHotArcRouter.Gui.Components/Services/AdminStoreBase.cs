@@ -18,10 +18,7 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <see cref="RecordFailure"/>.
 /// </para>
 /// <para>
-/// <b>Three stores deliberately do not derive from this, and should not be made to.</b>
-/// <c>RoutingGateStore</c> polls continuously on a background loop behind its own lock, derives
-/// <c>IsReachable</c> from a three-valued connection state, is <see cref="IAsyncDisposable"/>, and raises
-/// <c>Changed</c> only on an actual change — it shares the name "Store" but none of the shape.
+/// <b>Two stores deliberately do not derive from this, and should not be made to.</b>
 /// <c>ProviderAdminStore</c> and <c>UsageStore</c> moved from plain-HTTP/JSON to gRPC in
 /// docs/router/tracked-todos.md #7 (ADR-0007 is now stale on this point), but their
 /// <c>ProviderAdminException</c> still carries no unavailable-versus-rejected distinction for

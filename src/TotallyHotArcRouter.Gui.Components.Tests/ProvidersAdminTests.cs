@@ -17,7 +17,7 @@ public sealed class ProvidersAdminTests
     private static BunitContext NewContext()
     {
         var ctx = new BunitContext();
-        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59995")));
+        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new StubRouterChannelProvider("http://127.0.0.1:59995")));
         return ctx;
     }
 
@@ -40,7 +40,8 @@ public sealed class ProvidersAdminTests
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Proxy management API unreachable"),
             timeout: TimeSpan.FromSeconds(4));
-        cut.Markup.Should().Contain(ProviderAdminStore.DefaultManagementAddress);
+        cut.Markup.Should().Contain("http://127.0.0.1:59995");
+        cut.Markup.Should().NotContain(TelemetryChannelFactory.DefaultServerAddress);
     }
 
     [Fact]

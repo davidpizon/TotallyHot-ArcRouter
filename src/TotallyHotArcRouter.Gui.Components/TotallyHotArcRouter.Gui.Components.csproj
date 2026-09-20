@@ -8,8 +8,8 @@
          net10.0-windows - SupportedPlatform browser below is what lets a consuming WASM project trim
          and publish this library for the browser. Phase P5a's IRouterChannelProvider indirection is
          what keeps this library itself free of real sockets/TLS/filesystem code: every store here talks
-         to the router only through that interface and IClipboardService/IManagementTokenProvider-style
-         seams, never TelemetryChannelFactory or ManagementTokenReader directly. -->
+         to the router only through that interface and IClipboardService-style seams, never
+         TelemetryChannelFactory directly. -->
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>TotallyHot.ArcRouter.Gui</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>

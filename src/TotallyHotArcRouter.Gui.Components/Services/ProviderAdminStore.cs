@@ -10,17 +10,10 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <see cref="ProviderAdminClient"/> (the tested, platform-agnostic logic in TotallyHot.ArcRouter.Gui.Admin)
 /// with the same "singleton + Changed event + best-effort, reachability-tolerant" shape as
 /// <see cref="LiveDataStore"/>, so the UI survives tab switches and degrades gracefully when the proxy
-/// isn't running. Registered in <c>MauiProgram</c>.
+/// isn't running. Registered in the WASM host's composition root.
 /// </summary>
 public sealed class ProviderAdminStore : IDisposable
 {
-    /// <summary>
-    /// The proxy's TLS gRPC endpoint (docs/router/tracked-todos.md #7 - the provider-admin surface moved
-    /// off the plain-HTTP LLM-forwarding port onto this one), matching <see cref="LiveDataStore"/>'s own
-    /// server address.
-    /// </summary>
-    public const string DefaultManagementAddress = TelemetryChannelFactory.DefaultServerAddress;
-
     private readonly ProviderAdminClient _client;
     private readonly ILogger<ProviderAdminStore>? _logger;
 
@@ -35,12 +28,8 @@ public sealed class ProviderAdminStore : IDisposable
     /// </param>
     /// <param name="logger">Optional logger.</param>
     /// <param name="adminToken">
-    /// Optional management token; the composition root (<c>MauiProgram</c>) resolves it once from the
-    /// shared <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c> file (see
-    /// <see cref="ManagementTokenReader"/>) and passes it in here - this store no longer reads the file
-    /// itself, since that call is native-only and this class moves into the browser-targeted
-    /// <c>TotallyHot.ArcRouter.Gui.Components</c> library in Phase P5b. Sent as the <c>x-admin-token</c>
-    /// gRPC metadata entry.
+    /// Optional management token sent as the <c>x-admin-token</c> gRPC metadata entry. The WASM host
+    /// omits this: it authenticates via the ADR-0012 session cookie instead.
     /// </param>
     /// <param name="client">
     /// A pre-built client to use instead of constructing one from <paramref name="channelProvider"/>;
@@ -71,9 +60,17 @@ public sealed class ProviderAdminStore : IDisposable
         else
         {
             ArgumentNullException.ThrowIfNull(channelProvider);
+            ServerAddress = channelProvider.ServerAddress;
             _client = new ProviderAdminClient(channelProvider.CallInvoker, adminToken);
         }
     }
+
+    /// <summary>
+    /// The proxy endpoint this store's client talks to, so the unreachable state can name the address it
+    /// actually failed to reach rather than assuming the default. <see langword="null"/> when constructed
+    /// over a caller-supplied client, whose endpoint this store has no way to know.
+    /// </summary>
+    public string? ServerAddress { get; }
 
     /// <summary>The providers currently known, refreshed after each load or successful edit.</summary>
     public IReadOnlyList<ProviderAdminView> Providers { get; private set; } = [];
