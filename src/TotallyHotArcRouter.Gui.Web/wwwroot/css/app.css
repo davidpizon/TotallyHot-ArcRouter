@@ -125,12 +125,6 @@
   min-width: 0;
 }
 
-/* Scrollable request/response payload blocks in the turn drill-down (~8 lines). */
-.ls-payload {
-  max-height: 8rem;
-  overflow-y: auto;
-}
-
 /* Square icon buttons in a card's action row (Governance > Providers). The box matches the
    Tailwind-styled Edit/Remove buttons beside them — a 20px Heroicons Solid glyph inside p-1.5 is
    already a 32x32 square (the nested per-model-row buttons use p-1 and a 16px glyph instead, for
@@ -552,17 +546,6 @@ input[type="number"]:focus {
   color: var(--color-critical);
 }
 
-/* Stat-strip categorical hues (docs/gui/DESIGN.md §"Data-encoding palettes") — rose and violet appear
-   only in the TurnCard stat strip and are data labels, not chrome; kept as their own tokens rather than
-   reusing the chrome semantic vars. */
-.stat-color-tokens {
-  color: #a78bfa;
-}
-
-.stat-color-ttft {
-  color: #fb7185;
-}
-
 .sparkline-line {
   stroke: var(--accent);
 }
@@ -927,18 +910,6 @@ input[type="number"]:focus {
   background: rgba(77, 77, 77, 0.5);
 }
 
-/* ---- Code and payload block styling ---- */
-.ds-code-block {
-  background: var(--surface-base);
-  color: var(--text-bright-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  border-radius: 0.25rem;
-  padding: 0.5rem;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 0.75rem;
-}
-
 /* ---- Conditional button states (use class binding, not inline style) ---- */
 .btn-state-active {
   background-color: #1f1f1f;
@@ -1017,24 +988,6 @@ input[type="number"]:focus {
 }
 
 /* ---- Tinted semantic surfaces (routing steps, badges, alerts) — prefer these over inline style lists ---- */
-.ds-step-success {
-  background: rgba(16, 185, 129, 0.08);
-  border-left: 2px solid #10b981;
-  color: #6ee7b7;
-}
-
-.ds-step-warning {
-  background: rgba(245, 158, 11, 0.12);
-  border-left: 2px solid #f59e0b;
-  color: #fcd34d;
-}
-
-.ds-step-info {
-  background: rgba(56, 189, 248, 0.1);
-  border-left: 2px solid #38bdf8;
-  color: #7dd3fc;
-}
-
 .ds-step-critical {
   background: #ef444411;
   border-left: 2px solid #ef4444;
@@ -1380,18 +1333,6 @@ input[type="number"] {
    tracking to fire on, and unused CSS rots. Add it together with its wiring, not before. */
 
 /* ---- Static layout replacing inline style= (DESIGN.md §7) ---- */
-.ls-turn-card {
-  border: 1px solid var(--border-button);
-}
-
-.ls-turn-card-toggle {
-  background: transparent;
-}
-
-.ls-flex-auto {
-  flex: 1 1 auto;
-}
-
 .ls-stat-strip-gap {
   gap: 2px 14px;
 }
