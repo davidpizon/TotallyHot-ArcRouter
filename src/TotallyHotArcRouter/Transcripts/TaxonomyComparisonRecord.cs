@@ -77,10 +77,12 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </para>
 /// </param>
 /// <param name="EstimatedRegret">
-/// The routing decision's estimated regret against the untrained baseline under the canonical reward
-/// <c>r = ε₁·s + ε₂·κ</c> (docs/score-delta-methodology.md, weights from
-/// <c>RoutingOptions.Epsilon1</c>/<c>Epsilon2</c>, computed by
-/// <c>RewardWeights.ComputeEstimatedRegret</c>): the baseline's estimated reward
+/// The routing decision's estimated regret against the untrained baseline under the
+/// <em>configured</em> reward <c>r = ε₁·s + ε₂·κ</c> (docs/score-delta-methodology.md). Weights
+/// come from <c>RoutingOptions.Epsilon1</c>/<c>Epsilon2</c> as bound at comparison time; the
+/// value is computed by <c>RewardWeights.ComputeEstimatedRegret</c>. Shipped defaults are
+/// <c>RewardWeights.Canonical</c> (<c>ε₁ = 1</c>, <c>ε₂ = −0.1</c>); an operator override
+/// changes this figure. It is the baseline's estimated reward
 /// (<see cref="BaselinePredictedScore"/>, <see cref="BaselineEstimatedCostUsd"/>) minus the routed pick's
 /// observed reward (<see cref="ObservedScore"/>, <see cref="ActualCostUsd"/>). Positive means the untrained
 /// baseline would likely have earned more reward; negative means routing beat it.

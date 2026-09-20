@@ -17,15 +17,19 @@ harness). Canonical reward in Zhou et al., [arXiv:2606.22902](https://arxiv.org/
 
 ## Three numbers, one frozen policy
 
-The product publishes three related figures. They share a reward function and a frozen DimensionBest
-rule. They do **not** share an oracle, and they must not be quoted as if they were the same
-measurement.
+The product publishes three related figures. They share a frozen DimensionBest rule. They do **not**
+all share a reward function, they do **not** share an oracle, and they must not be quoted as if they
+were the same measurement.
 
 | Figure | What it answers | Where it lives | Oracle |
 |---|---|---|---|
-| **Estimated regret** | Did this live request beat the untrained baseline under the canonical reward? | `taxonomy_comparisons.estimated_regret`, computed by [`RewardWeights.ComputeEstimatedRegret`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RewardWeights.cs) | Predicted: the baseline response was never produced |
-| **Estimated net savings** | Did this live request cost less than the untrained baseline? | `taxonomy_comparisons.estimated_net_savings_usd`; this is the **only** half the Cost Analytics Routing ROI chart plots | Predicted cost, observed actual cost |
-| **CumReg** | Over a CodeRouterBench split, how far was this policy from the per-task oracle? | Governance → Regret Harness markdown table, via [`RegretReplayResult`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RegretReplayResult.cs) | Measured: every model was scored on every task |
+| **Estimated regret** | Did this live request beat the untrained baseline under the *configured* live reward \(r = \varepsilon_1 s + \varepsilon_2 \kappa\)? | `taxonomy_comparisons.estimated_regret`, computed by [`RewardWeights.ComputeEstimatedRegret`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RewardWeights.cs) | Predicted: the baseline response was never produced |
+| **Estimated net savings** | Did this live request cost less than the untrained baseline? \(\kappa_{\text{base}} - \kappa_{\text{act}}\) — cost only, **not** \(r\) | `taxonomy_comparisons.estimated_net_savings_usd`; this is the **only** half the Cost Analytics Routing ROI chart plots | Predicted cost, observed actual cost |
+| **CumReg** | Over a CodeRouterBench split, how far was this policy from the per-task oracle under \(r\)? | Governance → Regret Harness markdown table, via [`RegretReplayResult`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RegretReplayResult.cs) | Measured: every model was scored on every task |
+
+Estimated regret and CumReg share the *algebra* of \(r\). Their *weights* need not match: live
+regret reads `RoutingOptions.Epsilon1`/`Epsilon2` (shipped defaults \((1, -0.1)\)), while the
+offline harness always uses `RewardWeights.Canonical`. Net savings never enters \(r\).
 
 **Score-delta**, as used in this document, is the quality half of the live comparison:
 
@@ -125,7 +129,7 @@ the served model's score?). They are not the frozen-policy yardstick.
 
 ---
 
-## Live estimated regret (the stored score-delta)
+## Live estimated regret
 
 [`TaxonomyComparisonService`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Transcripts/TaxonomyComparisonService.cs)
 runs off the hot path, on a one-minute drain that **hard-pauses** while any proxy request is in
@@ -200,7 +204,8 @@ Cost Analytics → **Routing ROI** is a dual-directional bar chart of
 Gains above 0, losses below. The headline is the window sum. Every tooltip labels the baseline
 cost as an estimate.
 
-This chart **does not plot** estimated regret or \(\Delta s\). Those stay in the comparison store
+This chart **does not plot** estimated regret or \(\Delta s\), and it does not evaluate \(r\). The
+bars are the cost difference above; the reward-weighted comparison stays in the comparison store
 and the structured `[TAXONOMY-COMPARE]` logs. The predictive-adequacy (taxonomy MAE) series is
 deliberately not projected either — it gates a promotion decision, not an operator metric
 ([`RoutingRoiPoint`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Proxy/Management/RoutingRoiPoint.cs)).

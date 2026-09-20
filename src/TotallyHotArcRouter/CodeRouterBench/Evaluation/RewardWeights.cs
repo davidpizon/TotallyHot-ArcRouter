@@ -4,8 +4,10 @@ namespace TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 /// The cost-aware reward weights <c>(ε1, ε2)</c> in <c>r = ε1·s + ε2·κ</c>
 /// (docs/router/regret-evaluation-harness-plan.md, research-doc §A.2), applied identically to every
 /// baseline and the Orchestrator arm so their <see cref="RegretReplayResult"/> numbers are comparable.
-/// The same static helpers compute the live frozen-baseline score-delta
-/// (<c>taxonomy_comparisons.estimated_regret</c>); see <c>docs/score-delta-methodology.md</c>.
+/// The same static helpers compute live <c>taxonomy_comparisons.estimated_regret</c> — the full
+/// reward difference, not the quality-only score-delta
+/// (<c>observedScore − baselinePredictedScore</c>, which is not stored); see
+/// <c>docs/score-delta-methodology.md</c>.
 /// </summary>
 /// <param name="ScoreWeight">
 /// ε1, the weight on the verifier score <c>s_ij ∈ [0,1]</c>. Canonical value <c>1</c>.
@@ -23,7 +25,9 @@ public sealed record RewardWeights(double ScoreWeight, double CostWeight)
 
     /// <summary>
     /// Computes the per-decision reward <c>r = ε1·s + ε2·κ</c>. The live comparison and the offline
-    /// harness both call this so they cannot disagree about what "better" means.
+    /// harness both call this so they share the algebra; they do not necessarily share the same
+    /// <paramref name="epsilon1"/>/<paramref name="epsilon2"/> (live reads
+    /// <c>RoutingOptions</c>, the harness uses <see cref="Canonical"/>).
     /// </summary>
     /// <param name="score">Verifier score <c>s</c>, typically in <c>[0, 1]</c>.</param>
     /// <param name="costUsd">Monetary cost <c>κ</c> in USD.</param>

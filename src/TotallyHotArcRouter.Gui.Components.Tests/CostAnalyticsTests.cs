@@ -73,13 +73,14 @@ public sealed class CostAnalyticsTests
     [Fact]
     public async Task Methodology_link_is_hidden_when_routing_roi_is_not_the_active_metric()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
             p.Add(parameterSelector: c => c.Conversations, value: []));
         await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
 
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().NotContain("Methodology"), timeout: WaitTimeout);
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().NotContain("Methodology"),
+            timeout: WaitTimeout);
     }
 
     [Fact]
