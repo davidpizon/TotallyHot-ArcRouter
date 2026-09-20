@@ -65,7 +65,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 **Apache ECharts NOTICE** — reproduced as required by Apache-2.0 §4(d). The upstream `LICENSE` and
 `NOTICE` files are retained verbatim alongside the vendored bundle in
-`src/TotallyHotArcRouter.Gui/wwwroot/lib/echarts/`:
+`src/TotallyHotArcRouter.Gui.Web/wwwroot/lib/echarts/`:
 
 ```
 Apache ECharts

@@ -55,8 +55,9 @@ otherwise.
   and `src/TotallyHotArcRouter.Updater.Tests/` are gone; `scripts/service/Install-RouterService.ps1`/
   `Uninstall-RouterService.ps1` are kept only as a clearly-marked dev-only path for a developer who wants a
   real Windows Service on a dev machine without building the MSI.
-- **One MSI installs both the Router and the GUI**, to `%ProgramFiles%\TotallyHotArcRouter\Router\` and
-  `\Gui\` respectively — no `\Updater\` directory. Neither runtime data location is referenced by the
+- **One MSI installs both the Router and the WinForms tray**, to `%ProgramFiles%\TotallyHotArcRouter\Router\` and
+  `\Tray\` respectively — no `\Updater\` or `\Gui\` directory. The WASM dashboard is static files inside the
+  Router publish output, not a third install tree. Neither runtime data location is referenced by the
   installer, so both are untouched by install, upgrade, and uninstall:
   `%ProgramData%\TotallyHotArcRouter\` (machine-wide operational state — see §3.1) and
   `%LOCALAPPDATA%\TotallyHot.ArcRouter\` (the per-user ONNX model caches, still per-user).

@@ -380,10 +380,10 @@ Shipped as:
 - `Proxy/ProxyServer.cs` / `Hosting/ServiceCollectionExtensions.cs` wire the group and map the endpoint,
   following the cluster-model block's exact pattern.
 - GUI: `TotallyHotArcRouter.Gui.Telemetry/LogRegModelAdminClient.cs` (+ `ILogRegModelAdminClient`),
-  `TotallyHotArcRouter.Gui/Services/LogRegModelAdminStore.cs`, and a **Router Model** pane
+  `TotallyHotArcRouter.Gui.Components/Services/LogRegModelAdminStore.cs`, and a **Router Model** pane
   (`Components/RouterModelAdmin.razor`) added to `Governance.razor`'s tab list, following
   `ClusterModelAdmin.razor`'s layout and button-state vocabulary ("Train" / "Retrain" / "Training…" /
-  router-unreachable) exactly. Registered as a MAUI singleton in `MauiProgram.cs`.
+  router-unreachable) exactly. Registered in the WASM host (`Gui.Web`).
 
 **Exit:** `LogRegModelAdminGrpcServiceTests` (6 tests: no-artifact status, trained status, retrain-config
 context, trained/declined/already-running streaming outcomes) - all passing. `LogRegModelAdminClientTests`

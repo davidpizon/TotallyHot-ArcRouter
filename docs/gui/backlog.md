@@ -142,7 +142,7 @@ stale premises on:
 
 Governance > Providers cards previously had no way to show Anthropic's own authoritative usage/cost
 numbers — the "Monthly Budget" section
-([`ProvidersAdmin.razor`](../../src/TotallyHotArcRouter.Gui/Components/ProvidersAdmin.razor))
+([`ProvidersAdmin.razor`](../../src/TotallyHotArcRouter.Gui.Components/Components/ProvidersAdmin.razor))
 renders bar charts, but they're driven entirely by the proxy's own internal request tally
 (`ProviderBudgetStore`), not by Anthropic. **Shipped**, per `secrets-at-rest-plan.md` Phases 4-6:
 

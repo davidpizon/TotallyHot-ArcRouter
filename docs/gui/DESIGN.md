@@ -1,22 +1,22 @@
-# TotallyHotArcRouter.Gui Design System
+# TotallyHot Arc Router Design System
 
-This is the authoritative design-system reference for `TotallyHot.ArcRouter.Gui`. It codifies the app's
-**existing, shipping** visual identity — every value below is pulled from
-[`wwwroot/css/app.css`](../../src/TotallyHotArcRouter.Gui/wwwroot/css/app.css) and the behavior described in
-[`dashboard.md`](dashboard.md) — it is not a redesign proposal. Motion — durations, easing, entrance/exit patterns — lives in its
-companion [`MOTION.md`](MOTION.md), which *is* prescriptive. For component-level specs, see
+This is the authoritative design-system reference for the Blazor dashboard in
+`TotallyHotArcRouter.Gui.Components` (Razor UI) and `TotallyHotArcRouter.Gui.Web` (WASM host). It
+codifies the **existing, shipping** visual identity — every value below is pulled from
+[`wwwroot/css/app.css`](../../src/TotallyHotArcRouter.Gui.Web/wwwroot/css/app.css) and the behavior
+described in [`dashboard.md`](dashboard.md) — it is not a redesign proposal. Motion — durations,
+easing, entrance/exit patterns — lives in its companion [`MOTION.md`](MOTION.md), which *is*
+prescriptive. For component-level specs, see
 [`cost-analytics-visualization-spec.md`](cost-analytics-visualization-spec.md),
 [`governance-model-cards.md`](governance-model-cards.md),
 [`provider-management.md`](provider-management.md),
 [`secret-field.md`](secret-field.md), and
-[`livestream-redesign-plan.md`](livestream-redesign-plan.md).
+[`dashboard.md`](dashboard.md) (Sessions tab). The React kit under [`../design/`](../design/readme.md)
+is historical and not runtime.
 
-> **Status: aspirational design adopted.** As of [`aspirational-design-adoption-plan.md`](aspirational-design-adoption-plan.md)
-> Phase 2/3, this document has been updated to reflect the near-black + Dark Green (`#1ed760`) visual
-> identity from [`aspirational-design.md`](aspirational-design.md), which now supersedes the previous
-> slate-900/sky-400 identity described in earlier revisions of this file. See §9 for the one deliberate
-> deviation from the aspirational spec's literal font requirement (CircularSp licensing) and §4.2 for the
-> one deliberate deviation on button geometry (dense per-row icon actions stay square, not pill/circular).
+> **Status: aspirational design adopted.** Near-black + Dark Green (`#1ed760`) from
+> [`aspirational-design.md`](aspirational-design.md) is the live identity. See §9 for the CircularSp
+> licensing deviation and §4.2 for dense per-row icon actions staying square.
 
 ## 1. Design Principles
 

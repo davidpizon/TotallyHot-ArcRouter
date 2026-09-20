@@ -9,12 +9,14 @@
 ## Purpose
 
 `src/TotallyHotArcRouter/Telemetry/` captures per-request routing telemetry from the live traffic path
-and pushes it to connected clients (currently `TotallyHot.ArcRouter.Gui`) over gRPC, so the dashboard's
+and pushes it to connected clients (the Blazor WASM dashboard in `TotallyHotArcRouter.Gui.Web` /
+`Gui.Components`) over gRPC-Web, so the dashboard's
 Sessions and Cost Analytics tabs can show real conversations instead of only `MockData`. See
 [`../gui/dashboard.md`](../gui/dashboard.md) for how the GUI consumes this, and
 [`../gui/backlog.md`](../gui/backlog.md) for the backlog items this closed out. The transport was
-SignalR until [`grpc-migration.md`](grpc-migration.md) shipped (see "Transport: gRPC" below) - that
-migration changed only the transport, not any of the capture logic this doc otherwise describes.
+SignalR until gRPC shipped (historical design:
+[`../archive/router/grpc-migration.md`](../archive/router/grpc-migration.md); see "Transport: gRPC"
+below) - that migration changed only the transport, not any of the capture logic this doc otherwise describes.
 
 This is purely additive: every dependency it introduces into existing classes
 (`ProxyServer`, `ProxyHostedService`, `ProxyMiddleware`) is an appended optional constructor
@@ -359,16 +361,14 @@ The wire message (`TotallyHot.ArcRouter.Telemetry.Contract.RoutingTelemetryEvent
 `src/Protos/telemetry.proto`) is compiled independently into both `TotallyHotArcRouter`
 (`GrpcServices="Server"`) and `TotallyHot.ArcRouter.Gui.Telemetry` (`GrpcServices="Client"`) from the same
 file, so the two sides can never structurally drift the way the old hand-synced SignalR DTOs could.
-The client-side compile happens in `TotallyHot.ArcRouter.Gui.Telemetry` - a plain, non-MAUI project - rather
-than in `TotallyHot.ArcRouter.Gui` itself (which is where the generated types are actually *used*, via a
-`ProjectReference`): .NET MAUI's `SingleProject` build doesn't reliably run Grpc.Tools' codegen (no
-`protoc` invocation happens at all, confirmed empirically - restore succeeds, the `.proto`'s path
-resolves, but nothing is generated), while `TotallyHot.ArcRouter.Gui.Telemetry`'s plain `Microsoft.NET.Sdk`
-build has no such problem. See [`grpc-migration.md`](grpc-migration.md)'s section 4 for the full story.
+The client-side compile happens in `TotallyHot.ArcRouter.Gui.Telemetry` (plain `net10.0`) rather than
+in the WASM host. Generated types are consumed from `TotallyHotArcRouter.Gui.Components` via a
+`ProjectReference`. See [`../archive/router/grpc-migration.md`](../archive/router/grpc-migration.md)
+section 4 for the historical MAUI codegen finding that first forced this split.
 
 The GUI side still keeps `TotallyHot.ArcRouter.Gui.Telemetry.RoutingTelemetryEventDto`/
-`TotallyHot.ArcRouter.Gui.Console.LogLineDto` as separate, hand-written types, though — `TotallyHot.ArcRouter.Gui`'s
-`LiveDataStore` maps the generated proto messages into them (handling proto3 `optional` field
+`TotallyHot.ArcRouter.Gui.Console.LogLineDto` as separate, hand-written types — `LiveDataStore` in
+`Gui.Components` maps the generated proto messages into them (handling proto3 `optional` field
 presence, the decimal-as-string cost encoding, and `Timestamp`↔`DateTimeOffset` conversion) rather
 than passing proto types straight through, specifically so `ConversationAggregator`/`LogBuffer` (the
 actual aggregation/buffering logic, still Windows-independent and unit-tested) stay decoupled from
@@ -378,13 +378,14 @@ aggregation logic needs it.
 
 ## GUI consumption
 
-**Architecture principle: the GUI only ever talks to the TotallyHotArcRouter proxy.** `TotallyHot.ArcRouter.Gui`
-has no other integration surface, by design - it never calls an upstream provider (OpenAI, Anthropic,
-etc.) directly, and never reads proxy-side storage directly (e.g. opening a SQLite file on disk),
-even when both processes happen to run on the same machine as the same user and doing so would be
-technically possible. Every capability the GUI has goes through the proxy - today that's exclusively
-the `TelemetryService.StreamEvents` gRPC stream described below; any future GUI-facing surface (a new
-RPC, a new REST endpoint) must be served *by the proxy*, not bypass it. This keeps the proxy as the
+**Architecture principle: the GUI only ever talks to the TotallyHotArcRouter proxy.** The WASM
+dashboard (`Gui.Web` / `Gui.Components`) has no other integration surface, by design - it never calls
+an upstream provider (OpenAI, Anthropic, etc.) directly, and never reads proxy-side storage directly
+(e.g. opening a SQLite file on disk), even when the browser and the Router happen to run on the same
+machine. Every capability the GUI has goes through the proxy - today that's the
+`TelemetryService.StreamEvents` gRPC-Web stream described below (plus the other admin gRPC-Web
+services on the same origin); any future GUI-facing surface must be served *by the proxy*, not bypass
+it. This keeps the proxy as the
 single point that holds credentials, talks to providers, and owns persistence, and the GUI as a thin,
 credential-free client of it. Proposed features that add new GUI-facing surfaces -
 [`agent-cost-tracking.md`](agent-cost-tracking.md) (SQLite ledger + provider reconciliation) and
@@ -397,12 +398,12 @@ ledger's `.db` file directly, since it's "just a file on the same machine").
 list of `RoutingTelemetryEventDto`s into `LiveConversation`/`LiveConversationTurn` records by
 `SessionId`, ordering turns by `TurnNumber` and conversations by most-recently-active first.
 
-`TotallyHot.ArcRouter.Gui`'s `Services/LiveDataStore.cs` owns a `GrpcChannel` to `https://localhost:5002`
-(`ProxyServer.DefaultGrpcPort`, the dedicated TLS gRPC port - not the plain-HTTP proxy port 5001;
-configurable via `GuiSettingsStore`, editable from `SettingsModal.razor`) and a
+`TotallyHotArcRouter.Gui.Components`'s `Services/LiveDataStore.cs` owns a gRPC-Web channel to the
+Router's web origin (`https://localhost:47104` by default, same-origin when served by the Router;
+`TelemetryChannelFactory.DefaultServerAddress`) and a
 `TelemetryService.TelemetryServiceClient` over it, accumulates every received
 event, and re-runs `ConversationAggregator.Aggregate` on the full accumulated list after each new
-event. It's registered as a singleton in `MauiProgram.cs`, started once from `Dashboard.razor`'s
+event. It's registered in the WASM host, started once from `Dashboard.razor`'s
 `OnInitializedAsync`, and connection failures (e.g. the proxy isn't running) are logged and
 swallowed — the dashboard just shows no live conversations until a connection succeeds. Unlike
 SignalR's `WithAutomaticReconnect()`, `Grpc.Net.Client` has no built-in reconnect policy, so
@@ -462,9 +463,6 @@ input, and request/response summary pass-through - unaffected by the SignalR→g
 since it still operates on `RoutingTelemetryEventDto`, unchanged in shape (see "Transport: gRPC"
 above).
 
-`TotallyHot.ArcRouter.Gui`'s own `Services/LiveDataStore.cs` and `Services/LiveConversationMapper.cs` are
-**not** unit-tested: like the rest of `TotallyHot.ArcRouter.Gui` (Razor components, `MauiProgram.cs`,
-`TrayWindowManager.cs`), they depend on Windows-only MAUI/Blazor types (or, for `LiveDataStore`,
-live `GrpcChannel` networking) and can't be built or tested in this repo's Linux environment. The
-logic they wrap is tested where it's actually portable (`ConversationAggregator`, above).
+`TotallyHotArcRouter.Gui.Components.Tests/` covers `LiveDataStore` lifecycle without a live server.
+`LiveConversationMapper` lives in the same project. They are not MAUI types.
 

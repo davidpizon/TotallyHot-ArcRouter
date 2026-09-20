@@ -11,8 +11,9 @@ performance-cost tradeoff.
 
 ## Install
 
-TotallyHot Arc Router is cross-platform (web GUI migration plan Phases P6-P10): Windows, Linux, and
-macOS all run the same router, with a browser-based dashboard instead of a platform-specific GUI.
+TotallyHot Arc Router is cross-platform: Windows, Linux, and macOS all run the same router, with a
+browser-based Blazor WebAssembly dashboard. Windows additionally ships a small WinForms system-tray
+companion.
 
 **Windows** — Windows 10 version 1809 (build 17763) or later, x64. Download the `.msi` from the
 [latest release](https://github.com/davidpizon/TotallyHot-ArcRouter/releases/latest)
@@ -68,8 +69,9 @@ release (see
 [`docs/router/packaging-and-distribution.md`](docs/router/packaging-and-distribution.md)
 §7). Once installed, the router checks for new releases every six hours. On Windows the tray offers to
 apply what it finds via the MSI; on Linux/macOS an update is detected but must currently be applied by
-re-running the install script with a newer archive (no in-process apply path yet - see the web GUI
-migration plan's P10 section). Updates are never applied without an explicit action.
+re-running the install script with a newer archive (no in-process apply path yet). Updates are never
+applied without an explicit action. See
+[`docs/router/version-compatibility.md`](docs/router/version-compatibility.md).
 
 ## Routing
 
@@ -120,7 +122,7 @@ for what it syncs and verifies):
 ```text
 src/TotallyHotArcRouter*/             .NET router, web dashboard (Blazor WebAssembly), Windows tray, quality verifier, tests
 packaging/linux/, packaging/macos/    systemd/LaunchDaemon units and install scripts (cross-platform service packaging)
-docs/                                 Design docs and handbook
+docs/                                 Living design docs; closed plans under docs/archive/
 
 %ProgramData%\TotallyHotArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand (Linux/macOS: see AppDataPaths)
 ```
@@ -144,8 +146,8 @@ paired are in [`AGENTS.md`](AGENTS.md).
 TotallyHot Arc Router is licensed under the
 [GNU Affero General Public License v3.0](LICENSE), with an
 [additional permission](LICENSE.exceptions.md) for linking against Microsoft
-platform components. As of the web GUI migration plan (2026-09-15), no shipped
-component actually requires this permission - the WebView2-dependent Windows
+platform components. No shipped
+component currently requires this permission - the WebView2-dependent Windows
 GUI it was written for is retired in favor of a cross-platform Blazor
 WebAssembly dashboard - but the exception is kept in force for any future
 Windows-specific component that might need it; see

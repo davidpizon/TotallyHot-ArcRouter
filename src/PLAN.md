@@ -1,390 +1,105 @@
 # Current Implementation Plan: Measuring and Extending the Live C-A-F Loop
 
-This plan tracks only unfinished work. Completed phases are removed rather than archived; the
-narrative for anything already shipped lives in the design doc that owns it (see the pointer table
-below).
+This plan tracks **unfinished work only**. Shipped phases are not narrated here; each has an owning
+doc in the table below. Do not re-open a shipped row without new evidence.
 
-**Objective.** Bring the running router to the architecture described in
-[`../docs/research/technical-reference.md`](../docs/research/technical-reference.md) — a
-loop-complete **C-A-F** router (Context → Action → Feedback → Context) built from an **Orchestrator**,
-a **Verifier**, and a **Memory**, selecting under the cost-aware reward
-`r = ε₁·s + ε₂·κ` and measured by cumulative regret against a per-task oracle.
+**Objective.** Bring the running router to the architecture in
+[`../docs/research/technical-reference.md`](../docs/research/technical-reference.md) — a loop-complete
+**C-A-F** router (Context → Action → Feedback → Context) selecting under `r = ε₁·s + ε₂·κ` and
+measured by cumulative regret against a per-task oracle.
 
-## Where things stand
-
-**The C-A-F loop is closed and live.** The classifier (Phase H), the cost-aware `IRoutingPolicy` seam
-(Phase I), the embedding memory (Phase J), the benchmark corpus in SQLite (Phases K/K2), the
-Orchestrator ensemble (Phase L — four voters, joined later by a fifth, `cluster_best`, from Phase T3),
-the Orchestrator on the live path with requested-vs-routed telemetry (Phase M, M1–M4), live feedback
-capture plus the embedding-backed `logreg` trainer and its Governance admin surface
-(`live-feedback-learning-plan.md` Phases 1–5), Routing ROI's expense-and-regret comparison
-(`routing-roi-regret-plan.md`), self-organizing request classification end to end
-(`self-organizing-classification-plan.md` Phases T1–T6), five of the regret harness's six sub-phases
-(`regret-evaluation-harness-plan.md` N1–N5), and the GUI's Sessions tab surfacing persisted,
-training-linked transcript history (`sessions-tab-training-data-plan.md`) have all shipped. Narratives:
+## Already shipped (owning docs)
 
 | Shipped work | Owning doc |
 |---|---|
-| Phases H, I — classifier, `IRoutingPolicy`, cost-aware utility routing | [`../docs/router/utility-model-routing.md`](../docs/router/utility-model-routing.md) (§B1–B5 status blockquotes) |
-| Phases G, J — feedback loop reconnection, `RouterMemory` + `EmbeddingMemory` persistence | [`../docs/router/memory-persistence.md`](../docs/router/memory-persistence.md) |
-| Phases K, K2 — CodeRouterBench synced into SQLite | [`../docs/router/coderouterbench-sqlite-migration-plan.md`](../docs/router/coderouterbench-sqlite-migration-plan.md), [`../data/README.md`](../data/README.md), [`../docs/router/model-identity-canonicalization.md`](../docs/router/model-identity-canonicalization.md) |
-| Phase L — the Orchestrator ensemble (four voters; `cluster_best` added as a fifth by Phase T3) | [`../docs/router/orchestrator-ensemble.md`](../docs/router/orchestrator-ensemble.md) |
-| Phase M (M1–M4) — Orchestrator on the live path, requested-vs-routed end to end | [`../docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md), [`../docs/router/phase-m2-plan.md`](../docs/router/phase-m2-plan.md) |
-| Live-feedback Phases 1–5 — importer repair, feedback capture, embedding-backed `logreg`, training, Governance admin surface | [`../docs/router/live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md) |
-| Routing ROI — regret vs `dim_best`, one-minute full drain, hard pause under load | [`../docs/router/routing-roi-regret-plan.md`](../docs/router/routing-roi-regret-plan.md), [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (Phase T4 status block) |
-| Phases T1–T6 — transcript capture, self-organizing clustering, `cluster_best` voter, baseline comparison, Cluster Model admin pane, System Settings adaptive-routing toggle | [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
-| Phase N (N1–N6) — regret metrics core (`RegretReplayResult`), the no-leakage streaming replay engine (`RegretReplayEngine`), all six comparison baselines (Always-*m* / DimensionBest / LinUCB / LinTS / kNN Retrieval / LogReg), the Orchestrator arm + comparison report (measured; exit criterion not met — see below), and the on-demand CLI/GUI re-run surface (`IRegretHarnessRunner`, `--run-regret-harness`, the Regret Harness Governance panel) | [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) (N1–N6 status notes) |
-| Phase Q0 — quality rescan over saved task data (`QualityRescanService`, `scorer_version` column, `Quality:ScorerVersion`, prompt carried onto `QualityRequest`), off by default | [`../docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3, [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md) |
-| Phase G1 — shadow judge dispatch (`PendingResponseTextCache`, `JudgeShadowScoreDispatcher`/`GEvalJudgeClient`/`JudgeModelSelector`/drain worker, `judge_shadow_scores` side table, `is_judge_scored` provenance columns), off by default, judging on a free Providers-screen model | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
-| **Judge-join deadlock fix** — Phase N3's promotion of the judge to a real `QualityScoreAggregator` contributor never moved the judge's trigger off the write-time `IQualityScoreObserver` fan-out, so a held result could never start the judge that its own write was waiting on: every judged request silently degraded to the 60s join-timeout with no judge score ever reaching memory, while `judge_shadow_scores` kept filling and made the judge look healthy. Fixed by a new `IAsyncGraderDispatcher` seam, called at hold-time by `QualityScoreAggregator.SubmitAsync`; `JudgeShadowScoreObserver` renamed to `JudgeShadowScoreDispatcher` and moved off `IQualityScoreObserver` entirely; a second, related stall (a judge backbone throw leaving the join pinned) fixed in `JudgeShadowScoreDrainService.ProcessAsync` in the same change | [`../docs/router/judge-join-deadlock-fix-plan.md`](../docs/router/judge-join-deadlock-fix-plan.md) |
-| Auto-update Phases 0-1 — versioning source of truth, Windows Service hosting — plus update *detection* (`GitHubReleaseCheckClient`, `UpdateCheckHostedService`, `UpdateAdminService` gRPC surface) as originally shipped in Phase 2. Phase 2's *apply* mechanism (a separate `TotallyHotArcRouter.Updater` helper project) is superseded — the GUI now downloads/verifies/launches a single signed MSI installer instead | [`../docs/router/auto-update-plan.md`](../docs/router/auto-update-plan.md) (historical apply design), [`../docs/router/packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md) (current MSI design), [`../docs/router/version-compatibility.md`](../docs/router/version-compatibility.md) (current Router↔GUI versioning) |
-| Phase G2 — judge calibration as a standing check: `JudgeCalibrationAnalyzer` (cohort-segmented judge-vs-static agreement, score-collapse verdict, unverdicted self-preference), the `syntax_authoritative` column and its migration, `--run-judge-calibration-report`, the `JudgeCalibrationAdminService` gRPC surface, and the Governance → Judge Calibration panel | [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) (Phase G2 status blockquote) |
-| Sessions tab shows persisted, training-linked transcripts — `request_transcripts.session_id` column + backfill, the `TelemetryService.ListPersistedSessions` RPC, GUI merge of live + persisted history, the `IsUsedForTraining` badge, and the full-width unselected-card-list CSS fix | [`../docs/router/sessions-tab-training-data-plan.md`](../docs/router/sessions-tab-training-data-plan.md) |
+| H, I — classifier, `IRoutingPolicy`, cost-aware utility routing | [`utility-model-routing.md`](../docs/router/utility-model-routing.md) |
+| G, J — feedback loop, `RouterMemory` + `EmbeddingMemory` | [`memory-persistence.md`](../docs/router/memory-persistence.md) |
+| K, K2 — CodeRouterBench in SQLite | [`coderouterbench-sqlite-migration-plan.md`](../docs/router/coderouterbench-sqlite-migration-plan.md), [`data/README.md`](../data/README.md) |
+| L — Orchestrator ensemble (five voters) | [`orchestrator-ensemble.md`](../docs/router/orchestrator-ensemble.md) |
+| M, M1–M4 — Orchestrator on the live path | [`orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) |
+| Live-feedback 1–5 — capture, embedding `logreg`, Governance admin | [`live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md) |
+| Routing ROI vs `dim_best` | [`self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (T4) |
+| T1–T6 — transcripts, clustering, `cluster_best`, adaptive-routing toggle | [`self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
+| N1–N6 — regret harness (measured; **exit criterion not met**) | [`regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) |
+| Q0–Q4 — quality rescan, keyed graders, portfolio, CLI reliability report | [`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md), [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md) |
+| G1–G3 — shadow judge, calibration check, judge blended into `u_i` | [`geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
+| Sessions tab persisted transcripts | [`../docs/gui/dashboard.md`](../docs/gui/dashboard.md) |
+| Auto-update detect + Windows MSI apply via the tray | [`packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md), [`version-compatibility.md`](../docs/router/version-compatibility.md) |
 
-**What is still missing**, and which remaining workstream owns it:
+The Verifier is static analysis + the G-Eval judge; **code execution was removed** (no sandbox, no
+`Process` in `TotallyHotArcRouter.Quality`). Full design:
+[`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md).
 
-- **Measurement is built, has been run, and the ensemble's claimed advantage is not reproduced by it.**
-  An earlier revision of this bullet said "nothing computes `R_ij`, the per-task oracle, `CumReg`,
-  `AvgPerf`, `TotTok`, or `Perf/$`" — that is no longer true. **N1–N6 shipped:** `RegretReplayResult`
-  computes all five metrics against the per-task oracle `a*_i = argmax_j R_ij`, `RegretReplayEngine` runs
-  the offline streaming replay with no-leakage enforced at the call boundary, all six comparison baselines
-  exist (Always-*m*, DimensionBest, LinUCB, LinTS, kNN Retrieval, LogReg — the last two OOD-only, since
-  the ID split publishes no task text), the Orchestrator arm (`OrchestratorArmFactory`) replays the
-  real `OrchestratorRoutingPolicy` — with only `dim_best` and `logreg` wired, since an isolated offline run
-  has no live traffic to honestly back `memory_kNN`/`cluster_best`/`llm_router` — and the whole harness can
-  now be re-run on demand (`IRegretHarnessRunner`, the `--run-regret-harness` CLI flag, and the Governance
-  UI's Regret Harness panel). **The measured result: the exit criterion is not met.** On the real synced
-  corpus, the Orchestrator arm ties `dim_best` bit-for-bit on both splits (structurally — `logreg`'s weight
-  cannot outvote `dim_best`'s at their production values) rather than beating it, and on OOD a bandit
-  (`linucb`) beats `dim_best`/the Orchestrator on `CumReg`, contradicting the paper's expected ordering
-  outright. This is published, not hidden — see `regret-evaluation-harness-plan.md`'s N5 status note for
-  the full numbers and why a reduced-voter offline harness was always going to struggle to show the
-  ensemble's advantage. Closing the *substance* of this gap — demonstrating the ensemble actually beats
-  DimensionBest — needs either a live-traffic regret arm or a richer offline bootstrap for the three
-  excluded voters; neither is scheduled, and this is now a load-bearing fact about the router's actual,
-  measured state, not a formatting gap in an unrun harness.
-- ~~**Live traffic is not yet usable as a training corpus.**~~ **Closed by Phases T1–T6.** Transcripts
-  are captured opt-in with full provenance (`IsExploratory`, propensity, real cost), skipped embeddings
-  are recovered by backfill, the learned cluster taxonomy is trained, voted on (`cluster_best`), and
-  measured against the frozen nine-dimension baseline, and the System Settings window exposes the
-  adaptive-routing toggle and sample size operators use to turn it on.
-- ~~**The Verifier is blind on non-executable dimensions.**~~ **Overtaken by the quality-verifier
-  change.** G1 shipped the shadow judge; then code execution was removed from the project entirely, which
-  made *every* dimension non-executable and promoted the judge from bystander to co-grader. See the entry
-  below.
+## Remaining work
 
-- **Code execution removed; the Verifier is now static analysis + the G-Eval judge.** The tiered
-  sandboxed executor — Linux jail with cgroups v2 and seccomp (Tier 1), Firecracker microVM (Tier 2) —
-  was deleted outright, along with its host-capability probe, warm pools, and output redaction. Running
-  model-generated code is a risk this project declines to carry under any isolation. What replaced it,
-  in `TotallyHotArcRouter.Quality` (renamed from `.Sandbox`):
-  - **Static analysis, deepened.** Roslyn for C# and Acornima for JS/TS give authoritative syntax
-    verdicts; Python and shell keep a heuristic that is now *explicitly marked* non-authoritative and
-    weighted at half. Four composable `IStaticAnalyzer`s add diagnostics, placeholder/stub detection,
-    truncation detection, and a complexity band.
-  - **The judge promoted.** It now contributes to `u_i` on every graded request rather than writing only
-    to `judge_shadow_scores`, and defaults **on** when a free backbone resolves.
-  - **One write per request.** `QualityScoreAggregator` joins the two grades by correlation id and
-    guarantees exactly one observation reaches `RouterMemory` — enforced by winning a removal race, not a
-    flag. Two independent writes would inflate the sample count the voters trust, invisibly.
-  - **No execution surface at all.** No subprocess touches model code (no `node --check`, no
-    `py_compile`), the assembly has no `Process` reference, and the DI graph is identical on every OS.
+1. **Q5 — sample-size-aware `DimBestVoter`.** Evidence-blocked: live `RouterMemory` holds zero
+   observations here, and the offline harness hands `dim_best` an empty memory, so a live-vs-prior
+   blend is invisible to the only measurement surface. Re-open condition and paired-online-arm design:
+   [`regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) Q5.
+2. **Ensemble vs DimensionBest, for real.** N5 measured a tie with `dim_best` (and a bandit winning
+   on OOD). Closing the *substance* needs a live-traffic regret arm or a richer offline bootstrap for
+   the three excluded voters. **Unscheduled.**
+3. **Embedding re-key after a model change.** `memory_entries` stores vectors without prompt text;
+   superseded-model rows are filtered until they age out. A background re-embed over linked
+   transcript rows is unscheduled. Provenance for detecting the condition shipped with
+   `live-feedback-learning-plan.md`.
+4. **Cost term on the general (non-utility) live path.** `UtilityRoutingPolicy` prices candidates;
+   the Orchestrator does not. Unscheduled.
+5. **Live-feedback Phase 6 remainder** — namespace relocation of TF-IDF/`LogRegTrainer` types
+   (`live-feedback-learning-plan.md`). Placeholder deletion already shipped.
+6. **Counterfactual token estimation Phases 4–6** —
+   [`counterfactual-token-estimation-plan.md`](../docs/router/counterfactual-token-estimation-plan.md)
+   (closes when Phase 5 ships GUI confidence surfacing).
+7. **Admin-slice golden-path smoke** — implementation shipped; the stated end condition still wants
+   the manual smoke
+   ([`admin-slice-consolidation-plan.md`](../docs/router/admin-slice-consolidation-plan.md)).
+8. **Code-smell plan golden-path smoke** — Critical extracts shipped; the plan does not close until
+   the hot-path smoke runs
+   ([`code-smell-refactoring-plan.md`](../docs/router/code-smell-refactoring-plan.md)).
 
-  **Documented deviations and honest costs**, per AGENTS.md's deviation rule:
-  - *The G2 calibration gate is now unevaluable.* Its first condition — judge rank-correlates with the
-    verifier on execution-grounded rows — required ground truth that no longer exists. The judge was
-    promoted without the evidence G2 was designed to demand.
-  - *The strongest signal is gone.* "It compiled and ran cleanly" outperformed anything static analysis
-    can prove. The judge partially compensates; it does not replace it.
-  - *Python and shell lost their authoritative check.* A Tier-1 subprocess used to be their real syntax
-    verdict; no managed Python parser exists to replace it. IronPython was rejected — it is a full
-    interpreter, and referencing it would make "we cannot execute model code" a claim about discipline
-    rather than a fact about the assembly.
-  - ~~*`is_judge_scored` provenance and the learning-layer policy for judge-influenced rows are still
-    outstanding*~~ — **closed.** G3 required both in the same phase as the promotion and they did not land
-    then; they have now. `is_judge_scored` is stamped from whether the judge actually contributed a grade
-    (`QualityResult.JudgeScore.HasValue`), and `MemoryKnnVoter`, the `logreg`/cluster trainers, and
-    `ClusterLedger` (feeding both `ClusterBestVoter` and the T4 baseline comparison) all apply the same
-    configurable include/exclude/down-weight policy (`RoutingOptions.JudgeScoredRowPolicy`, default
-    down-weight at 0.5). Full detail: `geval-shadow-scoring-plan.md` §G3.
-  - *Security findings T-11, T-12, and T-18 are closed as no longer applicable*, and the CI step that
-    loosened `kernel.apparmor_restrict_unprivileged_userns` for a jail-launch test was removed.
-  - *The uncommitted resource-efficiency scoring axis was discarded*; both its inputs (wall-clock, peak
-    memory) were execution-derived.
+## Other open work (tracked elsewhere)
 
-  Full design: [`docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md).
-- **A live corpus cannot be re-keyed after an embedding-model change.** `memory_entries` stores the
-  embedding vector but never the prompt text (a deliberate choice — `live-feedback-learning-plan.md`'s
-  "Deliberately out of scope" rejects turning router memory into a transcript store), so vectors produced
-  by a superseded embedding model cannot be recomputed and are simply filtered out until they age out of
-  the FIFO. `request_transcripts.prompt_text` *does* hold the text needed to re-embed them, but only when
-  transcript capture is enabled, only within its retention bounds (30 days / 50,000 rows), and no job
-  currently does it: `EmbeddingBackfillService` scans `WHERE memory_entry_id IS NULL`, which by
-  construction excludes exactly the already-linked rows a re-key would need. Closing this would mean a
-  background re-embedding pass over linked transcript rows — the same shape as the existing backfill.
-  Unscheduled; recorded so the limitation is tracked rather than rediscovered. Provenance for detecting
-  the condition shipped with `live-feedback-learning-plan.md`'s "Embedding-model provenance" section.
-- **The general (non-utility) live path has no cost term.** `UtilityRoutingPolicy` prices candidates;
-  the Orchestrator does not. T1's real-cost wiring makes the reward computable from live data; putting
-  a cost term into the general path's selection is otherwise unscheduled.
-
-```mermaid
-flowchart LR
-    subgraph shipped["Shipped — the live C-A-F loop, G1–G3, N1–N6, Q0–Q4"]
-        LOOP["Classifier → 5-voter Orchestrator →<br/>model → Verifier → RouterMemory/EmbeddingMemory →<br/>back into the voters"]
-        G1["G1: shadow judge<br/>(judge_shadow_scores audit trail)"]
-        G3["G3: judge blended into u_i,<br/>is_judge_scored provenance,<br/>JudgeScoredRowPolicy"]
-        G2["G2: calibration as a standing check<br/>(cohort-segmented agreement,<br/>score-collapse verdict,<br/>self-preference unverdicted)"]
-        N16["N1–N6: metrics core, replay engine,<br/>all 6 baselines, Orchestrator arm,<br/>on-demand CLI/GUI re-run<br/>(measured; exit criterion not met)"]
-        LOOP -.-> G1
-        G1 --> G3
-        G3 --> LOOP
-        G1 -.->|"reads the shadow table"| G2
-    end
-
-    BLOCKED["Q5: sample-size-aware DimBestVoter<br/>(evidence-blocked — zero live observations)"]
-    UNSCHED["Unscheduled: live-traffic regret arm<br/>or richer offline bootstrap,<br/>to test the ensemble's claim for real"]
-
-    LOOP --> BLOCKED
-    N16 --> UNSCHED
-```
-
-## Remaining work, in order
-
-1. **Phases Q1–Q5 — empirical quality metrics.** Q0 shipped (see the table above). **Q1 shipped**: the
-   scorer generalizes from three named axes to N via a keyed extension — `DimensionWeightOptions.ExtraWeights`
-   and `QualityResult.GraderScores`/`GraderDegradedReasons`, matched by grader key, alongside (not replacing)
-   the three named fields — and `QualityScoreAggregator`'s judge join generalized from an implicit single
-   slot to a set of pending grader keys per request (`GraderKeys`). Exit criterion met by construction: the
-   new maps are empty for every result until a grader populates them, so today's blend is byte-identical to
-   pre-Q1, verified by `QualityScorerTests`/`QualityScoreAggregatorTests` rather than by re-deriving the math.
-   No new grader is registered by Q1 itself — that is Q3's job, and it now means adding one config entry
-   plus a job that calls `CompleteGraderAsync`'s public seam (`CompleteWithJudgeAsync`'s shape, generalized),
-   not touching `QualityScorer` or the aggregator's hold/write logic. The K-way join is exercised by
-   construction (a set, not a flag) rather than by a test holding two concurrent async graders — there is no
-   second one to test against until Q3 lands. Full design: `quality-verifier-architecture.md` §4/§5.
-   **Q2 shipped**: two new free `IStaticAnalyzer`s — `RelevanceAnalyzer` (prompt/response token overlap,
-   reached through a new `IStaticAnalyzer.Analyze(code, language, prompt)` default-interface-method overload
-   so the other four analyzers needed no change) and `SmellDensityAnalyzer` (Szych & Schwerk's
-   findings-per-100-lines ratio over a small self-contained smell catalog: magic numbers, long lines, empty
-   catch/except blocks, long parameter lists) — plus judge prompt-awareness: `JudgeScoreRequest.Prompt`,
-   recovered from a new `PendingPromptCache` mirroring `PendingResponseTextCache` exactly, woven into
-   `GEvalJudgeClient`'s prompt as an optional task section. Full design and rationale:
-   `quality-verifier-architecture.md` §3.2/§5, `code-quality-metrics-assessment.md` §5.1.
-   **Q3 shipped**: the LLM grader portfolio — `CodeJudgeGraderClient` (Tong & Zhang's severity-weighted fault
-   taxonomy, computed deterministically from the backbone's per-fault severity classifications rather than
-   trusting it to sum deductions itself), `IceScoreGraderClient` (ICE-Score's `usefulness` aspect only —
-   its `functional correctness` aspect needs reference tests live traffic doesn't have), and
-   `RaceGraderClient` (readability/maintainability, RACE's rubric vocabulary as a single rating) — all three
-   sharing `JudgeModelSelector`'s free-backbone eligibility and a new `PortfolioGraderClientBase`'s HTTP
-   plumbing (single-sample parse only, no logprobs weighting — that is G-Eval-specific). Each grader's
-   capability probe is the same "flag on and a backbone resolves" test `JudgeAvailability` already used,
-   generalized behind a new `IPortfolioGraderAvailability` seam (kept separate from `IJudgeAvailability`
-   rather than replacing it, so the judge's own contract and tests are undisturbed) whose answer the
-   aggregator unions with the judge's. Each of the three is independently live-toggleable from System
-   Settings' new "Grader Portfolio" row, backed by `PortfolioGraderOptions`/
-   `PortfolioGraderSettingsConfigureOptions` and three new `router_settings` keys — mirroring
-   `JudgeOptions.Enabled`'s own computed-default-unless-explicit-override precedence, including defaulting
-   *on* once a free backbone exists (the same "half-strength verifier" reasoning that applies to the judge
-   now applies to a three-grader-richer verifier too). Dispatch fans through a new
-   `PortfolioGraderDispatcher`/`PortfolioGraderDrainService` pair mirroring the judge's own
-   dispatcher/drain-worker shape, and `CompositeAsyncGraderDispatcher` fans `QualityScoreAggregator`'s single
-   `IAsyncGraderDispatcher` seam out to both the judge's dispatcher and the portfolio's, unioning their
-   accepted keys, so registering a second async-grader family needed no change to the aggregator itself
-   beyond what Q1 had already generalized (`IQualityScoreAggregator.CompleteGraderAsync`/`AbandonGraderAsync`,
-   public counterparts of the judge-only `CompleteWithJudgeAsync`/`AbandonJudgeAsync`, added rather than
-   replacing them). **One real architectural change fell out of this**: `PendingResponseTextCache`/
-   `PendingPromptCache` were single-consumer (`TryTake` removed an entry the instant the judge read it) but
-   now serve up to four independent async graders reading the *same* cached text for one request, so both
-   caches gained a non-removing `TryPeek` and every drain worker (the judge's included) switched to it —
-   entries are now bounded by TTL/capacity eviction alone rather than by an explicit take as well, a
-   deliberate, documented loosening of the "gone the moment it's taken" retention guarantee (still
-   in-memory-only, still bounded, just up to `CacheTtlSeconds` longer-lived). Config: `Quality:ScorerVersion`
-   bumped to `2.1`, and `appsettings.json`'s `DimensionWeights` gained a modest, not-yet-reliability-tuned
-   `ExtraWeights` entry per dimension for `codejudge`/`icescore`/`race` — Q4's job is to replace these
-   starting points with measured weights, not to leave them unset. Exit criterion met: the three-grader
-   portfolio registers and scores without touching `QualityScorer` (Q1's keyed-extension design absorbed it
-   entirely). **Q4 shipped, CLI surface only**: new per-request, per-grader persistence (`grader_scores`,
-   generalizing `judge_shadow_scores` to the whole portfolio via `GraderScoreRecordObserver`, unconditional
-   in the observer fan-out) now backs `IGraderReliabilityAnalyzer`'s per-dimension inter-grader agreement
-   (Spearman), verbosity skew, and self-preference skew, re-runnable on demand via
-   `--run-grader-reliability-report` — no weight is read or written by any of it. The
-   `GraderReliabilityAdminService` gRPC surface and Governance panel tab from the design's "Surfacing it"
-   section are **deliberately deferred** as a separable follow-up with no additional measurement value over
-   the CLI (the analyzer has no live-provider dependency either way). Full design, what shipped vs.
-   deferred, and the backbone-capture implementation deviation (a side cache instead of extending
-   `QualityResult`):
-   [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md); **Q5** — replaces
-   `DimBestVoter`'s argmax-over-raw-mean with a sample-size-aware estimator, accepted only if
-   `RegretReplayEngine` shows `CumReg` improving — **is evidence-blocked, not merely unstarted**: live
-   `RouterMemory` holds zero observations on this machine (dev and installed builds alike), and the
-   offline harness deliberately hands its `dim_best` arm an empty memory (`OrchestratorArmFactory.Build`),
-   so a live-vs-prior blend change is invisible to the one measurement surface that exists. A
-   *prerequisite* shipped in the same pass this was discovered: the ROI cost-savings yardstick was
-   silently reading the same live-preferring blend Q5 would have changed, so any Q5 estimator would have
-   moved its own measuring stick. That is now fixed — the yardstick reads a new, request-time-captured,
-   never-live-touching `UntrainedBaselineSelector` instead — which is necessary but not sufficient for
-   Q5 itself. Full evidence, the paired-online-arm measurement design agreed for when real traffic exists,
-   and the re-open condition:
-   [`regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)'s Q5 section.
-   Rationale and per-source verdicts for the estimator's shape:
-   [`../docs/research/code-quality-metrics-assessment.md`](../docs/research/code-quality-metrics-assessment.md).
-2. ~~**Phases G2 → G3 — judge calibration, then judge-as-verifier.**~~ **Both shipped.** G3 shipped first
-   (the judge blends into `u_i` on every graded request, with `is_judge_scored` provenance and the
-   `JudgeScoredRowPolicy` learning-layer policy); **G2 shipped 2026-09-10** as the standing regression
-   check that ordering leaves it as, rather than the gate it was designed to be — there is nothing left to
-   gate. Delivered as a full vertical slice: `JudgeCalibrationAnalyzer` over a new
-   `IJudgeShadowScoreStore.GetAllAsync`, a shared `JudgeCalibrationReportFormatter`, the headless
-   `--run-judge-calibration-report` flag, the `JudgeCalibrationAdminService` gRPC surface, and the
-   Governance → Judge Calibration panel. Every statistic is computed inside a
-   (dimension, `judge_model`, `used_logprobs`, static-grade authority) cohort rather than pooled, and a new
-   nullable `judge_shadow_scores.syntax_authoritative` column — plumbed from `QualityResult` through the
-   dispatcher and drain worker, NULL for pre-existing rows — supplies the parser-vs-heuristic split that
-   replaces the deleted `executed` flag. **Only one of the three G3 gate conditions is a pass/fail
-   verdict**, and the reasons are recorded in the owning doc rather than left implicit: condition (1)
-   (ground truth) is permanently `Unevaluable` because execution was removed; condition (2)
-   (score collapse) *is* verdicted, because `used_logprobs` gives the data its own control group for
-   exactly the failure G-Eval predicts; condition (3) (self-preference) ships as numbers with no ceiling,
-   because the paper establishes that bias's direction but no magnitude and the only local yardstick is
-   itself heuristic — pinned by a test, with a stated re-open condition. Full detail and every deviation:
-   [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) Phase G2's
-   status blockquote.
-
-### Phase N: roadmap-level scope and exit bar
-
-**Prerequisite status:** `live-feedback-learning-plan.md` Phase 4 shipped — every Orchestrator voter
-can now cast a real vote on live traffic instead of three of the original four abstaining for lack of an
-input, satisfying that plan's own ordering requirement ("measuring voters that structurally cannot fire would
-produce a benchmark of `dim_best` wearing an ensemble's name"). The self-organizing-classification-plan's
-T phases shipped ahead of N because every phase of them removed a blocker N would otherwise have had to
-solve itself, but N never required them to complete.
-
-- ~~Implement the metrics of research-doc §5.1 and A.2~~ — **shipped (N1).** `RegretReplayResult`
-  computes the reward matrix `R_ij = ε₁·s_ij + ε₂·κ_ij` (via `RewardWeights`), the per-task oracle
-  `a*_i = argmax_j R_ij`, cumulative regret `CumReg_N = Σ(r*_i − r_i(a_i))`, plus `AvgPerf`, `TotTok`,
-  `$Total`, and `Perf/$`.
-- ~~Offline streaming replay over the restored matrices~~ — **shipped (N1).** `RegretReplayEngine`
-  makes no live API calls, matching the handbook's "no API keys required" property, and enforces
-  no-leakage at the call boundary rather than trusting each baseline to police itself.
-- ~~Implement the comparison baselines as C-A-F configurations (research-doc Table 4)~~ — **all six
-  shipped (N1–N4):** Always-*m* (`AlwaysModelBaseline`), DimensionBest (`DimensionBestBaseline`), the
-  LinUCB/LinTS contextual bandits (`α = λ = 1`; `v = 0.5, λ = 1`; warm-started on the probing set, seed
-  42) over a shared `CategoricalContextBanditBaselineBase`, and kNN Retrieval (`KnnRetrievalBaseline`)/
-  LogReg (`LogRegBaseline`) — both need task text, so both are OOD-only, and kNN's index is built and
-  queried within OOD leave-one-out rather than the probing split Table 4 names literally (the same
-  text-availability constraint LogReg already worked around).
-- ~~Wire `OrchestratorRoutingPolicy` in as its own arm and produce the comparison report~~ — **shipped
-  (N5)**, via `OrchestratorArmFactory`/`OrchestratorArmBaseline` (only `dim_best`+`logreg` wired — an
-  isolated offline run has no live traffic to honestly back the other three voters) and
-  `RegretComparisonReportBuilder`.
-- ~~CLI/GUI surface for re-running the harness on demand~~ — **shipped (N6)**, via
-  `IRegretHarnessRunner`/`RegretHarnessRunner`, the headless `--run-regret-harness` CLI flag, the
-  `RegretHarnessAdminService` gRPC surface, and the Governance UI's Regret Harness panel. Read-only —
-  never mutates a live voter or writes an artifact. Detail:
-  [`../docs/router/regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md)'s
-  N6 status note.
-- **Exit — the real acceptance criterion for this whole plan — measured, not met.** On the real synced
-  corpus (2026-08-25), the Orchestrator arm ties `dim_best` bit-for-bit on both ID test and OOD rather than
-  beating it on `CumReg`, and on OOD a bandit (`linucb`) beats both, contradicting the paper's expected
-  ordering (ArcRouter < DimensionBest < static classifiers < bandits < single models) outright. Absolute
-  parity with 205.5 was never expected — the model pool, the verifier, and the embedding model all differ
-  — but the *ordering* claim itself is now falsified by this measurement, honestly, as the exit criterion
-  demands. Full numbers and the structural reason (voter-weight dominance under a necessarily reduced
-  two-voter harness): `regret-evaluation-harness-plan.md`'s N5 status note. Reproducing the paper's claim
-  for real is unscheduled follow-up work, not something N5 itself can still deliver by re-tuning.
-
-## Other open work (tracked elsewhere; referenced here so it is not lost)
-
-- [`../docs/router/tracked-todos.md`](../docs/router/tracked-todos.md) — #3 DeepSeek dialect research,
-  #5 human review of tool-call-normalization Phase 5's three design decisions, #6 a real Gemini cost
-  reconciler, #7 moving the remaining `/admin/*` REST endpoints onto gRPC. #4 (zero-coverage classes)
-  closed 2026-09-12: `TotallyHotArcRouter` sits at 90.0%, `TotallyHot.ArcRouter.Quality` at 98.5%, and
-  every remaining 0%-coverage class is a pure DTO record with no logic to test.
+- [`../docs/router/tracked-todos.md`](../docs/router/tracked-todos.md) — #3 DeepSeek dialect, #5
+  human review of tool-call-normalization Phase 5, #6 Gemini cost reconciler.
 - [`../docs/router/tool-call-normalization.md`](../docs/router/tool-call-normalization.md) — Phase 6
   remainder (response/telemetry diagnostics), Phase 7 (native endpoints, design only).
 - [`../docs/gui/backlog.md`](../docs/gui/backlog.md) — remaining live-telemetry gaps (Routing ROI /
   Tool Steps / Context Buffer, deliberately mock-backed) and
-  [`../docs/gui/governance-model-cards.md`](../docs/gui/governance-model-cards.md)'s missing model
-  price channel to the GUI.
+  [`governance-model-cards.md`](../docs/gui/governance-model-cards.md)'s missing model price channel.
 - [`../docs/router/agent-resilience-strategies.md`](../docs/router/agent-resilience-strategies.md) —
   Leaky Bucket (pattern 2) not yet built.
-- Proposed, unscheduled design docs:
-  [`../docs/router/security-hardening-plan.md`](../docs/router/security-hardening-plan.md),
-  [`../docs/router/proxy-coexistence.md`](../docs/router/proxy-coexistence.md),
-  [`../docs/router/system-proxy-architecture.md`](../docs/router/system-proxy-architecture.md).
+- Proposed, unscheduled:
+  [`security-hardening-plan.md`](../docs/router/security-hardening-plan.md),
+  [`proxy-coexistence.md`](../docs/router/proxy-coexistence.md),
+  [`system-proxy-architecture.md`](../docs/router/system-proxy-architecture.md).
 
 ## Settled deferrals (do not re-open without new evidence)
 
-- **Phase Q4's gRPC admin surface and Governance panel tab are deferred** — the CLI flag
-  (`--run-grader-reliability-report`) already exercises `IGraderReliabilityAnalyzer` end-to-end with no
-  live-provider dependency (it is pure SQL plus math over `grader_scores`), so the gRPC/GUI layer would add
-  a proto surface, a GUI client, and a Blazor panel with no additional measurement capability over the CLI.
-  A separable, independently-shippable follow-up, not a gap in Q4's own exit criterion. Rationale:
-  [`../docs/router/grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md)'s status note.
-- **G2's self-preference check ships as numbers, not a pass/fail verdict** — unlike its score-collapse
-  sibling, it has no control group in the data (there is no unbiased judge to compare against, and the
-  static score is itself heuristic on Python and shell rows), and G-Eval publishes this bias's direction
-  without a magnitude, so any ceiling would be invented rather than measured. The report ranks each
-  candidate's judge-minus-static delta and flags the judge's own backbone instead. **Re-open when** several
-  candidate models have accumulated rows and the spread across deltas supplies an empirical baseline.
-  Rationale: [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md)
-  Phase G2's status blockquote.
-- **G3 gate condition (1) is permanently unevaluable, and is reported as such rather than dropped** — it
-  required the judge to rank-correlate with execution-grounded scores, and code execution was removed from
-  the project. Reported every run as `Unevaluable`, distinct in the enum and on the wire from
-  `Insufficient`, so an absent check can never read as a silent pass. No re-open condition exists: waiting
-  will not produce the evidence. Rationale: same blockquote.
-- **The quality rescan does not write to router memory** — it grades saved transcript rows and stamps
-  the score onto the row only. `IQualityScoreObserver`'s contract is that `QualityScoreAggregator` calls it
-  exactly once per request, and `RouterMemory` accumulates a running sum and count, so a second writer
-  would double-count every row the live path had already scored — invisibly, since the average still looks
-  plausible. Whether rescan scores may reach live memory is deliberately deferred to Phase Q1, which
-  reworks that join from one judge to N. Rationale:
-  [`../docs/router/quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3.
-- **Multimodal price tiers** — deferred; no upstream feed publishes a `resolution_tier` concept.
-  Rationale: [`../docs/router/model-price-catalog.md`](../docs/router/model-price-catalog.md).
-- **Routing ROI / Tool Steps / Context Buffer GUI metrics** — deliberately mock-backed; each needs a
-  domain concept the codebase does not compute. Rationale:
-  [`../docs/gui/backlog.md`](../docs/gui/backlog.md), Cost Analytics bullet.
-- **Reasoning-token pricing** — `UsageInfo.ReasoningTokens` exists with no matching price column;
-  reasoning tokens bill at the standard output rate. Noted, unscoped.
-- **CodeRouterBench `outputs/`, `agentic-artifacts/`, and nested `raw_matrices/`** — not restored;
-  nothing in the remaining phases as currently scoped reads them. Rationale: `data/README.md`'s "Not
-  yet restored" section.
-- **Exact per-cell Table 10 parity for GLM-5/Qwen3-Max/Qwen3.5-Plus/MiniMax-M2.7** — `bug_fixing`,
-  `algorithm`, and `test_generation` cells for these four models diverge from the published table by up
-  to 0.32 even though row averages (AvgPerf) match within 0.05 for every model; looks like run-to-run
-  LLM-as-Judge noise baked into the released CSV, not a parsing bug. Rationale: `data/README.md`'s
-  "Known data-fidelity limit" section.
-- **`llm_router` substitutes an off-the-shelf model for the paper's unpublished fine-tuned
-  checkpoint** — with its sub-deferrals (zero-shot only, no disagreement gating, community-sourced
-  artifact URL). Rationale:
-  [`../docs/router/orchestrator-ensemble.md`](../docs/router/orchestrator-ensemble.md).
-- **Named-model requests are never routed** — a client naming a servable model is naming a command;
-  Phase M considered and withdrew superseding `utility-model-routing.md`'s non-goal. Rationale:
-  [`../docs/router/orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) §1.
-  (Phase M3.2's editable-toggle deferral is *partially* reopened, deliberately, by
-  [`../docs/router/self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md)
-  Phase T6, scoped to exactly two settings.)
-- **G1's auto-CoT is a static per-dimension prompt constant, not generated-and-cached** —
-  `GEvalJudgeClient.DimensionCriteria` is a hardcoded dictionary rather than a per-dimension prompt
-  generated once by a separate LLM call and cached with artifact-version guards; `JudgeOptions.PromptVersion`
-  still exists so a future move to generated-and-cached CoT is a version bump, not a schema change.
-  **G1's n-sample fallback is a single best-effort numeric parse**, not the G-Eval paper's full n-sample
-  estimation, when the judge backbone exposes no logprobs at all. Both are the plan's own allowed "iteration"
-  minimum. Rationale: [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md)
-  Phase G1's status blockquote.
-- **The judge backbone is a Providers-screen free model, not the hardcoded local endpoint G1 shipped** —
-  `JudgeOptions.BaseUrl`/`Model` are removed. `JudgeModelSelector` resolves a route per call from the
-  operator's own provider configuration (provider flagged `IsFree`, provider and model enabled, not a
-  Bedrock route), and abstains when none is eligible rather than recording a fabricated score. The judge's
-  own configuration (`Enabled`, `ModelName`) moved out of `appsettings.json` into `router_settings` behind
-  the System Settings window, which also makes `Enabled` a live toggle — including the gate that authorizes
-  retaining raw response text in memory. Rationale:
-  [`../docs/router/geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) §1a's
-  revision note.
-
----
+- **Q4 gRPC/Governance panel** — CLI `--run-grader-reliability-report` already measures; GUI would
+  add no measurement capability.
+  [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md).
+- **G2 self-preference is numbers, not pass/fail** — no unbiased control group.
+  [`geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md).
+- **G3 gate condition (1) permanently `Unevaluable`** — required execution-grounded scores; execution
+  was removed. Same doc.
+- **Quality rescan does not write router memory** — a second writer would double-count.
+  [`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md) §3.3.
+- **Multimodal price tiers** — no upstream `resolution_tier` feed.
+  [`model-price-catalog.md`](../docs/router/model-price-catalog.md).
+- **Routing ROI / Tool Steps / Context Buffer GUI metrics** — mock-backed until the domain concepts
+  exist. [`../docs/gui/backlog.md`](../docs/gui/backlog.md).
+- **Reasoning-token pricing** — `UsageInfo.ReasoningTokens` has no matching price column.
+- **CodeRouterBench `outputs/`, `agentic-artifacts/`, nested `raw_matrices/`** — not restored.
+  [`data/README.md`](../data/README.md).
+- **Exact per-cell Table 10 parity** for GLM-5 / Qwen3-Max / Qwen3.5-Plus / MiniMax-M2.7 — settled as
+  upstream judge noise. Same.
+- **`llm_router` uses an off-the-shelf model**, not the paper's unpublished checkpoint.
+  [`orchestrator-ensemble.md`](../docs/router/orchestrator-ensemble.md).
+- **Named-model requests are never routed** — a servable name is a command.
+  [`orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) §1.
+- **G1 auto-CoT is a static prompt constant**; n-sample fallback is a single numeric parse.
+  [`geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md).
+- **Judge backbone is a Providers-screen free model**, not a hardcoded local endpoint. Same.
 
 ## Final Validation Gate
 
@@ -394,15 +109,11 @@ Applies at the end of every phase, per [`../AGENTS.md`](../AGENTS.md):
 2. Every new public/protected type and member carries accurate XML documentation; docs on code changed
    by a phase are re-read for staleness, which the compiler cannot check.
 3. All unit tests pass; both non-GUI assemblies hold ≥ 80% line coverage per-assembly, as
-   `.github/workflows/dotnet-ci.yml` measures it. `TotallyHot.ArcRouter.Quality` sits at ~97.2%, so
-   phases touching it must add coverage, not just avoid removing it.
-4. No unusually heavy test exceeds 5 seconds. The embedding model load and Phase N's replay harness
-   are the live risks here — both belong behind fixtures or environment gates.
+   `.github/workflows/dotnet-ci.yml` measures it.
+4. No unusually heavy test exceeds 5 seconds.
 5. Every routing decision is logged through Serilog with a **static** message template and structured
-   properties. The vote breakdown, the chosen model, and the reward terms are audit-trail data, not
-   debug output.
-6. Documentation matches delivered behavior — including `README.md` and `docs/HANDBOOK.md`, which
-   describe `coderouterbench.db` as synced-on-demand and `outputs/`/`agentic-artifacts/` as not
-   restored.
-7. Any item deferred during a phase is recorded with its evidence, in the doc that owns the component,
-   and summarized in one line under "Settled deferrals" above.
+   properties.
+6. Documentation matches delivered behavior — including `README.md` and `data/README.md` (`docs/HANDBOOK.md`
+   is a pointer to those). `outputs/` / `agentic-artifacts/` stay unrestored unless a phase needs them.
+7. Any item deferred during a phase is recorded with its evidence in the owning doc, and summarized
+   under "Settled deferrals" above.

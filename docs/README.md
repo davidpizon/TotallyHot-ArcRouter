@@ -35,20 +35,23 @@ for what it syncs and verifies):
 ## Project Layout
 
 ```text
-src/TotallyHotArcRouter*/             .NET router implementation, GUI, quality verifier, tests
-docs/                           Design docs and handbook
+src/TotallyHotArcRouter*/             .NET router, Blazor WASM dashboard, WinForms tray, quality verifier, tests
+docs/                                 Living design docs; closed plans under docs/archive/
 
 %ProgramData%\TotallyHotArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand
 ```
 
+[`HANDBOOK.md`](HANDBOOK.md) is a pointer at README / `data/README.md` / `src/PLAN.md`, not a second
+product overview. Closed execution plans live in [`archive/`](archive/README.md). The React kit under
+[`design/`](design/readme.md) is historical and not runtime — live GUI contract:
+[`gui/DESIGN.md`](gui/DESIGN.md) + [`gui/MOTION.md`](gui/MOTION.md).
+
 ## Design docs
 
-The roadmap of remaining work, in order, is [`../src/PLAN.md`](../src/PLAN.md). Every document under
+The roadmap of remaining work is [`../src/PLAN.md`](../src/PLAN.md). Every living document under
 [`router/`](router/) is indexed below — this table is **exhaustive**, so a new router doc belongs here
-too. GUI docs live in [`gui/`](gui/) and are not indexed here.
-
-Status shown is each doc's own, verified against the code during the reconciliation pass recorded in
-[`router/doc-code-reconciliation-plan.md`](router/doc-code-reconciliation-plan.md).
+too. GUI docs live in [`gui/`](gui/) and are not indexed here. Archived stubs remain at their old
+paths so existing links resolve.
 
 ### Routing and learning
 
@@ -57,11 +60,11 @@ Status shown is each doc's own, verified against the code during the reconciliat
 | [`router/utility-model-routing.md`](router/utility-model-routing.md) | Classifier, `IRoutingPolicy`, cost-aware utility routing | Shipped (H, I) |
 | [`router/orchestrator-ensemble.md`](router/orchestrator-ensemble.md) | The five-voter Orchestrator ensemble and its weights | Shipped (5 of 5 voters) |
 | [`router/orchestrator-live-path-plan.md`](router/orchestrator-live-path-plan.md) | Orchestrator on the live path; requested-vs-routed end to end | Shipped (M1–M4) |
-| [`router/phase-m2-plan.md`](router/phase-m2-plan.md) | Requested-vs-routed telemetry, the M2 slice in detail | Implemented |
+| [`archive/router/phase-m2-plan.md`](archive/router/phase-m2-plan.md) | M2 slice (historical) | Archived — see orchestrator-live-path-plan |
 | [`router/memory-persistence.md`](router/memory-persistence.md) | `RouterMemory` / `EmbeddingMemory` SQLite persistence | Shipped |
 | [`router/live-feedback-learning-plan.md`](router/live-feedback-learning-plan.md) | Live feedback capture, embedding-backed `logreg`, its trainer and admin surface | Phases 1–5 shipped; 6 partial |
 | [`router/self-organizing-classification-plan.md`](router/self-organizing-classification-plan.md) | Transcripts, clustering, the `cluster_best` voter, adaptive-routing toggle | Shipped (T1–T6) |
-| [`router/routing-roi-regret-plan.md`](router/routing-roi-regret-plan.md) | Routing ROI: expense and regret vs `dim_best`, fast drain, hard pause under load | Shipped |
+| [`archive/router/routing-roi-regret-plan.md`](archive/router/routing-roi-regret-plan.md) | Routing ROI vs `dim_best` (historical) | Archived — see self-organizing-classification-plan T4 |
 | [`router/agent-resilience-strategies.md`](router/agent-resilience-strategies.md) | Circuit breaker and failover ranking; leaky bucket | Circuit breaker shipped; leaky bucket not built |
 | [`router/model-identity-canonicalization.md`](router/model-identity-canonicalization.md) | `ModelNameCanonicalizer` — spelling vs. identity | Implemented |
 
@@ -70,8 +73,9 @@ Status shown is each doc's own, verified against the code during the reconciliat
 | Doc | What it owns | Status |
 |---|---|---|
 | [`router/coderouterbench-sqlite-migration-plan.md`](router/coderouterbench-sqlite-migration-plan.md) | Benchmark corpus sync into SQLite, checksums, row counts | Shipped (all six phases) |
-| [`router/regret-evaluation-harness-plan.md`](router/regret-evaluation-harness-plan.md) | PLAN.md Phase N: `CumReg`/`AvgPerf`/`TotTok`/`$Total`/`Perf/$`, replay engine, comparison baselines, Orchestrator arm | N1–N5 shipped (N5's own exit criterion measured, not met — see its status note); N6 remains |
-| [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge, then judge-as-verifier for non-executable dimensions | G1 shipped; G2–G3 proposed |
+| [`router/regret-evaluation-harness-plan.md`](router/regret-evaluation-harness-plan.md) | PLAN.md Phase N: `CumReg`/`AvgPerf`/`TotTok`/`$Total`/`Perf/$`, replay engine, comparison baselines, Orchestrator arm | N1–N6 shipped (N5 exit criterion measured, not met); Q5 evidence-blocked |
+| [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge, then judge-as-verifier for non-executable dimensions | G1–G3 shipped |
+| [`router/grader-reliability-plan.md`](router/grader-reliability-plan.md) | Q4 inter-grader agreement CLI (`--run-grader-reliability-report`) | Shipped, CLI only; gRPC/GUI deferred |
 | [`router/quality-verifier-architecture.md`](router/quality-verifier-architecture.md) | The Verifier: static analysis + G-Eval judge scoring (no code execution) | Implemented |
 
 ### Telemetry, cost, and pricing
@@ -79,13 +83,13 @@ Status shown is each doc's own, verified against the code during the reconciliat
 | Doc | What it owns | Status |
 |---|---|---|
 | [`router/telemetry.md`](router/telemetry.md) | Telemetry pipeline, transport, and field provenance | Implemented, test-verified |
-| [`router/grpc-migration.md`](router/grpc-migration.md) | Telemetry transport SignalR → gRPC | Implemented, narrower than designed |
-| [`router/signalr-hub-security.md`](router/signalr-hub-security.md) | TLS + auth for the telemetry hub | Historical — SignalR removed; superseded by gRPC |
+| [`archive/router/grpc-migration.md`](archive/router/grpc-migration.md) | Telemetry transport SignalR → gRPC (historical) | Archived — see telemetry.md |
+| [`archive/router/signalr-hub-security.md`](archive/router/signalr-hub-security.md) | TLS + auth for the SignalR hub (historical) | Archived — SignalR removed |
 | [`router/agent-cost-tracking.md`](router/agent-cost-tracking.md) | Persistent spend ledger, auto-refreshed pricing, provider reconciliation | Superseded by the shipped implementation |
 | [`router/token-tracking-improvements.md`](router/token-tracking-improvements.md) | Survey of external usage trackers; the analysis behind the implementation plan | Implemented |
-| [`router/token-tracking-implementation-plan.md`](router/token-tracking-implementation-plan.md) | Phase-by-phase execution of the analysis above | Implemented (all six phases) |
-| [`router/anthropic-reported-usage-plan.md`](router/anthropic-reported-usage-plan.md) | Cache-aware Anthropic usage and budget tracking | Implemented (Phases 1–3) |
-| [`router/openai-format-usage-accuracy-plan.md`](router/openai-format-usage-accuracy-plan.md) | Usage accuracy for OpenAI-format traffic, incl. Anthropic-behind-OpenAI | Implemented (Phases 1–3) |
+| [`archive/router/token-tracking-implementation-plan.md`](archive/router/token-tracking-implementation-plan.md) | Phase-by-phase execution of the analysis above | Archived (all six phases shipped) |
+| [`archive/router/anthropic-reported-usage-plan.md`](archive/router/anthropic-reported-usage-plan.md) | Cache-aware Anthropic usage and budget tracking | Archived (Phases 1–3 shipped) |
+| [`archive/router/openai-format-usage-accuracy-plan.md`](archive/router/openai-format-usage-accuracy-plan.md) | Usage accuracy for OpenAI-format traffic | Archived (Phases 1–3 shipped) |
 | [`router/model-price-catalog.md`](router/model-price-catalog.md) | Multi-aggregator price ingestion, resolution, runtime cache | Phases 1–4 implemented |
 | [`router/d3-alias-resolution.md`](router/d3-alias-resolution.md) | Mapping aggregator model names onto the router key | Implemented (incl. Slice 4) |
 | [`router/pricing-seed-removal.md`](router/pricing-seed-removal.md) | Removing the fake `Pricing` seed; "unknown" as the honest default | Implemented |
@@ -102,13 +106,19 @@ Status shown is each doc's own, verified against the code during the reconciliat
 | Doc | What it owns | Status |
 |---|---|---|
 | [`router/mcp-endpoint.md`](router/mcp-endpoint.md) | The MCP management endpoint as built — ports, auth, tools | Reference (as-built) |
-| [`router/mcp-endpoint-plan.md`](router/mcp-endpoint-plan.md) | MCP endpoint + hardened REST over one shared `ManagementFacade` | Implemented |
+| [`archive/router/mcp-endpoint-plan.md`](archive/router/mcp-endpoint-plan.md) | MCP endpoint plan | Archived — see mcp-endpoint.md |
 | [`router/secrets-at-rest.md`](router/secrets-at-rest.md) | The protected secret store as built | Reference (as-built) |
-| [`router/secrets-at-rest-plan.md`](router/secrets-at-rest-plan.md) | Generic protected store; Anthropic Admin-API path as first consumer | Implemented (all six phases) |
+| [`archive/router/secrets-at-rest-plan.md`](archive/router/secrets-at-rest-plan.md) | Generic protected store plan | Archived — see secrets-at-rest.md |
 | [`router/security-hardening-plan.md`](router/security-hardening-plan.md) | Threat model and prioritized remediation findings | Action list — per-finding status unverified |
 | [`router/serilog-logging-guide.md`](router/serilog-logging-guide.md) | Config-driven Serilog setup and sink options | Partially implemented — Console sink only |
 | [`router/system-proxy-architecture.md`](router/system-proxy-architecture.md) | OS-level proxy registration and upstream chaining | Proposed — not implemented |
 | [`router/proxy-coexistence.md`](router/proxy-coexistence.md) | Detecting, backing up, and restoring existing proxy settings | Proposed — not implemented |
+| [`router/packaging-and-distribution.md`](router/packaging-and-distribution.md) | MSI, tarballs, GHCR, tagged releases | Implemented |
+| [`router/version-compatibility.md`](router/version-compatibility.md) | Router ↔ tray ↔ WASM lockstep versioning | Implemented |
+| [`router/client-tls-setup.md`](router/client-tls-setup.md) | Trusting the router local CA in browsers | Reference |
+| [`router/code-smell-refactoring-plan.md`](router/code-smell-refactoring-plan.md) | Mechanical extracts; closes on golden-path smoke | In progress (smoke outstanding) |
+| [`router/admin-slice-consolidation-plan.md`](router/admin-slice-consolidation-plan.md) | Shared admin seams; closes on golden-path smoke | Implementation shipped; smoke outstanding |
+| [`router/counterfactual-token-estimation-plan.md`](router/counterfactual-token-estimation-plan.md) | Per-request ROI baseline token estimate | Phases 0–3 shipped; 4–6 open |
 
 ### Working documents
 
@@ -116,7 +126,7 @@ Status shown is each doc's own, verified against the code during the reconciliat
 |---|---|
 | [`router/backlog.md`](router/backlog.md) | Router-side known defects and not-yet-implemented work |
 | [`router/tracked-todos.md`](router/tracked-todos.md) | Open working items carried across sessions |
-| [`router/doc-code-reconciliation-plan.md`](router/doc-code-reconciliation-plan.md) | Doc/code drift audit and the plan to close it |
+| [`archive/README.md`](archive/README.md) | Closed plans and the historical React kit |
 
 ## Citation
 

@@ -1,57 +1,15 @@
 # Tracked TODOs
 
 Working list of open items tracked in-session (not yet promoted to their own dedicated backlog
-entries, GitHub issues, or PRs). Complements [`backlog.md`](backlog.md), which records **known
-defects** discovered while reading the code; this file also covers forward-looking research and
-hardening work. One of the five items below lives in a different repository entirely
-(`spark-vscode-extension`) — recorded here anyway because it surfaced from the same investigation
-and this is the nearer of the two repos' doc folders to where the work is being tracked.
+entries, GitHub issues, or PRs). Complements [`backlog.md`](backlog.md). Done and obsolete items
+(#1 spark-vscode-extension TypeScript, #2 design-doc write, #4 zero-coverage pass, #7 `/admin/*`
+REST → gRPC — REST endpoints deleted in the web GUI migration) are removed.
 
-| # | Status | Repo | Title |
-|---|---|---|---|
-| [1](#1-make-converttoolstoopenai-degrade-instead-of-throwing-on-toolmoderequired-with-multiple-tools) | Open | `spark-vscode-extension` | Make `convertToolsToOpenAI` degrade instead of throwing on `ToolMode.Required` with multiple tools |
-| [2](#2-write-tool-call-normalizationmd-design-doc) | ✅ Done | ArcRouter | Write `tool-call-normalization.md` design doc |
-| [3](#3-research-deepseek-tool-call-delimiters-and-register-a-deepseek-dialect) | Open | ArcRouter | Research DeepSeek tool-call delimiters and register a `deepseek` dialect |
-| [4](#4-add-test-coverage-for-zero-coverage-classes-in-TotallyHotArcRouter-and-TotallyHotArcRoutersandbox) | ✅ Done | ArcRouter | Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality` |
-| [5](#5-get-a-human-review-of-phase-5s-three-design-decisions) | Open | ArcRouter | Get a human review of Phase 5's three design decisions |
-| [6](#6-build-a-real-iprovidercostreconciler-for-gemini) | Open | ArcRouter | Build a real `IProviderCostReconciler` for Gemini |
-| [7](#7-move-the-remaining-adminusage-rest-endpoints-onto-grpc) | Open | ArcRouter | Move the remaining `/admin/*` and `/admin/usage/*` REST endpoints onto gRPC |
-
----
-
-## #1 — removed (obsolete)
-
-**Was:** "Make `convertToolsToOpenAI` degrade instead of throwing on `ToolMode.Required` with multiple
-tools." **Removed** because it targeted a TypeScript codebase that no longer exists: every file it named
-(`src/utils.ts`, `src/openai/openaiApi.ts`, `src/anthropic/anthropicApi.ts`, `src/gemini/geminiApi.ts`,
-`src/openai/openaiResponsesApi.ts`, `src/logger.ts`) predates this repository's C# migration and is gone.
-The item was unactionable rather than merely stale. Tool-choice handling in the C# router lives in
-[`tool-call-normalization.md`](tool-call-normalization.md); raise a fresh item there if a real gap exists.
-
-The numbering below is left unchanged so [`../../src/PLAN.md`](../../src/PLAN.md)'s references to #3,
-#4, and #5 stay valid.
-
-## #2 Write `tool-call-normalization.md` design doc — **complete**
-
-**Repo:** ArcRouter · **Status:** ✅ Done
-
-Deliverable: [`tool-call-normalization.md`](tool-call-normalization.md). Per-model tool-call dialect
-detection and normalization, so VS Code respects a model's intent to invoke a tool regardless of
-which provider and model served it.
-
-Also delivered alongside it:
-- Cross-link from `docs/README.md`'s router table.
-- A supersession banner on `unified-api-translation.md` §4.5 (kept as the authoritative incident
-  record for the original LM Studio/Qwen repro; the new doc explains why that section's fix is
-  narrower than the problem it targets).
-- [`backlog.md`](backlog.md)'s "Related" note updated now that the provider-vs-model granularity
-  question is settled by the new design.
-
-Shipped docs-only as [PR #85](https://github.com/davidpizon/ArcRouter/pull/85).
-
-Phase 0 of the plan (the `ToolCallDialect` model, registry, and matcher — pure code, nothing wired
-into `ProxyMiddleware` yet) has since been implemented on branch `feat/tool-call-dialect-registry`.
-Items #3 and #4 below are follow-ons from that same workstream.
+| # | Status | Title |
+|---|---|---|
+| [3](#3-research-deepseek-tool-call-delimiters-and-register-a-deepseek-dialect) | Open | Research DeepSeek tool-call delimiters and register a `deepseek` dialect |
+| [5](#5-get-a-human-review-of-phase-5s-three-design-decisions) | Open | Get a human review of Phase 5's three design decisions |
+| [6](#6-build-a-real-iprovidercostreconciler-for-gemini) | Open | Build a real `IProviderCostReconciler` for Gemini |
 
 ---
 
@@ -150,54 +108,6 @@ dialect evidence. That check is now the first step of this task rather than an a
 is the one thing this attempt did establish.
 
 ---
-
-## #4 Add test coverage for zero-coverage classes in `TotallyHotArcRouter` and `TotallyHot.ArcRouter.Quality` — **complete**
-
-**Repo:** ArcRouter · **Status:** ✅ Done · **Closed:** 2026-09-12
-
-Both non-GUI production assemblies clear AGENTS.md's 80% line-coverage bar as CI actually checks it
-(per-assembly via `reportgenerator` merging `TotallyHot.ArcRouter.Tests` +
-`TotallyHot.ArcRouter.Quality.Tests` cobertura reports):
-
-- `TotallyHotArcRouter`: **90.0%** (was 89.7% before this pass)
-- `TotallyHot.ArcRouter.Quality`: **98.5%** (was 98.2%)
-
-This item's own class list was stale by the time it was picked back up: `McpHostedService`, `McpServer`,
-`PriceSourceAdminGrpcService`, `StartupHealthCheckHostedService`, and `TelemetryPublisher` had all
-already gained tests from unrelated work, and a fresh 0%-coverage scan turned up a different, current
-set (including `CostReconciliationHostedService`, added by the Cost Reconciliation module after this
-item was filed). Every substantive one is now covered:
-
-- `TotallyHot.ArcRouter.Hosting.PriceCatalogIngestionHostedService` (80.3%) — a lifecycle test that
-  deliberately does **not** exercise the "already due" poll-loop branch: forcing that within a test's
-  lifetime needs a zero-hour interval (production only ever configures 4-12h), and a zero interval makes
-  the loop re-check with no delay at all. Confirmed experimentally to busy-spin fast enough to starve the
-  thread pool and hang the test *process* (not just run slowly) — the original test attempt had to be
-  `taskkill`ed. See `PriceCatalogIngestionHostedServiceTests`' class remarks.
-- `TotallyHot.ArcRouter.Hosting.CostReconciliationHostedService` (68.1%) — safe to test the immediate
-  first-cycle behavior here since `CostReconciliationOptions.EnsureValid()` enforces a >= 1-hour interval,
-  and the `BackgroundService`'s `do { ... } while (WaitForNextTickAsync)` shape runs cycle #1
-  unconditionally before ever awaiting the timer.
-- `TotallyHot.ArcRouter.Proxy.EnvironmentVariableProvider`, `TotallyHot.ArcRouter.Telemetry.ITelemetryPublisher`
-  (its `PublishQualitySignalAsync` default member), `TotallyHot.ArcRouter.Transcripts.ITranscriptStore`
-  (its `ListSessionsAsync` default member), `TotallyHot.ArcRouter.CodeRouterBench.Evaluation.NullRegretHarnessRunner`,
-  and `TotallyHot.ArcRouter.Quality.Grading.NoAsyncGraderDispatcher` — all now at 100%.
-
-**Left at 0% deliberately**: `JudgeCalibrationAdminDependencies`, `RegretHarnessAdminDependencies`,
-`RoutingGateAdminDependencies`, `UpdateAdminDependencies`, `ModelEnabledWriteRequest`, and
-`SecretWriteRequest` are pure positional-record DTOs (constructor parameters only, no method bodies) —
-testing them would be exactly the "token line-hit" this item's own acceptance criterion ruled out, not
-meaningful coverage of any logic.
-
-Verification commands (same ones this item was originally filed with):
-```
-dotnet-coverage collect --output TestResults/MainCov/coverage.cobertura.xml --output-format cobertura --settings coverage.runsettings "./src/TotallyHotArcRouter.Tests/bin/Debug/net10.0/TotallyHotArcRouter.Tests.exe"
-dotnet-coverage collect --output TestResults/QCov/coverage.cobertura.xml --output-format cobertura --settings coverage.runsettings "./src/TotallyHotArcRouter.Quality.Tests/bin/Debug/net10.0/TotallyHotArcRouter.Quality.Tests.exe"
-reportgenerator "-reports:TestResults/MainCov/coverage.cobertura.xml;TestResults/QCov/coverage.cobertura.xml" -targetdir:TestResults/Report -reporttypes:"JsonSummary;TextSummary"
-```
-Check `TestResults/Report/Summary.json`'s per-assembly `coverage` values against the 80% bar — **not**
-the root-level aggregate `line-rate` a single project's own cobertura report shows, which double-counts
-an assembly pulled in transitively but barely exercised by a given test project.
 
 ---
 
@@ -314,6 +224,8 @@ judgment rather than re-deriving it.
 
 ---
 
+---
+
 ## #6 Build a real `IProviderCostReconciler` for Gemini
 
 **Repo:** ArcRouter · **Status:** Open · **Filed:** 2026-09-02, from the brutal-cozy-pascal structural
@@ -362,62 +274,3 @@ end-to-end without a real GCP billing export, the PR that adds it should say so 
 implying parity with the Anthropic/OpenAI reconcilers' live-tested confidence.
 
 ---
-
-## #7 Move the remaining `/admin/*` and `/admin/usage/*` REST endpoints onto gRPC
-
-**Repo:** ArcRouter · **Status:** Open · **Filed:** 2026-09-04, from a conversational walkthrough of the
-proxy's HTTP surface
-
-### Why this is open
-
-[`grpc-migration.md`](grpc-migration.md) already settled the design question for internal,
-same-machine surfaces between components the project controls: "the RPC won" (§Scope). Every admin
-surface built since that migration — router settings, LLM router model, cluster/logreg models, regret
-harness, price source, benchmark data, update, routing gate — is already a gRPC service registered on
-the dedicated TLS port (`ProxyServer.DefaultGrpcPort`, 5002). Two files predate/were missed by that
-migration and still serve plain REST on the shared loopback proxy port (5001), alongside actual
-LLM-forwarding traffic:
-
-- `src/TotallyHotArcRouter/Proxy/Management/ProviderAdminEndpoints.cs` — `/admin/providers*`,
-  `/admin/price-overrides`, `/admin/secrets/*`, all backed by `ManagementFacade`.
-- `src/TotallyHotArcRouter/Proxy/Management/UsageAdminEndpoints.cs` — `/admin/usage/*` (`summary`,
-  `rollup`, `routing-roi`, `export`), backed by `ManagementReportingService`.
-
-Both are consumed only by the desktop GUI (`TotallyHot.ArcRouter.Gui.Admin`'s `ProviderAdminClient`
-and `UsageQueryClient`, plain `HttpClient` calls against `http://localhost:5001/admin/...`). The MCP
-tool surface (`ProviderMcpTools`) already calls the same `ManagementFacade` in-process, not over HTTP,
-so it is not a reason either endpoint has to stay REST. Nothing else depends on these two being
-REST specifically (no browser CORS need, no known third party hitting `/admin/*` directly).
-
-No observed cost currently forces this — it is unfinished migration work consistent with a decision
-already on record, not a fix for a bug or a blocker for a feature. Do not schedule it against a
-deadline; pick it up when someone is touching one of these two files anyway, or when a genuine reason
-to finish the migration shows up (e.g. wanting port 5001 to carry only LLM-forwarding traffic).
-
-### What to do
-
-1. Write `.proto` contracts for provider CRUD (list/upsert/remove provider, budget, enabled toggles,
-   model upsert/remove/enabled/tool-dialect, discover-models, scan-capabilities,
-   refresh-from-endpoint, price overrides, price resolution, rate-limit history, secrets) and for
-   usage queries (summary, rollup, routing-roi, export), mirroring the request/response shapes
-   `ManagementFacade`/`ManagementReportingService` already expose.
-2. Implement `ProviderAdminGrpcService` and `UsageAdminGrpcService`, following the pattern of
-   `RouterSettingsAdminGrpcService`/`LlmRouterModelAdminGrpcService`, and register them on the inner
-   gRPC host in `ProxyServer.cs` the way `routerSettingsAdmin` and friends already are.
-3. Handle the CSV export path: return CSV as a string field (or a byte stream for large exports)
-   rather than a raw HTTP `text/csv` response.
-4. Port `TotallyHot.ArcRouter.Gui.Admin`'s `ProviderAdminClient` and `UsageQueryClient` to gRPC
-   channels instead of `HttpClient`, keeping their existing public method signatures so
-   `ProviderAdminStore`/`UsageStore` in the GUI project don't need to change.
-5. Delete `ProviderAdminEndpoints.cs`, `UsageAdminEndpoints.cs`, their `X-Admin-Token` header-check
-   middleware, and their REST-specific tests, once the gRPC equivalents have parity coverage.
-6. Confirm the management token gating (`ManagementAccessToken`) carries over via a gRPC interceptor,
-   the same way `TelemetryAuthInterceptor` already gates the telemetry/price-source/admin gRPC
-   services on this port.
-
-### Acceptance
-
-Port 5001 (the plain-HTTP Kestrel listener) serves only LLM-forwarding proxy traffic and `/v1/models`
-— no `/admin/*` routes remain on it. The GUI's provider-management and usage-analytics panels work
-unchanged against the new gRPC services, with test coverage at parity with what the REST endpoints had.
-
