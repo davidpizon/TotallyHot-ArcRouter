@@ -73,15 +73,6 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
     public RoutingGateMonitor? Monitor { get; private set; }
 
     /// <summary>
-    /// The channel provider backing <see cref="Monitor"/>, or <see langword="null"/> before the first
-    /// successful connection - so a caller can build another admin client (e.g. an update check) over the
-    /// exact same authenticated channel rather than opening a second one. Swapped in lockstep with
-    /// <see cref="Monitor"/>; re-read it after every use rather than holding a reference across an await,
-    /// for the same reconnect-can-replace-it-at-any-time reason as <see cref="Monitor"/>.
-    /// </summary>
-    public IRouterChannelProvider? Provider => _currentProvider;
-
-    /// <summary>
     /// Raised after <see cref="Monitor"/> is replaced by a fresh connection - the tray shell re-subscribes
     /// its <see cref="RoutingGateMonitor.BecameUnusable"/> handler to the new instance from here, since the
     /// old instance's own subscription died with it.

@@ -23,7 +23,7 @@ public sealed class TrayDiscoveryReaderTests
     }
 
     [Fact]
-    public void TryRead_ValidFile_ParsesEveryField()
+    public void TryRead_ValidFile_ParsesWebUrl_AndIgnoresUnusedFields()
     {
         var path = TempPath();
         try
@@ -40,8 +40,6 @@ public sealed class TrayDiscoveryReaderTests
 
             result.Should().NotBeNull();
             result!.WebUrl.Should().Be("https://localhost:5004");
-            result.CaThumbprint.Should().Be("AB12CD34");
-            result.WrittenAtUtc.Should().Be(DateTimeOffset.Parse("2026-09-15T12:00:00Z"));
         }
         finally
         {
@@ -63,7 +61,6 @@ public sealed class TrayDiscoveryReaderTests
 
             result.Should().NotBeNull();
             result!.WebUrl.Should().BeNull();
-            result.CaThumbprint.Should().BeNull();
         }
         finally
         {

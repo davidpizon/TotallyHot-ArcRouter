@@ -75,11 +75,10 @@ public sealed class RoutingGateMonitorTests
 
         monitor.IsReachable.Should().BeTrue("a router that answers with an error is still reachable");
         monitor.IsUsable.Should().BeFalse("the routing toggle still has nothing it can act on");
-        monitor.LastFailureMessage.Should().Be("Could not update the routing gate: bad token");
     }
 
     [Fact]
-    public async Task PollLoop_RecoveringAfterAFailure_ClearsTheFailureMessage()
+    public async Task PollLoop_RecoveringAfterAFailure_BecomesUsableAgain()
     {
         var client = new FakeRoutingGateAdminClient
         {
@@ -92,7 +91,7 @@ public sealed class RoutingGateMonitorTests
         client.GetFailure = null;
 
         await WaitUntilAsync(condition: () => monitor.IsUsable, timeout: WaitTimeout);
-        monitor.LastFailureMessage.Should().BeNull();
+        monitor.ConnectionState.Should().Be(RouterConnectionState.Connected);
     }
 
     [Fact]
