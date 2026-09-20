@@ -1,4 +1,4 @@
-@* System settings modal: telemetry connection settings, the adaptive-routing toggle and sample size
+@* System settings modal: the adaptive-routing toggle and sample size
    (docs/router/self-organizing-classification-plan.md Phase T6), the shadow-judge toggle and backbone
    picker (docs/router/geval-shadow-scoring-plan.md), the transcription-capture toggle and its Clear action
    (docs/router/self-organizing-classification-plan.md Phase T1), the Cost Reconciliation status and manual
@@ -6,40 +6,12 @@
    confirmation word, and a discreet GUI/Router version footer. *@
 @implements IDisposable
 @inject LiveDataStore LiveDataStore
-@inject IGuiSettingsStore SettingsStore
 @inject RouterSettingsAdminStore RouterSettingsStore
 @inject UpdateStore UpdateStore
 @inject CostReconciliationStore CostReconciliationStore
 @inject ManagementTokenAdminStore ManagementTokenStore
 @inject IClipboardService ClipboardService
 <DialogShell Title="System Settings" CloseAriaLabel="Close system settings" OnClose="OnClose">
-@* Connection settings. Unlike the router settings below, this is local-only (no round trip to
-               the router) and needs an app restart to take effect, so it keeps its own explicit Save/Undo
-               pair rather than saving on every keystroke. Both buttons stay disabled until the field holds
-               an actual pending change. *@
-<div class="space-y-2">
-    <label for="telemetry-address" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
-        Telemetry Server Address
-    </label>
-    <div class="flex items-center gap-2">
-        <input id="telemetry-address"
-               type="text"
-               value="@_telemetryAddress"
-               @oninput="OnTelemetryAddressInput"
-               class="flex-1 min-w-0 px-3 py-2 text-sm font-mono ds-input"/>
-        <button @onclick="UndoTelemetryAddress" disabled="@(!HasTelemetryAddressChanged)" class="btn btn-ghost">
-            Undo
-        </button>
-        <button @onclick="SaveTelemetryAddress" disabled="@(!CanSaveTelemetryAddress)" class="btn btn-ghost">
-            Save
-        </button>
-    </div>
-    @if (_telemetryAddressSaved)
-    {
-        <p class="text-xs text-emerald-400">Saved. Restart the app to connect to the new address.</p>
-    }
-</div>
-
 @* Adaptive routing (docs/router/self-organizing-classification-plan.md Phase T6). Every control
                here saves the instant it changes - there is no footer Save button for this section - so a
                toggle flipped and then abandoned (modal closed, tab switched) is never silently lost. *@
