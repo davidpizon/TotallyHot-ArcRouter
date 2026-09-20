@@ -153,17 +153,11 @@ public sealed class RoutingGateMonitorTests
         }
     }
 
-    private sealed class StubChannelProvider : IRouterChannelProvider
+    private sealed class StubChannelProvider(Grpc.Net.Client.GrpcChannel channel) : IRouterChannelProvider
     {
-        public StubChannelProvider(Grpc.Net.Client.GrpcChannel channel)
-        {
-            CallInvoker = channel.CreateCallInvoker();
-            ServerAddress = channel.Target;
-        }
+        public Grpc.Core.CallInvoker CallInvoker { get; } = channel.CreateCallInvoker();
 
-        public Grpc.Core.CallInvoker CallInvoker { get; }
-
-        public string ServerAddress { get; }
+        public string ServerAddress { get; } = channel.Target;
     }
 
     private sealed class FakeRoutingGateAdminClient : IRoutingGateAdminClient
