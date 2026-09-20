@@ -27,6 +27,11 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// </summary>
 public sealed class ManagementFacade
 {
+    /// <summary>
+    /// The named <see cref="HttpClient"/> used for live model-list queries and endpoint capability probes.
+    /// </summary>
+    public const string HttpClientName = nameof(ManagementFacade);
+
     // Config default (§5.9); overridable via the constructor's rateLimitStalenessThreshold parameter.
     private static readonly TimeSpan DefaultRateLimitStalenessThreshold = TimeSpan.FromMinutes(15);
 
@@ -53,7 +58,10 @@ public sealed class ManagementFacade
     /// </summary>
     /// <param name="store">The writable provider/model configuration store.</param>
     /// <param name="environment">Accessor used to resolve provider credentials for model discovery.</param>
-    /// <param name="httpClient">HTTP client used to query a provider's live model list.</param>
+    /// <param name="httpClient">
+    /// HTTP client used to query a provider's live model list. Tests pass a stub-wrapped instance; production
+    /// omits this and supplies <paramref name="httpClientFactory"/> instead.
+    /// </param>
     /// <param name="dependencies">
     /// The optional collaborators, carried as one named object rather than a dozen positional nullable
     /// arguments - see <see cref="ManagementFacadeDependencies"/>, whose members document what each one
@@ -62,15 +70,22 @@ public sealed class ManagementFacade
     /// models, and every surface needing an absent collaborator answers
     /// <see cref="ManagementErrorType.Unavailable"/>.
     /// </param>
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="HttpClientName"/> client per probe so this singleton does not capture a
+    /// handler past <c>IHttpClientFactory</c>'s rotation. Required when <paramref name="httpClient"/> is
+    /// omitted.
+    /// </param>
     public ManagementFacade(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
-        HttpClient httpClient,
-        ManagementFacadeDependencies? dependencies = null)
+        HttpClient? httpClient = null,
+        ManagementFacadeDependencies? dependencies = null,
+        IHttpClientFactory? httpClientFactory = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(environment);
-        ArgumentNullException.ThrowIfNull(httpClient);
+        if (httpClient is null && httpClientFactory is null)
+            throw new ArgumentNullException(nameof(httpClientFactory));
 
         _store = store;
         _budgetStore = dependencies?.BudgetStore;
@@ -85,7 +100,8 @@ public sealed class ManagementFacade
         // captures the method group as its buildProvidersResponse callback, but none of them invoke it
         // until after this constructor has returned.
         _providerManagementService = new ProviderManagementService(store: store, environment: environment,
-            httpClient: httpClient, dependencies: dependencies, buildProvidersResponse: BuildProvidersResponse);
+            httpClient: httpClient, dependencies: dependencies, buildProvidersResponse: BuildProvidersResponse,
+            httpClientFactory: httpClientFactory);
         _budgetAndPriceOverrideService = new BudgetAndPriceOverrideService(store: store, dependencies: dependencies,
             buildProvidersResponse: BuildProvidersResponse);
         _secretManagementService = new SecretManagementService(dependencies);

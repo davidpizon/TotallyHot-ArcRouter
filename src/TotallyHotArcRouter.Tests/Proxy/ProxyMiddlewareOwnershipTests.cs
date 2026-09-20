@@ -28,8 +28,8 @@ public sealed class ProxyMiddlewareOwnershipTests
     [Fact]
     public void Dispose_SuppliedHttpClient_IsLeftToItsOwner()
     {
-        // The dangerous direction. In production the client is DI-owned and shared; in tests it usually
-        // wraps a stub handler the test still uses afterward. Disposing it here would break both.
+        // The dangerous direction. Tests pass a stub-wrapped client they still use afterward.
+        // Disposing it here would break them. Production uses IHttpClientFactory instead.
         var handler = new TrackingHandler();
         var suppliedClient = new HttpClient(handler);
 

@@ -41,7 +41,8 @@ internal sealed class ProviderManagementService
     private readonly ModelDialectResolver _dialectResolver;
     private readonly ProviderEndpointScanner? _endpointScanner;
     private readonly IEnvironmentVariableProvider _environment;
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IProviderInteractionStatusStore? _interactionStatus;
     private readonly ISecretReader? _secretReader;
     private readonly ISecretWriter? _secretWriter;
@@ -53,7 +54,7 @@ internal sealed class ProviderManagementService
     /// </summary>
     /// <param name="store">The writable provider/model configuration store.</param>
     /// <param name="environment">Accessor used to resolve provider credentials for model discovery.</param>
-    /// <param name="httpClient">HTTP client used to query a provider's live model list.</param>
+    /// <param name="httpClient">HTTP client used to query a provider's live model list when no factory is supplied.</param>
     /// <param name="dependencies">The same optional collaborators bag <see cref="ManagementFacade"/> was constructed with.</param>
     /// <param name="buildProvidersResponse">
     /// Builds the masked, client-facing <see cref="ProvidersResponse"/> from the current store snapshot.
@@ -61,22 +62,29 @@ internal sealed class ProviderManagementService
     /// every CRUD cluster (budget status, price overrides, secrets, rate limits) - not just provider/model
     /// state - so this service calls back into it after every mutation instead of duplicating it.
     /// </param>
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="ManagementFacade.HttpClientName"/> client per discovery call. Required
+    /// when <paramref name="httpClient"/> is omitted.
+    /// </param>
     public ProviderManagementService(
         IProviderConfigStore store,
         IEnvironmentVariableProvider environment,
-        HttpClient httpClient,
+        HttpClient? httpClient,
         ManagementFacadeDependencies? dependencies,
-        Func<ProvidersResponse> buildProvidersResponse)
+        Func<ProvidersResponse> buildProvidersResponse,
+        IHttpClientFactory? httpClientFactory = null)
     {
         _store = store;
         _environment = environment;
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _endpointScanner = dependencies?.EndpointScanner;
         _capabilityStore = dependencies?.CapabilityStore;
         _secretWriter = dependencies?.SecretWriter;
         _secretReader = dependencies?.SecretReader;
         _interactionStatus = dependencies?.InteractionStatusStore;
-        _dialectResolver = new ModelDialectResolver(httpClient: httpClient, environment: environment);
+        _dialectResolver = new ModelDialectResolver(httpClient: httpClient, environment: environment,
+            httpClientFactory: httpClientFactory);
         _buildProvidersResponse = buildProvidersResponse;
     }
 
@@ -983,7 +991,9 @@ internal sealed class ProviderManagementService
 
         try
         {
-            using var response = await _httpClient
+            using var factoryClient = _httpClientFactory?.CreateClient(ManagementFacade.HttpClientName);
+            var client = factoryClient ?? _httpClient!;
+            using var response = await client
                 .SendAsync(request: requestMessage, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return new DiscoverModelsResponse(

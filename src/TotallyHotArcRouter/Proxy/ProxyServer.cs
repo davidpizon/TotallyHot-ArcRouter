@@ -22,10 +22,6 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 {
     private readonly IHost _host;
 
-    // Non-null only when this server created its own management HttpClient (no caller-supplied one), so
-    // disposal frees exactly what this server owns and never a client the caller still uses elsewhere.
-    private readonly HttpClient? _ownedManagementHttpClient;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ProxyServer"/> class.
     /// </summary>
@@ -118,12 +114,6 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         // when the caller didn't supply the real one.
         var regretHarnessAdmin = dependencies?.RegretHarnessAdmin;
         var judgeCalibrationAdmin = dependencies?.JudgeCalibrationAdmin;
-
-        // Own (and later dispose) the management client only when the caller didn't supply one. Note this
-        // runs whether or not the management API is enabled, exactly as before the parameter moved into
-        // ManagementApiDependencies - the client is this server's to dispose either way.
-        _ownedManagementHttpClient = managementApi?.HttpClient is null ? new HttpClient() : null;
-        var managementClient = managementApi?.HttpClient ?? _ownedManagementHttpClient!;
 
         var serilogLogger = dependencies?.SerilogLogger;
 
@@ -328,7 +318,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         var facade = new ManagementFacade(
                             store: managementApi.ConfigStore,
                             environment: managementApi.Environment ?? new EnvironmentVariableProvider(),
-                            httpClient: managementClient,
+                            httpClient: managementApi.HttpClient,
                             dependencies: new ManagementFacadeDependencies
                             {
                                 BudgetStore = managementApi.BudgetStore,
@@ -342,7 +332,8 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                                 SecretReader = managementApi.SecretReader,
                                 InteractionStatusStore = managementApi.InteractionStatusStore ??
                                                          new ProviderInteractionStatusStore()
-                            });
+                            },
+                            httpClientFactory: managementApi.HttpClientFactory);
                         var reportingService = new ManagementReportingService(
                             rollupStore: managementApi.UsageRollupStore,
                             comparisonStore: managementApi.TaxonomyComparisonStore);
@@ -516,8 +507,8 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     internal IServiceProvider Services => _host.Services;
 
     /// <summary>
-    /// Disposes the inner host and, when this server created it, the management <see cref="HttpClient"/>,
-    /// so repeatedly creating and discarding servers (e.g. across tests) doesn't leak hosts or handlers.
+    /// Disposes the inner host so repeatedly creating and discarding servers (e.g. across tests) doesn't
+    /// leak hosts.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -526,7 +517,6 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         else
             _host.Dispose();
 
-        _ownedManagementHttpClient?.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -534,7 +524,6 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     public void Dispose()
     {
         _host.Dispose();
-        _ownedManagementHttpClient?.Dispose();
         GC.SuppressFinalize(this);
     }
 

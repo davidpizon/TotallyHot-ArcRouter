@@ -18,13 +18,14 @@ public sealed class AnthropicUsageReportService
     /// <summary>The provider key rows are upserted under, matching the key used elsewhere for Anthropic cost tracking.</summary>
     private const string Provider = "anthropic";
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
     private readonly ILogger<AnthropicUsageReportService> _logger;
     private readonly ReportedUsageRepository _repository;
     private readonly Func<string?> _resolveAdminApiKey;
 
     /// <summary>Initializes a new instance of the <see cref="AnthropicUsageReportService"/> class.</summary>
-    /// <param name="httpClient">The client used to call Anthropic's usage report endpoint.</param>
+    /// <param name="httpClient">The client used to call Anthropic's usage report endpoint when no factory is supplied.</param>
     /// <param name="repository">Where fetched rows are upserted and later read back for the management API.</param>
     /// <param name="resolveAdminApiKey">
     /// Resolves the current Admin API key fresh on every call - stored secret first, then the configured
@@ -34,18 +35,25 @@ public sealed class AnthropicUsageReportService
     /// cycles takes effect without a restart.
     /// </param>
     /// <param name="logger">Logs a failed fetch (swallowed - retried next cycle).</param>
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="CostReconciliationRetryPolicy.HttpClientName"/> client per cycle. Required
+    /// when <paramref name="httpClient"/> is omitted.
+    /// </param>
     public AnthropicUsageReportService(
-        HttpClient httpClient,
+        HttpClient? httpClient,
         ReportedUsageRepository repository,
         Func<string?> resolveAdminApiKey,
-        ILogger<AnthropicUsageReportService> logger)
+        ILogger<AnthropicUsageReportService> logger,
+        IHttpClientFactory? httpClientFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        if (httpClient is null && httpClientFactory is null)
+            throw new ArgumentNullException(nameof(httpClientFactory));
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(resolveAdminApiKey);
         ArgumentNullException.ThrowIfNull(logger);
 
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _repository = repository;
         _resolveAdminApiKey = resolveAdminApiKey;
         _logger = logger;
@@ -63,7 +71,9 @@ public sealed class AnthropicUsageReportService
 
         try
         {
-            var client = new AnthropicUsageReportClient(httpClient: _httpClient, adminApiKey: adminApiKey);
+            using var factoryClient = _httpClientFactory?.CreateClient(CostReconciliationRetryPolicy.HttpClientName);
+            var httpClient = factoryClient ?? _httpClient!;
+            var client = new AnthropicUsageReportClient(httpClient: httpClient, adminApiKey: adminApiKey);
             var yesterday = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-1));
             var startingDay = yesterday.AddDays(-(TrailingWindowDays - 1));
 

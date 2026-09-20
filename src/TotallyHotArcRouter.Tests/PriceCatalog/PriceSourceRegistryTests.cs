@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
@@ -15,7 +16,7 @@ public class PriceSourceRegistryTests
     {
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
+        var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
         var names = registry.EnabledClients.Select(c => c.Name).ToList();
         Assert.Equal(2, actual: names.Count);
@@ -28,7 +29,7 @@ public class PriceSourceRegistryTests
     {
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
+        var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
         toggleStore.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
 
@@ -42,7 +43,7 @@ public class PriceSourceRegistryTests
     {
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
+        var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
         toggleStore.SetEnabled(sourceName: PriceCatalogOptions.LiteLlmSourceName, false);
         toggleStore.SetEnabled(sourceName: PriceCatalogOptions.OpenRouterSourceName, false);
@@ -57,7 +58,7 @@ public class PriceSourceRegistryTests
         // change needed a restart. It must now be evaluated per read.
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
+        var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
         Assert.Equal(2, actual: registry.EnabledClients.Count);
 
@@ -77,7 +78,7 @@ public class PriceSourceRegistryTests
         var repository = temp.CreateSourceRepository();
         using var toggleStore =
             new PriceSourceToggleStore(repository: repository, logger: NullLogger<PriceSourceToggleStore>.Instance);
-        using var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
+        var registry = Build(options: new PriceCatalogOptions(), toggleStore: toggleStore);
 
         Assert.Empty(registry.EnabledClients);
     }
@@ -104,6 +105,7 @@ public class PriceSourceRegistryTests
     private static PriceSourceRegistry Build(PriceCatalogOptions options, PriceSourceToggleStore toggleStore)
     {
         return new PriceSourceRegistry(options: Options.Create(options), toggleStore: toggleStore,
-            loggerFactory: NullLoggerFactory.Instance);
+            loggerFactory: NullLoggerFactory.Instance,
+            httpClientFactory: new FakeHttpClientFactory(new HttpClientHandler()));
     }
 }

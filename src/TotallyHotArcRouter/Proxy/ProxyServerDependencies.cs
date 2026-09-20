@@ -223,10 +223,16 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
     public IEnvironmentVariableProvider? Environment { get; init; }
 
     /// <summary>
-    /// Queries a provider's live model list. When omitted <see cref="ProxyServer"/> creates one and owns it,
-    /// disposing exactly what it created and never a client the caller still uses elsewhere.
+    /// Queries a provider's live model list. Tests pass a stub-wrapped instance; production omits this
+    /// and supplies <see cref="HttpClientFactory"/> instead.
     /// </summary>
     public HttpClient? HttpClient { get; init; }
+
+    /// <summary>
+    /// Creates a fresh <see cref="ManagementFacade.HttpClientName"/> client per management probe.
+    /// Production passes the outer container's factory; tests that pass <see cref="HttpClient"/> omit it.
+    /// </summary>
+    public IHttpClientFactory? HttpClientFactory { get; init; }
 
     /// <summary>Per-provider budgets. When absent, providers report no caps or spend and budget edits are unavailable.</summary>
     public ProviderBudgetStore? BudgetStore { get; init; }

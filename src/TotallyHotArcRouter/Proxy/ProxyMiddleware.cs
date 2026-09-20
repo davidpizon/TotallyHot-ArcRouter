@@ -55,6 +55,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     internal const string RoutedModelHeaderName = "X-ArcRouter-Routed-Model";
 
     /// <summary>
+    /// The named <see cref="HttpClient"/> this middleware resolves via <see cref="IHttpClientFactory"/>
+    /// for upstream forwarding.
+    /// </summary>
+    public const string HttpClientName = nameof(ProxyMiddleware);
+
+    /// <summary>
     /// Response header carrying the <see cref="RoutingSubstitutionReason"/> for why the two headers above differ, if
     /// they do.
     /// </summary>
@@ -145,7 +151,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly BedrockInvocationHandler _bedrockInvocationHandler;
     private readonly IBudgetEnforcer? _budgetStore;
     private readonly ICircuitBreaker _circuitBreaker;
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
     private readonly InFlightRequestGauge? _inFlightGauge;
     private readonly IProviderInteractionStatusStore? _interactionStatusStore;
     private readonly RequestInterceptor _interceptor;
@@ -163,10 +170,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // disposing it here would pull it out from under other consumers of the same DI-owned instance.
     private readonly bool _ownsBedrockClientFactory;
 
-    // Same ownership rule as _ownsBedrockClientFactory, for the same reason: true only when no client was
-    // supplied and this instance built its own. A supplied HttpClient belongs to whoever supplied it -
-    // in the real app that is the DI container, and in tests it is usually a client wrapping a stub
-    // handler the test still uses afterward - so disposing it here would pull it out from under its owner.
+    // Same ownership rule as _ownsBedrockClientFactory, for the same reason: true only when no client and
+    // no factory were supplied and this instance built its own fallback. A supplied HttpClient belongs to
+    // whoever supplied it - in tests it is usually a client wrapping a stub handler the test still uses
+    // afterward - so disposing it here would pull it out from under its owner. Factory-created clients are
+    // leased per attempt and disposed by that attempt's `using`, never here.
     private readonly bool _ownsHttpClient;
     private readonly IRateLimitHeaderCapture _rateLimitCapture;
 
@@ -183,27 +191,39 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// </summary>
     /// <param name="logger">Logger instance.</param>
     /// <param name="interceptor">Request/response interceptor.</param>
-    /// <param name="httpClient">Optional HTTP client used for forwarding requests.</param>
+    /// <param name="httpClient">
+    /// Optional HTTP client used for forwarding requests. Tests pass a stub-wrapped instance; production
+    /// omits this and supplies <paramref name="httpClientFactory"/> instead.
+    /// </param>
     /// <param name="dependencies">
     /// The optional collaborators this instance can be given, carried as one named object - see
     /// <see cref="ProxyMiddlewareDependencies"/>'s own remarks for why. <see langword="null"/> (the
     /// default) is equivalent to an empty <see cref="ProxyMiddlewareDependencies"/>: every optional
     /// feature falls back to its documented behaviorally-inert default, exactly as before this bag existed.
     /// </param>
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="HttpClientName"/> client per upstream attempt so this singleton does not
+    /// capture a handler past <c>IHttpClientFactory</c>'s rotation. Required in production; tests that
+    /// pass <paramref name="httpClient"/> omit it.
+    /// </param>
     public ProxyMiddleware(
         ILogger<ProxyMiddleware> logger,
         RequestInterceptor interceptor,
         HttpClient? httpClient = null,
-        ProxyMiddlewareDependencies? dependencies = null)
+        ProxyMiddlewareDependencies? dependencies = null,
+        IHttpClientFactory? httpClientFactory = null)
     {
         _logger = logger;
         _interceptor = interceptor;
-        _ownsHttpClient = httpClient is null;
-        _httpClient = httpClient ?? new HttpClient(new HttpClientHandler
-        {
-            AllowAutoRedirect = false,
-            UseCookies = false
-        });
+        _httpClientFactory = httpClientFactory;
+        _ownsHttpClient = httpClient is null && httpClientFactory is null;
+        _httpClient = httpClient ?? (httpClientFactory is null
+            ? new HttpClient(new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false
+            })
+            : null);
         _translators = dependencies?.Translators ?? NoTranslators;
         _budgetStore = dependencies?.BudgetStore;
         _rateLimitCapture = dependencies?.RateLimitCapture ?? NullRateLimitHeaderCapture.Instance;
@@ -261,15 +281,15 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     /// <see cref="BedrockRuntimeClientFactory"/> (see <see cref="_ownsBedrockClientFactory"/>) and the
     /// fallback <see cref="HttpClient"/> (see <see cref="_ownsHttpClient"/>). Each is a no-op when the
     /// corresponding dependency was supplied, since a supplied instance's lifetime belongs to its own
-    /// owner - the DI container in the real app. <see cref="ProxyMiddleware"/> is itself a DI-registered
-    /// singleton, so the container invokes this at shutdown the same way it would for any other
-    /// disposable singleton.
+    /// owner. Factory-created clients are leased per upstream attempt and disposed there, never here.
+    /// <see cref="ProxyMiddleware"/> is itself a DI-registered singleton, so the container invokes this
+    /// at shutdown the same way it would for any other disposable singleton.
     /// </summary>
     public void Dispose()
     {
         if (_ownsBedrockClientFactory && _bedrockClientFactory is IDisposable disposable) disposable.Dispose();
 
-        if (_ownsHttpClient) _httpClient.Dispose();
+        if (_ownsHttpClient) _httpClient?.Dispose();
     }
 
     /// <inheritdoc/>
@@ -495,10 +515,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 rewrittenBody: rewrittenBody);
 
             var stopwatch = Stopwatch.StartNew();
+            using var factoryClient = _httpClientFactory?.CreateClient(HttpClientName);
+            var sendClient = factoryClient ?? _httpClient!;
             HttpResponseMessage responseMessage;
             try
             {
-                responseMessage = await _httpClient.SendAsync(request: requestMessage,
+                responseMessage = await sendClient.SendAsync(request: requestMessage,
                     completionOption: HttpCompletionOption.ResponseHeadersRead,
                     cancellationToken: context.RequestAborted);
             }

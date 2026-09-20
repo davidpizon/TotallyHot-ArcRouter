@@ -186,6 +186,8 @@ internal static class ProxyServiceCollectionExtensions
         // tray calls to read/toggle it), so a toggle takes effect on the very next request.
         services.AddSingleton<IRoutingGate, RoutingGateStore>();
 
+        services.AddHttpClient(ProxyMiddleware.HttpClientName);
+
         // ProxyMiddleware takes its ~25 optional collaborators as one ProxyMiddlewareDependencies
         // bag rather than individual constructor parameters, so the container can no longer
         // auto-assemble it via plain constructor injection - this factory does that assembly
@@ -247,7 +249,7 @@ internal static class ProxyServiceCollectionExtensions
         // resolution, and validation happen in exactly one place. Registered here so MCP (which lives in
         // this outer container) can resolve it; ProxyServer builds its own instance from the same
         // underlying stores for REST - the facade is stateless, so the two instances behave identically.
-        services.AddSingleton<HttpClient>();
+        services.AddHttpClient(ManagementFacade.HttpClientName);
         // The shared, rotatable management token (web GUI migration plan Phase P4): a single outer-
         // container singleton passed by reference into both McpHostedService (below, resolved via
         // ordinary constructor injection) and the proxy inner host (via ProxyServerDependencies in
@@ -348,6 +350,7 @@ internal static class ProxyServiceCollectionExtensions
                     ManagementApi = new ManagementApiDependencies(sp.GetRequiredService<IProviderConfigStore>())
                     {
                         Environment = sp.GetRequiredService<IEnvironmentVariableProvider>(),
+                        HttpClientFactory = sp.GetRequiredService<IHttpClientFactory>(),
                         BudgetStore = sp.GetRequiredService<ProviderBudgetStore>(),
                         EndpointScanner = sp.GetRequiredService<ProviderEndpointScanner>(),
                         CapabilityStore = sp.GetRequiredService<ToolCallCapabilityStore>(),
