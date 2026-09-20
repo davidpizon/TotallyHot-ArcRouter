@@ -77,7 +77,8 @@ public sealed class OpenAiCompatibleDropInTests
     [Fact]
     public void Readme_contains_the_generated_drop_in_section_verbatim()
     {
-        var readme = File.ReadAllText(Path.Combine(FindRepoRoot(), "README.md"));
+        var readme = File.ReadAllText(Path.Combine(FindRepoRoot(), "README.md"))
+            .Replace(oldValue: "\r\n", newValue: "\n", comparisonType: StringComparison.Ordinal);
 
         Assert.Contains(OpenAiCompatibleDropIn.BuildReadmeMarkdown(), readme);
         Assert.Contains(OpenAiCompatibleDropIn.LatestReleaseUrl, readme);
