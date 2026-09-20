@@ -24,7 +24,7 @@ were the same measurement.
 | Figure | What it answers | Where it lives | Oracle |
 |---|---|---|---|
 | **Estimated regret** | Did this live request beat the untrained baseline under the *configured* live reward \(r = \varepsilon_1 s + \varepsilon_2 \kappa\)? | `taxonomy_comparisons.estimated_regret`, computed by [`RewardWeights.ComputeEstimatedRegret`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RewardWeights.cs) | Predicted: the baseline response was never produced |
-| **Estimated net savings** | Did this live request cost less than the untrained baseline? \(\kappa_{\text{base}} - \kappa_{\text{act}}\) — cost only, **not** \(r\) | `taxonomy_comparisons.estimated_net_savings_usd`; this is the **only** half the Cost Analytics Routing ROI chart plots | Predicted cost, observed actual cost |
+| **Estimated net savings** | Did this live request cost less than the untrained baseline? \(\kappa_{\text{base}} - \kappa_{\text{act}}\) — cost only, **not** \(r\) | `taxonomy_comparisons.estimated_net_savings_usd`; this is the **only** half the Cost Analytics Routing ROI chart plots | Predicted baseline cost, recorded serving cost |
 | **CumReg** | Over a CodeRouterBench split, how far was this policy from the per-task oracle under \(r\)? | Governance → Regret Harness markdown table, via [`RegretReplayResult`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RegretReplayResult.cs) | Measured: every model was scored on every task |
 
 Estimated regret and CumReg share the *algebra* of \(r\). Their *weights* need not match: live
@@ -233,7 +233,9 @@ deliberately not projected either — it gates a promotion decision, not an oper
 
 A turn whose baseline cost is unknown is **skipped**, not drawn at zero.
 
-The feed is `/admin/usage/routing-roi` (`ManagementReportingService.GetRoutingRoiAsync`), polled
+The feed is the `UsageAdminService.GetRoutingRoi` gRPC call
+([`admin.proto`](../src/Protos/admin.proto)) served by `UsageAdminGrpcService`, which delegates to
+`ManagementReportingService.GetRoutingRoiAsync`. It is polled
 every 30 seconds, because comparison work is a background drain rather than request-time
 telemetry.
 

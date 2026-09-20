@@ -17,7 +17,7 @@ shows service status - it renders none of the UI below itself.
 ## Purpose
 
 The dashboard presents routing, cost, and governance telemetry for the TotallyHotArcRouter proxy: which
-requests were routed to which upstream model, how much that saved versus a worst-case baseline, token
+requests were routed to which upstream model, how much that saved versus the frozen untrained baseline, token
 volume trends, model market share, and per-provider budget status.
 
 **Current status: mixed live and mock data.** The **Sessions** tab (formerly "Live Stream") and the **Console** tab are
@@ -183,16 +183,22 @@ flowchart TD
      to). The chart models are built by `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder.Build` (pure,
      unit-tested in `TotallyHot.ArcRouter.Gui.Charts.Tests`), serialized with `ChartJson`, and rendered
      through the shared `<EChart>` host + `wwwroot/js/echarts-interop.js`.
-   - **Data source**: the corpus is the live conversation turns (real tokens/cost/TTFT/model/
-     timestamp) **merged with** `MockData.BuildMetricHistory(now)` - a deterministic, timestamped
-     multi-session history spanning the last hour back through months, with fixed exemplar events (a
-     token runaway, a TTFT spike, a fallback, context breaches) so every chart shows its special state
-     even with no proxy running. Every rich tooltip figure (worst-case baseline, per-step model split,
-     cached/uncached tokens, context token counts, cold-start split) is **derived in `CostChartBuilder`**
-     from each turn's existing fields, so nothing new has to flow through telemetry. This supersedes the
-     tab's former combo chart (a single metric line plus per-model stacked bars). Note that ROI, tool
-     steps, cache, and context are still 0 for *live* turns (no proxy source - see
-     `../router/telemetry.md`), so the mock history is what demonstrates those metrics.
+   - **Data source** (`CostAnalytics.BuildCorpus`): **Routing ROI has its own corpus** - the
+     frozen-baseline comparison feed (`UsageAdminService.GetRoutingRoi`), one point per compared
+     routing decision. Live turns and usage rollups cannot contribute to it, because neither knows
+     what the frozen baseline would have picked. Every other metric merges rollup-backed history with
+     live conversation turns (real tokens/cost/TTFT/model/timestamp).
+     `MockData.BuildMetricHistory(now)` is a **fallback, not a merge**: a deterministic, timestamped
+     multi-session history with fixed exemplar events (a token runaway, a TTFT spike, a fallback,
+     context breaches), used only when there is nothing real at all - no ROI history and no live
+     conversations - so every chart still shows its special state with no proxy running. Tool steps,
+     cache, and context remain 0 for *live* turns (no proxy source - see `../router/telemetry.md`),
+     so the mock history is what demonstrates those; ROI is no longer in that list. Every rich
+     tooltip figure (the frozen untrained baseline's estimated cost, per-step model split,
+     cached/uncached tokens, context token counts, cold-start split) is **derived in
+     `CostChartBuilder`** from each turn's existing fields, so nothing new has to flow through
+     telemetry. This supersedes the tab's former combo chart (a single metric line plus per-model
+     stacked bars).
 
      When the corpus is that mock fallback rather than real rollups/live turns, the chart subtitle
      carries a **`· demo data`** marker (same intent as the Dashboard tab's `(demo)` labels, §3).

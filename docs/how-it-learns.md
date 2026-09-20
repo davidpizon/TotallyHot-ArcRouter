@@ -216,7 +216,7 @@ ensemble actually beat the simple baseline?**
 
 This is why every receipt stores which model the frozen baseline *would* have picked — the
 counterfactual — together with the probing-prior score that pick was based on. The comparison is
-scored as *estimated regret* under the same reward the rest of the system uses:
+scored as *estimated regret* under the cost-aware reward `r = ε₁·s + ε₂·κ`:
 
 ```
 routed reward    = ε₁ · observed score  + ε₂ · actual cost
@@ -224,6 +224,12 @@ baseline reward  = ε₁ · predicted score + ε₂ · counterfactual cost
 
 regret = baseline reward − routed reward     // positive means the router lost
 ```
+
+Reporting a decision under this reward is **not** the same as making it under this reward. Only the
+cost-aware utility policy selects on ε₁/ε₂; the Orchestrator/Agent path that serves general traffic
+never reads them (see "So where does cost actually come in?" below). The report card scores every
+comparison the same way regardless — that is the point of a yardstick — but a reader should not infer
+that live routing was optimizing the number being reported.
 
 The quality half of that difference — observed score minus the frozen policy's predicted score — is
 the **score-delta**. It is not stored as its own column; it is recovered from the two scores already
