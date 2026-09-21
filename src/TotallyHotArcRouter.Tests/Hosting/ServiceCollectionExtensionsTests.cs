@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Quality.Grading;
@@ -83,6 +84,28 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());
         Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
         Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
+    }
+
+    [Fact]
+    public void AddTotallyHotArcRouter_PriceSourceClient_CarriesAttributionHeaders()
+    {
+        // The price sources no longer set these themselves: the named-client registration is now the one
+        // place they live, so pin it there.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.Configure<RoutingOptions>(_ => { });
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddTotallyHotArcRouter();
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(PriceSourceRegistry.HttpClientName);
+
+        Assert.Equal(expected: ["TotallyHot Arc Router"], actual: client.DefaultRequestHeaders.GetValues("X-Title"));
+        Assert.Equal(expected: ["https://github.com/davidpizon/TotallyHot-ArcRouter"],
+            actual: client.DefaultRequestHeaders.GetValues("HTTP-Referer"));
     }
 
     /// <summary>
