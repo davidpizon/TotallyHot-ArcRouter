@@ -52,14 +52,19 @@ public sealed class LearningReportCardTests
     }
 
     [Fact]
-    public void Clicking_a_time_filter_switches_the_active_selection()
+    public async Task Clicking_a_time_filter_switches_the_active_selection()
     {
         using var ctx = CreateContext();
 
         var cut = ctx.Render<LearningReportCard>();
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").Click();
+        // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context: the initial
+        // reload against the unreachable endpoint can re-render between a plain FindAll() and Click(),
+        // invalidating the handler ID Click() dispatches against (Bunit.Rendering.UnknownEventHandlerIdException).
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").Click());
 
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Year").GetAttribute("class").Should()
-            .Contain("active");
+        await cut.WaitForAssertionAsync(
+            assertion: () => cut.FindAll("button").First(b => b.TextContent.Trim() == "Year")
+                .GetAttribute("class").Should().Contain("active"),
+            timeout: TimeSpan.FromSeconds(5));
     }
 }
