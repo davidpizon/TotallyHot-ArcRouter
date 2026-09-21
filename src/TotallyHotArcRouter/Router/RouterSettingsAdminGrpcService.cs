@@ -46,13 +46,13 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     /// The inclusive lower bound <see cref="UpdateRouterSettings"/> enforces on <c>embedding_memory_capacity</c>,
     /// matching the GUI's own client-side minimum.
     /// </summary>
-    public const int MinEmbeddingMemoryCapacity = 500;
+    private const int MinEmbeddingMemoryCapacity = 500;
 
     /// <summary>
     /// The inclusive upper bound <see cref="UpdateRouterSettings"/> enforces on <c>embedding_memory_capacity</c>,
     /// matching the GUI's own client-side maximum.
     /// </summary>
-    public const int MaxEmbeddingMemoryCapacity = 50_000;
+    private const int MaxEmbeddingMemoryCapacity = 50_000;
 
     private readonly EmbeddingMemory? _embeddingMemory;
     private readonly JudgeModelSelector _judgeModelSelector;

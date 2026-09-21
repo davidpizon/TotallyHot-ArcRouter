@@ -31,18 +31,18 @@ public enum RouterConnectionState
 /// <see cref="RoutingModeStore"/>, ...), which load once on a component's <c>OnInitializedAsync</c>, this
 /// one polls continuously in the background (<see cref="DefaultPollInterval"/>): the tray needs an always-fresh,
 /// synchronously readable signal at the moment the user right-clicks the icon, and there is no Blazor
-/// component lifecycle to hang a load off of while the dashboard window is hidden - which is almost always
-/// (see <c>TrayWindowManager</c>). Registered as a singleton in <c>MauiProgram</c>; <c>TrayWindowManager</c>
-/// resolves it via the MAUI service provider once the window is attached.
+/// component lifecycle to hang a load off of while the dashboard window is hidden. The shipping tray runs
+/// <c>TotallyHotArcRouter.Tray.Core.RoutingGateMonitor</c> instead - this store is the cross-platform
+/// equivalent and, since the WASM dashboard drives the toggle through its own components, currently has no
+/// production registration.
 /// </summary>
 public sealed class RoutingGateStore : IAsyncDisposable
 {
     /// <summary>The production polling cadence. Overridable via the constructor so tests don't wait out the real 3 seconds.</summary>
-    public static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(3);
 
     private readonly IRoutingGateAdminClient _client;
     private readonly ILogger<RoutingGateStore>? _logger;
-    private readonly IDisposable? _ownedClient;
     private readonly CancellationTokenSource _pollCts = new();
     private readonly TimeSpan _pollInterval;
     private readonly Task _pollTask;
@@ -53,34 +53,9 @@ public sealed class RoutingGateStore : IAsyncDisposable
     private string? _lastFailureMessage;
     private bool _wasUsable;
 
-    /// <summary>Initializes a new instance of the <see cref="RoutingGateStore"/> class and starts polling.</summary>
-    /// <param name="channelProvider">
-    /// Supplies the shared call invoker this store's client is constructed over (web GUI migration plan
-    /// Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
-    /// </param>
-    /// <param name="logger">Optional logger.</param>
-    /// <param name="pollInterval">
-    /// How often to re-poll the router; defaults to <see cref="DefaultPollInterval"/>. Overridable
-    /// so a test can assert on the poll loop without waiting out the real cadence.
-    /// </param>
-    public RoutingGateStore(
-        IRouterChannelProvider channelProvider,
-        ILogger<RoutingGateStore>? logger = null,
-        TimeSpan? pollInterval = null)
-    {
-        ArgumentNullException.ThrowIfNull(channelProvider);
-
-        _logger = logger;
-        _pollInterval = pollInterval ?? DefaultPollInterval;
-        var client = new RoutingGateAdminClient(channelProvider.CallInvoker);
-        _client = client;
-        _ownedClient = client;
-        _pollTask = PollLoopAsync(_pollCts.Token);
-    }
-
     /// <summary>
     /// Initializes a new instance of the <see cref="RoutingGateStore"/> class over a caller-supplied client.
-    /// The seam tests use to drive the store without a live proxy; the caller owns the client's lifetime.
+    /// The caller owns the client's lifetime.
     /// </summary>
     /// <param name="client">The client this store polls and mutates through.</param>
     /// <param name="logger">Optional logger.</param>
@@ -94,7 +69,6 @@ public sealed class RoutingGateStore : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(client);
         _pollInterval = pollInterval ?? DefaultPollInterval;
         _client = client;
-        _ownedClient = null;
         _logger = logger;
         _pollTask = PollLoopAsync(_pollCts.Token);
     }
@@ -188,7 +162,6 @@ public sealed class RoutingGateStore : IAsyncDisposable
         }
 
         _pollCts.Dispose();
-        _ownedClient?.Dispose();
     }
 
     /// <summary>
@@ -199,9 +172,6 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// which of the two happened.
     /// </summary>
     public event Action? BecameUnusable;
-
-    /// <summary>Raised after <see cref="IsReachable"/> or <see cref="IsEnabled"/> changes.</summary>
-    public event Action? Changed;
 
     /// <summary>Enables routing, returning the confirmed post-mutation state.</summary>
     /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
@@ -267,8 +237,8 @@ public sealed class RoutingGateStore : IAsyncDisposable
     }
 
     /// <summary>
-    /// Updates the cached state, raising <see cref="Changed"/> on any change and
-    /// <see cref="BecameUnusable"/> exactly once on a usable-to-unusable transition.
+    /// Updates the cached state, raising <see cref="BecameUnusable"/> exactly once on a usable-to-unusable
+    /// transition. Every other reader polls the properties directly, so no change notification is raised.
     /// </summary>
     /// <param name="connectionState">How the poll (or mutation) that produced this update turned out.</param>
     /// <param name="failureMessage">The failure detail, or <see langword="null"/> on success.</param>
@@ -278,12 +248,10 @@ public sealed class RoutingGateStore : IAsyncDisposable
     /// </param>
     private void UpdateState(RouterConnectionState connectionState, string? failureMessage, bool isEnabled)
     {
-        bool changed;
         bool becameUnusable;
         var isUsable = connectionState == RouterConnectionState.Connected;
         lock (_stateGate)
         {
-            changed = _connectionState != connectionState || (isUsable && _isEnabled != isEnabled);
             becameUnusable = _wasUsable && !isUsable;
             _wasUsable = isUsable;
             _connectionState = connectionState;
@@ -292,7 +260,5 @@ public sealed class RoutingGateStore : IAsyncDisposable
         }
 
         if (becameUnusable) BecameUnusable?.Invoke();
-
-        if (changed) Changed?.Invoke();
     }
 }

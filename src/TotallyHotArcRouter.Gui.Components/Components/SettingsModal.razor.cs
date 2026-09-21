@@ -5,7 +5,8 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 namespace TotallyHot.ArcRouter.Gui.Components;
 
 /// <summary>
-/// System settings modal: telemetry connection settings, the adaptive-routing toggle and sample size
+/// System settings modal: the OpenAI-compatible client drop-in (one base URL, <c>model: auto</c>),
+/// the adaptive-routing toggle and sample size
 /// (docs/router/self-organizing-classification-plan.md Phase T6), the shadow-judge toggle and backbone
 /// picker (docs/router/geval-shadow-scoring-plan.md), the transcription-capture toggle and its Clear action
 /// (docs/router/self-organizing-classification-plan.md Phase T1), the Cost Reconciliation status and
@@ -55,13 +56,10 @@ public partial class SettingsModal
     private bool _managementTokenCopied;
     private bool _managementTokenFailed;
     private string? _managementTokenMessage;
-    private string _persistedTelemetryAddress = string.Empty;
     private string? _routerSettingsMessage;
     private bool _routerSettingsSaveFailed;
     private bool _routerSettingsSaving;
     private string _sampleSizeText = RecommendedEmbeddingMemoryCapacity.ToString();
-    private string _telemetryAddress = string.Empty;
-    private bool _telemetryAddressSaved;
     private bool _transcriptCaptureEnabled;
     private string? _updateErrorMessage;
 
@@ -74,13 +72,6 @@ public partial class SettingsModal
 
     /// <summary>Whether the typed confirmation text exactly matches <see cref="Required"/>.</summary>
     private bool IsConfirmed => _confirmText == Required;
-
-    /// <summary>Whether the telemetry address field differs from the last-persisted value.</summary>
-    private bool HasTelemetryAddressChanged => _telemetryAddress != _persistedTelemetryAddress;
-
-    /// <summary>Whether the telemetry address field holds a real, savable pending change.</summary>
-    private bool CanSaveTelemetryAddress =>
-        HasTelemetryAddressChanged && !string.IsNullOrWhiteSpace(_telemetryAddress.Trim());
 
     // Read off the live (possibly out-of-bounds or unparsable) text rather than the clamped
     // _embeddingMemoryCapacity, which only updates on blur/save - otherwise the warning would lag a full
@@ -117,10 +108,6 @@ public partial class SettingsModal
     /// <inheritdoc/>
     protected override async Task OnInitializedAsync()
     {
-        var loadedAddress = SettingsStore.Load().TelemetryServerAddress;
-        _telemetryAddress = loadedAddress;
-        _persistedTelemetryAddress = loadedAddress;
-
         UpdateStore.Changed += OnUpdateStoreChanged;
         await UpdateStore.LoadAsync();
 
@@ -158,32 +145,6 @@ public partial class SettingsModal
         _codeJudgeEnabled = settings.CodeJudgeEnabled;
         _iceScoreEnabled = settings.IceScoreEnabled;
         _raceEnabled = settings.RaceEnabled;
-    }
-
-    /// <summary>Updates the address field and clears any stale "Saved" confirmation from a previous save.</summary>
-    private void OnTelemetryAddressInput(ChangeEventArgs e)
-    {
-        _telemetryAddress = (string?)e.Value ?? string.Empty;
-        _telemetryAddressSaved = false;
-    }
-
-    /// <summary>Persists the telemetry address once the operator explicitly confirms it via the Save button.</summary>
-    private void SaveTelemetryAddress()
-    {
-        var trimmed = _telemetryAddress.Trim();
-        if (string.IsNullOrWhiteSpace(trimmed)) return;
-
-        _telemetryAddress = trimmed;
-        _persistedTelemetryAddress = trimmed;
-        SettingsStore.Save(SettingsStore.Load() with { TelemetryServerAddress = trimmed });
-        _telemetryAddressSaved = true;
-    }
-
-    /// <summary>Discards the in-progress edit, restoring the field to the last-persisted address.</summary>
-    private void UndoTelemetryAddress()
-    {
-        _telemetryAddress = _persistedTelemetryAddress;
-        _telemetryAddressSaved = false;
     }
 
     /// <summary>Flips the adaptive-routing toggle and saves it immediately.</summary>

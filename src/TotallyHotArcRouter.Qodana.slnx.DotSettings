@@ -22,11 +22,11 @@
   <!--
     Record positional properties that only a serializer ever reads.
 
-    These fire on the JSON wire contracts: ProviderAdminModels.cs alone is 37 records behind the
-    proxy's /admin/* API, and LocalEndpointResponder's records are the /v1/models, /api/tags and
-    /api/show payloads. Their properties are constructed in C# and then read by System.Text.Json
-    through reflection, which the inspection cannot see, so it reports every wire field as unused.
-    Acting on it would delete the fields and silently break the API.
+    These fire on the JSON wire contracts: ProviderAdminModels.cs alone is 37 records behind
+    ProviderAdminService/UsageAdminService, and LocalEndpointResponder's records are the /v1/models,
+    /api/tags and /api/show payloads. Their properties are constructed in C# and then read by
+    System.Text.Json through reflection, which the inspection cannot see, so it reports every wire
+    field as unused. Acting on it would delete the fields and silently break the API.
   -->
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=NotAccessedPositionalProperty_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=NotAccessedPositionalProperty_002ELocal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
@@ -49,34 +49,48 @@
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=AutoPropertyCanBeMadeGetOnly_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
   <!--
-    "This public member/type is unused" - the whole family.
+    "This public member/type is unused" leftovers. Phase P9 put the WASM GUI (Gui.Web, Gui.Components,
+    Gui.Admin, Gui.Telemetry, Gui.Charts, Gui.Console) into TotallyHotArcRouter.Qodana.slnx, so the
+    previous "GUI is absent from the Linux scan" justification no longer holds. MemberCanBePrivate,
+    UnusedMember, UnusedMemberInSuper, UnusedType, and EventNeverSubscribedTo are therefore re-enabled.
 
-    The scan cannot see two of this codebase's largest callers, so "unused" is not a claim it is in a
-    position to make about public API:
+    Exactly one blind spot survives the re-enable: Tray (WinForms, net10.0-windows) is still omitted from
+    this scan, so a member whose only caller is Tray reads as unused. SessionRouterConnector and
+    RouterConnectionSupervisor.Provider are the two that do today; both carry a
+    `// ReSharper disable once ...` and a <remarks> naming the reason, so the judgement is recorded at the
+    member rather than re-made on every scan.
 
-      1. TotallyHotArcRouter.Gui and .Gui.Tests are deliberately absent from
-         TotallyHotArcRouter.Qodana.slnx - they target net10.0-windows and cannot build in the Linux
-         container this linter runs in (see that file's own header). 68 of the 132 production
-         findings in this family name an identifier that appears in those two projects.
-      2. The rest are constructed or written by a framework through reflection: System.Text.Json
-         (HuggingFaceTreeEntry and friends exist only as ReadFromJsonAsync<T> targets), ASP.NET Core
-         model binding (SecretWriteRequest, ModelEnabledWriteRequest are minimal-API handler
-         parameters), and the configuration binder.
+    .razor markup is NOT a blind spot - this was checked rather than assumed. ToastService.Changed,
+    ClusterModelAdminStore.Changed and six sibling store events are subscribed only from inline @code in
+    .razor files, and the scan reports none of them. So an unused/unsubscribed finding on a
+    Gui.Components member is a real finding about that member, not an artifact of the linter skipping
+    components. Do not wave one away on "a component probably uses it".
 
-    Acting on these would delete or restrict API the GUI actually calls, and nothing would catch it:
-    the Windows GUI build/test job in dotnet-ci.yml is "if: false", so no CI job compiles that code.
-    Re-enabling that job, or bringing the GUI into a scan that can build it, is what would make this
-    family trustworthy again - at which point these entries should be removed and the findings
-    re-read.
+    The compiler is the arbiter of the remaining cases. Reducing a member to private - or deleting it -
+    and getting a clean build of TotallyHotArcRouter.slnx, which DOES include Tray and DOES compile Razor,
+    settles whether it really had a caller. That is how all 48 MemberCanBePrivate findings were confirmed.
+
+    UnusedMemberInSuper is not a dead-code inspection and should not be read as one. It fires when every
+    call goes through the concrete type instead of the interface, so the member is live and the only
+    question is whether the interface should still declare it - a design change, which needs a reason
+    beyond the scan. Every current instance is suppressed at its declaration with a <remarks> saying so,
+    rather than solution-wide here, so a genuinely new one still gets reported and read on its merits.
+    EventNeverSubscribedTo has the same two shapes and is handled the same way: "only implementations of
+    event X are subscribed to" is the interface-vs-concrete case and is suppressed at the member, while a
+    bare "event X is never subscribed to" is a real finding - it caught three raised-but-ignored events.
+
+    Still suppressed because the scan still cannot see these callers:
+
+      - ClassNeverInstantiated: DI (AddSingleton/AddHostedService) and System.Text.Json
+        ReadFromJsonAsync&lt;T&gt; targets.
+      - UnusedAutoPropertyAccessor: options classes bound via configuration.GetSection().Bind and
+        JSON wire DTOs whose accessors are used only by reflection.
+      - UnusedMethodReturnValue.Global: fluent IServiceCollection returns (see the UnusedParameter
+        block below, which already covers the Local twin).
   -->
-  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=MemberCanBePrivate_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
-  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMemberInSuper_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=ClassNeverInstantiated_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMethodReturnValue_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
-  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedMember_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
   <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedAutoPropertyAccessor_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
-  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=UnusedType_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
-  <s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=EventNeverSubscribedTo_002EGlobal/@EntryIndexedValue">DO_NOT_SHOW</s:String>
 
   <!--
     Abbreviations. "AI" is load-bearing, not cosmetic: ProviderType.OpenAI and ProviderType.AzureOpenAI
@@ -128,11 +142,10 @@
 
     Three families that are each right about the code and wrong about what to do:
 
-      - UnusedParameter: ProviderAdminEndpoints' `key` parameters are bound from the route template
-        by ASP.NET and must keep their names; ProxyMiddleware.InvokeCoreAsync's `next` is the
-        middleware shape; TelemetryPublisher's and SpendTracker's `cancellationToken` and
-        IDimensionInferrer's `language` are interface contracts, and "no current implementation uses
-        it" is not a statement about the API.
+      - UnusedParameter: ProxyMiddleware.InvokeCoreAsync's `next` is the middleware shape;
+        TelemetryPublisher's and SpendTracker's `cancellationToken` and IDimensionInferrer's
+        `language` are interface contracts, and "no current implementation uses it" is not a
+        statement about the API.
       - UnusedMethodReturnValue: AddUpdate, AddQualityAndObservability and AddBackgroundServices
         return IServiceCollection because that is the fluent DI convention, whether or not today's
         caller chains from it.

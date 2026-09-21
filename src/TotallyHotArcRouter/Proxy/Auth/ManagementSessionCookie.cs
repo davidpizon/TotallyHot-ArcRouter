@@ -15,7 +15,7 @@ public static class ManagementSessionCookie
     /// for a sibling subdomain (there are none here, but the guarantee is unconditional) cannot forge
     /// one that overrides this one.
     /// </summary>
-    public const string Name = "__Host-arcrouter-session";
+    private const string Name = "__Host-arcrouter-session";
 
     /// <summary>Sets the session cookie on <paramref name="response"/> with the required <c>__Host-</c> attributes.</summary>
     public static void Write(HttpResponse response, string ticket)

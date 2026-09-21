@@ -79,8 +79,9 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
   model-generated code is a risk this project declines to carry under any isolation. What replaced it,
   in `TotallyHotArcRouter.Quality` (renamed from `.Sandbox`):
   - **Static analysis, deepened.** Roslyn for C# and Acornima for JS/TS give authoritative syntax
-    verdicts; Python and shell keep a heuristic that is now *explicitly marked* non-authoritative and
-    weighted at half. Four composable `IStaticAnalyzer`s add diagnostics, placeholder/stub detection,
+    verdicts; Python and shell keep language-aware heuristics that are *explicitly marked*
+    non-authoritative and weighted at half. Four composable `IStaticAnalyzer`s add diagnostics,
+    placeholder/stub detection,
     truncation detection, and a complexity band.
   - **The judge promoted.** It now contributes to `u_i` on every graded request rather than writing only
     to `judge_shadow_scores`, and defaults **on** when a free backbone resolves.
@@ -169,7 +170,8 @@ flowchart LR
    findings-per-100-lines ratio over a small self-contained smell catalog: magic numbers, long lines, empty
    catch/except blocks, long parameter lists) — plus judge prompt-awareness: `JudgeScoreRequest.Prompt`,
    recovered from a new `PendingPromptCache` mirroring `PendingResponseTextCache` exactly, woven into
-   `GEvalJudgeClient`'s prompt as an optional task section. Full design and rationale:
+   every LLM-grader prompt as a required task section (`GraderQuestionText`); a missing question fails
+   closed rather than grading the response in isolation (GitHub issue #114). Full design and rationale:
    `quality-verifier-architecture.md` §3.2/§5, `code-quality-metrics-assessment.md` §5.1.
    **Q3 shipped**: the LLM grader portfolio — `CodeJudgeGraderClient` (Tong & Zhang's severity-weighted fault
    taxonomy, computed deterministically from the backbone's per-fault severity classifications rather than

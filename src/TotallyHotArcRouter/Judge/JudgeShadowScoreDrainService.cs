@@ -36,9 +36,9 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     /// <param name="queue">The work queue to drain.</param>
     /// <param name="pendingResponseTextCache">Supplies the response text for each job, keyed by correlation id.</param>
     /// <param name="pendingPromptCache">
-    /// Supplies the prompt the response answered, keyed by the same correlation id. Best-effort: a miss
-    /// (aged out, or never cached) still lets the job proceed, just without a task section in the judge
-    /// prompt.
+    /// Supplies the prompt the response answered, keyed by the same correlation id. Required: a miss
+    /// (aged out, never cached, or whitespace-only) abandons the join with
+    /// <c>judge-question-missing</c> rather than letting the judge grade the response in isolation.
     /// </param>
     /// <param name="pendingGraderBackboneCache">
     /// Records which backbone actually judged this request (docs/router/grader-reliability-plan.md, Phase
@@ -128,9 +128,20 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             return;
         }
 
-        // Best-effort: a miss just means the judge grades without a task section, same as an operator
-        // running with transcript-adjacent caching aged out faster than the queue could drain.
-        _pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt);
+        // Fail closed: a recovered response without its question would be graded in isolation, which is
+        // exactly the response-only scoring docs/research/code-quality-metrics-assessment.md §1 forbids.
+        if (!_pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt) ||
+            !GraderQuestionText.IsPresent(prompt))
+        {
+            _logger.LogDebug(
+                message:
+                "No pending user/task question for correlation {CorrelationId}; skipping shadow-judge scoring.",
+                job.CorrelationId);
+            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId,
+                reason: GraderQuestionText.MissingReason("judge"), cancellationToken: stoppingToken)
+                .ConfigureAwait(false);
+            return;
+        }
 
         var stopwatch = Stopwatch.StartNew();
         try
@@ -138,7 +149,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             var result = await _judgeClient
                 .ScoreAsync(
                     request: new JudgeScoreRequest(Dimension: job.Dimension, ResponseText: responseText,
-                        Prompt: prompt ?? string.Empty),
+                        Prompt: prompt),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
             stopwatch.Stop();
 

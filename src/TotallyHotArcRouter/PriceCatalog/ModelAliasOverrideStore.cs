@@ -11,8 +11,8 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 public sealed record ModelAliasOverride(string SourceName, string AggregatorModelKey, string ModelName);
 
 /// <summary>
-/// Persists and reads operator-authored price-override mappings (<see cref="ModelAliasOverride"/>), backing
-/// <c>PUT/DELETE /admin/price-overrides</c>. Runtime-editable with no restart required, per
+/// Persists and reads operator-authored price-override mappings (<see cref="ModelAliasOverride"/>).
+/// Runtime-editable with no restart required, per
 /// <c>docs/router/token-tracking-implementation-plan.md</c> Phase 3 §5.7.
 /// </summary>
 public sealed class ModelAliasOverrideStore

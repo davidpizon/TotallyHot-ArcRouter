@@ -44,11 +44,10 @@ public enum RouterConnectionState
 public sealed class RoutingGateMonitor : IAsyncDisposable
 {
     /// <summary>The production polling cadence. Overridable via the constructor so tests don't wait out the real 3 seconds.</summary>
-    public static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(3);
 
     private readonly IRoutingGateAdminClient _client;
     private readonly ILogger<RoutingGateMonitor>? _logger;
-    private readonly IDisposable? _ownedClient;
     private readonly CancellationTokenSource _pollCts = new();
     private readonly TimeSpan _pollInterval;
     private readonly Task _pollTask;
@@ -77,9 +76,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
 
         _logger = logger;
         _pollInterval = pollInterval ?? DefaultPollInterval;
-        var client = new RoutingGateAdminClient(channelProvider.CallInvoker);
-        _client = client;
-        _ownedClient = client;
+        _client = new RoutingGateAdminClient(channelProvider.CallInvoker);
         _pollTask = PollLoopAsync(_pollCts.Token);
     }
 
@@ -99,7 +96,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(client);
         _pollInterval = pollInterval ?? DefaultPollInterval;
         _client = client;
-        _ownedClient = null;
         _logger = logger;
         _pollTask = PollLoopAsync(_pollCts.Token);
     }
@@ -193,7 +189,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
         }
 
         _pollCts.Dispose();
-        _ownedClient?.Dispose();
     }
 
     /// <summary>
@@ -204,9 +199,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     /// which of the two happened.
     /// </summary>
     public event Action? BecameUnusable;
-
-    /// <summary>Raised after <see cref="IsReachable"/> or <see cref="IsEnabled"/> changes.</summary>
-    public event Action? Changed;
 
     /// <summary>Enables routing, returning the confirmed post-mutation state.</summary>
     /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
@@ -272,8 +264,8 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Updates the cached state, raising <see cref="Changed"/> on any change and
-    /// <see cref="BecameUnusable"/> exactly once on a usable-to-unusable transition.
+    /// Updates the cached state, raising <see cref="BecameUnusable"/> exactly once on a usable-to-unusable
+    /// transition. Every other reader polls the properties directly, so no change notification is raised.
     /// </summary>
     /// <param name="connectionState">How the poll (or mutation) that produced this update turned out.</param>
     /// <param name="failureMessage">The failure detail, or <see langword="null"/> on success.</param>
@@ -283,12 +275,10 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     /// </param>
     private void UpdateState(RouterConnectionState connectionState, string? failureMessage, bool isEnabled)
     {
-        bool changed;
         bool becameUnusable;
         var isUsable = connectionState == RouterConnectionState.Connected;
         lock (_stateGate)
         {
-            changed = _connectionState != connectionState || (isUsable && _isEnabled != isEnabled);
             becameUnusable = _wasUsable && !isUsable;
             _wasUsable = isUsable;
             _connectionState = connectionState;
@@ -297,7 +287,5 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
         }
 
         if (becameUnusable) BecameUnusable?.Invoke();
-
-        if (changed) Changed?.Invoke();
     }
 }

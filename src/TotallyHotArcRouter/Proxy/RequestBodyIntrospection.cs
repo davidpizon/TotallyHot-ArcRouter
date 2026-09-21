@@ -46,7 +46,7 @@ internal static class RequestBodyIntrospection
     /// per-model arming exists to avoid.
     /// </remarks>
     /// <param name="jsonObject">The already-parsed request body.</param>
-    public static bool CarriesTools(JsonObject jsonObject)
+    private static bool CarriesTools(JsonObject jsonObject)
     {
         return jsonObject["tools"] is JsonArray { Count: > 0 };
     }
@@ -61,7 +61,7 @@ internal static class RequestBodyIntrospection
     /// and the answer to that is yes for every value they could have sent.
     /// </remarks>
     /// <param name="jsonObject">The already-parsed request body.</param>
-    public static bool CarriesResponseFormat(JsonObject jsonObject)
+    private static bool CarriesResponseFormat(JsonObject jsonObject)
     {
         return jsonObject["response_format"] is not null;
     }
@@ -78,7 +78,7 @@ internal static class RequestBodyIntrospection
     /// as its own, or a result whose role its template has never seen.
     /// </remarks>
     /// <param name="jsonObject">The already-parsed request body.</param>
-    public static bool CarriesToolHistory(JsonObject jsonObject)
+    private static bool CarriesToolHistory(JsonObject jsonObject)
     {
         if (jsonObject["messages"] is not JsonArray messages) return false;
 

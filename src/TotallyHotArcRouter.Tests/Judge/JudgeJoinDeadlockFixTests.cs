@@ -97,10 +97,12 @@ public class JudgeJoinDeadlockFixTests
     private static JudgeShadowScoreDrainService CreateDrainService(PendingResponseTextCache responseTextCache,
         IQualityScoreAggregator aggregator, JudgeScoreResult? judgeResult)
     {
+        var promptCache = new PendingPromptCache(Options.Create(JudgeOptions()));
+        promptCache.Set(correlationId: "corr-1", prompt: "write a function that adds two numbers");
         return new JudgeShadowScoreDrainService(
             queue: new JudgeShadowScoreQueue(Options.Create(JudgeOptions())),
             pendingResponseTextCache: responseTextCache,
-            pendingPromptCache: new PendingPromptCache(Options.Create(JudgeOptions())),
+            pendingPromptCache: promptCache,
             pendingGraderBackboneCache: new PendingGraderBackboneCache(Options.Create(JudgeOptions())),
             judgeClient: new FakeJudgeClient(result: judgeResult),
             store: new FakeJudgeShadowScoreStore(),

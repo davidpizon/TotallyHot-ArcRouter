@@ -32,8 +32,8 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// The move also collapses a folder-name split: <c>appsettings.json</c> pinned <c>DatabasePath</c> under
 /// <c>TotallyHotArcRouter\</c> while the four other defaults used <c>TotallyHot.ArcRouter\</c>, so one
 /// install wrote two sibling directories. All five now share
-/// <see cref="MachineSharedDirectoryName"/>. <see cref="LegacyStorageMigration"/> adopts files from
-/// either old spelling on first run.
+/// <see cref="AppDataPaths.ApplicationDirectoryName"/>. <see cref="LegacyStorageMigration"/> adopts files
+/// from either old spelling on first run.
 /// </para>
 /// <para>
 /// These files inherit <c>%ProgramData%</c>'s default ACL, which grants <c>Users</c> read - enough to
@@ -65,7 +65,7 @@ public sealed class StorageOptions
     // Path.GetDirectoryName("/data") is "/", so every one of these five paths resolved to
     // "/TotallyHotArcRouter/<file>" - outside the mounted volume and unwritable, crashing startup with
     // UnauthorizedAccessException. Every OTHER machine-shared consumer (ManagementAccessToken,
-    // ProtectedSecretStore, RoutingGateStore, TelemetryTlsCertificate) already called
+    // ProtectedSecretStore, RoutingGateStore, LocalCertificateAuthority) already called
     // AppDataPaths.ResolveMachineSharedDirectory() directly with no such peel, so they were never affected
     // - only this class's five paths silently diverged from where the token/secrets/CA actually live.
     // Fixed by dropping the redundant "TotallyHotArcRouter\" segment from each default (below) and having
@@ -76,16 +76,6 @@ public sealed class StorageOptions
     // Still recognized even though no default uses it any more: an operator's existing appsettings.json
     // may pin a %LOCALAPPDATA% path, and LegacyStorageMigration builds the pre-move locations from it.
     private const string LocalAppDataToken = "%LOCALAPPDATA%";
-
-    /// <summary>
-    /// The single machine-wide directory every file above lives in, shared with
-    /// <c>RoutingGateStore</c>'s state file and <c>ManagementAccessToken</c>'s token. Public so
-    /// <see cref="LegacyStorageMigration"/> can tell a default-located file (which it may migrate) from
-    /// one an operator deliberately pointed somewhere else (which it must leave alone). Mirrors
-    /// <see cref="AppDataPaths.ApplicationDirectoryName"/>, which <see cref="ResolveMachineSharedDirectory"/>
-    /// now delegates to.
-    /// </summary>
-    public const string MachineSharedDirectoryName = AppDataPaths.ApplicationDirectoryName;
 
     // The two per-user directories these files lived in before the move to %ProgramData%. Both spellings
     // existed at once: appsettings.json pinned DatabasePath under the dotless name while the four
@@ -228,7 +218,7 @@ public sealed class StorageOptions
         // token would already be gone by the time this method's old ordering checked for it) and giving
         // every default a different, ApplicationDirectoryName-less directory than every other
         // machine-shared consumer (ManagementAccessToken, ProtectedSecretStore, RoutingGateStore,
-        // TelemetryTlsCertificate) resolves to. Doing our own replacement first makes
+        // LocalCertificateAuthority) resolves to. Doing our own replacement first makes
         // AppDataPaths.ResolveMachineSharedDirectory() the one source of truth on every platform,
         // Windows included - a real regression this exact reordering was needed to catch and fix.
         var withTokensExpanded = rawPath;

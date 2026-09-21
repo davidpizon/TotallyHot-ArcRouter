@@ -18,7 +18,7 @@ public class RoutingGateAdminClientTests
     public async Task GetAsync_ReturnsTheGatesCurrentState()
     {
         var stub = new StubClient { Response = new Contract.RoutingGateResponse { Enabled = false } };
-        using var client = new RoutingGateAdminClient(stub);
+        var client = new RoutingGateAdminClient(stub);
 
         var enabled = await client.GetAsync(TestContext.Current.CancellationToken);
 
@@ -29,7 +29,7 @@ public class RoutingGateAdminClientTests
     public async Task SetAsync_ReturnsTheConfirmedPostMutationState()
     {
         var stub = new StubClient { Response = new Contract.RoutingGateResponse { Enabled = true } };
-        using var client = new RoutingGateAdminClient(stub);
+        var client = new RoutingGateAdminClient(stub);
 
         var enabled = await client.SetAsync(true, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -43,7 +43,7 @@ public class RoutingGateAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new RoutingGateAdminClient(stub);
+        var client = new RoutingGateAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
@@ -58,7 +58,7 @@ public class RoutingGateAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new RoutingGateAdminClient(stub);
+        var client = new RoutingGateAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetAsync(false, cancellationToken: TestContext.Current.CancellationToken));
@@ -72,38 +72,13 @@ public class RoutingGateAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new RoutingGateAdminClient(stub);
+        var client = new RoutingGateAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing gate: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new RoutingGateAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new RoutingGateAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_default_address_overload_targets_the_proxys_grpc_port()
-    {
-        using var client = new RoutingGateAdminClient();
-
-        client.Should().NotBeNull();
     }
 
     [Fact]

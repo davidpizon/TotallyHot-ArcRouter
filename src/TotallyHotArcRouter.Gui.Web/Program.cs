@@ -17,12 +17,6 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<AppRoot>("#root");
 builder.Services.AddSingleton<AuthGateState>();
 
-// Local, per-user GUI settings. Reused as-is from the native host (web GUI migration plan Phase P5a) -
-// its file-backed store harmlessly no-ops to an in-memory, per-session default here (WASM has no
-// persistent filesystem without an explicit virtual-FS mount), which is the correct behavior for this
-// host anyway: the telemetry address it would otherwise persist is moot in the browser, which is always
-// same-origin - see WasmRouterChannelProvider's remarks.
-builder.Services.AddSingleton<IGuiSettingsStore>(_ => new GuiSettingsStore());
 // App-wide error-toast notifications (see Services/ToastService.cs and Components/ToastHost.razor).
 builder.Services.AddSingleton<ToastService>();
 // navigator.clipboard.writeText via JS interop - the browser counterpart to MauiProgram's
@@ -77,6 +71,8 @@ builder.Services.AddSingleton(sp => new ManagementTokenAdminStore(
     channelProvider: sp.GetRequiredService<IRouterChannelProvider>(),
     reauthenticateAsync: _ => PostAuthSessionAsync(sp.GetRequiredService<NavigationManager>().BaseUri)));
 // Backs the Model Distribution / Cost Analytics history / header ticker's real data. See
+// Services/UsageStore.cs.
+// Backs the Model Distribution / Cost Analytics history / Report Card / header ticker's real data. See
 // Services/UsageStore.cs.
 builder.Services.AddSingleton<UsageStore>();
 

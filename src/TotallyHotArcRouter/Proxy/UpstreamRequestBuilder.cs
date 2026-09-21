@@ -37,7 +37,7 @@ internal static class UpstreamRequestBuilder
     /// upstream to compress at all sidesteps both failure modes.
     /// </para>
     /// </summary>
-    internal static readonly string[] AlwaysSkippedRequestHeaders =
+    private static readonly string[] AlwaysSkippedRequestHeaders =
         ["Host", "Content-Type", "Content-Length", "Authorization", "Accept-Encoding"];
 
     /// <summary>

@@ -22,7 +22,7 @@ public sealed class RegretHarnessAdminStore : AdminStoreBase<IRegretHarnessAdmin
     public RegretHarnessAdminStore(
         IRouterChannelProvider channelProvider,
         ILogger<RegretHarnessAdminStore>? logger = null)
-        : base(client: new RegretHarnessAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new RegretHarnessAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         ServerAddress = channelProvider.ServerAddress;
     }

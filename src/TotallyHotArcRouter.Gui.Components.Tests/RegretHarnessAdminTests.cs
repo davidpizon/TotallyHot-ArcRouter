@@ -46,6 +46,7 @@ public sealed class RegretHarnessAdminTests
 
         cut.Markup.Should().Contain("No run yet this session");
         cut.FindAll("button").Should().Contain(b => b.TextContent.Trim() == "Run");
+        AssertMethodologyLink(cut);
     }
 
     [Fact]
@@ -58,6 +59,7 @@ public sealed class RegretHarnessAdminTests
         cut.Markup.Should().Contain("Completed: 2919 ID-test task(s), 176 OOD task(s) replayed.");
         cut.Markup.Should().Contain("ID test");
         cut.Markup.Should().Contain("dim_best");
+        AssertMethodologyLink(cut);
     }
 
     [Fact]
@@ -145,17 +147,31 @@ public sealed class RegretHarnessAdminTests
                         Message: "Completed.", RanAtUtc: DateTimeOffset.UtcNow, Splits: []))
             ]
         };
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
         var cut = ctx.Render<RegretHarnessAdmin>();
 
         cut.FindAll("button").Single(b => b.TextContent.Trim() == "Run").Click();
-        cut.WaitForState(() => cut.Markup.Contains("Embedding the OOD split"));
+        await cut.WaitForStateAsync(() => cut.Markup.Contains("Embedding the OOD split"));
 
         cut.Markup.Should().Contain("Embedding the OOD split");
 
         gate.SetResult(true);
-        cut.WaitForState(() => cut.Markup.Contains("Completed."));
-        await Task.CompletedTask;
+        await cut.WaitForStateAsync(() => cut.Markup.Contains("Completed."));
+    }
+
+    /// <summary>
+    /// Asserts the pane cites the public score-delta methodology (docs/score-delta-methodology.md)
+    /// rather than describing the formula in the chrome itself, and that the citation carries
+    /// <c>.ds-doc-link</c> so it actually reads as a link. The underline matters more here than
+    /// anywhere else in the app: this anchor sits directly beside the "Regret Harness" label at the
+    /// same size and color, so without it the two are indistinguishable. A bare `underline` utility
+    /// cannot supply it - app.css is a committed, tree-shaken Tailwind build with no such rule.
+    /// </summary>
+    private static void AssertMethodologyLink(IRenderedComponent<RegretHarnessAdmin> cut)
+    {
+        var link = cut.FindAll("a").First(a => a.TextContent.Contains("Methodology", StringComparison.Ordinal));
+        link.GetAttribute("href").Should().Be(ProductDocs.ScoreDeltaMethodologyUrl);
+        link.ClassList.Should().Contain("ds-doc-link");
     }
 
     private sealed class FakeClient(RegretHarnessStatusInfo? status = null) : IRegretHarnessAdminClient

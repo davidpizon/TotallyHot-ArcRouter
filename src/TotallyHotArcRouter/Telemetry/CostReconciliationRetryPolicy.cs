@@ -7,6 +7,13 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </summary>
 public static class CostReconciliationRetryPolicy
 {
+    /// <summary>
+    /// The named <see cref="HttpClient"/> shared by cost reconcilers, Anthropic usage reporting, and
+    /// token-count calibration - the same consumers that previously shared the container-wide
+    /// <c>HttpClient</c> singleton.
+    /// </summary>
+    public const string HttpClientName = nameof(CostReconciliationRetryPolicy);
+
     /// <summary>The maximum number of attempts total (the first try plus up to <c>MaxAttempts - 1</c> retries).</summary>
     public const int MaxAttempts = 4;
 

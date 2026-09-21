@@ -187,7 +187,7 @@ public static class UpstreamFailureClassifier
     /// the same provider - each of these statuses is proof <em>this</em> target is unhealthy right now
     /// regardless of what (if anything) the request fails over to next.
     /// </summary>
-    internal static bool IsOutageStatus(int statusCode)
+    private static bool IsOutageStatus(int statusCode)
     {
         return statusCode is >= 500 and <= 599 or 429 or StatusCodes.Status404NotFound;
     }
@@ -202,7 +202,7 @@ public static class UpstreamFailureClassifier
     /// other statuses - including client-fault 4xx such as 400/422 - are never retried, since a backup
     /// would reject the same request the same way.
     /// </summary>
-    internal static bool IsRetriableOutageStatus(int statusCode, bool nextBackupIsDifferentProvider)
+    private static bool IsRetriableOutageStatus(int statusCode, bool nextBackupIsDifferentProvider)
     {
         if (statusCode is >= 500 and <= 599) return true;
 

@@ -154,18 +154,17 @@ public sealed class RouterModelAdminTests
                         Status: WithArtifact()))
             ]
         };
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
         var cut = ctx.Render<RouterModelAdmin>();
 
         cut.FindAll("button").Single(b => b.TextContent.Contains("Train")).Click();
-        cut.WaitForState(() => cut.Markup.Contains("Training…"));
+        await cut.WaitForStateAsync(() => cut.Markup.Contains("Training…"));
 
         cut.Markup.Should().Contain("Training…");
         cut.Markup.Should().Contain("5 so far");
 
         gate.SetResult(true);
-        cut.WaitForState(() => cut.Markup.Contains("Trained."));
-        await Task.CompletedTask;
+        await cut.WaitForStateAsync(() => cut.Markup.Contains("Trained."));
     }
 
     private sealed class FakeClient(LogRegModelStatusInfo? status = null) : ILogRegModelAdminClient
