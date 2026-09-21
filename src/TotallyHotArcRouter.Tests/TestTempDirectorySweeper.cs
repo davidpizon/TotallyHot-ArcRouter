@@ -39,13 +39,13 @@ namespace TotallyHot.ArcRouter.Tests;
 public sealed class TestTempDirectorySweeper : IDisposable
 {
     /// <summary>The shared scratch root every test class in this assembly creates its directories under.</summary>
-    internal static readonly string Root = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests");
+    private static readonly string Root = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests");
 
     /// <summary>
     /// How long a directory must go unwritten before the start-of-run sweep treats it as abandoned. A day is
     /// far beyond any real run (the full suite takes under a minute), so this can never catch live work.
     /// </summary>
-    internal static readonly TimeSpan AbandonedAfter = TimeSpan.FromHours(24);
+    private static readonly TimeSpan AbandonedAfter = TimeSpan.FromHours(24);
 
     private readonly DateTime _runStartedUtc = DateTime.UtcNow;
 
