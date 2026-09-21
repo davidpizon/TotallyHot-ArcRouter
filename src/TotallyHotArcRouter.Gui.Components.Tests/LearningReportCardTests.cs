@@ -36,7 +36,7 @@ public sealed class LearningReportCardTests
             cut.Markup.Should().Contain("Score Delta vs Frozen Policy");
             cut.Markup.Should().Contain("Demo data");
             cut.Markup.Should().Contain("A 42.0%");
-        }, timeout: TimeSpan.FromSeconds(6));
+        }, timeout: TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class LearningReportCardTests
 
         cut.WaitForAssertion(
             assertion: () => cut.FindAll("div[id^='echart-']").Should().HaveCount(3),
-            timeout: TimeSpan.FromSeconds(6));
+            timeout: TimeSpan.FromSeconds(5));
     }
 
     [Fact]

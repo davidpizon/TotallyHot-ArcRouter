@@ -103,6 +103,10 @@
     private string _deltaJson = "{}";
     private IReadOnlyList<GradeLegendItem> _gradeLegend = [];
 
+    // Bumped on every reload so a slower response for an earlier filter, landing after a newer click,
+    // is dropped instead of painting the wrong window's snapshot under the newer filter's highlight.
+    private int _reloadGeneration;
+
     /// <summary>One grade-mix legend chip: letter, fill color, and mix percent.</summary>
     private sealed record GradeLegendItem(string Grade, string Color, decimal Percent);
 
@@ -120,12 +124,16 @@
 
     /// <summary>
     /// Loads the aggregated report card for the active filter, falling back to <see cref="MockData"/>
-    /// when the proxy is unreachable or the snapshot is empty.
+    /// when the proxy is unreachable or the snapshot is empty. A response superseded by a later reload
+    /// is discarded, so only the most recent filter's snapshot is ever applied.
     /// </summary>
     private async Task ReloadAsync()
     {
+        var generation = ++_reloadGeneration;
         var (from, to) = RangeFor(filter: _activeFilter, now: DateTimeOffset.UtcNow);
         var card = await UsageStore.LoadLearningReportCardAsync(from: from, to: to);
+        if (generation != _reloadGeneration) return;
+
         var hasLive = card is not null &&
                       (card.SpendByModel.Count > 0 || card.ScoredRequests > 0 || card.ComparableRequests > 0);
         if (!hasLive)
@@ -137,7 +145,7 @@
                 deltas: MockData.ReportCardScoreDelta,
                 meanDelta: MockData.ReportCardMeanScoreDelta,
                 scored: MockData.ReportCardScoredRequests,
-                comparable: MockData.ReportCardScoredRequests,
+                comparable: MockData.ReportCardScoreDelta.Sum(row => row.SampleSize),
                 totalSpend: MockData.ReportCardSpend.Sum(row => row.CostUsd));
         }
         else

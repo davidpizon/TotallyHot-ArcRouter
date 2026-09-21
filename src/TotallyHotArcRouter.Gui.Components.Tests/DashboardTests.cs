@@ -72,11 +72,13 @@ public sealed class DashboardTests
         await cut.InvokeAsync(() =>
             cut.FindAll("nav button").First(b => b.TextContent.Contains("Model Distribution")).Click());
 
+        cut.Markup.Should().Contain("Token Volume Histogram");
+
         await cut.InvokeAsync(() =>
             cut.FindAll("nav button").First(b => b.TextContent.Contains("Report Card")).Click());
 
         await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Spend by Model"),
-            timeout: TimeSpan.FromSeconds(6));
+            timeout: TimeSpan.FromSeconds(5));
     }
 
     [Fact]
