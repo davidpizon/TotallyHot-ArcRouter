@@ -118,7 +118,7 @@ in [What was checked and rejected](#what-was-checked-and-rejected)).
 
 | # | Smell | Location | Size | Phase | Risk |
 |---|---|---|---|---|---|
-| 1 | Duplicated gRPC exception/constructor/dispose boilerplate | 9 classes in `Gui.Telemetry/*AdminClient.cs` | ~9× ~30 lines | 1 | Low |
+| 1 | Duplicated gRPC exception/constructor/dispose boilerplate *(since superseded 2026-09-20: the constructor and dispose parts were deleted, not just shared, see [§1](#1-duplicated-grpc-admin-client-boilerplate-9))* | 9 classes in `Gui.Telemetry/*AdminClient.cs` | ~9× ~30 lines | 1 | Low |
 | 2 | Duplicated error-envelope boilerplate | `ProxyMiddleware.cs`, 4 `Write*ResponseAsync` methods | 4× ~15 lines | 1 | Low |
 | 3 | Triplicated capture-buffer accounting | `ProxyMiddleware.cs`, 3 translate/copy methods | 3× ~20 lines | 1 | Low-Medium |
 | 4 | One 700-line method, ~120 DI registrations | `Hosting/ServiceCollectionExtensions.cs` | 800 lines | 1 | Low |
@@ -126,7 +126,7 @@ in [What was checked and rejected](#what-was-checked-and-rejected)).
 | 6 | God facade: ~7 sub-APIs, ~14 effective dependencies | `Proxy/Management/ManagementFacade.cs` | 2090 lines | 3 | Medium |
 | 7 | Multi-aggregate repository (6 concerns, 1 class) | `PriceCatalog/PriceCatalogRepository.cs` | 1123 lines | 4 (backlog) | Medium-High if touched |
 | 8 | Mixed responsibilities, 13-param ctor, 295-line method | `Proxy/RequestInterceptor.cs` | 945 lines | 4 (backlog) | Medium |
-| 9 | Inconsistent client transport (HTTP vs. gRPC) | `Gui.Admin/ProviderAdminClient.cs` vs. `Gui.Telemetry/*AdminClient.cs` | — | 4 (ADR) | N/A (observation) |
+| 9 | Inconsistent client transport (HTTP vs. gRPC) *(since resolved: both transport and type split gone by 2026-09-20, see [§ transport](#inconsistent-admin-client-transport-http-vs-grpc))* | `Gui.Admin/ProviderAdminClient.cs` vs. `Gui.Telemetry/*AdminClient.cs` | — | 4 (ADR) | N/A (observation) |
 | 10 | Oversized Razor components with large inline `@code` | `Gui/Components/ProvidersAdmin.razor` + 3 others | 500-987 lines | 4 (optional) | Low-Medium |
 
 ```mermaid
@@ -197,6 +197,12 @@ own RPC calls and DTO mapping — only the exception/dispose/constructor scaffol
 `PriceSourcesAdminTests.cs`, `RouterModelAdminTests.cs`, `RoutingModeAdminTests.cs`, etc.) that exercise
 the wrapped-exception behavior via the constructor-injected fake-client seam, so a behavior regression
 in the shared mapper would fail loudly and locally.
+
+> **Since superseded (2026-09-20, PR #135).** The exception and wrap parts landed on
+> `GrpcAdminClientBase` as planned. The constructor and dispose parts went further: the owned-channel
+> constructor turned out to have no production caller once every client was built over the shared
+> `IRouterChannelProvider.CallInvoker`, so it was deleted from all 14 clients and the base, and with no
+> channel left to own, `GrpcAdminClientBase` stopped being `IDisposable`. See the C4 note below.
 
 ### 2. Duplicated error-envelope boilerplate in `ProxyMiddleware`
 
@@ -378,6 +384,14 @@ records why it should stay on HTTP (e.g., avoiding a cert/TLS requirement for th
 if that's the real reason). **Risk: N/A for the observation itself; a transport migration would be
 High risk** — it touches every provider CRUD call site plus the Governance UI's error handling, which
 currently branches on `ProviderAdminException` vs. the gRPC clients' `IsUnavailable`-flagged exceptions.
+
+> **Since resolved.** ADR-0007 took option (b) on 2026-09-02, then was superseded on 2026-09-14 by
+> [ADR-0011](../adr/0011-router-served-blazor-webassembly-gui-over-grpc-web.md), which deleted REST
+> `/admin` and moved `ProviderAdminClient` onto gRPC. The leftover type-system split closed on
+> 2026-09-20 (PR #135, [ADR-0010 Amendment 3](../adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md#amendment-3-2026-09-20-fold-guiadmin-onto-the-same-seams)):
+> `ProviderAdminClient` and `UsageQueryClient` derive from `GrpcAdminClientBase`,
+> `ProviderAdminException` is deleted in favor of `GrpcAdminException`, and their stores sit on
+> `AdminStoreBase`. There is no longer a second pattern to reconcile.
 
 ### Oversized Razor components
 
@@ -825,6 +839,15 @@ client/transport survives disposal, a self-built one does not, `Dispose` is idem
 still advertise `IDisposable` so the container keeps reclaiming them.
 
 Note that `CA2000` would have caught the original leak for free — see D1.
+
+> **Since superseded (2026-09-20, PR #135).** The C4 half no longer describes the code.
+> `ProviderAdminStore` and `UsageStore` moved to gRPC and onto `AdminStoreBase<TClient>`, so neither
+> builds an `HttpClient` or holds `_ownedHttpClient` any more. Their clients are built over the shared
+> `IRouterChannelProvider.CallInvoker`, and `GrpcAdminClientBase` is no longer `IDisposable`, since no
+> admin client owns a channel. So there is no client for a store to dispose, and `AdminStoreBase` lost
+> its `ownsClient` parameter. The "own what you built, never what you were handed" rule survives as
+> `AdminStoreBase.Own()`, used today only by `UpdateStore` for its installer `HttpClient`. C3
+> (`ProxyMiddleware`) is unaffected.
 
 **C5 · `ProxyServer` constructor — 351 lines. Major.** Second-longest method in the codebase. It is DI
 wiring for the inner Kestrel host, structured as one feature-group null-check per block. Same remedy

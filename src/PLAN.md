@@ -169,7 +169,8 @@ flowchart LR
    findings-per-100-lines ratio over a small self-contained smell catalog: magic numbers, long lines, empty
    catch/except blocks, long parameter lists) — plus judge prompt-awareness: `JudgeScoreRequest.Prompt`,
    recovered from a new `PendingPromptCache` mirroring `PendingResponseTextCache` exactly, woven into
-   `GEvalJudgeClient`'s prompt as an optional task section. Full design and rationale:
+   every LLM-grader prompt as a required task section (`GraderQuestionText`); a missing question fails
+   closed rather than grading the response in isolation (GitHub issue #114). Full design and rationale:
    `quality-verifier-architecture.md` §3.2/§5, `code-quality-metrics-assessment.md` §5.1.
    **Q3 shipped**: the LLM grader portfolio — `CodeJudgeGraderClient` (Tong & Zhang's severity-weighted fault
    taxonomy, computed deterministically from the backbone's per-fault severity classifications rather than

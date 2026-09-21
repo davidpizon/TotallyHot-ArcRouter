@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Orchestrator;
+using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter;
@@ -166,6 +167,11 @@ public static class Program
         }
         finally
         {
+            // After the host - `using var` above, scoped to the try - has disposed its container and with it
+            // every GenAI Model and Tokenizer: shutting GenAI down while one is still alive would leave it to
+            // be freed against torn-down native state. Skipping the shutdown entirely is worse: the process
+            // can then hang forever inside onnxruntime_genai.dll's DLL_PROCESS_DETACH. See OnnxGenAiShutdown.
+            OnnxGenAiShutdown.Process.ShutdownIfUsed();
             await Log.CloseAndFlushAsync();
         }
     }

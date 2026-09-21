@@ -6,7 +6,7 @@ namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
 /// <summary>
 /// Covers the plain-data types in <c>ProviderAdminModels.cs</c> that <see cref="ProviderAdminClientTests"/>
 /// only exercises indirectly through JSON round-trips: record equality/formatting, <see cref="ProviderTemplates"/>,
-/// <see cref="ToolCallDialectNames"/>, and <see cref="ProviderAdminException"/>'s two constructors.
+/// and <see cref="ToolCallDialectNames"/>.
 /// </summary>
 public sealed class ProviderAdminModelsTests
 {
@@ -404,25 +404,5 @@ public sealed class ProviderAdminModelsTests
         Assert.Equal(
             expected: ["openai-native", "constrained", "emulated", "hermes", "mistral", "llama3-json", "function-call"],
             actual: ToolCallDialectNames.All);
-    }
-
-    [Fact]
-    public void ProviderAdminException_SingleArgConstructor_SetsMessage()
-    {
-        var ex = new ProviderAdminException("boom");
-
-        Assert.Equal(expected: "boom", actual: ex.Message);
-        Assert.Null(ex.InnerException);
-    }
-
-    [Fact]
-    public void ProviderAdminException_TwoArgConstructor_SetsMessageAndInnerException()
-    {
-        var inner = new InvalidOperationException("transport failed");
-
-        var ex = new ProviderAdminException(message: "boom", innerException: inner);
-
-        Assert.Equal(expected: "boom", actual: ex.Message);
-        Assert.Same(expected: inner, actual: ex.InnerException);
     }
 }

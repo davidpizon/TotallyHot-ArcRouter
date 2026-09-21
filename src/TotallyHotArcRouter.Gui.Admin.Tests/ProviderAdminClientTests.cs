@@ -1,5 +1,6 @@
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
@@ -320,7 +321,7 @@ public sealed class ProviderAdminClientTests
         var stub = new StubClient { ScanCapabilitiesResponse = ListResponse(Provider("openai")) };
         var client = new ProviderAdminClient(stub);
 
-        await Assert.ThrowsAsync<ProviderAdminException>(() =>
+        await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ScanCapabilitiesAsync(key: "openai", Ct));
     }
 
@@ -437,33 +438,6 @@ public sealed class ProviderAdminClientTests
         Assert.Equal(expected: "reconciliation:anthropic:admin-key", actual: stub.LastDeleteSecretRequest!.Name);
     }
 
-    // --- admin token metadata ---
-
-    [Fact]
-    public async Task AdminToken_WhenConfigured_IsSentAsMetadata()
-    {
-        var stub = new StubClient { ListProvidersResponse = new Contract.ProviderListResponse() };
-        var client = new ProviderAdminClient(stub, adminToken: "s3cret");
-
-        await client.GetProvidersAsync(Ct);
-
-        var entry = Assert.Single(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
-        Assert.Equal(expected: "s3cret", actual: entry.Value);
-    }
-
-    [Fact]
-    public async Task AdminToken_WhenNotConfigured_IsNotSent()
-    {
-        var stub = new StubClient { ListProvidersResponse = new Contract.ProviderListResponse() };
-        var client = new ProviderAdminClient(stub);
-
-        await client.GetProvidersAsync(Ct);
-
-        Assert.Empty(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
-    }
-
-    // --- error handling ---
-
     [Fact]
     public async Task Unavailable_BecomesTheReachabilityMessage()
     {
@@ -471,10 +445,10 @@ public sealed class ProviderAdminClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         var client = new ProviderAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() => client.GetProvidersAsync(Ct));
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() => client.GetProvidersAsync(Ct));
 
-        Assert.Contains(expectedSubstring: "Could not reach the proxy management API", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
+        Assert.Equal(expected: "Could not read the providers: the router is not reachable.", actual: ex.Message);
+        Assert.True(ex.IsUnavailable);
         Assert.IsType<RpcException>(ex.InnerException);
     }
 
@@ -488,17 +462,19 @@ public sealed class ProviderAdminClientTests
         };
         var client = new ProviderAdminClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.RemoveProviderAsync(key: "openai", Ct));
 
         Assert.Contains(expectedSubstring: "unknown provider", actualString: ex.Message,
             comparisonType: StringComparison.Ordinal);
+        Assert.False(ex.IsUnavailable);
     }
 
     [Fact]
-    public void Constructor_NullChannel_Throws()
+    public void Constructor_NullClient_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new ProviderAdminClient((Grpc.Net.Client.GrpcChannel)null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new ProviderAdminClient((Contract.ProviderAdminService.ProviderAdminServiceClient)null!));
     }
 
     /// <summary>
@@ -545,12 +521,10 @@ public sealed class ProviderAdminClientTests
         public Contract.GetRateLimitHistoryRequest? LastRateLimitHistoryRequest { get; private set; }
         public Contract.SetSecretRequest? LastSetSecretRequest { get; private set; }
         public Contract.DeleteSecretRequest? LastDeleteSecretRequest { get; private set; }
-        public CallOptions? LastCallOptions { get; private set; }
 
         public override AsyncUnaryCall<Contract.ProviderListResponse> ListProvidersAsync(
             Contract.ListProvidersRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             return Call(ListProvidersResponse);
         }
 
@@ -558,7 +532,6 @@ public sealed class ProviderAdminClientTests
             Contract.UpsertProviderRequest request, CallOptions options)
         {
             LastUpsertProviderRequest = request;
-            LastCallOptions = options;
             return Call(UpsertProviderResponse);
         }
 
@@ -566,7 +539,6 @@ public sealed class ProviderAdminClientTests
             Contract.RemoveProviderRequest request, CallOptions options)
         {
             LastRemoveProviderRequest = request;
-            LastCallOptions = options;
             return Call(RemoveProviderResponse);
         }
 
@@ -574,7 +546,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetProviderBudgetRequest request, CallOptions options)
         {
             LastSetBudgetRequest = request;
-            LastCallOptions = options;
             return Call(SetBudgetResponse);
         }
 
@@ -582,7 +553,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetProviderEnabledRequest request, CallOptions options)
         {
             LastSetEnabledRequest = request;
-            LastCallOptions = options;
             return Call(SetEnabledResponse);
         }
 
@@ -590,7 +560,6 @@ public sealed class ProviderAdminClientTests
             Contract.UpsertModelRequest request, CallOptions options)
         {
             LastUpsertModelRequest = request;
-            LastCallOptions = options;
             return Call(UpsertModelResponse);
         }
 
@@ -598,7 +567,6 @@ public sealed class ProviderAdminClientTests
             Contract.RemoveModelRequest request, CallOptions options)
         {
             LastRemoveModelRequest = request;
-            LastCallOptions = options;
             return Call(RemoveModelResponse);
         }
 
@@ -606,7 +574,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetModelEnabledRequest request, CallOptions options)
         {
             LastSetModelEnabledRequest = request;
-            LastCallOptions = options;
             return Call(SetModelEnabledResponse);
         }
 
@@ -614,7 +581,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetModelToolDialectRequest request, CallOptions options)
         {
             LastSetModelToolDialectRequest = request;
-            LastCallOptions = options;
             return Call(SetModelToolDialectResponse);
         }
 
@@ -622,7 +588,6 @@ public sealed class ProviderAdminClientTests
             Contract.DiscoverModelsRequest request, CallOptions options)
         {
             LastDiscoverModelsRequest = request;
-            LastCallOptions = options;
             return Call(DiscoverModelsResponse);
         }
 
@@ -630,7 +595,6 @@ public sealed class ProviderAdminClientTests
             Contract.ScanCapabilitiesRequest request, CallOptions options)
         {
             LastScanCapabilitiesRequest = request;
-            LastCallOptions = options;
             return Call(ScanCapabilitiesResponse);
         }
 
@@ -638,14 +602,12 @@ public sealed class ProviderAdminClientTests
             Contract.RefreshFromEndpointRequest request, CallOptions options)
         {
             LastRefreshFromEndpointRequest = request;
-            LastCallOptions = options;
             return Call(RefreshFromEndpointResponse);
         }
 
         public override AsyncUnaryCall<Contract.PriceOverrideListResponse> ListPriceOverridesAsync(
             Contract.ListPriceOverridesRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             return Call(ListPriceOverridesResponse);
         }
 
@@ -653,7 +615,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetPriceOverrideRequest request, CallOptions options)
         {
             LastSetPriceOverrideRequest = request;
-            LastCallOptions = options;
             return Call(SetPriceOverrideResponse);
         }
 
@@ -661,14 +622,12 @@ public sealed class ProviderAdminClientTests
             Contract.RemovePriceOverrideRequest request, CallOptions options)
         {
             LastRemovePriceOverrideRequest = request;
-            LastCallOptions = options;
             return Call(RemovePriceOverrideResponse);
         }
 
         public override AsyncUnaryCall<Contract.PriceResolutionResponse> GetPriceResolutionAsync(
             Contract.GetPriceResolutionRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             return Call(PriceResolutionResponse);
         }
 
@@ -676,7 +635,6 @@ public sealed class ProviderAdminClientTests
             Contract.GetRateLimitHistoryRequest request, CallOptions options)
         {
             LastRateLimitHistoryRequest = request;
-            LastCallOptions = options;
             return Call(RateLimitHistoryResponse);
         }
 
@@ -684,7 +642,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetSecretRequest request, CallOptions options)
         {
             LastSetSecretRequest = request;
-            LastCallOptions = options;
             return Call(SetSecretResponse);
         }
 
@@ -692,7 +649,6 @@ public sealed class ProviderAdminClientTests
             Contract.DeleteSecretRequest request, CallOptions options)
         {
             LastDeleteSecretRequest = request;
-            LastCallOptions = options;
             return Call(DeleteSecretResponse);
         }
 

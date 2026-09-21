@@ -29,7 +29,7 @@ public class LogRegModelAdminClientTests
                 LiveSampleWeight = 3.0
             }
         };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -61,7 +61,7 @@ public class LogRegModelAdminClientTests
                 LiveSampleWeight = 3.0
             }
         };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -99,7 +99,7 @@ public class LogRegModelAdminClientTests
                 }
             ]
         };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var events = new List<LogRegRetrainEvent>();
         await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -137,7 +137,7 @@ public class LogRegModelAdminClientTests
                 }
             ]
         };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var events = new List<LogRegRetrainEvent>();
         await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -149,7 +149,7 @@ public class LogRegModelAdminClientTests
     public async Task RetrainAsync_an_empty_oneof_maps_to_an_all_null_event_without_throwing()
     {
         var stub = new StubClient { RetrainEvents = [new Contract.LogRegRetrainStreamEvent()] };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var events = new List<LogRegRetrainEvent>();
         await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -164,7 +164,7 @@ public class LogRegModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
@@ -182,7 +182,7 @@ public class LogRegModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
@@ -196,30 +196,13 @@ public class LogRegModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new LogRegModelAdminClient(stub);
+        var client = new LogRegModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the logreg model status: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new LogRegModelAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new LogRegModelAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
     }
 
     [Fact]

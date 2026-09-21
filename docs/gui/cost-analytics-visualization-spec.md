@@ -14,9 +14,10 @@
 >   per-metric sections are explicitly per-turn — "each bar represents a Turn"), so the range acts as
 >   the filter window rather than driving the fixed 1-min/15-min/1-hr/6-hr bucket sizes in the
 >   *Time-Axis Engine* section.
-> - **Data.** Every rich tooltip figure the spec calls for (worst-case baseline cost, per-step model
->   attribution, cached/uncached token split, context token counts, TTFT cold-start split) is
->   **derived in `CostChartBuilder`** from the turn's existing fields and demonstrated on the
+> - **Data.** Every rich tooltip figure the spec calls for (the frozen untrained baseline's estimated
+>   cost, per-step model attribution, cached/uncached token split, context token counts, TTFT
+>   cold-start split) is **derived in `CostChartBuilder`** from the turn's existing fields and
+>   demonstrated on the
 >   deterministic `MockData.BuildMetricHistory` corpus — the telemetry pipeline still doesn't capture
 >   them directly (see [`../router/telemetry.md`](../router/telemetry.md) and [`backlog.md`](backlog.md)),
 >   so live turns fall back to those derivations too.

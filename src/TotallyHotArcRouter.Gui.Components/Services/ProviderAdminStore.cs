@@ -7,47 +7,32 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
 /// Singleton view-model backing the Governance tab's provider/credential/model management. Wraps
-/// <see cref="ProviderAdminClient"/> (the tested, platform-agnostic logic in TotallyHot.ArcRouter.Gui.Admin)
-/// with the same "singleton + Changed event + best-effort, reachability-tolerant" shape as
-/// <see cref="LiveDataStore"/>, so the UI survives tab switches and degrades gracefully when the proxy
-/// isn't running. Registered in <c>MauiProgram</c>.
+/// <see cref="ProviderAdminClient"/> in the shared <see cref="AdminStoreBase{TClient}"/> shape so the UI
+/// survives tab switches and degrades gracefully when the proxy isn't running. Toast notifications are a
+/// one-line wrap around load/mutation failure, not a reason to stay off the seam. Registered in
+/// <c>MauiProgram</c>.
 /// </summary>
-public sealed class ProviderAdminStore : IDisposable
+public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
 {
     /// <summary>
-    /// The proxy's TLS gRPC endpoint (docs/router/tracked-todos.md #7 - the provider-admin surface moved
-    /// off the plain-HTTP LLM-forwarding port onto this one), matching <see cref="LiveDataStore"/>'s own
-    /// server address.
+    /// The proxy's TLS gRPC endpoint, matching <see cref="LiveDataStore"/>'s own server address.
     /// </summary>
     public const string DefaultManagementAddress = TelemetryChannelFactory.DefaultServerAddress;
-
-    private readonly ProviderAdminClient _client;
-    private readonly ILogger<ProviderAdminStore>? _logger;
 
     private readonly ConcurrentDictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = new();
     private readonly ToastService? _toasts;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderAdminStore"/> class.</summary>
     /// <param name="channelProvider">
-    /// Supplies the shared call invoker this store's client is constructed over (web GUI migration plan
-    /// Phase P5a) - see <see cref="TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider"/>'s remarks.
-    /// Required unless <paramref name="client"/> is supplied, in which case it is never consulted.
+    /// Supplies the shared call invoker this store's client is constructed over. Required unless
+    /// <paramref name="client"/> is supplied, in which case it is never consulted.
     /// </param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="adminToken">
-    /// Optional management token; the composition root (<c>MauiProgram</c>) resolves it once from the
-    /// shared <c>%LOCALAPPDATA%\TotallyHotArcRouter\management-token.txt</c> file (see
-    /// <see cref="ManagementTokenReader"/>) and passes it in here - this store no longer reads the file
-    /// itself, since that call is native-only and this class moves into the browser-targeted
-    /// <c>TotallyHot.ArcRouter.Gui.Components</c> library in Phase P5b. Sent as the <c>x-admin-token</c>
-    /// gRPC metadata entry.
-    /// </param>
     /// <param name="client">
     /// A pre-built client to use instead of constructing one from <paramref name="channelProvider"/>;
     /// <see langword="null"/> (the default, and always the case in production) builds one. This exists so
     /// tests can render the Governance tab against a canned provider list: without it the only reachable
-    /// state in a test process is "unavailable", which leaves the entire loaded UI - the provider cards,
-    /// the dialogs, every mutation - unexercised.
+    /// state in a test process is "unavailable", which leaves the entire loaded UI unexercised.
     /// </param>
     /// <param name="toasts">
     /// App-wide error-toast notifications; <see langword="null"/> (a test's default) simply skips raising
@@ -57,22 +42,24 @@ public sealed class ProviderAdminStore : IDisposable
     public ProviderAdminStore(
         IRouterChannelProvider? channelProvider = null,
         ILogger<ProviderAdminStore>? logger = null,
-        string? adminToken = null,
         ProviderAdminClient? client = null,
         ToastService? toasts = null)
+        : base(client: ResolveClient(channelProvider, client), logger: logger)
     {
-        _logger = logger;
         _toasts = toasts;
+    }
 
-        if (client is not null)
-        {
-            _client = client;
-        }
-        else
-        {
-            ArgumentNullException.ThrowIfNull(channelProvider);
-            _client = new ProviderAdminClient(channelProvider.CallInvoker, adminToken);
-        }
+    /// <summary>
+    /// Resolves the client this store drives: a caller-supplied instance, or one constructed over
+    /// <paramref name="channelProvider"/>'s shared invoker.
+    /// </summary>
+    private static ProviderAdminClient ResolveClient(IRouterChannelProvider? channelProvider,
+        ProviderAdminClient? client)
+    {
+        if (client is not null) return client;
+
+        ArgumentNullException.ThrowIfNull(channelProvider);
+        return new ProviderAdminClient(channelProvider.CallInvoker);
     }
 
     /// <summary>The providers currently known, refreshed after each load or successful edit.</summary>
@@ -103,122 +90,116 @@ public sealed class ProviderAdminStore : IDisposable
     /// </summary>
     public IReadOnlyDictionary<string, RateLimitHistoryResponseAdminView> RateLimitHistory => _rateLimitHistory;
 
-    /// <summary>Whether a load has completed at least once (so the UI can distinguish "loading" from "empty").</summary>
-    public bool IsLoaded { get; private set; }
-
-    /// <summary>Whether the last load/edit reached the proxy management API.</summary>
-    public bool IsReachable { get; private set; }
-
-    /// <summary>The last load error message, if the management API was unreachable.</summary>
-    public string? LastError { get; private set; }
-
-    /// <summary>
-    /// No-op since Phase P5a: the shared channel behind <see cref="_client"/> is now owned by
-    /// <see cref="TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider"/>, not this store. Kept
-    /// implementing <see cref="IDisposable"/> so callers registered as a DI singleton in
-    /// <c>MauiProgram</c> need no change, and in case this store takes on its own disposable state again
-    /// later.
-    /// </summary>
-    public void Dispose()
-    {
-    }
-
-    /// <summary>Raised after <see cref="Providers"/>, <see cref="IsReachable"/>, or <see cref="LastError"/> change.</summary>
-    public event Action? Changed;
-
     /// <summary>
     /// Loads the provider list. Connection failures are swallowed and surfaced via
-    /// <see cref="IsReachable"/>/<see cref="LastError"/> rather than thrown, so the tab renders an
-    /// "unreachable" state instead of crashing when the proxy isn't running.
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>
+    /// rather than thrown, so the tab renders an "unreachable" state instead of crashing when the proxy
+    /// isn't running.
     /// </summary>
-    public async Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Providers = await _client.GetProvidersAsync(cancellationToken);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (ProviderAdminException ex)
-        {
-            IsReachable = false;
-            LastError = ex.Message;
-            _logger?.LogWarning(exception: ex, message: "Failed to load providers from the management API.");
-            _toasts?.ShowError(title: "Providers unreachable", message: ex.Message);
-        }
-        finally
-        {
-            IsLoaded = true;
-            Changed?.Invoke();
-        }
+        return LoadGuardedAsync(
+            async ct => Providers = await Client.GetProvidersAsync(ct),
+            "load the providers",
+            cancellationToken,
+            onFailure: () => _toasts?.ShowError(title: "Providers unreachable",
+                message: LastError ?? "Unknown error."));
     }
 
     /// <summary>Adds or edits a provider, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The edit was rejected; the caller (UI) surfaces the message.</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="body">The provider fields to write.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The edit was rejected; the caller (UI) surfaces the message.</exception>
     public Task UpsertProviderAsync(string key, ProviderWriteRequest body,
         CancellationToken cancellationToken = default)
     {
         return MutateAsync(() =>
-            _client.UpsertProviderAsync(key: key, body: body, cancellationToken: cancellationToken));
+            Client.UpsertProviderAsync(key: key, body: body, cancellationToken: cancellationToken));
     }
 
     /// <summary>Removes a provider along with every model routing to it, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The removal was rejected (e.g. the provider is unknown).</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The removal was rejected (e.g. the provider is unknown).</exception>
     public Task RemoveProviderAsync(string key, CancellationToken cancellationToken = default)
     {
-        return MutateAsync(() => _client.RemoveProviderAsync(key: key, cancellationToken: cancellationToken));
+        return MutateAsync(() => Client.RemoveProviderAsync(key: key, cancellationToken: cancellationToken));
     }
 
     /// <summary>Adds or edits a model under a provider, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The edit was rejected.</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="modelName">The client-facing model name.</param>
+    /// <param name="body">The model fields to write.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The edit was rejected.</exception>
     public Task UpsertModelAsync(string key, string modelName, ModelWriteRequest body,
         CancellationToken cancellationToken = default)
     {
         return MutateAsync(() =>
-            _client.UpsertModelAsync(key: key, modelName: modelName, body: body, cancellationToken: cancellationToken));
+            Client.UpsertModelAsync(key: key, modelName: modelName, body: body,
+                cancellationToken: cancellationToken));
     }
 
     /// <summary>Removes a model, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The removal was rejected.</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="modelName">The client-facing model name.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The removal was rejected.</exception>
     public Task RemoveModelAsync(string key, string modelName, CancellationToken cancellationToken = default)
     {
         return MutateAsync(() =>
-            _client.RemoveModelAsync(key: key, modelName: modelName, cancellationToken: cancellationToken));
+            Client.RemoveModelAsync(key: key, modelName: modelName, cancellationToken: cancellationToken));
     }
 
     /// <summary>Sets or clears a provider's monthly budget caps, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The edit was rejected (e.g. a negative cap).</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="body">The caps to write.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The edit was rejected (e.g. a negative cap).</exception>
     public Task SetBudgetAsync(string key, ProviderBudgetWriteRequest body,
         CancellationToken cancellationToken = default)
     {
-        return MutateAsync(() => _client.SetBudgetAsync(key: key, body: body, cancellationToken: cancellationToken));
+        return MutateAsync(() => Client.SetBudgetAsync(key: key, body: body, cancellationToken: cancellationToken));
     }
 
     /// <summary>Switches a provider on or off, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The provider is unknown or the write failed.</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="body">The new on/off state.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The provider is unknown or the write failed.</exception>
     public Task SetEnabledAsync(string key, ProviderEnabledWriteRequest body,
         CancellationToken cancellationToken = default)
     {
-        return MutateAsync(() => _client.SetEnabledAsync(key: key, body: body, cancellationToken: cancellationToken));
+        return MutateAsync(() => Client.SetEnabledAsync(key: key, body: body, cancellationToken: cancellationToken));
     }
 
     /// <summary>Switches a model on or off, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The model is unknown or the write failed.</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="modelName">The client-facing model name.</param>
+    /// <param name="body">The new on/off state.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The model is unknown or the write failed.</exception>
     public Task SetModelEnabledAsync(string key, string modelName, ModelEnabledWriteRequest body,
         CancellationToken cancellationToken = default)
     {
         return MutateAsync(() =>
-            _client.SetModelEnabledAsync(key: key, modelName: modelName, body: body,
+            Client.SetModelEnabledAsync(key: key, modelName: modelName, body: body,
                 cancellationToken: cancellationToken));
     }
 
     /// <summary>Pins (or clears) a model's tool-call dialect, then publishes the updated list.</summary>
-    /// <exception cref="ProviderAdminException">The model is unknown, the dialect is unrecognized, or the write failed.</exception>
+    /// <param name="key">The provider key.</param>
+    /// <param name="modelName">The client-facing model name.</param>
+    /// <param name="body">The dialect to pin, or a null/empty dialect to clear the pin.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The model is unknown, the dialect is unrecognized, or the write failed.</exception>
     public Task SetModelToolDialectAsync(string key, string modelName, ModelToolDialectWriteRequest body,
         CancellationToken cancellationToken = default)
     {
         return MutateAsync(() =>
-            _client.SetModelToolDialectAsync(key: key, modelName: modelName, body: body,
+            Client.SetModelToolDialectAsync(key: key, modelName: modelName, body: body,
                 cancellationToken: cancellationToken));
     }
 
@@ -227,41 +208,24 @@ public sealed class ProviderAdminStore : IDisposable
     /// reloads the provider list so <see cref="ProviderAdminView.HasStoredAdminKey"/> reflects it. Only
     /// <c>openai</c> and <c>anthropic</c> are recognized.
     /// </summary>
-    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the write failed.</exception>
+    /// <param name="provider">The reconciliation provider key.</param>
+    /// <param name="value">The Admin API key to store.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The provider is unrecognized, the store is unavailable, or the write failed.</exception>
     public async Task SetAdminApiKeyAsync(string provider, string value, CancellationToken cancellationToken = default)
     {
-        await _client.SetAdminApiKeyAsync(provider: provider, value: value, cancellationToken: cancellationToken);
+        await Client.SetAdminApiKeyAsync(provider: provider, value: value, cancellationToken: cancellationToken);
         await LoadAsync(cancellationToken);
     }
 
     /// <summary>Clears a provider's stored reconciliation Admin API key, then reloads the provider list.</summary>
-    /// <exception cref="ProviderAdminException">The provider is unrecognized, the store is unavailable, or the write failed.</exception>
+    /// <param name="provider">The reconciliation provider key.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The provider is unrecognized, the store is unavailable, or the write failed.</exception>
     public async Task DeleteAdminApiKeyAsync(string provider, CancellationToken cancellationToken = default)
     {
-        await _client.DeleteAdminApiKeyAsync(provider: provider, cancellationToken: cancellationToken);
+        await Client.DeleteAdminApiKeyAsync(provider: provider, cancellationToken: cancellationToken);
         await LoadAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Queries a provider's own model list (live discovery). An independently callable building block - the
-    /// Governance UI's "Refresh from endpoint" action uses <see cref="RefreshFromEndpointAsync"/> instead.
-    /// </summary>
-    public Task<DiscoverModelsResult> DiscoverModelsAsync(string key, CancellationToken cancellationToken = default)
-    {
-        return _client.DiscoverModelsAsync(key: key, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>
-    /// Re-probes a provider's endpoint and runs tool-call dialect detection for its models. An independently
-    /// callable building block - the Governance UI's "Refresh from endpoint" action uses
-    /// <see cref="RefreshFromEndpointAsync"/> instead, which also reconciles the model list. Does not itself
-    /// update <see cref="Providers"/> - the scan's own return value is only the endpoint-flavor result.
-    /// </summary>
-    /// <exception cref="ProviderAdminException">The provider is unknown, scanning is unavailable, or the request failed.</exception>
-    public Task<ProviderEndpointCapabilitiesView> ScanCapabilitiesAsync(string key,
-        CancellationToken cancellationToken = default)
-    {
-        return _client.ScanCapabilitiesAsync(key: key, cancellationToken: cancellationToken);
     }
 
     /// <summary>
@@ -273,16 +237,18 @@ public sealed class ProviderAdminStore : IDisposable
     /// </summary>
     /// <remarks>
     /// This is the one call where a rejected credential (e.g. an expired API key) does not surface as a
-    /// thrown <see cref="ProviderAdminException"/> - the request itself still succeeds, since the router
+    /// thrown <see cref="GrpcAdminException"/> - the request itself still succeeds, since the router
     /// noticed the discovery/scan failed and simply left the model list untouched (see
     /// <c>ManagementFacade.RefreshFromEndpointAsync</c>). The failure instead travels back inside the
     /// refreshed provider's own <see cref="ProviderAdminView.AdminAction"/>, which this method checks
     /// after the mutation to raise the toast the caller would otherwise never see.
     /// </remarks>
-    /// <exception cref="ProviderAdminException">The provider is unknown or the request failed outright.</exception>
+    /// <param name="key">The provider key to refresh.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="GrpcAdminException">The provider is unknown or the request failed outright.</exception>
     public async Task RefreshFromEndpointAsync(string key, CancellationToken cancellationToken = default)
     {
-        await MutateAsync(() => _client.RefreshFromEndpointAsync(key: key, cancellationToken: cancellationToken));
+        await MutateAsync(() => Client.RefreshFromEndpointAsync(key: key, cancellationToken: cancellationToken));
 
         var provider = Providers.FirstOrDefault(p =>
             string.Equals(a: p.Key, b: key, comparisonType: StringComparison.OrdinalIgnoreCase));
@@ -293,26 +259,21 @@ public sealed class ProviderAdminStore : IDisposable
 
     /// <summary>
     /// Shared implementation behind the provider mutation methods: runs the given write operation and
-    /// publishes its returned provider list, letting a <see cref="ProviderAdminException"/> propagate
+    /// publishes its returned provider list, letting a <see cref="GrpcAdminException"/> propagate
     /// untouched (after raising a toast) so the caller can also surface it inline.
     /// </summary>
     private async Task MutateAsync(Func<Task<IReadOnlyList<ProviderAdminView>>> mutation)
     {
         try
         {
-            // Success publishes the server's returned list; a ProviderAdminException (e.g. a validation 400)
-            // propagates so the UI can show the message inline, leaving the current list untouched.
             Providers = await mutation();
-            IsReachable = true;
-            IsLoaded = true;
-            LastError = null;
-            Changed?.Invoke();
+            RecordSuccess();
+            NotifyChanged();
         }
-        catch (ProviderAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            // Every admin pane's mutations flow through this one method, so this is the single place a
-            // toast covers a rejected save/refresh/toggle/etc. app-wide - not just the Providers pane.
             _toasts?.ShowError(title: "Action failed", message: ex.Message);
+            RecordFailure(exception: ex, description: "a provider operation");
             throw;
         }
     }
@@ -324,27 +285,28 @@ public sealed class ProviderAdminStore : IDisposable
     /// than surfacing as a store-wide reachability failure the way <see cref="LoadAsync"/> does - one
     /// provider's missing history shouldn't blank the whole Providers pane.
     /// </summary>
+    /// <param name="key">The provider key.</param>
+    /// <param name="hours">How far back to look, in hours (default 6).</param>
+    /// <param name="cancellationToken">Cancels the load.</param>
     public async Task LoadRateLimitHistoryAsync(string key, double hours = 6.0,
         CancellationToken cancellationToken = default)
     {
         try
         {
             _rateLimitHistory[key] =
-                await _client.GetRateLimitHistoryAsync(key: key, hours: hours, cancellationToken: cancellationToken);
-            Changed?.Invoke();
+                await Client.GetRateLimitHistoryAsync(key: key, hours: hours, cancellationToken: cancellationToken);
+            NotifyChanged();
         }
-        catch (ProviderAdminException ex)
+        catch (GrpcAdminException ex)
         {
-            _logger?.LogDebug(exception: ex, message: "Failed to load rate-limit history for provider {Provider}.",
+            Logger?.LogDebug(exception: ex, message: "Failed to load rate-limit history for provider {Provider}.",
                 key);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            // ProviderAdminClient.SendAsync only wraps HttpRequestException into ProviderAdminException;
-            // a request timeout surfaces as a raw TaskCanceledException instead. Called fire-and-forget
-            // from ProvidersAdmin.razor, so letting this escape would become an unobserved task exception
-            // rather than the best-effort no-op this method promises.
-            _logger?.LogDebug(exception: ex, message: "Timed out loading rate-limit history for provider {Provider}.",
+            // Called fire-and-forget from ProvidersAdmin.razor, so a timeout that is not the caller's
+            // cancellation must not become an unobserved task exception.
+            Logger?.LogDebug(exception: ex, message: "Timed out loading rate-limit history for provider {Provider}.",
                 key);
         }
     }
@@ -352,67 +314,68 @@ public sealed class ProviderAdminStore : IDisposable
     /// <summary>
     /// Loads the price-override list. Same reachability-tolerant shape as <see cref="LoadAsync"/>, kept
     /// separate since the price-overrides pane is a distinct Governance sub-view that shouldn't force a
-    /// provider reload (or vice versa).
+    /// provider reload (or vice versa). Does not mark the store loaded: that flag is the provider list's.
     /// </summary>
-    public async Task LoadPriceOverridesAsync(CancellationToken cancellationToken = default)
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public Task LoadPriceOverridesAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            PriceOverrides = await _client.GetPriceOverridesAsync(cancellationToken);
-            PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync(cancellationToken);
-            IsReachable = true;
-            LastError = null;
-        }
-        catch (ProviderAdminException ex)
-        {
-            IsReachable = false;
-            LastError = ex.Message;
-            _logger?.LogWarning(exception: ex, message: "Failed to load price overrides from the management API.");
-            _toasts?.ShowError(title: "Price overrides unreachable", message: ex.Message);
-        }
-        finally
-        {
-            Changed?.Invoke();
-        }
+        return LoadGuardedAsync(
+            async ct =>
+            {
+                PriceOverrides = await Client.GetPriceOverridesAsync(ct);
+                PriceResolutionDiagnosis = await Client.GetPriceResolutionDiagnosisAsync(ct);
+            },
+            "load the price overrides",
+            cancellationToken,
+            onFailure: () => _toasts?.ShowError(title: "Price overrides unreachable",
+                message: LastError ?? "Unknown error."),
+            marksLoaded: false);
     }
 
     /// <summary>Adds or replaces a price override, then publishes the updated override list.</summary>
-    /// <exception cref="ProviderAdminException">The edit was rejected (e.g. an unconfigured model) or the request failed.</exception>
+    /// <param name="body">The override to write.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">The edit was rejected (e.g. an unconfigured model) or the request failed.</exception>
     public Task SetPriceOverrideAsync(PriceOverrideWriteRequest body, CancellationToken cancellationToken = default)
     {
         return MutatePriceOverridesAsync(
-            mutation: () => _client.SetPriceOverrideAsync(body: body, cancellationToken: cancellationToken),
+            mutation: () => Client.SetPriceOverrideAsync(body: body, cancellationToken: cancellationToken),
             cancellationToken: cancellationToken);
     }
 
     /// <summary>Removes a price override, then publishes the updated override list.</summary>
-    /// <exception cref="ProviderAdminException">No override matched, or the request failed.</exception>
+    /// <param name="sourceName">The aggregator source the override applies to.</param>
+    /// <param name="aggregatorModelKey">The source's own model key the override matches.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="GrpcAdminException">No override matched, or the request failed.</exception>
     public Task RemovePriceOverrideAsync(string sourceName, string aggregatorModelKey,
         CancellationToken cancellationToken = default)
     {
         return MutatePriceOverridesAsync(
-            mutation: () => _client.RemovePriceOverrideAsync(sourceName: sourceName,
+            mutation: () => Client.RemovePriceOverrideAsync(sourceName: sourceName,
                 aggregatorModelKey: aggregatorModelKey,
                 cancellationToken: cancellationToken), cancellationToken: cancellationToken);
     }
 
+    /// <summary>
+    /// Shared implementation behind the price-override mutation methods: runs the write, refreshes
+    /// diagnosis, and publishes. An override can change whether a model resolves (or whether the resolved
+    /// price is approximate), so the diagnosis view has to be refreshed alongside the override list itself.
+    /// </summary>
     private async Task MutatePriceOverridesAsync(Func<Task<IReadOnlyList<PriceOverrideView>>> mutation,
         CancellationToken cancellationToken)
     {
         try
         {
             PriceOverrides = await mutation();
-            // An override can change whether a model resolves (or whether the resolved price is approximate),
-            // so the diagnosis view has to be refreshed alongside the override list itself, not just on the
-            // next explicit LoadPriceOverridesAsync call.
-            PriceResolutionDiagnosis = await _client.GetPriceResolutionDiagnosisAsync(cancellationToken);
-            IsReachable = true;
-            LastError = null;
-            Changed?.Invoke();
+            PriceResolutionDiagnosis = await Client.GetPriceResolutionDiagnosisAsync(cancellationToken);
+            RecordSuccess(marksLoaded: false);
+            NotifyChanged();
         }
-        catch (ProviderAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _toasts?.ShowError(title: "Action failed", message: ex.Message);
+            RecordFailure(exception: ex, description: "a price-override operation");
             throw;
         }
     }

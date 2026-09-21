@@ -5,18 +5,14 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// the System Settings window, or a tray notification rather than a raw <see cref="Grpc.Core.RpcException"/>.
 /// </summary>
 /// <remarks>
-/// <para>
 /// This is deliberately one concrete type rather than a per-service hierarchy. Every admin client used to
 /// declare its own empty subclass (<c>PriceSourceAdminException</c>, <c>ClusterModelAdminException</c>,
-/// and ten more) that added no state and no behavior, and each was caught in exactly one place — so the type
-/// carried no information the message and <see cref="IsUnavailable"/> did not already carry. See
-/// <see href="../../../docs/adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md">ADR-0010</see>.
-/// </para>
-/// <para>
-/// <c>ProviderAdminException</c> in <c>TotallyHot.ArcRouter.Gui.Admin</c> is intentionally *not* part of this
-/// hierarchy: it belongs to the HTTP provider-admin client, which ADR-0007 decided stays on HTTP. Keeping the
-/// two exception types unrelated keeps that transport split visible in the type system.
-/// </para>
+/// <c>ProviderAdminException</c>, and ten more) that added no state and no behavior, and each was caught
+/// in exactly one place — so the type carried no information the message and <see cref="IsUnavailable"/>
+/// did not already carry. See
+/// <see href="../../../docs/adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md">ADR-0010</see>
+/// (including Amendment 3, which folded the leftover Gui.Admin exception into this type after ADR-0011
+/// retired the HTTP transport split ADR-0007 had documented).
 /// </remarks>
 public sealed class GrpcAdminException : Exception
 {

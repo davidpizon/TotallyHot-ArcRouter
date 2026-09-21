@@ -128,8 +128,7 @@ public sealed class ManagementFacade
     }
 
     /// <summary>
-    /// Re-probes a provider's endpoint flavors on demand and persists the result
-    /// (<c>POST /admin/providers/{key}/scan-capabilities</c>). Delegates to
+    /// Re-probes a provider's endpoint flavors on demand and persists the result. Delegates to
     /// <see cref="ProviderManagementService.ScanCapabilitiesAsync"/>.
     /// </summary>
     /// <param name="key">The provider key to scan.</param>
@@ -141,9 +140,8 @@ public sealed class ManagementFacade
     }
 
     /// <summary>
-    /// Pins how one model expresses tool calls, so no automatic scan or live observation can overwrite it
-    /// (<c>PUT /admin/providers/{key}/models/{modelName}/tool-dialect</c>). Delegates to
-    /// <see cref="ProviderManagementService.SetModelToolDialect"/>.
+    /// Pins how one model expresses tool calls, so no automatic scan or live observation can overwrite it.
+    /// Delegates to <see cref="ProviderManagementService.SetModelToolDialect"/>.
     /// </summary>
     /// <param name="key">The provider key serving the model.</param>
     /// <param name="modelName">The client-facing model name.</param>

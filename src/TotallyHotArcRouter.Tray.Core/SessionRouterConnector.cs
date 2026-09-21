@@ -27,6 +27,11 @@ public interface ISessionRouterConnector
 /// <summary>
 /// Production <see cref="ISessionRouterConnector"/>: wraps <see cref="TelemetryChannelFactory.CreateSessionAuthenticatedAsync"/>.
 /// </summary>
+/// <remarks>
+/// Its only caller is <c>TotallyHotArcRouter.Tray</c>, which targets <c>net10.0-windows</c> and is therefore
+/// absent from <c>TotallyHotArcRouter.Qodana.slnx</c> - so the scan reports this type as unused.
+/// </remarks>
+// ReSharper disable once UnusedType.Global
 public sealed class SessionRouterConnector : ISessionRouterConnector
 {
     /// <inheritdoc/>

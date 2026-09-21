@@ -32,8 +32,8 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 /// The move also collapses a folder-name split: <c>appsettings.json</c> pinned <c>DatabasePath</c> under
 /// <c>TotallyHotArcRouter\</c> while the four other defaults used <c>TotallyHot.ArcRouter\</c>, so one
 /// install wrote two sibling directories. All five now share
-/// <see cref="MachineSharedDirectoryName"/>. <see cref="LegacyStorageMigration"/> adopts files from
-/// either old spelling on first run.
+/// <see cref="AppDataPaths.ApplicationDirectoryName"/>. <see cref="LegacyStorageMigration"/> adopts files
+/// from either old spelling on first run.
 /// </para>
 /// <para>
 /// These files inherit <c>%ProgramData%</c>'s default ACL, which grants <c>Users</c> read - enough to
@@ -76,16 +76,6 @@ public sealed class StorageOptions
     // Still recognized even though no default uses it any more: an operator's existing appsettings.json
     // may pin a %LOCALAPPDATA% path, and LegacyStorageMigration builds the pre-move locations from it.
     private const string LocalAppDataToken = "%LOCALAPPDATA%";
-
-    /// <summary>
-    /// The single machine-wide directory every file above lives in, shared with
-    /// <c>RoutingGateStore</c>'s state file and <c>ManagementAccessToken</c>'s token. Public so
-    /// <see cref="LegacyStorageMigration"/> can tell a default-located file (which it may migrate) from
-    /// one an operator deliberately pointed somewhere else (which it must leave alone). Mirrors
-    /// <see cref="AppDataPaths.ApplicationDirectoryName"/>, which <see cref="ResolveMachineSharedDirectory"/>
-    /// now delegates to.
-    /// </summary>
-    public const string MachineSharedDirectoryName = AppDataPaths.ApplicationDirectoryName;
 
     // The two per-user directories these files lived in before the move to %ProgramData%. Both spellings
     // existed at once: appsettings.json pinned DatabasePath under the dotless name while the four

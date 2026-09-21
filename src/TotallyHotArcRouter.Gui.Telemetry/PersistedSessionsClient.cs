@@ -37,20 +37,10 @@ public sealed class PersistedSessionsClient
         IPersistedSessionsClient
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="PersistedSessionsClient"/> class, creating and owning
-    /// a channel to <paramref name="serverAddress"/>.
-    /// </summary>
-    public PersistedSessionsClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress: serverAddress,
-            createClient: callInvoker => new Contract.TelemetryService.TelemetryServiceClient(callInvoker))
-    {
-    }
-
-    /// <summary>
     /// Initializes a new instance of the <see cref="PersistedSessionsClient"/> class over a shared, already-
     /// authenticated call invoker (web GUI migration plan Phase P5a) - see
-    /// <see cref="IRouterChannelProvider"/>'s remarks for why production now goes through this
-    /// constructor instead of the one above, which still exists for standalone/test use. The
+    /// <see cref="IRouterChannelProvider"/>'s remarks for why production goes through this shared
+    /// invoker rather than a channel of its own. The
     /// caller owns the invoker's underlying channel.
     /// </summary>
     /// <param name="callInvoker">The shared call invoker - see <see cref="IRouterChannelProvider.CallInvoker"/>.</param>

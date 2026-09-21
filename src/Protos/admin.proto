@@ -2,27 +2,23 @@ syntax = "proto3";
 
 package TotallyHot.ArcRouter.admin.v1;
 
-// docs/router/tracked-todos.md #7: the REST->gRPC migration for the Governance UI's provider/usage admin
-// surfaces. A separate file from telemetry.proto (and a separate csharp_namespace) rather than more
-// services appended there: TotallyHotArcRouter.Gui.Admin - the plain net10.0 library hosting
-// ProviderAdminClient/UsageQueryClient - deliberately does not reference TotallyHotArcRouter.Gui.Telemetry
-// (see that project's own csproj comment), so it compiles its own copy of whatever .proto it needs. When
-// that copy shared telemetry.proto's csharp_namespace, the two independently-compiled assemblies produced
-// identically-named types (TelemetryEvent, TelemetryService, etc.) in the same namespace, which the MAUI
-// TotallyHotArcRouter.Gui project - referencing both libraries for its telemetry stream and its admin
-// surface - could not resolve (CS0433, ambiguous type). A distinct package/csharp_namespace here means the
-// two compiled outputs never collide, so both libraries keep their independence.
+// docs/router/tracked-todos.md #7: the Governance UI's provider/usage admin gRPC-Web surface. A
+// separate file from telemetry.proto (and a separate csharp_namespace) rather than more services
+// appended there: TotallyHotArcRouter.Gui.Admin compiles its own copy of whatever .proto it needs
+// and does not reference TotallyHotArcRouter.Gui.Telemetry (see that project's own csproj comment).
+// When that copy shared telemetry.proto's csharp_namespace, the two independently-compiled assemblies
+// produced identically-named types (TelemetryEvent, TelemetryService, etc.) in the same namespace,
+// which any project that referenced both libraries (the WASM host via Gui.Components, formerly the
+// MAUI TotallyHotArcRouter.Gui) could not resolve (CS0433). A distinct package/csharp_namespace here
+// means the two compiled outputs never collide.
 option csharp_namespace = "TotallyHot.ArcRouter.Admin.Contract";
 
 import "google/protobuf/timestamp.proto";
 
 // docs/router/tracked-todos.md #7: the Governance UI's Providers card management plane - provider/model
 // CRUD, budgets, discovery, endpoint capability scanning, price overrides, rate-limit history, and
-// secrets. Originally migrated off the plain-HTTP /admin/* REST surface (ProviderAdminEndpoints), which
-// shared the LLM-forwarding proxy port; that REST surface and the dedicated gRPC-only port it moved onto
-// were both later deleted/retired (web GUI migration plan Phases P2/P9) once gRPC-Web gave the browser
-// dashboard direct access to this same service on the router's one web port - there is no REST admin
-// surface left to keep parity with. Provider/model mutations
+// secrets. Served over gRPC-Web on the router's web port (web GUI migration plan Phases P2/P9 retired
+// the REST /admin/* surface and the dedicated gRPC-only port). Provider/model mutations
 // (UpsertProvider through SetModelToolDialect, plus ScanCapabilities/RefreshFromEndpoint) return the full
 // refreshed ProviderListResponse, the same "full state after the mutation" convention as
 // RefreshPriceSourcesResponse and friends, so the GUI's ProviderAdminStore never needs a follow-up
@@ -395,7 +391,7 @@ message ProviderListResponse {
 }
 
 // docs/router/tracked-todos.md #7: the Governance/Model Distribution/Cost Analytics GUI tabs' read-only
-// usage-query surface. Replaces the plain-HTTP /admin/usage/* REST surface (UsageAdminEndpoints). All
+// usage-query surface. All
 // four RPCs are read-only, unlike ProviderAdminService above - no mutation, no security-boundary
 // concerns beyond the same management-token gate every service on this endpoint shares.
 service UsageAdminService {

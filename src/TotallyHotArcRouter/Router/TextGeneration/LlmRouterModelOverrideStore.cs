@@ -59,6 +59,12 @@ public interface ILlmRouterModelOverrideStore
     LlmRouterModelSnapshot Snapshot { get; }
 
     /// <summary>Raised after a successful model switch has been persisted and the snapshot swapped.</summary>
+    /// <remarks>
+    /// Reported by <c>EventNeverSubscribedTo.Global</c>: subscribers reach this through the implementing
+    /// type rather than this interface, so the scan sees no subscription on the declaration. It is
+    /// subscribed - unlike the three genuinely-unsubscribed events this PR removed.
+    /// </remarks>
+    // ReSharper disable once EventNeverSubscribedTo.Global
     event Action? Changed;
 
     /// <summary>

@@ -112,8 +112,7 @@ internal sealed class ProviderManagementService
     }
 
     /// <summary>
-    /// Re-probes a provider's endpoint flavors on demand and persists the result
-    /// (<c>POST /admin/providers/{key}/scan-capabilities</c>).
+    /// Re-probes a provider's endpoint flavors on demand and persists the result.
     /// </summary>
     /// <remarks>
     /// The explicit counterpart to the automatic scan on save: useful after starting a local server that was
@@ -169,8 +168,7 @@ internal sealed class ProviderManagementService
 
     /// <summary>
     /// Pins how one model expresses tool calls, at <see cref="DetectionConfidence.Operator"/>, so no
-    /// automatic scan or live observation can overwrite it
-    /// (<c>PUT /admin/providers/{key}/models/{modelName}/tool-dialect</c>).
+    /// automatic scan or live observation can overwrite it.
     /// </summary>
     /// <remarks>
     /// The equivalent of LiteLLM's <c>register_model(..., supports_function_calling=…)</c>: a way for a

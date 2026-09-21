@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
@@ -548,12 +549,15 @@ public sealed class TaxonomyComparisonService : BackgroundService
     }
 
     /// <summary>
-    /// Estimates the routing decision's regret against the untrained baseline under the canonical
-    /// reward <c>r = ε₁·s + ε₂·κ</c> (docs/router/routing-roi-regret-plan.md): the baseline's estimated
+    /// Estimates the routing decision's regret against the untrained baseline under the configured
+    /// reward <c>r = ε₁·s + ε₂·κ</c> (docs/score-delta-methodology.md): the baseline's estimated
     /// reward minus the routed pick's observed reward, using the same
     /// <see cref="RoutingOptions.Epsilon1"/>/<see cref="RoutingOptions.Epsilon2"/> weights
     /// <c>UtilityRoutingPolicy</c> routes with, so the regret figure and the live selection criterion can
-    /// never disagree about what "better" means.
+    /// never disagree about what "better" means. Delegates to
+    /// <see cref="RewardWeights.ComputeEstimatedRegret"/> so this live path and the offline harness share
+    /// the algebra; the harness scores under <see cref="RewardWeights.Canonical"/>, which matches
+    /// the shipped defaults but not an operator override of those options.
     /// </summary>
     /// <param name="observedScore">The routed pick's verifier score.</param>
     /// <param name="actualCost">What the routed pick actually cost, or <see langword="null"/> when unknown.</param>
@@ -576,10 +580,16 @@ public sealed class TaxonomyComparisonService : BackgroundService
             || baselineCost is not { } counterfactualCost)
             return null;
 
-        var routedReward = _routingOptions.Epsilon1 * observedScore + _routingOptions.Epsilon2 * (double)routedCost;
-        var baselineReward = _routingOptions.Epsilon1 * baselineScore +
-                             _routingOptions.Epsilon2 * (double)counterfactualCost;
-        return baselineReward - routedReward;
+        // Same static helper as the offline harness: shared algebra r = ε₁·s + ε₂·κ, not
+        // necessarily the same coefficients. Live passes RoutingOptions; CumReg uses
+        // RewardWeights.Canonical (docs/score-delta-methodology.md).
+        return RewardWeights.ComputeEstimatedRegret(
+            observedScore: observedScore,
+            actualCostUsd: (double)routedCost,
+            baselinePredictedScore: baselineScore,
+            baselineCostUsd: (double)counterfactualCost,
+            epsilon1: _routingOptions.Epsilon1,
+            epsilon2: _routingOptions.Epsilon2);
     }
 
     /// <summary>
