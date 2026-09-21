@@ -6,9 +6,6 @@ namespace TotallyHot.ArcRouter.Gui.Models;
 /// <summary>Severity of a single routing-decision log step.</summary>
 public enum StepStatus
 {
-    /// <summary>The step succeeded normally.</summary>
-    Ok,
-
     /// <summary>The step completed but flags something worth the user's attention.</summary>
     Warn,
 
