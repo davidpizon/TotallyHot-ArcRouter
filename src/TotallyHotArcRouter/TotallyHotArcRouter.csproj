@@ -6,10 +6,6 @@
     <RootNamespace>TotallyHot.ArcRouter</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>preview</LangVersion>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest</AnalysisLevel>
-    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <!-- Matches TotallyHotArcRouter.Gui.Admin/.Charts/.Console/.Telemetry: CS1591 (missing XML doc on a
          public member) becomes a build error via TreatWarningsAsErrors above, so undocumented public
          API can't creep back in. The generated gRPC server stub (Telemetry.cs/TelemetryGrpc.cs) already

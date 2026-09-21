@@ -213,7 +213,7 @@ actually appear in `app.css`.
   `-locked`): unlocking is destructive, so it opens the `UnlockSecretFieldDialog` confirmation rather
   than arming the control in place. Full contract, including why unlocking clears the value:
   [`secret-field.md`](secret-field.md).
-- **Navigation** (5-tab bar: Sessions / Cost Analytics / Model Distribution / Governance /
+- **Navigation** (6-tab bar: Sessions / Cost Analytics / Model Distribution / Report Card / Governance /
   Console) — the selected tab reads as a folder tab continuous with its panel: `var(--accent)`
   text, a `var(--surface-base)` fill, a `var(--border-button)` border on three sides, `6px 6px 0 0`
   radius, and a bottom edge painted `var(--surface-base)` that hides `.ds-toolbar`'s
@@ -792,6 +792,13 @@ following classes have been added to support this, on top of the earlier round b
   that part is genuinely data-driven, exception 1 above). `.ls-turn-card`/`.ls-turn-card-toggle` are
   now only referenced by the orphaned `TurnCard.razor` (§1); `.ls-flex-auto`/`.ls-stat-strip-gap` stay
   live via `ConversationSummary`.
+- `.ds-doc-link` — the "Methodology" citation anchors in `CostAnalytics`/`RegretHarnessAdmin`.
+  Supplies underline + `text-underline-offset` + case/letter-spacing reset, because the
+  compiled blob ships no `underline`, `underline-offset-*`, `normal-case` or `tracking-normal`
+  utility *and* its preflight sets `a { text-decoration: inherit }` — an anchor styled with
+  those utilities alone renders as plain text with no cue that it is clickable. Color stays on
+  the call site's `text-slate-*`/`hover:text-slate-200` utilities (those *are* in the blob) so a
+  citation can match the brightness of the copy around it
 - `.ds-dashboard-ticker` — Dashboard ticker row border/background
 - `.ls-console-line` — `ConsoleTab` line wrapping (the per-level text color stays inline, exception 1
   above)

@@ -30,23 +30,30 @@ public sealed class AnthropicTokenCountClient
     private const string AnthropicVersion = "2023-06-01";
 
     private readonly string _apiKey;
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
     private readonly ILogger<AnthropicTokenCountClient>? _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AnthropicTokenCountClient"/> class.</summary>
-    /// <param name="httpClient">The transport to send on.</param>
+    /// <param name="httpClient">The transport to send on when no factory is supplied.</param>
     /// <param name="apiKey">
     /// An ordinary Anthropic inference API key. Not the Admin key - this endpoint neither needs nor accepts
     /// that elevated credential.
     /// </param>
     /// <param name="logger">Optional logger.</param>
-    public AnthropicTokenCountClient(HttpClient httpClient, string apiKey,
-        ILogger<AnthropicTokenCountClient>? logger = null)
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="CostReconciliationRetryPolicy.HttpClientName"/> client per count. Required
+    /// when <paramref name="httpClient"/> is omitted.
+    /// </param>
+    public AnthropicTokenCountClient(HttpClient? httpClient, string apiKey,
+        ILogger<AnthropicTokenCountClient>? logger = null, IHttpClientFactory? httpClientFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        if (httpClient is null && httpClientFactory is null)
+            throw new ArgumentNullException(nameof(httpClientFactory));
         ArgumentException.ThrowIfNullOrWhiteSpace(apiKey);
 
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _apiKey = apiKey;
         _logger = logger;
     }
@@ -77,8 +84,10 @@ public sealed class AnthropicTokenCountClient
 
         try
         {
+            using var factoryClient = _httpClientFactory?.CreateClient(CostReconciliationRetryPolicy.HttpClientName);
+            var client = factoryClient ?? _httpClient!;
             using var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-                httpClient: _httpClient,
+                httpClient: client,
                 requestFactory: () => BuildRequest(model: model, text: text),
                 logger: _logger,
                 cancellationToken: cancellationToken).ConfigureAwait(false);

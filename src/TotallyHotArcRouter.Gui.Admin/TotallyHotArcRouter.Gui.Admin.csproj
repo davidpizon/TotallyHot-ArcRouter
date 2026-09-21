@@ -3,20 +3,11 @@
   <PropertyGroup>
     <!-- Plain net10.0 (not net10.0-windows / MAUI), mirroring TotallyHotArcRouter.Gui.Charts/.Telemetry:
          the DTOs and the gRPC client logic for the proxy's provider/usage admin surface live here so
-         they build and unit-test on any platform (the MAUI Gui project is Windows-only and excluded
-         from CI). TotallyHotArcRouter.Gui.Services.ProviderAdminStore is the thin MAUI glue that wraps the
-         client in this library, exactly as Services/LiveDataStore wraps TotallyHotArcRouter.Gui.Telemetry.
-         Deliberately does not reference the TotallyHotArcRouter proxy project - it's an independent wire
-         contract for a separately deployable process. Compiles its own copy of admin.proto
-         (GrpcServices="Client") rather than referencing TotallyHotArcRouter.Gui.Telemetry for the
-         ProviderAdminService/UsageAdminService client stubs it needs (docs/router/tracked-todos.md #7):
-         that project's raison d'être is the telemetry event stream, and reaching into it for two unrelated
-         admin services would couple this library to a sibling it has nothing to do with, breaking the
-         "deliberately independent" contract stated above. admin.proto is its own file with its own
-         csharp_namespace specifically so this works - see that file's own header comment: an earlier
-         version of this reused telemetry.proto directly, and the two independently-compiled copies of that
-         file's shared namespace collided (CS0433) the moment TotallyHotArcRouter.Gui referenced both this
-         project and Gui.Telemetry together. -->
+         they build and unit-test on any platform. TotallyHot.ArcRouter.Gui.Services.ProviderAdminStore
+         is the thin glue that wraps the client in this library. Compiles its own copy of admin.proto
+         (GrpcServices="Client"); that file has its own csharp_namespace so this does not collide with
+         Gui.Telemetry's telemetry.proto. This project now references Gui.Telemetry so
+         ProviderAdminClient / UsageQueryClient can derive from GrpcAdminClientBase (ADR-0010 Amendment 3). -->
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>TotallyHot.ArcRouter.Gui.Admin</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -35,6 +26,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Telemetry\TotallyHotArcRouter.Gui.Telemetry.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -17,7 +17,7 @@ shows service status - it renders none of the UI below itself.
 ## Purpose
 
 The dashboard presents routing, cost, and governance telemetry for the TotallyHotArcRouter proxy: which
-requests were routed to which upstream model, how much that saved versus a worst-case baseline, token
+requests were routed to which upstream model, how much that saved versus the frozen untrained baseline, token
 volume trends, model market share, and per-provider budget status.
 
 **Current status: mixed live and mock data.** The **Sessions** tab (formerly "Live Stream") and the **Console** tab are
@@ -25,12 +25,15 @@ wired to live telemetry pushed from the `TotallyHotArcRouter` proxy over gRPC (`
 - see [`../router/telemetry.md`](../router/telemetry.md) for the routing-telemetry pipeline and this
 doc's Console tab section above for the log-line pipeline. Until the proxy is running and reachable
 (or before it has forwarded any requests / emitted any log events), those surfaces simply show no
-data rather than falling back to mock data. The **Cost Analytics** tab is **live + mock merged**: it
-plots live conversation turns when present, on top of a deterministic timestamped mock history
-(`MockData.BuildMetricHistory`) so every metric/range renders offline; the metrics that have no live
-source (ROI, tool steps, cache, context) are demonstrated by the mock history only. **Model
-Distribution** fetches real rollup buckets through `UsageStore.LoadRollupAsync` on every filter
-change, falling back to the hard-coded `MockData` class only when there is no live data to show. The
+data rather than falling back to mock data. The **Cost Analytics** tab is **live with a fallback-only
+mock**: `CostAnalytics.BuildCorpus` plots usage-rollup history and live conversation turns when either
+exists; `MockData.BuildMetricHistory` fills in only when there is neither (the chart subtitle then
+carries a **`· demo data`** marker). Routing ROI is a separate corpus from the taxonomy-comparison
+store — live turns are never merged into it. **Model Distribution** fetches real rollup buckets
+through `UsageStore.LoadRollupAsync` on every filter change, falling back to the hard-coded
+`MockData` class only when there is no live data to show. **Report Card** fetches one aggregated
+snapshot (`UsageStore.LoadLearningReportCardAsync` → `GetLearningReportCard`) from the same usage-rollup
+and taxonomy-comparison stores, and uses the same `MockData` fallback when the window is empty. The
 **header ticker** is partly real: System Tokens comes from `UsageStore.LoadSummaryAsync`, while Total
 Saved and Avg. Cost Reduction are still mock and labelled "(demo)". [`backlog.md`](backlog.md) is the
 authority for which surfaces are live and which are still mock - when the two disagree, that doc is
@@ -81,7 +84,7 @@ scrolling internally where their content can overflow.
 flowchart TD
     Header["🤖 Router Optimization Engine — status banner — Settings"]
     Ticker["Total Saved · System Tokens · Avg. Cost Reduction · ● LIVE"]
-    Tabs["Sessions | Cost Analytics | Model Distribution | Governance | Console"]
+    Tabs["Sessions | Cost Analytics | Model Distribution | Report Card | Governance | Console"]
     Content["Active tab content"]
 
     Header --> Ticker --> Tabs --> Content
@@ -169,7 +172,11 @@ flowchart TD
      persisted-history sessions or the training-data flag). Defaults to whatever session the Sessions tab
      has selected, passed in as `InitialSessionId`.
    - **Bespoke per-metric charts** (Apache ECharts, one point per turn on a time x-axis): Routing ROI
-     is a dual-directional bar chart (savings above 0, fallback remediation below, colored by model);
+     is a dual-directional bar chart (savings above 0, fallback remediation below, colored by model).
+     While that metric is selected the chart header carries a **Methodology** link to
+     [`../score-delta-methodology.md`](../score-delta-methodology.md) — the as-built method for
+     estimated regret / score-delta versus the frozen untrained baseline. The chart itself still
+     plots only the **cost** half (`estimated_net_savings_usd`); the methodology says so.
      Turn Cost a stepped cumulative area recolored per active model; Tokens a cumulative stepped area
      with exponential-runaway detection (hatched zone + rippling alert); Tool Steps a per-turn bar
      segmented by the model that handled each stretch of steps; Cache Hit a stepped % line with a
@@ -179,16 +186,29 @@ flowchart TD
      to). The chart models are built by `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder.Build` (pure,
      unit-tested in `TotallyHot.ArcRouter.Gui.Charts.Tests`), serialized with `ChartJson`, and rendered
      through the shared `<EChart>` host + `wwwroot/js/echarts-interop.js`.
-   - **Data source**: the corpus is the live conversation turns (real tokens/cost/TTFT/model/
-     timestamp) **merged with** `MockData.BuildMetricHistory(now)` - a deterministic, timestamped
-     multi-session history spanning the last hour back through months, with fixed exemplar events (a
-     token runaway, a TTFT spike, a fallback, context breaches) so every chart shows its special state
-     even with no proxy running. Every rich tooltip figure (worst-case baseline, per-step model split,
-     cached/uncached tokens, context token counts, cold-start split) is **derived in `CostChartBuilder`**
-     from each turn's existing fields, so nothing new has to flow through telemetry. This supersedes the
-     tab's former combo chart (a single metric line plus per-model stacked bars). Note that ROI, tool
-     steps, cache, and context are still 0 for *live* turns (no proxy source - see
-     `../router/telemetry.md`), so the mock history is what demonstrates those metrics.
+   - **Data source** (`CostAnalytics.BuildCorpus`): **Routing ROI has its own corpus** - the
+     frozen-baseline comparison feed (`UsageAdminService.GetRoutingRoi`), one point per compared
+     routing decision. Live turns and usage rollups cannot contribute to it, because neither knows
+     what the frozen baseline would have picked. Every other metric merges rollup-backed history with
+     live conversation turns (real tokens/cost/TTFT/model/timestamp).
+     `MockData.BuildMetricHistory(now)` is a **fallback, not a merge**: a deterministic, timestamped
+     multi-session history with fixed exemplar events (a token runaway, a TTFT spike, a fallback,
+     context breaches), used only when there is nothing real at all - no ROI history and no live
+     conversations - so every chart still shows its special state with no proxy running. Tool steps,
+     cache, and context remain 0 for *live* turns (no proxy source - see `../router/telemetry.md`),
+     so the mock history is what demonstrates those; ROI is no longer in that list. Every rich
+     tooltip figure (the frozen untrained baseline's estimated cost — **not** a worst-case expensive
+     model; `CostChartBuilder.BuildRoi` labels it `"Baseline ({name}): … — estimate"` — plus per-step
+     model split, cached/uncached tokens, context token counts, cold-start split) is **derived in
+     `CostChartBuilder`** from each turn's existing fields, so nothing new has to flow through
+     telemetry. This supersedes the tab's former combo chart (a single metric line plus per-model
+     stacked bars).
+
+     When the corpus is that mock fallback rather than real rollups/live turns, the chart subtitle
+     carries a **`· demo data`** marker (same intent as the Dashboard tab's `(demo)` labels, §3).
+     Routing ROI is why this matters: it otherwise renders synthetic savings bars and a dollar
+     headline that are indistinguishable from real frozen-baseline measurements, directly beside the
+     Methodology link vouching for how they were computed.
 
 3. **Model Distribution** (`ModelDistribution.razor`) - a time-range filter bar (Day/Month/3-Month/
    6-Month/Year - visual only, does not currently refilter data) with From/To text inputs, above:
@@ -196,7 +216,17 @@ flowchart TD
    - A donut chart of model market share by execution volume (`MockData.ModelShares`), with a custom
      HTML legend below it.
 
-4. **Governance** (`Governance.razor`) - two sub-views behind a toggle:
+4. **Report Card** (`LearningReportCard.razor`, GitHub issue #111) - one local view of spend by model,
+   observed-score grade mix, and quality-score delta versus the frozen untrained baseline. Fed from
+   `UsageStore.LoadLearningReportCardAsync` → `UsageAdminService.GetLearningReportCard`, which aggregates
+   the existing usage-rollup store (spend) and taxonomy-comparison / learning store (grades + score
+   delta). There is no parallel metrics stack. A Day/Month/3-Month/6-Month/Year filter bar matches Model
+   Distribution. Offline/no-proxy (or a genuinely empty window) falls back to `MockData` so the three
+   panels still render. Letter grades A–F map from the `[0, 1]` quality score onto the 1–5 judge scale
+   (`LearningReportCardAggregator.GradeFromScore`). Score delta is observed score minus the frozen
+   baseline's predicted score; a missing baseline prediction is skipped rather than drawn as zero.
+
+5. **Governance** (`Governance.razor`) - two sub-views behind a toggle:
 
    - **Providers** (default, `ProvidersAdmin.razor`, full spec in
      [`provider-management.md`](provider-management.md)) - add/remove/edit provider endpoints,
@@ -229,7 +259,7 @@ flowchart TD
    `ModelRouting` config, with a functional date-range picker - is specified in
    [`governance-model-cards.md`](governance-model-cards.md).
 
-5. **Console** (`ConsoleTab.razor`, full spec in [`console-tab-plan.md`](console-tab-plan.md)) - a
+6. **Console** (`ConsoleTab.razor`, full spec in [`console-tab-plan.md`](console-tab-plan.md)) - a
    real-time, color-coded log stream: every Serilog log event the proxy emits, normalized to
    DEBUG/INFO/WARN/ERROR/FATAL and pushed over the telemetry gRPC-Web stream's `log_line` case by
    `src/TotallyHotArcRouter/Telemetry/TelemetryLogEventSink.cs`, buffered client-side (1,000-line cap,

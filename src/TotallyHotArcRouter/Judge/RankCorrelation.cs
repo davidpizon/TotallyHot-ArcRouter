@@ -33,7 +33,7 @@ internal static class RankCorrelation
     /// <summary>Ranks a sample in ascending order, giving tied values the average of the ranks they span.</summary>
     /// <param name="values">The sample to rank.</param>
     /// <returns>The rank of each value, in the input's original order.</returns>
-    internal static double[] Rank(IReadOnlyList<double> values)
+    private static double[] Rank(IReadOnlyList<double> values)
     {
         var indexed = values.Select((value, index) => (value, index)).OrderBy(t => t.value).ToArray();
         var ranks = new double[values.Count];

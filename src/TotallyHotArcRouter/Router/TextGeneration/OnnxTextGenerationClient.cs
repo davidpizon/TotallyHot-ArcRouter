@@ -205,6 +205,7 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
                                 cancellationToken: cancellationToken)
                             .ConfigureAwait(false);
 
+                    OnnxGenAiShutdown.Process.MarkUsed();
                     var swappedModel = new Model(cacheDirectoryForSwap);
                     _tokenizer = new Tokenizer(swappedModel);
                     _model = swappedModel;
@@ -230,6 +231,9 @@ public sealed class OnnxTextGenerationClient : ITextGenerationClient, IAsyncDisp
                         sourceUrl: $"{activeOverride.BaseUrl}/{fileName}", cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
 
+            // Before, not after: a Model constructor that throws has still initialized GenAI's native state,
+            // and that state is what owes the shutdown - see OnnxGenAiShutdown's remarks.
+            OnnxGenAiShutdown.Process.MarkUsed();
             var model = new Model(cacheDirectory);
             try
             {

@@ -59,6 +59,50 @@ public sealed class ManagementReportingServiceTests
         Assert.Equal(expected: "glm-5", actual: point.BaselineModel);
     }
 
+    [Fact]
+    public async Task GetLearningReportCardAsync_NoStores_IsUnavailableNotEmpty()
+    {
+        var service = new ManagementReportingService(null, null);
+        var result = await service.GetLearningReportCardAsync(from: DateTimeOffset.UtcNow.AddDays(-1),
+            to: DateTimeOffset.UtcNow, cancellationToken: Ct);
+
+        Assert.False(result.Success);
+        Assert.Equal(expected: ManagementErrorType.Unavailable, actual: result.ErrorType);
+    }
+
+    [Fact]
+    public async Task GetLearningReportCardAsync_InvertedRange_IsInvalidRequest()
+    {
+        var service = new ManagementReportingService(null, comparisonStore: new StubComparisonStore([]));
+        var now = DateTimeOffset.UtcNow;
+
+        var result = await service.GetLearningReportCardAsync(from: now, to: now.AddDays(-1), cancellationToken: Ct);
+
+        Assert.False(result.Success);
+        Assert.Equal(expected: ManagementErrorType.InvalidRequest, actual: result.ErrorType);
+    }
+
+    [Fact]
+    public async Task GetLearningReportCardAsync_ProjectsSpendAndScoreDeltaFromComparisons()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var inRange = MakeComparison(1, comparedAt: now.AddHours(-2), 0.09m);
+        var pastEnd = MakeComparison(2, comparedAt: now.AddHours(2), 0.50m);
+        var service =
+            new ManagementReportingService(null, comparisonStore: new StubComparisonStore([inRange, pastEnd]));
+
+        var result = await service.GetLearningReportCardAsync(from: now.AddDays(-1), to: now, cancellationToken: Ct);
+
+        Assert.True(result.Success);
+        var card = result.Value!;
+        Assert.Equal(1, actual: card.ScoredRequests);
+        Assert.Equal(1, actual: card.ComparableRequests);
+        var spend = Assert.Single(card.SpendByModel);
+        Assert.Equal(expected: "kimi-k2.5", actual: spend.Model);
+        Assert.NotNull(card.MeanScoreDelta);
+        Assert.Equal(0.05, actual: card.MeanScoreDelta!.Value, precision: 9);
+    }
+
     /// <summary>Builds a comparison row carrying a known savings figure at a known instant.</summary>
     private static TaxonomyComparisonRecord MakeComparison(
         long id, DateTimeOffset comparedAt, decimal savings)

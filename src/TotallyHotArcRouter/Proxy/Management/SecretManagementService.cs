@@ -32,10 +32,9 @@ internal sealed class SecretManagementService
     /// <summary>
     /// Stores <paramref name="value"/> as a provider's reconciliation Admin API key
     /// (docs/router/secrets-at-rest-plan.md §7), taking effect on the next reconciliation cycle with no
-    /// restart required. The public route is named by secret (<c>PUT /admin/secrets/{name}</c>) rather than
-    /// by provider so it matches the plan's write-only-secrets shape, but only the fixed
-    /// <c>reconciliation:{openai|anthropic}:admin-key</c> names are accepted - this is not a generic secret
-    /// store write endpoint.
+    /// restart required. Named by secret rather than by provider so it matches the plan's write-only-secrets
+    /// shape, but only the fixed <c>reconciliation:{openai|anthropic}:admin-key</c> names are accepted -
+    /// this is not a generic secret store.
     /// </summary>
     public ManagementResult<object?> SetSecret(string name, string value)
     {

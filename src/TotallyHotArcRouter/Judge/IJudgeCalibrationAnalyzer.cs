@@ -22,6 +22,12 @@ public interface IJudgeCalibrationAnalyzer
     /// few points. Shares <see cref="IGraderReliabilityAnalyzer.MinimumSampleSize"/>'s value and its
     /// caveat: a starting guess (30), not a measured threshold.
     /// </summary>
+    /// <remarks>
+    /// Reported by <c>UnusedMemberInSuper.Global</c>: every call reaches this through the implementing type
+    /// rather than this interface. It is not dead - see the declaration's callers. Narrowing the interface
+    /// to match today's call sites is a design change, not a scan fix (ADR-0008's stop rules).
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     int MinimumSampleSize { get; }
 
     /// <summary>Computes the full report over every row currently in <c>judge_shadow_scores</c>.</summary>

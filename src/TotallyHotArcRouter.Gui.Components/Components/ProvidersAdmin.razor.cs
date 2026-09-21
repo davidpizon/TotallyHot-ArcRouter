@@ -2,12 +2,13 @@ using System.Globalization;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Charts;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Components;
 
 /// <summary>
 /// Governance &gt; Providers pane: add/remove/edit provider endpoints + credentials and manage each
-/// provider's models (with live <c>/v1/models</c> discovery). Talks to the proxy's <c>/admin</c> API via
+/// provider's models (with live <c>/v1/models</c> discovery). Talks to the proxy via
 /// the injected <see cref="ProviderAdminStore"/>.
 /// </summary>
 public partial class ProvidersAdmin
@@ -167,7 +168,7 @@ public partial class ProvidersAdmin
             _showDialog = false;
             _dialogError = null;
         }
-        catch (ProviderAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _dialogError = ex.Message;
         }
@@ -321,7 +322,7 @@ public partial class ProvidersAdmin
             await operation();
             return true;
         }
-        catch (ProviderAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _opError = ex.Message;
             return false;

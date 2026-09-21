@@ -70,14 +70,14 @@ public static class LocalCertificateAuthority
     /// publicly-trusted leaf lifetime. This CA is never publicly trusted, but there is no reason to
     /// exceed a limit every mainstream browser already enforces.
     /// </summary>
-    public static readonly TimeSpan LeafValidity = TimeSpan.FromDays(397);
+    private static readonly TimeSpan LeafValidity = TimeSpan.FromDays(397);
 
     /// <summary>
     /// How long before expiry <see cref="GetOrCreateLeaf()"/> mints a replacement rather than returning
     /// the cached leaf. Wide enough that an operator who starts the router only occasionally still
     /// renews well ahead of expiry, without needing a background timer - every call re-checks.
     /// </summary>
-    public static readonly TimeSpan LeafRenewalWindow = TimeSpan.FromDays(30);
+    private static readonly TimeSpan LeafRenewalWindow = TimeSpan.FromDays(30);
 
     /// <summary>
     /// How long the CA itself is valid for. Long-lived by design (ADR-0013's whole point is that
@@ -85,7 +85,7 @@ public static class LocalCertificateAuthority
     /// needs renewing on a timescale roughly matching "how long before someone reinstalls the machine
     /// anyway", not a leaf's.
     /// </summary>
-    public static readonly TimeSpan CaValidity = TimeSpan.FromDays(3650);
+    private static readonly TimeSpan CaValidity = TimeSpan.FromDays(3650);
 
     /// <summary>
     /// Loads the persisted CA if one already exists, otherwise generates a new self-signed,
@@ -270,7 +270,7 @@ public static class LocalCertificateAuthority
     /// extension, unlike <see cref="X509BasicConstraintsExtension"/> or
     /// <see cref="SubjectAlternativeNameBuilder"/>.
     /// </summary>
-    internal static X509Extension BuildNameConstraintsExtension()
+    private static X509Extension BuildNameConstraintsExtension()
     {
         var writer = new AsnWriter(AsnEncodingRules.DER);
 

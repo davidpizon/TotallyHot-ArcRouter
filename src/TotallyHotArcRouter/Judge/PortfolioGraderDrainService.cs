@@ -7,11 +7,12 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <summary>
 /// Background worker that continuously drains <see cref="IPortfolioGraderQueue"/>, mirroring
 /// <see cref="JudgeShadowScoreDrainService"/>'s shape for Phase Q3's CodeJudge/ICE-Score/RACE portfolio. For
-/// each dequeued job it reads the response text (and, best-effort, the originating prompt) via
+/// each dequeued job it reads the response text and the originating prompt via
 /// <see cref="PendingResponseTextCache.TryPeek"/>/<see cref="PendingPromptCache.TryPeek"/> - never
 /// <c>TryTake</c>, since the G-Eval judge's own drain worker (or another portfolio grader's job for the same
 /// request) may still need the same cached entry - calls the matching <see cref="IPortfolioGraderClient"/>,
-/// and completes or abandons the aggregator's join for that grader's key.
+/// and completes or abandons the aggregator's join for that grader's key. A missing prompt fails closed
+/// (abandon with <c>{grader}-question-missing</c>) rather than scoring the response in isolation.
 /// </summary>
 public sealed class PortfolioGraderDrainService : BackgroundService
 {
@@ -27,7 +28,10 @@ public sealed class PortfolioGraderDrainService : BackgroundService
     /// <summary>Initializes a new instance of the <see cref="PortfolioGraderDrainService"/> class.</summary>
     /// <param name="queue">The work queue to drain.</param>
     /// <param name="pendingResponseTextCache">Supplies the response text for each job, keyed by correlation id.</param>
-    /// <param name="pendingPromptCache">Supplies the originating prompt for each job, best-effort.</param>
+    /// <param name="pendingPromptCache">
+    /// Supplies the originating prompt for each job. Required: a miss abandons that grader's join rather
+    /// than scoring the response without its question.
+    /// </param>
     /// <param name="pendingGraderBackboneCache">
     /// Records which backbone each successful score actually used
     /// (docs/router/grader-reliability-plan.md, Phase Q4), for <see cref="GraderScoreRecordObserver"/>'s
@@ -120,14 +124,26 @@ public sealed class PortfolioGraderDrainService : BackgroundService
             return;
         }
 
-        _pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt);
+        if (!_pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt) ||
+            !GraderQuestionText.IsPresent(prompt))
+        {
+            _logger.LogDebug(
+                message:
+                "No pending user/task question for correlation {CorrelationId}; skipping {GraderKey} scoring.",
+                job.CorrelationId,
+                job.GraderKey);
+            await _aggregator.AbandonGraderAsync(correlationId: job.CorrelationId, graderKey: job.GraderKey,
+                reason: GraderQuestionText.MissingReason(job.GraderKey), cancellationToken: stoppingToken)
+                .ConfigureAwait(false);
+            return;
+        }
 
         try
         {
             var result = await client
                 .ScoreAsync(
                     request: new PortfolioGraderScoreRequest(Dimension: job.Dimension, ResponseText: responseText,
-                        Prompt: prompt ?? string.Empty),
+                        Prompt: prompt),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
 
             if (result is null)

@@ -50,6 +50,12 @@ public interface ISecretWriter
     /// Reports whether a secret is stored under <paramref name="name"/> - the value itself is never returned by this
     /// surface.
     /// </summary>
+    /// <remarks>
+    /// Reported by <c>UnusedMemberInSuper.Global</c>: every call reaches this through the implementing type
+    /// rather than this interface. It is not dead - see the declaration's callers. Narrowing the interface
+    /// to match today's call sites is a design change, not a scan fix (ADR-0008's stop rules).
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     bool Exists(string name);
 
     /// <summary>

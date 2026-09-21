@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// <summary>
 /// Covers how <see cref="ManagementFacade"/> drives the endpoint-capability scan
 /// (<c>docs/router/tool-call-normalization.md</c> Phase 2): the explicit
-/// <c>POST /admin/providers/{key}/scan-capabilities</c> path, and the best-effort refresh that runs after a
+/// <see cref="ManagementFacade.ScanCapabilitiesAsync"/> path, and the best-effort refresh that runs after a
 /// provider save.
 /// <para>
 /// The load-bearing guarantee is that the save-time scan can never affect the save. A provider that is

@@ -28,7 +28,8 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
     // 1,000,000 tokens (D2). This is the one place that conversion happens for this source.
     private const decimal TokensPerMillion = 1_000_000m;
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
     private readonly ILogger<OpenRouterPriceSourceClient> _logger;
     private readonly string _url;
 
@@ -36,18 +37,27 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
     /// Initializes a new instance of the <see cref="OpenRouterPriceSourceClient"/> class.
     /// </summary>
     /// <param name="httpClient">
-    /// The shared client from <see cref="PriceSourceRegistry"/>, already carrying the <c>X-Title</c> and
-    /// <c>HTTP-Referer</c> attribution headers - the convention these headers originate from.
+    /// A caller-supplied client, typically a stub-wrapped instance in tests. Production omits this and
+    /// supplies <paramref name="httpClientFactory"/> instead; the factory's <see cref="PriceSourceRegistry.HttpClientName"/>
+    /// client already carries the <c>X-Title</c> and <c>HTTP-Referer</c> attribution headers - the convention
+    /// these headers originate from.
     /// </param>
     /// <param name="url">The catalog URL (an operator override, or <see cref="DefaultUrl"/>).</param>
     /// <param name="logger">The logger.</param>
-    public OpenRouterPriceSourceClient(HttpClient httpClient, string url, ILogger<OpenRouterPriceSourceClient> logger)
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="PriceSourceRegistry.HttpClientName"/> client per fetch. Required when
+    /// <paramref name="httpClient"/> is omitted.
+    /// </param>
+    public OpenRouterPriceSourceClient(HttpClient? httpClient, string url, ILogger<OpenRouterPriceSourceClient> logger,
+        IHttpClientFactory? httpClientFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        if (httpClient is null && httpClientFactory is null)
+            throw new ArgumentNullException(nameof(httpClientFactory));
         ArgumentException.ThrowIfNullOrWhiteSpace(url);
         ArgumentNullException.ThrowIfNull(logger);
 
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _url = url;
         _logger = logger;
     }
@@ -58,7 +68,9 @@ public sealed class OpenRouterPriceSourceClient : IPriceSourceClient
     /// <inheritdoc/>
     public async Task<IReadOnlyList<NormalizedPrice>> FetchAsync(CancellationToken cancellationToken)
     {
-        await using var stream = await _httpClient
+        using var factoryClient = _httpClientFactory?.CreateClient(PriceSourceRegistry.HttpClientName);
+        var client = factoryClient ?? _httpClient!;
+        await using var stream = await client
             .GetStreamAsync(requestUri: _url, cancellationToken: cancellationToken).ConfigureAwait(false);
         using var document = await JsonDocument.ParseAsync(utf8Json: stream, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
