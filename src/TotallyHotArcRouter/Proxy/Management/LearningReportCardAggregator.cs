@@ -29,10 +29,10 @@ public static class LearningReportCardAggregator
     {
         return score switch
         {
-            >= 0.80 => "A",
-            >= 0.60 => "B",
-            >= 0.40 => "C",
-            >= 0.20 => "D",
+            >= 0.875 => "A",
+            >= 0.625 => "B",
+            >= 0.375 => "C",
+            >= 0.125 => "D",
             _ => "F"
         };
     }
