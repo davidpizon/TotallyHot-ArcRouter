@@ -118,7 +118,7 @@ in [What was checked and rejected](#what-was-checked-and-rejected)).
 
 | # | Smell | Location | Size | Phase | Risk |
 |---|---|---|---|---|---|
-| 1 | Duplicated gRPC exception/constructor/dispose boilerplate | 9 classes in `Gui.Telemetry/*AdminClient.cs` | ~9× ~30 lines | 1 | Low |
+| 1 | Duplicated gRPC exception/constructor/dispose boilerplate *(since superseded 2026-09-20: the constructor and dispose parts were deleted, not just shared, see [§1](#1-duplicated-grpc-admin-client-boilerplate-9))* | 9 classes in `Gui.Telemetry/*AdminClient.cs` | ~9× ~30 lines | 1 | Low |
 | 2 | Duplicated error-envelope boilerplate | `ProxyMiddleware.cs`, 4 `Write*ResponseAsync` methods | 4× ~15 lines | 1 | Low |
 | 3 | Triplicated capture-buffer accounting | `ProxyMiddleware.cs`, 3 translate/copy methods | 3× ~20 lines | 1 | Low-Medium |
 | 4 | One 700-line method, ~120 DI registrations | `Hosting/ServiceCollectionExtensions.cs` | 800 lines | 1 | Low |
@@ -197,6 +197,12 @@ own RPC calls and DTO mapping — only the exception/dispose/constructor scaffol
 `PriceSourcesAdminTests.cs`, `RouterModelAdminTests.cs`, `RoutingModeAdminTests.cs`, etc.) that exercise
 the wrapped-exception behavior via the constructor-injected fake-client seam, so a behavior regression
 in the shared mapper would fail loudly and locally.
+
+> **Since superseded (2026-09-20, PR #135).** The exception and wrap parts landed on
+> `GrpcAdminClientBase` as planned. The constructor and dispose parts went further: the owned-channel
+> constructor turned out to have no production caller once every client was built over the shared
+> `IRouterChannelProvider.CallInvoker`, so it was deleted from all 14 clients and the base, and with no
+> channel left to own, `GrpcAdminClientBase` stopped being `IDisposable`. See the C4 note below.
 
 ### 2. Duplicated error-envelope boilerplate in `ProxyMiddleware`
 
