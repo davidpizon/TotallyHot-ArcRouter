@@ -30,7 +30,7 @@ public class ClusterModelAdminClientTests
                 CurrentTranscriptRowCount = 100
             }
         };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -63,7 +63,7 @@ public class ClusterModelAdminClientTests
                 ClusterNames = { "mostly bug_fixing: sql, migration", "mostly test_generation" }
             }
         };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -103,7 +103,7 @@ public class ClusterModelAdminClientTests
                 }
             ]
         };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var events = new List<ClusterRetrainEvent>();
         await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -141,7 +141,7 @@ public class ClusterModelAdminClientTests
                 }
             ]
         };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var events = new List<ClusterRetrainEvent>();
         await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -153,7 +153,7 @@ public class ClusterModelAdminClientTests
     public async Task RetrainAsync_an_empty_oneof_maps_to_an_all_null_event_without_throwing()
     {
         var stub = new StubClient { RetrainEvents = [new Contract.ClusterRetrainStreamEvent()] };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var events = new List<ClusterRetrainEvent>();
         await foreach (var e in client.RetrainAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -168,7 +168,7 @@ public class ClusterModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
@@ -186,7 +186,7 @@ public class ClusterModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
@@ -200,22 +200,13 @@ public class ClusterModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new ClusterModelAdminClient(stub);
+        var client = new ClusterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the cluster model status: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new ClusterModelAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
     }
 
     [Fact]

@@ -29,7 +29,7 @@ public class BenchmarkDataAdminClientTests
                 CheckedAtUtc = Timestamp.FromDateTimeOffset(checkedAt)
             }
         };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -58,7 +58,7 @@ public class BenchmarkDataAdminClientTests
                 }
             }
         };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -87,7 +87,7 @@ public class BenchmarkDataAdminClientTests
         BenchmarkDataAdminState expected)
     {
         var stub = new StubClient { StatusResponse = new Contract.BenchmarkStatusResponse { State = wireState } };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -99,7 +99,7 @@ public class BenchmarkDataAdminClientTests
     {
         var stub = new StubClient
         { StatusResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -111,7 +111,7 @@ public class BenchmarkDataAdminClientTests
     {
         var stub = new StubClient
         { RecheckResponse = new Contract.BenchmarkStatusResponse { State = Contract.BenchmarkDataState.Current } };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var status = await client.RecheckAsync(TestContext.Current.CancellationToken);
 
@@ -149,7 +149,7 @@ public class BenchmarkDataAdminClientTests
                 }
             ]
         };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -187,7 +187,7 @@ public class BenchmarkDataAdminClientTests
                 }
             ]
         };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -219,7 +219,7 @@ public class BenchmarkDataAdminClientTests
                 }
             ]
         };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -231,7 +231,7 @@ public class BenchmarkDataAdminClientTests
     public async Task SyncAsync_an_empty_oneof_maps_to_an_all_null_event_without_throwing()
     {
         var stub = new StubClient { SyncEvents = [new Contract.BenchmarkSyncStreamEvent()] };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -260,7 +260,7 @@ public class BenchmarkDataAdminClientTests
                 }
             ]
         };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var events = new List<BenchmarkSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -273,7 +273,7 @@ public class BenchmarkDataAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
@@ -291,7 +291,7 @@ public class BenchmarkDataAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
@@ -305,22 +305,13 @@ public class BenchmarkDataAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new BenchmarkDataAdminClient(stub);
+        var client = new BenchmarkDataAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.RecheckAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not recheck the benchmark data: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new BenchmarkDataAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
     }
 
     [Fact]

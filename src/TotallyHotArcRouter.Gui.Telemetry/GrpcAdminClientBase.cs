@@ -5,12 +5,14 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <summary>
 /// Base for gRPC admin clients (<see cref="PriceSourceAdminClient"/>,
 /// <see cref="ClusterModelAdminClient"/>, <see cref="BenchmarkDataAdminClient"/>, and the Gui.Admin
-/// <c>ProviderAdminClient</c>/<c>UsageQueryClient</c> pair): owns the generated-client constructor, unary <c>CallAsync</c>,
-/// and the "unavailable → friendly message, else → server detail" exception-wrapping rule every one of them used to reimplement identically.
-/// Each concrete client keeps its own RPC calls and DTO mapping - only this scaffolding lives here.
+/// <c>ProviderAdminClient</c>/<c>UsageQueryClient</c> pair): owns the generated-client constructor, unary
+/// <c>CallAsync</c>, and the "unavailable → friendly message, else → server detail" exception-wrapping rule
+/// every one of them used to reimplement identically. Each concrete client keeps its own RPC calls and DTO
+/// mapping - only this scaffolding lives here. Not <see cref="IDisposable"/>: a client owns no channel,
+/// since it is always built over the shared call invoker or a caller-supplied generated client.
 /// </summary>
 /// <typeparam name="TGeneratedClient">The generated gRPC client type this admin client wraps.</typeparam>
-public abstract class GrpcAdminClientBase<TGeneratedClient> : IDisposable
+public abstract class GrpcAdminClientBase<TGeneratedClient>
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="GrpcAdminClientBase{TGeneratedClient}"/> class over a
@@ -25,15 +27,6 @@ public abstract class GrpcAdminClientBase<TGeneratedClient> : IDisposable
 
     /// <summary>Gets the generated gRPC client this admin client wraps.</summary>
     protected TGeneratedClient Client { get; }
-
-    /// <summary>
-    /// Does nothing: every client is built over a caller-owned generated client or shared call invoker, so
-    /// there is no channel here to close. Kept so the stores' <c>ownsClient</c> disposal and existing
-    /// <c>using</c> call sites need no change.
-    /// </summary>
-    public void Dispose()
-    {
-    }
 
     /// <summary>
     /// Invokes a unary RPC through <see cref="Client"/> and wraps an <see cref="RpcException"/> via

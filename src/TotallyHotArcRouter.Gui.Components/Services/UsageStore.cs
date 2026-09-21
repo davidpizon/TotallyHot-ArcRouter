@@ -36,7 +36,7 @@ public sealed class UsageStore : AdminStoreBase<UsageQueryClient>
         IRouterChannelProvider? channelProvider = null,
         ILogger<UsageStore>? logger = null,
         UsageQueryClient? client = null)
-        : base(client: ResolveClient(channelProvider, client), logger: logger, ownsClient: client is null)
+        : base(client: ResolveClient(channelProvider, client), logger: logger)
     {
     }
 

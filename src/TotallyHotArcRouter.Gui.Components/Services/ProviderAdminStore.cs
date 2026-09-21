@@ -44,7 +44,7 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
         ILogger<ProviderAdminStore>? logger = null,
         ProviderAdminClient? client = null,
         ToastService? toasts = null)
-        : base(client: ResolveClient(channelProvider, client), logger: logger, ownsClient: client is null)
+        : base(client: ResolveClient(channelProvider, client), logger: logger)
     {
         _toasts = toasts;
     }

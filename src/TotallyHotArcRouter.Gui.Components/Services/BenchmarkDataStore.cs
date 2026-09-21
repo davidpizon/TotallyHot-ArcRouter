@@ -23,7 +23,7 @@ public sealed class BenchmarkDataStore : AdminStoreBase<IBenchmarkDataAdminClien
     public BenchmarkDataStore(
         IRouterChannelProvider channelProvider,
         ILogger<BenchmarkDataStore>? logger = null)
-        : base(client: new BenchmarkDataAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new BenchmarkDataAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         ServerAddress = channelProvider.ServerAddress;
     }

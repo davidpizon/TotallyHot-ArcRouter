@@ -5,11 +5,10 @@ using TotallyHot.ArcRouter.Gui.Services;
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
-/// Pins the disposal contract the GUI singleton stores follow: a store disposes the client it built
-/// for itself, and never a caller-injected client's. A caller-injected
-/// <see cref="ProviderAdminClient"/>/<see cref="UsageQueryClient"/> built over a fake generated client owns
-/// no channel, so <see cref="AdminStoreBase{TClient}.Dispose"/> must not throw. Both stores stay
-/// <see cref="IDisposable"/> so the DI container reclaims anything they own.
+/// Pins the disposal contract the GUI singleton stores follow: a store disposes only what it built for
+/// itself (see <see cref="AdminStoreBase{TClient}.Dispose()"/>), never its client - the admin clients own
+/// no channel, since every one is built over the shared call invoker or a caller-supplied generated client.
+/// Both stores stay <see cref="IDisposable"/> so the DI container reclaims anything they do own.
 /// </summary>
 public sealed class AdminStoreDisposalTests
 {
@@ -34,14 +33,14 @@ public sealed class AdminStoreDisposalTests
     }
 
     [Fact]
-    public void UsageStore_IsDisposable_SoTheDiContainerReclaimsItsClient()
+    public void UsageStore_IsDisposable_SoTheDiContainerReclaimsWhatItOwns()
     {
         new UsageStore(client: new UsageQueryClient(new StubUsageAdminServiceClient()))
             .Should().BeAssignableTo<IDisposable>();
     }
 
     [Fact]
-    public void ProviderAdminStore_IsDisposable_SoTheDiContainerReclaimsItsClient()
+    public void ProviderAdminStore_IsDisposable_SoTheDiContainerReclaimsWhatItOwns()
     {
         new ProviderAdminStore(client: new ProviderAdminClient(new StubProviderAdminServiceClient()))
             .Should().BeAssignableTo<IDisposable>();

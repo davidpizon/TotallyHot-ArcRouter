@@ -26,7 +26,7 @@ public class CostReconciliationAdminClientTests
                 Providers = { new Contract.ProviderReconciliationStatus { Provider = "openai" } }
             }
         };
-        using var client = new CostReconciliationAdminClient(stub);
+        var client = new CostReconciliationAdminClient(stub);
 
         var providers = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -59,7 +59,7 @@ public class CostReconciliationAdminClientTests
                 }
             }
         };
-        using var client = new CostReconciliationAdminClient(stub);
+        var client = new CostReconciliationAdminClient(stub);
 
         var providers = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -78,7 +78,7 @@ public class CostReconciliationAdminClientTests
         {
             StatusFailure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect"))
         };
-        using var client = new CostReconciliationAdminClient(stub);
+        var client = new CostReconciliationAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
@@ -97,7 +97,7 @@ public class CostReconciliationAdminClientTests
                 Providers = { new Contract.ProviderReconciliationStatus { Provider = "openai" } }
             }
         };
-        using var client = new CostReconciliationAdminClient(stub);
+        var client = new CostReconciliationAdminClient(stub);
 
         var providers = await client.RunNowAsync(TestContext.Current.CancellationToken);
 
@@ -111,22 +111,13 @@ public class CostReconciliationAdminClientTests
         {
             RunNowFailure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "reconciler blew up"))
         };
-        using var client = new CostReconciliationAdminClient(stub);
+        var client = new CostReconciliationAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.RunNowAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not run cost reconciliation: reconciler blew up");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new CostReconciliationAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
     }
 
     [Fact]

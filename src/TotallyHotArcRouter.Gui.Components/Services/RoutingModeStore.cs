@@ -22,7 +22,7 @@ public sealed class RoutingModeStore : AdminStoreBase<IRoutingModeAdminClient>
     public RoutingModeStore(
         IRouterChannelProvider channelProvider,
         ILogger<RoutingModeStore>? logger = null)
-        : base(client: new RoutingModeAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new RoutingModeAdminClient(channelProvider.CallInvoker), logger: logger)
     {
     }
 

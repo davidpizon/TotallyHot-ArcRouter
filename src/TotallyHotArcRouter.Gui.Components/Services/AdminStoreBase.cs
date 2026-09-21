@@ -44,18 +44,12 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     /// <summary>Initializes a new instance of the <see cref="AdminStoreBase{TClient}"/> class.</summary>
     /// <param name="client">The admin client to drive. Never null.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="ownsClient">
-    /// Whether this store created <paramref name="client"/> and must therefore dispose it. False for the
-    /// caller-supplied-client constructor every store offers as a test seam, where the caller owns the
-    /// lifetime.
-    /// </param>
-    protected AdminStoreBase(TClient client, ILogger? logger, bool ownsClient = false)
+    protected AdminStoreBase(TClient client, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(client);
 
         Client = client;
         Logger = logger;
-        if (ownsClient && client is IDisposable disposable) _owned.Add(disposable);
     }
 
     /// <summary>Gets the admin client this store drives.</summary>
@@ -118,7 +112,7 @@ public abstract class AdminStoreBase<TClient> : IDisposable
 
     /// <summary>
     /// Registers a resource this store created and therefore owns, so <see cref="Dispose()"/> releases it.
-    /// For the extra collaborators a store builds beyond its client — an <see cref="HttpClient"/>, say.
+    /// For the collaborators a store builds for itself — an <see cref="HttpClient"/>, say.
     /// </summary>
     /// <typeparam name="T">The resource type.</typeparam>
     /// <param name="resource">The resource to take ownership of.</param>

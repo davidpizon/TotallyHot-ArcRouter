@@ -48,7 +48,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
 
     private readonly IRoutingGateAdminClient _client;
     private readonly ILogger<RoutingGateMonitor>? _logger;
-    private readonly IDisposable? _ownedClient;
     private readonly CancellationTokenSource _pollCts = new();
     private readonly TimeSpan _pollInterval;
     private readonly Task _pollTask;
@@ -77,9 +76,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
 
         _logger = logger;
         _pollInterval = pollInterval ?? DefaultPollInterval;
-        var client = new RoutingGateAdminClient(channelProvider.CallInvoker);
-        _client = client;
-        _ownedClient = client;
+        _client = new RoutingGateAdminClient(channelProvider.CallInvoker);
         _pollTask = PollLoopAsync(_pollCts.Token);
     }
 
@@ -99,7 +96,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(client);
         _pollInterval = pollInterval ?? DefaultPollInterval;
         _client = client;
-        _ownedClient = null;
         _logger = logger;
         _pollTask = PollLoopAsync(_pollCts.Token);
     }
@@ -193,7 +189,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
         }
 
         _pollCts.Dispose();
-        _ownedClient?.Dispose();
     }
 
     /// <summary>
