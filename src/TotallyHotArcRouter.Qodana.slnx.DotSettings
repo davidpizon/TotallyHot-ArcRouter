@@ -72,10 +72,12 @@
 
     UnusedMemberInSuper is not a dead-code inspection and should not be read as one. It fires when every
     call goes through the concrete type instead of the interface, so the member is live and the only
-    question is whether the interface should still declare it. Three of the current eight
-    (IGraderReliabilityAnalyzer/IJudgeCalibrationAnalyzer.MinimumSampleSize, ProviderConfigStore
-    .ReplaceAsync) are called from inside the implementing class itself and will report forever unless the
-    interface is narrowed. Narrowing an interface is a design change - it needs a reason beyond the scan.
+    question is whether the interface should still declare it - a design change, which needs a reason
+    beyond the scan. Every current instance is suppressed at its declaration with a <remarks> saying so,
+    rather than solution-wide here, so a genuinely new one still gets reported and read on its merits.
+    EventNeverSubscribedTo has the same two shapes and is handled the same way: "only implementations of
+    event X are subscribed to" is the interface-vs-concrete case and is suppressed at the member, while a
+    bare "event X is never subscribed to" is a real finding - it caught three raised-but-ignored events.
 
     Still suppressed because the scan still cannot see these callers:
 

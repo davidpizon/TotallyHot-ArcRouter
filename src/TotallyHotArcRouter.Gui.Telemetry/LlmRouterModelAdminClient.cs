@@ -104,6 +104,15 @@ public interface ILlmRouterModelAdminClient
 
     /// <summary>Switches the active model to <paramref name="baseUrl"/>. Does not download.</summary>
     /// <exception cref="GrpcAdminException">The call failed, was rejected, or the router is unreachable.</exception>
+    /// <remarks>
+    /// Reported as used only through the implementation once the unreferenced <c>LlmRouterModelStore</c>
+    /// wrapper was deleted. Kept rather than deleted in turn: this is the client half of a <em>live</em>
+    /// server RPC - <c>LlmRouterModelAdminGrpcService.SetBaseUrl</c> serves it and
+    /// <c>LlmRouterModelOverrideStore.SetBaseUrlAsync</c> persists it - and no dashboard component exposes
+    /// the control yet. Deleting the client would make a working RPC unreachable from the GUI, which is a
+    /// product decision rather than a scan fix.
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default);
 
     /// <summary>

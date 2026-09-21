@@ -33,7 +33,13 @@ public class RequestInterceptor
     /// <remarks>
     /// Internal rather than private so same-assembly callers (the OpenAI-compatible drop-in helpers)
     /// and InternalsVisibleTo tests can read the reserved name without duplicating the token.
+    /// <para>
+    /// Qodana reports this as private-able and is wrong about it: the scan runs against this branch, which
+    /// does not yet carry <c>OpenAiCompatibleDropIn</c>. That caller arrives with <c>main</c>, which is what
+    /// merge CI compiles against - narrowing the const broke exactly that build once already.
+    /// </para>
     /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
     internal const string AutoSelectModelName = "auto";
 
     /// <summary>
