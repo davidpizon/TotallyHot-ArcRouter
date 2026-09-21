@@ -36,9 +36,8 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <param name="InputTokens">The request's prompt token count, or <see langword="null"/> when unknown.</param>
 /// <param name="OutputTokens">The response's completion token count, or <see langword="null"/> when unknown.</param>
 /// <param name="MemoryEntryId">
-/// The linked <c>memory_entries</c> row id, once Phase T1d's embedding backfill (out of scope for this
-/// pass) links this transcript row to one. Left unused by every phase T1a-c ships; present now so a
-/// future backfill needs no further schema migration.
+/// The linked <c>memory_entries</c> row id once <see cref="EmbeddingBackfillService"/> (or the live
+/// embedding path) folds this transcript into the live-learning corpus; <see langword="null"/> until then.
 /// </param>
 /// <param name="DimBestModel">
 /// The model the live, memory-preferring <c>dim_best</c> voter actually voted for, captured at decision

@@ -22,7 +22,7 @@ public sealed class ClusterModelAdminStore : AdminStoreBase<IClusterModelAdminCl
     public ClusterModelAdminStore(
         IRouterChannelProvider channelProvider,
         ILogger<ClusterModelAdminStore>? logger = null)
-        : base(client: new ClusterModelAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new ClusterModelAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         ServerAddress = channelProvider.ServerAddress;
     }

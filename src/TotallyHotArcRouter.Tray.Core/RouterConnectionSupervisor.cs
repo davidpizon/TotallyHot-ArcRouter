@@ -24,7 +24,7 @@ namespace TotallyHot.ArcRouter.Tray;
 public sealed class RouterConnectionSupervisor : IAsyncDisposable
 {
     /// <summary>How often to check whether a (re)connect is needed. Overridable so tests don't wait out the real cadence.</summary>
-    public static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(10);
 
     private readonly ISessionRouterConnector _connector;
     private readonly CancellationTokenSource _cts = new();
@@ -79,6 +79,11 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
     /// <see cref="Monitor"/>; re-read it after every use rather than holding a reference across an await,
     /// for the same reconnect-can-replace-it-at-any-time reason as <see cref="Monitor"/>.
     /// </summary>
+    /// <remarks>
+    /// Read by <c>TotallyHotArcRouter.Tray</c>, which targets <c>net10.0-windows</c> and is therefore absent
+    /// from <c>TotallyHotArcRouter.Qodana.slnx</c> - so the scan reports this property as unused.
+    /// </remarks>
+    // ReSharper disable once UnusedMember.Global
     public IRouterChannelProvider? Provider => _currentProvider;
 
     /// <summary>

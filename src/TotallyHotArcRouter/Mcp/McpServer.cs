@@ -36,7 +36,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     /// Initializes a new instance of the <see cref="McpServer"/> class.
     /// </summary>
     /// <param name="logger">The logger for this host.</param>
-    /// <param name="managementFacade">The shared provider/model/budget management facade (also used by REST <c>/admin/*</c>).</param>
+    /// <param name="managementFacade">The shared provider/model/budget management facade (also used by the gRPC-Web admin services).</param>
     /// <param name="priceSourceToggleStore">The price-source enable/disable/rank store.</param>
     /// <param name="priceCatalogIngestionService">The price-catalog ingestion cycle runner.</param>
     /// <param name="priceLookup">The per-model price lookup.</param>

@@ -27,7 +27,9 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// model required. This class is kept only for its own still-passing unit tests
 /// (<c>TelemetryTlsCertificateTests</c>) and as the historical record of the h2c-unreliability finding
 /// above, which is still true and still the reason every listener uses TLS at all - nothing currently
-/// calls <see cref="GetOrCreate()"/> in production. The client-side trust callback this remarks section
+/// calls <see cref="GetOrCreate"/> in production, and the parameterless overload that resolved the
+/// machine-shared paths itself was deleted once the scan confirmed it had no callers at all. The
+/// caller-supplied paths are now the only way in. The client-side trust callback this remarks section
 /// used to describe (<c>TotallyHot.ArcRouter.Gui.Services.LiveDataStore</c>) belonged to the retired MAUI
 /// GUI; its closest surviving analog is <c>TotallyHot.ArcRouter.Gui.Telemetry.TelemetryChannelFactory
 /// .ValidateLoopbackCertificate</c>, kept for the Tray's own native-gRPC channel (see that type's remarks).
@@ -47,9 +49,6 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </remarks>
 public static class TelemetryTlsCertificate
 {
-    private const string CertificateFileName = "telemetry-cert.pfx";
-    private const string PasswordFileName = "telemetry-cert-pwd.txt";
-
     /// <summary>
     /// The protected secret store's name for the certificate password (<c>docs/router/secrets-at-rest-plan.md</c>
     /// §3's naming convention).
@@ -57,22 +56,10 @@ public static class TelemetryTlsCertificate
     private const string PasswordSecretName = "telemetry:cert-password";
 
     /// <summary>
-    /// Loads the persisted certificate if one already exists, otherwise generates a new self-signed
-    /// one (subject <c>CN=localhost</c>, with <c>localhost</c>/loopback IPs as Subject Alternative
-    /// Names, valid two years) and persists it before returning it.
-    /// </summary>
-    public static X509Certificate2 GetOrCreate()
-    {
-        var directory = AppDataPaths.ResolveMachineSharedDirectory();
-        return GetOrCreate(
-            certificatePath: Path.Combine(path1: directory, path2: CertificateFileName),
-            passwordPath: Path.Combine(path1: directory, path2: PasswordFileName),
-            secretStore: new ProtectedSecretStore());
-    }
-
-    /// <summary>
-    /// Overload taking explicit paths and a secret store, for tests. See <see cref="GetOrCreate()"/> for
-    /// behavior.
+    /// Loads the persisted certificate if one already exists, otherwise generates a new self-signed one
+    /// (subject <c>CN=localhost</c>, with <c>localhost</c>/loopback IPs as Subject Alternative Names, valid
+    /// two years) and persists it before returning it. Takes explicit paths and a secret store rather than
+    /// resolving them itself, so a test can point it at a temporary directory.
     /// </summary>
     /// <param name="certificatePath">The <c>.pfx</c> file path.</param>
     /// <param name="passwordPath">

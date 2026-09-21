@@ -22,7 +22,7 @@ public static class GraderQuestionText
     /// with a grader prefix so the aggregator's diagnostic names both who gave up and why
     /// (<c>judge-question-missing</c>, <c>codejudge-question-missing</c>, …).
     /// </summary>
-    public const string MissingReasonToken = "question-missing";
+    private const string MissingReasonToken = "question-missing";
 
     /// <summary>
     /// Whether <paramref name="question"/> is usable as a grading requirement: non-null and not

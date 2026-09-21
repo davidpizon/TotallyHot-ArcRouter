@@ -35,7 +35,7 @@ public class PersistedSessionsClientTests
             MemoryEntryId = 7
         });
         var stub = new StubClient { Response = response };
-        using var client = new PersistedSessionsClient(stub);
+        var client = new PersistedSessionsClient(stub);
 
         var result = await client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -67,7 +67,7 @@ public class PersistedSessionsClientTests
             RoutedModel = "gpt-5.4"
         });
         var stub = new StubClient { Response = response };
-        using var client = new PersistedSessionsClient(stub);
+        var client = new PersistedSessionsClient(stub);
 
         var result = await client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -85,7 +85,7 @@ public class PersistedSessionsClientTests
     {
         var response = new Contract.ListPersistedSessionsResponse { TranscriptCaptureEnabled = false };
         var stub = new StubClient { Response = response };
-        using var client = new PersistedSessionsClient(stub);
+        var client = new PersistedSessionsClient(stub);
 
         var result = await client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -98,7 +98,7 @@ public class PersistedSessionsClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new PersistedSessionsClient(stub);
+        var client = new PersistedSessionsClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken));
@@ -113,38 +113,13 @@ public class PersistedSessionsClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new PersistedSessionsClient(stub);
+        var client = new PersistedSessionsClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ListAsync(10, cancellationToken: TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read persisted sessions: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new PersistedSessionsClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new PersistedSessionsClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_default_address_overload_targets_the_proxys_grpc_port()
-    {
-        using var client = new PersistedSessionsClient();
-
-        client.Should().NotBeNull();
     }
 
     [Fact]

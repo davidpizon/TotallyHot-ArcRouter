@@ -19,14 +19,14 @@ internal sealed class LocalEndpointResponder
     // The OpenAI-compatible model discovery path. Answered locally from configuration (mirroring LiteLLM's
     // /v1/models behavior) since it has no request body to resolve a single upstream provider from, and no
     // single upstream to forward it to anyway when ModelList spans multiple providers.
-    public const string ModelsListPath = "/v1/models";
+    private const string ModelsListPath = "/v1/models";
 
     // Ollama's native model discovery path. A client that adds this proxy as an "Ollama" provider (e.g.
     // Visual Studio's AI model picker) probes this GET endpoint - with no body - to list models, exactly
     // like ModelsListPath above but in Ollama's own response shape rather than OpenAI's. Answered the same
     // way: locally from configuration, never forwarded, since there is no body to resolve a single upstream
     // from and no single upstream anyway when ModelList spans multiple providers.
-    public const string OllamaTagsPath = "/api/tags";
+    private const string OllamaTagsPath = "/api/tags";
 
     // Ollama's native per-model detail path. A client that discovers models via OllamaTagsPath above (e.g.
     // Visual Studio's AI model picker) follows up with one POST here per model to fetch its details before
@@ -34,7 +34,7 @@ internal sealed class LocalEndpointResponder
     // through to the normal per-model routing path, which resolves its {"model": "..."} body to a real
     // upstream candidate and forwards it there verbatim - a malformed chat/completion request that the
     // upstream (correctly) rejects, surfacing as a confusing 400 with no indication /api/show was involved.
-    public const string OllamaShowPath = "/api/show";
+    private const string OllamaShowPath = "/api/show";
 
     /// <summary>
     /// The architecture reported for the synthetic router alias, and for any model whose real architecture

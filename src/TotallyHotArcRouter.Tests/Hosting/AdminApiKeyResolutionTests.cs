@@ -5,6 +5,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
 
@@ -132,7 +133,7 @@ public sealed class AdminApiKeyResolutionTests
         var services = new ServiceCollection();
         services.AddSingleton(Options.Create(options));
         services.AddSingleton(Mock.Of<IEnvironmentVariableProvider>());
-        services.AddSingleton<HttpClient>();
+        services.AddSingleton<IHttpClientFactory>(new FakeHttpClientFactory(new HttpClientHandler()));
         if (secretReader is not null) services.AddSingleton(secretReader);
 
         return services.BuildServiceProvider();

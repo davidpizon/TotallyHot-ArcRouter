@@ -507,7 +507,7 @@ public sealed class GeminiPayloadTranslator : IPayloadTranslator
     /// (<c>data: {"error": {...}}</c>). Returns false when no embedded error object is found, so the
     /// caller can fall back to forwarding the raw body unchanged.
     /// </summary>
-    internal static bool TryExtractEmbeddedError(byte[] body, out string status, out string message)
+    private static bool TryExtractEmbeddedError(byte[] body, out string status, out string message)
     {
         status = string.Empty;
         message = string.Empty;

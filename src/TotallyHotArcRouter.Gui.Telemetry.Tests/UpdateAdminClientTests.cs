@@ -28,7 +28,7 @@ public class UpdateAdminClientTests
                 AssetSha256 = "abc123"
             }
         };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -45,7 +45,7 @@ public class UpdateAdminClientTests
     public async Task GetStatusAsync_UnsetCheckedAtUtc_MapsToNull()
     {
         var stub = new StubClient { StatusResponse = new Contract.UpdateStatusResponse() };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -56,7 +56,7 @@ public class UpdateAdminClientTests
     public async Task GetStatusAsync_NoAssetFieldsSet_MapsToNull()
     {
         var stub = new StubClient { StatusResponse = new Contract.UpdateStatusResponse() };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -82,7 +82,7 @@ public class UpdateAdminClientTests
                 UnavailableDetail = "some detail"
             }
         };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -97,7 +97,7 @@ public class UpdateAdminClientTests
         {
             CheckNowResponse = new Contract.UpdateStatusResponse { CurrentVersion = "1.0.0", LatestVersion = "1.0.0" }
         };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         var status = await client.CheckNowAsync(TestContext.Current.CancellationToken);
 
@@ -111,7 +111,7 @@ public class UpdateAdminClientTests
         {
             NotifyResponse = new Contract.NotifyApplyStartingResponse { Acknowledged = true }
         };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         var outcome = await client.NotifyApplyStartingAsync(version: "2.0.0",
             cancellationToken: TestContext.Current.CancellationToken);
@@ -124,7 +124,7 @@ public class UpdateAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "down")) };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         // Awaited by ThrowAsync below, still inside client's using scope.
         // ReSharper disable once AccessToDisposedClosure
@@ -139,7 +139,7 @@ public class UpdateAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.FailedPrecondition, detail: "no update")) };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         // Awaited by ThrowAsync below, still inside client's using scope.
         // ReSharper disable once AccessToDisposedClosure
@@ -156,7 +156,7 @@ public class UpdateAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new UpdateAdminClient(stub);
+        var client = new UpdateAdminClient(stub);
 
         // Awaited by ThrowAsync below, still inside client's using scope.
         // ReSharper disable once AccessToDisposedClosure

@@ -13,13 +13,13 @@ import "google/protobuf/wrappers.proto";
 
 // Replaces TotallyHot.ArcRouter.Telemetry.TelemetryHub (SignalR). See
 // docs/router/grpc-migration.md for the design this implements. Compiled independently into both
-// TotallyHot.ArcRouter (GrpcServices="Server") and TotallyHot.ArcRouter.Gui (GrpcServices="Client") from this one
-// file, so the two sides can never structurally drift the way the hand-synced SignalR DTOs could.
+// TotallyHot.ArcRouter (GrpcServices="Server") and TotallyHotArcRouter.Gui.Telemetry
+// (GrpcServices="Client") from this one file, so the two sides can never structurally drift the way
+// the hand-synced SignalR DTOs could.
 //
 // GetModelSpend and a ModelListEvent stream case are described in grpc-migration.md's design but are
-// intentionally not part of this contract: both would need TotallyHot.ArcRouter.Telemetry's proposed
-// IUsageLedger (docs/router/agent-cost-tracking.md), which has no implementation yet. Beyond the two
-// event types TotallyHot.ArcRouter.Telemetry.TelemetryHub already sent, this service also carries
+// intentionally not part of this contract. Beyond the two event types
+// TotallyHot.ArcRouter.Telemetry.TelemetryHub already sent, this service also carries
 // QualitySignalEvent - the quality verifier's live signal - which TelemetryHub never had, since the
 // verifier postdates it.
 service TelemetryService {
@@ -31,7 +31,7 @@ service TelemetryService {
   // (docs/router/sessions-tab-training-data-plan.md Phase 1), so a session survives a GUI restart instead
   // of existing only in the live StreamEvents buffer. A unary RPC on this push-only service rather than a
   // new admin service: the GUI already holds an open TelemetryServiceClient channel for StreamEvents, and
-  // this read needs no new channel, DI wiring, or :5002 admin-endpoint registration to reuse it.
+  // this read needs no new channel or DI wiring to reuse it.
   rpc ListPersistedSessions (ListPersistedSessionsRequest) returns (ListPersistedSessionsResponse);
 }
 
@@ -74,7 +74,7 @@ message ListPersistedSessionsResponse {
 // off (docs/router/model-price-catalog.md D6), and trigger an immediate pull.
 //
 // Separate from TelemetryService rather than more RPCs on it: that service is a push-only event stream for
-// the lifetime of a connection, this is unary request/response. They share the :5002 TLS loopback endpoint.
+// the lifetime of a connection, this is unary request/response.
 //
 // LICENSING - read before adding a field. Every message below carries only feed METADATA: source name,
 // enabled flag, rank, row counts, timestamps, error strings. No price value appears here, and none may be
@@ -183,8 +183,8 @@ message RefreshPriceSourcesResponse {
 // freshness (docs/router/coderouterbench-sqlite-migration-plan.md, Phase 4), force a fresh checksum
 // probe, and run a sync with streamed per-file progress.
 //
-// Separate service, same shape as PriceSourceAdminService: unary reads/mutations plus one streaming RPC,
-// sharing the :5002 TLS loopback endpoint. No licensing constraint applies here (unlike price data) -
+// Separate service, same shape as PriceSourceAdminService: unary reads/mutations plus one streaming RPC.
+// No licensing constraint applies here (unlike price data) -
 // the corpus is public benchmark data - so file names, sizes, and row counts are carried freely.
 service BenchmarkDataAdminService {
   // Returns the last-computed freshness state (cached in BenchmarkDataStatusService; never null once
@@ -293,8 +293,8 @@ message BenchmarkSyncStreamEvent {
 // file sync state, switch the model by base URL, and run a download/verify sync with streamed per-file
 // progress.
 //
-// Same shape as BenchmarkDataAdminService (unary reads/mutations plus one streaming RPC), sharing the
-// same :5002 TLS loopback endpoint. Deliberately a separate service rather than more RPCs on
+// Same shape as BenchmarkDataAdminService (unary reads/mutations plus one streaming RPC). Deliberately a
+// separate service rather than more RPCs on
 // BenchmarkDataAdminService: the two pipelines diverge (this one has no import stage, and adds a
 // model-switch mutation the corpus has no equivalent of), and keeping them separate means a client that
 // only cares about one doesn't pull in messages for the other.
@@ -403,7 +403,7 @@ message LlmRouterModelSyncStreamEvent {
 // docs/router/orchestrator-live-path-plan.md §M3.2. No mutation RPC: flipping any of these is an
 // appsettings.json change and a process restart, not a GUI action - M3.2's documented deferral leaves an
 // editable toggle as a separate config-management sub-project. Same shape as the other admin services
-// above (unary, sharing the :5002 TLS loopback endpoint) but always mapped, unlike them: routing
+// above (unary) but always mapped, unlike them: routing
 // configuration is core, not an optional feature gated on an external store being supplied.
 service RoutingModeAdminService {
   // Returns the routing options currently bound into RoutingOptions.
@@ -436,13 +436,13 @@ message RoutingModeResponse {
 
 // The GUI system tray's "Enable Routing"/"Disable Routing" toggle: reads and mutates whether the proxy
 // currently accepts LLM-forwarding requests, independent of whether the process itself is running -
-// disabling routing keeps every admin/management surface (this endpoint, /admin/*, /v1/models) fully
+// disabling routing keeps every admin/management surface (this endpoint, the other gRPC-Web admin
+// services, /v1/models) fully
 // usable, it only stops new LLM traffic from being forwarded. A separate service from the read-only
 // RoutingModeAdminService above for the same reason RouterSettingsAdminService is separate from it (see
 // that service's remarks) - this is a mutating kill switch, not ensemble/voter configuration. Always
 // mapped, like RoutingModeAdminService and UpdateAdminService: whether the proxy accepts requests is core
-// operational state, not an optional add-on. Same shape as the other admin services, sharing the :5002 TLS
-// loopback endpoint.
+// operational state, not an optional add-on. Same shape as the other admin services.
 service RoutingGateAdminService {
   // Returns whether the proxy currently accepts LLM-forwarding requests.
   rpc GetRoutingGate (GetRoutingGateRequest) returns (RoutingGateResponse);
@@ -500,7 +500,7 @@ message ManagementTokenResponse {
 // Deliberately a separate service from the read-only RoutingModeAdminService above
 // (§M3.2's settled "read-only reporting and settings mutation stay separate" convention) - this is the one
 // admin service on this endpoint that mutates RoutingOptions. Same shape as ClusterModelAdminService/
-// BenchmarkDataAdminService (unary read plus a mutating RPC), sharing the :5002 TLS loopback endpoint.
+// BenchmarkDataAdminService (unary read plus a mutating RPC).
 service RouterSettingsAdminService {
   // Returns the settings' currently effective values - i.e. IOptionsMonitor<RoutingOptions>.CurrentValue,
   // which already reflects stored-override > appsettings.json > coded-default precedence - not the raw
@@ -592,7 +592,7 @@ message ClearTranscriptsResponse {
 // bootstrap-embedding progress. Also surfaces the transcript retention settings that gate the corpus this
 // model trains from, since this panel is their closest existing home - see
 // TotallyHot.ArcRouter.Transcripts.TranscriptOptions. Same shape as the other admin services (unary status
-// read plus one streaming mutation RPC), sharing the :5002 TLS loopback endpoint.
+// read plus one streaming mutation RPC).
 service ClusterModelAdminService {
   // Returns the current artifact's status (or the honest "no artifact yet" state) plus transcript
   // retention context.
@@ -666,9 +666,8 @@ message ClusterRetrainStreamEvent {
 
 // The Governance UI's Router Model panel (docs/router/live-feedback-learning-plan.md Phase 5): reports
 // the trained logreg voter's status and runs a retrain with streamed bootstrap-embedding progress. Same
-// shape as ClusterModelAdminService above (unary status read plus one streaming mutation RPC), sharing
-// the :5002 TLS loopback endpoint - this is the logreg voter's admin surface the way ClusterModelAdminService
-// is the cluster_best voter's.
+// shape as ClusterModelAdminService above (unary status read plus one streaming mutation RPC) - this is
+// the logreg voter's admin surface the way ClusterModelAdminService is the cluster_best voter's.
 service RouterModelAdminService {
   // Returns the current artifact's status (or the honest "no artifact yet" state) plus the retrain
   // threshold/live-sample-weight context that always applies regardless of artifact presence.
@@ -741,7 +740,7 @@ message LogRegRetrainStreamEvent {
 // RouterModelAdminService above, a run never mutates a live voter or writes an artifact - it is
 // read-only and informational, so GetRegretHarnessStatus reports an in-memory "last run" (reset on
 // process restart) rather than anything read from disk. Same shape otherwise (unary status read plus one
-// streaming mutation-shaped RPC), sharing the :5002 TLS loopback endpoint.
+// streaming mutation-shaped RPC).
 service RegretHarnessAdminService {
   // Returns the last completed run's report, or the honest "no run yet this process" state.
   rpc GetRegretHarnessStatus (GetRegretHarnessStatusRequest) returns (RegretHarnessStatusResponse);
@@ -818,8 +817,7 @@ message RegretHarnessStreamEvent {
 // Unary-only, unlike RegretHarnessAdminService above - the analysis is pure SQL plus arithmetic over an
 // already-bounded table, so there is no long-running run to stream progress for and no "last run" state
 // to keep: every call recomputes from the current rows. Read-only in the strongest sense - it never
-// mutates a weight, a voter, or the judge's own blend contribution. Shares the :5002 TLS loopback
-// endpoint with every other admin service.
+// mutates a weight, a voter, or the judge's own blend contribution.
 service JudgeCalibrationAdminService {
   // Recomputes and returns the calibration report over every judge_shadow_scores row.
   rpc GetJudgeCalibrationReport (GetJudgeCalibrationReportRequest) returns (JudgeCalibrationReportResponse);
@@ -996,8 +994,7 @@ message QualitySignalEvent {
 // Phase 2, superseded 2026-08-26 by the MSI packaging decision - see
 // docs/router/packaging-and-distribution.md): reads the Router's last-known self-update check outcome,
 // forces an immediate re-check, and receives the GUI's audit notification that an apply is starting.
-// Same shape as the other admin services (unary reads/mutations), sharing the :5002 TLS loopback
-// endpoint. Unlike the optional feature groups (LlmRouterModelAdmin, ClusterModelAdmin, etc.), this
+// Same shape as the other admin services (unary reads/mutations). Unlike the optional feature groups (LlmRouterModelAdmin, ClusterModelAdmin, etc.), this
 // service is mapped unconditionally, the same way RoutingModeAdminService is - update status is core
 // operational state, not an optional add-on.
 //
@@ -1067,8 +1064,7 @@ message UpdateStatusResponse {
 // checkpoint and most recent reported-vs-local comparison (docs/router/agent-cost-tracking.md §5.8),
 // and trigger a cycle on demand instead of waiting for CostReconciliationHostedService's poll interval.
 //
-// Same shape as PriceSourceAdminService: unary reads/mutations, no streaming, sharing the :5002 TLS
-// loopback endpoint.
+// Same shape as PriceSourceAdminService: unary reads/mutations, no streaming.
 service CostReconciliationAdminService {
   // Returns every provider CostReconciliationOptions configures a reconciler for, with its checkpoint
   // and most recent snapshot. A provider with no reconciler configured is not listed at all - there is

@@ -266,7 +266,11 @@ HEAD, and dispatches [`release.yml`](../../.github/workflows/release.yml) agains
 see the version without tagging. A tag pushed by hand (`git tag v1.4.3 && git push origin v1.4.3`) runs the
 same `release.yml` through its `push` trigger. `release.yml` verifies the tag, runs the CI suite, builds
 every asset with the tag's version, checks that the version actually landed in the MSI and the Router
-assembly, and publishes it all plus `checksums.txt` as a **prerelease**. `GitHubReleaseCheckClient` polls
+assembly, and publishes it all plus `checksums.txt` as a **prerelease**. The release body
+starts with [`docs/install/openai-compatible-drop-in.md`](../install/openai-compatible-drop-in.md)
+(one base URL, `model: auto`, copy-paste fences) so the release page itself is
+the drop-in; `generate_release_notes` then appends the changelog.
+`GitHubReleaseCheckClient` polls
 `/repos/{owner}/{repo}/releases/latest`, and that endpoint excludes prereleases by definition — so a build
 at this stage is invisible to every installed Router, and no code in the update pipeline needed changing to
 make that true. Testers install the RC by downloading its MSI from the release page by hand.

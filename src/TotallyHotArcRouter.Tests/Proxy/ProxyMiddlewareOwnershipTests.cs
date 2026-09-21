@@ -1,5 +1,8 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Net;
 using System.Reflection;
+using System.Text;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -28,8 +31,8 @@ public sealed class ProxyMiddlewareOwnershipTests
     [Fact]
     public void Dispose_SuppliedHttpClient_IsLeftToItsOwner()
     {
-        // The dangerous direction. In production the client is DI-owned and shared; in tests it usually
-        // wraps a stub handler the test still uses afterward. Disposing it here would break both.
+        // The dangerous direction. Tests pass a stub-wrapped client they still use afterward.
+        // Disposing it here would break them. Production uses IHttpClientFactory instead.
         var handler = new TrackingHandler();
         var suppliedClient = new HttpClient(handler);
 
@@ -64,6 +67,39 @@ public sealed class ProxyMiddlewareOwnershipTests
 
         var second = Record.Exception(middleware.Dispose);
         Assert.Null(second);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithFactory_ForwardsThroughTheNamedClient()
+    {
+        // Production supplies only the factory, so this is the path real traffic takes. Pins both the
+        // client name the DI registration must match and that the upstream call actually goes through
+        // the factory-created client rather than a fallback.
+        var factory = new RecordingHttpClientFactory(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"choices":[]}""", encoding: Encoding.UTF8, mediaType: "application/json")
+        });
+        using var middleware = new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+                modelRouteResolver: ModelRouteResolverTestFactory.CreateWithModels(
+                    ("primary", "prov-a", "primary-upstream", "https://primary.test"))),
+            httpClientFactory: factory);
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("127.0.0.1:5001");
+        context.Request.Path = "/v1/chat/completions";
+        var body = """{"model":"primary","messages":[{"role":"user","content":"hi"}]}"""u8.ToArray();
+        context.Request.Body = new MemoryStream(body);
+        context.Request.ContentLength = body.Length;
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
+
+        Assert.Single(factory.Requests);
+        Assert.Equal([ProxyMiddleware.HttpClientName], factory.RequestedNames);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
     }
 
     /// <summary>Records whether it was disposed. Never actually sends: these tests construct and dispose only.</summary>

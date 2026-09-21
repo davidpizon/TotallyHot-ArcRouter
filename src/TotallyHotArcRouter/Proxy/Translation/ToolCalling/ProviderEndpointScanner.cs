@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -40,17 +41,25 @@ public sealed class ProviderEndpointScanner
 
     private readonly IEnvironmentVariableProvider _environment;
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderEndpointScanner"/> class.</summary>
-    /// <param name="httpClient">Client used to issue the probes.</param>
     /// <param name="environment">Accessor used to resolve provider credentials and header env vars.</param>
-    public ProviderEndpointScanner(HttpClient httpClient, IEnvironmentVariableProvider environment)
+    /// <param name="httpClient">Client used to issue the probes when no factory is supplied.</param>
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="ManagementFacade.HttpClientName"/> client per probe. Required when
+    /// <paramref name="httpClient"/> is omitted.
+    /// </param>
+    public ProviderEndpointScanner(IEnvironmentVariableProvider environment, HttpClient? httpClient = null,
+        IHttpClientFactory? httpClientFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(environment);
+        if (httpClient is null && httpClientFactory is null)
+            throw new ArgumentNullException(nameof(httpClientFactory));
 
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _environment = environment;
     }
 
@@ -223,7 +232,9 @@ public sealed class ProviderEndpointScanner
 
         try
         {
-            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+            using var factoryClient = _httpClientFactory?.CreateClient(ManagementFacade.HttpClientName);
+            var client = factoryClient ?? _httpClient!;
+            using var response = await client.SendAsync(request: request, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (ClassifyMessagesBody(succeeded: response.IsSuccessStatusCode, body: body)) return (true, null);
@@ -290,7 +301,9 @@ public sealed class ProviderEndpointScanner
 
         try
         {
-            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+            using var factoryClient = _httpClientFactory?.CreateClient(ManagementFacade.HttpClientName);
+            var client = factoryClient ?? _httpClient!;
+            using var response = await client.SendAsync(request: request, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return new ProbeResult(

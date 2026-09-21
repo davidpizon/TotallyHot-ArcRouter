@@ -16,7 +16,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 public sealed class IncrementalUsageScanner
 {
     /// <summary>Default tail window size: generous relative to a single trailing SSE usage event.</summary>
-    public const int DefaultMaxTailBytes = 65_536;
+    private const int DefaultMaxTailBytes = 65_536;
 
     private readonly byte[] _buffer;
 
