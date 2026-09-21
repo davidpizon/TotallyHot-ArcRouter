@@ -14,8 +14,8 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 public interface IQualityScoreAggregator
 {
     /// <summary>
-    /// Submits a freshly graded static result. Either writes it immediately (no judge expected) or holds it
-    /// open for <see cref="CompleteWithJudgeAsync"/>.
+    /// Submits a freshly graded static result. Either writes it immediately (no pending grader) or holds it
+    /// open for <see cref="CompleteGraderAsync"/>.
     /// </summary>
     /// <param name="result">The static result to submit.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
@@ -23,41 +23,14 @@ public interface IQualityScoreAggregator
     Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Supplies the judge's grade for a held result, blending and writing it. A correlation id that is not
-    /// held - already timed out, evicted, or never submitted - is ignored.
+    /// Supplies a grader's score for a held result. When <paramref name="graderKey"/> is
+    /// <see cref="GraderKeys.Judge"/>, the score also lands on <see cref="QualityResult.JudgeScore"/> so the
+    /// named judge axis and downstream <c>IsJudgeScored</c> provenance keep working; every other key lands
+    /// in <see cref="QualityResult.GraderScores"/>. A correlation id that is not held - already timed out,
+    /// evicted, or never submitted - is ignored.
     /// </summary>
     /// <param name="correlationId">The correlation id identifying the held result.</param>
-    /// <param name="judgeScore">The judge's grade, normalized to [0,1].</param>
-    /// <param name="cancellationToken">A cancellation token.</param>
-    /// <returns><see langword="true"/> when a held result was completed by this call; otherwise <see langword="false"/>.</returns>
-    Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Releases a held result immediately with its static score alone, because the judge is known not to be
-    /// coming - it abstained, its backbone failed, or the response text it needed had already aged out.
-    /// </summary>
-    /// <param name="correlationId">The correlation id identifying the held result.</param>
-    /// <param name="reason">A short machine-readable reason, recorded as the result's degraded reason.</param>
-    /// <param name="cancellationToken">A cancellation token.</param>
-    /// <returns><see langword="true"/> when a held result was released by this call; otherwise <see langword="false"/>.</returns>
-    /// <remarks>
-    /// Waiting out the full join timeout would produce the same score, just a minute later. Releasing
-    /// eagerly matters because the judge's own failure modes are common and cheap to detect - an operator
-    /// with no eligible free model configured would otherwise have every score arrive a timeout late, and
-    /// would reasonably read that as the verifier being broken.
-    /// </remarks>
-    Task<bool> AbandonJudgeAsync(string correlationId, string reason, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Supplies an extra grader's score for a held result (Phase Q3: CodeJudge/ICE-Score/RACE), the
-    /// generalized counterpart of <see cref="CompleteWithJudgeAsync"/> for any grader key beyond
-    /// <see cref="GraderKeys.Judge"/>. The score lands in <see cref="QualityResult.GraderScores"/> keyed by
-    /// <paramref name="graderKey"/>. A correlation id that is not held - already timed out, evicted, or
-    /// never submitted - is ignored.
-    /// </summary>
-    /// <param name="correlationId">The correlation id identifying the held result.</param>
-    /// <param name="graderKey">The grader's key, e.g. <see cref="GraderKeys.CodeJudge"/>.</param>
+    /// <param name="graderKey">The grader's key, e.g. <see cref="GraderKeys.Judge"/> or <see cref="GraderKeys.CodeJudge"/>.</param>
     /// <param name="score">The grader's score, normalized to [0,1].</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns><see langword="true"/> when a held result was completed by this call; otherwise <see langword="false"/>.</returns>
@@ -65,14 +38,20 @@ public interface IQualityScoreAggregator
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Releases one grader's contribution for a held result because it is known not to be coming, the
-    /// generalized counterpart of <see cref="AbandonJudgeAsync"/> for any grader key.
+    /// Releases one grader's contribution for a held result because it is known not to be coming - it
+    /// abstained, its backbone failed, or the response text it needed had already aged out.
     /// </summary>
     /// <param name="correlationId">The correlation id identifying the held result.</param>
-    /// <param name="graderKey">The grader's key, e.g. <see cref="GraderKeys.CodeJudge"/>.</param>
+    /// <param name="graderKey">The grader's key, e.g. <see cref="GraderKeys.Judge"/> or <see cref="GraderKeys.CodeJudge"/>.</param>
     /// <param name="reason">A short machine-readable reason, recorded in the result's per-grader degraded reasons.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns><see langword="true"/> when a held result was found (and, if it was the last pending grader, written); otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// Waiting out the full join timeout would produce the same score, just a minute later. Releasing
+    /// eagerly matters because a grader's own failure modes are common and cheap to detect - an operator
+    /// with no eligible free model configured would otherwise have every score arrive a timeout late, and
+    /// would reasonably read that as the verifier being broken.
+    /// </remarks>
     Task<bool> AbandonGraderAsync(string correlationId, string graderKey, string reason,
         CancellationToken cancellationToken = default);
 

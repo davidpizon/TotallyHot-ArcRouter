@@ -94,7 +94,7 @@ internal static class PriceCatalogServiceCollectionExtensions
         // Owns per-provider monthly budgets + spend (Governance > Providers). Same empty-until-schema-ready
         // lifecycle as the toggle store: StartupHealthCheckHostedService calls Reload after EnsureCreated.
         // Injected into ProxyMiddleware's optional budgetStore param (enforcement + spend recording) and
-        // passed across to the inner host for the /admin budget endpoints.
+        // passed across to the inner host for the gRPC-Web budget RPCs.
         services.AddSingleton<ProviderBudgetStore>();
         // ProxyMiddleware depends only on the enforce+record slice (IBudgetEnforcer); map it to the same
         // singleton so the request path and the admin/cap surface share one store and one snapshot.
@@ -125,6 +125,7 @@ internal static class PriceCatalogServiceCollectionExtensions
         services.AddOptions<CostReconciliationOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(CostReconciliationOptions.SectionName).Bind(options));
+        services.AddHttpClient(CostReconciliationRetryPolicy.HttpClientName);
         services.AddSingleton<IProviderCostReconciliationStore, ProviderCostReconciliationStore>();
         services.AddSingleton(BuildCostReconcilers);
         services.AddSingleton<IEnumerable<IProviderCostReconciler>>(sp =>
@@ -142,7 +143,7 @@ internal static class PriceCatalogServiceCollectionExtensions
         // BuildCostReconcilers), so a key saved from the GUI takes effect without a restart, and an
         // account with none configured (Claude Pro/Max) simply gets a permanent no-op.
         services.AddSingleton(sp => new AnthropicUsageReportService(
-            httpClient: sp.GetRequiredService<HttpClient>(),
+            httpClient: null,
             repository: sp.GetRequiredService<ReportedUsageRepository>(),
             resolveAdminApiKey: () =>
             {
@@ -154,7 +155,8 @@ internal static class PriceCatalogServiceCollectionExtensions
                     ? key
                     : null;
             },
-            logger: sp.GetRequiredService<ILogger<AnthropicUsageReportService>>()));
+            logger: sp.GetRequiredService<ILogger<AnthropicUsageReportService>>(),
+            httpClientFactory: sp.GetRequiredService<IHttpClientFactory>()));
         // Counterfactual token counting and its opt-in calibration loop (ADR-0009). Counting itself is
         // local, offline, and always available - it is the ITokenCounter every estimator resolves. The
         // calibration half is what reaches the network, and BuildTokenCountClient returns null (leaving the
@@ -190,6 +192,12 @@ internal static class PriceCatalogServiceCollectionExtensions
         // see IModelContextWindowStore - but backed by the one store so both read the same snapshot and
         // one Reload refreshes both.
         services.AddSingleton<IModelContextWindowStore>(sp => sp.GetRequiredService<ToolCallCapabilityStore>());
+        services.AddHttpClient(PriceSourceRegistry.HttpClientName, client =>
+        {
+            client.DefaultRequestHeaders.Add(name: "X-Title", value: "TotallyHot Arc Router");
+            client.DefaultRequestHeaders.Add(name: "HTTP-Referer",
+                value: "https://github.com/davidpizon/TotallyHot-ArcRouter");
+        });
         services.AddSingleton<PriceSourceRegistry>();
         services.AddSingleton<IPriceSourceRegistry>(sp => sp.GetRequiredService<PriceSourceRegistry>());
         services.AddSingleton<PriceCatalogIngestionService>();
@@ -213,19 +221,19 @@ internal static class PriceCatalogServiceCollectionExtensions
         var options = sp.GetRequiredService<IOptions<CostReconciliationOptions>>().Value;
         var environment = sp.GetRequiredService<IEnvironmentVariableProvider>();
         var secretReader = sp.GetService<ISecretReader>();
-        var httpClient = sp.GetRequiredService<HttpClient>();
+        var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
 
         var reconcilers = new List<IProviderCostReconciler>();
 
         if (TryResolveAdminApiKey(options: options, environment: environment, secretReader: secretReader,
                 provider: "openai", adminApiKey: out var openAiKey))
-            reconcilers.Add(new OpenAiCostReconciler(httpClient: httpClient, adminApiKey: openAiKey,
-                logger: sp.GetService<ILogger<OpenAiCostReconciler>>()));
+            reconcilers.Add(new OpenAiCostReconciler(httpClient: null, adminApiKey: openAiKey,
+                logger: sp.GetService<ILogger<OpenAiCostReconciler>>(), httpClientFactory: httpClientFactory));
 
         if (TryResolveAdminApiKey(options: options, environment: environment, secretReader: secretReader,
                 provider: "anthropic", adminApiKey: out var anthropicKey))
-            reconcilers.Add(new AnthropicCostReconciler(httpClient: httpClient, adminApiKey: anthropicKey,
-                logger: sp.GetService<ILogger<AnthropicCostReconciler>>()));
+            reconcilers.Add(new AnthropicCostReconciler(httpClient: null, adminApiKey: anthropicKey,
+                logger: sp.GetService<ILogger<AnthropicCostReconciler>>(), httpClientFactory: httpClientFactory));
 
         return reconcilers;
     }
@@ -251,15 +259,17 @@ internal static class PriceCatalogServiceCollectionExtensions
         if (string.IsNullOrWhiteSpace(key)) return null;
 
         return new AnthropicTokenCountClient(
-            httpClient: sp.GetRequiredService<HttpClient>(),
+            httpClient: null,
             apiKey: key,
-            logger: sp.GetService<ILogger<AnthropicTokenCountClient>>());
+            logger: sp.GetService<ILogger<AnthropicTokenCountClient>>(),
+            httpClientFactory: sp.GetRequiredService<IHttpClientFactory>());
     }
 
     /// <summary>
     /// Resolves <paramref name="provider"/>'s Admin API key, stored secret first
     /// (<see cref="AdminApiKeySecretName"/>) then <see cref="ProviderReconciliationOptions.AdminApiKeyEnvVar"/>
-    /// (docs/router/secrets-at-rest-plan.md §7) - so a key saved through <c>PUT /admin/secrets/{name}</c>
+    /// (docs/router/secrets-at-rest-plan.md §7) - so a key saved through
+    /// <see cref="TotallyHot.ArcRouter.Proxy.Management.ManagementFacade.SetSecret"/>
     /// takes priority over (and needs no change to) an existing environment-variable deployment.
     /// </summary>
     internal static bool TryResolveAdminApiKey(
@@ -294,7 +304,7 @@ internal static class PriceCatalogServiceCollectionExtensions
     /// The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md
     /// §3's naming convention).
     /// </summary>
-    internal static string AdminApiKeySecretName(string provider)
+    private static string AdminApiKeySecretName(string provider)
     {
         return $"reconciliation:{provider}:admin-key";
     }

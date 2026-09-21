@@ -24,7 +24,7 @@ public sealed class CompositeStaticAnalyzer : IStaticAnalyzer
         ArgumentNullException.ThrowIfNull(analyzers);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _analyzers = [.. analyzers.Where(a => a is not CompositeStaticAnalyzer)];
+        _analyzers = [.. analyzers];
         _logger = logger;
     }
 

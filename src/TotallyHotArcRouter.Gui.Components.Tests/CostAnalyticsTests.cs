@@ -57,12 +57,37 @@ public sealed class CostAnalyticsTests
             p.Add(parameterSelector: c => c.Conversations, value: []));
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Routing ROI"), timeout: WaitTimeout);
+        cut.WaitForAssertion(
+            assertion: () =>
+            {
+                var link = cut.Find("a");
+                link.TextContent.Trim().Should().Be("Methodology");
+                link.GetAttribute("href").Should().Be(ProductDocs.ScoreDeltaMethodologyUrl);
+                // .ds-doc-link, not a bare `underline` utility: app.css is a committed, tree-shaken
+                // Tailwind build that ships no underline/underline-offset rule, so styling the
+                // citation with utilities alone renders it as unclickable-looking plain text.
+                link.ClassList.Should().Contain("ds-doc-link");
+            },
+            timeout: WaitTimeout);
+    }
+
+    [Fact]
+    public async Task Methodology_link_is_hidden_when_routing_roi_is_not_the_active_metric()
+    {
+        await using var ctx = CreateContext();
+
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: []));
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
+
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().NotContain("Methodology"),
+            timeout: WaitTimeout);
     }
 
     [Fact]
     public async Task Switching_metric_updates_the_chart_title()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
             p.Add(parameterSelector: c => c.Conversations, value: []));
@@ -72,21 +97,22 @@ public sealed class CostAnalyticsTests
         // an event handler ID the re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
         await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
 
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Stepped cumulative cost"),
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Stepped cumulative cost"),
             timeout: WaitTimeout);
     }
 
     [Fact]
     public async Task Switching_range_updates_the_range_caption()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var cut = ctx.Render<CostAnalytics>(p =>
             p.Add(parameterSelector: c => c.Conversations, value: []));
         // See Switching_metric_updates_the_chart_title's remarks on why this is InvokeAsync-wrapped.
         await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Day").Click());
 
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Past 24 hours"), timeout: WaitTimeout);
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Past 24 hours"),
+            timeout: WaitTimeout);
     }
 
     [Fact]
@@ -117,11 +143,12 @@ public sealed class CostAnalyticsTests
     [Fact]
     public async Task Selecting_a_session_from_the_dropdown_scopes_the_chart()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var conversations = new[] { MakeLiveConversation() };
         var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: conversations));
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("Live Session"), timeout: WaitTimeout);
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Live Session"),
+            timeout: WaitTimeout);
 
         // See Switching_metric_updates_the_chart_title's remarks on why this is InvokeAsync-wrapped -
         // Change() dispatches an event the same way Click() does, so it races the same background
@@ -143,5 +170,30 @@ public sealed class CostAnalyticsTests
         // load falls back to it, so a chart eventually renders.
         cut.WaitForAssertion(assertion: () => cut.FindAll("div[id^='echart-']").Should().NotBeEmpty(),
             timeout: WaitTimeout);
+    }
+
+    [Fact]
+    public void Mock_backed_chart_is_labelled_demo_data()
+    {
+        using var ctx = CreateContext();
+
+        // No live conversations and an unreachable router, so the corpus falls back to MockData. Routing
+        // ROI then draws synthetic savings bars and a dollar headline that are indistinguishable from real
+        // frozen-baseline measurements - beside a Methodology link vouching for how they were computed.
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: []));
+
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("demo data"), timeout: WaitTimeout);
+    }
+
+    [Fact]
+    public void Real_conversation_data_is_not_labelled_demo_data()
+    {
+        using var ctx = CreateContext();
+
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: [MakeLiveConversation()]));
+
+        cut.WaitForAssertion(assertion: () => cut.Markup.Should().NotContain("demo data"), timeout: WaitTimeout);
     }
 }

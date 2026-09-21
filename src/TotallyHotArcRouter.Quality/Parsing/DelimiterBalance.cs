@@ -2,10 +2,11 @@ namespace TotallyHot.ArcRouter.Quality.Parsing;
 
 /// <summary>
 /// A cheap, in-process structural sanity check: verifies bracketing delimiters are balanced, skipping
-/// content inside single/double/back-quoted strings and <c>#</c> line comments. Not a real parser — a
-/// best-effort, non-authoritative signal for languages (Python, shell) that this assembly has no managed
-/// parser for. There is no further, more-authoritative check for those languages: this heuristic is the
-/// only one <see cref="StructuralParser"/> runs for them, and it reports itself non-authoritative via
+/// content inside single/double/back-quoted strings and <c>#</c> line comments. Not a real parser — the
+/// fallback <see cref="StructuralParser"/> uses for <see cref="CodeLanguage.Unknown"/>, where no
+/// language-aware scanner applies. Python and shell have dedicated scanners
+/// (<see cref="PythonStructuralParser"/>, <see cref="ShellStructuralParser"/>) rather than sharing this
+/// bracket count; the verdict is still reported non-authoritative via
 /// <see cref="SyntaxVerdict.IsAuthoritative"/> rather than a subprocess ever being spawned to confirm it.
 /// </summary>
 internal static class DelimiterBalance

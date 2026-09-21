@@ -49,7 +49,7 @@ public sealed class GovernanceTests
     [Fact]
     public async Task Switching_to_the_models_sub_view_renders_GovernanceModelCards()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Governance>();
         // See Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin's remarks on why this is
@@ -72,7 +72,7 @@ public sealed class GovernanceTests
     [Fact]
     public async Task Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Governance>();
         // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context:
@@ -88,7 +88,7 @@ public sealed class GovernanceTests
     [Fact]
     public async Task Switching_to_the_benchmark_data_sub_view_renders_BenchmarkData()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Governance>();
         // See Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin's remarks on why this is

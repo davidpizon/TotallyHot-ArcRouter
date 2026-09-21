@@ -3,6 +3,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
@@ -54,7 +55,7 @@ public sealed class ProviderAdminStoreTests
     }
 
     [Fact]
-    public async Task UpsertProviderAsync_propagates_a_ProviderAdminException_when_unreachable()
+    public async Task UpsertProviderAsync_propagates_a_GrpcAdminException_when_unreachable()
     {
         var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
         var body = new ProviderWriteRequest(
@@ -62,7 +63,7 @@ public sealed class ProviderAdminStoreTests
 
         var act = () => store.UpsertProviderAsync(key: "test", body: body);
 
-        await act.Should().ThrowAsync<ProviderAdminException>();
+        await act.Should().ThrowAsync<GrpcAdminException>();
     }
 
     [Fact]
@@ -87,7 +88,7 @@ public sealed class ProviderAdminStoreTests
     public async Task LoadRateLimitHistoryAsync_deadlineExceeded_is_swallowed_not_propagated()
     {
         // Every RpcException ProviderAdminClient's calls can raise - including a timeout's
-        // DeadlineExceeded - is wrapped into ProviderAdminException, which this method catches. Called
+        // DeadlineExceeded - is wrapped into GrpcAdminException, which this method catches. Called
         // fire-and-forget from ProvidersAdmin.razor, it must never let a failure become an unobserved task
         // exception.
         var stub = new StubClient

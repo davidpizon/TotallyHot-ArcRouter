@@ -28,7 +28,7 @@ public class LlmRouterModelAdminClientTests
                 Current = true
             }
         };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -63,7 +63,7 @@ public class LlmRouterModelAdminClientTests
                 }
             }
         };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var status = await client.GetStatusAsync(TestContext.Current.CancellationToken);
 
@@ -91,7 +91,7 @@ public class LlmRouterModelAdminClientTests
                 Current = false
             }
         };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var status = await client.SetBaseUrlAsync(
             baseUrl: "https://huggingface.co/org/other-model/resolve/main",
@@ -107,7 +107,7 @@ public class LlmRouterModelAdminClientTests
     [InlineData("   ")]
     public async Task SetBaseUrlAsync_rejects_a_blank_url(string baseUrl)
     {
-        using var client = new LlmRouterModelAdminClient(new StubClient());
+        var client = new LlmRouterModelAdminClient(new StubClient());
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             client.SetBaseUrlAsync(baseUrl: baseUrl, cancellationToken: TestContext.Current.CancellationToken));
@@ -116,7 +116,7 @@ public class LlmRouterModelAdminClientTests
     [Fact]
     public async Task SetBaseUrlAsync_rejects_a_null_url()
     {
-        using var client = new LlmRouterModelAdminClient(new StubClient());
+        var client = new LlmRouterModelAdminClient(new StubClient());
 
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             client.SetBaseUrlAsync(baseUrl: null!, cancellationToken: TestContext.Current.CancellationToken));
@@ -152,7 +152,7 @@ public class LlmRouterModelAdminClientTests
                 }
             ]
         };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -189,7 +189,7 @@ public class LlmRouterModelAdminClientTests
                 }
             ]
         };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -221,7 +221,7 @@ public class LlmRouterModelAdminClientTests
                 }
             ]
         };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -247,7 +247,7 @@ public class LlmRouterModelAdminClientTests
                 }
             ]
         };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var events = new List<LlmRouterModelSyncEvent>();
         await foreach (var e in client.SyncAsync(TestContext.Current.CancellationToken)) events.Add(e);
@@ -259,7 +259,7 @@ public class LlmRouterModelAdminClientTests
     public async Task SyncAsync_rejects_an_empty_stream_message_instead_of_crashing()
     {
         var stub = new StubClient { SyncEvents = [new Contract.LlmRouterModelSyncStreamEvent()] };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
@@ -276,7 +276,7 @@ public class LlmRouterModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(async () =>
         {
@@ -294,7 +294,7 @@ public class LlmRouterModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetStatusAsync(TestContext.Current.CancellationToken));
@@ -308,7 +308,7 @@ public class LlmRouterModelAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new LlmRouterModelAdminClient(stub);
+        var client = new LlmRouterModelAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetBaseUrlAsync(baseUrl: "https://huggingface.co/org/model/resolve/main",
@@ -316,23 +316,6 @@ public class LlmRouterModelAdminClientTests
 
         ex.Message.Should().Be("Could not switch the llm_router model: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new LlmRouterModelAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new LlmRouterModelAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
     }
 
     [Fact]

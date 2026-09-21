@@ -47,21 +47,10 @@ public sealed class RaceGraderClient : PortfolioGraderClientBase
     /// <inheritdoc/>
     protected override string BuildPrompt(string dimension, string responseText, string taskPrompt)
     {
-        var taskSection = string.IsNullOrWhiteSpace(taskPrompt)
-            ? string.Empty
-            : $"""
-
-               Task the response was written for:
-               ---
-               {taskPrompt}
-               ---
-
-               """;
-
         return $"""
                 You are an expert code reviewer rating the readability and maintainability of an AI
                 assistant's coding response on a scale of 1 (worst) to 5 (best).
-                {taskSection}
+                {GraderQuestionText.FormatTaskSection(taskPrompt)}
                 Judge readability and maintainability specifically: clear and consistent naming, sensible
                 structure and cohesion, appropriate use of comments (present where the code's intent is
                 non-obvious, absent where the code already speaks for itself), and freedom from needless

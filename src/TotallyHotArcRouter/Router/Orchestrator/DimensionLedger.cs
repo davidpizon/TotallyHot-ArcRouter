@@ -149,7 +149,7 @@ public sealed class DimensionLedger
     /// The mean of the other observations, or <see langword="null"/> when <paramref name="count"/> is 1 or
     /// less and removing this observation would leave nothing to average.
     /// </returns>
-    internal static double? LeaveOneOutMean(double mean, int count, double observedScore)
+    private static double? LeaveOneOutMean(double mean, int count, double observedScore)
     {
         return count <= 1 ? null : (mean * count - observedScore) / (count - 1);
     }

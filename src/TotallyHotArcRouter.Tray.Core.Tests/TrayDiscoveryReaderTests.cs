@@ -15,6 +15,16 @@ public sealed class TrayDiscoveryReaderTests
     }
 
     [Fact]
+    public void TryRead_DefaultPath_DoesNotThrow()
+    {
+        // Covers DefaultPath() (ProgramData\...\web-interface.json). CI has no discovery file; a
+        // developer machine with a running router is still a valid parse of WebUrl.
+        var result = TrayDiscoveryReader.TryRead();
+        if (result?.WebUrl is { } webUrl)
+            Uri.TryCreate(uriString: webUrl, uriKind: UriKind.Absolute, result: out _).Should().BeTrue();
+    }
+
+    [Fact]
     public void TryRead_MissingFile_ReturnsNull()
     {
         var result = TrayDiscoveryReader.TryRead(TempPath());
@@ -23,7 +33,7 @@ public sealed class TrayDiscoveryReaderTests
     }
 
     [Fact]
-    public void TryRead_ValidFile_ParsesEveryField()
+    public void TryRead_ValidFile_ParsesWebUrl_AndIgnoresUnusedFields()
     {
         var path = TempPath();
         try
@@ -40,8 +50,6 @@ public sealed class TrayDiscoveryReaderTests
 
             result.Should().NotBeNull();
             result!.WebUrl.Should().Be("https://localhost:5004");
-            result.CaThumbprint.Should().Be("AB12CD34");
-            result.WrittenAtUtc.Should().Be(DateTimeOffset.Parse("2026-09-15T12:00:00Z"));
         }
         finally
         {
@@ -63,7 +71,6 @@ public sealed class TrayDiscoveryReaderTests
 
             result.Should().NotBeNull();
             result!.WebUrl.Should().BeNull();
-            result.CaThumbprint.Should().BeNull();
         }
         finally
         {

@@ -58,12 +58,6 @@ public class ProxyHostedService : IHostedService
     }
 
     /// <summary>
-    /// Gets the addresses the underlying <see cref="ProxyServer"/> is actually listening on. Only meaningful
-    /// after <see cref="StartAsync"/> completes.
-    /// </summary>
-    public IReadOnlyCollection<string> Addresses => _proxyServer.Addresses;
-
-    /// <summary>
     /// Starts the proxy server. A port that cannot be bound is reported as a single actionable line and
     /// shuts the host down in an orderly way rather than propagating: the proxy is the reason the process
     /// exists, so there is nothing useful to keep running, and the cause is an operator/environment

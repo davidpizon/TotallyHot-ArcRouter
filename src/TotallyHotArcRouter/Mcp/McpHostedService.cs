@@ -81,12 +81,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         _tokenProvider = tokenProvider;
     }
 
-    /// <summary>
-    /// Gets the addresses the underlying <see cref="McpServer"/> is listening on, or empty when disabled
-    /// or not yet started. Only meaningful after <see cref="StartAsync"/> completes.
-    /// </summary>
-    public IReadOnlyCollection<string> Addresses => _server?.Addresses ?? [];
-
     /// <summary>Disposes the underlying <see cref="McpServer"/>, if it was created.</summary>
     public async ValueTask DisposeAsync()
     {

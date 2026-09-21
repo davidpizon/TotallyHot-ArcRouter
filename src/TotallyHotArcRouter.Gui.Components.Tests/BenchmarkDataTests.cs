@@ -157,7 +157,7 @@ public sealed class BenchmarkDataTests
             ],
             HoldBeforeFinalStatus = tcs.Task
         };
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
         var cut = ctx.Render<BenchmarkData>();
 
         cut.FindAll("[role=progressbar]").Should().BeEmpty();
@@ -169,12 +169,12 @@ public sealed class BenchmarkDataTests
             cut.FindAll("button")
                 .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
-        cut.WaitForAssertion(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
+        await cut.WaitForAssertionAsync(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
         cut.Markup.Should().Contain("models.json");
 
         tcs.SetResult();
 
-        cut.WaitForAssertion(() => cut.FindAll("[role=progressbar]").Should().BeEmpty());
+        await cut.WaitForAssertionAsync(() => cut.FindAll("[role=progressbar]").Should().BeEmpty());
     }
 
     [Fact]
@@ -275,21 +275,21 @@ public sealed class BenchmarkDataTests
         {
             HoldBeforeFinalStatus = tcs.Task
         };
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
         var cut = ctx.Render<BenchmarkData>();
 
         await cut.InvokeAsync(() =>
             cut.FindAll("button")
                 .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
-        cut.WaitForAssertion(() =>
+        await cut.WaitForAssertionAsync(() =>
             cut.FindAll("button").First(b =>
                     b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal))
                 .HasAttribute("disabled").Should().BeTrue());
 
         tcs.SetResult();
 
-        cut.WaitForAssertion(() =>
+        await cut.WaitForAssertionAsync(() =>
             cut.FindAll("button").First(b =>
                     b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal))
                 .HasAttribute("disabled").Should().BeFalse());
@@ -473,7 +473,8 @@ public sealed class BenchmarkDataTests
             ],
             HoldBeforeFinalStatus = tcs.Task
         };
-        using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
+        await using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current),
+            voterClient: voterClient);
         var cut = ctx.Render<BenchmarkData>();
 
         cut.FindAll("[role=progressbar]").Should().BeEmpty();
@@ -484,12 +485,12 @@ public sealed class BenchmarkDataTests
             cut.FindAll("button")
                 .Last(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
-        cut.WaitForAssertion(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
+        await cut.WaitForAssertionAsync(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
         cut.Markup.Should().Contain("model.onnx");
 
         tcs.SetResult();
 
-        cut.WaitForAssertion(() => cut.FindAll("[role=progressbar]").Should().BeEmpty());
+        await cut.WaitForAssertionAsync(() => cut.FindAll("[role=progressbar]").Should().BeEmpty());
     }
 
     [Fact]

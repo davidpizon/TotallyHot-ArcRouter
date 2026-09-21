@@ -23,10 +23,10 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 internal static class OllamaModelCapabilities
 {
     /// <summary>Text generation. Every model the router routes can do this, by definition.</summary>
-    internal const string Completion = "completion";
+    private const string Completion = "completion";
 
     /// <summary>Tool/function calling - the capability clients filter their model pickers on.</summary>
-    internal const string Tools = "tools";
+    private const string Tools = "tools";
 
     // The canonical order every result is emitted in. Fixed rather than derived from set enumeration so the
     // serialized JSON is byte-stable across runs and processes, which keeps both response diffing and the

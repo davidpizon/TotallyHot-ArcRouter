@@ -6,7 +6,7 @@ namespace TotallyHot.ArcRouter.Mcp.Tools;
 
 /// <summary>
 /// MCP tools for managing providers, model routes, and per-provider budgets. Every read and write goes
-/// through <see cref="ManagementFacade"/> - the same facade the hardened REST <c>/admin/*</c> API calls -
+/// through <see cref="ManagementFacade"/> - the same facade the gRPC-Web admin services call -
 /// so secrets are masked identically on both surfaces: a custom header's literal value comes back only
 /// when the operator has left that header unlocked (see <see cref="HeaderView"/>).
 /// </summary>

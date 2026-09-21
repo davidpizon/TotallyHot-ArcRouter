@@ -1,6 +1,6 @@
 @* Governance > Price Overrides pane: the §5.7 resolution ladder's top rung. Read-only diagnosis of which
    (source, aggregator model key) pairs the operator has mapped onto a configured model, plus add/remove.
-   Talks to the proxy's /admin/price-overrides REST API via the injected ProviderAdminStore - the same
+   Talks to the router via the injected ProviderAdminStore - the same
    store ProvidersAdmin uses, so both panes share one reachability/error shape.
    docs/router/token-tracking-implementation-plan.md Phase 3, §5.7. *@
 @implements IDisposable
@@ -206,7 +206,7 @@
         {
             await operation();
         }
-        catch (ProviderAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _opError = ex.Message;
         }
