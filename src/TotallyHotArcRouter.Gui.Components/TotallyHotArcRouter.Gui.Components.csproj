@@ -32,7 +32,7 @@
 
   <ItemGroup>
     <!-- Provides ComponentBase, IJSRuntime, ElementReference, PointerEventArgs, etc. for Components/*.razor -->
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
