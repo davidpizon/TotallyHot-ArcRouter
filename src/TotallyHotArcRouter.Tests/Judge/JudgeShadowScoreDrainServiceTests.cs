@@ -129,6 +129,7 @@ public class JudgeShadowScoreDrainServiceTests
 
         var completed = Assert.Single(aggregator.Completed);
         Assert.Equal(expected: "corr-1", actual: completed.CorrelationId);
+        Assert.Equal(expected: GraderKeys.Judge, actual: completed.GraderKey);
         Assert.Equal(0.8, actual: completed.Score);
         Assert.Empty(aggregator.Abandoned);
     }
@@ -178,6 +179,7 @@ public class JudgeShadowScoreDrainServiceTests
 
         var abandoned = Assert.Single(aggregator.Abandoned);
         Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: GraderKeys.Judge, actual: abandoned.GraderKey);
         Assert.Equal(expected: expectedReason, actual: abandoned.Reason);
         Assert.Empty(aggregator.Completed);
     }
@@ -205,6 +207,7 @@ public class JudgeShadowScoreDrainServiceTests
 
         var abandoned = Assert.Single(aggregator.Abandoned);
         Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: GraderKeys.Judge, actual: abandoned.GraderKey);
         Assert.Equal(expected: "judge-failed", actual: abandoned.Reason);
         Assert.Empty(aggregator.Completed);
     }
@@ -381,39 +384,27 @@ public class JudgeShadowScoreDrainServiceTests
     /// </summary>
     private sealed class RecordingAggregator : IQualityScoreAggregator
     {
-        public List<(string CorrelationId, double Score)> Completed { get; } = [];
+        public List<(string CorrelationId, string GraderKey, double Score)> Completed { get; } = [];
 
-        public List<(string CorrelationId, string Reason)> Abandoned { get; } = [];
+        public List<(string CorrelationId, string GraderKey, string Reason)> Abandoned { get; } = [];
 
         public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
-        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
-            CancellationToken cancellationToken = default)
-        {
-            Completed.Add((correlationId, judgeScore));
-            return Task.FromResult(true);
-        }
-
-        public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
-            CancellationToken cancellationToken = default)
-        {
-            Abandoned.Add((correlationId, reason));
-            return Task.FromResult(true);
-        }
-
         public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(false);
+            Completed.Add((correlationId, graderKey, score));
+            return Task.FromResult(true);
         }
 
         public Task<bool> AbandonGraderAsync(string correlationId, string graderKey, string reason,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(false);
+            Abandoned.Add((correlationId, graderKey, reason));
+            return Task.FromResult(true);
         }
 
         public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)
