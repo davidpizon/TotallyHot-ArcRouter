@@ -58,7 +58,10 @@ public class RouterCompositionTests : IAsyncDisposable
             foreach (var file in Directory.EnumerateFiles(path: _databaseDirectory, searchPattern: "*.db"))
                 try
                 {
-                    using var connection =
+                    // await using, not using: SqliteConnection closes asynchronously through
+                    // IAsyncDisposable, and this teardown is already async - TempDatabase's synchronous
+                    // Dispose has no such option, which is the only reason it spells this `using`.
+                    await using var connection =
                         new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = file }.ToString());
                     SqliteConnection.ClearPool(connection);
                 }
