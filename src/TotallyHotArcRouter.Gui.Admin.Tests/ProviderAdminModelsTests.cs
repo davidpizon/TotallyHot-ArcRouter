@@ -327,8 +327,6 @@ public sealed class ProviderAdminModelsTests
         Assert.Equal(expected: "https://api.anthropic.com", actual: template.BaseUrl);
         Assert.True(template.RequiresAuth);
         Assert.Equal(expected: "x-api-key", actual: template.AuthHeaderName);
-        // A raw key, no scheme prefix - so the suggestion is a bare variable name.
-        Assert.Equal(expected: "ANTHROPIC_API_KEY", actual: template.SuggestedEnvValue);
         // Without anthropic-version every request 400s, which used to be the operator's problem to discover.
         var header = Assert.Single(template.DefaultHeaders);
         Assert.Equal(expected: "anthropic-version", actual: header.Name);
@@ -336,14 +334,13 @@ public sealed class ProviderAdminModelsTests
     }
 
     [Fact]
-    public void ProviderTemplates_OpenAI_SuggestsABearerValueTemplate()
+    public void ProviderTemplates_OpenAI_UsesAuthorizationHeader()
     {
         var template = ProviderTemplates.Templates[ProviderType.OpenAI];
 
         Assert.Equal(expected: "https://api.openai.com/v1", actual: template.BaseUrl);
         Assert.True(template.RequiresAuth);
         Assert.Equal(expected: "Authorization", actual: template.AuthHeaderName);
-        Assert.Equal(expected: "Bearer {env:OPENAI_API_KEY}", actual: template.SuggestedEnvValue);
         Assert.Empty(template.DefaultHeaders);
     }
 
@@ -356,7 +353,6 @@ public sealed class ProviderAdminModelsTests
         // "Other" now means an unknown *remote* API: every unauthenticated case has its own type.
         Assert.True(template.RequiresAuth);
         Assert.Equal(expected: "Authorization", actual: template.AuthHeaderName);
-        Assert.Empty(template.SuggestedEnvValue);
     }
 
     [Theory]
@@ -367,7 +363,6 @@ public sealed class ProviderAdminModelsTests
         var template = ProviderTemplates.Templates[providerType];
 
         Assert.False(template.RequiresAuth);
-        Assert.Empty(template.SuggestedEnvValue);
         // The absence of a credential is surprising enough to need saying, or an operator assumes it's a bug.
         Assert.False(string.IsNullOrWhiteSpace(template.AuthHint));
     }
@@ -377,25 +372,6 @@ public sealed class ProviderAdminModelsTests
     {
         Assert.True(ProviderTemplates.Templates[ProviderType.LocalRuntime].DefaultsToFree);
         Assert.False(ProviderTemplates.Templates[ProviderType.OpenAI].DefaultsToFree);
-    }
-
-    [Theory]
-    [InlineData(ProviderType.Anthropic)]
-    [InlineData(ProviderType.OpenAI)]
-    [InlineData(ProviderType.GoogleGemini)]
-    [InlineData(ProviderType.AzureOpenAI)]
-    [InlineData(ProviderType.Cohere)]
-    public void ProviderTemplates_AuthenticatedTypes_HaveAHeaderAndAParsableSuggestion(ProviderType providerType)
-    {
-        var template = ProviderTemplates.Templates[providerType];
-
-        Assert.True(template.RequiresAuth);
-        Assert.False(string.IsNullOrWhiteSpace(template.AuthHeaderName));
-        // A suggestion the editor's own parser rejects would be a placeholder the operator cannot copy.
-        Assert.True(
-            condition: AuthValueTemplate.TryParse(template: template.SuggestedEnvValue, scheme: out _,
-                envVarName: out _, error: out var error),
-            userMessage: $"{providerType}'s suggested value does not parse: {error}");
     }
 
     [Fact]
