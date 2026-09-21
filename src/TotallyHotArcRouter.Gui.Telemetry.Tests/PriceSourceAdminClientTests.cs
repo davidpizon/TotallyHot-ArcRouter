@@ -360,24 +360,6 @@ public class PriceSourceAdminClientTests
     }
 
     [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        // Safe to construct without a server: a gRPC channel connects lazily, on the first call. This covers
-        // the constructor the GUI actually uses, and its disposal.
-        var client = new PriceSourceAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_default_address_overload_targets_the_proxys_grpc_port()
-    {
-        using var client = new PriceSourceAdminClient();
-
-        client.Should().NotBeNull();
-    }
-
-    [Fact]
     public void Rejects_a_null_stub()
     {
         Assert.Throws<ArgumentNullException>(() =>

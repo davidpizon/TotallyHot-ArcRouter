@@ -158,22 +158,6 @@ public class RouterSettingsAdminClientTests
     }
 
     [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new RouterSettingsAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_default_address_overload_targets_the_proxys_grpc_port()
-    {
-        using var client = new RouterSettingsAdminClient();
-
-        client.Should().NotBeNull();
-    }
-
-    [Fact]
     public void Rejects_a_null_stub()
     {
         Assert.Throws<ArgumentNullException>(() =>

@@ -298,14 +298,6 @@ public class JudgeCalibrationAdminClientTests
     }
 
     [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new JudgeCalibrationAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
     public void Rejects_a_null_stub()
     {
         Assert.Throws<ArgumentNullException>(() =>
