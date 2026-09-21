@@ -30,7 +30,11 @@ public class RequestInterceptor
     /// <see cref="RouterModelName"/> this name is never advertised by
     /// <see cref="ListAvailableModels"/>; it remains accepted for callers that already send it.
     /// </summary>
-    private const string AutoSelectModelName = "auto";
+    /// <remarks>
+    /// Internal rather than private so same-assembly callers (the OpenAI-compatible drop-in helpers)
+    /// and InternalsVisibleTo tests can read the reserved name without duplicating the token.
+    /// </remarks>
+    internal const string AutoSelectModelName = "auto";
 
     /// <summary>
     /// The advertised alias for <see cref="AutoSelectModelName"/>, and the only one of the two that
