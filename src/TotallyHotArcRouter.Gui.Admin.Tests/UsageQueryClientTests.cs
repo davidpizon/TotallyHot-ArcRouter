@@ -308,13 +308,10 @@ public sealed class UsageQueryClientTests
 
         public Contract.GetRoutingRoiRequest? LastRoutingRoiRequest { get; private set; }
 
-        public CallOptions? LastCallOptions { get; private set; }
-
         public override AsyncUnaryCall<Contract.UsageSummaryResponse> GetUsageSummaryAsync(
             Contract.GetUsageSummaryRequest request, CallOptions options)
         {
             LastSummaryRequest = request;
-            LastCallOptions = options;
             return Call(SummaryResponse);
         }
 
@@ -322,7 +319,6 @@ public sealed class UsageQueryClientTests
             Contract.GetUsageRollupRequest request, CallOptions options)
         {
             LastRollupRequest = request;
-            LastCallOptions = options;
             return Call(CannedRollupResponse);
         }
 
@@ -330,14 +326,12 @@ public sealed class UsageQueryClientTests
             Contract.GetRoutingRoiRequest request, CallOptions options)
         {
             LastRoutingRoiRequest = request;
-            LastCallOptions = options;
             return Call(CannedRoutingRoiResponse);
         }
 
         public override AsyncServerStreamingCall<Contract.UsageRollupBucketRow> ExportUsageRollup(
             Contract.ExportUsageRollupRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             IAsyncStreamReader<Contract.UsageRollupBucketRow> reader = Failure is null
                 ? new FakeStreamReader<Contract.UsageRollupBucketRow>(ExportRows)
                 : new ThrowingStreamReader(Failure);

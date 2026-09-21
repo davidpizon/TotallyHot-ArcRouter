@@ -521,12 +521,10 @@ public sealed class ProviderAdminClientTests
         public Contract.GetRateLimitHistoryRequest? LastRateLimitHistoryRequest { get; private set; }
         public Contract.SetSecretRequest? LastSetSecretRequest { get; private set; }
         public Contract.DeleteSecretRequest? LastDeleteSecretRequest { get; private set; }
-        public CallOptions? LastCallOptions { get; private set; }
 
         public override AsyncUnaryCall<Contract.ProviderListResponse> ListProvidersAsync(
             Contract.ListProvidersRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             return Call(ListProvidersResponse);
         }
 
@@ -534,7 +532,6 @@ public sealed class ProviderAdminClientTests
             Contract.UpsertProviderRequest request, CallOptions options)
         {
             LastUpsertProviderRequest = request;
-            LastCallOptions = options;
             return Call(UpsertProviderResponse);
         }
 
@@ -542,7 +539,6 @@ public sealed class ProviderAdminClientTests
             Contract.RemoveProviderRequest request, CallOptions options)
         {
             LastRemoveProviderRequest = request;
-            LastCallOptions = options;
             return Call(RemoveProviderResponse);
         }
 
@@ -550,7 +546,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetProviderBudgetRequest request, CallOptions options)
         {
             LastSetBudgetRequest = request;
-            LastCallOptions = options;
             return Call(SetBudgetResponse);
         }
 
@@ -558,7 +553,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetProviderEnabledRequest request, CallOptions options)
         {
             LastSetEnabledRequest = request;
-            LastCallOptions = options;
             return Call(SetEnabledResponse);
         }
 
@@ -566,7 +560,6 @@ public sealed class ProviderAdminClientTests
             Contract.UpsertModelRequest request, CallOptions options)
         {
             LastUpsertModelRequest = request;
-            LastCallOptions = options;
             return Call(UpsertModelResponse);
         }
 
@@ -574,7 +567,6 @@ public sealed class ProviderAdminClientTests
             Contract.RemoveModelRequest request, CallOptions options)
         {
             LastRemoveModelRequest = request;
-            LastCallOptions = options;
             return Call(RemoveModelResponse);
         }
 
@@ -582,7 +574,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetModelEnabledRequest request, CallOptions options)
         {
             LastSetModelEnabledRequest = request;
-            LastCallOptions = options;
             return Call(SetModelEnabledResponse);
         }
 
@@ -590,7 +581,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetModelToolDialectRequest request, CallOptions options)
         {
             LastSetModelToolDialectRequest = request;
-            LastCallOptions = options;
             return Call(SetModelToolDialectResponse);
         }
 
@@ -598,7 +588,6 @@ public sealed class ProviderAdminClientTests
             Contract.DiscoverModelsRequest request, CallOptions options)
         {
             LastDiscoverModelsRequest = request;
-            LastCallOptions = options;
             return Call(DiscoverModelsResponse);
         }
 
@@ -606,7 +595,6 @@ public sealed class ProviderAdminClientTests
             Contract.ScanCapabilitiesRequest request, CallOptions options)
         {
             LastScanCapabilitiesRequest = request;
-            LastCallOptions = options;
             return Call(ScanCapabilitiesResponse);
         }
 
@@ -614,14 +602,12 @@ public sealed class ProviderAdminClientTests
             Contract.RefreshFromEndpointRequest request, CallOptions options)
         {
             LastRefreshFromEndpointRequest = request;
-            LastCallOptions = options;
             return Call(RefreshFromEndpointResponse);
         }
 
         public override AsyncUnaryCall<Contract.PriceOverrideListResponse> ListPriceOverridesAsync(
             Contract.ListPriceOverridesRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             return Call(ListPriceOverridesResponse);
         }
 
@@ -629,7 +615,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetPriceOverrideRequest request, CallOptions options)
         {
             LastSetPriceOverrideRequest = request;
-            LastCallOptions = options;
             return Call(SetPriceOverrideResponse);
         }
 
@@ -637,14 +622,12 @@ public sealed class ProviderAdminClientTests
             Contract.RemovePriceOverrideRequest request, CallOptions options)
         {
             LastRemovePriceOverrideRequest = request;
-            LastCallOptions = options;
             return Call(RemovePriceOverrideResponse);
         }
 
         public override AsyncUnaryCall<Contract.PriceResolutionResponse> GetPriceResolutionAsync(
             Contract.GetPriceResolutionRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             return Call(PriceResolutionResponse);
         }
 
@@ -652,7 +635,6 @@ public sealed class ProviderAdminClientTests
             Contract.GetRateLimitHistoryRequest request, CallOptions options)
         {
             LastRateLimitHistoryRequest = request;
-            LastCallOptions = options;
             return Call(RateLimitHistoryResponse);
         }
 
@@ -660,7 +642,6 @@ public sealed class ProviderAdminClientTests
             Contract.SetSecretRequest request, CallOptions options)
         {
             LastSetSecretRequest = request;
-            LastCallOptions = options;
             return Call(SetSecretResponse);
         }
 
@@ -668,7 +649,6 @@ public sealed class ProviderAdminClientTests
             Contract.DeleteSecretRequest request, CallOptions options)
         {
             LastDeleteSecretRequest = request;
-            LastCallOptions = options;
             return Call(DeleteSecretResponse);
         }
 
