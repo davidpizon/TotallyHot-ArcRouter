@@ -1270,7 +1270,7 @@ input[type="number"] {
   animation-delay: calc(var(--i, 0) * 30ms);
 }
 
-/* Revealed disclosure content (TurnCard routing-decision log). Deliberately animates
+/* Revealed disclosure content mounted with @if. Deliberately animates
    transform/opacity and never height: payload blocks are variable-height and animating
    height forces layout every frame in a WebView. */
 @keyframes disclosure-enter {
@@ -1411,7 +1411,7 @@ input[type="number"] {
 /* Chat-style reproduction of a session's turns (SessionConversationPane.razor). Request bubbles
    sit left, response bubbles sit right (mirroring the ROI/cost read direction the rest of the
    dashboard uses), tinted with the turn's agent color so scanning the thread still shows which
-   agent produced which reply - the same tinted-row language TurnCard uses for the routing log. */
+   agent produced which reply. */
 .ls-chat-turn-separator {
   font-size: 10px;
   letter-spacing: 0.05em;
