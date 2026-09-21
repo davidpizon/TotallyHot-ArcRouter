@@ -10,10 +10,8 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <IsPackable>false</IsPackable>
-    <!-- xunit.v3 runs on Microsoft.Testing.Platform (MTP), which the .NET 10 SDK no longer bridges to
-         VSTest for `dotnet test` by default (see https://aka.ms/dotnet-test-mtp-error). This opts back
-         into `dotnet test` support so CI's `dotnet test` invocation keeps working. -->
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <!-- xunit.v3 test projects are self-hosting Microsoft.Testing.Platform executables. -->
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,13 +33,8 @@
          WASM GUI (ADR-0011) will use. -->
     <PackageReference Include="Grpc.Net.Client" Version="2.83.0" />
     <PackageReference Include="Grpc.Net.Client.Web" Version="2.83.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <PackageReference Include="xunit.v3" Version="4.0.0" />
   </ItemGroup>
 
