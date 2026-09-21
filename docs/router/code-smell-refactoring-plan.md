@@ -126,7 +126,7 @@ in [What was checked and rejected](#what-was-checked-and-rejected)).
 | 6 | God facade: ~7 sub-APIs, ~14 effective dependencies | `Proxy/Management/ManagementFacade.cs` | 2090 lines | 3 | Medium |
 | 7 | Multi-aggregate repository (6 concerns, 1 class) | `PriceCatalog/PriceCatalogRepository.cs` | 1123 lines | 4 (backlog) | Medium-High if touched |
 | 8 | Mixed responsibilities, 13-param ctor, 295-line method | `Proxy/RequestInterceptor.cs` | 945 lines | 4 (backlog) | Medium |
-| 9 | Inconsistent client transport (HTTP vs. gRPC) | `Gui.Admin/ProviderAdminClient.cs` vs. `Gui.Telemetry/*AdminClient.cs` | — | 4 (ADR) | N/A (observation) |
+| 9 | Inconsistent client transport (HTTP vs. gRPC) *(since resolved: both transport and type split gone by 2026-09-20, see [§ transport](#inconsistent-admin-client-transport-http-vs-grpc))* | `Gui.Admin/ProviderAdminClient.cs` vs. `Gui.Telemetry/*AdminClient.cs` | — | 4 (ADR) | N/A (observation) |
 | 10 | Oversized Razor components with large inline `@code` | `Gui/Components/ProvidersAdmin.razor` + 3 others | 500-987 lines | 4 (optional) | Low-Medium |
 
 ```mermaid
@@ -384,6 +384,14 @@ records why it should stay on HTTP (e.g., avoiding a cert/TLS requirement for th
 if that's the real reason). **Risk: N/A for the observation itself; a transport migration would be
 High risk** — it touches every provider CRUD call site plus the Governance UI's error handling, which
 currently branches on `ProviderAdminException` vs. the gRPC clients' `IsUnavailable`-flagged exceptions.
+
+> **Since resolved.** ADR-0007 took option (b) on 2026-09-02, then was superseded on 2026-09-14 by
+> [ADR-0011](../adr/0011-router-served-blazor-webassembly-gui-over-grpc-web.md), which deleted REST
+> `/admin` and moved `ProviderAdminClient` onto gRPC. The leftover type-system split closed on
+> 2026-09-20 (PR #135, [ADR-0010 Amendment 3](../adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md#amendment-3-2026-09-20-fold-guiadmin-onto-the-same-seams)):
+> `ProviderAdminClient` and `UsageQueryClient` derive from `GrpcAdminClientBase`,
+> `ProviderAdminException` is deleted in favor of `GrpcAdminException`, and their stores sit on
+> `AdminStoreBase`. There is no longer a second pattern to reconcile.
 
 ### Oversized Razor components
 
