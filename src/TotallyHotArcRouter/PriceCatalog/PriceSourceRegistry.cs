@@ -17,9 +17,10 @@ public interface IPriceSourceRegistry
 
 /// <summary>
 /// Builds and holds the price-source clients, exposing the currently enabled subset. It is the seam that
-/// makes adding a second source a new class rather than a redesign, and the one place the shared attribution
-/// headers are set - so a new client inherits them for free rather than having to remember (Phase 2). Holds
-/// LiteLLM and OpenRouter today; it was written for exactly this growth.
+/// makes adding a second source a new class rather than a redesign. Every client it builds fetches through
+/// the <see cref="HttpClientName"/> named client, whose registration in <c>AddPriceCatalog</c> is the one
+/// place the shared attribution headers are set - so a new client inherits them for free rather than having
+/// to remember (Phase 2). Holds LiteLLM and OpenRouter today; it was written for exactly this growth.
 /// </summary>
 /// <remarks>
 /// Validating the options in the constructor is what makes a bad source name fail at startup: the

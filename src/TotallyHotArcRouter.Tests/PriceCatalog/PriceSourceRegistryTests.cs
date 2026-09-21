@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Net;
+using System.Text;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
@@ -102,10 +104,57 @@ public class PriceSourceRegistryTests
             toggleStore: toggleStore));
     }
 
+    [Fact]
+    public async Task EveryClient_FetchesThroughTheNamedPriceSourceClient()
+    {
+        // The attribution headers live on the PriceSourceRegistry.HttpClientName registration, so a
+        // source that asked for any other name (or none) would silently fetch without them.
+        using var temp = new TempDatabase();
+        using var toggleStore = temp.CreateToggleStore();
+        var factory = new RecordingHttpClientFactory();
+        var registry = new PriceSourceRegistry(options: Options.Create(new PriceCatalogOptions()),
+            toggleStore: toggleStore, loggerFactory: NullLoggerFactory.Instance, httpClientFactory: factory);
+
+        foreach (var client in registry.EnabledClients)
+            await client.FetchAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: 2, actual: factory.RequestedNames.Count);
+        Assert.All(collection: factory.RequestedNames,
+            action: name => Assert.Equal(expected: PriceSourceRegistry.HttpClientName, actual: name));
+    }
+
     private static PriceSourceRegistry Build(PriceCatalogOptions options, PriceSourceToggleStore toggleStore)
     {
         return new PriceSourceRegistry(options: Options.Create(options), toggleStore: toggleStore,
             loggerFactory: NullLoggerFactory.Instance,
             httpClientFactory: new FakeHttpClientFactory(new HttpClientHandler()));
+    }
+
+    /// <summary>
+    /// Records each requested client name and answers every fetch with an empty JSON object, which both
+    /// sources normalize to zero prices without throwing.
+    /// </summary>
+    private sealed class RecordingHttpClientFactory : IHttpClientFactory
+    {
+        internal List<string> RequestedNames { get; } = [];
+
+        public HttpClient CreateClient(string name)
+        {
+            RequestedNames.Add(name);
+            return new HttpClient(new EmptyJsonHandler());
+        }
+    }
+
+    /// <summary>Returns <c>{}</c> for every request.</summary>
+    private sealed class EmptyJsonHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json")
+            });
+        }
     }
 }
