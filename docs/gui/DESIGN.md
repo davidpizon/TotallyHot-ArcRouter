@@ -213,7 +213,7 @@ actually appear in `app.css`.
   `-locked`): unlocking is destructive, so it opens the `UnlockSecretFieldDialog` confirmation rather
   than arming the control in place. Full contract, including why unlocking clears the value:
   [`secret-field.md`](secret-field.md).
-- **Navigation** (5-tab bar: Sessions / Cost Analytics / Model Distribution / Governance /
+- **Navigation** (6-tab bar: Sessions / Cost Analytics / Model Distribution / Report Card / Governance /
   Console) — the selected tab reads as a folder tab continuous with its panel: `var(--accent)`
   text, a `var(--surface-base)` fill, a `var(--border-button)` border on three sides, `6px 6px 0 0`
   radius, and a bottom edge painted `var(--surface-base)` that hides `.ds-toolbar`'s
