@@ -222,7 +222,8 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
 
     /// <summary>
     /// Queries a provider's live model list. Tests pass a stub-wrapped instance; production omits this
-    /// and supplies <see cref="HttpClientFactory"/> instead.
+    /// and supplies <see cref="HttpClientFactory"/> instead. When both are omitted <see cref="ProxyServer"/>
+    /// creates a fallback client and owns it.
     /// </summary>
     public HttpClient? HttpClient { get; init; }
 

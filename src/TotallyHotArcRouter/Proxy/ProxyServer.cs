@@ -22,6 +22,10 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 {
     private readonly IHost _host;
 
+    // Non-null only when the caller enabled the management API but supplied neither a client nor a factory,
+    // so direct construction keeps working; disposal frees exactly what this server created.
+    private readonly HttpClient? _ownedManagementHttpClient;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ProxyServer"/> class.
     /// </summary>
@@ -114,6 +118,10 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         // when the caller didn't supply the real one.
         var regretHarnessAdmin = dependencies?.RegretHarnessAdmin;
         var judgeCalibrationAdmin = dependencies?.JudgeCalibrationAdmin;
+
+        _ownedManagementHttpClient = managementApi is { HttpClient: null, HttpClientFactory: null }
+            ? new HttpClient()
+            : null;
 
         var serilogLogger = dependencies?.SerilogLogger;
 
@@ -318,7 +326,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         var facade = new ManagementFacade(
                             store: managementApi.ConfigStore,
                             environment: managementApi.Environment ?? new EnvironmentVariableProvider(),
-                            httpClient: managementApi.HttpClient,
+                            httpClient: managementApi.HttpClient ?? _ownedManagementHttpClient,
                             dependencies: new ManagementFacadeDependencies
                             {
                                 BudgetStore = managementApi.BudgetStore,
@@ -507,8 +515,9 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     internal IServiceProvider Services => _host.Services;
 
     /// <summary>
-    /// Disposes the inner host so repeatedly creating and discarding servers (e.g. across tests) doesn't
-    /// leak hosts.
+    /// Disposes the inner host and, when this server created it, the fallback management
+    /// <see cref="HttpClient"/>, so repeatedly creating and discarding servers (e.g. across tests) doesn't
+    /// leak hosts or handlers.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -517,6 +526,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         else
             _host.Dispose();
 
+        _ownedManagementHttpClient?.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -524,6 +534,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     public void Dispose()
     {
         _host.Dispose();
+        _ownedManagementHttpClient?.Dispose();
         GC.SuppressFinalize(this);
     }
 

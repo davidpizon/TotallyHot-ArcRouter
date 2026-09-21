@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net.Sockets;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -55,6 +57,28 @@ public class ProxyServerTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new ProxyServer(logger: new NullLogger<ProxyServer>(), proxyMiddleware: proxyMiddleware,
                 listenerOptions: new ProxyListenerOptions { Port = port }));
+    }
+
+    [Fact]
+    public async Task Constructor_ManagementApiWithNoClientOrFactory_BuildsTheFacade()
+    {
+        // Direct construction predates IHttpClientFactory: a caller enabling the management API without
+        // supplying either a client or a factory must still get a working facade (backed by a fallback
+        // client this server owns), not an ArgumentNullException from inside the inner host's wiring.
+        var interceptor = new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: ModelRouteResolverTestFactory.Empty());
+        var proxyMiddleware =
+            new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance, interceptor: interceptor);
+
+        await using var server = new ProxyServer(logger: new NullLogger<ProxyServer>(),
+            proxyMiddleware: proxyMiddleware, listenerOptions: new ProxyListenerOptions { Port = 0 },
+            webInterfaceOptions: new WebInterfaceOptions { Port = 0 },
+            dependencies: new ProxyServerDependencies
+            {
+                ManagementApi = new ManagementApiDependencies(new InMemoryProviderConfigStore(new ModelRoutingOptions()))
+            });
+
+        Assert.NotNull(server.Services.GetService<ManagementFacade>());
     }
 
     [Fact]
