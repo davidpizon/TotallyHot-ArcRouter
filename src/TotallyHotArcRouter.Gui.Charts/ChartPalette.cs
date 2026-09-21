@@ -1,10 +1,10 @@
 namespace TotallyHot.ArcRouter.Gui.Charts;
 
 /// <summary>
-/// Deterministic display-color assignment for models/agents across every chart. Lives in the pure
-/// Charts library so the chart builders and the Gui's <c>ColorUtils</c> (which delegates here) agree on
-/// one palette. Uses FNV-1a rather than <see cref="string.GetHashCode()"/>, which is randomized per
-/// process and would reshuffle colors on every launch.
+/// Deterministic display-color assignment for models/agents across every chart and the Sessions
+/// conversation cards. Lives in the pure Charts library so the chart builders and the Blazor
+/// components share one palette. Uses FNV-1a rather than <see cref="string.GetHashCode()"/>, which is
+/// randomized per process and would reshuffle colors on every launch.
 /// </summary>
 public static class ChartPalette
 {
