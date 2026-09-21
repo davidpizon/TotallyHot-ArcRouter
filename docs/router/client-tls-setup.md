@@ -62,8 +62,12 @@ importing it per profile.
 
 ## Pointing an LLM client at the HTTPS proxy port
 
-Once the CA is trusted (system-wide, or per-tool below), point your client at
-`https://localhost:47101` instead of the old plain `http://` scheme.
+Once the CA is trusted (system-wide, or per-tool below), the OpenAI-compatible
+drop-in is one base URL — `https://localhost:47101/v1` — and `"model": "auto"`.
+That pair is what the [README](../../README.md#point-a-client) and every GitHub
+Release copy-paste. Origin without the `/v1` prefix (`https://localhost:47101`)
+is the TLS listener; OpenAI SDKs and editors append `/chat/completions` to the
+base URL they are given, so they need the version prefix included.
 
 | Client | How it discovers trust |
 |---|---|

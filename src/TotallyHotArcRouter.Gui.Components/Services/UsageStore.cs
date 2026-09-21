@@ -9,8 +9,8 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// Singleton view-model backing the Model Distribution, Cost Analytics, and header-ticker surfaces' real
 /// data (Phase 4, §5.15). Wraps <see cref="UsageQueryClient"/> in the shared
 /// <see cref="AdminStoreBase{TClient}"/> shape so the UI survives tab switches and degrades gracefully
-/// (falling back to demo data) when the proxy isn't running or has no rollup store wired up. Registered in
-/// <c>MauiProgram</c>.
+/// (falling back to demo data) when the proxy isn't running or has no rollup store wired up. Registered as a
+/// singleton in the WASM host's <c>Program</c>.
 /// </summary>
 public sealed class UsageStore : AdminStoreBase<UsageQueryClient>
 {

@@ -308,6 +308,10 @@ jobs:
             release-assets/*.msi
             release-assets/*.tar.gz
             release-assets/checksums.txt
+          # Drop-in preamble (one base URL, model: auto) is the release page's first screen; the
+          # generated changelog is appended after it. The markdown is produced by
+          # OpenAiCompatibleDropIn.BuildReleaseNotesMarkdown and locked by unit test against this file.
+          body_path: docs/install/openai-compatible-drop-in.md
           generate_release_notes: true
           # See the two-stage note in this file's header: an RC, not `latest`, until promote.yml says so.
           # make_latest is quoted because it is a tri-state string input ('true'/'false'/'legacy'), not a

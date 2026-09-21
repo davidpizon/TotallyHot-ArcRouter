@@ -50,9 +50,8 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <!-- The former MAUI host project (referenced pre-retarget) pulled this in implicitly via its own SDK
-         targets; every test file here already assumes it is ambient, matching MauiProgram.cs's DI-heavy
-         composition-root style, so it is restored as an explicit global using rather than editing dozens
-         of files that never needed their own using for it before. -->
+         targets; every test file here already assumes it is ambient, so it is restored as an explicit
+         global using rather than editing dozens of files that never needed their own using for it. -->
     <Using Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
 

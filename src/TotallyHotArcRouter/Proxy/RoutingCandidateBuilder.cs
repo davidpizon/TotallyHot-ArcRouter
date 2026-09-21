@@ -59,7 +59,8 @@ internal sealed class RoutingCandidateBuilder(
     /// selection whose target/provider is already circuit-open - leaves it unsubstituted and instead
     /// reports a truthful client-facing message via <see cref="RoutingCandidateBuildResult.ExplicitCircuitTripBlockMessage"/>
     /// (docs/adr/0004-.../0005-...). Then appends every other currently-eligible configured model,
-    /// deduplicated by upstream target and ranked by <see cref="RouterMemory"/> score, as further
+    /// deduplicated by upstream target and ranked by the routing policy's voter scores when this
+    /// request was policy-picked, or by <see cref="RouterMemory"/> score otherwise, as further
     /// failover hops.
     /// </summary>
     /// <param name="jsonObject">The already-parsed, mutable request body to rewrite per candidate.</param>
@@ -70,12 +71,19 @@ internal sealed class RoutingCandidateBuilder(
     /// or substituted, so the ADR-0004/0005 explicit-selection protection does not apply.
     /// </param>
     /// <param name="liveDimension">The request's live dimension key for score lookup.</param>
+    /// <param name="policyCandidateScores">
+    /// Per-model aggregates from the routing policy's <c>RoutingDecision.CandidateScores</c> when this
+    /// request was auto-selected or otherwise policy-picked; <see langword="null"/> for an explicit
+    /// named-model request (no vote happened). When present, failover hops retry the next voter pick
+    /// rather than a separately memory-ranked model.
+    /// </param>
     /// <returns>The ordered candidate list plus the (possibly substituted) route and updated substitution state.</returns>
     public RoutingCandidateBuildResult Build(
         JsonObject jsonObject,
         ResolvedModelRoute route,
         RoutingSubstitutionReason substitutionReasonSoFar,
-        string liveDimension)
+        string liveDimension,
+        IReadOnlyDictionary<string, double>? policyCandidateScores = null)
     {
         // docs/router/agent-resilience-strategies.md's Circuit Breaker: when the resolved primary's
         // own upstream target is presently OPEN (unhealthy, still cooling down) - or its whole
@@ -134,7 +142,8 @@ internal sealed class RoutingCandidateBuilder(
         }
         else if (targetOpen || providerOpen || providerStopped || modelStopped)
         {
-            var substitute = RankEligibleModels(excludeModelNames: [route.ModelName], liveDimension: liveDimension)
+            var substitute = RankEligibleModels(excludeModelNames: [route.ModelName], liveDimension: liveDimension,
+                    policyCandidateScores: policyCandidateScores)
                 .FirstOrDefault();
             if (substitute is not null)
             {
@@ -159,7 +168,7 @@ internal sealed class RoutingCandidateBuilder(
 
         var seenTargets = new HashSet<CircuitBreakerTargetKey> { CircuitBreakerTargetKey.FromRoute(route) };
         foreach (var fallbackRoute in RankEligibleModels(excludeModelNames: [route.ModelName],
-                     liveDimension: liveDimension))
+                     liveDimension: liveDimension, policyCandidateScores: policyCandidateScores))
             // Skip a candidate that resolves to the same upstream target (same provider, base URL,
             // and model id) as one already queued - a duplicate hop would just repeat the same
             // failing call. Keyed on the full target, not ProviderModelId alone, so two genuinely
@@ -180,22 +189,29 @@ internal sealed class RoutingCandidateBuilder(
     /// called by <see cref="ProxyMiddleware"/> immediately before it actually attempts a candidate), and
     /// whose provider hasn't been switched off via Governance &gt; Providers' Stop control (see
     /// <see cref="IModelRouteResolver.IsProviderEnabled"/>), and whose own Start/Stop toggle or last
-    /// endpoint scan hasn't stopped it (see <see cref="IModelRouteResolver.IsModelEnabled"/>), by
-    /// <see cref="RouterMemory.GetAverageScore"/> under <paramref name="liveDimension"/>, descending. A
-    /// candidate with no recorded score yet is treated as <see cref="ColdStartRankingScore"/> rather
-    /// than assumed worst, so cold-start candidates interleave with scored ones instead of always
-    /// sinking to the bottom; ties preserve <see cref="IModelRouteResolver.ListModels"/>'s configured
-    /// order (LINQ's <c>OrderByDescending</c> is a stable sort).
+    /// endpoint scan hasn't stopped it (see <see cref="IModelRouteResolver.IsModelEnabled"/>). Ranking
+    /// is <see cref="FailoverCandidateRanker.Rank"/>: a policy-picked request walks remaining voter
+    /// picks first; otherwise <see cref="RouterMemory.GetAverageScore"/> under
+    /// <paramref name="liveDimension"/>, descending. A candidate with no recorded score yet is treated
+    /// as <see cref="ColdStartRankingScore"/> rather than assumed worst, so cold-start candidates
+    /// interleave with scored ones instead of always sinking to the bottom; ties on the memory-only
+    /// path preserve <see cref="IModelRouteResolver.ListModels"/>'s configured order (LINQ's
+    /// <c>OrderByDescending</c> is a stable sort).
     /// </summary>
     /// <param name="excludeModelNames">Model names to omit from the ranking (e.g. the primary already queued).</param>
     /// <param name="liveDimension">The request's inferred live dimension.</param>
+    /// <param name="policyCandidateScores">
+    /// See <see cref="Build"/>'s <c>policyCandidateScores</c> - when present, the next hop is the next
+    /// voter pick rather than the highest <see cref="RouterMemory"/> scorer.
+    /// </param>
     public List<ResolvedModelRoute> RankEligibleModels(IReadOnlyCollection<string> excludeModelNames,
-        string liveDimension)
+        string liveDimension, IReadOnlyDictionary<string, double>? policyCandidateScores = null)
     {
-        return [.. GetEligibleRoutes(excludeModelNames)
-            .OrderByDescending(e =>
-                routerMemory?.GetAverageScore(dimension: liveDimension, model: e.ModelName) ?? ColdStartRankingScore)
-            .Select(e => e.Route)];
+        return FailoverCandidateRanker.Rank(
+            eligible: GetEligibleRoutes(excludeModelNames),
+            policyScores: policyCandidateScores,
+            routerMemory: routerMemory,
+            liveDimension: liveDimension);
     }
 
     /// <summary>

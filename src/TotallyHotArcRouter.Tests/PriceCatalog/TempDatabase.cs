@@ -90,13 +90,6 @@ internal sealed class TempDatabase : IDisposable
         return new RateLimitRepository(Database);
     }
 
-    /// <summary>Creates the schema and returns a reported-usage repository over it.</summary>
-    public ReportedUsageRepository CreateReportedUsageRepository()
-    {
-        Database.EnsureCreated();
-        return new ReportedUsageRepository(Database);
-    }
-
     /// <summary>
     /// Inserts an extra <c>aggregator_sources</c> row directly, standing in for a second source with a
     /// client. Only <c>litellm</c> is seeded today, so multi-source behavior (a toggle cancelling one source

@@ -30,9 +30,10 @@ public interface IPortfolioGraderClient
 /// <param name="Dimension">The task dimension the response was routed under.</param>
 /// <param name="ResponseText">The raw response text to grade.</param>
 /// <param name="Prompt">
-/// The task the response was written for, or empty when it could not be recovered
-/// (docs/research/code-quality-metrics-assessment.md §1: every grader here needs the requirement to score
-/// against, not just the answer in isolation).
+/// The user/task question the response was written to answer, recovered from
+/// <see cref="PendingPromptCache"/>. Required: every portfolio grader fails closed rather than grading
+/// the response in isolation when this is missing or whitespace-only
+/// (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
 /// </param>
 public sealed record PortfolioGraderScoreRequest(string Dimension, string ResponseText, string Prompt);
 

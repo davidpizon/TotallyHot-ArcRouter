@@ -10,8 +10,8 @@ using TotallyHot.ArcRouter.Tests.PriceCatalog;
 namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
 /// <summary>
-/// Covers <see cref="ManagementFacade"/>: the shared security boundary behind both REST <c>/admin/*</c>
-/// and the MCP provider tools. These tests are the critical guarantee - a custom-header value must never
+/// Covers <see cref="ManagementFacade"/>: the shared security boundary behind both the gRPC-Web admin
+/// services and the MCP provider tools. These tests are the critical guarantee - a custom-header value must never
 /// appear in anything the facade returns, and a blank write must preserve whatever secret is already
 /// stored.
 /// </summary>

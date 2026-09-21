@@ -65,8 +65,11 @@ public abstract class PortfolioGraderClientBase : IPortfolioGraderClient
         var route = _modelSelector.Resolve();
         if (route is null) return null;
 
+        // Fail closed before any HTTP: a missing question must not produce a response-only grade
+        // (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
+        var taskPrompt = GraderQuestionText.Require(request.Prompt);
         var prompt = BuildPrompt(dimension: request.Dimension, responseText: request.ResponseText,
-            taskPrompt: request.Prompt);
+            taskPrompt: taskPrompt);
         var client = _httpClientFactory.CreateClient(HttpClientName);
         client.Timeout = TimeSpan.FromSeconds(_options.CurrentValue.RequestTimeoutSeconds);
 
@@ -119,7 +122,11 @@ public abstract class PortfolioGraderClientBase : IPortfolioGraderClient
     /// <summary>Composes this grader's prompt for one response.</summary>
     /// <param name="dimension">The task dimension the response was routed under.</param>
     /// <param name="responseText">The response text to grade.</param>
-    /// <param name="taskPrompt">The task the response was written for, or empty when unrecoverable.</param>
+    /// <param name="taskPrompt">
+    /// The user/task question the response was written to answer. Never empty: the caller has already
+    /// <see cref="GraderQuestionText.Require">required</see> it, so implementations must weave it in
+    /// rather than treating it as optional.
+    /// </param>
     protected abstract string BuildPrompt(string dimension, string responseText, string taskPrompt);
 
     /// <summary>
