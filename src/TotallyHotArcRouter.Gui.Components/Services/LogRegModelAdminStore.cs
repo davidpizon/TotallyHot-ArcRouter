@@ -22,7 +22,7 @@ public sealed class LogRegModelAdminStore : AdminStoreBase<ILogRegModelAdminClie
     public LogRegModelAdminStore(
         IRouterChannelProvider channelProvider,
         ILogger<LogRegModelAdminStore>? logger = null)
-        : base(client: new LogRegModelAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new LogRegModelAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         ServerAddress = channelProvider.ServerAddress;
     }

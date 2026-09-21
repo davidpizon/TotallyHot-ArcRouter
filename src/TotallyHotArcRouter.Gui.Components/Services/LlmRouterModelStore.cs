@@ -24,7 +24,7 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
     public LlmRouterModelStore(
         IRouterChannelProvider channelProvider,
         ILogger<LlmRouterModelStore>? logger = null)
-        : base(client: new LlmRouterModelAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new LlmRouterModelAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         ServerAddress = channelProvider.ServerAddress;
     }

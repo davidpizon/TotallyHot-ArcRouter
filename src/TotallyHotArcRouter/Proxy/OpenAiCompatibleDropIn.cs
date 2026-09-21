@@ -24,7 +24,7 @@ public static class OpenAiCompatibleDropIn
     /// Absolute GitHub blob URL for the TLS trust doc, used on the release page where a relative
     /// <c>docs/...</c> link would 404.
     /// </summary>
-    public const string ClientTlsSetupUrl =
+    private const string ClientTlsSetupUrl =
         "https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/docs/router/client-tls-setup.md";
 
     /// <summary>

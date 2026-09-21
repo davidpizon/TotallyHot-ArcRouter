@@ -657,6 +657,9 @@ silently substituted.
   with zero base-class changes needed. Every corresponding `Gui/Services/*Store.cs` (15 of them, including
   `LiveDataStore`, `ProviderAdminStore`, `UsageStore`, `UpdateStore`, `RoutingGateStore`) now takes
   `IRouterChannelProvider channelProvider` instead of a `string serverAddress`/`managementAddress`.
+  *(Since superseded, 2026-09-20, PR #135: nothing ever called the channel-owning constructors after
+  this phase, so they were removed from every client and from `GrpcAdminClientBase`, which is no
+  longer `IDisposable`.)*
 - `ManagementTokenReader.TryRead()` moved out of `ProviderAdminStore`/`UsageStore`'s constructors into
   `MauiProgram` (resolved once, passed in as `adminToken`) - the plan's third bullet ("Gui.Admin/
   ManagementTokenReader"), satisfied by relocating the *call site* rather than the file, since the reader

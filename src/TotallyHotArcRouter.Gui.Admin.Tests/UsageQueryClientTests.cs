@@ -1,5 +1,6 @@
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
@@ -194,31 +195,6 @@ public sealed class UsageQueryClientTests
         Assert.Equal(1.00m, actual: rows[1].CostUsd);
     }
 
-    // --- admin token metadata ---
-
-    [Fact]
-    public async Task AdminToken_WhenConfigured_IsSentAsMetadata()
-    {
-        var stub = new StubClient { SummaryResponse = new Contract.UsageSummaryResponse { CostUsd = "0" } };
-        var client = new UsageQueryClient(stub, adminToken: "s3cret");
-
-        await client.GetSummaryAsync(window: "week", cancellationToken: Ct);
-
-        var entry = Assert.Single(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
-        Assert.Equal(expected: "s3cret", actual: entry.Value);
-    }
-
-    [Fact]
-    public async Task AdminToken_WhenNotConfigured_IsNotSent()
-    {
-        var stub = new StubClient { SummaryResponse = new Contract.UsageSummaryResponse { CostUsd = "0" } };
-        var client = new UsageQueryClient(stub);
-
-        await client.GetSummaryAsync(window: "week", cancellationToken: Ct);
-
-        Assert.Empty(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
-    }
-
     // --- error handling ---
 
     [Fact]
@@ -228,11 +204,11 @@ public sealed class UsageQueryClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         var client = new UsageQueryClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetSummaryAsync(window: "day", cancellationToken: Ct));
 
-        Assert.Contains(expectedSubstring: "Could not reach the proxy management API", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
+        Assert.Equal(expected: "Could not read the usage summary: the router is not reachable.", actual: ex.Message);
+        Assert.True(ex.IsUnavailable);
         Assert.IsType<RpcException>(ex.InnerException);
     }
 
@@ -246,16 +222,19 @@ public sealed class UsageQueryClientTests
         };
         var client = new UsageQueryClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetSummaryAsync(window: "day", cancellationToken: Ct));
 
-        Assert.Equal(expected: "Usage rollups are not available.", actual: ex.Message);
+        Assert.Contains(expectedSubstring: "Usage rollups are not available.", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
+        Assert.False(ex.IsUnavailable);
     }
 
     [Fact]
-    public void Constructor_NullChannel_Throws()
+    public void Constructor_NullClient_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new UsageQueryClient((Grpc.Net.Client.GrpcChannel)null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new UsageQueryClient((Contract.UsageAdminService.UsageAdminServiceClient)null!));
     }
 
     private static Contract.UsageRollupResponse RollupResponse(params Contract.UsageRollupBucketRow[] buckets)
@@ -329,13 +308,10 @@ public sealed class UsageQueryClientTests
 
         public Contract.GetRoutingRoiRequest? LastRoutingRoiRequest { get; private set; }
 
-        public CallOptions? LastCallOptions { get; private set; }
-
         public override AsyncUnaryCall<Contract.UsageSummaryResponse> GetUsageSummaryAsync(
             Contract.GetUsageSummaryRequest request, CallOptions options)
         {
             LastSummaryRequest = request;
-            LastCallOptions = options;
             return Call(SummaryResponse);
         }
 
@@ -343,7 +319,6 @@ public sealed class UsageQueryClientTests
             Contract.GetUsageRollupRequest request, CallOptions options)
         {
             LastRollupRequest = request;
-            LastCallOptions = options;
             return Call(CannedRollupResponse);
         }
 
@@ -351,14 +326,12 @@ public sealed class UsageQueryClientTests
             Contract.GetRoutingRoiRequest request, CallOptions options)
         {
             LastRoutingRoiRequest = request;
-            LastCallOptions = options;
             return Call(CannedRoutingRoiResponse);
         }
 
         public override AsyncServerStreamingCall<Contract.UsageRollupBucketRow> ExportUsageRollup(
             Contract.ExportUsageRollupRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             IAsyncStreamReader<Contract.UsageRollupBucketRow> reader = Failure is null
                 ? new FakeStreamReader<Contract.UsageRollupBucketRow>(ExportRows)
                 : new ThrowingStreamReader(Failure);

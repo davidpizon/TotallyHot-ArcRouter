@@ -22,7 +22,7 @@ public sealed class CostReconciliationStore : AdminStoreBase<ICostReconciliation
     public CostReconciliationStore(
         IRouterChannelProvider channelProvider,
         ILogger<CostReconciliationStore>? logger = null)
-        : base(client: new CostReconciliationAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new CostReconciliationAdminClient(channelProvider.CallInvoker), logger: logger)
     {
     }
 

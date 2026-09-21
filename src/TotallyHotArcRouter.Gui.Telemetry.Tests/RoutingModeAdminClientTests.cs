@@ -27,7 +27,7 @@ public class RoutingModeAdminClientTests
         response.Voters.Add(new Contract.VoterMode { Name = "dim_best", Enabled = true, Weight = 0.9 });
         response.Voters.Add(new Contract.VoterMode { Name = "memory_kNN", Enabled = true, Weight = 0.57 });
         var stub = new StubClient { Response = response };
-        using var client = new RoutingModeAdminClient(stub);
+        var client = new RoutingModeAdminClient(stub);
 
         var mode = await client.GetAsync(TestContext.Current.CancellationToken);
 
@@ -45,7 +45,7 @@ public class RoutingModeAdminClientTests
         var response = new Contract.RoutingModeResponse { OrchestratorEnabled = false, ExplorationEnabled = false };
         response.Voters.Add(new Contract.VoterMode { Name = "llm_router", Enabled = false, Weight = 0.64 });
         var stub = new StubClient { Response = response };
-        using var client = new RoutingModeAdminClient(stub);
+        var client = new RoutingModeAdminClient(stub);
 
         var mode = await client.GetAsync(TestContext.Current.CancellationToken);
 
@@ -59,7 +59,7 @@ public class RoutingModeAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new RoutingModeAdminClient(stub);
+        var client = new RoutingModeAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
@@ -74,38 +74,13 @@ public class RoutingModeAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new RoutingModeAdminClient(stub);
+        var client = new RoutingModeAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the routing mode: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new RoutingModeAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new RoutingModeAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_default_address_overload_targets_the_proxys_grpc_port()
-    {
-        using var client = new RoutingModeAdminClient();
-
-        client.Should().NotBeNull();
     }
 
     [Fact]

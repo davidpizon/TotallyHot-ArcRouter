@@ -21,7 +21,7 @@ public sealed class PriceSourceStore : AdminStoreBase<IPriceSourceAdminClient>
     public PriceSourceStore(
         IRouterChannelProvider channelProvider,
         ILogger<PriceSourceStore>? logger = null)
-        : base(client: new PriceSourceAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new PriceSourceAdminClient(channelProvider.CallInvoker), logger: logger)
     {
     }
 
