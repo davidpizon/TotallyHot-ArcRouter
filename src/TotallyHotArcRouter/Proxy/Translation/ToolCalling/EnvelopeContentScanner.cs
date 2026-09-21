@@ -58,7 +58,7 @@ internal sealed class EnvelopeContentScanner
     /// Lets the caller distinguish "the model wrote no prose" from "the prose never finished arriving",
     /// which matters on the fail-open path: only the second means text may still be owed to the client.
     /// </remarks>
-    public bool ContentComplete { get; private set; }
+    private bool ContentComplete { get; set; }
 
     /// <summary>Gets a value indicating whether any prose has been emitted yet.</summary>
     /// <remarks>

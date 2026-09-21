@@ -94,7 +94,7 @@ internal static class PriceCatalogServiceCollectionExtensions
         // Owns per-provider monthly budgets + spend (Governance > Providers). Same empty-until-schema-ready
         // lifecycle as the toggle store: StartupHealthCheckHostedService calls Reload after EnsureCreated.
         // Injected into ProxyMiddleware's optional budgetStore param (enforcement + spend recording) and
-        // passed across to the inner host for the /admin budget endpoints.
+        // passed across to the inner host for the gRPC-Web budget RPCs.
         services.AddSingleton<ProviderBudgetStore>();
         // ProxyMiddleware depends only on the enforce+record slice (IBudgetEnforcer); map it to the same
         // singleton so the request path and the admin/cap surface share one store and one snapshot.
@@ -259,7 +259,8 @@ internal static class PriceCatalogServiceCollectionExtensions
     /// <summary>
     /// Resolves <paramref name="provider"/>'s Admin API key, stored secret first
     /// (<see cref="AdminApiKeySecretName"/>) then <see cref="ProviderReconciliationOptions.AdminApiKeyEnvVar"/>
-    /// (docs/router/secrets-at-rest-plan.md §7) - so a key saved through <c>PUT /admin/secrets/{name}</c>
+    /// (docs/router/secrets-at-rest-plan.md §7) - so a key saved through
+    /// <see cref="TotallyHot.ArcRouter.Proxy.Management.ManagementFacade.SetSecret"/>
     /// takes priority over (and needs no change to) an existing environment-variable deployment.
     /// </summary>
     internal static bool TryResolveAdminApiKey(
@@ -294,7 +295,7 @@ internal static class PriceCatalogServiceCollectionExtensions
     /// The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md
     /// §3's naming convention).
     /// </summary>
-    internal static string AdminApiKeySecretName(string provider)
+    private static string AdminApiKeySecretName(string provider)
     {
         return $"reconciliation:{provider}:admin-key";
     }

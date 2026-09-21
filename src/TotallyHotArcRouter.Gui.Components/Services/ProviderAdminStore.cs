@@ -243,28 +243,6 @@ public sealed class ProviderAdminStore : IDisposable
     }
 
     /// <summary>
-    /// Queries a provider's own model list (live discovery). An independently callable building block - the
-    /// Governance UI's "Refresh from endpoint" action uses <see cref="RefreshFromEndpointAsync"/> instead.
-    /// </summary>
-    public Task<DiscoverModelsResult> DiscoverModelsAsync(string key, CancellationToken cancellationToken = default)
-    {
-        return _client.DiscoverModelsAsync(key: key, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>
-    /// Re-probes a provider's endpoint and runs tool-call dialect detection for its models. An independently
-    /// callable building block - the Governance UI's "Refresh from endpoint" action uses
-    /// <see cref="RefreshFromEndpointAsync"/> instead, which also reconciles the model list. Does not itself
-    /// update <see cref="Providers"/> - the scan's own return value is only the endpoint-flavor result.
-    /// </summary>
-    /// <exception cref="ProviderAdminException">The provider is unknown, scanning is unavailable, or the request failed.</exception>
-    public Task<ProviderEndpointCapabilitiesView> ScanCapabilitiesAsync(string key,
-        CancellationToken cancellationToken = default)
-    {
-        return _client.ScanCapabilitiesAsync(key: key, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>
     /// The Governance UI's "Refresh from endpoint" action, then publishes the updated list: discovers the
     /// provider's live model list, reconciles it into configuration (adding newly-seen ids as stopped,
     /// flagging previously-configured ones no longer reported - never deleting), then re-scans endpoint

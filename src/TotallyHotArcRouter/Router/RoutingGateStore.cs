@@ -58,7 +58,7 @@ public sealed class RoutingGateStore : IRoutingGate
     /// Gets the default state file path (<c>%ProgramData%\TotallyHotArcRouter\routing-gate.json</c> on
     /// Windows; see <see cref="AppDataPaths"/> for every other platform).
     /// </summary>
-    public static string DefaultPath()
+    private static string DefaultPath()
     {
         return Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: FileName);
     }

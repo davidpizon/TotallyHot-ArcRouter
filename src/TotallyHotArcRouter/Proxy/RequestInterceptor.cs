@@ -30,6 +30,16 @@ public class RequestInterceptor
     /// <see cref="RouterModelName"/> this name is never advertised by
     /// <see cref="ListAvailableModels"/>; it remains accepted for callers that already send it.
     /// </summary>
+    /// <remarks>
+    /// Internal rather than private so same-assembly callers (the OpenAI-compatible drop-in helpers)
+    /// and InternalsVisibleTo tests can read the reserved name without duplicating the token.
+    /// <para>
+    /// Qodana reports this as private-able and is wrong about it: the scan runs against this branch, which
+    /// does not yet carry <c>OpenAiCompatibleDropIn</c>. That caller arrives with <c>main</c>, which is what
+    /// merge CI compiles against - narrowing the const broke exactly that build once already.
+    /// </para>
+    /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
     internal const string AutoSelectModelName = "auto";
 
     /// <summary>
@@ -40,7 +50,7 @@ public class RequestInterceptor
     /// so offer no other way to express "you choose". Spelled as an Ollama-safe slug - no spaces, no
     /// tag separator - so it round-trips unmodified through both clients.
     /// </summary>
-    internal const string RouterModelName = "totallyhot-arcrouter";
+    private const string RouterModelName = "totallyhot-arcrouter";
 
     /// <summary>
     /// The <c>owned_by</c> value reported for <see cref="RouterModelName"/> on the OpenAI-shaped

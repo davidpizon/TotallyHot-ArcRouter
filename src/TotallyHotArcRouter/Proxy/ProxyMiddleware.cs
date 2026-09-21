@@ -315,7 +315,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // The GUI system tray's "Disable Routing" kill switch: checked after the read-only /v1/models and
         // Ollama listing endpoints above (which stay available so clients can still discover models while
         // routing is paused) but before any actual routing/forwarding work begins. Every other
-        // admin/management surface (REST /admin/*, the gRPC admin services, and this same kill switch's own
+        // admin/management surface (the gRPC-Web admin services, MCP, and this same kill switch's own
         // toggle RPC) lives on separate endpoints mapped ahead of this terminal middleware, so disabling
         // routing never blocks administrative tasks.
         if (_routingGate?.IsEnabled == false)

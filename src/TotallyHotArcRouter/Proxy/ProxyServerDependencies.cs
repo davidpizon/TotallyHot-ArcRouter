@@ -68,7 +68,7 @@ public sealed record ProxyServerDependencies
     /// </summary>
     public IOptions<RoutingOptions>? RoutingOptions { get; init; }
 
-    /// <summary>The <c>/admin/*</c> REST management API on the plain-HTTP port. <see langword="null"/> leaves it unmapped.</summary>
+    /// <summary>The gRPC-Web provider/usage admin services. <see langword="null"/> leaves them unmapped.</summary>
     public ManagementApiDependencies? ManagementApi { get; init; }
 
     /// <summary>The Governance UI's Price Sources panel API. <see langword="null"/> leaves it unmapped.</summary>
@@ -203,12 +203,10 @@ public interface IAdminServiceModule
 
 /// <summary>
 /// Backs <see cref="ProviderAdminGrpcService"/>/<see cref="UsageAdminGrpcService"/>, the Governance UI's
-/// provider/credential/model management and usage-query APIs (the REST <c>/admin/*</c> surface these
-/// once shared a group with was deleted in
-/// <see href="../../../docs/gui/web-gui-migration-plan.md">the web GUI migration plan</see>'s Phase P2).
-/// Everything optional here is forwarded to <see cref="ManagementFacade"/>, the shared security boundary the
-/// MCP provider tools use too; an absent member makes its endpoints answer
-/// <see cref="ManagementErrorType.Unavailable"/> rather than failing the whole API.
+/// provider/credential/model management and usage-query APIs over gRPC-Web. Everything optional here is
+/// forwarded to <see cref="ManagementFacade"/>, the shared security boundary the MCP provider tools use
+/// too; an absent member makes its endpoints answer <see cref="ManagementErrorType.Unavailable"/> rather
+/// than failing the whole API.
 /// </summary>
 /// <param name="ConfigStore">
 /// The writable provider/model configuration store. Required: it is what makes the API meaningful at all,
@@ -247,21 +245,21 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
     public PriceRepository? PriceRepository { get; init; }
 
     /// <summary>
-    /// Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot/history to <c>GET /admin/providers</c>
-    /// .
+    /// Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot/history to
+    /// <see cref="ProviderAdminGrpcService.ListProviders"/>.
     /// </summary>
     public RateLimitRepository? RateLimitRepository { get; init; }
 
     /// <summary>
     /// Supplies each provider's own reported usage (docs/router/secrets-at-rest-plan.md §8.1) to
-    /// <c>GET /admin/providers</c>.
+    /// <see cref="ProviderAdminGrpcService.ListProviders"/>.
     /// </summary>
     public ReportedUsageRepository? ReportedUsageRepository { get; init; }
 
-    /// <summary>Operator price overrides, backing <c>PUT/DELETE /admin/price-overrides</c>.</summary>
+    /// <summary>Operator price overrides, backing <see cref="ProviderAdminGrpcService"/>'s price-override RPCs.</summary>
     public ModelAliasOverrideStore? ModelAliasOverrideStore { get; init; }
 
-    /// <summary>Usage rollups, backing <c>GET /admin/usage/summary</c> and <c>GET /admin/usage/rollup</c>.</summary>
+    /// <summary>Usage rollups, backing <see cref="UsageAdminGrpcService"/>'s summary and rollup RPCs.</summary>
     public IUsageRollupStore? UsageRollupStore { get; init; }
 
     /// <summary>Writes a locked literal header into the protected secret store instead of <c>model-routing.json</c>.</summary>
@@ -270,7 +268,7 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
     /// <summary>Authenticates a provider whose credential lives in the protected secret store during model discovery.</summary>
     public ISecretReader? SecretReader { get; init; }
 
-    /// <summary>Backs Cost Analytics' "Routing ROI" feed, <c>GET /admin/usage/routing-roi</c> (Phase T4).</summary>
+    /// <summary>Backs Cost Analytics' "Routing ROI" feed via <see cref="UsageAdminGrpcService.GetRoutingRoi"/> (Phase T4).</summary>
     public ITaxonomyComparisonStore? TaxonomyComparisonStore { get; init; }
 
     /// <summary>

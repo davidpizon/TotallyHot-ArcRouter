@@ -36,6 +36,12 @@ public interface IModelPriceCatalog
     /// <returns>
     /// The tier-selected price, or <see langword="null"/> when the catalog has no row for this key at all.
     /// </returns>
+    /// <remarks>
+    /// Reported by <c>UnusedMemberInSuper.Global</c>: every call reaches this through the implementing type
+    /// rather than this interface. It is not dead - see the declaration's callers. Narrowing the interface
+    /// to match today's call sites is a design change, not a scan fix (ADR-0008's stop rules).
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context);
 
     /// <summary>

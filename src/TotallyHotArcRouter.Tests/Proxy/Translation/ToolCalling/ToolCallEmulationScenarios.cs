@@ -37,13 +37,13 @@ internal sealed record EmulationScenario(
 /// </summary>
 internal static class ToolCallEmulationScenarios
 {
-    internal const string GetTime =
+    private const string GetTime =
         """{"type":"function","function":{"name":"get_time","description":"Returns the current time in a given timezone.","parameters":{"type":"object","properties":{"timezone":{"type":"string","description":"IANA timezone name"}},"required":["timezone"]}}}""";
 
-    internal const string GetWeather =
+    private const string GetWeather =
         """{"type":"function","function":{"name":"get_weather","description":"Returns the current weather for a city.","parameters":{"type":"object","properties":{"city":{"type":"string"},"units":{"type":"string","enum":["metric","imperial"]}},"required":["city"]}}}""";
 
-    internal const string ReadFile =
+    private const string ReadFile =
         """{"type":"function","function":{"name":"read_file","description":"Reads a file from disk and returns its contents.","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}}""";
 
     public static IReadOnlyList<EmulationScenario> All { get; } =

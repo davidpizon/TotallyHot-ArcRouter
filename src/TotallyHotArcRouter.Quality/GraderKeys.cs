@@ -11,6 +11,14 @@ namespace TotallyHot.ArcRouter.Quality;
 public static class GraderKeys
 {
     /// <summary>The structural-parse grader (<see cref="QualityResult.SyntaxValid"/>/<see cref="QualityResult.SyntaxAuthoritative"/>).</summary>
+    /// <remarks>
+    /// No caller today - the structural parse is synchronous, so it never has to hold a request open on the
+    /// aggregator the way the asynchronous graders do. Kept because this type is the catalog of grader keys:
+    /// a missing entry reads as "there is no syntax grader", and
+    /// <c>TotallyHot.ArcRouter.Judge.GraderScoreRecord</c>'s documentation names it as one of the values its
+    /// own key can take.
+    /// </remarks>
+    // ReSharper disable once UnusedMember.Global
     public const string Syntax = "syntax";
 
     /// <summary>The composed static-analysis grader (<see cref="QualityResult.AnalysisScore"/>).</summary>

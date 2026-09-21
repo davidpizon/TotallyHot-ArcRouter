@@ -47,7 +47,7 @@ public static class WebInterfaceDiscoveryFile
     };
 
     /// <summary>Resolves the file's absolute path under the machine-shared data directory.</summary>
-    public static string ResolvePath()
+    private static string ResolvePath()
     {
         return Path.Combine(path1: StorageOptions.ResolveMachineSharedDirectory(), path2: FileName);
     }

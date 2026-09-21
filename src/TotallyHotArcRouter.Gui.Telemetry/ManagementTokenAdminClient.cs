@@ -29,33 +29,12 @@ public sealed class ManagementTokenAdminClient
         IManagementTokenAdminClient
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="ManagementTokenAdminClient"/> class, creating and
-    /// owning a channel to <paramref name="serverAddress"/>.
-    /// </summary>
-    public ManagementTokenAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress: serverAddress,
-            createClient: callInvoker =>
-                new Contract.ManagementTokenAdminService.ManagementTokenAdminServiceClient(callInvoker))
-    {
-    }
-
-    /// <summary>
     /// Initializes a new instance of the <see cref="ManagementTokenAdminClient"/> class over a shared,
     /// already-authenticated call invoker - see <see cref="IRouterChannelProvider"/>'s remarks.
     /// </summary>
     /// <param name="callInvoker">The shared call invoker - see <see cref="IRouterChannelProvider.CallInvoker"/>.</param>
     public ManagementTokenAdminClient(CallInvoker callInvoker)
         : base(new Contract.ManagementTokenAdminService.ManagementTokenAdminServiceClient(callInvoker))
-    {
-    }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="ManagementTokenAdminClient"/> class over a
-    /// caller-supplied generated client. The seam tests use to substitute a fake without a live server;
-    /// the caller owns the channel's lifetime.
-    /// </summary>
-    public ManagementTokenAdminClient(Contract.ManagementTokenAdminService.ManagementTokenAdminServiceClient client)
-        : base(client)
     {
     }
 

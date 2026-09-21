@@ -99,7 +99,7 @@ public sealed class PriceCatalogDatabase
                                      -- onto the client-facing ModelName from ModelRouting:ModelList; the entry's Provider is looked up from
                                      -- that ModelName at resolve time (ModelName is unique - see ConfigModelIdentityResolver.Build), so this
                                      -- table does not duplicate a Provider column that config edits could drift out of sync with. Managed at
-                                     -- runtime via PUT/DELETE /admin/price-overrides, no restart required.
+                                     -- runtime via the gRPC-Web price-override RPCs, no restart required.
                                      CREATE TABLE IF NOT EXISTS model_alias_overrides (
                                          source_name          TEXT NOT NULL COLLATE NOCASE,
                                          aggregator_model_key TEXT NOT NULL COLLATE NOCASE,
@@ -120,7 +120,7 @@ public sealed class PriceCatalogDatabase
                                      );
 
                                      -- Per-provider monthly budget caps set from the Governance > Providers panel. Keyed on the
-                                     -- provider *key* (as used in model-routing.json / the /admin API), not the catalog's numeric
+                                     -- provider *key* (as used in model-routing.json / the gRPC-Web admin API), not the catalog's numeric
                                      -- provider_id, because a budget can exist for a provider the price catalog has never seen. A NULL
                                      -- cap means "no budget for that dimension" - distinct from a zero cap. Decimals are stored as text
                                      -- (invariant round-trip) exactly like the REAL/text money columns elsewhere are read back through
@@ -386,7 +386,7 @@ public sealed class PriceCatalogDatabase
     public string DatabasePath { get; }
 
     /// <summary>Gets the connection string that opens (creating if needed) the database file.</summary>
-    public string ConnectionString => new SqliteConnectionStringBuilder
+    private string ConnectionString => new SqliteConnectionStringBuilder
     {
         DataSource = DatabasePath,
         Mode = SqliteOpenMode.ReadWriteCreate
