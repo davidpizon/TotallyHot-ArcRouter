@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Models;
+using TotallyHot.ArcRouter.Gui.Services;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -46,12 +47,17 @@ public sealed class LiveStreamTests
     {
         using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
 
         var cut = ctx.Render<LiveStream>(p => p
             .Add(parameterSelector: c => c.Conversations, value: [])
             .Add(parameterSelector: c => c.SelectedId, value: string.Empty));
 
         cut.Markup.Should().Contain("No conversations yet.");
+        cut.Find("[data-testid='client-drop-in-base-url']").GetAttribute("value")
+            .Should().Be(OpenAiCompatibleDropIn.BaseUrl);
+        cut.Find("[data-testid='client-drop-in-model']").GetAttribute("value")
+            .Should().Be(OpenAiCompatibleDropIn.Model);
     }
 
     [Fact]

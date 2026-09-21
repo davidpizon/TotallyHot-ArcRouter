@@ -659,7 +659,7 @@ internal sealed class RequestTelemetryPublisher
         // Mirrors the response-text retention immediately above, for the other half of the pair every LLM
         // grader needs to grade against a requirement rather than in isolation
         // (docs/research/code-quality-metrics-assessment.md §1). Gated the same way.
-        if (!string.IsNullOrEmpty(newestUserMessage) && AnyLlmGraderEnabled())
+        if (GraderQuestionText.IsPresent(newestUserMessage) && AnyLlmGraderEnabled())
             _pendingPromptCache?.Set(correlationId: correlationId, prompt: newestUserMessage);
 
         return (newestUserMessage, requestSummary, responseSummary, responseText, correlationId);

@@ -44,11 +44,10 @@ public enum RouterConnectionState
 public sealed class RoutingGateMonitor : IAsyncDisposable
 {
     /// <summary>The production polling cadence. Overridable via the constructor so tests don't wait out the real 3 seconds.</summary>
-    public static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromSeconds(3);
 
     private readonly IRoutingGateAdminClient _client;
     private readonly ILogger<RoutingGateMonitor>? _logger;
-    private readonly IDisposable? _ownedClient;
     private readonly CancellationTokenSource _pollCts = new();
     private readonly TimeSpan _pollInterval;
     private readonly Task _pollTask;
@@ -76,9 +75,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
 
         _logger = logger;
         _pollInterval = pollInterval ?? DefaultPollInterval;
-        var client = new RoutingGateAdminClient(channelProvider.CallInvoker);
-        _client = client;
-        _ownedClient = client;
+        _client = new RoutingGateAdminClient(channelProvider.CallInvoker);
         _pollTask = PollLoopAsync(_pollCts.Token);
     }
 
@@ -98,7 +95,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(client);
         _pollInterval = pollInterval ?? DefaultPollInterval;
         _client = client;
-        _ownedClient = null;
         _logger = logger;
         _pollTask = PollLoopAsync(_pollCts.Token);
     }
@@ -175,7 +171,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
         }
 
         _pollCts.Dispose();
-        _ownedClient?.Dispose();
     }
 
     /// <summary>
@@ -251,8 +246,8 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Updates the cached state, raising <see cref="BecameUnusable"/> exactly once on a
-    /// usable-to-unusable transition.
+    /// Updates the cached state, raising <see cref="BecameUnusable"/> exactly once on a usable-to-unusable
+    /// transition. Every other reader polls the properties directly, so no change notification is raised.
     /// </summary>
     /// <param name="connectionState">How the poll (or mutation) that produced this update turned out.</param>
     /// <param name="isEnabled">

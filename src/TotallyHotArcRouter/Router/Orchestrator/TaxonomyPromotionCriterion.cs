@@ -49,10 +49,10 @@ public sealed record TaxonomyComparisonWindow(
 public static class TaxonomyPromotionCriterion
 {
     /// <summary>The default number of consecutive qualifying windows the criterion requires (the plan's <c>K</c>).</summary>
-    public const int DefaultConsecutiveWindows = 4;
+    private const int DefaultConsecutiveWindows = 4;
 
     /// <summary>The default minimum cluster coverage each qualifying window must reach.</summary>
-    public const double DefaultMinimumCoverage = 0.8;
+    private const double DefaultMinimumCoverage = 0.8;
 
     /// <summary>
     /// Returns whether the most recent <paramref name="consecutiveWindows"/> windows all qualify: the

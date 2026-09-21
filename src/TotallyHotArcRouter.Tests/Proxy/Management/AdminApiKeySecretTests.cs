@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 
 /// <summary>
 /// Covers <see cref="ManagementFacade.SetSecret"/>/<see cref="ManagementFacade.DeleteSecret"/> (the
-/// write-only <c>PUT</c>/<c>DELETE /admin/secrets/{name}</c> surface, docs/router/secrets-at-rest-plan.md
+/// write-only secret surface, docs/router/secrets-at-rest-plan.md
 /// §4/§7) and <see cref="ProviderView.HasStoredAdminKey"/>.
 /// </summary>
 public sealed class AdminApiKeySecretTests

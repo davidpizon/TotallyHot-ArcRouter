@@ -578,10 +578,11 @@ voters (both by concrete type and as `IRoutingVoter`).
 >   embedding, neither of which exists when the response is sent, so it cannot run inline. Comparison data
 >   is deliberately not real-time.
 >
-> The cost half is surfaced; the predictive-adequacy half is not. `GET /admin/usage/routing-roi` (via
-> `ManagementFacade.GetRoutingRoiAsync`) feeds the Cost Analytics **Routing ROI** screen, which the GUI
-> polls every 30 seconds rather than receiving over telemetry — there is no live event for a figure the
-> background job produces. This **redefines that chart's baseline** from a worst-case model to
+> The cost half is surfaced; the predictive-adequacy half is not. The `UsageAdminService.GetRoutingRoi`
+> gRPC call (served by `UsageAdminGrpcService`, delegating to
+> `ManagementReportingService.GetRoutingRoiAsync`) feeds the Cost Analytics **Routing ROI** screen, which
+> the GUI polls every 30 seconds rather than receiving over telemetry — there is no live event for a
+> figure the background job produces. This **redefines that chart's baseline** from a worst-case model to
 > `dim_best`'s own pick, which is what finally gives it a real data source: `docs/gui/backlog.md` had
 > deferred it precisely because no baseline cost existed. Two fabricated inputs were deleted in the
 > process — a baseline reconstructed from a cost-reduction percentage, and an invented `$2.50/M`

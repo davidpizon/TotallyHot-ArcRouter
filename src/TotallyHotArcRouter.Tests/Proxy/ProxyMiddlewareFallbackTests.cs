@@ -7,6 +7,8 @@ using System.Text.Json;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
+using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -108,6 +110,68 @@ public class ProxyMiddlewareFallbackTests
 
         Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
         Assert.Equal(expected: "served-by-backup", actual: await ReadBodyAsync(context));
+        Assert.Equal(expected: "primary", actual: context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal(expected: "backup", actual: context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.Failover),
+            actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AutoSelectedPrimary5xx_FailsOverToNextVoterPick_NotHigherMemoryDecoy()
+    {
+        // Issue #113: the chosen provider 500s; failover must retry the next voter pick even when
+        // RouterMemory would have ranked a different model higher. Headers must still report
+        // requested=auto, routed=the voter runner-up, reason=Failover.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("winner", "prov-a", "winner-upstream", $"https://{PrimaryHost}"),
+            ("runner-up", "prov-b", "runner-up-upstream", $"https://{BackupHost}"),
+            ("decoy", "prov-c", "decoy-upstream", "https://decoy.test"));
+        var memory = new RouterMemory();
+        var liveDimension = RouterDimension.ToLiveKey(liveMemoryPrefix: new QualityOptions().LiveMemoryPrefix,
+            dimension: RouterDimension.CodeGeneration);
+        await memory.AddScoreAsync(dimension: liveDimension, model: "decoy", 0.99);
+        await memory.AddScoreAsync(dimension: liveDimension, model: "runner-up", 0.1);
+        await memory.AddScoreAsync(dimension: liveDimension, model: "winner", 0.2);
+        var policy = new ScoredRoutingPolicy(new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["winner"] = 3,
+            ["runner-up"] = 2,
+            ["decoy"] = 1
+        });
+
+        var decoyCalled = false;
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == PrimaryHost) return Status(HttpStatusCode.InternalServerError);
+
+            if (request.RequestUri!.Host == "decoy.test")
+            {
+                decoyCalled = true;
+                return Ok("served-by-decoy");
+            }
+
+            return Ok("served-by-runner-up");
+        });
+
+        var interceptor = new RequestInterceptor(
+            logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver,
+            routerMemory: memory,
+            routingPolicy: policy);
+        var middleware = new ProxyMiddleware(
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler));
+
+        var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.Equal(expected: "served-by-runner-up", actual: await ReadBodyAsync(context));
+        Assert.False(decoyCalled);
+        Assert.Equal(expected: "auto", actual: context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal(expected: "runner-up", actual: context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.Failover),
+            actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
     }
 
     [Fact]
@@ -1420,6 +1484,10 @@ public class ProxyMiddlewareFallbackTests
         var body = await ReadBodyAsync(context);
         using var json = JsonDocument.Parse(body);
         Assert.Equal(expected: "502", actual: json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(expected: "primary", actual: context.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal(expected: "primary", actual: context.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.None),
+            actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
     }
 
     // Mirrors the full multi-provider cascade from the production log (zhipu 405 -> moonshot 401 ->
@@ -1560,6 +1628,96 @@ public class ProxyMiddlewareFallbackTests
 
         Assert.Equal(503, actual: finalContext.Response.StatusCode);
         Assert.Equal(3, actual: primaryAttempts); // unchanged - the 4th request never touched the primary at all
+        Assert.Equal(expected: "primary",
+            actual: finalContext.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal(expected: "primary",
+            actual: finalContext.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.CircuitOpen),
+            actual: finalContext.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
+    }
+
+    [Fact]
+    public async Task
+        InvokeAsync_TargetTripped_SubsequentAutoSelectedRequestFallsThroughToNextVoterPick()
+    {
+        // Same-request 5xx failover already walked the voter ranking; a later auto-select whose winner
+        // is now circuit-open must re-vote among remaining eligible models and serve the next pick,
+        // not the higher-memory decoy, with AutoSelect headers (the client asked the router to choose).
+        var circuitBreaker = new CircuitBreaker();
+        var resolver = ModelRouteResolverTestFactory.CreateWithModels(
+            ("winner", "prov-a", "winner-upstream", $"https://{PrimaryHost}"),
+            ("runner-up", "prov-b", "runner-up-upstream", $"https://{BackupHost}"),
+            ("decoy", "prov-c", "decoy-upstream", "https://decoy.test"));
+        var memory = new RouterMemory();
+        var liveDimension = RouterDimension.ToLiveKey(liveMemoryPrefix: new QualityOptions().LiveMemoryPrefix,
+            dimension: RouterDimension.CodeGeneration);
+        await memory.AddScoreAsync(dimension: liveDimension, model: "decoy", 0.99);
+        await memory.AddScoreAsync(dimension: liveDimension, model: "runner-up", 0.1);
+        await memory.AddScoreAsync(dimension: liveDimension, model: "winner", 0.2);
+        var policy = new ScoredRoutingPolicy(new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["winner"] = 3,
+            ["runner-up"] = 2,
+            ["decoy"] = 1
+        });
+
+        var winnerAttempts = 0;
+        var decoyCalled = false;
+        var handler = new RoutingHandlerStub(request =>
+        {
+            if (request.RequestUri!.Host == PrimaryHost)
+            {
+                winnerAttempts++;
+                return Status(HttpStatusCode.ServiceUnavailable);
+            }
+
+            if (request.RequestUri!.Host == "decoy.test")
+            {
+                decoyCalled = true;
+                return Ok("served-by-decoy");
+            }
+
+            return Ok("served-by-runner-up");
+        });
+
+        var interceptor = new RequestInterceptor(
+            logger: NullLogger<RequestInterceptor>.Instance,
+            modelRouteResolver: resolver,
+            routerMemory: memory,
+            circuitBreaker: circuitBreaker,
+            routingPolicy: policy);
+        var middleware = new ProxyMiddleware(
+            logger: NullLogger<ProxyMiddleware>.Instance,
+            interceptor: interceptor,
+            httpClient: new HttpClient(handler),
+            dependencies: new ProxyMiddlewareDependencies
+            {
+                CircuitBreaker = circuitBreaker
+            }
+        );
+
+        for (var i = 0; i < 3; i++)
+        {
+            var context = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+            Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+            Assert.Equal(expected: "served-by-runner-up", actual: await ReadBodyAsync(context));
+            Assert.Equal(expected: nameof(RoutingSubstitutionReason.Failover),
+                actual: context.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
+        }
+
+        Assert.Equal(3, actual: winnerAttempts);
+        Assert.True(circuitBreaker.IsOpen(new CircuitBreakerTargetKey(Provider: "prov-a",
+            BaseUrl: $"https://{PrimaryHost}/", ProviderModelId: "winner-upstream")));
+
+        var subsequent = await RunWithSharedMiddleware(middleware: middleware, requestedModel: "auto");
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: subsequent.Response.StatusCode);
+        Assert.Equal(expected: "served-by-runner-up", actual: await ReadBodyAsync(subsequent));
+        Assert.Equal(3, actual: winnerAttempts); // the open winner is never attempted again
+        Assert.False(decoyCalled);
+        Assert.Equal(expected: "auto", actual: subsequent.Response.Headers["X-ArcRouter-Requested-Model"].ToString());
+        Assert.Equal(expected: "runner-up", actual: subsequent.Response.Headers["X-ArcRouter-Routed-Model"].ToString());
+        Assert.Equal(expected: nameof(RoutingSubstitutionReason.AutoSelect),
+            actual: subsequent.Response.Headers["X-ArcRouter-Substitution-Reason"].ToString());
     }
 
     private static async Task<HttpContext> RunWithSharedMiddleware(ProxyMiddleware middleware, string requestedModel)

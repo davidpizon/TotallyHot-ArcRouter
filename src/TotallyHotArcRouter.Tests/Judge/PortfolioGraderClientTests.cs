@@ -147,6 +147,50 @@ public class PortfolioGraderClientTests
         Assert.Equal(expected: "Bearer judge-key", actual: request.AuthorizationHeader);
         Assert.Contains(expectedSubstring: "\"model\":\"qwen2.5-7b-instruct\"", actualString: request.Body,
             comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "Task the response was written for", actualString: request.Body,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Contains(expectedSubstring: "fix the bug", actualString: request.Body,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// GitHub issue #114: a missing question must fail closed at the client too, not only at the drain
+    /// worker, so a direct ScoreAsync caller cannot produce a response-only grade.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ScoreAsync_QuestionMissing_FailsClosedWithoutCallingTheBackbone(string prompt)
+    {
+        var requests = new List<CapturedRequest>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            requests.Add(new CapturedRequest(
+                Url: request.RequestUri!.ToString(),
+                AuthorizationHeader: null,
+                Body: request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? string.Empty));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content: BuildResponse("FAULT: none"), encoding: Encoding.UTF8,
+                    mediaType: "application/json")
+            };
+        });
+
+        var client = new CodeJudgeGraderClient(
+            httpClientFactory: new FakeHttpClientFactory(handler),
+            modelSelector: CreateSelector(FreeResolver()),
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+            logger: NullLogger<CodeJudgeGraderClient>.Instance);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.ScoreAsync(
+                request: new PortfolioGraderScoreRequest(Dimension: "bug_fixing", ResponseText: "some response",
+                    Prompt: prompt),
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains(expectedSubstring: "without the user/task question", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
+        Assert.Empty(requests);
     }
 
     /// <summary>No free provider configured is an abstention: null, no HTTP call.</summary>

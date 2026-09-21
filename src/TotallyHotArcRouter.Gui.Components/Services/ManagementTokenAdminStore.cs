@@ -28,7 +28,7 @@ public sealed class ManagementTokenAdminStore : AdminStoreBase<IManagementTokenA
     public ManagementTokenAdminStore(IRouterChannelProvider channelProvider,
         Func<CancellationToken, Task>? reauthenticateAsync = null,
         ILogger<ManagementTokenAdminStore>? logger = null)
-        : base(client: new ManagementTokenAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new ManagementTokenAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         _reauthenticateAsync = reauthenticateAsync;
     }

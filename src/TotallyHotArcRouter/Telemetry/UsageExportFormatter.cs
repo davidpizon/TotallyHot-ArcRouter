@@ -4,8 +4,10 @@ using System.Text;
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// Formats <see cref="UsageRollupBucket"/> rows for <c>GET /admin/usage/export</c> (§5.12). Pure and
-/// platform-neutral (no ASP.NET dependency), so it stays unit-testable without spinning up the endpoint.
+/// Formats <see cref="UsageRollupBucket"/> rows for
+/// <see cref="TotallyHot.ArcRouter.Proxy.Management.UsageAdminGrpcService"/>'s export stream
+/// (§5.12). Pure and platform-neutral (no ASP.NET dependency), so it stays unit-testable without spinning
+/// up the gRPC service.
 /// </summary>
 public static class UsageExportFormatter
 {

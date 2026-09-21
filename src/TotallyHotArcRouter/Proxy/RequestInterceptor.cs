@@ -30,6 +30,16 @@ public class RequestInterceptor
     /// <see cref="RouterModelName"/> this name is never advertised by
     /// <see cref="ListAvailableModels"/>; it remains accepted for callers that already send it.
     /// </summary>
+    /// <remarks>
+    /// Internal rather than private so same-assembly callers (the OpenAI-compatible drop-in helpers)
+    /// and InternalsVisibleTo tests can read the reserved name without duplicating the token.
+    /// <para>
+    /// Qodana reports this as private-able and is wrong about it: the scan runs against this branch, which
+    /// does not yet carry <c>OpenAiCompatibleDropIn</c>. That caller arrives with <c>main</c>, which is what
+    /// merge CI compiles against - narrowing the const broke exactly that build once already.
+    /// </para>
+    /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
     internal const string AutoSelectModelName = "auto";
 
     /// <summary>
@@ -40,7 +50,7 @@ public class RequestInterceptor
     /// so offer no other way to express "you choose". Spelled as an Ollama-safe slug - no spaces, no
     /// tag separator - so it round-trips unmodified through both clients.
     /// </summary>
-    internal const string RouterModelName = "totallyhot-arcrouter";
+    private const string RouterModelName = "totallyhot-arcrouter";
 
     /// <summary>
     /// The <c>owned_by</c> value reported for <see cref="RouterModelName"/> on the OpenAI-shaped
@@ -433,6 +443,7 @@ public class RequestInterceptor
         string? dimBestModel = null;
         string? untrainedBaselineModel = null;
         double? untrainedBaselinePredictedScore = null;
+        IReadOnlyDictionary<string, double>? policyCandidateScores = null;
 
         if (isAutoSelectRequest)
         {
@@ -457,6 +468,7 @@ public class RequestInterceptor
             dimBestModel = autoSelected.DimBestModel;
             untrainedBaselineModel = autoSelected.UntrainedBaselineModel;
             untrainedBaselinePredictedScore = autoSelected.UntrainedBaselinePredictedScore;
+            policyCandidateScores = autoSelected.CandidateScores;
             substitutionReason = RoutingSubstitutionReason.AutoSelect;
         }
         else if (!_modelRouteResolver.TryResolve(modelName: modelName, route: out route) ||
@@ -492,6 +504,7 @@ public class RequestInterceptor
                 dimBestModel = agenticRoute.DimBestModel;
                 untrainedBaselineModel = agenticRoute.UntrainedBaselineModel;
                 untrainedBaselinePredictedScore = agenticRoute.UntrainedBaselinePredictedScore;
+                policyCandidateScores = agenticRoute.CandidateScores;
                 substitutionReason = wasResolved
                     ? RoutingSubstitutionReason.ModelStopped
                     : RoutingSubstitutionReason.UnresolvedName;
@@ -522,7 +535,8 @@ public class RequestInterceptor
             // truthful-error carve-out both live in RoutingCandidateBuilder now - see its Build's doc
             // comment for the full rationale, unchanged from when it lived inline here.
             var buildResult = _routingCandidateBuilder.Build(jsonObject: jsonObject, route: route,
-                substitutionReasonSoFar: substitutionReason, liveDimension: liveDimension);
+                substitutionReasonSoFar: substitutionReason, liveDimension: liveDimension,
+                policyCandidateScores: policyCandidateScores);
             candidates = buildResult.Candidates;
             // buildResult.Route is deliberately not read back into `route`: the resolved route reaches
             // the caller through buildResult.Candidates, which the Success(...) return below receives,
@@ -689,7 +703,8 @@ public class RequestInterceptor
                         DimBestModel: OrchestratorRoutingPolicy.TryGetVoterPick(decision: decision,
                             voterName: VoterNames.DimBest),
                         UntrainedBaselineModel: policyPathBaseline?.Model,
-                        UntrainedBaselinePredictedScore: policyPathBaseline?.Score);
+                        UntrainedBaselinePredictedScore: policyPathBaseline?.Score,
+                        CandidateScores: decision.CandidateScores);
                 }
                 else
                 {
@@ -790,11 +805,17 @@ public class RequestInterceptor
     /// the model with a score from a different snapshot. <see langword="null"/> whenever
     /// <see cref="UntrainedBaselineModel"/> is.
     /// </param>
+    /// <param name="CandidateScores">
+    /// The policy's per-model aggregates for this decision, forwarded to
+    /// <see cref="RoutingCandidateBuilder.Build"/> so a same-request failover retries the next voter
+    /// pick. <see langword="null"/> on the memory-ranking fallback (no vote happened).
+    /// </param>
     private sealed record AgenticRouteResult(
         ResolvedModelRoute Route,
         bool IsExploratory,
         double Propensity,
         string? DimBestModel = null,
         string? UntrainedBaselineModel = null,
-        double? UntrainedBaselinePredictedScore = null);
+        double? UntrainedBaselinePredictedScore = null,
+        IReadOnlyDictionary<string, double>? CandidateScores = null);
 }

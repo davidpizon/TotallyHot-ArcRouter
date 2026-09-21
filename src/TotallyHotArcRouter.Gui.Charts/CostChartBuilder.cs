@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Gui.Charts;
 /// </summary>
 public enum CostMetric
 {
-    /// <summary>1. Routing ROI - dollars saved by the routing decision versus a worst-case baseline.</summary>
+    /// <summary>1. Routing ROI - dollars saved by the routing decision versus the frozen untrained baseline.</summary>
     RoutingRoi,
 
     /// <summary>2. Total turn cost ($).</summary>

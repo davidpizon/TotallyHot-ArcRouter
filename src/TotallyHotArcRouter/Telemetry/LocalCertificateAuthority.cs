@@ -10,8 +10,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <summary>
 /// Generates, persists, and rotates the router's own name-constrained local CA and the leaf certificate
 /// every TLS listener (the web port, MCP, and - as of the web GUI migration plan's Phase P7 - the LLM
-/// proxy port) presents (ADR-0013). Supersedes <see cref="TelemetryTlsCertificate"/>'s single long-lived
-/// self-signed leaf: a leaf issued under a locally-trusted CA can be silently rotated (see
+/// proxy port) presents (ADR-0013). A leaf issued under a locally-trusted CA can be silently rotated (see
 /// <see cref="GetOrCreateLeaf()"/>'s remarks) without ever asking an already-trusting client to re-trust
 /// anything, which a self-signed leaf cannot do without repeating the OS-trust step on every renewal.
 /// </summary>
@@ -30,9 +29,8 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// round-trips correctly through .NET's own ASN.1 parser.
 /// </para>
 /// <para>
-/// Both the CA and the leaf are persisted the same way <see cref="TelemetryTlsCertificate"/> persists its
-/// certificate: a password-protected <c>.pfx</c> under the machine-shared data directory
-/// (<see cref="AppDataPaths"/>), with the random per-installation password held in
+/// Both the CA and the leaf are persisted as a password-protected <c>.pfx</c> under the machine-shared
+/// data directory (<see cref="AppDataPaths"/>), with the random per-installation password held in
 /// <see cref="ProtectedSecretStore"/>. The CA's key is the higher-value secret of the two (ADR-0013) -
 /// its compromise lets an attacker mint a certificate any already-trusting client on this machine would
 /// accept for the router's own loopback identities - but it uses the same protector every other secret
@@ -72,14 +70,14 @@ public static class LocalCertificateAuthority
     /// publicly-trusted leaf lifetime. This CA is never publicly trusted, but there is no reason to
     /// exceed a limit every mainstream browser already enforces.
     /// </summary>
-    public static readonly TimeSpan LeafValidity = TimeSpan.FromDays(397);
+    private static readonly TimeSpan LeafValidity = TimeSpan.FromDays(397);
 
     /// <summary>
     /// How long before expiry <see cref="GetOrCreateLeaf()"/> mints a replacement rather than returning
     /// the cached leaf. Wide enough that an operator who starts the router only occasionally still
     /// renews well ahead of expiry, without needing a background timer - every call re-checks.
     /// </summary>
-    public static readonly TimeSpan LeafRenewalWindow = TimeSpan.FromDays(30);
+    private static readonly TimeSpan LeafRenewalWindow = TimeSpan.FromDays(30);
 
     /// <summary>
     /// How long the CA itself is valid for. Long-lived by design (ADR-0013's whole point is that
@@ -87,7 +85,7 @@ public static class LocalCertificateAuthority
     /// needs renewing on a timescale roughly matching "how long before someone reinstalls the machine
     /// anyway", not a leaf's.
     /// </summary>
-    public static readonly TimeSpan CaValidity = TimeSpan.FromDays(3650);
+    private static readonly TimeSpan CaValidity = TimeSpan.FromDays(3650);
 
     /// <summary>
     /// Loads the persisted CA if one already exists, otherwise generates a new self-signed,
@@ -225,9 +223,8 @@ public static class LocalCertificateAuthority
     /// <summary>
     /// Exports <paramref name="certificate"/> (private key included) to <paramref name="certificatePath"/>
     /// under a fresh random password stored in <paramref name="secretStore"/>, then reloads and returns it
-    /// from the written bytes - the same load-after-write shape <see cref="TelemetryTlsCertificate"/> uses,
-    /// so the returned instance's key storage flags are consistent regardless of whether this call created
-    /// or loaded the certificate.
+    /// from the written bytes so the returned instance's key storage flags are consistent regardless of
+    /// whether this call created or loaded the certificate.
     /// </summary>
     /// <remarks>
     /// Ordered so a failure never leaves an existing on-disk certificate paired with the wrong password
@@ -273,7 +270,7 @@ public static class LocalCertificateAuthority
     /// extension, unlike <see cref="X509BasicConstraintsExtension"/> or
     /// <see cref="SubjectAlternativeNameBuilder"/>.
     /// </summary>
-    internal static X509Extension BuildNameConstraintsExtension()
+    private static X509Extension BuildNameConstraintsExtension()
     {
         var writer = new AsnWriter(AsnEncodingRules.DER);
 

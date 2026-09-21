@@ -1,5 +1,6 @@
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
@@ -164,6 +165,68 @@ public sealed class UsageQueryClientTests
         Assert.Null(point.EstimatedNetSavingsUsd);
     }
 
+    [Fact]
+    public async Task GetLearningReportCardAsync_SendsTheRange_AndMapsEveryField()
+    {
+        var stub = new StubClient
+        {
+            CannedReportCardResponse = new Contract.LearningReportCardResponse
+            {
+                MeanScoreDelta = 0.041,
+                ScoredRequests = 100,
+                ComparableRequests = 90,
+                TotalSpendUsd = "23.70"
+            }
+        };
+        stub.CannedReportCardResponse.SpendByModel.Add(new Contract.ModelSpendRow
+        {
+            Model = "gpt-4o-mini", CostUsd = "12.40", Requests = 84
+        });
+        stub.CannedReportCardResponse.GradeMix.Add(new Contract.GradeMixRow
+        {
+            Grade = "A", Count = 42, Percent = "42.0"
+        });
+        stub.CannedReportCardResponse.ScoreDeltaByModel.Add(new Contract.ModelScoreDeltaRow
+        {
+            Model = "gpt-4o-mini", MeanDelta = 0.082, SampleSize = 40
+        });
+        var client = new UsageQueryClient(stub);
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z");
+
+        var card = await client.GetLearningReportCardAsync(from: from, to: to, cancellationToken: Ct);
+
+        Assert.Equal(expected: from, actual: stub.LastReportCardRequest!.From.ToDateTimeOffset());
+        Assert.Equal(expected: to, actual: stub.LastReportCardRequest.To.ToDateTimeOffset());
+        Assert.Equal(0.041, actual: card.MeanScoreDelta);
+        Assert.Equal(100, actual: card.ScoredRequests);
+        Assert.Equal(90, actual: card.ComparableRequests);
+        Assert.Equal(23.70m, actual: card.TotalSpendUsd);
+        var spend = Assert.Single(card.SpendByModel);
+        Assert.Equal(expected: "gpt-4o-mini", actual: spend.Model);
+        Assert.Equal(12.40m, actual: spend.CostUsd);
+        var mix = Assert.Single(card.GradeMix);
+        Assert.Equal(expected: "A", actual: mix.Grade);
+        var delta = Assert.Single(card.ScoreDeltaByModel);
+        Assert.Equal(0.082, actual: delta.MeanDelta);
+    }
+
+    [Fact]
+    public async Task GetLearningReportCardAsync_NullMeanDelta_StaysNull()
+    {
+        var stub = new StubClient
+        {
+            CannedReportCardResponse = new Contract.LearningReportCardResponse { TotalSpendUsd = "0" }
+        };
+        var client = new UsageQueryClient(stub);
+
+        var card = await client.GetLearningReportCardAsync(from: DateTimeOffset.UnixEpoch,
+            to: DateTimeOffset.UnixEpoch.AddDays(1), cancellationToken: Ct);
+
+        Assert.Null(card.MeanScoreDelta);
+        Assert.Equal(0m, actual: card.TotalSpendUsd);
+    }
+
     // --- ExportRollupAsync ---
 
     [Fact]
@@ -194,31 +257,6 @@ public sealed class UsageQueryClientTests
         Assert.Equal(1.00m, actual: rows[1].CostUsd);
     }
 
-    // --- admin token metadata ---
-
-    [Fact]
-    public async Task AdminToken_WhenConfigured_IsSentAsMetadata()
-    {
-        var stub = new StubClient { SummaryResponse = new Contract.UsageSummaryResponse { CostUsd = "0" } };
-        var client = new UsageQueryClient(stub, adminToken: "s3cret");
-
-        await client.GetSummaryAsync(window: "week", cancellationToken: Ct);
-
-        var entry = Assert.Single(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
-        Assert.Equal(expected: "s3cret", actual: entry.Value);
-    }
-
-    [Fact]
-    public async Task AdminToken_WhenNotConfigured_IsNotSent()
-    {
-        var stub = new StubClient { SummaryResponse = new Contract.UsageSummaryResponse { CostUsd = "0" } };
-        var client = new UsageQueryClient(stub);
-
-        await client.GetSummaryAsync(window: "week", cancellationToken: Ct);
-
-        Assert.Empty(stub.LastCallOptions!.Value.Headers!.GetAll("x-admin-token"));
-    }
-
     // --- error handling ---
 
     [Fact]
@@ -228,11 +266,11 @@ public sealed class UsageQueryClientTests
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
         var client = new UsageQueryClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetSummaryAsync(window: "day", cancellationToken: Ct));
 
-        Assert.Contains(expectedSubstring: "Could not reach the proxy management API", actualString: ex.Message,
-            comparisonType: StringComparison.Ordinal);
+        Assert.Equal(expected: "Could not read the usage summary: the router is not reachable.", actual: ex.Message);
+        Assert.True(ex.IsUnavailable);
         Assert.IsType<RpcException>(ex.InnerException);
     }
 
@@ -246,16 +284,19 @@ public sealed class UsageQueryClientTests
         };
         var client = new UsageQueryClient(stub);
 
-        var ex = await Assert.ThrowsAsync<ProviderAdminException>(() =>
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetSummaryAsync(window: "day", cancellationToken: Ct));
 
-        Assert.Equal(expected: "Usage rollups are not available.", actual: ex.Message);
+        Assert.Contains(expectedSubstring: "Usage rollups are not available.", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
+        Assert.False(ex.IsUnavailable);
     }
 
     [Fact]
-    public void Constructor_NullChannel_Throws()
+    public void Constructor_NullClient_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new UsageQueryClient((Grpc.Net.Client.GrpcChannel)null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new UsageQueryClient((Contract.UsageAdminService.UsageAdminServiceClient)null!));
     }
 
     private static Contract.UsageRollupResponse RollupResponse(params Contract.UsageRollupBucketRow[] buckets)
@@ -319,6 +360,8 @@ public sealed class UsageQueryClientTests
 
         public Contract.RoutingRoiResponse CannedRoutingRoiResponse { get; init; } = new();
 
+        public Contract.LearningReportCardResponse CannedReportCardResponse { get; init; } = new();
+
         public IReadOnlyList<Contract.UsageRollupBucketRow> ExportRows { get; init; } = [];
 
         public RpcException? Failure { get; init; }
@@ -329,13 +372,12 @@ public sealed class UsageQueryClientTests
 
         public Contract.GetRoutingRoiRequest? LastRoutingRoiRequest { get; private set; }
 
-        public CallOptions? LastCallOptions { get; private set; }
+        public Contract.GetLearningReportCardRequest? LastReportCardRequest { get; private set; }
 
         public override AsyncUnaryCall<Contract.UsageSummaryResponse> GetUsageSummaryAsync(
             Contract.GetUsageSummaryRequest request, CallOptions options)
         {
             LastSummaryRequest = request;
-            LastCallOptions = options;
             return Call(SummaryResponse);
         }
 
@@ -343,7 +385,6 @@ public sealed class UsageQueryClientTests
             Contract.GetUsageRollupRequest request, CallOptions options)
         {
             LastRollupRequest = request;
-            LastCallOptions = options;
             return Call(CannedRollupResponse);
         }
 
@@ -351,14 +392,19 @@ public sealed class UsageQueryClientTests
             Contract.GetRoutingRoiRequest request, CallOptions options)
         {
             LastRoutingRoiRequest = request;
-            LastCallOptions = options;
             return Call(CannedRoutingRoiResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.LearningReportCardResponse> GetLearningReportCardAsync(
+            Contract.GetLearningReportCardRequest request, CallOptions options)
+        {
+            LastReportCardRequest = request;
+            return Call(CannedReportCardResponse);
         }
 
         public override AsyncServerStreamingCall<Contract.UsageRollupBucketRow> ExportUsageRollup(
             Contract.ExportUsageRollupRequest request, CallOptions options)
         {
-            LastCallOptions = options;
             IAsyncStreamReader<Contract.UsageRollupBucketRow> reader = Failure is null
                 ? new FakeStreamReader<Contract.UsageRollupBucketRow>(ExportRows)
                 : new ThrowingStreamReader(Failure);

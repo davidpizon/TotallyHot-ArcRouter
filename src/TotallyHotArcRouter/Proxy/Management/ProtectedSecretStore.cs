@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// Resolution surface for the protected secret store - the router's own request-path/discovery/telemetry
 /// code is the only intended reader of secret material (see
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProviderCredentialResolver"/>, <c>BuildCostReconcilers</c>, and
-/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>). Public rather than internal only
+/// <see cref="TotallyHot.ArcRouter.Telemetry.LocalCertificateAuthority"/>). Public rather than internal only
 /// because it appears as an optional constructor parameter on public types
 /// (<see cref="ManagementFacade"/>, <see cref="TotallyHot.ArcRouter.Proxy.ModelRouteResolver"/>,
 /// <see cref="TotallyHot.ArcRouter.Proxy.ProxyServer"/>); §4's write-only invariant is upheld by
@@ -50,6 +50,12 @@ public interface ISecretWriter
     /// Reports whether a secret is stored under <paramref name="name"/> - the value itself is never returned by this
     /// surface.
     /// </summary>
+    /// <remarks>
+    /// Reported by <c>UnusedMemberInSuper.Global</c>: every call reaches this through the implementing type
+    /// rather than this interface. It is not dead - see the declaration's callers. Narrowing the interface
+    /// to match today's call sites is a design change, not a scan fix (ADR-0008's stop rules).
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     bool Exists(string name);
 
     /// <summary>

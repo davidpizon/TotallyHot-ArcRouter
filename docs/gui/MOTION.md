@@ -78,8 +78,8 @@ Opacity is the only safe channel. This is a hard constraint, not a stylistic pre
 - **The primary axis is vertical.** Every scrollable region — conversation list, turn list, console
   log, payload blocks — scrolls vertically. New content therefore enters on the Y axis, moving a
   short distance *toward* its resting position (`translateY(-4px) → 0` for prepended rows).
-- **The tab bar is explicitly non-directional.** The five tabs (Sessions / Cost Analytics / Model
-  Distribution / Governance / Console) are peers, not a sequence — there is no "next" tab, and
+- **The tab bar is explicitly non-directional.** The six tabs (Sessions / Cost Analytics / Model
+  Distribution / Report Card / Governance / Console) are peers, not a sequence — there is no "next" tab, and
   Governance is not spatially to the right of Console in any meaningful sense. Sliding panels
   horizontally would assert an ordering the information architecture does not have. **Tab panels
   crossfade in place** (§6 Panel Crossfade). This is a deliberate decision, not an unimplemented
@@ -433,13 +433,14 @@ read the true value throughout.
 .value-tick { animation: value-tick 400ms var(--ease-out-quart); }
 ```
 
-### Disclosure Expand — *CSS ships in `app.css`, but currently unused (§10)*
+### Disclosure Expand — *Proposed (CSS removed with `TurnCard`)*
 
 `TurnCard` expanded to show the routing-decision log this way — animating `opacity` and `transform`
 on the revealed content, never `height` (the payload blocks are variable-height, and height animation
-forces layout on every frame in a WebView). `TurnCard` is orphaned since the Sessions-tab rebuild
-(`DESIGN.md` §1), so nothing invokes this pattern today; the `.disclosure-enter` keyframe stays in
-`app.css` for whichever future disclosure UI needs the same "animate reveal, not height" rule.
+forces layout on every frame in a WebView). `TurnCard` and its `.disclosure-enter` CSS were deleted
+once nothing rendered them, so nothing in `app.css` implements this pattern today. A future disclosure
+that mounts its content with `@if` should add the rule below together with its first consumer, not
+before.
 
 ```css
 @keyframes disclosure-enter {
@@ -590,7 +591,6 @@ accessibility setting forcing `prefers-reduced-motion: reduce` (collapses all du
 | Panel Crossfade on tab switch | `Dashboard.razor` — `@key`-ed wrapper in `<main>` |
 | Overlay Rise | `SettingsModal`, `ProviderEditDialog` |
 | Row Enter + first-mount stagger | `ConversationCard` via `LiveStream._listHasRendered` |
-| Disclosure Expand + causal-order stagger | `TurnCard` routing-decision log — orphaned since the Sessions-tab rebuild (`DESIGN.md` §1); CSS ships, no live consumer |
 
 ### Not yet implemented
 

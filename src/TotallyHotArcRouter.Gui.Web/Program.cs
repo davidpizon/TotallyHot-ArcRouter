@@ -72,6 +72,8 @@ builder.Services.AddSingleton(sp => new ManagementTokenAdminStore(
     reauthenticateAsync: _ => PostAuthSessionAsync(sp.GetRequiredService<NavigationManager>().BaseUri)));
 // Backs the Model Distribution / Cost Analytics history / header ticker's real data. See
 // Services/UsageStore.cs.
+// Backs the Model Distribution / Cost Analytics history / Report Card / header ticker's real data. See
+// Services/UsageStore.cs.
 builder.Services.AddSingleton<UsageStore>();
 
 var host = builder.Build();

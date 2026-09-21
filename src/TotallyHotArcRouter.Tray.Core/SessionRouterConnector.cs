@@ -32,9 +32,12 @@ public interface ISessionRouterConnector
 /// Excluded from coverage: this type is a one-call wrapper around
 /// <see cref="TelemetryChannelFactory.CreateSessionAuthenticatedAsync"/> (tested in Gui.Telemetry).
 /// <see cref="ISessionRouterConnector"/> is the seam <c>RouterConnectionSupervisorTests</c> use so they
-/// never open a live session.
+/// never open a live session. Its only caller is <c>TotallyHotArcRouter.Tray</c>, which targets
+/// <c>net10.0-windows</c> and is therefore absent from <c>TotallyHotArcRouter.Qodana.slnx</c> - so the scan
+/// reports this type as unused.
 /// </remarks>
 [ExcludeFromCodeCoverage]
+// ReSharper disable once UnusedType.Global
 public sealed class SessionRouterConnector : ISessionRouterConnector
 {
     /// <inheritdoc/>
