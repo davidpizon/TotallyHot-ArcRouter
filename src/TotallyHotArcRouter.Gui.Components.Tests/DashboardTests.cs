@@ -18,15 +18,16 @@ public sealed class DashboardTests
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996")));
+        var unreachable = new StubRouterChannelProvider("https://127.0.0.1:59996");
+        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(persistedSessionStore ??
-                                  new PersistedSessionStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996")));
-        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59994")));
-        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59993")));
-        ctx.Services.AddSingleton(new RouterSettingsAdminStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59995")));
-        ctx.Services.AddSingleton(new UpdateStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59992")));
-        ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59991")));
-        ctx.Services.AddSingleton(new ManagementTokenAdminStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59990")));
+                                  new PersistedSessionStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new RouterSettingsAdminStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new UpdateStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new ManagementTokenAdminStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new ToastService());
         ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         return ctx;
@@ -41,6 +42,7 @@ public sealed class DashboardTests
 
         cut.Markup.Should().Contain("Router Optimization Engine");
         cut.Markup.Should().Contain("No conversations yet.");
+        cut.Markup.Should().Contain(OpenAiCompatibleDropIn.BaseUrl);
     }
 
     [Fact]
@@ -60,24 +62,30 @@ public sealed class DashboardTests
     [Fact]
     public async Task Clicking_a_tab_switches_the_active_workspace()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context: Dashboard
-        // constructs several stores against deliberately-unreachable NativeRouterChannelProvider
-        // addresses (see NewContext), and any of their background connection-failure continuations can
+        // constructs several stores against a deliberately-unreachable StubRouterChannelProvider
+        // (see NewContext), and any of their background connection-failure continuations can
         // re-render between a plain Find() and Click(), leaving Click() dispatching against an event
         // handler ID the re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
         await cut.InvokeAsync(() =>
             cut.FindAll("nav button").First(b => b.TextContent.Contains("Model Distribution")).Click());
 
         cut.Markup.Should().Contain("Token Volume Histogram");
+
+        await cut.InvokeAsync(() =>
+            cut.FindAll("nav button").First(b => b.TextContent.Contains("Report Card")).Click());
+
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Spend by Model"),
+            timeout: TimeSpan.FromSeconds(5));
     }
 
     [Fact]
     public async Task Clicking_Console_tab_renders_the_console()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
@@ -89,7 +97,7 @@ public sealed class DashboardTests
     [Fact]
     public async Task Clicking_Governance_tab_renders_the_providers_sub_view()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
@@ -103,7 +111,7 @@ public sealed class DashboardTests
     [Fact]
     public async Task Settings_button_opens_the_modal_and_close_removes_it()
     {
-        using var ctx = NewContext();
+        await using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
         // See Clicking_a_tab_switches_the_active_workspace's remarks on why this is InvokeAsync-wrapped.
@@ -127,7 +135,7 @@ public sealed class DashboardTests
         };
         var store = new PersistedSessionStore(client);
         await store.LoadAsync(TestContext.Current.CancellationToken);
-        using var ctx = NewContext(store);
+        await using var ctx = NewContext(store);
 
         var cut = ctx.Render<Dashboard>();
 
@@ -147,7 +155,7 @@ public sealed class DashboardTests
         };
         var store = new PersistedSessionStore(client);
         await store.LoadAsync(TestContext.Current.CancellationToken);
-        using var ctx = NewContext(store);
+        await using var ctx = NewContext(store);
 
         var cut = ctx.Render<Dashboard>();
 

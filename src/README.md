@@ -203,23 +203,28 @@ for trusting it, or pass `curl --cacert`/`-k` for local testing without
 trusting it system-wide). An opt-in, always-loopback plain-HTTP fallback
 exists at `Proxy:PlainHttp:Enabled` (default port `47105`) for tools that
 cannot be pointed at a custom CA - see `client-tls-setup.md`'s "opt-in
-plain-HTTP listener" section. Point your coding-agent client's base URL at
-the proxy instead of the provider directly, and request whichever `model`
-alias you configured in `ModelList`. The proxy forwards the path and query
+plain-HTTP listener" section.
+
+Point an OpenAI-compatible client at **one** base URL —
+`https://localhost:47101/v1` — and send `"model": "auto"` to let the router
+pick. That pair is the shipped drop-in (see the repository
+[`README.md`](../README.md#point-a-client)); a named `ModelList` alias still
+works when you want a specific backend. The proxy forwards the path and query
 string unchanged, rewrites the `model` field to the provider's
 `ProviderModelId`, and injects the resolved auth header before sending the
 request upstream.
 
 ## 5. Verify
 
-With the proxy running, send a request using one of your configured model
-aliases (`-k` skips certificate verification for local testing; drop it
-once you've trusted the local CA):
+With the proxy running, send a request (`-k` skips certificate verification
+for local testing; drop it once you've trusted the local CA). `"model": "auto"`
+is the drop-in; a configured `ModelList` alias still works when you want a
+specific backend:
 
 ```bash
 curl -k https://localhost:47101/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "kimi-k2.5", "messages": [{"role": "user", "content": "hello"}]}'
+  -d '{"model":"auto","messages":[{"role":"user","content":"hello"}]}'
 ```
 
 An unconfigured model name returns a `400` with an `invalid_request_error`

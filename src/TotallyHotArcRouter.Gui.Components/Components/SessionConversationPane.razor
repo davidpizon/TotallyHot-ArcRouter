@@ -1,7 +1,6 @@
 @* Chronological chat-style reproduction of a session's turns: a labeled separator (turn number,
    agent chip, model, timestamp) followed by a request bubble (left) and a response bubble (right),
-   tinted with the turn's agent color - the same tinted-row language TurnCard uses for the routing
-   decision log. Rendered in the right pane of the Sessions split view (LiveStream.razor) once a
+   tinted with the turn's agent color. Rendered in the right pane of the Sessions split view (LiveStream.razor) once a
    session is opened via double-click on its card. *@
 <div class="flex-1 overflow-y-auto space-y-3 pr-1">
     @foreach (var turn in OrderedTurns)
@@ -40,8 +39,7 @@
     private IEnumerable<ConversationTurn> OrderedTurns => Conversation.Turns.OrderBy(t => t.TurnNumber);
 
     /// <summary>
-    /// The accent color for <paramref name="turn"/>'s agent, matching the coloring TurnCard and the routing-decision
-    /// log use.
+    /// The accent color for <paramref name="turn"/>'s agent, used to tint its separator chip and response bubble.
     /// </summary>
     private static string AgentColorFor(ConversationTurn turn)
     {

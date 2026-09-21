@@ -23,6 +23,8 @@
          THIRD-PARTY-NOTICES.md. The assertion API is identical; only the root namespace differs
          (`using AwesomeAssertions;`), which is why no test assertion needed rewriting. -->
     <PackageReference Include="AwesomeAssertions" Version="9.6.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.11" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
@@ -35,7 +37,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TotallyHotArcRouter.Quality\TotallyHotArcRouter.Quality.csproj" />
-    <ProjectReference Include="..\TotallyHotArcRouter\TotallyHotArcRouter.csproj" />
   </ItemGroup>
 
   <ItemGroup>

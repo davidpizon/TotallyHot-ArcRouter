@@ -47,31 +47,32 @@ tray:
 
 ```mermaid
 flowchart LR
-    Tray["Tray<br/>(interactive, elevates via UAC)"]
-    Msiexec["msiexec<br/>(elevated, launched by the tray)"]
+    Operator["Operator<br/>(runs the downloaded .msi, one UAC prompt)"]
+    Msiexec["msiexec<br/>(elevated)"]
     Router["Router<br/>(Windows Service, serves WASM)"]
     TrayFiles["...\\Tray\\ files"]
     RouterFiles["...\\Router\\ files<br/>(includes WASM static files)"]
 
-    Tray -- "download + verify MSI, launch elevated, then exit" --> Msiexec
+    Operator -- "download from the release page, run" --> Msiexec
     Msiexec -- "ServiceControl: stop" --> Router
     Msiexec -- "replace" --> RouterFiles
-    Msiexec -- "replace (tray has already exited)" --> TrayFiles
+    Msiexec -- "replace" --> TrayFiles
     Msiexec -- "ServiceControl: start" --> Router
 ```
 
-The tray downloads the release's MSI, verifies it against the published SHA256
-(`TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier`, invoked from `Tray.Core`), launches
-`msiexec /i <path> /qn REBOOT=ReallySuppress /l*v <logpath>` elevated (`UseShellExecute = true`,
-`Verb = "runas"` — the single UAC prompt an operator sees), and **exits immediately** so it is not
-holding its own files locked when the MSI tries to replace `...\Tray\`. The Router does not
-participate in its own replacement beyond that — Windows Installer's `ServiceControl` element stops
-the `TotallyHotArcRouter` service before the file swap and restarts it after.
+**There is no in-process apply path today.** The dashboard's System Settings shows an available
+update with a link to the release page (the WASM host registers `UpdateStore` with
+`supportsApply: false` — a browser tab cannot launch an installer), and the tray's never-visible
+"Install update" path was deleted as dead code. The operator downloads the MSI and runs it; the
+Router does not participate in its own replacement beyond that — Windows Installer's `ServiceControl`
+element stops the `TotallyHotArcRouter` service before the file swap and restarts it after.
+`TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier` (download, SHA256 verify, elevated
+`msiexec /i <path> /qn REBOOT=ReallySuppress /l*v <logpath>`) still exists and is unit-tested, but no
+production host currently invokes it.
 
-**Why tray-elevated rather than Router-launched.** A detached `msiexec` from the `LocalSystem`
-service could not be empirically verified in this project's development environment (no admin/UAC
-session; `sc.exe create` returned `OpenSCManager FAILED 5`). Rather than ship an unverified
-detached-launch-from-a-service design, apply is tray-elevated: one ordinary UAC prompt. See
+**Why not Router-launched.** A detached `msiexec` from the `LocalSystem` service could not be
+empirically verified in this project's development environment (no admin/UAC session; `sc.exe create`
+returned `OpenSCManager FAILED 5`), so no service-side apply path was shipped. See
 [`packaging-and-distribution.md`](packaging-and-distribution.md) §6.
 
 On Linux/macOS an update is **detected** (`GitHubReleaseCheckClient` looks for
@@ -80,7 +81,7 @@ newer archive — there is no in-process apply path.
 
 ## 3. Atomicity and skew
 
-**Apply is always operator-initiated from the tray** (Windows), behind a confirmation. The Router's
+**Apply is always operator-initiated** — the operator runs the installer themselves. The Router's
 background poller (`UpdateCheckHostedService`) only *detects* an available update and records it —
 it never applies unattended. Promoted GitHub Releases are the only ones offered; prereleases are
 invisible to the check ([`packaging-and-distribution.md`](packaging-and-distribution.md) §7).
@@ -105,11 +106,11 @@ prevent.
 |---|---|---|
 | Dashboard / tray ↔ Router | gRPC-Web on the web port (`https://localhost:47104`), protos under [`src/Protos/`](../../src/Protos/) | proto3 additive field rules: a mismatched pair degrades — unknown fields ignored, absent fields default — rather than failing to connect. An older dashboard simply does not render the newest panes. |
 | Router → GitHub | release asset + `checksums.txt` naming | A release missing the platform asset (`.msi` on Windows, `totallyhotarcrouter-<rid>.tar.gz` elsewhere) or its checksum line is `AssetOrChecksumMissing` and the update is **not offered**. |
-| Tray → installer | the MSI's `ServiceControl`/`ServiceInstall` naming (`TotallyHotArcRouter`) | Must exactly match `Program.cs`'s `UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")`. A mismatch would register or control a service that does not exist. Guarded at build/review time, not at runtime. |
+| Installer → Router service | the MSI's `ServiceControl`/`ServiceInstall` naming (`TotallyHotArcRouter`) | Must exactly match `Program.cs`'s `UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")`. A mismatch would register or control a service that does not exist. Guarded at build/review time, not at runtime. |
 
-The tray knows its own compiled version and reads the Router's from `GetUpdateStatus`, so a mismatch
-is observable and should be shown rather than left as confusing behavior. The WASM dashboard is the
-same build as the Router that served it.
+The Router reports its own version through `GetUpdateStatus`; the tray does not read it, so a
+hand-made Router/tray mismatch is not surfaced anywhere today. The WASM dashboard is the same build as
+the Router that served it.
 
 ## 5. Consequences for contributors
 

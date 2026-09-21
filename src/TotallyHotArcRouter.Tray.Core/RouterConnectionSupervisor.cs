@@ -24,7 +24,7 @@ namespace TotallyHot.ArcRouter.Tray;
 public sealed class RouterConnectionSupervisor : IAsyncDisposable
 {
     /// <summary>How often to check whether a (re)connect is needed. Overridable so tests don't wait out the real cadence.</summary>
-    public static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(10);
 
     private readonly ISessionRouterConnector _connector;
     private readonly CancellationTokenSource _cts = new();
@@ -71,15 +71,6 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
     /// time, so re-read this property rather than holding a reference across an await.
     /// </summary>
     public RoutingGateMonitor? Monitor { get; private set; }
-
-    /// <summary>
-    /// The channel provider backing <see cref="Monitor"/>, or <see langword="null"/> before the first
-    /// successful connection - so a caller can build another admin client (e.g. an update check) over the
-    /// exact same authenticated channel rather than opening a second one. Swapped in lockstep with
-    /// <see cref="Monitor"/>; re-read it after every use rather than holding a reference across an await,
-    /// for the same reconnect-can-replace-it-at-any-time reason as <see cref="Monitor"/>.
-    /// </summary>
-    public IRouterChannelProvider? Provider => _currentProvider;
 
     /// <summary>
     /// Raised after <see cref="Monitor"/> is replaced by a fresh connection - the tray shell re-subscribes
@@ -131,18 +122,21 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
             provider = await _connector.ConnectAsync(serverAddress: _serverAddress, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or UriFormatException
-            && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is HttpRequestException or UriFormatException
+            || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             // A connect failure here just means the router isn't up yet (or dropped mid-restart) - the
             // supervisor's own loop retries every _retryInterval, so this is swallowed rather than logged
-            // as an error. TaskCanceledException is included because HttpClient throws it for its own
-            // request timeout, distinct from this method's cancellationToken (guarded by the condition
-            // above so a genuine caller-cancellation still propagates instead of being swallowed).
-            // UriFormatException covers a malformed serverAddress (a stale/corrupt discovery-file write
-            // mid-crash) - degrades to "keeps retrying, never connects" rather than an unobserved
-            // background-task exception, matching every other unreachable-router case this loop already
-            // treats as retry-forever rather than fatal.
+            // as an error. HttpRequestException and UriFormatException stay swallowed even while Dispose
+            // is cancelling the loop: ConnectAsync can still fault with "router unreachable" on the tick
+            // that races with CancelAsync, and that is a shutdown race, not a caller-cancellation to
+            // surface. TaskCanceledException is included because HttpClient throws it for its own request
+            // timeout, distinct from this method's cancellationToken (guarded so a genuine
+            // caller-cancellation still propagates instead of being swallowed). UriFormatException covers
+            // a malformed serverAddress (a stale/corrupt discovery-file write mid-crash) - degrades to
+            // "keeps retrying, never connects" rather than an unobserved background-task exception,
+            // matching every other unreachable-router case this loop already treats as retry-forever
+            // rather than fatal.
             _logger?.LogDebug(exception: ex, message: "Could not (re)connect to the router; will retry.");
             return;
         }

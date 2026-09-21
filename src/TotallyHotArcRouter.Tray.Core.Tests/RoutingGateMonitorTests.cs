@@ -75,11 +75,10 @@ public sealed class RoutingGateMonitorTests
 
         monitor.IsReachable.Should().BeTrue("a router that answers with an error is still reachable");
         monitor.IsUsable.Should().BeFalse("the routing toggle still has nothing it can act on");
-        monitor.LastFailureMessage.Should().Be("Could not update the routing gate: bad token");
     }
 
     [Fact]
-    public async Task PollLoop_RecoveringAfterAFailure_ClearsTheFailureMessage()
+    public async Task PollLoop_RecoveringAfterAFailure_BecomesUsableAgain()
     {
         var client = new FakeRoutingGateAdminClient
         {
@@ -92,7 +91,28 @@ public sealed class RoutingGateMonitorTests
         client.GetFailure = null;
 
         await WaitUntilAsync(condition: () => monitor.IsUsable, timeout: WaitTimeout);
-        monitor.LastFailureMessage.Should().BeNull();
+        monitor.ConnectionState.Should().Be(RouterConnectionState.Connected);
+    }
+
+    [Fact]
+    public void Constructors_NullDependencies_Throw()
+    {
+        var nullProvider = () => new RoutingGateMonitor(channelProvider: null!);
+        var nullClient = () => new RoutingGateMonitor(client: null!);
+
+        nullProvider.Should().Throw<ArgumentNullException>();
+        nullClient.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task ChannelProviderConstructor_UnreachableEndpoint_ReportsUnreachable()
+    {
+        using var channel = Grpc.Net.Client.GrpcChannel.ForAddress("https://127.0.0.1:1");
+        var provider = new StubChannelProvider(channel);
+        await using var monitor = new RoutingGateMonitor(channelProvider: provider, pollInterval: FastPoll);
+
+        await WaitUntilAsync(condition: () => monitor.ConnectionState == RouterConnectionState.Unreachable,
+            timeout: WaitTimeout);
     }
 
     [Fact]
@@ -131,6 +151,13 @@ public sealed class RoutingGateMonitorTests
 
             await Task.Delay(10, cancellationToken: TestContext.Current.CancellationToken);
         }
+    }
+
+    private sealed class StubChannelProvider(Grpc.Net.Client.GrpcChannel channel) : IRouterChannelProvider
+    {
+        public Grpc.Core.CallInvoker CallInvoker { get; } = channel.CreateCallInvoker();
+
+        public string ServerAddress { get; } = channel.Target;
     }
 
     private sealed class FakeRoutingGateAdminClient : IRoutingGateAdminClient

@@ -24,7 +24,7 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
     public LlmRouterModelStore(
         IRouterChannelProvider channelProvider,
         ILogger<LlmRouterModelStore>? logger = null)
-        : base(client: new LlmRouterModelAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new LlmRouterModelAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         ServerAddress = channelProvider.ServerAddress;
     }
@@ -56,7 +56,7 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
 
     /// <summary>
     /// Every file's live progress during a sync, keyed by file name and refreshed as events stream in.
-    /// Cleared at the start of each sync and on a successful <see cref="SetBaseUrlAsync"/>. Not cleared
+    /// Cleared at the start of each sync. Not cleared
     /// when a sync finishes - the terminal (including Failed) events remain so the panel can keep
     /// rendering per-file errors after <see cref="IsSyncing"/> goes false.
     /// </summary>
@@ -67,7 +67,7 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
     /// <see langword="null"/> before the plan event arrives (or when no sync is running). Cleared at the
     /// start of each <see cref="SyncAsync"/> call.
     /// </summary>
-    public LlmRouterModelSyncPlanInfo? SyncPlan { get; private set; }
+    private LlmRouterModelSyncPlanInfo? SyncPlan { get; set; }
 
     /// <summary>
     /// The file named by the most recently received progress event of the current sync - terminal
@@ -112,33 +112,6 @@ public sealed class LlmRouterModelStore : AdminStoreBase<ILlmRouterModelAdminCli
             async ct => Status = await Client.GetStatusAsync(ct),
             "load the llm_router model status",
             cancellationToken);
-    }
-
-    /// <summary>
-    /// Switches the active model to <paramref name="baseUrl"/> and publishes the refreshed (now-unsynced-
-    /// until-updated) status. Rethrows on failure - the panel has to render the rejection inline - the
-    /// same split <see cref="SyncAsync"/> and <see cref="BenchmarkDataStore.RecheckAsync"/> use.
-    /// </summary>
-    /// <exception cref="GrpcAdminException">The switch was rejected or the router is unreachable.</exception>
-    public async Task SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            Status = await Client.SetBaseUrlAsync(baseUrl: baseUrl, cancellationToken: cancellationToken);
-        }
-        catch (GrpcAdminException ex)
-        {
-            RecordFailure(exception: ex, description: "a llm_router model operation");
-            throw;
-        }
-
-        // The new model's files share the old model's file names (genai_config.json, model.onnx, ...),
-        // so a leftover progress entry from the previous model would otherwise be misread as this one's.
-        _syncProgress = [];
-        SyncPlan = null;
-        CurrentFileName = null;
-        RecordSuccess();
-        NotifyChanged();
     }
 
     /// <summary>

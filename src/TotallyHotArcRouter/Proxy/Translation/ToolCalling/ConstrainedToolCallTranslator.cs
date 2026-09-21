@@ -87,7 +87,7 @@ internal sealed class ConstrainedToolCallTranslator : IClientPathTranslator
     public ToolCallNormalizationPlan Plan { get; }
 
     /// <summary>Gets the dialect being enforced.</summary>
-    public ToolCallDialect Dialect { get; }
+    private ToolCallDialect Dialect { get; }
 
     /// <inheritdoc/>
     /// <remarks>Never consulted for routing; constrained mode is selected per (provider, model), not per provider key.</remarks>

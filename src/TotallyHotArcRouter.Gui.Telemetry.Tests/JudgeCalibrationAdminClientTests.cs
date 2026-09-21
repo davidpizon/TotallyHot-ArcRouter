@@ -23,7 +23,7 @@ public class JudgeCalibrationAdminClientTests
     public async Task GetReportAsync_EmptyResponse_MapsToAnEmptyReport()
     {
         var stub = new StubClient { Response = new Contract.JudgeCalibrationReportResponse() };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -41,7 +41,7 @@ public class JudgeCalibrationAdminClientTests
         // than zeroing it, unlike a scalar. The client must not throw dereferencing a null timestamp.
         var stub = new StubClient
         { Response = new Contract.JudgeCalibrationReportResponse { GeneratedAtUtc = null } };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -57,7 +57,7 @@ public class JudgeCalibrationAdminClientTests
             Response = new Contract.JudgeCalibrationReportResponse
             { GeneratedAtUtc = Timestamp.FromDateTimeOffset(generatedAt), TotalRowsAnalyzed = 42 }
         };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -90,7 +90,7 @@ public class JudgeCalibrationAdminClientTests
                 }
             }
         };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -122,7 +122,7 @@ public class JudgeCalibrationAdminClientTests
                 }
             }
         };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -152,7 +152,7 @@ public class JudgeCalibrationAdminClientTests
                 Verdicts = { new Contract.JudgeCalibrationVerdict { Condition = "c", Kind = wireKind, Detail = "d" } }
             }
         };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -178,7 +178,7 @@ public class JudgeCalibrationAdminClientTests
                 }
             }
         };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -208,7 +208,7 @@ public class JudgeCalibrationAdminClientTests
                 }
             }
         };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -226,7 +226,7 @@ public class JudgeCalibrationAdminClientTests
     {
         var stub = new StubClient
         { Response = new Contract.JudgeCalibrationReportResponse { Markdown = "### Gate conditions" } };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -252,7 +252,7 @@ public class JudgeCalibrationAdminClientTests
                 }
             }
         };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var report = await client.GetReportAsync(TestContext.Current.CancellationToken);
 
@@ -265,7 +265,7 @@ public class JudgeCalibrationAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetReportAsync(TestContext.Current.CancellationToken));
@@ -279,30 +279,13 @@ public class JudgeCalibrationAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new JudgeCalibrationAdminClient(stub);
+        var client = new JudgeCalibrationAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetReportAsync(TestContext.Current.CancellationToken));
 
         ex.Message.Should().Be("Could not read the judge calibration report: boom");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new JudgeCalibrationAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new JudgeCalibrationAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
     }
 
     [Fact]

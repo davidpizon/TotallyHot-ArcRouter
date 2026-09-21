@@ -18,16 +18,19 @@ measured by cumulative regret against a per-task oracle.
 | L — Orchestrator ensemble (five voters) | [`orchestrator-ensemble.md`](../docs/router/orchestrator-ensemble.md) |
 | M, M1–M4 — Orchestrator on the live path | [`orchestrator-live-path-plan.md`](../docs/router/orchestrator-live-path-plan.md) |
 | Live-feedback 1–5 — capture, embedding `logreg`, Governance admin | [`live-feedback-learning-plan.md`](../docs/router/live-feedback-learning-plan.md) |
-| Routing ROI vs `dim_best` | [`self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (T4) |
+| Routing ROI vs the frozen untrained baseline ([`score-delta-methodology.md`](../docs/score-delta-methodology.md)) | [`self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) (T4) |
 | T1–T6 — transcripts, clustering, `cluster_best`, adaptive-routing toggle | [`self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
 | N1–N6 — regret harness (measured; **exit criterion not met**) | [`regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) |
 | Q0–Q4 — quality rescan, keyed graders, portfolio, CLI reliability report | [`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md), [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md) |
 | G1–G3 — shadow judge, calibration check, judge blended into `u_i` | [`geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 | Sessions tab persisted transcripts | [`../docs/gui/dashboard.md`](../docs/gui/dashboard.md) |
-| Auto-update detect + Windows MSI apply via the tray | [`packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md), [`version-compatibility.md`](../docs/router/version-compatibility.md) |
+| Auto-update detect (apply is manual: the dashboard links to the release) | [`packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md), [`version-compatibility.md`](../docs/router/version-compatibility.md) |
 
 The Verifier is static analysis + the G-Eval judge; **code execution was removed** (no sandbox, no
-`Process` in `TotallyHotArcRouter.Quality`). Full design:
+`Process` in `TotallyHotArcRouter.Quality`). Roslyn (C#) and Acornima (JS/TS) give authoritative
+syntax verdicts; Python and shell use language-aware heuristics marked non-authoritative and weighted at
+half. Every LLM-grader prompt carries the user's question as a required section, and a missing question
+fails closed (GitHub issue #114). Full design:
 [`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md).
 
 ## Remaining work

@@ -173,26 +173,40 @@ public sealed class ProxyServerWebInterfaceTests
             using var call = invoker.AsyncServerStreamingCall(method: StreamEventsMethod, host: null,
                 options: new CallOptions(cancellationToken: Ct), new Contract.StreamEventsRequest());
 
-            // Give the subscription a moment to register before publishing, mirroring how a real dashboard
-            // connects first and then observes live events - a publish before the subscriber is attached
-            // would otherwise be missed and make this test flaky, not the plumbing under test.
-            await Task.Delay(TimeSpan.FromMilliseconds(200), Ct);
-            broadcaster.PublishLogLine(new LogLineEvent(TimestampUtc: DateTimeOffset.UtcNow, Level: "Information",
-                Message: "probe-1"));
-            broadcaster.PublishLogLine(new LogLineEvent(TimestampUtc: DateTimeOffset.UtcNow, Level: "Information",
-                Message: "probe-2"));
+            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+            readCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            // Publish on an interval until two arrive, rather than sleeping once and publishing twice.
+            // StreamEvents registers its writer server-side only once the call has been dispatched, and the
+            // client's AsyncServerStreamingCall returns before that; a publish with nothing registered is
+            // dropped, not queued. So any fixed delay is a race - this one used to sleep 200ms, which a warm
+            // process won and a cold one (first TLS handshake, first dispatch) reliably lost, publishing both
+            // probes into an empty registry. Publishing until observed waits exactly as long as registration
+            // takes on whatever machine this runs on, and no longer.
+            var publisher = PublishProbesUntilCancelledAsync(broadcaster: broadcaster, cancellationToken: readCts.Token);
 
             var received = 0;
-            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(Ct);
-            readCts.CancelAfter(TimeSpan.FromSeconds(5));
             try
             {
                 while (received < 2 && await call.ResponseStream.MoveNext(readCts.Token))
                     received++;
             }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && readCts.IsCancellationRequested &&
+                                          !Ct.IsCancellationRequested)
+            {
+                // Timed out waiting - the assertion below reports how far it got. The deadline surfaces here as
+                // RpcException(Cancelled): Grpc.Net.Client wraps the cancelled read rather than letting the
+                // OperationCanceledException through, so a filter on that type alone never matched and a
+                // timeout escaped as an unhandled exception instead of reaching the assertion.
+            }
             catch (OperationCanceledException) when (readCts.IsCancellationRequested && !Ct.IsCancellationRequested)
             {
-                // Timed out waiting - received below reports how far it got.
+                // The same timeout, if it lands before the read is handed to gRPC.
+            }
+            finally
+            {
+                await readCts.CancelAsync();
+                await publisher;
             }
 
             Assert.True(received >= 2, $"Expected at least 2 streamed messages, got {received}.");
@@ -201,6 +215,29 @@ public sealed class ProxyServerWebInterfaceTests
         {
             using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             await server.StopAsync(stopCts.Token);
+        }
+    }
+
+    /// <summary>
+    /// Publishes a numbered log-line probe every 50ms until <paramref name="cancellationToken"/> fires. Completes
+    /// normally on cancellation, so the caller can await it unconditionally in a <c>finally</c>.
+    /// </summary>
+    private static async Task PublishProbesUntilCancelledAsync(TelemetryBroadcaster broadcaster,
+        CancellationToken cancellationToken)
+    {
+        var sequence = 0;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                broadcaster.PublishLogLine(new LogLineEvent(TimestampUtc: DateTimeOffset.UtcNow,
+                    Level: "Information", Message: $"probe-{++sequence}"));
+                await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected: the reader has what it needs, or gave up.
         }
     }
 

@@ -4,7 +4,7 @@ namespace TotallyHot.ArcRouter.PriceCatalog;
 
 /// <summary>
 /// A provider's persisted monthly budget caps, keyed on the provider key used in model-routing.json / the
-/// <c>/admin</c> API. A <see langword="null"/> cap means "no budget for that dimension" - distinct from a
+/// gRPC-Web admin API. A <see langword="null"/> cap means "no budget for that dimension" - distinct from a
 /// zero cap.
 /// </summary>
 /// <param name="ProviderKey">The provider key (e.g. <c>openai</c>).</param>

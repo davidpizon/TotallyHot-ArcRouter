@@ -342,10 +342,10 @@ public readonly record struct ModelCapabilityKey
     }
 
     /// <summary>Gets the <c>ModelRouting:Providers</c> key.</summary>
-    public string ProviderKey { get; }
+    private string ProviderKey { get; }
 
     /// <summary>Gets the client-facing model name.</summary>
-    public string ModelName { get; }
+    private string ModelName { get; }
 
     /// <summary>
     /// Compares both halves case-insensitively. Null-safe by construction:

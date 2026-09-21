@@ -4,12 +4,12 @@ using Microsoft.Extensions.Hosting;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Tools;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
@@ -34,8 +34,6 @@ public class ServiceCollectionExtensionsTests
             filter: d => d.ServiceType == typeof(RouterMemory) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(collection: services,
             filter: d => d.ServiceType == typeof(AgentAsARouter) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(collection: services,
-            filter: d => d.ServiceType == typeof(CheckSyntax) && d.Lifetime == ServiceLifetime.Transient);
         Assert.Contains(collection: services,
             filter: d =>
                 d.ServiceType == typeof(IEnvironmentVariableProvider) &&
@@ -77,12 +75,33 @@ public class ServiceCollectionExtensionsTests
         await using var provider = services.BuildServiceProvider();
 
         Assert.NotNull(provider.GetRequiredService<RouterMemory>());
-        Assert.NotNull(provider.GetRequiredService<CheckSyntax>());
         Assert.NotNull(provider.GetRequiredService<IModelRouteResolver>());
         Assert.NotNull(provider.GetRequiredService<RequestInterceptor>());
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());
         Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
         Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
+    }
+
+    [Fact]
+    public void AddTotallyHotArcRouter_PriceSourceClient_CarriesAttributionHeaders()
+    {
+        // The price sources no longer set these themselves: the named-client registration is now the one
+        // place they live, so pin it there.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.Configure<RoutingOptions>(_ => { });
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddTotallyHotArcRouter();
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(PriceSourceRegistry.HttpClientName);
+
+        Assert.Equal(expected: ["TotallyHot Arc Router"], actual: client.DefaultRequestHeaders.GetValues("X-Title"));
+        Assert.Equal(expected: ["https://github.com/davidpizon/TotallyHot-ArcRouter"],
+            actual: client.DefaultRequestHeaders.GetValues("HTTP-Referer"));
     }
 
     /// <summary>

@@ -25,8 +25,8 @@ is historical and not runtime.
   stats into a compact card, and every stat gets consistent `gap-*`/`px-*`/`py-*` spacing and a
   `.ls-stat-label` (10px, uppercase, muted `#64748b`) so the strip scans instead of blurring together.
   (`TurnCard`'s denser 8-stat strip — ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model — demonstrated
-  this most aggressively, but the component is orphaned since the Sessions-tab rebuild: see the
-  Progressive disclosure bullet below.)
+  this most aggressively, but the component was deleted after the Sessions-tab rebuild orphaned it:
+  see the Progressive disclosure bullet below.)
 - **Hierarchy through weight and color tier, not decoration** — text hierarchy comes from the
   `font-bold` / `font-semibold` / `font-medium` steps and the five-tier slate text-color ladder
   (§3), never from box shadows, gradients, or size alone. Agent identity comes from a deterministic
@@ -44,8 +44,8 @@ is historical and not runtime.
   session details (left) and `SessionConversationPane`'s chat-style reproduction of the conversation
   (right). Cost Analytics shows one chart at a time behind a ranked metric-picker pill row, not seven
   charts at once. (`TurnCard`'s in-place click-to-expand routing-decision log was the previous
-  disclosure mechanism for turn detail; it is orphaned — unreferenced by any component — since this
-  double-click split view replaced it, and does not render anywhere today.)
+  disclosure mechanism for turn detail; once this double-click split view replaced it, nothing
+  referenced it, and the component and its CSS were deleted.)
 
 ## 2. Visual Theme
 
@@ -69,7 +69,7 @@ Dark theme only — there is no light mode and no theme toggle (`dashboard.md` �
 | Warning / degraded | `#f59e0b` (fill), `#fbbf24` text | `--color-warning` | `.text-amber-400` |
 | Critical / failed | `#ef4444` (fill), `#f87171` text | `--color-critical` | `.text-red-400` |
 | Inset surface — recessed | `#172033` | n/a | ticker row, active metric-picker pill |
-| Inset surface — payload block | `#020617` | n/a | *Currently unused* — was `TurnCard`'s request/response `<pre>` blocks (`.ds-code-block`); orphaned since the Sessions-tab rebuild, no live component renders this surface |
+| Inset surface — payload block | `#020617` | n/a | *Retired* — was `TurnCard`'s request/response `<pre>` blocks; the `.ds-code-block` rule was deleted with `TurnCard`, so no CSS implements this surface today |
 | Inset surface — console | `#0b1120` | `--surface-inset` | `ConsoleTab` log surface |
 
 \* `.bg-slate-700` is the one compiled-blob utility class actually applied to card-like surfaces in
@@ -80,9 +80,9 @@ markup; `bg-slate-800` never appears as a literal class (card surfaces are set v
 adoption — every reference to the old accent used as UI chrome (active tab text, focus rings, the Stop
 icon-action color, tooltip focus outline) now points at `--accent`. Semantic colors (success/warning/
 critical) are unchanged — they already matched the aspirational spec before adoption. Sky's two
-data-encoding roles — the `TurnCard` stat strip's Cost/Model hue and its routing-step "Info" tone — are
-both dormant now that `TurnCard` is orphaned (see §1's Progressive disclosure bullet); see the note in
-the next section.
+data-encoding roles — the `TurnCard` stat strip's Cost/Model hue and its routing-step "Info" tone — were
+retired when `TurnCard` was deleted (see §1's Progressive disclosure bullet); see the note in the next
+section.
 
 Inset surfaces sit *below* the page background rather than above it — they mark a region as a
 well (raw data, logs) rather than a card. They are the inverse of elevation: no border-lightening,
@@ -94,11 +94,12 @@ The three-color semantic palette above governs *chrome*. One additional palette 
 (below); it is deliberately broader — collapsing it into the chrome palette would destroy the
 encoding.
 
-**Stat-strip categorical hues** — *currently unused.* Each stat in `TurnCard`'s 8-stat strip carried
-its own hue so a specific metric could be found by color in a dense two-line strip, without reading
-labels. `TurnCard` is orphaned since the Sessions-tab rebuild (§1), so this palette renders nowhere
-today; the CSS (`.stat-color-tokens`, `.stat-color-ttft`, and the inline sky/emerald/amber spans in
-`TurnCard.razor`) is left in place rather than deleted in case a future dense turn view revives it:
+**Stat-strip categorical hues** — *retired.* Each stat in `TurnCard`'s 8-stat strip carried its own
+hue so a specific metric could be found by color in a dense two-line strip, without reading labels.
+`TurnCard` was deleted after the Sessions-tab rebuild orphaned it (§1), and its CSS
+(`.stat-color-tokens`, `.stat-color-ttft`) went with it, so this palette renders nowhere today. The
+values are recorded here so a future dense turn view can revive it; re-add the classes together with
+that view, not before:
 
 | Stat | Color | | Stat | Color |
 | --- | --- | --- | --- | --- |
@@ -118,14 +119,14 @@ one shade lighter (`-300`) for contrast against that tint. The pattern is always
 | Context | Background | Border | Text |
 | --- | --- | --- | --- |
 | Error banners, failed pulls (`.ds-step-critical`, live: `ProviderEditDialog`, `ProvidersAdmin`) | `#ef444411` | `#ef444444` | `#fca5a5` red-300 |
-| Routing step — Warn (`.ds-step-warning`) *currently unused* | `rgba(245,158,11,0.12)` | `#f59e0b` (left, 2px) | `#fcd34d` amber-300 |
-| Routing step — Info (`.ds-step-info`) *currently unused* | `rgba(56,189,248,0.1)` | `#38bdf8` (left, 2px) | `#7dd3fc` sky-300 |
-| Routing step — OK (`.ds-step-success`) *currently unused* | `rgba(16,185,129,0.08)` | `#10b981` (left, 2px) | `#6ee7b7` emerald-300 |
+| Routing step — Warn (`.ds-step-warning`) *retired* | `rgba(245,158,11,0.12)` | `#f59e0b` (left, 2px) | `#fcd34d` amber-300 |
+| Routing step — Info (`.ds-step-info`) *retired* | `rgba(56,189,248,0.1)` | `#38bdf8` (left, 2px) | `#7dd3fc` sky-300 |
+| Routing step — OK (`.ds-step-success`) *retired* | `rgba(16,185,129,0.08)` | `#10b981` (left, 2px) | `#6ee7b7` emerald-300 |
 
-The three "Routing step" rows were `TurnCard`'s routing-decision log tones. That log doesn't render
-anywhere today — `TurnCard` is orphaned since the Sessions-tab rebuild (§1) — but the `.ds-step-*`
-classes remain in `app.css` (§7 keeps `.ds-step-critical` alive for error banners) so the palette is
-ready if a routing-decision view returns.
+The three "Routing step" rows were `TurnCard`'s routing-decision log tones. Their `.ds-step-success`,
+`.ds-step-warning` and `.ds-step-info` rules were deleted with `TurnCard` (§1); only
+`.ds-step-critical` remains in `app.css`, kept alive by the error banners. The values are recorded
+here in case a routing-decision view returns.
 
 Fonts: `var(--font-ds)` (`"Century Gothic", "Avenir Next", "Poppins", Inter, system-ui, sans-serif`) for
 all UI text, **JetBrains Mono** for every numeric/monospace value (token counts, costs, timestamps,
@@ -213,7 +214,7 @@ actually appear in `app.css`.
   `-locked`): unlocking is destructive, so it opens the `UnlockSecretFieldDialog` confirmation rather
   than arming the control in place. Full contract, including why unlocking clears the value:
   [`secret-field.md`](secret-field.md).
-- **Navigation** (5-tab bar: Sessions / Cost Analytics / Model Distribution / Governance /
+- **Navigation** (6-tab bar: Sessions / Cost Analytics / Model Distribution / Report Card / Governance /
   Console) — the selected tab reads as a folder tab continuous with its panel: `var(--accent)`
   text, a `var(--surface-base)` fill, a `var(--border-button)` border on three sides, `6px 6px 0 0`
   radius, and a bottom edge painted `var(--surface-base)` that hides `.ds-toolbar`'s
@@ -340,7 +341,7 @@ app is Solid-only for now** — Mini is a deliberate future pass, not adopted he
 | Tier | Size | Where | Why |
 |---|---|---|---|
 | Default | **20px** | Tab bar, card header action rows, alerts/badges, modal close glyphs, search, settings — the large majority of call sites | Heroicons' own Solid-vs-Mini threshold |
-| Dense-inline exception | **16px** | `ProvidersAdmin.razor`'s nested per-model row Stop/Play/Remove icons (~20-24px row height) (`TurnCard.razor`'s inline step icons used this tier too, but the component is orphaned — see §1 — and no longer renders) | Jumping straight to 20px would visually dominate rows built around "data density without claustrophobia" (§1) |
+| Dense-inline exception | **16px** | `ProvidersAdmin.razor`'s nested per-model row Stop/Play/Remove icons (~20-24px row height) (`TurnCard.razor`'s inline step icons used this tier too, before the component was deleted — see §1) | Jumping straight to 20px would visually dominate rows built around "data density without claustrophobia" (§1) |
 | Unchanged | **12–14px** | `grip-vertical` (`PriceSourcesAdmin.razor`'s drag handle, §5.3) | Hand-drawn, not a Heroicons glyph — not subject to the Solid-threshold rationale |
 
 **The one hand-drawn exception: `grip-vertical`.** Heroicons ships no drag-handle glyph — the nearest
@@ -780,18 +781,23 @@ much the card can grow — recompute both together.
 **Common patterns (prefer these classes over building inline styles):**
 - `.overlay-backdrop` — modal backdrop with `rgba(0,0,0,0.7)` + `blur(4px)` ✓ (already exists)
 - Semantic form inputs — use `.ds-input` (TBD) instead of hand-rolling `background: var(--surface-interactive); border: 1px solid var(--border-light)`
-- Tinted semantic surfaces (error/warning/success steps) — use `.ds-step-*` classes instead of inline color lists
+- Tinted semantic surfaces (error banners) — use `.ds-step-critical` instead of inline color lists
 
 See §4.2's `.btn-*` classes and §4's `.overlay-backdrop` as the reference pattern — static styling belongs in CSS, dynamic behavior stays inline.
 
 ### Refactoring Status
 **Complete.** All static and conditional inline styles have been extracted to CSS classes. The
 following classes have been added to support this, on top of the earlier round below:
-- `.ls-turn-card`, `.ls-turn-card-toggle`, `.ls-flex-auto`, `.ls-stat-strip-gap` — `TurnCard`/
-  `ConversationSummary` static chrome (the AgentColor-tinted background/border-left stays inline —
-  that part is genuinely data-driven, exception 1 above). `.ls-turn-card`/`.ls-turn-card-toggle` are
-  now only referenced by the orphaned `TurnCard.razor` (§1); `.ls-flex-auto`/`.ls-stat-strip-gap` stay
-  live via `ConversationSummary`.
+- `.ls-stat-strip-gap` — `ConversationSummary`'s stat-strip spacing. It was added alongside
+  `.ls-turn-card`, `.ls-turn-card-toggle` and `.ls-flex-auto` for `TurnCard`'s static chrome; those
+  three were deleted with `TurnCard` (§1).
+- `.ds-doc-link` — the "Methodology" citation anchors in `CostAnalytics`/`RegretHarnessAdmin`.
+  Supplies underline + `text-underline-offset` + case/letter-spacing reset, because the
+  compiled blob ships no `underline`, `underline-offset-*`, `normal-case` or `tracking-normal`
+  utility *and* its preflight sets `a { text-decoration: inherit }` — an anchor styled with
+  those utilities alone renders as plain text with no cue that it is clickable. Color stays on
+  the call site's `text-slate-*`/`hover:text-slate-200` utilities (those *are* in the blob) so a
+  citation can match the brightness of the copy around it
 - `.ds-dashboard-ticker` — Dashboard ticker row border/background
 - `.ls-console-line` — `ConsoleTab` line wrapping (the per-level text color stays inline, exception 1
   above)
@@ -808,7 +814,6 @@ following classes have been added to support this, on top of the earlier round b
 Earlier round of classes:
 - `.ds-surface-base`, `.ds-surface-card-bordered`, `.ds-toolbar` — card and container styling
 - `.ds-divider`, `.ds-divider-subtle` — separator lines
-- `.ds-code-block` — code/payload block styling
 - `.tab-button` with `.active`/`.inactive` states — tab bar button styling
 - `.ds-card-stack` / `.ds-card-gap` — the standard `--space-card-gap` (0.75rem) gap between stacked
   cards; see §5.2 for which form to use
@@ -821,7 +826,7 @@ Earlier round of classes:
 Every remaining `style=` attribute in `TotallyHotArcRouter.Gui.Components/Components` is one of the sanctioned
 exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
 `share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
-property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
+property feeding the `.row-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
 `Style` passthrough parameter (a generic per-instance API, unused by any current caller).
 
 ## 8. Do's and Don'ts

@@ -33,7 +33,7 @@ namespace TotallyHot.ArcRouter.Update;
 public sealed class GitHubReleaseCheckClient : IReleaseCheckClient
 {
     /// <summary>The asset GitHub Releases must publish alongside the MSI: one <c>sha256sum</c>-format line for it.</summary>
-    public const string ChecksumsAssetName = "checksums.txt";
+    private const string ChecksumsAssetName = "checksums.txt";
 
     private const string UserAgent = "TotallyHotArcRouter-Router";
     private readonly string _currentVersion;

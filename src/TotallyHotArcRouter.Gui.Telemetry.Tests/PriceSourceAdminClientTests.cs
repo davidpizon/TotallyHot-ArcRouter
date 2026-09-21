@@ -24,7 +24,7 @@ public class PriceSourceAdminClientTests
         {
             ListResponse = Response(Source(name: "litellm", true, 3, 2505))
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var source = (await client.ListAsync(TestContext.Current.CancellationToken)).Sources.Single();
 
@@ -43,7 +43,7 @@ public class PriceSourceAdminClientTests
         {
             ListResponse = Response(Source(name: "litellm", true, 0, 0))
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         (await client.ListAsync(TestContext.Current.CancellationToken)).Sources.Single().PriceCount.Should().Be(0);
     }
@@ -59,7 +59,7 @@ public class PriceSourceAdminClientTests
             ScheduleAnchorUtc = Timestamp.FromDateTimeOffset(anchor)
         };
         var stub = new StubClient { ListResponse = response };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var schedule = (await client.ListAsync(TestContext.Current.CancellationToken)).Schedule;
 
@@ -78,7 +78,7 @@ public class PriceSourceAdminClientTests
         {
             ListResponse = Response(Source(name: "litellm", true, 0, 10))
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var list = await client.ListAsync(TestContext.Current.CancellationToken);
 
@@ -104,7 +104,7 @@ public class PriceSourceAdminClientTests
                 }
             }
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var result = await client.RefreshAsync(TestContext.Current.CancellationToken);
 
@@ -120,7 +120,7 @@ public class PriceSourceAdminClientTests
         {
             SetEnabledResponse = Response(Source(name: "litellm", false, 0, 10))
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var list = await client.SetEnabledAsync(name: "litellm", false,
             cancellationToken: TestContext.Current.CancellationToken);
@@ -137,7 +137,7 @@ public class PriceSourceAdminClientTests
     public async Task SetEnabledAsync_rejects_a_blank_name_without_a_round_trip(string name)
     {
         var stub = new StubClient();
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             client.SetEnabledAsync(name: name, true, cancellationToken: TestContext.Current.CancellationToken));
@@ -159,7 +159,7 @@ public class PriceSourceAdminClientTests
                 Sources = { Source(name: "litellm", true, 0, 2505) }
             }
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var result = await client.RefreshAsync(TestContext.Current.CancellationToken);
 
@@ -187,7 +187,7 @@ public class PriceSourceAdminClientTests
                 }
             }
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var outcome = (await client.RefreshAsync(TestContext.Current.CancellationToken)).Outcomes.Single();
 
@@ -202,7 +202,7 @@ public class PriceSourceAdminClientTests
         // not a gRPC status dump.
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ListAsync(TestContext.Current.CancellationToken));
@@ -224,7 +224,7 @@ public class PriceSourceAdminClientTests
             Failure = new RpcException(new Status(statusCode: StatusCode.NotFound,
                 detail: "No price source named 'nope' exists."))
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetEnabledAsync(name: "nope", true, cancellationToken: TestContext.Current.CancellationToken));
@@ -242,7 +242,7 @@ public class PriceSourceAdminClientTests
             Failure = new RpcException(new Status(statusCode: StatusCode.NotFound,
                 detail: "No price source named 'nope' exists."))
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetEnabledAsync(name: "nope", true, cancellationToken: TestContext.Current.CancellationToken));
@@ -255,7 +255,7 @@ public class PriceSourceAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Internal, detail: "boom")) };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.SetEnabledAsync(name: "litellm", false, cancellationToken: TestContext.Current.CancellationToken));
@@ -268,7 +268,7 @@ public class PriceSourceAdminClientTests
     {
         var stub = new StubClient
         { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.RefreshAsync(TestContext.Current.CancellationToken));
@@ -295,7 +295,7 @@ public class PriceSourceAdminClientTests
                 }
             }
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var result = await client.ReorderAsync(namesInPriorityOrder: ["openrouter", "litellm"],
             cancellationToken: TestContext.Current.CancellationToken);
@@ -318,7 +318,7 @@ public class PriceSourceAdminClientTests
                 Sources = { Source(name: "litellm", true, 1, 2505) }
             }
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var result = await client.ReorderAsync(namesInPriorityOrder: ["litellm", "openrouter"],
             cancellationToken: TestContext.Current.CancellationToken);
@@ -336,7 +336,7 @@ public class PriceSourceAdminClientTests
                 statusCode: StatusCode.InvalidArgument,
                 detail: "The submitted order must name every existing price source exactly once."))
         };
-        using var client = new PriceSourceAdminClient(stub);
+        var client = new PriceSourceAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ReorderAsync(namesInPriorityOrder: ["litellm"],
@@ -346,35 +346,6 @@ public class PriceSourceAdminClientTests
             .Be(
                 "Could not reorder the price sources: The submitted order must name every existing price source exactly once.");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        // The stub overload exists for tests and for callers who own the channel; only the address overload
-        // owns what it created.
-        var client = new PriceSourceAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        // Safe to construct without a server: a gRPC channel connects lazily, on the first call. This covers
-        // the constructor the GUI actually uses, and its disposal.
-        var client = new PriceSourceAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_default_address_overload_targets_the_proxys_grpc_port()
-    {
-        using var client = new PriceSourceAdminClient();
-
-        client.Should().NotBeNull();
     }
 
     [Fact]

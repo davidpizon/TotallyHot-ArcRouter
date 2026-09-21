@@ -57,6 +57,8 @@ paths so existing links resolve.
 
 | Doc | What it owns | Status |
 |---|---|---|
+| [`how-it-learns.md`](how-it-learns.md) | Plain-language walkthrough of the learning loop | Reference (as-built) |
+| [`score-delta-methodology.md`](score-delta-methodology.md) | Citable method for score-delta / estimated regret vs the frozen untrained baseline | Reference (as-built) |
 | [`router/utility-model-routing.md`](router/utility-model-routing.md) | Classifier, `IRoutingPolicy`, cost-aware utility routing | Shipped (H, I) |
 | [`router/orchestrator-ensemble.md`](router/orchestrator-ensemble.md) | The five-voter Orchestrator ensemble and its weights | Shipped (5 of 5 voters) |
 | [`router/orchestrator-live-path-plan.md`](router/orchestrator-live-path-plan.md) | Orchestrator on the live path; requested-vs-routed end to end | Shipped (M1–M4) |
@@ -64,7 +66,7 @@ paths so existing links resolve.
 | [`router/memory-persistence.md`](router/memory-persistence.md) | `RouterMemory` / `EmbeddingMemory` SQLite persistence | Shipped |
 | [`router/live-feedback-learning-plan.md`](router/live-feedback-learning-plan.md) | Live feedback capture, embedding-backed `logreg`, its trainer and admin surface | Phases 1–5 shipped; 6 partial |
 | [`router/self-organizing-classification-plan.md`](router/self-organizing-classification-plan.md) | Transcripts, clustering, the `cluster_best` voter, adaptive-routing toggle | Shipped (T1–T6) |
-| [`archive/router/routing-roi-regret-plan.md`](archive/router/routing-roi-regret-plan.md) | Routing ROI vs `dim_best` (historical) | Archived — see self-organizing-classification-plan T4 |
+| [`archive/router/routing-roi-regret-plan.md`](archive/router/routing-roi-regret-plan.md) | Routing ROI: expense and regret vs the frozen untrained baseline (historical). As-built method: [`score-delta-methodology.md`](score-delta-methodology.md) | Archived — see self-organizing-classification-plan T4 |
 | [`router/agent-resilience-strategies.md`](router/agent-resilience-strategies.md) | Circuit breaker and failover ranking; leaky bucket | Circuit breaker shipped; leaky bucket not built |
 | [`router/model-identity-canonicalization.md`](router/model-identity-canonicalization.md) | `ModelNameCanonicalizer` — spelling vs. identity | Implemented |
 

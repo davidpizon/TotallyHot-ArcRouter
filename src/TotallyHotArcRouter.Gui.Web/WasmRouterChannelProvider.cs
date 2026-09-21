@@ -15,9 +15,8 @@ namespace TotallyHot.ArcRouter.Gui.Web;
 /// </summary>
 /// <remarks>
 /// Same-origin by construction - <see cref="ServerAddress"/> is <see cref="NavigationManager.BaseUri"/>,
-/// never a configurable address the way <c>NativeRouterChannelProvider</c>'s is for the MAUI host. The
-/// browser's own same-origin cookie policy is what carries the ADR-0012 session cookie on every call
-/// with no explicit credential handling needed here.
+/// never a configurable address. The browser's own same-origin cookie policy is what carries the
+/// ADR-0012 session cookie on every call with no explicit credential handling needed here.
 /// </remarks>
 public sealed class WasmRouterChannelProvider : IRouterChannelProvider
 {

@@ -7,7 +7,8 @@
 > docs this file originally pointed at.
 
 **Status:** shipped. See `docs/router/self-organizing-classification-plan.md` Phase T4's status block for
-the delivered summary.
+the delivered summary. The as-built, citable method (what the product actually computes today, including
+the frozen-baseline correction below) is [`../../score-delta-methodology.md`](../../score-delta-methodology.md).
 **Builds on:** [`self-organizing-classification-plan.md`](self-organizing-classification-plan.md) Phase T4 (shipped).
 
 > **Frozen-baseline correction (2026-09-09).** This plan's original "Not changing" list froze
@@ -263,6 +264,13 @@ MAE-ordering tests (the accuracy machinery is retained).
 
 `RoutingRoiPointView`, `ManagementFacade.GetRoutingRoiAsync`, the `/admin/usage/routing-roi` JSON
 contract, `DimBestVoter`'s own live-preferring blend, and the cluster/dimension accuracy fields.
+
+> **Transport has moved since (not by this plan).** The plain-HTTP `/admin/usage/*` REST surface named
+> here — including that JSON contract and `ManagementFacade.GetRoutingRoiAsync` — was later replaced by
+> the `UsageAdminService.GetRoutingRoi` gRPC call (`UsageAdminGrpcService` →
+> `ManagementReportingService.GetRoutingRoiAsync`). The names above are kept as the record of what this
+> plan left alone; do not treat them as reachable APIs today. Current shape:
+> [`../../score-delta-methodology.md`](../../score-delta-methodology.md).
 `request_transcripts.dim_best_model` stays exactly as it was - it feeds the dashboard's
 requested-vs-routed telemetry, not the ROI yardstick.
 
