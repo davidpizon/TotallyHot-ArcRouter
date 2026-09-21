@@ -15,7 +15,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <see cref="IManagementTokenProvider"/> so every management surface is gated identically and a
 /// <see cref="IManagementTokenProvider.Regenerate"/> call takes effect everywhere without a restart. TLS
 /// on this port is defense-in-depth on top of this check, not a substitute for it - see
-/// <see cref="TelemetryTlsCertificate"/>'s remarks on the loopback trust model, and
+/// <see cref="LocalCertificateAuthority"/>'s remarks on the loopback trust model, and
 /// docs/router/signalr-hub-security.md §2 for the original (SignalR-era) design this translates.
 /// </summary>
 public sealed class TelemetryAuthInterceptor : Interceptor

@@ -42,9 +42,7 @@ public static class ServiceCollectionExtensions
         // toucher: since Phase P7 it calls LocalCertificateAuthority.GetOrCreateLeaf() (in turn
         // GetOrCreateCa()) for its own TLS listener, which stores the CA's private-key password in
         // ProtectedSecretStore - so it must be registered, and therefore started, after
-        // AddBackgroundServices, not before it. (This superseded TelemetryTlsCertificate.GetOrCreate(),
-        // which used to be the toucher this comment named before Phase P7 - see that class's own remarks
-        // for why it is no longer wired into any production listener.) See this method's own
+        // AddBackgroundServices, not before it. See this method's own
         // hosted-service-ordering remarks, which already documented the identical constraint for
         // AddProxyHost's ProxyHostedService.
         services.AddBackgroundServices();

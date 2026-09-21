@@ -8,7 +8,7 @@ namespace TotallyHot.ArcRouter.Mcp;
 /// an <c>Authorization: Bearer &lt;token&gt;</c> header. Placed before <c>MapMcp()</c> in the MCP host's
 /// pipeline (<see cref="McpServer"/>), so every tool call - list or mutate - is authenticated; TLS on
 /// this port is defense-in-depth on top, not a substitute (see
-/// <see cref="TotallyHot.ArcRouter.Telemetry.TelemetryTlsCertificate"/>'s remarks on the loopback trust model).
+/// <see cref="TotallyHot.ArcRouter.Telemetry.LocalCertificateAuthority"/>'s remarks on the loopback trust model).
 /// Reads <see cref="IManagementTokenProvider.CurrentToken"/> on every request rather than a captured
 /// string, so a management-token rotation (Phase P4) takes effect on this endpoint immediately.
 /// </summary>
