@@ -137,7 +137,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                 message:
                 "No pending user/task question for correlation {CorrelationId}; skipping shadow-judge scoring.",
                 job.CorrelationId);
-            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId,
+            await _aggregator.AbandonGraderAsync(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
                 reason: GraderQuestionText.MissingReason("judge"), cancellationToken: stoppingToken)
                 .ConfigureAwait(false);
             return;
