@@ -138,12 +138,11 @@ flowchart TD
      stat with a tooltip explaining the metric.
    - Split view, right panel (`SessionConversationPane.razor`): a chat-style, chronological reproduction
      of the session's turns - a labeled separator per turn (turn number, agent chip, model, timestamp)
-     above a request bubble (left) and a response bubble (right), tinted with the turn's agent color (the
-     same tinted-row visual language `ColorUtils.GetColorForAgent` gives the routing decision log).
-     `TurnCard.razor` (the compact two-line card with the "ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx,
-     Model" stat strip and the click-to-expand routing-decision drill-down) is not currently instantiated
-     anywhere in the Sessions tab or elsewhere in the app - it predates the double-click split view and
-     is effectively dead code, kept alive only by `TurnCardTests.cs`.
+     above a request bubble (left) and a response bubble (right), tinted with the turn's agent color
+     (`ColorUtils.GetColorForAgent`). This split view replaced `TurnCard.razor` (the compact two-line
+     card with the "ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model" stat strip and the
+     click-to-expand routing-decision drill-down); once nothing instantiated it, the component, its
+     tests, and its CSS were deleted.
    - Tooltips: metric tooltips across the tab are floating tooltips driven by `data-tip` attributes
      (`wwwroot/js/tooltips.js`, a single body-level element) rather than native `title` attributes,
      so they render reliably and are never clipped by scroll containers.
