@@ -433,13 +433,14 @@ read the true value throughout.
 .value-tick { animation: value-tick 400ms var(--ease-out-quart); }
 ```
 
-### Disclosure Expand — *CSS ships in `app.css`, but currently unused (§10)*
+### Disclosure Expand — *Proposed (CSS removed with `TurnCard`)*
 
 `TurnCard` expanded to show the routing-decision log this way — animating `opacity` and `transform`
 on the revealed content, never `height` (the payload blocks are variable-height, and height animation
-forces layout on every frame in a WebView). `TurnCard` is orphaned since the Sessions-tab rebuild
-(`DESIGN.md` §1), so nothing invokes this pattern today; the `.disclosure-enter` keyframe stays in
-`app.css` for whichever future disclosure UI needs the same "animate reveal, not height" rule.
+forces layout on every frame in a WebView). `TurnCard` and its `.disclosure-enter` CSS were deleted
+once nothing rendered them, so nothing in `app.css` implements this pattern today. A future disclosure
+that mounts its content with `@if` should add the rule below together with its first consumer, not
+before.
 
 ```css
 @keyframes disclosure-enter {
@@ -590,7 +591,6 @@ accessibility setting forcing `prefers-reduced-motion: reduce` (collapses all du
 | Panel Crossfade on tab switch | `Dashboard.razor` — `@key`-ed wrapper in `<main>` |
 | Overlay Rise | `SettingsModal`, `ProviderEditDialog` |
 | Row Enter + first-mount stagger | `ConversationCard` via `LiveStream._listHasRendered` |
-| Disclosure Expand + causal-order stagger | `TurnCard` routing-decision log — orphaned since the Sessions-tab rebuild (`DESIGN.md` §1); CSS ships, no live consumer |
 
 ### Not yet implemented
 
