@@ -50,9 +50,9 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     private readonly IPortfolioGraderAvailability _portfolioGraderAvailability;
 
     /// <summary>
-    /// Guards <see cref="_pending"/> and <see cref="_insertionOrder"/>. All five public methods
-    /// (<see cref="SubmitAsync"/>, <see cref="CompleteWithJudgeAsync"/>, <see cref="AbandonJudgeAsync"/>,
-    /// <see cref="SweepExpiredAsync"/>, and the <see cref="PendingCount"/> diagnostic) currently serialize
+    /// Guards <see cref="_pending"/> and <see cref="_insertionOrder"/>. All four public methods
+    /// (<see cref="SubmitAsync"/>, <see cref="CompleteGraderAsync"/>, <see cref="AbandonGraderAsync"/>,
+    /// <see cref="SweepExpiredAsync"/>) plus the <see cref="PendingCount"/> diagnostic currently serialize
     /// through this single lock. That is a deliberate simplicity choice, not an oversight: the pending
     /// table is small (bounded by <see cref="_capacity"/>) and contention is expected to be low, so a
     /// single lock is easier to reason about correctly than finer-grained locking. Revisit only if
@@ -198,7 +198,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// consume the full join timeout for a grade nobody will ever run
     /// (docs/router/judge-join-deadlock-fix-plan.md). Called after the entry is already visible in
     /// <see cref="_pending"/>, so a dispatcher whose grader resolves inline (or races ahead of this method
-    /// returning) can call <see cref="CompleteWithJudgeAsync"/> and find the entry rather than losing the
+    /// returning) can call <see cref="CompleteGraderAsync"/> and find the entry rather than losing the
     /// race against its own creation.
     /// </summary>
     private async Task DispatchPendingGradersAsync(
@@ -238,38 +238,6 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     }
 
     /// <inheritdoc/>
-    public Task<bool> CompleteWithJudgeAsync(
-        string correlationId,
-        double judgeScore,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
-
-        var clamped = Math.Clamp(value: judgeScore, 0.0, 1.0);
-        return JoinGraderAsync(
-            correlationId: correlationId,
-            graderKey: GraderKeys.Judge,
-            apply: held => held with { JudgeScore = clamped },
-            cancellationToken: cancellationToken);
-    }
-
-    /// <inheritdoc/>
-    public Task<bool> AbandonJudgeAsync(
-        string correlationId,
-        string reason,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-
-        return AbandonGraderAsync(
-            correlationId: correlationId,
-            graderKey: GraderKeys.Judge,
-            reason: reason,
-            cancellationToken: cancellationToken);
-    }
-
-    /// <inheritdoc/>
     public Task<bool> CompleteGraderAsync(
         string correlationId,
         string graderKey,
@@ -283,13 +251,23 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         return JoinGraderAsync(
             correlationId: correlationId,
             graderKey: graderKey,
-            apply: held =>
-            {
-                var scores = new Dictionary<string, double>(held.GraderScores, StringComparer.OrdinalIgnoreCase)
-                { [graderKey] = clamped };
-                return held with { GraderScores = scores };
-            },
+            apply: held => ApplyGraderScore(held: held, graderKey: graderKey, clamped: clamped),
             cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Stamps a grader's score onto the held result. <see cref="GraderKeys.Judge"/> writes the named
+    /// <see cref="QualityResult.JudgeScore"/> field the scorer and <c>IsJudgeScored</c> provenance still
+    /// read; every other key goes into <see cref="QualityResult.GraderScores"/>.
+    /// </summary>
+    private static QualityResult ApplyGraderScore(QualityResult held, string graderKey, double clamped)
+    {
+        if (string.Equals(graderKey, GraderKeys.Judge, StringComparison.OrdinalIgnoreCase))
+            return held with { JudgeScore = clamped };
+
+        var scores = new Dictionary<string, double>(held.GraderScores, StringComparer.OrdinalIgnoreCase)
+        { [graderKey] = clamped };
+        return held with { GraderScores = scores };
     }
 
     /// <summary>

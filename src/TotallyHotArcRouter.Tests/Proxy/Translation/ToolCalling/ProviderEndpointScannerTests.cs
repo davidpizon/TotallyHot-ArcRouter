@@ -2,6 +2,7 @@ using Moq;
 using System.Net;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
@@ -92,6 +93,30 @@ public sealed class ProviderEndpointScannerTests
     private static ProviderOptions Provider(string baseUrl, bool probeAnthropicMessages = false)
     {
         return new ProviderOptions { BaseUrl = baseUrl, ProbeAnthropicMessages = probeAnthropicMessages };
+    }
+
+    // ----- Production transport -----
+
+    [Fact]
+    public async Task WithFactory_ProbesThroughTheManagementNamedClient()
+    {
+        // Every other test here passes a stub-wrapped HttpClient, which skips the factory branch
+        // production runs. A wrong client name would bypass the ManagementFacade registration entirely.
+        var factory = new RecordingHttpClientFactory(request =>
+            request.RequestUri!.AbsolutePath.EndsWith(value: "/v1/models", comparisonType: StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(OpenAiBody) }
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+        var scanner = new ProviderEndpointScanner(environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClientFactory: factory);
+
+        var result = await scanner.ScanAsync(providerKey: "openai", provider: Provider("https://api.openai.com"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.OpenAiCompatible);
+        Assert.NotEmpty(factory.RequestedNames);
+        Assert.All(collection: factory.RequestedNames,
+            action: name => Assert.Equal(expected: ManagementFacade.HttpClientName, actual: name));
+        Assert.Equal(expected: factory.RequestedNames.Count, actual: factory.Requests.Count);
     }
 
     // ----- Each flavor detected -----

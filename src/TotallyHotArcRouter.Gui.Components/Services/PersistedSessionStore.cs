@@ -37,7 +37,7 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
     public PersistedSessionStore(
         IRouterChannelProvider channelProvider,
         ILogger<PersistedSessionStore>? logger = null)
-        : base(client: new PersistedSessionsClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new PersistedSessionsClient(channelProvider.CallInvoker), logger: logger)
     {
     }
 

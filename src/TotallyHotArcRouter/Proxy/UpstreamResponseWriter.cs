@@ -18,7 +18,39 @@ namespace TotallyHot.ArcRouter.Proxy;
 internal readonly record struct RoutingResponseHeaders(
     string RequestedModel,
     string RoutedModel,
-    string SubstitutionReason);
+    string SubstitutionReason)
+{
+    /// <summary>
+    /// Builds the three headers from the typed substitution reason, so callers do not each call
+    /// <see cref="Enum.ToString()"/> and risk drifting from one another.
+    /// </summary>
+    /// <param name="requestedModel">The client's literal <c>model</c> string.</param>
+    /// <param name="routedModel">The model that served - or the one the router would have served.</param>
+    /// <param name="substitutionReason">Why they differ, or the circuit-open/failover cause on an error path.</param>
+    public static RoutingResponseHeaders From(
+        string requestedModel,
+        string routedModel,
+        RoutingSubstitutionReason substitutionReason)
+    {
+        return new RoutingResponseHeaders(
+            RequestedModel: requestedModel,
+            RoutedModel: routedModel,
+            SubstitutionReason: substitutionReason.ToString());
+    }
+
+    /// <summary>
+    /// Writes the three <c>X-ArcRouter-*</c> headers onto <paramref name="context"/> before any body
+    /// byte is committed, matching <see cref="UpstreamResponseWriter"/>'s success-path placement so a
+    /// circuit-open 503 or exhausted-cascade 502 still reports requested vs routed and the reason.
+    /// </summary>
+    /// <param name="context">The client response being written.</param>
+    public void WriteTo(HttpContext context)
+    {
+        context.Response.Headers[ProxyMiddleware.RequestedModelHeaderName] = RequestedModel;
+        context.Response.Headers[ProxyMiddleware.RoutedModelHeaderName] = RoutedModel;
+        context.Response.Headers[ProxyMiddleware.SubstitutionReasonHeaderName] = SubstitutionReason;
+    }
+}
 
 /// <summary>
 /// The outcome of committing one upstream response to the client.
@@ -229,9 +261,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         // docs/router/orchestrator-live-path-plan.md §M2.2: requested-vs-routed surfaced in response
         // headers (not the provider-shaped JSON body) so it works identically for streaming and buffered
         // responses. Set before any body byte is written, alongside the rest of this hop's headers above.
-        context.Response.Headers[ProxyMiddleware.RequestedModelHeaderName] = routingHeaders.RequestedModel;
-        context.Response.Headers[ProxyMiddleware.RoutedModelHeaderName] = routingHeaders.RoutedModel;
-        context.Response.Headers[ProxyMiddleware.SubstitutionReasonHeaderName] = routingHeaders.SubstitutionReason;
+        routingHeaders.WriteTo(context);
 
         return isStreaming;
     }

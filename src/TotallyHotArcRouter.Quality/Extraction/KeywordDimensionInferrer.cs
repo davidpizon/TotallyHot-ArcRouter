@@ -22,10 +22,7 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
     /// <inheritdoc/>
     public string Infer(string prompt, CodeLanguage language)
     {
-        // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
-        // Nullable annotations are a compile-time contract, not a runtime guarantee - this implements a
-        // public interface method any caller can reach with null.
-        var p = (prompt ?? string.Empty).ToLowerInvariant();
+        var p = prompt.ToLowerInvariant();
 
         if (ContainsAny(haystack: p, "port to", "port from", "translate to", "translate from", "convert from",
                 "cross-language", "cross language") ||
@@ -38,7 +35,8 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
         if (ContainsAny(haystack: p, "refactor", "clean up", "rename", "restructure", "simplify"))
             return RouterDimension.CodeRefactoring;
 
-        if (ContainsAny(haystack: p, "unit test", "write tests", "test case", "pytest", "xunit", "jest"))
+        if (ContainsAny(haystack: p, "unit test", "unit tests", "write tests", "test case", "pytest", "xunit",
+                "jest"))
             return RouterDimension.TestGeneration;
 
         if (ContainsAny(haystack: p, "explain", "what does", "how does", "understand", "walk through"))
@@ -56,11 +54,15 @@ public sealed class KeywordDimensionInferrer : IDimensionInferrer
         return RouterDimension.CodeGeneration;
     }
 
-    /// <summary>Returns true if the haystack contains any of the given needles, using an ordinal substring match.</summary>
+    /// <summary>
+    /// Returns true if the haystack contains any of the given needles as whole words. A substring match
+    /// would misclassify prompts that merely contain a keyword inside a longer token (e.g. "fix" inside
+    /// "prefix").
+    /// </summary>
     private static bool ContainsAny(string haystack, params string[] needles)
     {
         foreach (var needle in needles)
-            if (haystack.Contains(value: needle, comparisonType: StringComparison.Ordinal))
+            if (WordMatching.ContainsWholeWord(haystack: haystack, needle: needle))
                 return true;
 
         return false;

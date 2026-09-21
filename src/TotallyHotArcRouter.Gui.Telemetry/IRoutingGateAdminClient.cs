@@ -2,7 +2,7 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
 /// The routing-gate read/write operations the tray's "Enable Routing"/"Disable Routing" toggle needs. An
-/// interface so <c>RoutingGateStore</c> can be unit-tested against a fake without a live proxy or a gRPC
+/// interface so <c>RoutingGateMonitor</c> can be unit-tested against a fake without a live proxy or a gRPC
 /// channel.
 /// </summary>
 public interface IRoutingGateAdminClient

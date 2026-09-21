@@ -28,7 +28,7 @@ public sealed class JudgeCalibrationAdminStore : AdminStoreBase<IJudgeCalibratio
     public JudgeCalibrationAdminStore(
         IRouterChannelProvider channelProvider,
         ILogger<JudgeCalibrationAdminStore>? logger = null)
-        : base(client: new JudgeCalibrationAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new JudgeCalibrationAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         ServerAddress = channelProvider.ServerAddress;
     }

@@ -10,7 +10,7 @@ namespace TotallyHot.ArcRouter.Judge;
 public interface IJudgeClient
 {
     /// <summary>Scores a single response against a dimension's G-Eval criteria.</summary>
-    /// <param name="request">The dimension and response text to score.</param>
+    /// <param name="request">The dimension, response text, and user/task question to score against.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>
     /// The judge's score and whether it was computed via probability weighting, or <see langword="null"/>
@@ -27,12 +27,11 @@ public interface IJudgeClient
 /// <param name="Prompt">
 /// The user prompt <paramref name="ResponseText"/> was written to answer, recovered from
 /// <see cref="PendingPromptCache"/> the same way <paramref name="ResponseText"/> is recovered from
-/// <see cref="PendingResponseTextCache"/>, or an empty string when it was never cached or already aged out.
-/// Lets the judge grade the response <em>against its requirement</em>
-/// (docs/research/code-quality-metrics-assessment.md §1's first finding) instead of in isolation. Defaults
-/// to empty so existing two-argument call sites keep compiling.
+/// <see cref="PendingResponseTextCache"/>. Required: <see cref="GEvalJudgeClient"/> fails closed rather
+/// than grading the response in isolation when this is missing or whitespace-only
+/// (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
 /// </param>
-public sealed record JudgeScoreRequest(string Dimension, string ResponseText, string Prompt = "");
+public sealed record JudgeScoreRequest(string Dimension, string ResponseText, string Prompt);
 
 /// <summary>The result of one <see cref="IJudgeClient.ScoreAsync"/> call.</summary>
 /// <param name="Score">The judge's score, normalized to <c>[0, 1]</c>.</param>

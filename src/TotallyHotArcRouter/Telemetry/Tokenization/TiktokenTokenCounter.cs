@@ -118,7 +118,7 @@ public sealed class TiktokenTokenCounter : ITokenCounter
     /// their real tokenizers, which genuinely differ (Anthropic's own Opus 4.7+ tokenizer alone runs
     /// roughly 1x-1.35x its predecessor).
     /// </remarks>
-    internal static bool IsNativeEncoding(ModelKey key)
+    private static bool IsNativeEncoding(ModelKey key)
     {
         if (string.IsNullOrWhiteSpace(key.ModelName)) return false;
 

@@ -44,8 +44,10 @@ The consequences are worth stating plainly rather than glossing:
 - **The strongest signal is gone.** "It compiled, ran, and exited cleanly" is more informative than
   anything static analysis can prove. The judge partially compensates; it does not replace it.
 - **Non-C#/JS languages lost their authoritative check.** A Tier-1 subprocess used to be Python's real
-  syntax verdict. There is no managed Python parser, so Python and shell now carry a heuristic verdict
-  that is *explicitly marked* as such (§3.1) and weighted at half.
+  syntax verdict. There is no managed Python parser, so Python and shell now carry a language-aware
+  heuristic verdict that is *explicitly marked* as such (§3.1) and weighted at half. The scanners exist
+  to stop common real outputs (triple-quoted apostrophes, here-documents, `${#var}`, `case` arms) from
+  looking invalid under a raw bracket count — not to promote the verdict to authoritative.
 - **The pipeline is now platform-independent.** There is no capability probe, no degraded mode, and no
   OS-gated registration. The graph is identical on Windows, Linux, and macOS.
 
@@ -123,8 +125,8 @@ scorer depends on.
 |---|---|---|
 | C# | Roslyn (`CSharpSyntaxTree.ParseText`) | yes |
 | JavaScript / TypeScript | Acornima (module grammar, then script grammar) | yes |
-| Python | `DelimiterBalance` heuristic | **no** |
-| Shell | `DelimiterBalance` heuristic | **no** |
+| Python | `PythonStructuralParser` (quoting, prefixes, f/t-strings; non-authoritative) | **no** |
+| Shell | `ShellStructuralParser` (quoting, `$(...)` / `${...}`, here-documents, `case` arms; non-authoritative) | **no** |
 | Unknown | `DelimiterBalance` heuristic | **no** |
 
 JavaScript is tried as a module first and then as a script. A model's answer is as likely to be a bare
@@ -133,8 +135,9 @@ implicit strict mode — accepting either is what stops good code failing on a t
 
 A non-authoritative verdict is **marked**, never silently promoted: the result carries
 `SyntaxAuthoritative = false` and `DegradedReason = "heuristic-syntax-check"`, and §4 halves its weight.
-Letting a bracket count pass for a compiler's verdict would quietly inflate every Python score the router
-learns from.
+Letting a heuristic pass for a compiler's verdict would quietly inflate every Python score the router
+learns from. Python and shell still get more than a raw bracket count: dedicated scanners understand
+quoting, interpolations, here-documents, and `case` arms so common real outputs do not fail the scan.
 
 ### 3.2 Static analyzers
 
@@ -180,7 +183,7 @@ small, self-contained catalog picked for being cheap to detect from text and str
 what the other analyzers already report: magic numbers, overlong lines, empty `catch`/`except` blocks, and
 long parameter/argument lists.
 
-Both are approximate by design, in the same spirit as the `DelimiterBalance` heuristic in §3.1: a token
+Both are approximate by design, in the same spirit as the Python/shell scanners in §3.1: a token
 overlap or a regex-counted magic number is a proxy, not a compiler's verdict, and neither can zero a
 snippet on its own (both floor at 0.3).
 
@@ -341,14 +344,17 @@ written; since a result needing judgment is never written until judged, that tri
 after the outcome it was meant to produce, and every judged request silently degraded to the
 `JudgeJoinTimeoutMs` row above instead of the "judge grade arrives" row.
 
-**Q2: the judge is now prompt-aware.** `JudgeScoreRequest` carries an optional `Prompt` alongside
-`ResponseText`, recovered from `PendingPromptCache` — a second cache mirroring `PendingResponseTextCache`
+**Q2: the judge is now prompt-aware, and fails closed without the question.** `JudgeScoreRequest.Prompt`
+is required, recovered from `PendingPromptCache` — a second cache mirroring `PendingResponseTextCache`
 exactly (same TTL/capacity bounds, same in-process-only lifetime) and set at the same point in
 `RequestTelemetryPublisher` the response text is, gated on the same live `JudgeOptions.Enabled` check.
-`GEvalJudgeClient.BuildPrompt` weaves it into the G-Eval prompt as a "Task the response was written for"
-section, present only when a prompt was actually recovered — an empty prompt (never cached, or aged out
-faster than the queue drained) omits the section entirely rather than filling it with a placeholder, so the
-judge is never told a task existed when none could be recovered.
+`GEvalJudgeClient.BuildPrompt` (and every Q3 portfolio grader, via `GraderQuestionText.FormatTaskSection`)
+weaves it into the backbone prompt as a "Task the response was written for" section. A missing,
+whitespace-only, or aged-out prompt does **not** omit the section and grade the response in isolation:
+the drain worker abandons with `judge-question-missing` (or `{grader}-question-missing`) and the client
+refuses to call the backbone. Response-only scoring is the gap
+`docs/research/code-quality-metrics-assessment.md` §1 named first; GitHub issue #114 is the fail-closed
+close of that gap.
 
 ### 5.1 Judge enablement
 

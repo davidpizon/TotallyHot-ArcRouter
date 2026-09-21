@@ -20,9 +20,10 @@ public class PortfolioGraderDrainServiceTests
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var promptCache = CreatePromptCache();
         var client = new FakeClient(GraderKeys.CodeJudge, 0.8);
         var aggregator = new RecordingAggregator();
-        var service = CreateService(cache: cache, clients: [client], aggregator: aggregator);
+        var service = CreateService(cache: cache, promptCache: promptCache, clients: [client], aggregator: aggregator);
 
         await service.ProcessAsync(job: MakeJob(GraderKeys.CodeJudge), stoppingToken: TestContext.Current.CancellationToken);
 
@@ -32,6 +33,7 @@ public class PortfolioGraderDrainServiceTests
         Assert.Equal(0.8, actual: completed.Score);
         Assert.Empty(aggregator.Abandoned);
         Assert.True(cache.TryPeek(correlationId: "corr-1", text: out _));
+        Assert.Equal(expected: "write a function that adds two numbers", actual: client.LastRequest?.Prompt);
     }
 
     [Fact]
@@ -123,9 +125,35 @@ public class PortfolioGraderDrainServiceTests
 
         await service.ProcessAsync(job: MakeJob(GraderKeys.CodeJudge), stoppingToken: TestContext.Current.CancellationToken);
 
-        var abandoned = Assert.Single(aggregator.Abandoned);
-        Assert.Equal(expected: "codejudge-failed", actual: abandoned.Reason);
+        Assert.Equal(expected: "codejudge-failed", actual: Assert.Single(aggregator.Abandoned).Reason);
         Assert.Empty(aggregator.Completed);
+    }
+
+    /// <summary>
+    /// GitHub issue #114: a missing or whitespace-only question must fail closed. The drain worker
+    /// abandons with its own reason and never calls the backbone, so a response-only score cannot join.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "")]
+    [InlineData(true, "")]
+    [InlineData(true, "   ")]
+    public async Task ProcessAsync_QuestionMissing_AbandonsWithQuestionMissingReasonAndDoesNotCallTheClient(
+        bool cachePrompt, string prompt)
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        if (cachePrompt) promptCache.Set(correlationId: "corr-1", prompt: prompt);
+        var client = new FakeClient(GraderKeys.CodeJudge, 0.8);
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, promptCache: promptCache, clients: [client], aggregator: aggregator);
+
+        await service.ProcessAsync(job: MakeJob(GraderKeys.CodeJudge),
+            stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.False(client.WasCalled);
+        Assert.Empty(aggregator.Completed);
+        Assert.Equal(expected: "codejudge-question-missing", actual: Assert.Single(aggregator.Abandoned).Reason);
     }
 
     private static PortfolioGraderJob MakeJob(string graderKey, string correlationId = "corr-1")
@@ -138,17 +166,30 @@ public class PortfolioGraderDrainServiceTests
         return new PendingResponseTextCache(Options.Create(new JudgeOptions()));
     }
 
+    /// <summary>
+    /// A prompt cache already holding the question for <c>corr-1</c>. Scoring-path tests take this
+    /// default; missing-question tests pass their own empty cache.
+    /// </summary>
+    private static PendingPromptCache CreatePromptCache(string correlationId = "corr-1",
+        string prompt = "write a function that adds two numbers")
+    {
+        var cache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        cache.Set(correlationId: correlationId, prompt: prompt);
+        return cache;
+    }
+
     private static PortfolioGraderDrainService CreateService(
         PendingResponseTextCache cache,
         IEnumerable<IPortfolioGraderClient> clients,
         IQualityScoreAggregator? aggregator = null,
         StaticOptionsMonitor<PortfolioGraderOptions>? options = null,
-        PendingGraderBackboneCache? backboneCache = null)
+        PendingGraderBackboneCache? backboneCache = null,
+        PendingPromptCache? promptCache = null)
     {
         return new PortfolioGraderDrainService(
             queue: new PortfolioGraderQueue(Options.Create(new JudgeOptions())),
             pendingResponseTextCache: cache,
-            pendingPromptCache: new PendingPromptCache(Options.Create(new JudgeOptions())),
+            pendingPromptCache: promptCache ?? CreatePromptCache(),
             pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
             clients: clients,
             options: options ?? new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions
@@ -164,12 +205,15 @@ public class PortfolioGraderDrainServiceTests
     {
         public bool WasCalled { get; private set; }
 
+        public PortfolioGraderScoreRequest? LastRequest { get; private set; }
+
         public string GraderKey => graderKey;
 
         public Task<PortfolioGraderScoreResult?> ScoreAsync(PortfolioGraderScoreRequest request,
             CancellationToken cancellationToken = default)
         {
             WasCalled = true;
+            LastRequest = request;
             if (exception is not null) return Task.FromException<PortfolioGraderScoreResult?>(exception);
             return Task.FromResult(score is { } value
                 ? new PortfolioGraderScoreResult(Score: value, GraderModel: backboneModel)
@@ -187,18 +231,6 @@ public class PortfolioGraderDrainServiceTests
         public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
-        }
-
-        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(false);
-        }
-
-        public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(false);
         }
 
         public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,

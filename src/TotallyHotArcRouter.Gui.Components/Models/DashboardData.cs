@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Charts;
 
 namespace TotallyHot.ArcRouter.Gui.Models;
@@ -56,8 +57,7 @@ public sealed record ConversationTurn(
     // Telemetry.RoutingSubstitutionReason name), or null when the source has no live-routing concept.
     // Plumbed through by Phase M2 (docs/router/orchestrator-live-path-plan.md §M2.2) and rendered by
     // Phase M3.1: LiveConversationMapper.BuildRoutingSteps turns a visible reason (anything but None or
-    // AutoSelect) into the Live Stream inspector's substitution warning step, and TurnCard extends its
-    // fallback styling/accessible label to the same condition.
+    // AutoSelect) into the Live Stream inspector's substitution warning step.
     string? RequestedModel = null,
     string? RoutedModel = null,
     string? SubstitutionReason = null);
@@ -117,6 +117,38 @@ public static class MockData
         new(Slot: "Sat", 1_840_000m, 620_000m),
         new(Slot: "Sun", 1_240_000m, 380_000m)
     ];
+
+    /// <summary>Mock per-model spend for the Report Card tab's offline/no-proxy fallback.</summary>
+    public static readonly IReadOnlyList<ModelSpendRowView> ReportCardSpend =
+    [
+        new(Model: "gpt-4o-mini", 12.40m, 84),
+        new(Model: "claude-3-haiku", 8.10m, 51),
+        new(Model: "gemini-1.5-flash", 3.20m, 37)
+    ];
+
+    /// <summary>Mock A–F grade mix for the Report Card tab's offline/no-proxy fallback.</summary>
+    public static readonly IReadOnlyList<GradeMixRowView> ReportCardGradeMix =
+    [
+        new(Grade: "A", 42, 42.0m),
+        new(Grade: "B", 31, 31.0m),
+        new(Grade: "C", 18, 18.0m),
+        new(Grade: "D", 6, 6.0m),
+        new(Grade: "F", 3, 3.0m)
+    ];
+
+    /// <summary>Mock per-model score delta for the Report Card tab's offline/no-proxy fallback.</summary>
+    public static readonly IReadOnlyList<ModelScoreDeltaRowView> ReportCardScoreDelta =
+    [
+        new(Model: "gpt-4o-mini", 0.082, 40),
+        new(Model: "claude-3-haiku", 0.031, 28),
+        new(Model: "gemini-1.5-flash", -0.019, 22)
+    ];
+
+    /// <summary>Mock mean score delta for the Report Card tab's offline/no-proxy fallback.</summary>
+    public const double ReportCardMeanScoreDelta = 0.041;
+
+    /// <summary>Mock scored-request count for the Report Card tab's offline/no-proxy fallback.</summary>
+    public const int ReportCardScoredRequests = 100;
 
     /// <summary>Mock per-model token-volume market share for the Model Distribution tab.</summary>
     public static readonly IReadOnlyList<ModelShare> ModelShares =

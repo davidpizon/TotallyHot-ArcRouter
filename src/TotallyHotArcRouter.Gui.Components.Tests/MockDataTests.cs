@@ -15,6 +15,9 @@ public sealed class MockDataTests
     {
         MockData.TokenBuckets.Should().NotBeEmpty();
         MockData.ModelShares.Should().NotBeEmpty();
+        MockData.ReportCardSpend.Should().NotBeEmpty();
+        MockData.ReportCardGradeMix.Should().HaveCount(5);
+        MockData.ReportCardScoreDelta.Should().NotBeEmpty();
     }
 
     [Fact]

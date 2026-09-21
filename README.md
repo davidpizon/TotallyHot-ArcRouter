@@ -9,10 +9,46 @@
 TotallyHot Arc Router routes coding tasks to different backend models under a
 performance-cost tradeoff.
 
+## Point a client
+
+One OpenAI-compatible base URL. Send `"model": "auto"` and the router picks the model.
+
+**Base URL**
+
+```
+https://localhost:47101/v1
+```
+
+**Copy-paste**
+
+```bash
+export OPENAI_BASE_URL=https://localhost:47101/v1
+export OPENAI_API_KEY=not-needed
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="https://localhost:47101/v1", api_key="not-needed")
+client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "hello"}],
+)
+```
+
+```bash
+curl https://localhost:47101/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","messages":[{"role":"user","content":"hello"}]}'
+```
+
+Dashboard: `https://localhost:47104`. Windows/Linux/macOS installers already trust the local CA. Docker and browsers that ignore the OS store: [client TLS setup](docs/router/client-tls-setup.md). The `OPENAI_API_KEY` value is a placeholder — LLM forwarding is not authenticated; it only satisfies clients that refuse an empty key.
+
 ## Install
 
-TotallyHot Arc Router is cross-platform (web GUI migration plan Phases P6-P10): Windows, Linux, and
-macOS all run the same router, with a browser-based dashboard instead of a platform-specific GUI.
+TotallyHot Arc Router is cross-platform: Windows, Linux, and macOS all run the same router, with a
+browser-based Blazor WebAssembly dashboard. Windows additionally ships a small WinForms system-tray
+companion.
 
 **Windows** — Windows 10 version 1809 (build 17763) or later, x64. Download the `.msi` from the
 [latest release](https://github.com/davidpizon/TotallyHot-ArcRouter/releases/latest)
@@ -57,29 +93,36 @@ that doesn't read the OS trust store (Firefox, Chrome-on-Linux).
 or the [`Dockerfile`](src/TotallyHotArcRouter/Dockerfile)'s own header comment for the run command and
 first-time trust setup.
 
-Once running, open `https://localhost:47104` for the dashboard (see
-[`docs/router/client-tls-setup.md`](docs/router/client-tls-setup.md) for trusting the local CA, or accept
-the browser's self-signed-certificate warning for local use).
+Once running, open `https://localhost:47104` for the dashboard and point a client using
+[Point a client](#point-a-client) (see
+[`docs/router/client-tls-setup.md`](docs/router/client-tls-setup.md) if a client or browser does not
+yet trust the local CA).
 
 Releases marked **Pre-release** on the releases page are release candidates. They are
 built by the same pipeline and are safe to install, but they are deliberately
 invisible to the built-in update check, which only ever offers a promoted
 release (see
 [`docs/router/packaging-and-distribution.md`](docs/router/packaging-and-distribution.md)
-§7). Once installed, the router checks for new releases every six hours. On Windows the tray offers to
-apply what it finds via the MSI; on Linux/macOS an update is detected but must currently be applied by
-re-running the install script with a newer archive (no in-process apply path yet - see the web GUI
-migration plan's P10 section). Updates are never applied without an explicit action.
+§7). Once installed, the router checks for new releases every six hours. An available update
+shows in the dashboard's System Settings with a link to the release; nothing installs it in-process
+yet. On Windows, download and run the newer `.msi`; on Linux/macOS, re-run the install script with the
+newer archive. Updates are never applied without an explicit action. See
+[`docs/router/version-compatibility.md`](docs/router/version-compatibility.md).
 
 ## Routing
 
-Point an OpenAI/Anthropic-compatible client at the proxy and send `"model": "auto"`
-(any casing) to opt a request into routing — the router picks the model. A
-request naming a real, servable model (e.g. `"model": "gpt-5.4"`) is always
-served exactly that model; the router never substitutes a model the client
-explicitly named. An unrecognized name, an administratively stopped model, or
-a circuit-open/unhealthy provider fall back to the same routing decision as
-`auto`.
+The drop-in above is the whole client setup: one base URL, `"model": "auto"`
+(any casing). A request naming a real, servable model (e.g. `"model": "gpt-5.4"`)
+is always served exactly that model; the router never substitutes a model the
+client explicitly named. An unrecognized name, an administratively stopped
+model, or a circuit-open/unhealthy provider fall back to the same routing
+decision as `auto`.
+
+How that decision is scored against the policy that never learned — estimated
+regret, score-delta, and the Cost Analytics report card — is documented in
+[`docs/score-delta-methodology.md`](docs/score-delta-methodology.md). The
+plain-language loop that produces those receipts is
+[`docs/how-it-learns.md`](docs/how-it-learns.md).
 
 Every response — streaming or buffered — carries three headers reporting what
 happened:
@@ -120,7 +163,7 @@ for what it syncs and verifies):
 ```text
 src/TotallyHotArcRouter*/             .NET router, web dashboard (Blazor WebAssembly), Windows tray, quality verifier, tests
 packaging/linux/, packaging/macos/    systemd/LaunchDaemon units and install scripts (cross-platform service packaging)
-docs/                                 Design docs and handbook
+docs/                                 Living design docs; closed plans under docs/archive/
 
 %ProgramData%\TotallyHotArcRouter\coderouterbench.db   CodeRouterBench tables, synced on demand (Linux/macOS: see AppDataPaths)
 ```
@@ -144,8 +187,8 @@ paired are in [`AGENTS.md`](AGENTS.md).
 TotallyHot Arc Router is licensed under the
 [GNU Affero General Public License v3.0](LICENSE), with an
 [additional permission](LICENSE.exceptions.md) for linking against Microsoft
-platform components. As of the web GUI migration plan (2026-09-15), no shipped
-component actually requires this permission - the WebView2-dependent Windows
+platform components. No shipped
+component currently requires this permission - the WebView2-dependent Windows
 GUI it was written for is retired in favor of a cross-platform Blazor
 WebAssembly dashboard - but the exception is kept in force for any future
 Windows-specific component that might need it; see

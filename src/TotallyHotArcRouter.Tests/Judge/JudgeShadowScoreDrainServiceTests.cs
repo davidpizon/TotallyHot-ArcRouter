@@ -129,6 +129,7 @@ public class JudgeShadowScoreDrainServiceTests
 
         var completed = Assert.Single(aggregator.Completed);
         Assert.Equal(expected: "corr-1", actual: completed.CorrelationId);
+        Assert.Equal(expected: GraderKeys.Judge, actual: completed.GraderKey);
         Assert.Equal(0.8, actual: completed.Score);
         Assert.Empty(aggregator.Abandoned);
     }
@@ -150,10 +151,12 @@ public class JudgeShadowScoreDrainServiceTests
     }
 
     /// <summary>
-    /// Each of the three give-up paths abandons the join with its own reason, so an operator reading the
+    /// Each of the give-up paths abandons the join with its own reason, so an operator reading the
     /// aggregator can tell a switched-off judge from an evicted response from a judge that abstained. The
-    /// reason strings are asserted literally because they are the diagnostic - a silent rename would leave
-    /// the three cases indistinguishable.
+    /// missing-question path is covered separately (GitHub issue #114) rather than folded in here, because
+    /// it needs the response text cached and the prompt cache empty — a combination this theory's
+    /// textCached flag cannot express without a fourth parameter. The reason strings are asserted
+    /// literally because they are the diagnostic - a silent rename would leave the cases indistinguishable.
     /// </summary>
     [Theory]
     [InlineData(false, true, true, "judge-disabled")]
@@ -176,6 +179,7 @@ public class JudgeShadowScoreDrainServiceTests
 
         var abandoned = Assert.Single(aggregator.Abandoned);
         Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: GraderKeys.Judge, actual: abandoned.GraderKey);
         Assert.Equal(expected: expectedReason, actual: abandoned.Reason);
         Assert.Empty(aggregator.Completed);
     }
@@ -203,6 +207,7 @@ public class JudgeShadowScoreDrainServiceTests
 
         var abandoned = Assert.Single(aggregator.Abandoned);
         Assert.Equal(expected: "corr-1", actual: abandoned.CorrelationId);
+        Assert.Equal(expected: GraderKeys.Judge, actual: abandoned.GraderKey);
         Assert.Equal(expected: "judge-failed", actual: abandoned.Reason);
         Assert.Empty(aggregator.Completed);
     }
@@ -214,8 +219,7 @@ public class JudgeShadowScoreDrainServiceTests
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
-        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
-        promptCache.Set(correlationId: "corr-1", prompt: "write a function that adds two numbers");
+        var promptCache = CreatePromptCache(prompt: "write a function that adds two numbers");
         var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
         var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
             promptCache: promptCache);
@@ -226,22 +230,50 @@ public class JudgeShadowScoreDrainServiceTests
         Assert.True(promptCache.TryPeek(correlationId: "corr-1", prompt: out _));
     }
 
-    [Fact]
-    public async Task ProcessAsync_NoPromptCached_StillScoresWithAnEmptyPrompt()
+    /// <summary>
+    /// GitHub issue #114: grading without the user/task question is response-only scoring. A cache miss
+    /// (or a whitespace-only hit) must abandon the join and never call the backbone.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "")]
+    [InlineData(true, "")]
+    [InlineData(true, "   ")]
+    public async Task ProcessAsync_QuestionMissing_AbandonsWithQuestionMissingReasonAndDoesNotCallTheJudge(
+        bool cachePrompt, string prompt)
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        if (cachePrompt) promptCache.Set(correlationId: "corr-1", prompt: prompt);
         var judgeClient = new FakeJudgeClient(new JudgeScoreResult(0.8, true, JudgeModel: "free-judge-model"));
-        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore());
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, judgeClient: judgeClient, store: new FakeJudgeShadowScoreStore(),
+            promptCache: promptCache, aggregator: aggregator);
 
         await service.ProcessAsync(job: MakeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(expected: string.Empty, actual: judgeClient.LastRequest?.Prompt);
+        Assert.False(judgeClient.WasCalled);
+        Assert.Empty(aggregator.Completed);
+        var abandoned = Assert.Single(aggregator.Abandoned);
+        Assert.Equal(expected: "judge-question-missing", actual: abandoned.Reason);
     }
 
     private static PendingResponseTextCache CreateCache()
     {
         return new PendingResponseTextCache(Options.Create(new JudgeOptions()));
+    }
+
+    /// <summary>
+    /// A prompt cache already holding the question for <c>corr-1</c>, which is the correlation every
+    /// scoring-path test in this fixture uses. Tests that cover a missing question pass their own empty
+    /// cache instead of taking this default.
+    /// </summary>
+    private static PendingPromptCache CreatePromptCache(string correlationId = "corr-1",
+        string prompt = "write a function that adds two numbers")
+    {
+        var cache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        cache.Set(correlationId: correlationId, prompt: prompt);
+        return cache;
     }
 
     private static JudgeShadowScoreDrainService CreateService(
@@ -257,7 +289,7 @@ public class JudgeShadowScoreDrainServiceTests
         return new JudgeShadowScoreDrainService(
             queue: queue,
             pendingResponseTextCache: cache,
-            pendingPromptCache: promptCache ?? new PendingPromptCache(Options.Create(new JudgeOptions())),
+            pendingPromptCache: promptCache ?? CreatePromptCache(),
             pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
             judgeClient: judgeClient,
             store: store,
@@ -352,39 +384,27 @@ public class JudgeShadowScoreDrainServiceTests
     /// </summary>
     private sealed class RecordingAggregator : IQualityScoreAggregator
     {
-        public List<(string CorrelationId, double Score)> Completed { get; } = [];
+        public List<(string CorrelationId, string GraderKey, double Score)> Completed { get; } = [];
 
-        public List<(string CorrelationId, string Reason)> Abandoned { get; } = [];
+        public List<(string CorrelationId, string GraderKey, string Reason)> Abandoned { get; } = [];
 
         public Task SubmitAsync(QualityResult result, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
-        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
-            CancellationToken cancellationToken = default)
-        {
-            Completed.Add((correlationId, judgeScore));
-            return Task.FromResult(true);
-        }
-
-        public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
-            CancellationToken cancellationToken = default)
-        {
-            Abandoned.Add((correlationId, reason));
-            return Task.FromResult(true);
-        }
-
         public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(false);
+            Completed.Add((correlationId, graderKey, score));
+            return Task.FromResult(true);
         }
 
         public Task<bool> AbandonGraderAsync(string correlationId, string graderKey, string reason,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(false);
+            Abandoned.Add((correlationId, graderKey, reason));
+            return Task.FromResult(true);
         }
 
         public Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)

@@ -16,8 +16,8 @@ namespace TotallyHot.ArcRouter.Tray;
 /// <remarks>
 /// Every formatting/classification decision (the status caption, the balloon text) is delegated to
 /// <see cref="TrayStatusPresenter"/>; every router connection/reconnection decision is delegated to
-/// <see cref="RouterConnectionSupervisor"/>; every routing-gate/update interaction goes through the
-/// monitor/coordinator it hands back - this class is deliberately thin glue, matching AGENTS.md's
+/// <see cref="RouterConnectionSupervisor"/>; every routing-gate interaction goes through the
+/// monitor it hands back - this class is deliberately thin glue, matching AGENTS.md's
 /// <c>[ExcludeFromCodeCoverage]</c> convention for platform shells whose logic has already been extracted
 /// and tested elsewhere.
 /// </remarks>
@@ -27,8 +27,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     private const string ServiceName = "TotallyHotArcRouter";
     private static readonly TimeSpan ServiceStatusPollInterval = TimeSpan.FromSeconds(3);
 
-    private readonly ToolStripMenuItem _installUpdateItem;
-    private readonly IMsiUpdateApplier _msiUpdateApplier;
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _routingToggleItem;
     private readonly ToolStripMenuItem _statusCaptionItem;
@@ -54,14 +52,9 @@ public sealed class TrayApplicationContext : ApplicationContext
         _supervisor = new RouterConnectionSupervisor(new SessionRouterConnector(), serverAddress);
         _supervisor.Reconnected += OnReconnected;
 
-        _msiUpdateApplier = new MsiUpdateApplier(httpClient: new HttpClient(),
-            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<MsiUpdateApplier>.Instance);
-
         _statusCaptionItem = new ToolStripMenuItem("Router: not responding") { Enabled = false };
         _routingToggleItem = new ToolStripMenuItem("Routing Unavailable") { Enabled = false };
         _routingToggleItem.Click += (_, _) => ToggleRouting();
-        _installUpdateItem = new ToolStripMenuItem("Install update") { Visible = false };
-        _installUpdateItem.Click += async (_, _) => await ApplyUpdateAsync().ConfigureAwait(true);
 
         var showDashboardItem = new ToolStripMenuItem("Show Dashboard");
         showDashboardItem.Click += (_, _) => ShowDashboard();
@@ -74,7 +67,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(showDashboardItem);
         menu.Items.Add(_routingToggleItem);
-        menu.Items.Add(_installUpdateItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
         menu.Opening += (_, _) => RefreshMenuState();
@@ -126,7 +118,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     }
 
     /// <summary>
-    /// Re-reads the service status and routing-gate state and updates the menu's caption/toggle/update
+    /// Re-reads the service status and routing-gate state and updates the menu's caption and toggle
     /// items - called both on a timer and every time the menu is about to open, so a right-click always
     /// shows a fresh answer rather than whatever the last timer tick happened to see.
     /// </summary>
@@ -214,40 +206,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
 
         RefreshMenuState();
-    }
-
-    /// <summary>
-    /// Builds a fresh <see cref="TrayUpdateCoordinator"/> over the supervisor's current connection each
-    /// time this runs, rather than holding one for the tray's whole lifetime - the coordinator's
-    /// <see cref="UpdateAdminClient"/> is bound to one specific call invoker, which goes stale the moment
-    /// <see cref="RouterConnectionSupervisor"/> reconnects (a router restart, most likely - the same event
-    /// that invalidates the session cookie an old coordinator's calls would otherwise keep presenting).
-    /// </summary>
-    private async Task ApplyUpdateAsync()
-    {
-        if (_supervisor.Provider is not { } provider) return;
-
-        var coordinator = new TrayUpdateCoordinator(client: new UpdateAdminClient(provider.CallInvoker),
-            applier: _msiUpdateApplier, exitApplication: ExitApplication);
-
-        try
-        {
-            var status = await coordinator.CheckNowAsync().ConfigureAwait(true);
-            if (!status.UpdateAvailable) return;
-
-            var confirmed = MessageBox.Show(
-                text: $"Version {status.LatestVersion} is available. Install it now? The router service will restart.",
-                caption: "TotallyHot Arc Router Update", buttons: MessageBoxButtons.YesNo,
-                icon: MessageBoxIcon.Question);
-            if (confirmed != DialogResult.Yes) return;
-
-            await coordinator.ApplyAsync().ConfigureAwait(true);
-        }
-        catch (GrpcAdminException ex)
-        {
-            MessageBox.Show(text: $"Could not check for updates: {ex.Message}", caption: "TotallyHot Arc Router",
-                buttons: MessageBoxButtons.OK, icon: MessageBoxIcon.Warning);
-        }
     }
 
     private void ExitApplication()

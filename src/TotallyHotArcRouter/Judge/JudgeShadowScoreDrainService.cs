@@ -36,9 +36,9 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
     /// <param name="queue">The work queue to drain.</param>
     /// <param name="pendingResponseTextCache">Supplies the response text for each job, keyed by correlation id.</param>
     /// <param name="pendingPromptCache">
-    /// Supplies the prompt the response answered, keyed by the same correlation id. Best-effort: a miss
-    /// (aged out, or never cached) still lets the job proceed, just without a task section in the judge
-    /// prompt.
+    /// Supplies the prompt the response answered, keyed by the same correlation id. Required: a miss
+    /// (aged out, never cached, or whitespace-only) abandons the join with
+    /// <c>judge-question-missing</c> rather than letting the judge grade the response in isolation.
     /// </param>
     /// <param name="pendingGraderBackboneCache">
     /// Records which backbone actually judged this request (docs/router/grader-reliability-plan.md, Phase
@@ -112,8 +112,8 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
         // so a disabled judge still releases the retained response text rather than leaving it to age out.
         if (!_options.CurrentValue.Enabled)
         {
-            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-disabled",
-                cancellationToken: stoppingToken).ConfigureAwait(false);
+            await _aggregator.AbandonGraderAsync(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
+                reason: "judge-disabled", cancellationToken: stoppingToken).ConfigureAwait(false);
             return;
         }
 
@@ -123,14 +123,25 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             _logger.LogDebug(
                 message: "No pending response text for correlation {CorrelationId}; skipping shadow-judge scoring.",
                 job.CorrelationId);
-            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-text-evicted",
-                cancellationToken: stoppingToken).ConfigureAwait(false);
+            await _aggregator.AbandonGraderAsync(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
+                reason: "judge-text-evicted", cancellationToken: stoppingToken).ConfigureAwait(false);
             return;
         }
 
-        // Best-effort: a miss just means the judge grades without a task section, same as an operator
-        // running with transcript-adjacent caching aged out faster than the queue could drain.
-        _pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt);
+        // Fail closed: a recovered response without its question would be graded in isolation, which is
+        // exactly the response-only scoring docs/research/code-quality-metrics-assessment.md §1 forbids.
+        if (!_pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt) ||
+            !GraderQuestionText.IsPresent(prompt))
+        {
+            _logger.LogDebug(
+                message:
+                "No pending user/task question for correlation {CorrelationId}; skipping shadow-judge scoring.",
+                job.CorrelationId);
+            await _aggregator.AbandonGraderAsync(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
+                reason: GraderQuestionText.MissingReason("judge"), cancellationToken: stoppingToken)
+                .ConfigureAwait(false);
+            return;
+        }
 
         var stopwatch = Stopwatch.StartNew();
         try
@@ -138,7 +149,7 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             var result = await _judgeClient
                 .ScoreAsync(
                     request: new JudgeScoreRequest(Dimension: job.Dimension, ResponseText: responseText,
-                        Prompt: prompt ?? string.Empty),
+                        Prompt: prompt),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
             stopwatch.Stop();
 
@@ -150,8 +161,8 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
                 _logger.LogDebug(
                     message: "No eligible free judge model for correlation {CorrelationId}; recorded no shadow score.",
                     job.CorrelationId);
-                await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-abstained",
-                    cancellationToken: stoppingToken).ConfigureAwait(false);
+                await _aggregator.AbandonGraderAsync(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
+                    reason: "judge-abstained", cancellationToken: stoppingToken).ConfigureAwait(false);
                 return;
             }
 
@@ -181,8 +192,8 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             // audit trail for a score that is about to influence routing, so it must exist before the score
             // does - never the other way round, which would leave a routed-on grade with no record of where
             // it came from if the insert then failed.
-            await _aggregator.CompleteWithJudgeAsync(correlationId: job.CorrelationId, judgeScore: result.Score,
-                cancellationToken: stoppingToken).ConfigureAwait(false);
+            await _aggregator.CompleteGraderAsync(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
+                score: result.Score, cancellationToken: stoppingToken).ConfigureAwait(false);
 
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug(
@@ -208,8 +219,8 @@ public sealed class JudgeShadowScoreDrainService : BackgroundService
             // instead of releasing it immediately - the same stall this class exists to fix at the
             // dispatch side (docs/router/judge-join-deadlock-fix-plan.md), just triggered by a throw
             // here instead of a trigger that never fired at all.
-            await _aggregator.AbandonJudgeAsync(correlationId: job.CorrelationId, reason: "judge-failed",
-                cancellationToken: stoppingToken).ConfigureAwait(false);
+            await _aggregator.AbandonGraderAsync(correlationId: job.CorrelationId, graderKey: GraderKeys.Judge,
+                reason: "judge-failed", cancellationToken: stoppingToken).ConfigureAwait(false);
         }
     }
 }

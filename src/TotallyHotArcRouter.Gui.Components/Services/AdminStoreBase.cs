@@ -5,10 +5,10 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
 /// Base for the gRPC-backed Governance and System Settings singleton view-model stores. Owns the
-/// "singleton + <see cref="Changed"/> event + best-effort, reachability-tolerant" shape that eleven of them
-/// re-implemented identically: the three status properties, the change notification, disposal of whatever
-/// the store built itself, and — the part most worth having in one place — the rule that a load swallows
-/// its failure while a mutation records and rethrows.
+/// "singleton + <see cref="Changed"/> event + best-effort, reachability-tolerant" shape that the
+/// Governance and System Settings stores share: the three status properties, the change notification,
+/// disposal of whatever the store built itself, and — the part most worth having in one place — the rule
+/// that a load swallows its failure while a mutation records and rethrows.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,17 +18,9 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <see cref="RecordFailure"/>.
 /// </para>
 /// <para>
-/// <b>Three stores deliberately do not derive from this, and should not be made to.</b>
-/// <c>RoutingGateStore</c> polls continuously on a background loop behind its own lock, derives
-/// <c>IsReachable</c> from a three-valued connection state, is <see cref="IAsyncDisposable"/>, and raises
-/// <c>Changed</c> only on an actual change — it shares the name "Store" but none of the shape.
-/// <c>ProviderAdminStore</c> and <c>UsageStore</c> moved from plain-HTTP/JSON to gRPC in
-/// docs/router/tracked-todos.md #7 (ADR-0007 is now stale on this point), but their
-/// <c>ProviderAdminException</c> still carries no unavailable-versus-rejected distinction for
-/// <see cref="GrpcAdminException.IsUnavailable"/> to key off, and they surface failures through
-/// <c>ToastService</c> rather than <see cref="LastError"/>. Bending this base to fit them would mean
-/// adding a toast hook and an exception-typed failure callback for two callers, which is how a useful
-/// base class turns into a burden.
+/// <c>ProviderAdminStore</c> and <c>UsageStore</c> sit here now that they throw
+/// <see cref="GrpcAdminException"/>; toasting a mutation is a one-line wrap around
+/// <see cref="RecordFailure"/>, not a reason to stay off the seam. See ADR-0010 Amendment 3.
 /// </para>
 /// </remarks>
 /// <typeparam name="TClient">The gRPC admin client this store wraps.</typeparam>
@@ -48,18 +40,12 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     /// <summary>Initializes a new instance of the <see cref="AdminStoreBase{TClient}"/> class.</summary>
     /// <param name="client">The admin client to drive. Never null.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="ownsClient">
-    /// Whether this store created <paramref name="client"/> and must therefore dispose it. False for the
-    /// caller-supplied-client constructor every store offers as a test seam, where the caller owns the
-    /// lifetime.
-    /// </param>
-    protected AdminStoreBase(TClient client, ILogger? logger, bool ownsClient = false)
+    protected AdminStoreBase(TClient client, ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(client);
 
         Client = client;
         Logger = logger;
-        if (ownsClient && client is IDisposable disposable) _owned.Add(disposable);
     }
 
     /// <summary>Gets the admin client this store drives.</summary>
@@ -122,7 +108,7 @@ public abstract class AdminStoreBase<TClient> : IDisposable
 
     /// <summary>
     /// Registers a resource this store created and therefore owns, so <see cref="Dispose()"/> releases it.
-    /// For the extra collaborators a store builds beyond its client — an <see cref="HttpClient"/>, say.
+    /// For the collaborators a store builds for itself — an <see cref="HttpClient"/>, say.
     /// </summary>
     /// <typeparam name="T">The resource type.</typeparam>
     /// <param name="resource">The resource to take ownership of.</param>
@@ -164,13 +150,18 @@ public abstract class AdminStoreBase<TClient> : IDisposable
     /// publishing an extra, misleading "finished but still loading" state in between. Runs after
     /// <paramref name="onFailure"/> on the failure path.
     /// </param>
+    /// <param name="marksLoaded">
+    /// Whether this also counts as a completed load of the store's primary data. False for a secondary
+    /// read that must not claim the main panel is ready (price-overrides diagnosis, for example).
+    /// </param>
     /// <returns>Whether the read succeeded.</returns>
     protected async Task<bool> LoadGuardedAsync(
         Func<CancellationToken, Task> operation,
         string description,
         CancellationToken cancellationToken,
         Action? onFailure = null,
-        Action? beforeNotify = null)
+        Action? beforeNotify = null,
+        bool marksLoaded = true)
     {
         ArgumentNullException.ThrowIfNull(operation);
 
@@ -198,7 +189,7 @@ public abstract class AdminStoreBase<TClient> : IDisposable
         }
         finally
         {
-            IsLoaded = true;
+            if (marksLoaded) IsLoaded = true;
             beforeNotify?.Invoke();
             NotifyChanged();
         }

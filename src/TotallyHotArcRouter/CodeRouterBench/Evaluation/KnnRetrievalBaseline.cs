@@ -40,7 +40,7 @@ public sealed class KnnRetrievalBaseline : IRegretBaselineRouter
     }
 
     /// <summary>Gets the number of nearest neighbors this baseline votes over.</summary>
-    public int K { get; }
+    private int K { get; }
 
     /// <inheritdoc/>
     public string Name => "knn_retrieval";

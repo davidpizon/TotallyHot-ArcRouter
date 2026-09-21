@@ -79,7 +79,7 @@ flowchart LR
 | Rate-limit headers | [`RateLimitHeaderCapture.cs:80`](../../src/TotallyHotArcRouter/Telemetry/RateLimitHeaderCapture.cs#L80), [`RateLimitSnapshotParser.cs`](../../src/TotallyHotArcRouter/PriceCatalog/RateLimitSnapshotParser.cs) | Captured verbatim (snapshot + minute-bucketed 30-day history), parsed into a typed `RateLimitSnapshotView`, and shown on the Providers card via `GET /admin/providers`. **Displayed but never interpreted**: no burn-rate projection, no history charts, no staleness state. |
 | Turn counting | [`ConversationTurnTracker.cs:26`](../../src/TotallyHotArcRouter/Telemetry/ConversationTurnTracker.cs#L26) | `ConcurrentDictionary<string,int>`, no eviction, resets on process restart. |
 | Broadcast shape | [`RoutingTelemetryEvent.cs`](../../src/TotallyHotArcRouter/Telemetry/RoutingTelemetryEvent.cs), [`telemetry.proto:161`](../../src/Protos/telemetry.proto#L161) | Carries `PromptTokens`, `CompletionTokens`, `EstimatedCostUsd`. **No cache fields.** |
-| GUI consumption | [`LiveDataStore.cs:50`](../../src/TotallyHotArcRouter.Gui/Services/LiveDataStore.cs#L50), [`LiveConversationMapper.cs:69`](../../src/TotallyHotArcRouter.Gui/Services/LiveConversationMapper.cs#L69) | In-memory `List<RoutingTelemetryEventDto>`, populated only while connected. `CacheHitRate` hardcoded to `0m`. |
+| GUI consumption | [`LiveDataStore.cs:50`](../../src/TotallyHotArcRouter.Gui.Components/Services/LiveDataStore.cs#L50), [`LiveConversationMapper.cs:69`](../../src/TotallyHotArcRouter.Gui.Components/Services/LiveConversationMapper.cs#L69) | In-memory `List<RoutingTelemetryEventDto>`, populated only while connected. `CacheHitRate` hardcoded to `0m`. |
 
 **The two structural gaps this table exposes:**
 
