@@ -826,6 +826,15 @@ still advertise `IDisposable` so the container keeps reclaiming them.
 
 Note that `CA2000` would have caught the original leak for free — see D1.
 
+> **Since superseded (2026-09-20, PR #135).** The C4 half no longer describes the code.
+> `ProviderAdminStore` and `UsageStore` moved to gRPC and onto `AdminStoreBase<TClient>`, so neither
+> builds an `HttpClient` or holds `_ownedHttpClient` any more. Their clients are built over the shared
+> `IRouterChannelProvider.CallInvoker`, and `GrpcAdminClientBase` is no longer `IDisposable`, since no
+> admin client owns a channel. So there is no client for a store to dispose, and `AdminStoreBase` lost
+> its `ownsClient` parameter. The "own what you built, never what you were handed" rule survives as
+> `AdminStoreBase.Own()`, used today only by `UpdateStore` for its installer `HttpClient`. C3
+> (`ProxyMiddleware`) is unaffected.
+
 **C5 · `ProxyServer` constructor — 351 lines. Major.** Second-longest method in the codebase. It is DI
 wiring for the inner Kestrel host, structured as one feature-group null-check per block. Same remedy
 shape as A2: one `Configure<Group>` private method per feature group.

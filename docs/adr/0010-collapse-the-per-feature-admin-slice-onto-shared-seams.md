@@ -194,7 +194,8 @@ Fold, don't invent a second base:
 - `ProviderAdminClient` and `UsageQueryClient` derive from `GrpcAdminClientBase` (same `CallAsync` +
   Unavailable wrapping as the Telemetry clients). No admin client keeps an owned-channel
   `serverAddress` constructor, and neither does the base: nothing called them, since every store builds
-  its client over the shared `CallInvoker`. Auth stays on
+  its client over the shared `CallInvoker`. With no channel to own, the base is not `IDisposable`
+  either, and `AdminStoreBase` takes no `ownsClient` flag. Auth stays on
   `TelemetryAuthClientInterceptor`; the clients no longer attach `x-admin-token` themselves.
 - `ProviderAdminException` is deleted. Callers catch `GrpcAdminException`.
 - `ProviderAdminStore` and `UsageStore` derive from `AdminStoreBase`. Toasts stay as a one-line wrap
