@@ -8,25 +8,13 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
 /// A thin, platform-agnostic gRPC client for the proxy's <see cref="Contract.UsageAdminService"/>.
-/// Same 3-constructor + CallAsync + Unavailable wrapping as <see cref="ProviderAdminClient"/>; both sit
+/// Same CallAsync + Unavailable wrapping as <see cref="ProviderAdminClient"/>; both sit
 /// on <see cref="GrpcAdminClientBase{TGeneratedClient}"/>. <c>UsageStore</c> wraps an instance of this
 /// the way <c>ProviderAdminStore</c> wraps <see cref="ProviderAdminClient"/>.
 /// </summary>
 public sealed class UsageQueryClient
     : GrpcAdminClientBase<Contract.UsageAdminService.UsageAdminServiceClient>
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="UsageQueryClient"/> class, creating and owning a
-    /// channel to <paramref name="serverAddress"/>.
-    /// </summary>
-    /// <param name="serverAddress">The proxy's gRPC endpoint.</param>
-    public UsageQueryClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress: serverAddress,
-            createClient: callInvoker =>
-                new Contract.UsageAdminService.UsageAdminServiceClient(callInvoker))
-    {
-    }
-
     /// <summary>
     /// Initializes a new instance of the <see cref="UsageQueryClient"/> class over a shared,
     /// already-authenticated call invoker. The caller owns the invoker's underlying channel.

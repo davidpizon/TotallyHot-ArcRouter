@@ -7,25 +7,13 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
 /// A thin, platform-agnostic gRPC client for the proxy's <see cref="Contract.ProviderAdminService"/>.
-/// Same 3-constructor + CallAsync + Unavailable wrapping as every other admin client on
+/// Same CallAsync + Unavailable wrapping as every other admin client on
 /// <see cref="GrpcAdminClientBase{TGeneratedClient}"/>. Lives in this plain <c>net10.0</c> library so
 /// its mapping logic is unit-tested in CI; <c>ProviderAdminStore</c> wraps an instance of it.
 /// </summary>
 public sealed class ProviderAdminClient
     : GrpcAdminClientBase<Contract.ProviderAdminService.ProviderAdminServiceClient>
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class, creating and owning a
-    /// channel to <paramref name="serverAddress"/>.
-    /// </summary>
-    /// <param name="serverAddress">The proxy's gRPC endpoint.</param>
-    public ProviderAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress: serverAddress,
-            createClient: callInvoker =>
-                new Contract.ProviderAdminService.ProviderAdminServiceClient(callInvoker))
-    {
-    }
-
     /// <summary>
     /// Initializes a new instance of the <see cref="ProviderAdminClient"/> class over a shared,
     /// already-authenticated call invoker. The caller owns the invoker's underlying channel.
