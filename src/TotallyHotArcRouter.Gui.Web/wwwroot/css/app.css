@@ -1270,14 +1270,6 @@ input[type="number"] {
   animation-delay: calc(var(--i, 0) * 30ms);
 }
 
-/* Revealed disclosure content mounted with @if. Deliberately animates
-   transform/opacity and never height: payload blocks are variable-height and animating
-   height forces layout every frame in a WebView. */
-@keyframes disclosure-enter {
-  from { opacity: 0; transform: translateY(-2px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 /* Error-toast stack (ToastHost), fixed to the top-center of the app window, above every tab/modal. z-index
    500 is the toast layer reserved in aspirational-design.md #369 - higher than .overlay-backdrop's 50, so a
    toast stays visible even while a modal is open. */
@@ -1301,15 +1293,9 @@ input[type="number"] {
   pointer-events: auto;
 }
 
-.disclosure-enter {
-  animation: disclosure-enter var(--dur-default) var(--ease-out-expo);
-  animation-fill-mode: backwards;
-  animation-delay: calc(var(--i, 0) * 25ms);
-}
-
-/* Disclosure Collapse (MOTION.md §6) — the two-way companion to .disclosure-enter above.
-   .disclosure-enter animates content that Blazor has just mounted with @if, so it can only
-   ever play on the way IN; the node is gone before an exit could run. A card whose own height
+/* Disclosure Collapse (MOTION.md §6). An entrance animation on content that Blazor has just
+   mounted with @if can only ever play on the way IN; the node is gone before an exit could
+   run. A card whose own height
    should grow and shrink smoothly therefore has to stay mounted and toggle a class instead.
 
    The open/closed size is carried by the grid track, not by `height`. This is what MOTION.md

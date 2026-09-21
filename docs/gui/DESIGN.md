@@ -828,7 +828,7 @@ Earlier round of classes:
 Every remaining `style=` attribute in `TotallyHotArcRouter.Gui.Components/Components` is one of the sanctioned
 exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
 `share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
-property feeding the `.row-enter`/`.disclosure-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
+property feeding the `.row-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
 `Style` passthrough parameter (a generic per-instance API, unused by any current caller).
 
 ## 8. Do's and Don'ts
