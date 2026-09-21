@@ -79,8 +79,9 @@ training-linked transcript history (`sessions-tab-training-data-plan.md`) have a
   model-generated code is a risk this project declines to carry under any isolation. What replaced it,
   in `TotallyHotArcRouter.Quality` (renamed from `.Sandbox`):
   - **Static analysis, deepened.** Roslyn for C# and Acornima for JS/TS give authoritative syntax
-    verdicts; Python and shell keep a heuristic that is now *explicitly marked* non-authoritative and
-    weighted at half. Four composable `IStaticAnalyzer`s add diagnostics, placeholder/stub detection,
+    verdicts; Python and shell keep language-aware heuristics that are *explicitly marked*
+    non-authoritative and weighted at half. Four composable `IStaticAnalyzer`s add diagnostics,
+    placeholder/stub detection,
     truncation detection, and a complexity band.
   - **The judge promoted.** It now contributes to `u_i` on every graded request rather than writing only
     to `judge_shadow_scores`, and defaults **on** when a free backbone resolves.
