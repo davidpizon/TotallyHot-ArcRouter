@@ -4,9 +4,13 @@ description: Use this skill to generate well-branded interfaces and assets for T
 user-invocable: true
 ---
 
+> **Historical (archived 2026-09-20). Not runtime.** Production UI is Blazor WASM
+> (`TotallyHotArcRouter.Gui.Web` / `Gui.Components`) plus the WinForms tray. Live contract:
+> `docs/gui/DESIGN.md` and `docs/gui/MOTION.md`. Do not copy this React kit into production.
+
 Read the README.md file within this skill, and explore the other available files.
 
-If creating visual artifacts (slides, mocks, throwaway prototypes, etc), copy assets out and create static HTML files for the user to view. If working on production code, you can copy assets and read the rules here to become an expert in designing with this brand.
+If creating visual artifacts (slides, mocks, throwaway prototypes, etc), copy assets out and create static HTML files for the user to view. **If working on production code, follow `docs/gui/DESIGN.md` / `MOTION.md` and the Blazor components — not this kit.**
 
 If the user invokes this skill without any other guidance, ask them what they want to build or design, ask some questions, and act as an expert designer who outputs HTML artifacts _or_ production code, depending on the need.
 

@@ -1,132 +1,135 @@
-# Version Compatibility: Router and GUI
+# Version Compatibility: Router, tray, and WASM dashboard
 
-> **Status.** This document was rewritten 2026-08-26 for the MSI packaging decision
-> ([`packaging-and-distribution.md`](packaging-and-distribution.md)), which replaced the three-executable
-> Router↔Updater↔GUI closed loop described in the prior revision of this document (still readable in git
-> history) with a single Windows Installer transaction. There is no Updater component anymore, so there is
-> no closed loop, no ordering invariant between a Router-launched helper and its payload, and no
-> Router→Updater compatibility surface to reason about. What remains genuinely unchanged from the prior
-> revision: one lockstep version for every component (§1) and the GUI↔Router gRPC contract as a
-> compatibility surface (§4). Updated 2026-09-16: that version's single source of truth is now the
-> `vMAJOR.MINOR.PATCH` release tag, no longer `<Version>` in `Directory.Build.props` (§1).
+> **Status.** Rewritten 2026-09-20 for the current product: a cross-platform Router that serves a
+> Blazor WebAssembly dashboard, plus a Windows-only WinForms tray. The previous revision described a
+> "Router + MAUI tray GUI" pair and a mermaid of deleted `...\Gui\` install paths; that GUI is gone
+> (`src/TotallyHotArcRouter.Gui` deleted with the web GUI migration). Updated 2026-09-16: the version's
+> single source of truth is the `vMAJOR.MINOR.PATCH` release tag, not `<Version>` in
+> `Directory.Build.props` (§1).
 
-TotallyHot ArcRouter ships as two executables — the Router (a Windows Service) and the GUI (a MAUI tray
-app) — packaged and versioned together. This document records how they relate by version and what happens
-when they skew.
+TotallyHot Arc Router ships as:
 
-## 1. The decision: lockstep, one release, one artifact
+| Piece | What it is | Where it lives |
+|---|---|---|
+| **Router** | Kestrel host: LLM proxy, gRPC-Web admin/telemetry, static WASM dashboard | Windows Service / systemd / LaunchDaemon / GHCR; `%ProgramFiles%\TotallyHotArcRouter\Router\` on Windows |
+| **WASM dashboard** | Blazor WebAssembly in `TotallyHotArcRouter.Gui.Web`, Razor UI in `Gui.Components` | Served by the Router on the web port (`https://localhost:47104` by default) — not a separate install |
+| **Tray** | Small WinForms companion (`TotallyHotArcRouter.Tray` / `Tray.Core`) | Windows only; `%ProgramFiles%\TotallyHotArcRouter\Tray\` |
 
-**Both components carry the same version number, cut from the same release, and are installed together by
-one MSI in one Windows Installer transaction.** There is no independent per-component versioning.
+Linux and macOS run the Router (and therefore the browser dashboard) without a tray. This document
+records how those pieces relate by version and what happens when they skew.
 
-The version is stamped exactly once, as the MSBuild `<Version>` property: for a release, `release.yml` sets
-it from the `vMAJOR.MINOR.PATCH` git tag (`-p:Version`); for a local build it falls back to
-[`src/Directory.Build.props`](../../src/Directory.Build.props)'s value
-([`packaging-and-distribution.md`](packaging-and-distribution.md) §7.1). The Router and the GUI compile it
-directly into `AssemblyInformationalVersionAttribute`; the installer project derives the MSI's
+## 1. The decision: lockstep, one release, one artifact set
+
+**Every shipped component carries the same version number, cut from the same release.** There is no
+independent per-component versioning. On Windows the Router and the tray are installed together by
+one MSI in one Windows Installer transaction. The WASM files are published *with* the Router, so they
+cannot skew from it via the installer.
+
+The version is stamped exactly once, as the MSBuild `<Version>` property: for a release,
+`release.yml` sets it from the `vMAJOR.MINOR.PATCH` git tag (`-p:Version`); for a local build it
+falls back to [`src/Directory.Build.props`](../../src/Directory.Build.props)
+([`packaging-and-distribution.md`](packaging-and-distribution.md) §7.1). Router, tray, and WASM
+compile it into `AssemblyInformationalVersionAttribute`; the installer project derives the MSI's
 `ProductVersion` from the same property via MSBuild passthrough
-(`src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj`) — never a second, hand-typed
-version. That one release publishes exactly one `.msi` asset plus a single `checksums.txt`.
+(`src/TotallyHotArcRouter.Installer/TotallyHotArcRouter.Installer.wixproj`) — never a second,
+hand-typed version. That one release publishes the `.msi`, the `totallyhotarcrouter-<rid>.tar.gz`
+archives, a GHCR image, and a single `checksums.txt`.
 
-**Why not independent versions.** Independent semver per component would buy the ability to ship a fix to
-one without touching the other — real value when components are consumed separately. They are not: the GUI
-is useless without a Router to talk to, and both are installed by the same MSI. Lockstep pays nothing for a
-guarantee that would otherwise need enforcing.
+**Why not independent versions.** The dashboard is useless without a Router to serve it, and the tray
+is useless without a Router to talk to. On Windows both binaries are installed by the same MSI.
+Lockstep pays nothing for a guarantee that would otherwise need enforcing.
 
-## 2. How the swap actually happens now
+## 2. How the Windows swap actually happens
 
-The physical constraint that shaped the old three-executable design is still real: **a running process
-cannot overwrite its own image or loaded DLLs.** What changed is *who* does the overwriting. Windows
-Installer's own transaction — not a hand-rolled helper process — is the "someone else" that replaces both
-the Router and the GUI:
+The physical constraint is still real: **a running process cannot overwrite its own image or loaded
+DLLs.** Windows Installer's transaction — not a hand-rolled helper — replaces both the Router and the
+tray:
 
 ```mermaid
 flowchart LR
-    Gui["GUI<br/>(interactive, elevates via UAC)"]
-    Msiexec["msiexec<br/>(elevated, launched by the GUI)"]
-    Router["Router<br/>(Windows Service)"]
-    GuiFiles["...\Gui\ files"]
-    RouterFiles["...\Router\ files"]
+    Operator["Operator<br/>(runs the downloaded .msi, one UAC prompt)"]
+    Msiexec["msiexec<br/>(elevated)"]
+    Router["Router<br/>(Windows Service, serves WASM)"]
+    TrayFiles["...\\Tray\\ files"]
+    RouterFiles["...\\Router\\ files<br/>(includes WASM static files)"]
 
-    Gui -- "download + verify MSI, launch elevated, then exit" --> Msiexec
+    Operator -- "download from the release page, run" --> Msiexec
     Msiexec -- "ServiceControl: stop" --> Router
     Msiexec -- "replace" --> RouterFiles
-    Msiexec -- "replace (GUI has already exited)" --> GuiFiles
+    Msiexec -- "replace" --> TrayFiles
     Msiexec -- "ServiceControl: start" --> Router
 ```
 
-The GUI downloads the release's MSI, verifies it against the published SHA256
-(`TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier`), launches
-`msiexec /i <path> /qn REBOOT=ReallySuppress /l*v <logpath>` elevated (`UseShellExecute = true`,
-`Verb = "runas"` — the single UAC prompt an operator sees), and **exits immediately** so it is not holding
-its own files locked when the MSI tries to replace `...\Gui\`. The Router does not participate in its own
-replacement beyond that — Windows Installer's `ServiceControl` element stops the
-`TotallyHotArcRouter` service before the file swap and restarts it after, the same stop/swap/restart
-sequence the deleted `Updater.exe` used to perform by hand, now a property of the MSI transaction instead
-of application code.
+**There is no in-process apply path today.** The dashboard's System Settings shows an available
+update with a link to the release page (the WASM host registers `UpdateStore` with
+`supportsApply: false` — a browser tab cannot launch an installer), and the tray's never-visible
+"Install update" path was deleted as dead code. The operator downloads the MSI and runs it; the
+Router does not participate in its own replacement beyond that — Windows Installer's `ServiceControl`
+element stops the `TotallyHotArcRouter` service before the file swap and restarts it after.
+`TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier` (download, SHA256 verify, elevated
+`msiexec /i <path> /qn REBOOT=ReallySuppress /l*v <logpath>`) still exists and is unit-tested, but no
+production host currently invokes it.
 
-**Why GUI-elevated rather than Router-launched.** The original intent explored during this design was
-having the always-on Router (running as `LocalSystem` under the Windows Service) launch `msiexec` detached,
-so applying an update needed no interactive session at all. That could not be empirically verified in this
-project's development environment — testing it requires an admin/UAC-capable interactive Windows session to
-install a real service and observe whether a `msiexec` process launched detached by that service survives
-the service being stopped mid-transaction by the very same MSI, and no such session was available (`sc.exe
-create` returned `OpenSCManager FAILED 5: Access is denied` in every session that attempted it; a
-containerized Windows target was also considered and ruled out — the available container backend on the
-development machine is a Linux/WSL2 backend, which cannot host a real Windows Service either). Rather than
-ship an unverified detached-launch-from-a-service design, the repo owner decided on GUI-elevated: one
-ordinary UAC prompt, the same pattern virtually every other Windows desktop installer uses, and simpler to
-reason about than a service launching a process that outlives the service's own shutdown.
+**Why not Router-launched.** A detached `msiexec` from the `LocalSystem` service could not be
+empirically verified in this project's development environment (no admin/UAC session; `sc.exe create`
+returned `OpenSCManager FAILED 5`), so no service-side apply path was shipped. See
+[`packaging-and-distribution.md`](packaging-and-distribution.md) §6.
+
+On Linux/macOS an update is **detected** (`GitHubReleaseCheckClient` looks for
+`totallyhotarcrouter-<rid>.tar.gz`) but must be applied by re-running the install script with a
+newer archive — there is no in-process apply path.
 
 ## 3. Atomicity and skew
 
-**Apply is always operator-initiated from the GUI**, behind a confirmation dialog. The Router's background
-poller (`UpdateCheckHostedService`) only *detects* an available update and records it — it never applies
-unattended.
+**Apply is always operator-initiated** — the operator runs the installer themselves. The Router's
+background poller (`UpdateCheckHostedService`) only *detects* an available update and records it —
+it never applies unattended. Promoted GitHub Releases are the only ones offered; prereleases are
+invisible to the check ([`packaging-and-distribution.md`](packaging-and-distribution.md) §7).
 
-Because the entire swap is now one Windows Installer transaction, atomicity is Windows Installer's problem,
-not this codebase's: **a failed MSI transaction rolls back automatically** — there is no partial-apply state
-where the Router is on version *N+1* and the GUI is still on version *N*, or vice versa, the way a failed
-step mid-`Updater.exe`-run could previously leave one component ahead of the other. `MajorUpgrade`'s
-scheduling (`src/TotallyHotArcRouter.Installer/Package.wxs`) means a successful install always leaves both
-components at the same version, and a failed one leaves both at whatever version was there before the
-transaction began.
+Because the Windows swap is one Windows Installer transaction, **a failed MSI rolls back
+automatically** — there is no partial-apply state where the Router is on version *N+1* and the tray
+is still on version *N*. `MajorUpgrade` in
+`src/TotallyHotArcRouter.Installer/Package.wxs` means a successful install always leaves both at the
+same version.
 
-Version skew between Router and GUI can now only happen from an *operator* action outside the MSI's control
-— e.g. downgrading one component's files by hand, which nothing about this design prevents or needs to
-prevent, since it is not a path the shipped tooling offers.
+The WASM dashboard cannot skew from the Router through the installer: it is static files inside the
+Router's publish output. Browser cache can show a stale dashboard until refresh; that is not a
+version-skew of shipped artifacts.
+
+Version skew between Router and tray can now only happen from an *operator* action outside the MSI
+(e.g. copying one component's files by hand), which nothing about this design prevents or needs to
+prevent.
 
 ## 4. Compatibility surfaces — what actually breaks on skew
 
 | Seam | Contract | Behavior under skew |
 |---|---|---|
-| GUI ↔ Router | the gRPC contract in [`src/Protos/telemetry.proto`](../../src/Protos/telemetry.proto) | proto3's additive field rules mean a mismatched pair degrades — unknown fields are ignored, absent fields read as defaults — rather than failing to connect. A GUI older than its Router simply does not render the newest panes. |
-| Router → GitHub | the release asset + `checksums.txt` naming convention | A release missing the `.msi` asset or its checksum line is reported as `AssetOrChecksumMissing` and the update is **not offered**. An update that cannot be applied is never reported as available. |
-| GUI → installer | the MSI's `ServiceControl`/`ServiceInstall` naming (`TotallyHotArcRouter`) | Must exactly match `Program.cs`'s `UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")`. A mismatch here would mean the installer registers or controls a service that does not exist, which `dotnet build`-time XML review and the "verify for real" step of any installer change are the only guards — there is no runtime skew-detection possible for this seam, since it is fixed at build time on both sides. |
+| Dashboard / tray ↔ Router | gRPC-Web on the web port (`https://localhost:47104`), protos under [`src/Protos/`](../../src/Protos/) | proto3 additive field rules: a mismatched pair degrades — unknown fields ignored, absent fields default — rather than failing to connect. An older dashboard simply does not render the newest panes. |
+| Router → GitHub | release asset + `checksums.txt` naming | A release missing the platform asset (`.msi` on Windows, `totallyhotarcrouter-<rid>.tar.gz` elsewhere) or its checksum line is `AssetOrChecksumMissing` and the update is **not offered**. |
+| Installer → Router service | the MSI's `ServiceControl`/`ServiceInstall` naming (`TotallyHotArcRouter`) | Must exactly match `Program.cs`'s `UseWindowsService(options => options.ServiceName = "TotallyHotArcRouter")`. A mismatch would register or control a service that does not exist. Guarded at build/review time, not at runtime. |
 
-**The GUI surfaces detected skew.** The GUI knows its own compiled version and reads the Router's from
-`GetUpdateStatus`, so a mismatch is directly observable and should be shown to the operator rather than
-left to manifest as confusing behavior.
+The Router reports its own version through `GetUpdateStatus`; the tray does not read it, so a
+hand-made Router/tray mismatch is not surfaced anywhere today. The WASM dashboard is the same build as
+the Router that served it.
 
 ## 5. Consequences for contributors
 
-- **Never hand-edit a version to release.** Run `cut-release.yml`; the release tag is the single source of
-  truth for the Router, the GUI, and the installer's `ProductVersion` alike, and a component with its own
-  hardcoded version is a bug.
-- **A release publishes one `.msi` and one `checksums.txt` or it publishes nothing usable.** A partial
-  release is rejected by the release check, not partially applied.
-- **Changing the gRPC contract follows proto3 additive rules.** Never renumber or repurpose a field; skew
-  is supposed to degrade, and renumbering turns degradation into corruption.
-- **Changing the Windows Service name requires updating three places in lockstep**: `Program.cs`'s
+- **Never hand-edit a version to release.** Run `cut-release.yml`; the release tag is the single
+  source of truth for the Router, the tray, the WASM dashboard, and the installer's `ProductVersion`.
+- **A Windows release publishes one `.msi` and a `checksums.txt` covering every asset, or it
+  publishes nothing usable.** Linux/macOS tarballs and the GHCR image are part of the same tag.
+- **Changing the gRPC contract follows proto3 additive rules.** Never renumber or repurpose a field;
+  skew is supposed to degrade, and renumbering turns degradation into corruption.
+- **Changing the Windows Service name requires updating three places in lockstep:** `Program.cs`'s
   `UseWindowsService` call, `Package.wxs`'s `ServiceInstall`/`ServiceControl` `Name` attributes, and
   `scripts/service/Install-RouterService.ps1`'s `$ServiceName` (dev-only path, but should still agree).
 
 ## Related
 
-- [`packaging-and-distribution.md`](packaging-and-distribution.md) — the MSI decision itself, the MSIX
-  evaluation that preceded it, and the WiX v7 licensing note.
-- [`auto-update-plan.md`](auto-update-plan.md) — the original Router-self-update design; its Phase 2 apply
-  mechanism is superseded by this document and by packaging-and-distribution.md.
-- [`grpc-migration.md`](grpc-migration.md) — the GUI ↔ Router contract this document treats as a
-  compatibility surface.
+- [`packaging-and-distribution.md`](packaging-and-distribution.md) — the MSI decision, MSIX
+  evaluation, WiX v7 licensing note, and the tagged release/GHCR flow.
+- [`../archive/router/auto-update-plan.md`](../archive/router/auto-update-plan.md) — historical
+  Router-self-update / `Updater.exe` design; superseded.
+- [`telemetry.md`](telemetry.md) — the gRPC-Web contract this document treats as a compatibility
+  surface.
 - [`../../AGENTS.md`](../../AGENTS.md) — the repository-wide rules every change validates against.

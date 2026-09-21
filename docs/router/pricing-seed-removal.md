@@ -120,7 +120,7 @@ pinned it. Side effect worth knowing: `llama3` now reports token counts for the 
 dotnet build src/TotallyHotArcRouter/TotallyHotArcRouter.csproj   # removes a public type; build first
 dotnet test  src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj
 dotnet test  src/TotallyHotArcRouter.Gui.Admin.Tests/TotallyHotArcRouter.Gui.Admin.Tests.csproj
-dotnet test  src/TotallyHotArcRouter.Gui.Tests/TotallyHotArcRouter.Gui.Tests.csproj
+dotnet test  src/TotallyHotArcRouter.Gui.Components.Tests/TotallyHotArcRouter.Gui.Components.Tests.csproj
 dotnet test  src/TotallyHotArcRouter.Quality.Tests/TotallyHotArcRouter.Quality.Tests.csproj
 dotnet test  src/TotallyHotArcRouter.Gui.Telemetry.Tests/TotallyHotArcRouter.Gui.Telemetry.Tests.csproj
 ```
