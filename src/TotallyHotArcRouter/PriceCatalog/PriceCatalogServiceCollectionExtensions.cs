@@ -295,7 +295,7 @@ internal static class PriceCatalogServiceCollectionExtensions
     /// The protected-store name for a provider's reconciliation Admin API key (docs/router/secrets-at-rest-plan.md
     /// §3's naming convention).
     /// </summary>
-    internal static string AdminApiKeySecretName(string provider)
+    private static string AdminApiKeySecretName(string provider)
     {
         return $"reconciliation:{provider}:admin-key";
     }

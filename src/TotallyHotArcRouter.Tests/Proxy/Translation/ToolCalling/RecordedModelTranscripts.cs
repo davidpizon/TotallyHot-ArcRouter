@@ -66,7 +66,7 @@ internal static class RecordedModelTranscripts
     /// Field values are verbatim; the JSON is reformatted to one line per response.
     /// </para>
     /// </remarks>
-    public static RecordedModelTranscript Qwen25Coder7BInstruct { get; } = new(
+    private static RecordedModelTranscript Qwen25Coder7BInstruct { get; } = new(
         ModelName: "qwen2.5.1-coder-7b-instruct",
         Notes: "Passes all five scenarios. Frames every call in <tools> rather than the requested <tool_call>.",
         ResponseByScenario: new Dictionary<string, string>

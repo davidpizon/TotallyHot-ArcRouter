@@ -7,11 +7,17 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
 /// Singleton view-model backing the Model Distribution, Cost Analytics, and header-ticker surfaces' real
-/// data (Phase 4, §5.15). Wraps <see cref="UsageQueryClient"/> with the same "singleton + Changed event +
-/// best-effort, reachability-tolerant" shape as <see cref="ProviderAdminStore"/>, so the UI survives tab
-/// switches and degrades gracefully (falling back to demo data) when the proxy isn't running or has no
-/// rollup store wired up. Registered in <c>MauiProgram</c>.
+/// data (Phase 4, §5.15). Wraps <see cref="UsageQueryClient"/> with the same "singleton + best-effort,
+/// reachability-tolerant" shape as <see cref="ProviderAdminStore"/>, so the UI survives tab switches and
+/// degrades gracefully (falling back to demo data) when the proxy isn't running or has no rollup store
+/// wired up. Registered as a singleton in the WASM host's <c>Program</c>.
 /// </summary>
+/// <remarks>
+/// Unlike its sibling stores this one raises no <c>Changed</c> event. Every consumer awaits a load and
+/// then renders from the returned value or from <see cref="Summary"/>, so there was never a subscriber;
+/// the event was removed rather than left as a notification nobody listened to. A component that needs
+/// push-style refresh should add it back deliberately, with the subscriber in the same change.
+/// </remarks>
 public sealed class UsageStore : IDisposable
 {
     private readonly UsageQueryClient _client;
@@ -85,9 +91,6 @@ public sealed class UsageStore : IDisposable
     {
     }
 
-    /// <summary>Raised after <see cref="Summary"/>, <see cref="IsReachable"/>, or <see cref="LastError"/> change.</summary>
-    public event Action? Changed;
-
     /// <summary>
     /// Loads totals for a preset window (the header ticker's System Tokens tile). Connection/unavailability
     /// failures are swallowed and surfaced via <see cref="IsReachable"/>/<see cref="LastError"/> rather than
@@ -111,7 +114,6 @@ public sealed class UsageStore : IDisposable
         finally
         {
             IsLoaded = true;
-            Changed?.Invoke();
         }
     }
 
@@ -146,11 +148,9 @@ public sealed class UsageStore : IDisposable
         }
         finally
         {
-            // Deliberately does not raise Changed: unlike Summary, the result is handed straight back to
-            // the caller via the awaited return value, so there is no shared state a listener would need
-            // to be notified about. Raising it here would also invite a feedback loop in any caller that
-            // reacts to Changed by calling LoadRollupAsync again with a fresh DateTimeOffset.UtcNow range
-            // (a different cache key every time, so the cache's own re-entrancy guard never catches it).
+            // Publishes nothing: unlike Summary, the result is handed straight back to the caller via the
+            // awaited return value, so there is no shared state a listener would need to be notified
+            // about. This is half of why the store carries no Changed event - see the type's remarks.
             IsLoaded = true;
         }
     }

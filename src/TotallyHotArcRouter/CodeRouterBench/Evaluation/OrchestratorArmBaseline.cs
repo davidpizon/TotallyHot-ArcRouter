@@ -26,7 +26,7 @@ public sealed class OrchestratorArmBaseline : IRegretBaselineRouter
     /// CodeRouterBench model ids carry no real provider, and this value is applied identically on both the candidate and the
     /// voters' own canonicalization, so it is a no-op rather than a source of mismatches.
     /// </summary>
-    internal const string CandidateProvider = "coderouterbench";
+    private const string CandidateProvider = "coderouterbench";
 
     private readonly IReadOnlyDictionary<string, float[]> _embeddingsByTaskId;
 

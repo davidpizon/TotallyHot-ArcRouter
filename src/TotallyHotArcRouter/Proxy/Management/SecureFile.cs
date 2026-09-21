@@ -43,6 +43,11 @@ internal static class SecureFile
     /// until the content is fully written - so another process trying to open the file in the meantime
     /// hits a sharing violation and fails fast instead of silently observing a partial write.
     /// </summary>
+    /// <remarks>
+    /// Has no callers - deliberately, for the reasons set out on the type. Suppressed rather than deleted so
+    /// the retention decision does not have to be re-argued on every scan.
+    /// </remarks>
+    // ReSharper disable once UnusedMember.Global
     public static void WriteRestricted(string path, byte[] content)
     {
         // Create empty and closed first: applying the ACL (SetAccessControl) needs to open its own

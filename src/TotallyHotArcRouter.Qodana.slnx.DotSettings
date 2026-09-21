@@ -54,8 +54,28 @@
     previous "GUI is absent from the Linux scan" justification no longer holds. MemberCanBePrivate,
     UnusedMember, UnusedMemberInSuper, UnusedType, and EventNeverSubscribedTo are therefore re-enabled.
 
-    Tray (WinForms, net10.0-windows) is still omitted from this scan. A finding that names only a Tray
-    caller is a false positive until Tray can be scanned - file it as a follow-up, do not delete.
+    Exactly one blind spot survives the re-enable: Tray (WinForms, net10.0-windows) is still omitted from
+    this scan, so a member whose only caller is Tray reads as unused. SessionRouterConnector and
+    RouterConnectionSupervisor.Provider are the two that do today; both carry a
+    `// ReSharper disable once ...` and a <remarks> naming the reason, so the judgement is recorded at the
+    member rather than re-made on every scan.
+
+    .razor markup is NOT a blind spot - this was checked rather than assumed. ToastService.Changed,
+    ClusterModelAdminStore.Changed and six sibling store events are subscribed only from inline @code in
+    .razor files, and the scan reports none of them. So an unused/unsubscribed finding on a
+    Gui.Components member is a real finding about that member, not an artifact of the linter skipping
+    components. Do not wave one away on "a component probably uses it".
+
+    The compiler is the arbiter of the remaining cases. Reducing a member to private - or deleting it -
+    and getting a clean build of TotallyHotArcRouter.slnx, which DOES include Tray and DOES compile Razor,
+    settles whether it really had a caller. That is how all 48 MemberCanBePrivate findings were confirmed.
+
+    UnusedMemberInSuper is not a dead-code inspection and should not be read as one. It fires when every
+    call goes through the concrete type instead of the interface, so the member is live and the only
+    question is whether the interface should still declare it. Three of the current eight
+    (IGraderReliabilityAnalyzer/IJudgeCalibrationAnalyzer.MinimumSampleSize, ProviderConfigStore
+    .ReplaceAsync) are called from inside the implementing class itself and will report forever unless the
+    interface is narrowed. Narrowing an interface is a design change - it needs a reason beyond the scan.
 
     Still suppressed because the scan still cannot see these callers:
 

@@ -386,7 +386,7 @@ public sealed class PriceCatalogDatabase
     public string DatabasePath { get; }
 
     /// <summary>Gets the connection string that opens (creating if needed) the database file.</summary>
-    public string ConnectionString => new SqliteConnectionStringBuilder
+    private string ConnectionString => new SqliteConnectionStringBuilder
     {
         DataSource = DatabasePath,
         Mode = SqliteOpenMode.ReadWriteCreate

@@ -30,7 +30,7 @@ public class RequestInterceptor
     /// <see cref="RouterModelName"/> this name is never advertised by
     /// <see cref="ListAvailableModels"/>; it remains accepted for callers that already send it.
     /// </summary>
-    internal const string AutoSelectModelName = "auto";
+    private const string AutoSelectModelName = "auto";
 
     /// <summary>
     /// The advertised alias for <see cref="AutoSelectModelName"/>, and the only one of the two that
@@ -40,7 +40,7 @@ public class RequestInterceptor
     /// so offer no other way to express "you choose". Spelled as an Ollama-safe slug - no spaces, no
     /// tag separator - so it round-trips unmodified through both clients.
     /// </summary>
-    internal const string RouterModelName = "totallyhot-arcrouter";
+    private const string RouterModelName = "totallyhot-arcrouter";
 
     /// <summary>
     /// The <c>owned_by</c> value reported for <see cref="RouterModelName"/> on the OpenAI-shaped

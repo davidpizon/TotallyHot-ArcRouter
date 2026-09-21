@@ -65,7 +65,7 @@ public sealed class BenchmarkDataStore : AdminStoreBase<IBenchmarkDataAdminClien
     /// published as the first event on the stream. <see langword="null"/> before that first event
     /// arrives (including outside of a running sync) or if the sync failed before it was sent.
     /// </summary>
-    public BenchmarkSyncPlanInfo? SyncPlan { get; private set; }
+    private BenchmarkSyncPlanInfo? SyncPlan { get; set; }
 
     /// <summary>
     /// The name of the file the most recent progress event was about, i.e. the file currently being
