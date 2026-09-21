@@ -102,10 +102,11 @@ built by the same pipeline and are safe to install, but they are deliberately
 invisible to the built-in update check, which only ever offers a promoted
 release (see
 [`docs/router/packaging-and-distribution.md`](docs/router/packaging-and-distribution.md)
-§7). Once installed, the router checks for new releases every six hours. On Windows the tray offers to
-apply what it finds via the MSI; on Linux/macOS an update is detected but must currently be applied by
-re-running the install script with a newer archive (no in-process apply path yet - see the web GUI
-migration plan's P10 section). Updates are never applied without an explicit action.
+§7). Once installed, the router checks for new releases every six hours. On Windows, apply a verified
+update from System Settings in the dashboard; the tray does not install the MSI. On Linux/macOS an
+update is detected but must currently be applied by re-running the install script with a newer archive
+(no in-process apply path yet - see the web GUI migration plan's P10 section). Updates are never
+applied without an explicit action.
 
 ## Routing
 

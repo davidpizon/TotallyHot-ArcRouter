@@ -55,7 +55,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     private readonly object _stateGate = new();
     private RouterConnectionState _connectionState = RouterConnectionState.Unreachable;
     private bool _isEnabled = true;
-    private string? _lastFailureMessage;
     private bool _wasUsable;
 
     /// <summary>Initializes a new instance of the <see cref="RoutingGateMonitor"/> class and starts polling.</summary>
@@ -145,23 +144,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     }
 
     /// <summary>
-    /// The failure detail from the last unsuccessful poll, or <see langword="null"/> while
-    /// <see cref="ConnectionState"/> is <see cref="RouterConnectionState.Connected"/>. Surfaced so a
-    /// <see cref="RouterConnectionState.Rejected"/> router can report <em>why</em> rather than being
-    /// flattened into a generic outage message.
-    /// </summary>
-    public string? LastFailureMessage
-    {
-        get
-        {
-            lock (_stateGate)
-            {
-                return _lastFailureMessage;
-            }
-        }
-    }
-
-    /// <summary>
     /// Whether the proxy currently accepts routing requests, as of the last successful poll. Meaningless
     /// while <see cref="IsUsable"/> is <see langword="false"/>.
     /// </summary>
@@ -218,7 +200,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     {
         var confirmed = await _client.SetAsync(enabled: enabled, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
-        UpdateState(connectionState: RouterConnectionState.Connected, null, isEnabled: confirmed);
+        UpdateState(connectionState: RouterConnectionState.Connected, isEnabled: confirmed);
         return confirmed;
     }
 
@@ -234,7 +216,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
             try
             {
                 var enabled = await _client.GetAsync(cancellationToken).ConfigureAwait(false);
-                UpdateState(connectionState: RouterConnectionState.Connected, null, isEnabled: enabled);
+                UpdateState(connectionState: RouterConnectionState.Connected, isEnabled: enabled);
             }
             catch (GrpcAdminException ex)
             {
@@ -245,7 +227,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
                 var state = ex.IsUnavailable ? RouterConnectionState.Unreachable : RouterConnectionState.Rejected;
                 _logger?.LogWarning(exception: ex,
                     message: "Failed to poll the routing gate from the router; classified as {State}.", state);
-                UpdateState(connectionState: state, failureMessage: ex.Message, false);
+                UpdateState(connectionState: state, isEnabled: false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -268,12 +250,11 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     /// transition. Every other reader polls the properties directly, so no change notification is raised.
     /// </summary>
     /// <param name="connectionState">How the poll (or mutation) that produced this update turned out.</param>
-    /// <param name="failureMessage">The failure detail, or <see langword="null"/> on success.</param>
     /// <param name="isEnabled">
     /// The gate's value; only recorded when <paramref name="connectionState"/> is
     /// <see cref="RouterConnectionState.Connected"/>.
     /// </param>
-    private void UpdateState(RouterConnectionState connectionState, string? failureMessage, bool isEnabled)
+    private void UpdateState(RouterConnectionState connectionState, bool isEnabled)
     {
         bool becameUnusable;
         var isUsable = connectionState == RouterConnectionState.Connected;
@@ -282,7 +263,6 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
             becameUnusable = _wasUsable && !isUsable;
             _wasUsable = isUsable;
             _connectionState = connectionState;
-            _lastFailureMessage = failureMessage;
             if (isUsable) _isEnabled = isEnabled;
         }
 
