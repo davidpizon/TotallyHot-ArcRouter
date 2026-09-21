@@ -75,17 +75,10 @@ public sealed class ProxyMiddlewareOwnershipTests
         // Production supplies only the factory, so this is the path real traffic takes. Pins both the
         // client name the DI registration must match and that the upstream call actually goes through
         // the factory-created client rather than a fallback.
-        var upstreamCalls = 0;
-        var handler = new StubHandler(() =>
+        var factory = new RecordingHttpClientFactory(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            upstreamCalls++;
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("""{"choices":[]}""", encoding: Encoding.UTF8,
-                    mediaType: "application/json")
-            };
+            Content = new StringContent("""{"choices":[]}""", encoding: Encoding.UTF8, mediaType: "application/json")
         });
-        var factory = new RecordingHttpClientFactory(handler);
         using var middleware = new ProxyMiddleware(logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance,
                 modelRouteResolver: ModelRouteResolverTestFactory.CreateWithModels(
@@ -104,31 +97,9 @@ public sealed class ProxyMiddlewareOwnershipTests
 
         await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
-        Assert.Equal(1, upstreamCalls);
+        Assert.Single(factory.Requests);
         Assert.Equal([ProxyMiddleware.HttpClientName], factory.RequestedNames);
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-    }
-
-    /// <summary>Records every client name requested and hands out clients over one shared stub handler.</summary>
-    private sealed class RecordingHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        internal List<string> RequestedNames { get; } = [];
-
-        public HttpClient CreateClient(string name)
-        {
-            RequestedNames.Add(name);
-            return new HttpClient(handler: handler, disposeHandler: false);
-        }
-    }
-
-    /// <summary>Answers every upstream request with the response the delegate builds.</summary>
-    private sealed class StubHandler(Func<HttpResponseMessage> respond) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            return Task.FromResult(respond());
-        }
     }
 
     /// <summary>Records whether it was disposed. Never actually sends: these tests construct and dispose only.</summary>

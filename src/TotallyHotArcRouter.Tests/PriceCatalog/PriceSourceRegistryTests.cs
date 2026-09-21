@@ -111,7 +111,11 @@ public class PriceSourceRegistryTests
         // source that asked for any other name (or none) would silently fetch without them.
         using var temp = new TempDatabase();
         using var toggleStore = temp.CreateToggleStore();
-        var factory = new RecordingHttpClientFactory();
+        var factory = new RecordingHttpClientFactory(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            // An empty object: both sources normalize it to zero prices without throwing.
+            Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json")
+        });
         var registry = new PriceSourceRegistry(options: Options.Create(new PriceCatalogOptions()),
             toggleStore: toggleStore, loggerFactory: NullLoggerFactory.Instance, httpClientFactory: factory);
 
@@ -128,33 +132,5 @@ public class PriceSourceRegistryTests
         return new PriceSourceRegistry(options: Options.Create(options), toggleStore: toggleStore,
             loggerFactory: NullLoggerFactory.Instance,
             httpClientFactory: new FakeHttpClientFactory(new HttpClientHandler()));
-    }
-
-    /// <summary>
-    /// Records each requested client name and answers every fetch with an empty JSON object, which both
-    /// sources normalize to zero prices without throwing.
-    /// </summary>
-    private sealed class RecordingHttpClientFactory : IHttpClientFactory
-    {
-        internal List<string> RequestedNames { get; } = [];
-
-        public HttpClient CreateClient(string name)
-        {
-            RequestedNames.Add(name);
-            return new HttpClient(new EmptyJsonHandler());
-        }
-    }
-
-    /// <summary>Returns <c>{}</c> for every request.</summary>
-    private sealed class EmptyJsonHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(content: "{}", encoding: Encoding.UTF8, mediaType: "application/json")
-            });
-        }
     }
 }
