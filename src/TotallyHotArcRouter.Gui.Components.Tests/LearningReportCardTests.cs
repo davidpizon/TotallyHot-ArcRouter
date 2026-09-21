@@ -1,7 +1,6 @@
 using AwesomeAssertions;
 using Bunit;
 using Grpc.Core;
-using Microsoft.Extensions.DependencyInjection;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
@@ -77,7 +76,7 @@ public sealed class LearningReportCardTests
     public async Task A_superseded_filter_response_arriving_last_is_not_applied()
     {
         var stub = new DeferredReportCardClient();
-        using var ctx = new BunitContext();
+        await using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton(new UsageStore(client: new UsageQueryClient(stub)));
 
@@ -87,7 +86,7 @@ public sealed class LearningReportCardTests
 
         // The newer (Day) request answers first, then the older (Month) one straggles in.
         stub.Pending[1].SetResult(Card(scored: 7));
-        cut.WaitForAssertion(assertion: () => cut.Markup.Should().Contain("7 scored"),
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("7 scored"),
             timeout: TimeSpan.FromSeconds(5));
 
         stub.Pending[0].SetResult(Card(scored: 99));
