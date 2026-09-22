@@ -171,7 +171,7 @@ jobs:
           }
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-asset-msi
           path: release-assets/*.msi
@@ -232,7 +232,7 @@ jobs:
           ls -la release-assets
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-asset-tarball-${{ matrix.rid }}
           path: release-assets/*.tar.gz
