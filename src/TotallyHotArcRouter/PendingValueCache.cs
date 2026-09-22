@@ -8,8 +8,10 @@ namespace TotallyHot.ArcRouter;
 /// <summary>
 /// A correlation-id-keyed, TTL- and capacity-bounded in-process cache. One implementation covers every
 /// pending-* bridge on the request path (embeddings, cost, provenance, response length, and the
-/// text/prompt/backbone wrappers) so those clones cannot drift apart again. A key is set once and, when
-/// taken, taken at most once; <see cref="TryPeek"/> leaves the slot for concurrent readers.
+/// text/prompt/backbone wrappers) so those clones cannot drift apart again. <see cref="Set"/> may be called
+/// repeatedly for the same key: each call replaces the value (or, with a merge function, combines into it)
+/// and refreshes its TTL. Reads are separate from that: <see cref="TryTake"/> removes the entry so a value
+/// is taken at most once, while <see cref="TryPeek"/> leaves it in place for concurrent readers.
 /// </summary>
 /// <typeparam name="T">The cached value type.</typeparam>
 public sealed class PendingValueCache<T>
