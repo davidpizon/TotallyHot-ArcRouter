@@ -30,7 +30,7 @@ public class RouterSettingsAdminClientTests
                 TranscriptCaptureEnabled = true
             }
         };
-        using var client = new RouterSettingsAdminClient(stub);
+        var client = new RouterSettingsAdminClient(stub);
 
         var settings = await client.GetAsync(TestContext.Current.CancellationToken);
 
@@ -55,7 +55,7 @@ public class RouterSettingsAdminClientTests
                 JudgeModelName = "free-judge"
             }
         };
-        using var client = new RouterSettingsAdminClient(stub);
+        var client = new RouterSettingsAdminClient(stub);
 
         var settings = await client.UpdateAsync(true, 5_000, true, judgeModelName: "free-judge", true,
             cancellationToken: TestContext.Current.CancellationToken);
@@ -76,7 +76,7 @@ public class RouterSettingsAdminClientTests
     public async Task UpdateAsync_null_judge_model_name_is_sent_as_empty()
     {
         var stub = new StubClient { UpdateResponse = new Contract.RouterSettingsResponse() };
-        using var client = new RouterSettingsAdminClient(stub);
+        var client = new RouterSettingsAdminClient(stub);
 
         await client.UpdateAsync(false, 5_000, false, judgeModelName: null!, false,
             cancellationToken: TestContext.Current.CancellationToken);
@@ -89,7 +89,7 @@ public class RouterSettingsAdminClientTests
     {
         var stub = new StubClient
         { ClearTranscriptsResponse = new Contract.ClearTranscriptsResponse { RowsDeleted = 42 } };
-        using var client = new RouterSettingsAdminClient(stub);
+        var client = new RouterSettingsAdminClient(stub);
 
         var rowsDeleted = await client.ClearTranscriptsAsync(TestContext.Current.CancellationToken);
 
@@ -104,7 +104,7 @@ public class RouterSettingsAdminClientTests
             ClearTranscriptsFailure =
                 new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect"))
         };
-        using var client = new RouterSettingsAdminClient(stub);
+        var client = new RouterSettingsAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.ClearTranscriptsAsync(TestContext.Current.CancellationToken));
@@ -120,7 +120,7 @@ public class RouterSettingsAdminClientTests
         {
             GetFailure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect"))
         };
-        using var client = new RouterSettingsAdminClient(stub);
+        var client = new RouterSettingsAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
             client.GetAsync(TestContext.Current.CancellationToken));
@@ -138,7 +138,7 @@ public class RouterSettingsAdminClientTests
             UpdateFailure = new RpcException(new Status(statusCode: StatusCode.InvalidArgument,
                 detail: "embedding_memory_capacity must be between 500 and 50000 (got 1)"))
         };
-        using var client = new RouterSettingsAdminClient(stub);
+        var client = new RouterSettingsAdminClient(stub);
 
         var ex = await Assert.ThrowsAsync<GrpcAdminException>(() => client.UpdateAsync(false, 1, false,
             judgeModelName: string.Empty, false, cancellationToken: TestContext.Current.CancellationToken));
@@ -146,31 +146,6 @@ public class RouterSettingsAdminClientTests
         ex.Message.Should()
             .Be("Could not save the router settings: embedding_memory_capacity must be between 500 and 50000 (got 1)");
         ex.IsUnavailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Disposing_a_client_over_a_caller_supplied_stub_does_not_dispose_the_callers_channel()
-    {
-        var client = new RouterSettingsAdminClient(new StubClient());
-
-        client.Dispose();
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_address_overload_owns_the_channel_it_creates()
-    {
-        var client = new RouterSettingsAdminClient("https://127.0.0.1:65001");
-
-        client.Dispose();
-    }
-
-    [Fact]
-    public void The_default_address_overload_targets_the_proxys_grpc_port()
-    {
-        using var client = new RouterSettingsAdminClient();
-
-        client.Should().NotBeNull();
     }
 
     [Fact]

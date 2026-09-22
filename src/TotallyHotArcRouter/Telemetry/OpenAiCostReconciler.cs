@@ -14,16 +14,27 @@ public sealed class OpenAiCostReconciler : IProviderCostReconciler
     private const string BaseUrl = "https://api.openai.com/v1/organization/costs";
     private readonly string _adminApiKey;
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
     private readonly ILogger<OpenAiCostReconciler>? _logger;
 
     /// <summary>Initializes a new instance of the <see cref="OpenAiCostReconciler"/> class.</summary>
-    public OpenAiCostReconciler(HttpClient httpClient, string adminApiKey, ILogger<OpenAiCostReconciler>? logger = null)
+    /// <param name="httpClient">Transport used in tests. Production omits this and supplies <paramref name="httpClientFactory"/>.</param>
+    /// <param name="adminApiKey">The OpenAI Admin API key used to authorize cost queries.</param>
+    /// <param name="logger">Optional logger for retry visibility.</param>
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="CostReconciliationRetryPolicy.HttpClientName"/> client per reconciliation
+    /// call. Required when <paramref name="httpClient"/> is omitted.
+    /// </param>
+    public OpenAiCostReconciler(HttpClient? httpClient, string adminApiKey, ILogger<OpenAiCostReconciler>? logger = null,
+        IHttpClientFactory? httpClientFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        if (httpClient is null && httpClientFactory is null)
+            throw new ArgumentNullException(nameof(httpClientFactory));
         ArgumentException.ThrowIfNullOrWhiteSpace(adminApiKey);
 
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _adminApiKey = adminApiKey;
         _logger = logger;
     }
@@ -41,6 +52,8 @@ public sealed class OpenAiCostReconciler : IProviderCostReconciler
 
         var total = 0m;
         string? page = null;
+        using var factoryClient = _httpClientFactory?.CreateClient(CostReconciliationRetryPolicy.HttpClientName);
+        var client = factoryClient ?? _httpClient!;
 
         do
         {
@@ -48,7 +61,7 @@ public sealed class OpenAiCostReconciler : IProviderCostReconciler
                       (page is null ? string.Empty : $"&page={Uri.EscapeDataString(page)}");
 
             using var response = await CostReconciliationRetryPolicy.SendWithRetryAsync(
-                httpClient: _httpClient,
+                httpClient: client,
                 requestFactory: () => BuildRequest(uri),
                 logger: _logger,
                 cancellationToken: cancellationToken).ConfigureAwait(false);

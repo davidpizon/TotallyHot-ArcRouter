@@ -10,7 +10,9 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 /// <summary>
 /// Covers <see cref="GraderDrainService.ProcessAsync"/> for both the G-Eval judge (including the G2
 /// persist-to-<c>judge_shadow_scores</c> hook) and a portfolio grader. The cached response text is read
-/// without being removed; every give-up path abandons with its own reason.
+/// without being removed; every give-up path abandons with its own reason. Every scoring-path test gets a
+/// prompt cache already holding the question for <c>corr-1</c> by default, because a missing question
+/// fails closed (GitHub issue #114); the missing-question tests pass their own empty cache.
 /// </summary>
 public class GraderDrainServiceTests
 {
@@ -49,7 +51,6 @@ public class GraderDrainServiceTests
         Assert.Equal(expected: "corr-1", actual: completed.CorrelationId);
         Assert.Equal(expected: GraderKeys.Judge, actual: completed.GraderKey);
         Assert.Equal(0.8, actual: completed.Score);
-        Assert.True(completed.ViaJudgeSeam);
         Assert.Empty(aggregator.Abandoned);
     }
 
@@ -131,22 +132,57 @@ public class GraderDrainServiceTests
         Assert.Empty(aggregator.Completed);
     }
 
+    /// <summary>
+    /// GitHub issue #114: grading without the user/task question is response-only scoring. A cache miss
+    /// (or a whitespace-only hit) must abandon the join with <c>{grader}-question-missing</c> and never
+    /// call the backbone, for the judge and a portfolio grader alike.
+    /// </summary>
+    [Theory]
+    [InlineData(GraderKeys.Judge, false, "")]
+    [InlineData(GraderKeys.Judge, true, "")]
+    [InlineData(GraderKeys.Judge, true, "   ")]
+    [InlineData(GraderKeys.CodeJudge, false, "")]
+    [InlineData(GraderKeys.CodeJudge, true, "   ")]
+    public async Task ProcessAsync_QuestionMissing_AbandonsWithQuestionMissingReasonAndDoesNotCallTheClient(
+        string graderKey, bool cachePrompt, string prompt)
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var promptCache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        if (cachePrompt) promptCache.Set(correlationId: "corr-1", prompt: prompt);
+        var client = new FakeClient(graderKey, 0.8);
+        var store = new FakeJudgeShadowScoreStore();
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache, clients: [client], shadowStore: store, aggregator: aggregator,
+            promptCache: promptCache);
+
+        await service.ProcessAsync(job: MakePortfolioJob(graderKey),
+            stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(client.LastRequest);
+        Assert.Empty(store.Inserted);
+        Assert.Empty(aggregator.Completed);
+        var abandoned = Assert.Single(aggregator.Abandoned);
+        Assert.Equal(expected: graderKey, actual: abandoned.GraderKey);
+        Assert.Equal(expected: GraderQuestionText.MissingReason(graderKey), actual: abandoned.Reason);
+    }
+
     [Fact]
     public async Task ProcessAsync_PortfolioTextPresentAndEnabled_CompletesTheJoinAndLeavesTheCache()
     {
         var cache = CreateCache();
         cache.Set(correlationId: "corr-1", text: "the agent's response");
         var aggregator = new RecordingAggregator();
-        var service = CreateService(cache: cache, clients: [new FakeClient(GraderKeys.CodeJudge, 0.8)],
-            aggregator: aggregator);
+        var client = new FakeClient(GraderKeys.CodeJudge, 0.8);
+        var service = CreateService(cache: cache, clients: [client], aggregator: aggregator);
 
         await service.ProcessAsync(job: MakePortfolioJob(GraderKeys.CodeJudge),
             stoppingToken: TestContext.Current.CancellationToken);
 
+        Assert.Equal(expected: "write a function that adds two numbers", actual: client.LastRequest?.Prompt);
         var completed = Assert.Single(aggregator.Completed);
         Assert.Equal(expected: GraderKeys.CodeJudge, actual: completed.GraderKey);
         Assert.Equal(0.8, actual: completed.Score);
-        Assert.False(completed.ViaJudgeSeam);
         Assert.Empty(aggregator.Abandoned);
         Assert.True(cache.TryPeek(correlationId: "corr-1", text: out _));
     }
@@ -214,6 +250,17 @@ public class GraderDrainServiceTests
         return new PendingResponseTextCache(Options.Create(new JudgeOptions()));
     }
 
+    /// <summary>
+    /// A prompt cache already holding the question for <c>corr-1</c>, the correlation every scoring-path
+    /// test in this fixture uses.
+    /// </summary>
+    private static PendingPromptCache CreatePromptCache()
+    {
+        var cache = new PendingPromptCache(Options.Create(new JudgeOptions()));
+        cache.Set(correlationId: "corr-1", prompt: "write a function that adds two numbers");
+        return cache;
+    }
+
     private static GraderDrainService CreateService(
         PendingResponseTextCache cache,
         IEnumerable<IPortfolioGraderClient> clients,
@@ -227,7 +274,7 @@ public class GraderDrainServiceTests
         return new GraderDrainService(
             queue: new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 })),
             pendingResponseTextCache: cache,
-            pendingPromptCache: promptCache ?? new PendingPromptCache(Options.Create(new JudgeOptions())),
+            pendingPromptCache: promptCache ?? CreatePromptCache(),
             pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
             clients: clients,
             shadowStore: shadowStore ?? new FakeJudgeShadowScoreStore(),
@@ -294,7 +341,7 @@ public class GraderDrainServiceTests
 
     private sealed class RecordingAggregator : IQualityScoreAggregator
     {
-        public List<(string CorrelationId, string GraderKey, double Score, bool ViaJudgeSeam)> Completed { get; } = [];
+        public List<(string CorrelationId, string GraderKey, double Score)> Completed { get; } = [];
 
         public List<(string CorrelationId, string GraderKey, string Reason)> Abandoned { get; } = [];
 
@@ -303,24 +350,10 @@ public class GraderDrainServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<bool> CompleteWithJudgeAsync(string correlationId, double judgeScore,
-            CancellationToken cancellationToken = default)
-        {
-            Completed.Add((correlationId, GraderKeys.Judge, judgeScore, true));
-            return Task.FromResult(true);
-        }
-
-        public Task<bool> AbandonJudgeAsync(string correlationId, string reason,
-            CancellationToken cancellationToken = default)
-        {
-            Abandoned.Add((correlationId, GraderKeys.Judge, reason));
-            return Task.FromResult(true);
-        }
-
         public Task<bool> CompleteGraderAsync(string correlationId, string graderKey, double score,
             CancellationToken cancellationToken = default)
         {
-            Completed.Add((correlationId, graderKey, score, false));
+            Completed.Add((correlationId, graderKey, score));
             return Task.FromResult(true);
         }
 

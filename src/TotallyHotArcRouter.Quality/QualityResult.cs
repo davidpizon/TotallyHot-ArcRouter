@@ -12,7 +12,9 @@ public sealed record QualityResult
     /// Bumped to <c>2.0</c> when execution-derived fields (tier, exit code, timeout/OOM/seccomp flags,
     /// captured output, wall-clock, peak memory) were removed along with the executing verifier itself.
     /// A consumer reading <c>1.0</c> rows out of historical telemetry must not expect these fields.
+    /// No C# caller reads it; it exists to be serialized, which the scan cannot see.
     /// </remarks>
+    // ReSharper disable once UnusedMember.Global
     public string SchemaVersion { get; init; } = "2.0";
 
     /// <summary>Correlation id tying this result back to its <c>RoutingTelemetryEvent</c>.</summary>

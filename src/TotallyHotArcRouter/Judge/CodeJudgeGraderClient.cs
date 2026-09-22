@@ -47,21 +47,10 @@ public sealed class CodeJudgeGraderClient : PortfolioGraderClientBase
     /// <inheritdoc/>
     protected override string BuildPrompt(string dimension, string responseText, string taskPrompt)
     {
-        var taskSection = string.IsNullOrWhiteSpace(taskPrompt)
-            ? string.Empty
-            : $"""
-
-               Task the response was written for:
-               ---
-               {taskPrompt}
-               ---
-
-               """;
-
         return $"""
                 You are a strict code reviewer looking only for correctness faults in an AI assistant's
                 response.
-                {taskSection}
+                {GraderQuestionText.FormatTaskSection(taskPrompt)}
                 Response to evaluate:
                 ---
                 {responseText}

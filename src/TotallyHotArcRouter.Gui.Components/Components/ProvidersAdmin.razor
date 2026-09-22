@@ -15,8 +15,17 @@ else if (!Store.IsReachable)
         <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
             <Icon Name="alert-triangle" Size="20"/> Proxy management API unreachable
         </div>
+        @* The store's own endpoint, not a default constant: naming an address the client was never
+           pointed at is worse than naming none while diagnosing a connectivity failure. *@
         <div class="text-xs text-slate-400">
-            Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
+            @if (Store.ServerAddress is { Length: > 0 } serverAddress)
+            {
+                <text>Could not reach <span class="font-mono">@serverAddress</span>. Is the proxy running?</text>
+            }
+            else
+            {
+                <text>Could not reach the proxy. Is it running?</text>
+            }
         </div>
         @if (!string.IsNullOrEmpty(Store.LastError))
         {
@@ -193,8 +202,9 @@ else
 
             @* Manual add, for a provider "Refresh from endpoint" can't reach (no OpenAI-shaped
                            /v1/models - hosted Anthropic, Bedrock) or as a plain override. Collapsed by
-                           default now that reconciliation adds most models automatically; mirrors the
-                           expand/collapse pattern in TurnCard.razor (a per-key toggle + chevron glyph). *@
+                           default now that reconciliation adds most models automatically; the same
+                           expand/collapse pattern as BenchmarkData.razor's file lists (a toggle + chevron
+                           glyph), keyed per provider here. *@
             <button @onclick="() => ToggleAddModelPane(provider.Key)"
                     aria-expanded="@IsAddModelPaneOpen(provider.Key)"
                     aria-label="Add model manually"

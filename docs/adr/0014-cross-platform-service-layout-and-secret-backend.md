@@ -142,7 +142,7 @@ token relocation and this ADR's credential-storage fix don't need.
 
 ## More Information
 
-See [`docs/gui/web-gui-migration-plan.md`](../gui/web-gui-migration-plan.md) phase P3 (implementation
+See [`docs/archive/gui/web-gui-migration-plan.md`](../archive/gui/web-gui-migration-plan.md) phase P3 (implementation
 and exit criteria: Linux CI credential round-trip, Windows DPAPI-format compatibility fixture, key-ring
 restart-survival test) and phase P10 (systemd/launchd packaging). Feeds
 [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md) (the management token's new home)

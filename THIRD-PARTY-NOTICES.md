@@ -65,7 +65,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 **Apache ECharts NOTICE** — reproduced as required by Apache-2.0 §4(d). The upstream `LICENSE` and
 `NOTICE` files are retained verbatim alongside the vendored bundle in
-`src/TotallyHotArcRouter.Gui/wwwroot/lib/echarts/`:
+`src/TotallyHotArcRouter.Gui.Web/wwwroot/lib/echarts/`:
 
 ```
 Apache ECharts
@@ -97,7 +97,6 @@ PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 | Microsoft.ML.Tokenizers | 2.0.0 | Copyright (c) Microsoft Corporation |
 | Microsoft.ML.Tokenizers.Data.Cl100kBase | 2.0.0 | Copyright (c) Microsoft Corporation |
 | Microsoft.ML.Tokenizers.Data.O200kBase | 2.0.0 | Copyright (c) Microsoft Corporation |
-| Microsoft.SemanticKernel | 1.80.1 | Copyright (c) Microsoft Corporation |
 | System.Security.Cryptography.ProtectedData | 10.0.12 | Copyright (c) Microsoft Corporation |
 | System.ServiceProcess.ServiceController | 10.0.11 | Copyright (c) Microsoft Corporation |
 | Microsoft.Bcl.Memory | 10.0.12 | Copyright (c) Microsoft Corporation |

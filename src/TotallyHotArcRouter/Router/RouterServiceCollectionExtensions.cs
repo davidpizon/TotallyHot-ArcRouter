@@ -5,7 +5,6 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
-using TotallyHot.ArcRouter.Tools;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -21,8 +20,7 @@ internal static class RouterServiceCollectionExtensions
     /// Registers the routing core: learned memory storage, <see cref="RoutingOptions"/>/
     /// <see cref="EmbeddingOptions"/>/<see cref="LlmRouterOptions"/> and their live-override layers, the
     /// embedding and local text-generation clients, the Orchestrator voter ensemble, and the retrain
-    /// hosted-service triggers' training services - plus <see cref="CheckSyntax"/>, the one remaining
-    /// tool.
+    /// hosted-service triggers' training services.
     /// </summary>
     internal static IServiceCollection AddRouterCore(this IServiceCollection services)
     {
@@ -170,13 +168,6 @@ internal static class RouterServiceCollectionExtensions
         // resolve IRegretHarnessRunner directly - read-only and informational, so there is no hosted
         // automatic trigger the way the retrains above have one.
         services.AddSingleton<IRegretHarnessRunner, RegretHarnessRunner>();
-
-        // Tools. RunVisibleTests (which shelled out to `dotnet test` in a caller-supplied directory) and
-        // EstimateQuality (a placeholder length-and-comment heuristic) were removed along with the
-        // executing verifier: the first was a live path to running code we do not run, and the second
-        // was a competing quality API that the real static analyzers in TotallyHot.ArcRouter.Quality
-        // supersede outright.
-        services.AddTransient<CheckSyntax>();
 
         return services;
     }

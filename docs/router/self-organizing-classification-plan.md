@@ -578,10 +578,11 @@ voters (both by concrete type and as `IRoutingVoter`).
 >   embedding, neither of which exists when the response is sent, so it cannot run inline. Comparison data
 >   is deliberately not real-time.
 >
-> The cost half is surfaced; the predictive-adequacy half is not. `GET /admin/usage/routing-roi` (via
-> `ManagementFacade.GetRoutingRoiAsync`) feeds the Cost Analytics **Routing ROI** screen, which the GUI
-> polls every 30 seconds rather than receiving over telemetry — there is no live event for a figure the
-> background job produces. This **redefines that chart's baseline** from a worst-case model to
+> The cost half is surfaced; the predictive-adequacy half is not. The `UsageAdminService.GetRoutingRoi`
+> gRPC call (served by `UsageAdminGrpcService`, delegating to
+> `ManagementReportingService.GetRoutingRoiAsync`) feeds the Cost Analytics **Routing ROI** screen, which
+> the GUI polls every 30 seconds rather than receiving over telemetry — there is no live event for a
+> figure the background job produces. This **redefines that chart's baseline** from a worst-case model to
 > `dim_best`'s own pick, which is what finally gives it a real data source: `docs/gui/backlog.md` had
 > deferred it precisely because no baseline cost existed. Two fabricated inputs were deleted in the
 > process — a baseline reconstructed from a cost-reduction percentage, and an invented `$2.50/M`
@@ -674,7 +675,7 @@ flow, and the in-progress "Training…" state with a live bootstrap-progress cou
 > clamp, synchronous `EmbeddingMemory.TrimToCurrentCapacityAsync` on a lowered capacity) all landed ahead
 > of this GUI work. GUI side: `RouterSettingsAdminClient`/`IRouterSettingsAdminClient`
 > (`TotallyHotArcRouter.Gui.Telemetry`) and the `RouterSettingsAdminStore` view-model
-> (`TotallyHotArcRouter.Gui/Services`) mirror `ClusterModelAdminClient`/`ClusterModelAdminStore`'s
+> (`TotallyHotArcRouter.Gui.Components/Services`) mirror `ClusterModelAdminClient`/`ClusterModelAdminStore`'s
 > reachability-tolerant shape. `SettingsModal.razor` gained the Adaptive Routing toggle plus Sample Size
 > input (client-side `[500, 50000]` clamp on blur, the amber warning tooltip below 20000), and the
 > telemetry address's dedicated Save button was removed in favor of one footer Save that persists both
@@ -787,7 +788,7 @@ clamping, and a full persistence round-trip.
   `LogRegVoter.cs`, `EmbeddingLogRegTrainer.cs`, `EmbeddingLogRegTrainingService`,
   `Hosting/LogRegRetrainHostedService.cs`, `OodBootstrapSampleSource.cs`.
 - Request path: `Proxy/RequestInterceptor.cs` (T1's capture point).
-- GUI: `TotallyHotArcRouter.Gui/Components/SettingsModal.razor` (the window T6 modifies),
+- GUI: `TotallyHotArcRouter.Gui.Components/Components/SettingsModal.razor` (the window T6 modifies),
   `Services/GuiSettingsStore.cs` (telemetry-address persistence, unchanged), `PriceSourcesAdmin.razor`
   (the router-unreachable state pattern reused), `docs/gui/DESIGN.md` §4.1 (the window contract).
 - Design docs: `docs/router/regret-evaluation-harness-plan.md` (the constraint and the three live-arm

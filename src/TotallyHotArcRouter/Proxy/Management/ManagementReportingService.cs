@@ -6,7 +6,7 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// <summary>
 /// The read-only reporting surface split out of <see cref="ManagementFacade"/>
 /// (docs/router/code-smell-refactoring-plan.md Phase 3 step 1): usage summaries, the cost-analytics chart
-/// feed, and routing-ROI comparisons. None of these grant capability or mutate anything, so - unlike the
+/// feed, routing-ROI comparisons, and the Report Card snapshot (spend / grade mix / score delta). None of these grant capability or mutate anything, so - unlike the
 /// rest of <see cref="ManagementFacade"/> - they are not part of its documented "single security boundary"
 /// for management operations; splitting them out cuts that class roughly in half without touching its
 /// write/security-sensitive surface at all.
@@ -166,5 +166,51 @@ public sealed class ManagementReportingService
                         IsExploratory: r.IsExploratory))
             ];
         }, failureMessage: "Failed to read routing ROI comparisons.");
+    }
+
+    /// <summary>
+    /// The Report Card tab's unified spend / grade-mix / score-delta snapshot (GitHub issue #111). Spend
+    /// is read from <see cref="IUsageRollupStore"/> grouped by model; grade mix and frozen-baseline score
+    /// delta are read from <see cref="ITaxonomyComparisonStore"/>. Neither store is required on its own —
+    /// a learning-only database still produces grades and a spend fallback from comparison costs — but
+    /// both missing is <see cref="ManagementErrorType.Unavailable"/> rather than an empty card, for the
+    /// same reason <see cref="GetRoutingRoiAsync"/> distinguishes "nothing measured" from "measured zero".
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound; must be after <paramref name="from"/>.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    public async Task<ManagementResult<LearningReportCard>> GetLearningReportCardAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default)
+    {
+        if (_rollupStore is null && _comparisonStore is null)
+            return ManagementResult<LearningReportCard>.Fail(
+                errorType: ManagementErrorType.Unavailable,
+                message: "The learning report card is not available.");
+
+        if (to <= from)
+            return ManagementResult<LearningReportCard>.Fail(
+                errorType: ManagementErrorType.InvalidRequest, message: "'to' must be after 'from'.");
+
+        return await ManagementResultExecutor.TryExecuteAsync(action: async () =>
+        {
+            IReadOnlyList<UsageRollupBucket> buckets = [];
+            if (_rollupStore is not null)
+            {
+                buckets = _rollupStore.Query(from: from, to: to, bucketWidth: "P1D", groupBy: "model");
+            }
+
+            IReadOnlyList<TaxonomyComparisonRecord> comparisons = [];
+            if (_comparisonStore is not null)
+            {
+                var rows = await _comparisonStore
+                    .LoadSinceAsync(since: from, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                comparisons = [.. rows.Where(row => row.ComparedAtUtc < to)];
+            }
+
+            return LearningReportCardAggregator.Aggregate(modelBuckets: buckets, comparisons: comparisons);
+        }, failureMessage: "Failed to read the learning report card.");
     }
 }

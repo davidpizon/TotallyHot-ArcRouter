@@ -9,7 +9,8 @@ namespace TotallyHot.ArcRouter.Judge;
 /// Background worker that continuously drains <see cref="IGraderQueue"/> for every LLM grader. For each
 /// dequeued job it looks up the matching <see cref="IPortfolioGraderClient"/> by
 /// <see cref="GraderScoringJob.GraderKey"/>, peeks the cached prompt/response, scores, and completes or
-/// abandons the aggregator's join. The G-Eval judge additionally persists one row to
+/// abandons the aggregator's join. A missing or whitespace-only prompt fails closed (abandon with
+/// <c>{grader}-question-missing</c>) rather than scoring the response in isolation. The G-Eval judge additionally persists one row to
 /// <c>judge_shadow_scores</c> (G2) before completing the join; that table is not merged with
 /// <c>grader_scores</c>.
 /// </summary>
@@ -29,7 +30,10 @@ public sealed class GraderDrainService : BackgroundService
     /// <summary>Initializes a new instance of the <see cref="GraderDrainService"/> class.</summary>
     /// <param name="queue">The work queue to drain.</param>
     /// <param name="pendingResponseTextCache">Supplies the response text for each job, keyed by correlation id.</param>
-    /// <param name="pendingPromptCache">Supplies the originating prompt for each job, best-effort.</param>
+    /// <param name="pendingPromptCache">
+    /// Supplies the originating prompt for each job. Required: a miss (aged out, never cached, or
+    /// whitespace-only) abandons that grader's join rather than scoring the response without its question.
+    /// </param>
     /// <param name="pendingGraderBackboneCache">Records which backbone each successful score actually used.</param>
     /// <param name="clients">Every registered LLM grader client, indexed by <see cref="IPortfolioGraderClient.GraderKey"/>.</param>
     /// <param name="shadowStore">Where G-Eval judge scores are persisted for G2; unused for portfolio keys.</param>
@@ -125,7 +129,20 @@ public sealed class GraderDrainService : BackgroundService
             return;
         }
 
-        _pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt);
+        // Fail closed: a recovered response without its question would be graded in isolation, which is
+        // exactly the response-only scoring docs/research/code-quality-metrics-assessment.md §1 forbids.
+        if (!_pendingPromptCache.TryPeek(correlationId: job.CorrelationId, prompt: out var prompt) ||
+            !GraderQuestionText.IsPresent(prompt))
+        {
+            _logger.LogDebug(
+                message:
+                "No pending user/task question for correlation {CorrelationId}; skipping {GraderKey} scoring.",
+                job.CorrelationId,
+                graderKey);
+            await AbandonAsync(job, GraderQuestionText.MissingReason(graderKey), stoppingToken)
+                .ConfigureAwait(false);
+            return;
+        }
 
         var stopwatch = Stopwatch.StartNew();
         try
@@ -133,7 +150,7 @@ public sealed class GraderDrainService : BackgroundService
             var result = await client
                 .ScoreAsync(
                     request: new PortfolioGraderScoreRequest(Dimension: job.Dimension, ResponseText: responseText,
-                        Prompt: prompt ?? string.Empty),
+                        Prompt: prompt),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
             stopwatch.Stop();
 
@@ -170,15 +187,10 @@ public sealed class GraderDrainService : BackgroundService
                         UsedLogprobs: result.UsedLogprobs,
                         SyntaxAuthoritative: job.SyntaxAuthoritative),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
+            }
 
-                await _aggregator.CompleteWithJudgeAsync(correlationId: job.CorrelationId, judgeScore: result.Score,
-                    cancellationToken: stoppingToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await _aggregator.CompleteGraderAsync(correlationId: job.CorrelationId, graderKey: graderKey,
-                    score: result.Score, cancellationToken: stoppingToken).ConfigureAwait(false);
-            }
+            await _aggregator.CompleteGraderAsync(correlationId: job.CorrelationId, graderKey: graderKey,
+                score: result.Score, cancellationToken: stoppingToken).ConfigureAwait(false);
 
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug(

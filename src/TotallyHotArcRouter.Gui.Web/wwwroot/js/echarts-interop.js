@@ -76,6 +76,12 @@ window.echartsInterop = (function () {
           if (a >= 1e3) return (v / 1e3).toFixed(0) + "K";
           return Number(v).toFixed(0);
         };
+      case "score":
+        return (v) => {
+          const n = Number(v);
+          const sign = n > 0 ? "+" : "";
+          return sign + n.toFixed(3);
+        };
       default:
         return (v) => Number(v).toFixed(0);
     }
@@ -572,11 +578,14 @@ window.echartsInterop = (function () {
   // ---- Model Distribution builders ---------------------------------------------
 
   function optionGroupedBars(m) {
+    const unit = m.unit || "tok";
+    const yAxisOpts = { max: m.yMax || null };
+    if (m.yMin != null) yAxisOpts.min = m.yMin;
     return Object.assign({}, boldAnim, {
       grid: baseGrid({ left: 52, bottom: 22 }),
       legend: { show: false },
       tooltip: Object.assign({ trigger: "axis", axisPointer: { type: "shadow" } }, baseTooltip, {
-        valueFormatter: numberFmt("tok"),
+        valueFormatter: numberFmt(unit),
       }),
       xAxis: {
         type: "category",
@@ -585,7 +594,7 @@ window.echartsInterop = (function () {
         axisTick: { show: false },
         axisLabel: { color: AXIS_COLOR, fontFamily: FONT, fontSize: 10 },
       },
-      yAxis: valueAxis("tok", { max: m.yMax || null }),
+      yAxis: valueAxis(unit, yAxisOpts),
       series: (m.series || []).map((s) => ({
         type: "bar",
         name: s.name,

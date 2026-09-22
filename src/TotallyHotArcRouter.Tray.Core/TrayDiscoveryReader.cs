@@ -3,16 +3,16 @@ using System.Text.Json;
 namespace TotallyHot.ArcRouter.Tray;
 
 /// <summary>
-/// The subset of the router's discovery file the tray needs: where to open the dashboard, and which CA
-/// thumbprint that connection should be trusted under. Field names and shape mirror
-/// <c>TotallyHot.ArcRouter.Proxy.WebInterfaceDiscoveryInfo</c> exactly - kept as an independent type here
-/// rather than a reference to it for the same reason <see cref="TrayDiscoveryReader"/> re-implements the
-/// read rather than calling <c>WebInterfaceDiscoveryFile.TryRead</c>: see that type's remarks.
+/// The subset of the router's discovery file the tray actually uses: where to open the dashboard.
+/// Extra fields the router writes (<c>caThumbprint</c>, <c>writtenAtUtc</c>) are ignored on deserialize -
+/// the tray trusts the loopback session path rather than that thumbprint, and never reads the write
+/// timestamp. Kept as an independent type rather than a reference to
+/// <c>TotallyHot.ArcRouter.Proxy.WebInterfaceDiscoveryInfo</c> for the same reason
+/// <see cref="TrayDiscoveryReader"/> re-implements the read rather than calling
+/// <c>WebInterfaceDiscoveryFile.TryRead</c>: see that type's remarks.
 /// </summary>
 /// <param name="WebUrl">The web dashboard's own effective address, or <see langword="null"/> if it could not be determined.</param>
-/// <param name="CaThumbprint">The router's local CA certificate thumbprint, or <see langword="null"/> if unknown.</param>
-/// <param name="WrittenAtUtc">When the router wrote this file.</param>
-public sealed record TrayDiscoveryInfo(string? WebUrl, string? CaThumbprint, DateTimeOffset WrittenAtUtc);
+public sealed record TrayDiscoveryInfo(string? WebUrl);
 
 /// <summary>
 /// Reads the router's discovery file - written by <c>ProxyHostedService.WriteDiscoveryFile</c>

@@ -16,7 +16,7 @@ certificate by hand (accepts any cert whose subject is exactly `CN=localhost` on
 ignoring chain errors) — a native-client-only workaround.
 
 With the web port (ADR-0011) and, per the plain-HTTP-removal decision in
-[`docs/gui/web-gui-migration-plan.md`](../gui/web-gui-migration-plan.md), the LLM proxy port 5001 both
+[`docs/archive/gui/web-gui-migration-plan.md`](../archive/gui/web-gui-migration-plan.md), the LLM proxy port 5001 both
 moving to HTTPS by default, an ordinary browser now needs to trust these certificates without a custom
 validation callback — browsers have no such escape hatch, and showing a certificate warning on every
 page load is not an acceptable steady state for a desktop tool's own dashboard.
@@ -110,7 +110,7 @@ reintroduces the manual-setup friction Option A eliminates for the default case.
 
 ## More Information
 
-See [`docs/gui/web-gui-migration-plan.md`](../gui/web-gui-migration-plan.md) phase P0 spike S5 (trust
+See [`docs/archive/gui/web-gui-migration-plan.md`](../archive/gui/web-gui-migration-plan.md) phase P0 spike S5 (trust
 matrix across Windows/Linux/macOS/browsers) and phase P7 (CA generation, MSI/Linux/macOS trust steps,
 CLI `--install-certificate`/`--export-ca`, leaf hot-swap). An operator-supplied-certificate override
 (Option D as a fallback, not the default) may be added later via config if a deployment needs it;

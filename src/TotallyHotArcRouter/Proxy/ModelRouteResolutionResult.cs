@@ -8,8 +8,9 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// A single upstream this request may be forwarded to: a resolved route plus the request body already
 /// rewritten with that route's <c>model</c> id. The first candidate is the client's requested model (or its
 /// circuit-breaker substitute, see <c>RequestInterceptor.ResolveModelRouteAsync</c>); any further candidates
-/// are other currently-eligible configured models, ranked by <c>RouterMemory</c> score - the dynamic
-/// replacement for the old static per-model <c>Fallbacks</c> list (see
+/// are other currently-eligible configured models, ranked by the routing policy's voter scores when this
+/// request was policy-picked or by <c>RouterMemory</c> score otherwise - the dynamic replacement for the old
+/// static per-model <c>Fallbacks</c> list (see
 /// <c>docs/router/agent-resilience-strategies.md</c>). Each candidate carries its own rewritten body because
 /// a backup on a different provider needs a different <c>model</c> value (and, downstream, a different
 /// payload translator).

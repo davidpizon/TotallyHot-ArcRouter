@@ -3,6 +3,7 @@
 **Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-11
 **Deciders:** David Pizon
+**Amendments:** [Amendment 1](#amendment-1-2026-09-11-the-store-base-is-not-generic-over-its-exception-and-covers-11-stores) · [Amendment 2](#amendment-2-2026-09-11-the-proof-of-seam-knob-shipped) · [Amendment 3 (2026-09-20) — fold Gui.Admin onto the same seams](#amendment-3-2026-09-20-fold-guiadmin-onto-the-same-seams)
 
 ## Context and Problem Statement
 
@@ -181,6 +182,27 @@ Accepted per the plan's end condition: System Settings' Cost Reconciliation sect
 "next admin knob" this ADR's Consequences section predicted, added as a new optional
 `IAdminServiceModule` with **zero lines changed in `ProxyServer.cs`** — the concrete confirmation that
 the marginal cost actually fell. See the plan document's Phase 4 for the file-by-file breakdown.
+
+### Amendment 3 (2026-09-20): fold Gui.Admin onto the same seams
+
+ADR-0011 already retired the HTTP transport this ADR's Amendment 1 used to keep `ProviderAdminStore` /
+`UsageStore` off `AdminStoreBase`. The leftover split was the exception type: `ProviderAdminException`
+still had no `IsUnavailable` flag, so those two stores could not sit on the base.
+
+Fold, don't invent a second base:
+
+- `ProviderAdminClient` and `UsageQueryClient` derive from `GrpcAdminClientBase` (same `CallAsync` +
+  Unavailable wrapping as the Telemetry clients). No admin client keeps an owned-channel
+  `serverAddress` constructor, and neither does the base: nothing called them, since every store builds
+  its client over the shared `CallInvoker`. With no channel to own, the base is not `IDisposable`
+  either, and `AdminStoreBase` takes no `ownsClient` flag. Auth stays on
+  `TelemetryAuthClientInterceptor`; the clients no longer attach `x-admin-token` themselves.
+- `ProviderAdminException` is deleted. Callers catch `GrpcAdminException`.
+- `ProviderAdminStore` and `UsageStore` derive from `AdminStoreBase`. Toasts stay as a one-line wrap
+  around `LoadGuardedAsync` / `RecordFailure`. `RoutingGateStore` remains the only deliberate holdout.
+
+Public-surface change: one exception type gone; existing catch sites widened the same way Amendment 1
+already did for the other eleven stores.
 
 ## More Information
 

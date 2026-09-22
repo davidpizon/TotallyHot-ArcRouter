@@ -104,6 +104,15 @@ public interface ILlmRouterModelAdminClient
 
     /// <summary>Switches the active model to <paramref name="baseUrl"/>. Does not download.</summary>
     /// <exception cref="GrpcAdminException">The call failed, was rejected, or the router is unreachable.</exception>
+    /// <remarks>
+    /// Reported as used only through the implementation once the unreferenced <c>LlmRouterModelStore</c>
+    /// wrapper was deleted. Kept rather than deleted in turn: this is the client half of a <em>live</em>
+    /// server RPC - <c>LlmRouterModelAdminGrpcService.SetBaseUrl</c> serves it and
+    /// <c>LlmRouterModelOverrideStore.SetBaseUrlAsync</c> persists it - and no dashboard component exposes
+    /// the control yet. Deleting the client would make a working RPC unreachable from the GUI, which is a
+    /// product decision rather than a scan fix.
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     Task<LlmRouterModelStatusInfo> SetBaseUrlAsync(string baseUrl, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -126,21 +135,10 @@ public sealed class LlmRouterModelAdminClient
         ILlmRouterModelAdminClient
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="LlmRouterModelAdminClient"/> class, creating and
-    /// owning a channel to <paramref name="serverAddress"/>.
-    /// </summary>
-    public LlmRouterModelAdminClient(string serverAddress = TelemetryChannelFactory.DefaultServerAddress)
-        : base(serverAddress: serverAddress,
-            createClient: callInvoker =>
-                new Contract.LlmRouterModelAdminService.LlmRouterModelAdminServiceClient(callInvoker))
-    {
-    }
-
-    /// <summary>
     /// Initializes a new instance of the <see cref="LlmRouterModelAdminClient"/> class over a shared, already-
     /// authenticated call invoker (web GUI migration plan Phase P5a) - see
-    /// <see cref="IRouterChannelProvider"/>'s remarks for why production now goes through this
-    /// constructor instead of the one above, which still exists for standalone/test use. The
+    /// <see cref="IRouterChannelProvider"/>'s remarks for why production goes through this shared
+    /// invoker rather than a channel of its own. The
     /// caller owns the invoker's underlying channel.
     /// </summary>
     /// <param name="callInvoker">The shared call invoker - see <see cref="IRouterChannelProvider.CallInvoker"/>.</param>

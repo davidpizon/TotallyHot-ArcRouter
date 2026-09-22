@@ -8,6 +8,11 @@
 > ([ADR-0011](0011-router-served-blazor-webassembly-gui-over-grpc-web.md)) deletes REST `/admin`
 > entirely, so the HTTP-vs-gRPC transport split this ADR documented no longer exists. This record is
 > kept for history; it is no longer the operative decision.
+>
+> **Amendment (2026-09-20):** the leftover type-system split is gone too.
+> `ProviderAdminClient` / `UsageQueryClient` now derive from `GrpcAdminClientBase`, throw
+> `GrpcAdminException`, and `ProviderAdminStore` / `UsageStore` sit on `AdminStoreBase`. See
+> [ADR-0010 Amendment 3](0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md#amendment-3-2026-09-20-fold-guiadmin-onto-the-same-seams).
 
 ## Context and Problem Statement
 

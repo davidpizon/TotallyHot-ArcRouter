@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Grpc.Core;
 using Grpc.Net.Client;
 using TotallyHot.ArcRouter.Gui.Telemetry;
@@ -27,6 +28,16 @@ public interface ISessionRouterConnector
 /// <summary>
 /// Production <see cref="ISessionRouterConnector"/>: wraps <see cref="TelemetryChannelFactory.CreateSessionAuthenticatedAsync"/>.
 /// </summary>
+/// <remarks>
+/// Excluded from coverage: this type is a one-call wrapper around
+/// <see cref="TelemetryChannelFactory.CreateSessionAuthenticatedAsync"/> (tested in Gui.Telemetry).
+/// <see cref="ISessionRouterConnector"/> is the seam <c>RouterConnectionSupervisorTests</c> use so they
+/// never open a live session. Its only caller is <c>TotallyHotArcRouter.Tray</c>, which targets
+/// <c>net10.0-windows</c> and is therefore absent from <c>TotallyHotArcRouter.Qodana.slnx</c> - so the scan
+/// reports this type as unused.
+/// </remarks>
+[ExcludeFromCodeCoverage]
+// ReSharper disable once UnusedType.Global
 public sealed class SessionRouterConnector : ISessionRouterConnector
 {
     /// <inheritdoc/>
@@ -46,6 +57,11 @@ public sealed class SessionRouterConnector : ISessionRouterConnector
 /// the session cookie travels automatically with every request over the channel's own
 /// <see cref="System.Net.CookieContainer"/>-backed transport.
 /// </summary>
+/// <remarks>
+/// Excluded from coverage with <see cref="SessionRouterConnector"/>: constructing one requires a live
+/// <see cref="GrpcChannel"/>, which is the hop the connector seam exists to avoid in tests.
+/// </remarks>
+[ExcludeFromCodeCoverage]
 internal sealed class SessionRouterChannelProvider : IRouterChannelProvider, IDisposable
 {
     private readonly GrpcChannel _channel;

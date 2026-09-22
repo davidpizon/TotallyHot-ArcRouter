@@ -16,7 +16,7 @@ public sealed record Toast(Guid Id, string Title, string Message);
 public sealed class ToastService
 {
     /// <summary>How long a toast stays visible before auto-dismissing.</summary>
-    public static readonly TimeSpan AutoDismissAfter = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan AutoDismissAfter = TimeSpan.FromSeconds(6);
 
     private readonly TimeSpan _autoDismissAfter;
     private readonly TimeProvider _timeProvider;

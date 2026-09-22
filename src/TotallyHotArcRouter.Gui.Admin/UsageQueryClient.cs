@@ -1,82 +1,51 @@
 using System.Globalization;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using Grpc.Net.Client;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
-/// A thin, platform-agnostic gRPC client for the proxy's <see cref="Contract.UsageAdminService"/>
-/// (Phase 4, §5.15; docs/router/tracked-todos.md #7 - replaces the earlier plain-HTTP/JSON
-/// <c>/admin/usage/*</c> client). Mirrors <see cref="ProviderAdminClient"/>'s shape exactly - same
-/// channel/token setup, same error handling - so both clients read as one family;
-/// <c>Gui.Services.UsageStore</c> wraps an instance of this the way <c>ProviderAdminStore</c> wraps
-/// <see cref="ProviderAdminClient"/>. Every public method's signature is unchanged from the HTTP-era
-/// client.
+/// A thin, platform-agnostic gRPC client for the proxy's <see cref="Contract.UsageAdminService"/>.
+/// Same CallAsync + Unavailable wrapping as <see cref="ProviderAdminClient"/>; both sit
+/// on <see cref="GrpcAdminClientBase{TGeneratedClient}"/>. <c>UsageStore</c> wraps an instance of this
+/// the way <c>ProviderAdminStore</c> wraps <see cref="ProviderAdminClient"/>.
 /// </summary>
 public sealed class UsageQueryClient
+    : GrpcAdminClientBase<Contract.UsageAdminService.UsageAdminServiceClient>
 {
-    private readonly string? _adminToken;
-    private readonly Contract.UsageAdminService.UsageAdminServiceClient _client;
-
     /// <summary>
-    /// Initializes a new instance of the <see cref="UsageQueryClient"/> class.
+    /// Initializes a new instance of the <see cref="UsageQueryClient"/> class over a shared,
+    /// already-authenticated call invoker. The caller owns the invoker's underlying channel.
     /// </summary>
-    /// <param name="channel">
-    /// The gRPC channel to send requests over. Must target the router's web-interface TLS endpoint (e.g.
-    /// <c>https://localhost:47104</c>) - the same channel <see cref="ProviderAdminClient"/> uses.
-    /// </param>
-    /// <param name="adminToken">
-    /// Optional management token; when set, it is sent in the <c>x-admin-token</c> gRPC metadata entry on
-    /// every call.
-    /// </param>
-    public UsageQueryClient(GrpcChannel channel, string? adminToken = null)
+    /// <param name="callInvoker">The shared call invoker - see <see cref="IRouterChannelProvider.CallInvoker"/>.</param>
+    public UsageQueryClient(CallInvoker callInvoker)
+        : base(new Contract.UsageAdminService.UsageAdminServiceClient(callInvoker))
     {
-        ArgumentNullException.ThrowIfNull(channel);
-        _client = new Contract.UsageAdminService.UsageAdminServiceClient(channel);
-        _adminToken = adminToken;
-    }
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="UsageQueryClient"/> class over a shared call invoker
-    /// (web GUI migration plan Phase P5a) - see
-    /// <c>TotallyHot.ArcRouter.Gui.Telemetry.IRouterChannelProvider</c>'s remarks for why production now
-    /// goes through this constructor instead of the channel-owning one above. The caller owns the
-    /// invoker's underlying channel.
-    /// </summary>
-    /// <param name="callInvoker">The shared call invoker.</param>
-    /// <param name="adminToken">Optional management token; see the primary constructor's remarks.</param>
-    public UsageQueryClient(CallInvoker callInvoker, string? adminToken = null)
-    {
-        ArgumentNullException.ThrowIfNull(callInvoker);
-        _client = new Contract.UsageAdminService.UsageAdminServiceClient(callInvoker);
-        _adminToken = adminToken;
     }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="UsageQueryClient"/> class over a caller-supplied
-    /// generated client. The seam tests use to substitute a fake without a live server - see
-    /// <see cref="ProviderAdminClient"/>'s identical constructor for the full rationale. The caller owns
-    /// any channel backing <paramref name="client"/>.
+    /// generated client. The seam tests use to substitute a fake without a live server; the caller owns
+    /// the channel's lifetime.
     /// </summary>
     /// <param name="client">The generated client (or test double) to send requests through.</param>
-    /// <param name="adminToken">Optional management token; see the primary constructor's remarks.</param>
-    public UsageQueryClient(Contract.UsageAdminService.UsageAdminServiceClient client, string? adminToken = null)
+    public UsageQueryClient(Contract.UsageAdminService.UsageAdminServiceClient client)
+        : base(client)
     {
-        ArgumentNullException.ThrowIfNull(client);
-        _client = client;
-        _adminToken = adminToken;
     }
 
     /// <summary>Gets totals for a preset window - the header ticker and summary tiles.</summary>
     /// <param name="window">One of <c>"day"</c>, <c>"week"</c>, <c>"month"</c>, or <c>"all"</c>.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <exception cref="ProviderAdminException">Usage rollups are unavailable or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">Usage rollups are unavailable or the request failed.</exception>
     public async Task<UsageSummaryView> GetSummaryAsync(string window, CancellationToken cancellationToken = default)
     {
         var request = new Contract.GetUsageSummaryRequest { Window = window };
-        var response = await CallAsync((client, options) => client.GetUsageSummaryAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.GetUsageSummaryAsync(request, cancellationToken: ct),
+            "Could not read the usage summary",
             cancellationToken).ConfigureAwait(false);
         return new UsageSummaryView(
             Requests: response.Requests,
@@ -94,9 +63,8 @@ public sealed class UsageQueryClient
     /// <param name="width">Bucket width: <c>"hour"</c> or <c>"day"</c>.</param>
     /// <param name="groupBy"><c>"model"</c>, <c>"provider"</c>, or <c>"day"</c>.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <exception cref="ProviderAdminException">
-    /// Usage rollups are unavailable, the range/parameters were rejected, or the
-    /// request failed.
+    /// <exception cref="GrpcAdminException">
+    /// Usage rollups are unavailable, the range/parameters were rejected, or the request failed.
     /// </exception>
     public async Task<IReadOnlyList<UsageRollupBucketView>> GetRollupAsync(
         DateTimeOffset from, DateTimeOffset to, string width, string groupBy,
@@ -107,7 +75,9 @@ public sealed class UsageQueryClient
             From = Timestamp.FromDateTimeOffset(from), To = Timestamp.FromDateTimeOffset(to),
             Width = width, GroupBy = groupBy
         };
-        var response = await CallAsync((client, options) => client.GetUsageRollupAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.GetUsageRollupAsync(request, cancellationToken: ct),
+            "Could not read usage rollups",
             cancellationToken).ConfigureAwait(false);
         return response.Buckets.Select(ToView).ToList();
     }
@@ -120,7 +90,7 @@ public sealed class UsageQueryClient
     /// <param name="to">Exclusive upper bound.</param>
     /// <param name="sessionId">A session to filter to, or <see langword="null"/> for every session.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <exception cref="ProviderAdminException">Comparisons are unavailable, the range was rejected, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">Comparisons are unavailable, the range was rejected, or the request failed.</exception>
     public async Task<IReadOnlyList<RoutingRoiPointView>> GetRoutingRoiAsync(
         DateTimeOffset from, DateTimeOffset to, string? sessionId = null, CancellationToken cancellationToken = default)
     {
@@ -130,9 +100,35 @@ public sealed class UsageQueryClient
         };
         if (!string.IsNullOrEmpty(sessionId)) request.SessionId = sessionId;
 
-        var response = await CallAsync((client, options) => client.GetRoutingRoiAsync(request, options),
+        var response = await CallAsync(
+            (client, ct) => client.GetRoutingRoiAsync(request, cancellationToken: ct),
+            "Could not read routing ROI",
             cancellationToken).ConfigureAwait(false);
         return response.Entries.Select(ToView).ToList();
+    }
+
+    /// <summary>
+    /// Gets the Report Card tab's unified spend / grade-mix / score-delta snapshot over an explicit range
+    /// (GitHub issue #111).
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <exception cref="GrpcAdminException">
+    /// The report card is unavailable, the range was rejected, or the request failed.
+    /// </exception>
+    public async Task<LearningReportCardView> GetLearningReportCardAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken = default)
+    {
+        var request = new Contract.GetLearningReportCardRequest
+        {
+            From = Timestamp.FromDateTimeOffset(from), To = Timestamp.FromDateTimeOffset(to)
+        };
+        var response = await CallAsync(
+            (client, ct) => client.GetLearningReportCardAsync(request, cancellationToken: ct),
+            "Could not read the learning report card",
+            cancellationToken).ConfigureAwait(false);
+        return ToView(response);
     }
 
     /// <summary>
@@ -146,7 +142,7 @@ public sealed class UsageQueryClient
     /// <param name="width">Bucket width: <c>"hour"</c> or <c>"day"</c>.</param>
     /// <param name="groupBy"><c>"model"</c>, <c>"provider"</c>, or <c>"day"</c>.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>
-    /// <exception cref="ProviderAdminException">Usage rollups are unavailable, the range/parameters were rejected, or the request failed.</exception>
+    /// <exception cref="GrpcAdminException">Usage rollups are unavailable, the range/parameters were rejected, or the request failed.</exception>
     public async IAsyncEnumerable<UsageRollupBucketView> ExportRollupAsync(
         DateTimeOffset from, DateTimeOffset to, string width, string groupBy,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -157,7 +153,7 @@ public sealed class UsageQueryClient
             Width = width, GroupBy = groupBy
         };
 
-        using var call = _client.ExportUsageRollup(request, BuildCallOptions(cancellationToken));
+        using var call = Client.ExportUsageRollup(request, cancellationToken: cancellationToken);
         var stream = call.ResponseStream;
         while (true)
         {
@@ -168,52 +164,12 @@ public sealed class UsageQueryClient
             }
             catch (RpcException ex)
             {
-                throw ToProviderAdminException(ex);
+                throw Wrap(ex: ex, action: "Could not export usage rollups");
             }
 
             if (!hasNext) yield break;
             yield return ToView(stream.Current);
         }
-    }
-
-    /// <summary>
-    /// Attaches the admin token (if configured) as gRPC call metadata, invokes <paramref name="call"/>, and
-    /// translates an <see cref="RpcException"/> into a <see cref="ProviderAdminException"/> carrying the
-    /// same human-readable message the REST client used to surface. Identical to
-    /// <see cref="ProviderAdminClient"/>'s private helper of the same shape.
-    /// </summary>
-    private async Task<TResponse> CallAsync<TResponse>(
-        Func<Contract.UsageAdminService.UsageAdminServiceClient, CallOptions, AsyncUnaryCall<TResponse>> call,
-        CancellationToken cancellationToken)
-    {
-        var options = BuildCallOptions(cancellationToken);
-        try
-        {
-            return await call(_client, options).ResponseAsync.ConfigureAwait(false);
-        }
-        catch (RpcException ex)
-        {
-            throw ToProviderAdminException(ex);
-        }
-    }
-
-    /// <summary>Builds the <see cref="CallOptions"/> shared by every call: the admin-token metadata entry and cancellation.</summary>
-    private CallOptions BuildCallOptions(CancellationToken cancellationToken)
-    {
-        var metadata = new Metadata();
-        if (!string.IsNullOrEmpty(_adminToken)) metadata.Add(key: "x-admin-token", value: _adminToken);
-        return new CallOptions(headers: metadata, cancellationToken: cancellationToken);
-    }
-
-    /// <summary>Translates a gRPC failure into a <see cref="ProviderAdminException"/>, mirroring the REST client's error shape.</summary>
-    private static ProviderAdminException ToProviderAdminException(RpcException ex)
-    {
-        // Unavailable is what Grpc.Net.Client reports for a transport-level failure - see
-        // ProviderAdminClient.ToProviderAdminException's identical remark.
-        return ex.StatusCode == StatusCode.Unavailable
-            ? new ProviderAdminException(message: $"Could not reach the proxy management API: {ex.Status.Detail}",
-                innerException: ex)
-            : new ProviderAdminException(ex.Status.Detail);
     }
 
     private static UsageRollupBucketView ToView(Contract.UsageRollupBucketRow bucket)
@@ -246,5 +202,26 @@ public sealed class UsageQueryClient
                 ? decimal.Parse(entry.EstimatedNetSavingsUsd, CultureInfo.InvariantCulture)
                 : null,
             IsExploratory: entry.IsExploratory);
+    }
+
+    private static LearningReportCardView ToView(Contract.LearningReportCardResponse card)
+    {
+        return new LearningReportCardView(
+            SpendByModel: card.SpendByModel.Select(row => new ModelSpendRowView(
+                Model: row.Model,
+                CostUsd: decimal.Parse(row.CostUsd, CultureInfo.InvariantCulture),
+                Requests: row.Requests)).ToList(),
+            GradeMix: card.GradeMix.Select(row => new GradeMixRowView(
+                Grade: row.Grade,
+                Count: row.Count,
+                Percent: decimal.Parse(row.Percent, CultureInfo.InvariantCulture))).ToList(),
+            MeanScoreDelta: card.HasMeanScoreDelta ? card.MeanScoreDelta : null,
+            ScoredRequests: card.ScoredRequests,
+            ComparableRequests: card.ComparableRequests,
+            ScoreDeltaByModel: card.ScoreDeltaByModel.Select(row => new ModelScoreDeltaRowView(
+                Model: row.Model,
+                MeanDelta: row.MeanDelta,
+                SampleSize: row.SampleSize)).ToList(),
+            TotalSpendUsd: decimal.Parse(card.TotalSpendUsd, CultureInfo.InvariantCulture));
     }
 }

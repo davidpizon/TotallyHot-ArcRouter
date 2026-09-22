@@ -11,6 +11,12 @@ namespace TotallyHot.ArcRouter.Judge;
 public interface IGraderQueue
 {
     /// <summary>The number of jobs dropped because the queue was full.</summary>
+    /// <remarks>
+    /// Reported by <c>UnusedMemberInSuper.Global</c>: every call reaches this through the implementing type
+    /// rather than this interface. It is not dead - see the declaration's callers. Narrowing the interface
+    /// to match today's call sites is a design change, not a scan fix (ADR-0008's stop rules).
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     long DroppedCount { get; }
 
     /// <summary>Attempts to enqueue a job without blocking.</summary>

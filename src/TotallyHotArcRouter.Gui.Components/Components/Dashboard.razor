@@ -112,6 +112,9 @@
                 case Tab.Distribution:
                     <ModelDistribution/>
                     break;
+                case Tab.ReportCard:
+                    <LearningReportCard/>
+                    break;
                 case Tab.Governance:
                     <Governance/>
                     break;
@@ -139,6 +142,7 @@
         Live,
         Analytics,
         Distribution,
+        ReportCard,
         Governance,
         Console
     }
@@ -148,6 +152,7 @@
         (Tab.Live, "activity", "Sessions"),
         (Tab.Analytics, "bar-chart", "Cost Analytics"),
         (Tab.Distribution, "trending-up", "Model Distribution"),
+        (Tab.ReportCard, "database", "Report Card"),
         (Tab.Governance, "shield-check", "Governance"),
         (Tab.Console, "terminal", "Console")
     ];
