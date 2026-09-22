@@ -57,8 +57,7 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         // TryTake runs first, unconditionally consuming the pending-cache slot, so a result with no model
         // attribution still drains its entry instead of leaving it to age out via TTL/capacity eviction.
         if (string.IsNullOrEmpty(result.RequestCorrelationId) ||
-            !_pendingCache.TryTake(correlationId: result.RequestCorrelationId, value: out var embedding) ||
-            embedding is null)
+            !_pendingCache.TryTake(correlationId: result.RequestCorrelationId, value: out var embedding))
         {
             _logger.LogDebug(
                 message:
