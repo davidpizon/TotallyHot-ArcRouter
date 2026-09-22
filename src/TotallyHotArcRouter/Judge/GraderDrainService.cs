@@ -177,9 +177,6 @@ public sealed class GraderDrainService : BackgroundService
                 return;
             }
 
-            _pendingGraderBackboneCache.Set(correlationId: job.CorrelationId, graderKey: graderKey,
-                backboneModel: result.GraderModel);
-
             if (IsJudge(graderKey))
             {
                 // Shadow row first, then the join: the row is the audit trail for a score that is about to
@@ -200,6 +197,13 @@ public sealed class GraderDrainService : BackgroundService
                         SyntaxAuthoritative: job.SyntaxAuthoritative),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
             }
+
+            // Recorded only after every persistence step above has succeeded, and before the join completes:
+            // GraderScoreRecordObserver reads this cache when the aggregator's write fires, so it must be
+            // there by then - but a shadow insert that throws must not leave a backbone attributed to a
+            // score the catch below is about to abandon.
+            _pendingGraderBackboneCache.Set(correlationId: job.CorrelationId, graderKey: graderKey,
+                backboneModel: result.GraderModel);
 
             await _aggregator.CompleteGraderAsync(correlationId: job.CorrelationId, graderKey: graderKey,
                 score: result.Score, cancellationToken: stoppingToken).ConfigureAwait(false);

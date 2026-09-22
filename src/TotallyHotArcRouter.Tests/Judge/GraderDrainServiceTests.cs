@@ -167,6 +167,31 @@ public class GraderDrainServiceTests
         Assert.Equal(expected: GraderQuestionText.MissingReason(graderKey), actual: abandoned.Reason);
     }
 
+    /// <summary>
+    /// The shadow row is the judge score's audit trail, so it is written before anything that lets the
+    /// score count. When that insert fails the join is abandoned and no backbone is left recorded for a
+    /// score that never landed.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_JudgeShadowInsertFails_AbandonsAndRecordsNoBackbone()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var backboneCache = new PendingGraderBackboneCache(Options.Create(new JudgeOptions()));
+        var aggregator = new RecordingAggregator();
+        var service = CreateService(cache: cache,
+            clients: [new FakeClient(GraderKeys.Judge, 0.8, usedLogprobs: true, backboneModel: "free-judge-model")],
+            shadowStore: new FakeJudgeShadowScoreStore(insertFailure: new InvalidOperationException("disk full")),
+            aggregator: aggregator,
+            backboneCache: backboneCache);
+
+        await service.ProcessAsync(job: MakeJudgeJob("corr-1"), stoppingToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "judge-failed", actual: Assert.Single(aggregator.Abandoned).Reason);
+        Assert.Empty(aggregator.Completed);
+        Assert.False(backboneCache.TryTake(correlationId: "corr-1", backboneByGraderKey: out _));
+    }
+
     [Fact]
     public async Task ProcessAsync_PortfolioTextPresentAndEnabled_CompletesTheJoinAndLeavesTheCache()
     {
@@ -365,12 +390,13 @@ public class GraderDrainServiceTests
         }
     }
 
-    private sealed class FakeJudgeShadowScoreStore : IJudgeShadowScoreStore
+    private sealed class FakeJudgeShadowScoreStore(Exception? insertFailure = null) : IJudgeShadowScoreStore
     {
         public List<JudgeShadowScoreRecord> Inserted { get; } = [];
 
         public Task InsertAsync(JudgeShadowScoreRecord record, CancellationToken cancellationToken = default)
         {
+            if (insertFailure is not null) return Task.FromException(insertFailure);
             Inserted.Add(record);
             return Task.CompletedTask;
         }
