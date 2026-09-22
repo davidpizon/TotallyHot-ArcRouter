@@ -98,7 +98,7 @@ jobs:
           echo "Promoted $TAG. /releases/latest now resolves to it; Routers will offer it on their next poll."
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
