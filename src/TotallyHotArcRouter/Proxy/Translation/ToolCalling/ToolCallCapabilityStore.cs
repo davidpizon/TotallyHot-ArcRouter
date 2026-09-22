@@ -218,14 +218,32 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         _repository.UpsertProviderCapabilities(stamped);
         Reload();
 
-        _logger.LogInformation(
-            message:
-            "Endpoint capabilities for provider {Provider} scanned: openai={OpenAi}, lmstudio={LmStudio}, ollama={Ollama}, anthropic={Anthropic}.",
-            SanitizeForLog(stamped.ProviderKey),
-            stamped.OpenAiCompatible,
-            stamped.LmStudioNative,
-            stamped.OllamaNative,
-            stamped.AnthropicCompatible);
+        if (string.IsNullOrWhiteSpace(stamped.ScanError))
+        {
+            _logger.LogInformation(
+                message:
+                "Endpoint capabilities for provider {Provider} scanned: openai={OpenAi}, lmstudio={LmStudio}, ollama={Ollama}, anthropic={Anthropic}.",
+                SanitizeForLog(stamped.ProviderKey),
+                stamped.OpenAiCompatible,
+                stamped.LmStudioNative,
+                stamped.OllamaNative,
+                stamped.AnthropicCompatible);
+        }
+        else
+        {
+            // The flags alone do not say why every probe missed. A 401 from GET /v1/models used to land
+            // here as openai=false with no further line, so the provider card showed the failure and the
+            // log file did not.
+            _logger.LogWarning(
+                message:
+                "Endpoint capabilities for provider {Provider} scanned: openai={OpenAi}, lmstudio={LmStudio}, ollama={Ollama}, anthropic={Anthropic}. Scan error: {ScanError}.",
+                SanitizeForLog(stamped.ProviderKey),
+                stamped.OpenAiCompatible,
+                stamped.LmStudioNative,
+                stamped.OllamaNative,
+                stamped.AnthropicCompatible,
+                SanitizeForLog(stamped.ScanError));
+        }
 
         Changed?.Invoke();
     }

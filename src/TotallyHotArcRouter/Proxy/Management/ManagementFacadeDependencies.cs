@@ -76,4 +76,13 @@ public sealed record ManagementFacadeDependencies
     /// every provider simply reports no interaction history on either track.
     /// </summary>
     public IProviderInteractionStatusStore? InteractionStatusStore { get; init; }
+
+    /// <summary>
+    /// Writes model-discovery failures (a non-success status from <c>GET /v1/models</c>, a missing
+    /// credential, a header name HTTP refused). The provider card already shows that failure; this is what
+    /// puts the same fact in the log file. Optional because tests construct the facade without a logger,
+    /// and because the facade is built inside the inner host — pass the outer host's logger so the line
+    /// reaches the operator-facing file sink rather than an unconfigured inner logger.
+    /// </summary>
+    public ILogger? Logger { get; init; }
 }

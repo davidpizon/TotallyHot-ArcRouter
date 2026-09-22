@@ -133,6 +133,7 @@ public sealed class ProviderAdminStore : IDisposable
     /// </summary>
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
+        _logger?.LogDebug("Refreshing provider agent list.");
         try
         {
             Providers = await _client.GetProvidersAsync(cancellationToken);
@@ -158,6 +159,7 @@ public sealed class ProviderAdminStore : IDisposable
     public Task UpsertProviderAsync(string key, ProviderWriteRequest body,
         CancellationToken cancellationToken = default)
     {
+        _logger?.LogDebug("Updating provider {ProviderKey} with URL {ProviderUrl}.", key, body.BaseUrl);
         return MutateAsync(() =>
             _client.UpsertProviderAsync(key: key, body: body, cancellationToken: cancellationToken));
     }

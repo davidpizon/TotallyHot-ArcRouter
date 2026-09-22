@@ -19,6 +19,8 @@ internal static class ProviderCredentialResolver
     /// <see cref="ProviderHeader.ValueSecretRef"/> (<c>docs/router/secrets-at-rest-plan.md</c> §5). Headers
     /// with an empty name, or whose value can't be resolved through any of the three, are skipped. Order is
     /// preserved. Shared by the forwarding path and the discovery endpoint so both send identical headers.
+    /// An <c>Authorization</c> value that is only a raw credential is sent as <c>Bearer</c> that credential;
+    /// see <see cref="ApplyAuthorizationScheme"/>.
     /// </summary>
     /// <param name="provider">The provider whose custom headers to resolve.</param>
     /// <param name="environment">Accessor used to resolve env-var-sourced values.</param>
@@ -38,10 +40,66 @@ internal static class ProviderCredentialResolver
             if (string.IsNullOrWhiteSpace(header.Name)) continue;
 
             var value = ResolveHeaderValue(header: header, environment: environment, secretReader: secretReader);
+            value = ApplyAuthorizationScheme(headerName: header.Name, value: value);
             if (value is not null) resolved.Add(new KeyValuePair<string, string>(key: header.Name, value: value));
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// Supplies the <c>Bearer</c> scheme on an <c>Authorization</c> value that is only a raw credential.
+    /// </summary>
+    /// <remarks>
+    /// OpenAI-compatible providers (xAI, Groq, OpenAI, Gemini's OpenAI endpoint) reject
+    /// <c>Authorization: &lt;raw key&gt;</c> with 401. The provider editor stores an environment variable or
+    /// a locked secret that holds that raw key — the variable is named <c>XAI_API_KEY</c>, not the finished
+    /// header — and there is no separate scheme field to compose at save time. A value that already carries
+    /// an auth scheme (<c>Bearer …</c>, <c>Token …</c>) is left unchanged, so a header stored as the full
+    /// value keeps working. Every other header name is returned untouched: Anthropic's <c>x-api-key</c> is
+    /// the raw key on purpose.
+    /// </remarks>
+    /// <param name="headerName">The configured header name.</param>
+    /// <param name="value">The resolved value, or <see langword="null"/> when nothing resolved.</param>
+    /// <returns>
+    /// <paramref name="value"/> for a non-Authorization header; <see langword="null"/> when an Authorization
+    /// value is missing or blank; otherwise the value with a <c>Bearer </c> prefix when it had no scheme.
+    /// </returns>
+    private static string? ApplyAuthorizationScheme(string headerName, string? value)
+    {
+        if (value is null) return null;
+        if (!headerName.Trim().Equals(value: "Authorization", comparisonType: StringComparison.OrdinalIgnoreCase))
+            return value;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0) return null;
+
+        return HasAuthScheme(trimmed) ? trimmed : "Bearer " + trimmed;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> already begins with an RFC 7235 auth-scheme and a parameter.
+    /// </summary>
+    /// <param name="value">A trimmed header value.</param>
+    /// <returns>
+    /// <see langword="true"/> when the first token is a scheme (<c>ALPHA *(ALPHA / DIGIT / "+" / "-" / ".")</c>)
+    /// followed by a space and a non-empty remainder.
+    /// </returns>
+    private static bool HasAuthScheme(string value)
+    {
+        var space = value.IndexOf(' ');
+        if (space <= 0 || space >= value.Length - 1) return false;
+
+        for (var i = 0; i < space; i++)
+        {
+            var c = value[i];
+            var isSchemeChar = i == 0
+                ? char.IsAsciiLetter(c)
+                : char.IsAsciiLetterOrDigit(c) || c is '+' or '-' or '.';
+            if (!isSchemeChar) return false;
+        }
+
+        return true;
     }
 
     /// <summary>

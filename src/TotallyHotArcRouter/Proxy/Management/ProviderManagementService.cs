@@ -43,6 +43,7 @@ internal sealed class ProviderManagementService
     private readonly IEnvironmentVariableProvider _environment;
     private readonly HttpClient _httpClient;
     private readonly IProviderInteractionStatusStore? _interactionStatus;
+    private readonly ILogger? _logger;
     private readonly ISecretReader? _secretReader;
     private readonly ISecretWriter? _secretWriter;
 
@@ -76,6 +77,7 @@ internal sealed class ProviderManagementService
         _secretWriter = dependencies?.SecretWriter;
         _secretReader = dependencies?.SecretReader;
         _interactionStatus = dependencies?.InteractionStatusStore;
+        _logger = dependencies?.Logger;
         _dialectResolver = new ModelDialectResolver(httpClient: httpClient, environment: environment);
         _buildProvidersResponse = buildProvidersResponse;
     }
@@ -977,19 +979,41 @@ internal sealed class ProviderManagementService
 
         // The provider's credentials and configured custom headers, sent identically to the forwarding path.
         // This is how a provider that requires an extra header for discovery gets it (e.g. Anthropic's
-        // anthropic-version) without any provider-specific code here.
-        ProviderCredentialResolver.ApplyToRequest(request: requestMessage, provider: provider,
+        // anthropic-version) without any provider-specific code here. Rejected names are logged and named
+        // in the error: TryAddWithoutValidation drops an invalid name instead of throwing, and a dropped
+        // Authorization header is exactly a 401 that looks like a bad key.
+        var rejectedHeaders = ProviderCredentialResolver.ApplyToRequest(request: requestMessage, provider: provider,
             environment: _environment, secretReader: _secretReader);
+        var authorizationConfigured = provider.Headers.Any(header =>
+            !string.IsNullOrWhiteSpace(header.Name)
+            && header.Name.Trim().Equals(value: "Authorization", comparisonType: StringComparison.OrdinalIgnoreCase));
+        var authorizationSent = requestMessage.Headers.Contains("Authorization");
 
         try
         {
             using var response = await _httpClient
                 .SendAsync(request: requestMessage, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return new DiscoverModelsResponse(
-                    false,
-                    Models: [],
-                    Error: $"Provider returned {(int)response.StatusCode} for {target}.");
+            {
+                var detail = await ReadProviderErrorDetailAsync(response: response, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                var statusCode = (int)response.StatusCode;
+                // Logged only on failure. A local runtime whose AuthHeaderName default is Authorization but
+                // which configures no credential must not warn on every successful refresh.
+                var rejected = rejectedHeaders.Count == 0
+                    ? "none"
+                    : string.Join(separator: ", ", values: rejectedHeaders);
+                _logger?.LogWarning(
+                    "Model discovery failed for {Url}: provider returned {StatusCode}. Authorization header sent: {AuthorizationSent}. Rejected header names: {RejectedHeaders}. {Detail}",
+                    target, statusCode, authorizationSent, rejected, detail ?? "No error body.");
+                var error = $"Provider returned {statusCode} for {target}.";
+                if (detail is not null) error = $"{error} {detail}";
+                if (authorizationConfigured && !authorizationSent)
+                    error += " No Authorization header was sent; the configured credential did not resolve.";
+                if (rejectedHeaders.Count > 0)
+                    error += " Header names not sent: " + string.Join(separator: ", ", values: rejectedHeaders) + ".";
+                return new DiscoverModelsResponse(false, Models: [], Error: error);
+            }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var models = ParseModelIds(body);
@@ -997,8 +1021,67 @@ internal sealed class ProviderManagementService
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            _logger?.LogWarning(ex, "Model discovery failed for {Url}.", target);
             return new DiscoverModelsResponse(false, Models: [], Error: ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Pulls a short, non-secret reason out of a failed model-list response so the log and the provider
+    /// card can say why, not only the status code. xAI and OpenAI put that reason on <c>error</c> (a string
+    /// or an object with <c>message</c>). Anything else — HTML, an empty body — contributes nothing.
+    /// </summary>
+    private static async Task<string?> ReadProviderErrorDetailAsync(HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        string body;
+        try
+        {
+            body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(body)) return null;
+
+        var trimmed = body.Trim();
+        if (trimmed[0] == '{')
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(trimmed);
+                if (document.RootElement.TryGetProperty(propertyName: "error", value: out var error))
+                {
+                    if (error.ValueKind == JsonValueKind.String)
+                        return TruncateDetail(error.GetString());
+                    if (error.ValueKind == JsonValueKind.Object
+                        && error.TryGetProperty(propertyName: "message", value: out var message)
+                        && message.ValueKind == JsonValueKind.String)
+                        return TruncateDetail(message.GetString());
+                }
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            return null;
+        }
+
+        // A non-JSON body is usually an HTML error page. Logging it adds noise and can be large.
+        return trimmed.Contains('<') ? null : TruncateDetail(trimmed);
+    }
+
+    /// <summary>Collapses a provider error string onto one line and caps it so a log record stays readable.</summary>
+    private static string? TruncateDetail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        var singleLine = value.ReplaceLineEndings(" ").Trim();
+        const int max = 240;
+        return singleLine.Length <= max ? singleLine : singleLine[..max];
     }
 
     /// <summary>Parses an OpenAI-shaped model-list JSON body and returns the <c>id</c> of each entry in its <c>data</c> array.</summary>

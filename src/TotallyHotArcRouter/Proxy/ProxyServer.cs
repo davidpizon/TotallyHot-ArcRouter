@@ -341,7 +341,11 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                                 SecretWriter = managementApi.SecretWriter,
                                 SecretReader = managementApi.SecretReader,
                                 InteractionStatusStore = managementApi.InteractionStatusStore ??
-                                                         new ProviderInteractionStatusStore()
+                                                         new ProviderInteractionStatusStore(),
+                                // Outer-host logger: the inner host's own ILogger is not the file sink the
+                                // operator reads. Model-discovery 401s were previously visible only on the
+                                // provider card.
+                                Logger = logger
                             });
                         var reportingService = new ManagementReportingService(
                             rollupStore: managementApi.UsageRollupStore,

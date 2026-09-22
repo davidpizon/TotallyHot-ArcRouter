@@ -158,6 +158,59 @@ public sealed class ProviderCredentialResolverTests
     }
 
     [Fact]
+    public void ResolveExtraHeaders_PrefixesBearerOnARawAuthorizationValue()
+    {
+        // xAI (and the other OpenAI-compatible APIs) reject Authorization set to the raw key. The editor
+        // stores that raw key in an env var named like XAI_API_KEY, with no scheme field beside it.
+        var environment = new Mock<IEnvironmentVariableProvider>();
+        environment.Setup(e => e.GetVariable("XAI_API_KEY")).Returns("xai-raw-key");
+        var provider = new ProviderOptions
+        {
+            BaseUrl = "https://api.x.ai/v1",
+            Headers = [new ProviderHeader { Name = "Authorization", ValueEnvVar = "XAI_API_KEY" }]
+        };
+
+        var header = Assert.Single(ProviderCredentialResolver.ResolveExtraHeaders(provider: provider,
+            environment: environment.Object));
+
+        Assert.Equal(expected: "Authorization", actual: header.Key);
+        Assert.Equal(expected: "Bearer xai-raw-key", actual: header.Value);
+    }
+
+    [Theory]
+    [InlineData("Bearer already-a-token", "Bearer already-a-token")]
+    [InlineData("Token raw-token", "Token raw-token")]
+    [InlineData("  bearer mixed-case  ", "bearer mixed-case")]
+    public void ResolveExtraHeaders_LeavesAnAuthorizationValueThatAlreadyHasAScheme(string stored, string expected)
+    {
+        var provider = new ProviderOptions
+        {
+            BaseUrl = "https://api.x.ai/v1",
+            Headers = [new ProviderHeader { Name = "Authorization", Value = stored }]
+        };
+
+        var header = Assert.Single(ProviderCredentialResolver.ResolveExtraHeaders(provider: provider,
+            environment: Mock.Of<IEnvironmentVariableProvider>()));
+
+        Assert.Equal(expected: expected, actual: header.Value);
+    }
+
+    [Fact]
+    public void ResolveExtraHeaders_DoesNotPrefixBearerOnANonAuthorizationHeader()
+    {
+        var provider = new ProviderOptions
+        {
+            BaseUrl = "https://api.anthropic.com",
+            Headers = [new ProviderHeader { Name = "x-api-key", Value = "sk-ant-raw" }]
+        };
+
+        var header = Assert.Single(ProviderCredentialResolver.ResolveExtraHeaders(provider: provider,
+            environment: Mock.Of<IEnvironmentVariableProvider>()));
+
+        Assert.Equal(expected: "sk-ant-raw", actual: header.Value);
+    }
+
+    [Fact]
     public void ResolveAwsCredentials_ResolvesAllThree_WhenAccessKeySecretAndSessionTokenConfigured()
     {
         var environment = new Mock<IEnvironmentVariableProvider>();

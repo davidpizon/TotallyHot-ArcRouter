@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Moq;
 using System.Net;
 using TotallyHot.ArcRouter.Models;
@@ -67,15 +68,18 @@ public sealed class RefreshFromEndpointTests : IDisposable
         HttpMessageHandler discoveryHandler,
         ProviderEndpointScanner? scanner = null,
         ToolCallCapabilityStore? capabilityStore = null,
-        IProviderInteractionStatusStore? interactionStatusStore = null)
+        IProviderInteractionStatusStore? interactionStatusStore = null,
+        ILogger? logger = null,
+        IEnvironmentVariableProvider? environment = null)
     {
-        return new ManagementFacade(store: store, environment: Mock.Of<IEnvironmentVariableProvider>(),
+        return new ManagementFacade(store: store, environment: environment ?? Mock.Of<IEnvironmentVariableProvider>(),
             httpClient: new HttpClient(discoveryHandler),
             dependencies: new ManagementFacadeDependencies
             {
                 EndpointScanner = scanner,
                 CapabilityStore = capabilityStore,
-                InteractionStatusStore = interactionStatusStore
+                InteractionStatusStore = interactionStatusStore,
+                Logger = logger
             });
     }
 
@@ -357,6 +361,64 @@ public sealed class RefreshFromEndpointTests : IDisposable
         Assert.NotNull(provider.AdminAction);
         Assert.False(provider.AdminAction!.Ok);
         Assert.Contains(expectedSubstring: "401", actualString: provider.AdminAction.Message);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_SendsARawAuthorizationKeyWithABearerPrefix()
+    {
+        string? authorization = null;
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["xai"] = new()
+                {
+                    BaseUrl = "https://api.x.ai/v1",
+                    AuthHeaderName = "Authorization",
+                    Headers = [new ProviderHeader { Name = "Authorization", Value = "xai-test-key" }]
+                }
+            }
+        });
+        var handler = DiscoveryHandler(request =>
+        {
+            authorization = request.Headers.TryGetValues("Authorization", out var values) ? values.Single() : null;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(OpenAiBody)
+            });
+        });
+        var facade = Facade(store: store, discoveryHandler: handler);
+
+        var result = await facade.RefreshFromEndpointAsync(key: "xai",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Equal(expected: "Bearer xai-test-key", actual: authorization);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryReturns401_LogsTheFailure()
+    {
+        var logger = new Mock<ILogger>();
+        logger.Setup(l => l.IsEnabled(LogLevel.Warning)).Returns(true);
+        var discoveryUnauthorized = DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("""{"error":"Incorrect API key provided"}""")
+        }));
+        var facade = Facade(store: StoreWithProvider(), discoveryHandler: discoveryUnauthorized, logger: logger.Object);
+
+        await facade.RefreshFromEndpointAsync(key: "lmstudio",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        logger.Verify(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) =>
+                    state.ToString()!.Contains("401", StringComparison.Ordinal)
+                    && state.ToString()!.Contains("Incorrect API key provided", StringComparison.Ordinal)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     [Fact]
