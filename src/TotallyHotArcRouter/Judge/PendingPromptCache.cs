@@ -23,9 +23,6 @@ public sealed class PendingPromptCache
         _maxTextChars = options.Value.MaxCachedTextChars;
     }
 
-    /// <summary>Gets the number of entries currently held (test/diagnostic use).</summary>
-    internal int Count => _inner.Count;
-
     /// <summary>
     /// Records <paramref name="prompt"/> under <paramref name="correlationId"/>, truncating to the
     /// configured per-entry character cap first.

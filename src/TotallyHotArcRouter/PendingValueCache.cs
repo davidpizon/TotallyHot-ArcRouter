@@ -21,14 +21,15 @@ public sealed class PendingValueCache<T>
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _ttl;
 
-    /// <summary>Initializes a new instance of the <see cref="PendingValueCache{T}"/> class.</summary>
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PendingValueCache{T}"/> class from already-validated
+    /// bounds. Private: every caller sizes a cache from <see cref="RoutingOptions"/> or
+    /// <see cref="JudgeOptions"/> through the public constructors, which null-check the options first.
+    /// </summary>
     /// <param name="capacity">Maximum live entries; oldest keys are evicted first once exceeded.</param>
     /// <param name="ttl">How long an unclaimed entry is retained.</param>
-    /// <param name="timeProvider">
-    /// Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
-    /// deterministic tests.
-    /// </param>
-    public PendingValueCache(int capacity, TimeSpan ttl, TimeProvider? timeProvider = null)
+    /// <param name="timeProvider">Clock used for TTL expiry; defaults to <see cref="TimeProvider.System"/>.</param>
+    private PendingValueCache(int capacity, TimeSpan ttl, TimeProvider? timeProvider)
     {
         _capacity = capacity;
         _ttl = ttl;
