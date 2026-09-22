@@ -31,7 +31,9 @@ exists; `MockData.BuildMetricHistory` fills in only when there is neither (the c
 carries a **`· demo data`** marker). Routing ROI is a separate corpus from the taxonomy-comparison
 store — live turns are never merged into it. **Model Distribution** fetches real rollup buckets
 through `UsageStore.LoadRollupAsync` on every filter change, falling back to the hard-coded
-`MockData` class only when there is no live data to show. The
+`MockData` class only when there is no live data to show. **Report Card** fetches one aggregated
+snapshot (`UsageStore.LoadLearningReportCardAsync` → `GetLearningReportCard`) from the same usage-rollup
+and taxonomy-comparison stores, and uses the same `MockData` fallback when the window is empty. The
 **header ticker** is partly real: System Tokens comes from `UsageStore.LoadSummaryAsync`, while Total
 Saved and Avg. Cost Reduction are still mock and labelled "(demo)". [`backlog.md`](backlog.md) is the
 authority for which surfaces are live and which are still mock - when the two disagree, that doc is
@@ -82,7 +84,7 @@ scrolling internally where their content can overflow.
 flowchart TD
     Header["🤖 Router Optimization Engine — status banner — Settings"]
     Ticker["Total Saved · System Tokens · Avg. Cost Reduction · ● LIVE"]
-    Tabs["Sessions | Cost Analytics | Model Distribution | Governance | Console"]
+    Tabs["Sessions | Cost Analytics | Model Distribution | Report Card | Governance | Console"]
     Content["Active tab content"]
 
     Header --> Ticker --> Tabs --> Content
@@ -136,12 +138,11 @@ flowchart TD
      stat with a tooltip explaining the metric.
    - Split view, right panel (`SessionConversationPane.razor`): a chat-style, chronological reproduction
      of the session's turns - a labeled separator per turn (turn number, agent chip, model, timestamp)
-     above a request bubble (left) and a response bubble (right), tinted with the turn's agent color (the
-     same tinted-row visual language `ColorUtils.GetColorForAgent` gives the routing decision log).
-     `TurnCard.razor` (the compact two-line card with the "ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx,
-     Model" stat strip and the click-to-expand routing-decision drill-down) is not currently instantiated
-     anywhere in the Sessions tab or elsewhere in the app - it predates the double-click split view and
-     is effectively dead code, kept alive only by `TurnCardTests.cs`.
+     above a request bubble (left) and a response bubble (right), tinted with the turn's agent color
+     (`ColorUtils.GetColorForAgent`). This split view replaced `TurnCard.razor` (the compact two-line
+     card with the "ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model" stat strip and the
+     click-to-expand routing-decision drill-down); once nothing instantiated it, the component, its
+     tests, and its CSS were deleted.
    - Tooltips: metric tooltips across the tab are floating tooltips driven by `data-tip` attributes
      (`wwwroot/js/tooltips.js`, a single body-level element) rather than native `title` attributes,
      so they render reliably and are never clipped by scroll containers.
@@ -214,7 +215,17 @@ flowchart TD
    - A donut chart of model market share by execution volume (`MockData.ModelShares`), with a custom
      HTML legend below it.
 
-4. **Governance** (`Governance.razor`) - two sub-views behind a toggle:
+4. **Report Card** (`LearningReportCard.razor`, GitHub issue #111) - one local view of spend by model,
+   observed-score grade mix, and quality-score delta versus the frozen untrained baseline. Fed from
+   `UsageStore.LoadLearningReportCardAsync` → `UsageAdminService.GetLearningReportCard`, which aggregates
+   the existing usage-rollup store (spend) and taxonomy-comparison / learning store (grades + score
+   delta). There is no parallel metrics stack. A Day/Month/3-Month/6-Month/Year filter bar matches Model
+   Distribution. Offline/no-proxy (or a genuinely empty window) falls back to `MockData` so the three
+   panels still render. Letter grades A–F map from the `[0, 1]` quality score onto the 1–5 judge scale
+   (`LearningReportCardAggregator.GradeFromScore`). Score delta is observed score minus the frozen
+   baseline's predicted score; a missing baseline prediction is skipped rather than drawn as zero.
+
+5. **Governance** (`Governance.razor`) - two sub-views behind a toggle:
 
    - **Providers** (default, `ProvidersAdmin.razor`, full spec in
      [`provider-management.md`](provider-management.md)) - add/remove/edit provider endpoints,
@@ -247,7 +258,7 @@ flowchart TD
    `ModelRouting` config, with a functional date-range picker - is specified in
    [`governance-model-cards.md`](governance-model-cards.md).
 
-5. **Console** (`ConsoleTab.razor`, full spec in [`console-tab-plan.md`](console-tab-plan.md)) - a
+6. **Console** (`ConsoleTab.razor`, full spec in [`console-tab-plan.md`](console-tab-plan.md)) - a
    real-time, color-coded log stream: every Serilog log event the proxy emits, normalized to
    DEBUG/INFO/WARN/ERROR/FATAL and pushed over the telemetry gRPC-Web stream's `log_line` case by
    `src/TotallyHotArcRouter/Telemetry/TelemetryLogEventSink.cs`, buffered client-side (1,000-line cap,

@@ -132,7 +132,7 @@ public static class OpenAiCompatibleDropIn
     /// </summary>
     /// <param name="leadIn">Opening sentence under the heading.</param>
     /// <param name="tlsLink">Markdown link to the TLS trust doc, relative or absolute.</param>
-    /// <returns>The full section, including the heading, ending with a trailing newline.</returns>
+    /// <returns>The full section, including the heading, with LF line endings and a trailing newline.</returns>
     public static string BuildMarkdown(string leadIn, string tlsLink)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(leadIn);
@@ -167,6 +167,9 @@ public static class OpenAiCompatibleDropIn
             Dashboard: `{DashboardUrl}`. Windows/Linux/macOS installers already trust the local CA. Docker and browsers that ignore the OS store: {tlsLink}. The `OPENAI_API_KEY` value is a placeholder — LLM forwarding is not authenticated; it only satisfies clients that refuse an empty key.
             """;
 
+        // Raw string literals take their line endings from this source file's checkout, so a Windows
+        // autocrlf checkout would emit CRLF. The checked-in README and release notes are LF, so normalize.
+        markdown = markdown.ReplaceLineEndings("\n");
         return markdown.EndsWith('\n') ? markdown : markdown + "\n";
     }
 }

@@ -99,7 +99,7 @@ named-model question above, but because of a single DI registration.
 | `CompositeRoutingPolicy` does not override the `RoutingSignals` overload, so the interface default silently discards the task text and embedding the interceptor computed | [`Router/CompositeRoutingPolicy.cs:25`](../../src/TotallyHotArcRouter/Router/CompositeRoutingPolicy.cs:25), [`Router/IRoutingPolicy.cs:30`](../../src/TotallyHotArcRouter/Router/IRoutingPolicy.cs:30) |
 | Telemetry's `RequestedModel` is the **post-routing** primary candidate, not the client's literal `model` string — so today's substitutions are already misreported | [`Proxy/ProxyMiddleware.cs:259`](../../src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs:259) — `candidates[0].Route.ModelName` |
 | No telemetry field carries the router-facing *chosen* model name; `ResolvedModel` is the upstream provider's id | [`Telemetry/RoutingTelemetryEvent.cs:21`](../../src/TotallyHotArcRouter/Telemetry/RoutingTelemetryEvent.cs:21), set from `route.ProviderModelId` at [`ProxyMiddleware.cs:1525`](../../src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs:1525) |
-| The GUI's routing-step list flags fallback routing only — there is no substitution step | [`Gui/Services/LiveConversationMapper.cs:86`](../../src/TotallyHotArcRouter.Gui/Services/LiveConversationMapper.cs:86) |
+| The GUI's routing-step list flags fallback routing only — there is no substitution step | [`Gui.Components/Services/LiveConversationMapper.cs`](../../src/TotallyHotArcRouter.Gui.Components/Services/LiveConversationMapper.cs) |
 | Epsilon-greedy exploration has exactly one consumer, and it is the policy M1 replaces | [`Router/AgentAsARouter.cs:53`](../../src/TotallyHotArcRouter/Router/AgentAsARouter.cs:53) — `OrchestratorRoutingPolicy` has no exploration |
 | `RoutingOptions.PolicyName` (`"hierarchical"`) is **dead configuration** — set in `appsettings.json:22`, read by nothing but its own unit tests | [`Models/RoutingOptions.cs:48`](../../src/TotallyHotArcRouter/Models/RoutingOptions.cs:48), [`Models/RouterConstants.cs:23`](../../src/TotallyHotArcRouter/Models/RouterConstants.cs:23) |
 
@@ -406,7 +406,7 @@ telemetry tests pass with the new fields defaulted.
 
 ### M3.1 Substitution at a glance — **shipped**
 
-`LiveConversationMapper.BuildRoutingSteps` ([`:107`](../../src/TotallyHotArcRouter.Gui/Services/LiveConversationMapper.cs:107))
+`LiveConversationMapper.BuildRoutingSteps` ([`LiveConversationMapper.cs`](../../src/TotallyHotArcRouter.Gui.Components/Services/LiveConversationMapper.cs))
 now emits a fallback warning, a substitution warning, and `"Route Confirmed: {model}"`, in that order.
 The substitution step reads:
 

@@ -10,15 +10,10 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// <see cref="ProviderAdminClient"/> in the shared <see cref="AdminStoreBase{TClient}"/> shape so the UI
 /// survives tab switches and degrades gracefully when the proxy isn't running. Toast notifications are a
 /// one-line wrap around load/mutation failure, not a reason to stay off the seam. Registered in
-/// <c>MauiProgram</c>.
+/// the WASM host's composition root.
 /// </summary>
 public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
 {
-    /// <summary>
-    /// The proxy's TLS gRPC endpoint, matching <see cref="LiveDataStore"/>'s own server address.
-    /// </summary>
-    public const string DefaultManagementAddress = TelemetryChannelFactory.DefaultServerAddress;
-
     private readonly ConcurrentDictionary<string, RateLimitHistoryResponseAdminView> _rateLimitHistory = new();
     private readonly ToastService? _toasts;
 
@@ -47,6 +42,7 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
         : base(client: ResolveClient(channelProvider, client), logger: logger)
     {
         _toasts = toasts;
+        ServerAddress = client is null ? channelProvider?.ServerAddress : null;
     }
 
     /// <summary>
@@ -61,6 +57,13 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
         ArgumentNullException.ThrowIfNull(channelProvider);
         return new ProviderAdminClient(channelProvider.CallInvoker);
     }
+
+    /// <summary>
+    /// The proxy endpoint this store's client talks to, so the unreachable state can name the address it
+    /// actually failed to reach rather than assuming the default. <see langword="null"/> when constructed
+    /// over a caller-supplied client, whose endpoint this store has no way to know.
+    /// </summary>
+    public string? ServerAddress { get; }
 
     /// <summary>The providers currently known, refreshed after each load or successful edit.</summary>
     public IReadOnlyList<ProviderAdminView> Providers { get; private set; } = [];

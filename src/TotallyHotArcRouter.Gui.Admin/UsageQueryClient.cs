@@ -108,6 +108,30 @@ public sealed class UsageQueryClient
     }
 
     /// <summary>
+    /// Gets the Report Card tab's unified spend / grade-mix / score-delta snapshot over an explicit range
+    /// (GitHub issue #111).
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <exception cref="GrpcAdminException">
+    /// The report card is unavailable, the range was rejected, or the request failed.
+    /// </exception>
+    public async Task<LearningReportCardView> GetLearningReportCardAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken = default)
+    {
+        var request = new Contract.GetLearningReportCardRequest
+        {
+            From = Timestamp.FromDateTimeOffset(from), To = Timestamp.FromDateTimeOffset(to)
+        };
+        var response = await CallAsync(
+            (client, ct) => client.GetLearningReportCardAsync(request, cancellationToken: ct),
+            "Could not read the learning report card",
+            cancellationToken).ConfigureAwait(false);
+        return ToView(response);
+    }
+
+    /// <summary>
     /// Streams the same rollup buckets <see cref="GetRollupAsync"/> returns for an explicit range, for
     /// rendering a CSV/JSON download without buffering the whole range client-side first via a separate
     /// bulk call (§5.12). The caller assembles the presentation format (CSV text, a JSON array, etc.) from
@@ -178,5 +202,26 @@ public sealed class UsageQueryClient
                 ? decimal.Parse(entry.EstimatedNetSavingsUsd, CultureInfo.InvariantCulture)
                 : null,
             IsExploratory: entry.IsExploratory);
+    }
+
+    private static LearningReportCardView ToView(Contract.LearningReportCardResponse card)
+    {
+        return new LearningReportCardView(
+            SpendByModel: card.SpendByModel.Select(row => new ModelSpendRowView(
+                Model: row.Model,
+                CostUsd: decimal.Parse(row.CostUsd, CultureInfo.InvariantCulture),
+                Requests: row.Requests)).ToList(),
+            GradeMix: card.GradeMix.Select(row => new GradeMixRowView(
+                Grade: row.Grade,
+                Count: row.Count,
+                Percent: decimal.Parse(row.Percent, CultureInfo.InvariantCulture))).ToList(),
+            MeanScoreDelta: card.HasMeanScoreDelta ? card.MeanScoreDelta : null,
+            ScoredRequests: card.ScoredRequests,
+            ComparableRequests: card.ComparableRequests,
+            ScoreDeltaByModel: card.ScoreDeltaByModel.Select(row => new ModelScoreDeltaRowView(
+                Model: row.Model,
+                MeanDelta: row.MeanDelta,
+                SampleSize: row.SampleSize)).ToList(),
+            TotalSpendUsd: decimal.Parse(card.TotalSpendUsd, CultureInfo.InvariantCulture));
     }
 }

@@ -18,15 +18,16 @@ public sealed class DashboardTests
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996")));
+        var unreachable = new StubRouterChannelProvider("https://127.0.0.1:59996");
+        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(persistedSessionStore ??
-                                  new PersistedSessionStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59996")));
-        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59994")));
-        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider("http://127.0.0.1:59993")));
-        ctx.Services.AddSingleton(new RouterSettingsAdminStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59995")));
-        ctx.Services.AddSingleton(new UpdateStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59992")));
-        ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59991")));
-        ctx.Services.AddSingleton(new ManagementTokenAdminStore(channelProvider: new NativeRouterChannelProvider("https://127.0.0.1:59990")));
+                                  new PersistedSessionStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new RouterSettingsAdminStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new UpdateStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new ManagementTokenAdminStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new ToastService());
         ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         return ctx;
@@ -65,14 +66,20 @@ public sealed class DashboardTests
 
         var cut = ctx.Render<Dashboard>();
         // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context: Dashboard
-        // constructs several stores against deliberately-unreachable NativeRouterChannelProvider
-        // addresses (see NewContext), and any of their background connection-failure continuations can
+        // constructs several stores against a deliberately-unreachable StubRouterChannelProvider
+        // (see NewContext), and any of their background connection-failure continuations can
         // re-render between a plain Find() and Click(), leaving Click() dispatching against an event
         // handler ID the re-render already invalidated (Bunit.Rendering.UnknownEventHandlerIdException).
         await cut.InvokeAsync(() =>
             cut.FindAll("nav button").First(b => b.TextContent.Contains("Model Distribution")).Click());
 
         cut.Markup.Should().Contain("Token Volume Histogram");
+
+        await cut.InvokeAsync(() =>
+            cut.FindAll("nav button").First(b => b.TextContent.Contains("Report Card")).Click());
+
+        await cut.WaitForAssertionAsync(assertion: () => cut.Markup.Should().Contain("Spend by Model"),
+            timeout: TimeSpan.FromSeconds(5));
     }
 
     [Fact]

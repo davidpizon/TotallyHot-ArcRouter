@@ -6,7 +6,7 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 namespace TotallyHot.ArcRouter.Gui.Services;
 
 /// <summary>
-/// Singleton view-model backing the Model Distribution, Cost Analytics, and header-ticker surfaces' real
+/// Singleton view-model backing the Model Distribution, Cost Analytics, Report Card, and header-ticker surfaces' real
 /// data (Phase 4, §5.15). Wraps <see cref="UsageQueryClient"/> in the shared
 /// <see cref="AdminStoreBase{TClient}"/> shape so the UI survives tab switches and degrades gracefully
 /// (falling back to demo data) when the proxy isn't running or has no rollup store wired up. Registered as a
@@ -136,6 +136,31 @@ public sealed class UsageStore : AdminStoreBase<UsageQueryClient>
                 .GetRoutingRoiAsync(from: from, to: to, sessionId: sessionId, cancellationToken: ct)
                 .ConfigureAwait(false),
             "read routing ROI comparisons",
+            cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+
+    /// <summary>
+    /// Loads the Report Card tab's unified spend / grade-mix / score-delta snapshot for a range
+    /// (GitHub issue #111). Returns <see langword="null"/>, rather than throwing, when the proxy is
+    /// unreachable or neither backing store is wired up; the caller falls back to demo data.
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <remarks>
+    /// Deliberately uncached, same as <see cref="LoadRoutingRoiAsync"/>: taxonomy comparisons fill in
+    /// the background, so a fixed range's answer changes over time.
+    /// </remarks>
+    public async Task<LearningReportCardView?> LoadLearningReportCardAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken = default)
+    {
+        LearningReportCardView? result = null;
+        await LoadGuardedAsync(
+            async ct => result = await Client
+                .GetLearningReportCardAsync(from: from, to: to, cancellationToken: ct)
+                .ConfigureAwait(false),
+            "read the learning report card",
             cancellationToken).ConfigureAwait(false);
         return result;
     }

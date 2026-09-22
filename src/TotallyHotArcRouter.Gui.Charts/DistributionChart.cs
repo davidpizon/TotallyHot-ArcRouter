@@ -15,17 +15,25 @@ public sealed record DistributionSlice(string Model, decimal Value, string Color
 /// <param name="Categories">X-axis category labels (e.g. weekday slots).</param>
 /// <param name="YMax">Optional fixed y-axis maximum.</param>
 /// <param name="Series">The bar series (prompt / completion).</param>
+/// <param name="Unit">
+/// Axis/tooltip unit forwarded to the renderer (<c>tok</c>, <c>$</c>, <c>score</c>). Null keeps the
+/// historical token formatter so existing Model Distribution / budget charts stay unchanged.
+/// </param>
+/// <param name="YMin">Optional fixed y-axis minimum, used by the score-delta chart's symmetric axis.</param>
 public sealed record GroupedBarsModel(
     string Kind,
     string Title,
     IReadOnlyList<string> Categories,
     decimal? YMax,
-    IReadOnlyList<DistributionSeries> Series)
+    IReadOnlyList<DistributionSeries> Series,
+    string? Unit = null,
+    decimal? YMin = null)
 {
     /// <summary>Creates a grouped-bars model with the <c>GroupedBars</c> renderer kind.</summary>
     public GroupedBarsModel(string title, IReadOnlyList<string> categories, decimal? yMax,
-        IReadOnlyList<DistributionSeries> series)
-        : this(Kind: "GroupedBars", Title: title, Categories: categories, YMax: yMax, Series: series)
+        IReadOnlyList<DistributionSeries> series, string? unit = null, decimal? yMin = null)
+        : this(Kind: "GroupedBars", Title: title, Categories: categories, YMax: yMax, Series: series, Unit: unit,
+            YMin: yMin)
     {
     }
 
@@ -43,6 +51,19 @@ public sealed record GroupedBarsModel(
     {
         var max = series.SelectMany(s => s).DefaultIfEmpty(0m).Max();
         return max <= 0m ? null : Math.Ceiling(max * headroomMultiplier);
+    }
+
+    /// <summary>
+    /// Symmetric axis extent around zero for a signed series (score delta): the larger of the absolute
+    /// min/max, with headroom. Null when every value is zero so the renderer auto-scales rather than
+    /// pinning a fabricated range.
+    /// </summary>
+    /// <param name="values">The signed values that will share the axis.</param>
+    /// <param name="headroomMultiplier">How much larger than the largest absolute value the extent should be.</param>
+    public static decimal? SymmetricExtent(IEnumerable<decimal> values, decimal headroomMultiplier = 1.1m)
+    {
+        var maxAbs = values.Select(Math.Abs).DefaultIfEmpty(0m).Max();
+        return maxAbs <= 0m ? null : Math.Round(maxAbs * headroomMultiplier, decimals: 3);
     }
 }
 
