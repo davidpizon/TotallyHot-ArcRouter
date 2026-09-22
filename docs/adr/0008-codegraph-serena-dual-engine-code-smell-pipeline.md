@@ -1,9 +1,11 @@
 # 0008. Adopt CodeGraph + Serena as the standing dual-engine code-smell pipeline
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-02
 **Deciders:** David Pizon
 **Amendments:** [Amendment 1 (2026-09-02) — stop rules](#amendment-1-2026-09-02-stop-rules)
+
+> **Accepted 2026-09-22**, as rule of record on the project board.
 
 ## Context and Problem Statement
 
@@ -266,7 +268,7 @@ Apply the matrix to **this pass's catalog** (Serena skipped — agent judgment o
 
 ## Amendment 1 (2026-09-02): stop rules
 
-**Status:** proposed. Amends the Decision Outcome above; does not change the chosen option or
+**Status:** accepted. Amends the Decision Outcome above; does not change the chosen option or
 re-open ADR-0006/0007.
 
 ### Why
