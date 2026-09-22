@@ -103,8 +103,8 @@ public class ServiceCollectionExtensionsTests
         var fakeProvider = new ServiceCollection()
             .AddLogging()
             .AddOptions()
-            .AddSingleton<IJudgeShadowScoreStore>(Mock.Of<IJudgeShadowScoreStore>())
-            .AddSingleton<IGraderScoreStore>(Mock.Of<IGraderScoreStore>())
+            .AddSingleton(Mock.Of<IJudgeShadowScoreStore>())
+            .AddSingleton(Mock.Of<IGraderScoreStore>())
             .BuildServiceProvider();
 
         var retention = factories
