@@ -12,8 +12,8 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 /// <summary>
 /// End-to-end coverage for docs/router/judge-join-deadlock-fix-plan.md: wires the real
 /// <see cref="QualityScoreAggregator"/>, the real <see cref="JudgeAvailability"/>, the real
-/// <see cref="JudgeShadowScoreDispatcher"/>/<see cref="JudgeShadowScoreQueue"/>, and
-/// <see cref="JudgeShadowScoreDrainService.ProcessAsync"/> together - the exact combination that was never
+/// <see cref="GraderDispatcher"/>/<see cref="GraderQueue"/>, and
+/// <see cref="GraderDrainService.ProcessAsync"/> together - the exact combination that was never
 /// exercised together before this fix, which is why the deadlock shipped undetected. Every test here never
 /// advances a clock and never calls <see cref="QualityScoreAggregator.SweepExpiredAsync"/>: under the
 /// pre-fix code, a held result reached the observer only after the join-timeout sweep ran, so a test that
@@ -27,7 +27,7 @@ public class JudgeJoinDeadlockFixTests
         var responseTextCache = new PendingResponseTextCache(Options.Create(JudgeOptions()));
         responseTextCache.Set(correlationId: "corr-1", text: "the agent's response");
 
-        var queue = new JudgeShadowScoreQueue(Options.Create(JudgeOptions()));
+        var queue = new GraderQueue(Options.Create(JudgeOptions()));
         var observer = new RecordingObserver();
         var aggregator = CreateAggregator(observer: observer, queue: queue, willJudge: true);
 
@@ -53,10 +53,10 @@ public class JudgeJoinDeadlockFixTests
     [Fact]
     public async Task HeldResult_QueueFull_WrittenImmediatelyAsNotDispatchedWithoutSweeping()
     {
-        var queue = new JudgeShadowScoreQueue(Options.Create(JudgeOptions(queueCapacity: 1)));
+        var queue = new GraderQueue(Options.Create(JudgeOptions(queueCapacity: 1)));
         // Fill the single slot so the dispatcher's own enqueue attempt is the one that gets shed.
-        Assert.True(queue.TryEnqueue(new JudgeShadowScoringJob(CorrelationId: "occupant", Dimension: "algorithm",
-            Model: "model-a", StaticScore: 0.5, SyntaxAuthoritative: true)));
+        Assert.True(queue.TryEnqueue(new GraderScoringJob(CorrelationId: "occupant", GraderKey: GraderKeys.Judge,
+            Dimension: "algorithm", Model: "model-a", StaticScore: 0.5, SyntaxAuthoritative: true)));
 
         var observer = new RecordingObserver();
         var aggregator = CreateAggregator(observer: observer, queue: queue, willJudge: true);
@@ -69,7 +69,7 @@ public class JudgeJoinDeadlockFixTests
     }
 
     private static QualityScoreAggregator CreateAggregator(IQualityScoreObserver observer,
-        IJudgeShadowScoreQueue queue, bool willJudge)
+        IGraderQueue queue, bool willJudge)
     {
         var qualityOptions = new QualityOptions
         {
@@ -82,8 +82,11 @@ public class JudgeJoinDeadlockFixTests
             ? new JudgeAvailability(options: EnabledJudgeMonitor(), modelSelector: CreateResolvingModelSelector())
             : (IJudgeAvailability)new NoJudgeAvailability();
 
-        var dispatcher = new JudgeShadowScoreDispatcher(queue: queue, options: EnabledJudgeMonitor(),
-            logger: NullLogger<JudgeShadowScoreDispatcher>.Instance);
+        var dispatcher = new GraderDispatcher(
+            queue: queue,
+            judgeOptions: EnabledJudgeMonitor(),
+            portfolioOptions: new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions()),
+            logger: NullLogger<GraderDispatcher>.Instance);
 
         return new QualityScoreAggregator(
             observer: observer,
@@ -94,21 +97,22 @@ public class JudgeJoinDeadlockFixTests
             logger: NullLogger<QualityScoreAggregator>.Instance);
     }
 
-    private static JudgeShadowScoreDrainService CreateDrainService(PendingResponseTextCache responseTextCache,
+    private static GraderDrainService CreateDrainService(PendingResponseTextCache responseTextCache,
         IQualityScoreAggregator aggregator, JudgeScoreResult? judgeResult)
     {
         var promptCache = new PendingPromptCache(Options.Create(JudgeOptions()));
         promptCache.Set(correlationId: "corr-1", prompt: "write a function that adds two numbers");
-        return new JudgeShadowScoreDrainService(
-            queue: new JudgeShadowScoreQueue(Options.Create(JudgeOptions())),
+        return new GraderDrainService(
+            queue: new GraderQueue(Options.Create(JudgeOptions())),
             pendingResponseTextCache: responseTextCache,
             pendingPromptCache: promptCache,
             pendingGraderBackboneCache: new PendingGraderBackboneCache(Options.Create(JudgeOptions())),
-            judgeClient: new FakeJudgeClient(result: judgeResult),
-            store: new FakeJudgeShadowScoreStore(),
-            options: EnabledJudgeMonitor(),
+            clients: [new FakeJudgeClient(result: judgeResult)],
+            shadowStore: new FakeJudgeShadowScoreStore(),
+            judgeOptions: EnabledJudgeMonitor(),
+            portfolioOptions: new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions()),
             aggregator: aggregator,
-            logger: NullLogger<JudgeShadowScoreDrainService>.Instance);
+            logger: NullLogger<GraderDrainService>.Instance);
     }
 
     private static JudgeModelSelector CreateResolvingModelSelector()
@@ -148,9 +152,9 @@ public class JudgeJoinDeadlockFixTests
         };
     }
 
-    private static async Task<JudgeShadowScoringJob?> DequeueOneAsync(IJudgeShadowScoreQueue queue)
+    private static async Task<GraderScoringJob?> DequeueOneAsync(IGraderQueue queue, string graderKey = GraderKeys.Judge)
     {
-        await foreach (var job in queue.DequeueAllAsync(TestContext.Current.CancellationToken)) return job;
+        await foreach (var job in queue.DequeueAllAsync(graderKey, TestContext.Current.CancellationToken)) return job;
         return null;
     }
 
@@ -166,12 +170,16 @@ public class JudgeJoinDeadlockFixTests
         }
     }
 
-    private sealed class FakeJudgeClient(JudgeScoreResult? result) : IJudgeClient
+    private sealed class FakeJudgeClient(JudgeScoreResult? result) : IPortfolioGraderClient
     {
-        public Task<JudgeScoreResult?> ScoreAsync(JudgeScoreRequest request,
+        public string GraderKey => GraderKeys.Judge;
+
+        public Task<PortfolioGraderScoreResult?> ScoreAsync(PortfolioGraderScoreRequest request,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(result);
+            return Task.FromResult(result is null
+                ? null
+                : new PortfolioGraderScoreResult(result.Score, result.JudgeModel, result.UsedLogprobs));
         }
     }
 

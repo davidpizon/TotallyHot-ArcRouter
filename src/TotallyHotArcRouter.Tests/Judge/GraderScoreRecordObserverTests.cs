@@ -76,8 +76,8 @@ public class GraderScoreRecordObserverTests
     public async Task ObserveAsync_ResponseLengthCached_AttachesItToEveryRow()
     {
         var store = new FakeGraderScoreStore();
-        var lengthCache = new PendingResponseLengthCache(Options.Create(new JudgeOptions()));
-        lengthCache.Set(correlationId: "corr-1", length: 256);
+        var lengthCache = new PendingValueCache<int>(Options.Create(new JudgeOptions()));
+        lengthCache.Set(correlationId: "corr-1", value: 256);
         var observer = CreateObserver(store, lengthCache: lengthCache);
         var result = new QualityResult
         {
@@ -139,12 +139,12 @@ public class GraderScoreRecordObserverTests
 
     private static GraderScoreRecordObserver CreateObserver(
         FakeGraderScoreStore store,
-        PendingResponseLengthCache? lengthCache = null,
+        PendingValueCache<int>? lengthCache = null,
         PendingGraderBackboneCache? backboneCache = null)
     {
         return new GraderScoreRecordObserver(
             store: store,
-            pendingResponseLengthCache: lengthCache ?? new PendingResponseLengthCache(Options.Create(new JudgeOptions())),
+            pendingResponseLengthCache: lengthCache ?? new PendingValueCache<int>(Options.Create(new JudgeOptions())),
             pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
             logger: NullLogger<GraderScoreRecordObserver>.Instance);
     }

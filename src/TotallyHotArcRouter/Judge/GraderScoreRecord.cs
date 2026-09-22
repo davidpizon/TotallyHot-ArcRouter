@@ -29,7 +29,7 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <param name="ResponseLengthChars">
 /// The graded response's character length, or <see langword="null"/> when it was never captured - the
 /// request had no correlation id, response-text extraction failed, or the entry aged out of
-/// <c>PendingResponseLengthCache</c> before this row was written. Captured unconditionally on successful
+/// the pending-length cache before this row was written. Captured unconditionally on successful
 /// extraction (never gated on whether an LLM grader is live, unlike raw response text retention), so a
 /// null here is the exception rather than the rule. Duplicated across every row sharing
 /// <see cref="CorrelationId"/> so a verbosity-skew query never needs a join back to a separate per-request

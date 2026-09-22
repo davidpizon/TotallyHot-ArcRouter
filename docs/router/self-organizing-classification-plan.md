@@ -1,5 +1,14 @@
 # Self-Organizing Request Classification Plan
 
+> **Names since changed.** This plan records the types as they were named when each phase shipped. They
+> have since been consolidated: the judge and portfolio dispatchers, queues, jobs, and drain workers are now
+> `GraderDispatcher`, `GraderQueue`, `GraderScoringJob`, and `GraderDrainService`
+> (`CompositeAsyncGraderDispatcher` is gone); both retention workers are one `ScoreTableRetentionService`
+> run once per table; the judge-specific `CompleteWithJudgeAsync`/`AbandonJudgeAsync` are now
+> `CompleteGraderAsync`/`AbandonGraderAsync`; and `PendingTaskEmbeddingCache`, `PendingRequestCostCache`,
+> `PendingRequestProvenanceCache`, and `PendingResponseLengthCache` are now `PendingValueCache<T>` instances.
+> See `docs/router/quality-verifier-architecture.md` for the current component list.
+
 Gives the router a taxonomy it learns from its own traffic, alongside the fixed nine-dimension
 vocabulary CodeRouterBench defines, and closes the biggest structural gap in
 `docs/router/live-feedback-learning-plan.md`'s voter set: three of the four Orchestrator voters
@@ -675,7 +684,7 @@ flow, and the in-progress "Training…" state with a live bootstrap-progress cou
 > clamp, synchronous `EmbeddingMemory.TrimToCurrentCapacityAsync` on a lowered capacity) all landed ahead
 > of this GUI work. GUI side: `RouterSettingsAdminClient`/`IRouterSettingsAdminClient`
 > (`TotallyHotArcRouter.Gui.Telemetry`) and the `RouterSettingsAdminStore` view-model
-> (`TotallyHotArcRouter.Gui/Services`) mirror `ClusterModelAdminClient`/`ClusterModelAdminStore`'s
+> (`TotallyHotArcRouter.Gui.Components/Services`) mirror `ClusterModelAdminClient`/`ClusterModelAdminStore`'s
 > reachability-tolerant shape. `SettingsModal.razor` gained the Adaptive Routing toggle plus Sample Size
 > input (client-side `[500, 50000]` clamp on blur, the amber warning tooltip below 20000), and the
 > telemetry address's dedicated Save button was removed in favor of one footer Save that persists both
@@ -788,7 +797,7 @@ clamping, and a full persistence round-trip.
   `LogRegVoter.cs`, `EmbeddingLogRegTrainer.cs`, `EmbeddingLogRegTrainingService`,
   `Hosting/LogRegRetrainHostedService.cs`, `OodBootstrapSampleSource.cs`.
 - Request path: `Proxy/RequestInterceptor.cs` (T1's capture point).
-- GUI: `TotallyHotArcRouter.Gui/Components/SettingsModal.razor` (the window T6 modifies),
+- GUI: `TotallyHotArcRouter.Gui.Components/Components/SettingsModal.razor` (the window T6 modifies),
   `Services/GuiSettingsStore.cs` (telemetry-address persistence, unchanged), `PriceSourcesAdmin.razor`
   (the router-unreachable state pattern reused), `docs/gui/DESIGN.md` §4.1 (the window contract).
 - Design docs: `docs/router/regret-evaluation-harness-plan.md` (the constraint and the three live-arm

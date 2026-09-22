@@ -13,61 +13,24 @@
 > built) that is hardcoded, not config-driven.
 >
 > One additional sink beyond the config-driven `Console` sink *is* wired up in code (not via
-> `appsettings.json`): `TelemetryLogEventSink` (renamed from `SignalRLogEventSink` when the telemetry
-> transport migrated to gRPC - see [`grpc-migration.md`](grpc-migration.md)), added with
-> `.WriteTo.Sink(...)` directly in `Program.cs`, forwards every log event to the GUI's Console tab
-> over the telemetry gRPC stream. See [`../gui/console-tab-plan.md`](../gui/console-tab-plan.md) and
+> `appsettings.json`): `TelemetryLogEventSink`, added with `.WriteTo.Sink(...)` directly in
+> `Program.cs`, forwards every log event to the dashboard Console tab over the telemetry gRPC-Web
+> stream. See [`../gui/dashboard.md`](../gui/dashboard.md) and
 > [`telemetry.md`](telemetry.md)'s "Transport: gRPC" section.
 
-## Two processes, two logs
+## Router logs; the dashboard is a browser
 
-The Router and the GUI are separate processes running as **different identities** — the Router as
-`LocalSystem` under the service control manager, the GUI as the interactive user — so they cannot share
-one log file without one of them being denied. Each has its own `appsettings.json` and its own `File`
-sink:
+The Router is the process that logs. It runs as `LocalSystem` (Windows Service), a systemd/LaunchDaemon
+unit, or a console host. Configure Serilog in `src/TotallyHotArcRouter/appsettings.json`. The File sink
+writes to `C:\Logs\ArcRouter\arcrouter-.log` on Windows (rolling daily, 30-day retention).
 
-| Process | Configuration | Log file |
-| --- | --- | --- |
-| Router (`TotallyHotArcRouter`) | `src/TotallyHotArcRouter/appsettings.json` | `C:\Logs\ArcRouter\arcrouter-.log` |
-| GUI (`TotallyHotArcRouter.Gui`) | `src/TotallyHotArcRouter.Gui/appsettings.json` | `%LOCALAPPDATA%\TotallyHotArcRouter\logs\arcrouter-gui-.log` |
+The dashboard is Blazor WebAssembly in the operator's browser (`TotallyHotArcRouter.Gui.Web`) — there is
+no MAUI/`TotallyHotArcRouter.Gui` process, no WebView2, and no `GuiLogging.cs`. Diagnose a blank
+dashboard in the **browser** (certificate trust, see [`client-tls-setup.md`](client-tls-setup.md);
+dev tools console), not a tray log.
 
-Both roll daily with a 30-day retention limit and share the same output template, so the two files line
-up when they are read side by side during an incident.
-
-### GUI logging
-
-The GUI had **no logging at all** until it was added; a WebView2 environment failure in the installed
-build opened a blank dashboard window with nothing written anywhere, because the only log that existed
-belonged to a different process. `Services/GuiLogging.cs` is what closes that, and it is deliberately
-defensive:
-
-- The log lives under `%LOCALAPPDATA%` — the same per-user root `GuiSettingsStore` and
-  `WebViewUserData` already use — because the interactive user cannot write to the Router's
-  `C:\Logs\ArcRouter`, and the installed GUI cannot write beside its own executable under
-  `%ProgramFiles%`.
-- `%LOCALAPPDATA%` in the configured path is expanded **in code** before Serilog reads it. An
-  unexpanded variable would otherwise become a literal `%LOCALAPPDATA%` directory relative to the
-  working directory, which for the GUI's registry Run-key auto-start is not even the install folder.
-- A missing or unreadable `appsettings.json` falls back to a built-in rolling file sink at that same
-  per-user path and records *why* it fell back. A bootstrap that quietly produces a logger with no
-  sinks would reproduce the exact undiagnosable symptom this exists to prevent.
-
-What the GUI logs at startup:
-
-| Event | Where |
-| --- | --- |
-| Version, PID, user, base directory, working directory, OS | `MauiProgram.CreateMauiApp` |
-| The resolved WebView2 user-data folder (or the failure to create it) | `MauiProgram.CreateMauiApp` → `WebViewUserData.Apply` |
-| BlazorWebView initializing / initialized, and the WebView2 runtime version | `MainPage` |
-| WebView2 browser-process failures | `MainPage`, via the platform control's `CoreProcessFailed` |
-| `Failed to create WebView2 environment` | .NET MAUI's own logger — reaches the file because `MauiProgram` routes `Microsoft.Extensions.Logging` into Serilog |
-| Tray window attached; exit chosen from the tray menu | `Platforms/Windows/TrayWindowManager` |
-| Unhandled exceptions (app domain, WinUI thread, unobserved tasks) | `MauiProgram` and `Platforms/Windows/App.xaml.cs` |
-
-**Diagnosing a blank dashboard:** look for `BlazorWebView initializing` in the GUI log. If no
-`BlazorWebView initialized` line follows it, WebView2 never came up — the reason is either MAUI's
-`Failed to create WebView2 environment` entry (runtime missing, or the user-data folder unwritable) or a
-`CoreProcessFailed` entry immediately after.
+The Windows tray (`TotallyHotArcRouter.Tray`) is a small WinForms companion: open dashboard, toggle
+routing, service status, MSI apply. It is not the dashboard host.
 
 ---
 

@@ -73,9 +73,9 @@ public sealed class JudgeOptions
     public int MaxCachedTextChars { get; init; } = 65_536;
 
     /// <summary>
-    /// Gets the capacity of the bounded background channel <see cref="JudgeShadowScoreDispatcher"/> enqueues
-    /// onto. A full channel sheds the newest job (logged and dropped) rather than blocking the caller.
-    /// Defaults to 500.
+    /// Gets the capacity of <see cref="GraderQueue"/>, the background queue <see cref="GraderDispatcher"/>
+    /// enqueues onto: the most jobs that may be waiting across every grader's lane combined. A full queue
+    /// sheds the newest job (logged and dropped) rather than blocking the caller. Defaults to 500.
     /// </summary>
     [Range(1, 100_000)]
     public int QueueCapacity { get; init; } = 500;

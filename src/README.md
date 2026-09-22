@@ -259,8 +259,7 @@ timestamp for a statically configured route.
 
 ## Running with Docker
 
-A `Dockerfile` is provided for containerized runs (web GUI migration plan
-Phase P10). Build from the **repository root**, not this directory - the
+A `Dockerfile` is provided for containerized runs. Build from the **repository root**, not this directory - the
 image also packages the web dashboard, a sibling project referenced from
 `TotallyHotArcRouter.csproj`:
 
@@ -281,12 +280,22 @@ own header comment for the full first-time trust setup
 
 ## Running tests
 
-xUnit v3's own `dotnet test` integration is unreliable in this repo (it has
-flipped between working and broken across .NET SDK updates several times).
-Build, then run the built test executable directly:
+xUnit v3's own `dotnet test` integration has been unreliable in this repo across SDK updates.
+Prefer building, then running the test **host** for the project you care about. On Windows the host
+is `*.Tests.exe`; on Linux/macOS it is the extensionless `*.Tests` file (or `dotnet exec` the
+`.dll`).
 
 ```bash
 dotnet build src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj -c Release
+# Windows
 src/TotallyHotArcRouter.Tests/bin/Release/net10.0/TotallyHotArcRouter.Tests.exe
+# Linux / macOS
+src/TotallyHotArcRouter.Tests/bin/Release/net10.0/TotallyHotArcRouter.Tests
 ```
+
+Sibling hosts follow the same pattern: `TotallyHotArcRouter.Quality.Tests`,
+`TotallyHotArcRouter.Gui.Components.Tests`, `TotallyHotArcRouter.Gui.Admin.Tests`,
+`TotallyHotArcRouter.Gui.Charts.Tests`, `TotallyHotArcRouter.Gui.Console.Tests`,
+`TotallyHotArcRouter.Gui.Telemetry.Tests`, `TotallyHotArcRouter.Tray.Core.Tests`.
+CI uses `dotnet test` with `TestingPlatformDotnetTestSupport` enabled in each test csproj.
 

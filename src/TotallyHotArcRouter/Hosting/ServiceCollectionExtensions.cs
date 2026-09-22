@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Quality.DependencyInjection;
@@ -65,9 +67,10 @@ public static class ServiceCollectionExtensions
         // RouterMemoryScoreObserver (live dim_best scores) and EmbeddingMemoryScoreObserver
         // (docs/router/live-feedback-learning-plan.md Phase 2c: memory_entries writes). Registered
         // before AddQuality so it wins over the library's Null default (which uses TryAdd).
-        services.AddSingleton<PendingTaskEmbeddingCache>();
-        services.AddSingleton<PendingRequestCostCache>();
-        services.AddSingleton<PendingRequestProvenanceCache>();
+        services.AddSingleton(sp => new PendingValueCache<float[]>(sp.GetRequiredService<IOptions<RoutingOptions>>()));
+        services.AddSingleton(sp => new PendingValueCache<decimal>(sp.GetRequiredService<IOptions<RoutingOptions>>()));
+        services.AddSingleton(sp =>
+            new PendingValueCache<PendingRequestProvenance>(sp.GetRequiredService<IOptions<RoutingOptions>>()));
         services.AddSingleton<RouterMemoryScoreObserver>();
         services.AddSingleton<EmbeddingMemoryScoreObserver>();
 
@@ -89,7 +92,7 @@ public static class ServiceCollectionExtensions
                 // (ProxyMiddleware, gated live off IOptionsMonitor<RoutingOptions>) - a row that was never
                 // inserted has no correlation id for this backfill to match, so it naturally no-ops too.
 
-                // The judge is intentionally NOT here. JudgeShadowScoreDispatcher is an
+                // The judge is intentionally NOT here. GraderDispatcher is an
                 // IAsyncGraderDispatcher, started by QualityScoreAggregator.SubmitAsync at hold-time -
                 // registered by AddJudge() above, resolved through IAsyncGraderDispatcher, not this
                 // fan-out. It used to be an IQualityScoreObserver registered here, but that trigger only
@@ -169,17 +172,28 @@ public static class ServiceCollectionExtensions
         // See docs/research/code-quality-metrics-assessment.md for why grading needs saved data.
         services.AddHostedService<QualityRescanService>();
 
-        // docs/router/geval-shadow-scoring-plan.md Phase G1: the shadow judge's drain worker and
-        // retention purge. Both are registered unconditionally and keep running regardless, no-opping
-        // per job / per tick while JudgeOptions.Enabled is false - that flag is toggleable at runtime,
-        // so neither may exit at startup on reading it once.
-        services.AddHostedService<JudgeShadowScoreDrainService>();
-        services.AddHostedService<JudgeShadowScoreRetentionService>();
-
-        // docs/router/grader-reliability-plan.md Phase Q4: the per-grader score table's own retention
-        // purge. Unlike the shadow-judge one above, this has no enabled gate - see
-        // GraderScoreRetentionService's remarks for why.
-        services.AddHostedService<GraderScoreRetentionService>();
+        // Score-table retention: one worker type, two instances, two SQLite tables. The shadow-judge
+        // instance no-ops while JudgeOptions.Enabled is false; the grader-scores instance always runs
+        // because analysis rows arrive regardless of which LLM grader is live. The drain worker is
+        // registered in AddJudge so it shares the queue/client graph. AddSingleton<IHostedService>, not
+        // AddHostedService: the factory overload of AddHostedService goes through TryAddEnumerable, which
+        // keys on the implementation type and would silently discard the second instance of the same type.
+        services.AddSingleton<IHostedService>(sp => new ScoreTableRetentionService(
+            logger: sp.GetRequiredService<ILogger<ScoreTableRetentionService>>(),
+            store: sp.GetRequiredService<IJudgeShadowScoreStore>(),
+            options: sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),
+            isEnabled: static o => o.Enabled,
+            maxRows: static o => o.MaxRows,
+            retentionDays: static o => o.RetentionDays,
+            tableLabel: "Shadow judge"));
+        services.AddSingleton<IHostedService>(sp => new ScoreTableRetentionService(
+            logger: sp.GetRequiredService<ILogger<ScoreTableRetentionService>>(),
+            store: sp.GetRequiredService<IGraderScoreStore>(),
+            options: sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),
+            isEnabled: static _ => true,
+            maxRows: static o => o.GraderScoreMaxRows,
+            retentionDays: static o => o.GraderScoreRetentionDays,
+            tableLabel: "Grader-score"));
 
         // docs/router/self-organizing-classification-plan.md Phase T4: drains the comparison queue on a
         // timer. Deliberately off the request path - a comparison needs both a verifier score and a

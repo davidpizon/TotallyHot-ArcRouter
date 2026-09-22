@@ -23,7 +23,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
+        pendingCache.Set(correlationId: "corr-1", value: [1f, 0f, 0f]);
 
         var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
@@ -95,7 +95,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        pendingCache.Set(correlationId: "corr-1", embedding: [1f]);
+        pendingCache.Set(correlationId: "corr-1", value: [1f]);
         var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
             logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
@@ -115,7 +115,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        pendingCache.Set(correlationId: "corr-1", embedding: [1f]);
+        pendingCache.Set(correlationId: "corr-1", value: [1f]);
         var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
             logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
@@ -135,11 +135,12 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
+        pendingCache.Set(correlationId: "corr-1", value: [1f, 0f, 0f]);
         var pendingCostCache = CreatePendingCostCache();
         pendingCostCache.Set(correlationId: "corr-1", 0.0042m);
         var pendingProvenanceCache = CreatePendingProvenanceCache();
-        pendingProvenanceCache.Set(correlationId: "corr-1", true, 0.02);
+        pendingProvenanceCache.Set(correlationId: "corr-1",
+            value: new PendingRequestProvenance(true, 0.02, null));
 
         var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
             pendingCostCache: pendingCostCache, pendingProvenanceCache: pendingProvenanceCache,
@@ -168,7 +169,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
+        pendingCache.Set(correlationId: "corr-1", value: [1f, 0f, 0f]);
 
         var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
@@ -197,7 +198,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
+        pendingCache.Set(correlationId: "corr-1", value: [1f, 0f, 0f]);
         var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
             logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
@@ -220,7 +221,7 @@ public class EmbeddingMemoryScoreObserverTests
         await memory.InitializeAsync(TestContext.Current.CancellationToken);
 
         var pendingCache = CreatePendingCache();
-        pendingCache.Set(correlationId: "corr-1", embedding: [1f, 0f, 0f]);
+        pendingCache.Set(correlationId: "corr-1", value: [1f, 0f, 0f]);
         var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
             logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
@@ -245,22 +246,22 @@ public class EmbeddingMemoryScoreObserverTests
             logger: NullLogger<EmbeddingMemory>.Instance);
     }
 
-    private static PendingTaskEmbeddingCache CreatePendingCache()
+    private static PendingValueCache<float[]> CreatePendingCache()
     {
-        return new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions
-        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        return new PendingValueCache<float[]>(Options.Create(new RoutingOptions
+            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
     }
 
-    private static PendingRequestCostCache CreatePendingCostCache()
+    private static PendingValueCache<decimal> CreatePendingCostCache()
     {
-        return new PendingRequestCostCache(Options.Create(new RoutingOptions
-        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        return new PendingValueCache<decimal>(Options.Create(new RoutingOptions
+            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
     }
 
-    private static PendingRequestProvenanceCache CreatePendingProvenanceCache()
+    private static PendingValueCache<PendingRequestProvenance> CreatePendingProvenanceCache()
     {
-        return new PendingRequestProvenanceCache(Options.Create(new RoutingOptions
-        { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
+        return new PendingValueCache<PendingRequestProvenance>(Options.Create(new RoutingOptions
+            { PendingEmbeddingCacheCapacity = 100, PendingEmbeddingCacheTtlSeconds = 300 }));
     }
 
     private sealed class FakeMemoryEntryStore : IMemoryEntryStore

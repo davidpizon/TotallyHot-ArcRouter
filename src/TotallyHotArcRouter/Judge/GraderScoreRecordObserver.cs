@@ -15,7 +15,7 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
 {
     private readonly ILogger<GraderScoreRecordObserver> _logger;
     private readonly PendingGraderBackboneCache _pendingGraderBackboneCache;
-    private readonly PendingResponseLengthCache _pendingResponseLengthCache;
+    private readonly PendingValueCache<int> _pendingResponseLengthCache;
     private readonly IGraderScoreStore _store;
     private readonly TimeProvider _timeProvider;
 
@@ -30,7 +30,7 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
     /// </param>
     public GraderScoreRecordObserver(
         IGraderScoreStore store,
-        PendingResponseLengthCache pendingResponseLengthCache,
+        PendingValueCache<int> pendingResponseLengthCache,
         PendingGraderBackboneCache pendingGraderBackboneCache,
         ILogger<GraderScoreRecordObserver> logger,
         TimeProvider? timeProvider = null)
@@ -65,7 +65,7 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
         // immediate-write path) simply carries no length or backbone rather than probing either cache.
         var hasCorrelationId = !string.IsNullOrEmpty(result.RequestCorrelationId);
         var responseLength = hasCorrelationId &&
-            _pendingResponseLengthCache.TryTake(correlationId: result.RequestCorrelationId, length: out var length)
+            _pendingResponseLengthCache.TryTake(correlationId: result.RequestCorrelationId, value: out var length)
             ? (int?)length
             : null;
         IReadOnlyDictionary<string, string> backboneByGraderKey =

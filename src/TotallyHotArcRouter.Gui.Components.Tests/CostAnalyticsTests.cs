@@ -3,7 +3,6 @@ using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Services;
-using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -18,10 +17,8 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class CostAnalyticsTests
 {
-    // An address nothing listens on; a connection attempt against it takes a couple of seconds to fail on
-    // this host (not an instant refusal), which is why assertions gated on the load use a generous wait.
     private const string UnreachableAddress = "http://127.0.0.1:59990";
-    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(4);
 
     private static Conversation MakeLiveConversation()
     {
@@ -47,7 +44,7 @@ public sealed class CostAnalyticsTests
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new UsageStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress)));
+        ctx.Services.AddSingleton(new UsageStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress)));
         return ctx;
     }
 

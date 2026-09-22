@@ -248,11 +248,13 @@ the scorer normalizes by their total.
 > (correctness, Tong & Zhang's severity-weighted fault taxonomy), `IceScoreGraderClient` (usefulness, ICE-
 > Score's aspect of that name), and `RaceGraderClient` (readability/maintainability) each contribute under
 > `GraderKeys.CodeJudge`/`IceScore`/`Race`, wired through `IQualityScoreAggregator.CompleteGraderAsync`/
-> `AbandonGraderAsync` — the generalized counterparts of `CompleteWithJudgeAsync`/`AbandonJudgeAsync` Q1 kept
-> judge-specific — without any change to `QualityScorer` itself. A new `IPortfolioGraderAvailability` seam
+> `AbandonGraderAsync` — the generalized join API that has since replaced Q1's judge-specific
+> `CompleteWithJudgeAsync`/`AbandonJudgeAsync` for every grader, the judge included — without any change to
+> `QualityScorer` itself. A new `IPortfolioGraderAvailability` seam
 > (deliberately separate from `IJudgeAvailability`, so the judge's own contract is undisturbed) supplies the
-> pending keys the aggregator unions with the judge's, and `CompositeAsyncGraderDispatcher` fans the
-> aggregator's single `IAsyncGraderDispatcher` seam out to both the judge's dispatcher and the portfolio's.
+> pending keys the aggregator unions with the judge's. Q3 originally fanned the aggregator's single
+> `IAsyncGraderDispatcher` seam out to separate judge and portfolio dispatchers; those have since collapsed
+> into one `GraderDispatcher` that enqueues every grader's job onto one `GraderQueue`.
 > The genuinely concurrent multi-grader hold this was all built for is exercised for real now — a request
 > can be held open for the judge and any of the three portfolio graders simultaneously, resolved by whichever
 > arrives, in whichever order. Full design: §5's judge-join section (its description generalizes to every
@@ -333,9 +335,9 @@ when the system is busiest.
 **Dispatching the judge: hold-time, not write-time.** `IAsyncGraderDispatcher.DispatchAsync` is called by
 `SubmitAsync` immediately after the entry is stored in the pending table — this is what actually starts
 grading, and it is the reason the table above has an outcome for every path *except* "judge grade in
-flight": that state exists only because dispatch already happened. `JudgeShadowScoreDispatcher` is the
-production implementation, enqueuing onto the drain worker's channel and returning immediately; a full
-channel, a judge switched off between `WillJudge` and dispatch, or a missing correlation id are all
+flight": that state exists only because dispatch already happened. `GraderDispatcher` is the
+production implementation, enqueuing onto `GraderQueue` and returning immediately; a full
+queue, a judge switched off between `WillJudge` and dispatch, or a missing correlation id are all
 answered by returning an empty accepted set, which the aggregator turns into an immediate
 `judge-not-dispatched` release rather than a wasted wait for `JudgeJoinTimeoutMs`
 (`docs/router/judge-join-deadlock-fix-plan.md`). An earlier design fired the judge from
@@ -455,8 +457,10 @@ learned rather than migrating it.
 | `PendingPromptCache` (Q2) | Mirrors `PendingResponseTextCache`: bridges the request's prompt to a later-arriving grading job, in-process only. Both caches gained a non-removing `TryPeek` in Q3 - see below. |
 | `IPortfolioGraderAvailability` (Q3) | Seam: "should this be held for a CodeJudge/ICE-Score/RACE grade?" - separate from `IJudgeAvailability`, unioned with it by the aggregator. |
 | `CodeJudgeGraderClient` / `IceScoreGraderClient` / `RaceGraderClient` (Q3) | The three portfolio graders, each built on `PortfolioGraderClientBase`'s shared HTTP plumbing over the judge's own `JudgeModelSelector` backbone. Live in the host, not this assembly. |
-| `PortfolioGraderDispatcher` / `PortfolioGraderDrainService` (Q3) | Mirror `JudgeShadowScoreDispatcher`/`JudgeShadowScoreDrainService`'s dispatch/drain shape for the three portfolio graders. Live in the host. |
-| `CompositeAsyncGraderDispatcher` (Q3) | Fans the aggregator's single `IAsyncGraderDispatcher` seam out to both the judge's dispatcher and the portfolio's, unioning their accepted keys. Lives in the host. |
+| `GraderDispatcher` | The single `IAsyncGraderDispatcher` for every LLM grader (the G-Eval judge and the three portfolio graders): gates each key on its live enabled flag and enqueues one job per accepted key. Lives in the host. |
+| `GraderQueue` | One lane per grader key, with a single `JudgeOptions.QueueCapacity` bound shared across all lanes; drops rather than back-pressures. Lives in the host. |
+| `GraderDrainService` | Drains `GraderQueue` with one sequential consumer per lane, so a slow backbone only delays its own grader. The judge reaches it through `JudgeGraderClient`, and additionally persists its `judge_shadow_scores` row before completing the join. Lives in the host. |
+| `PendingValueCache<T>` | The one correlation-id-keyed, TTL- and capacity-bounded cache behind every pending-* bridge (embedding, cost, provenance, response length, and the text/prompt/backbone wrappers). Lives in the host. |
 
 The `IJudgeAvailability`, `IPortfolioGraderAvailability`, and `IQualityScoreObserver` seams exist so
 `TotallyHot.ArcRouter.Quality` never references the core router or the judge subsystem. The host supplies

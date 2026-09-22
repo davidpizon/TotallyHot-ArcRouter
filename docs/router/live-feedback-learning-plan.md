@@ -1,5 +1,14 @@
 # Live Feedback Learning Plan
 
+> **Names since changed.** This plan records the types as they were named when each phase shipped. They
+> have since been consolidated: the judge and portfolio dispatchers, queues, jobs, and drain workers are now
+> `GraderDispatcher`, `GraderQueue`, `GraderScoringJob`, and `GraderDrainService`
+> (`CompositeAsyncGraderDispatcher` is gone); both retention workers are one `ScoreTableRetentionService`
+> run once per table; the judge-specific `CompleteWithJudgeAsync`/`AbandonJudgeAsync` are now
+> `CompleteGraderAsync`/`AbandonGraderAsync`; and `PendingTaskEmbeddingCache`, `PendingRequestCostCache`,
+> `PendingRequestProvenanceCache`, and `PendingResponseLengthCache` are now `PendingValueCache<T>` instances.
+> See `docs/router/quality-verifier-architecture.md` for the current component list.
+
 Makes the router actually learn from its own traffic. Before this plan, exactly one of four Orchestrator
 voters participated in a live routing decision; the other three abstained on every real request because
 the data they need was never computed. This plan wires the feedback capture that was designed but never
@@ -380,10 +389,10 @@ Shipped as:
 - `Proxy/ProxyServer.cs` / `Hosting/ServiceCollectionExtensions.cs` wire the group and map the endpoint,
   following the cluster-model block's exact pattern.
 - GUI: `TotallyHotArcRouter.Gui.Telemetry/LogRegModelAdminClient.cs` (+ `ILogRegModelAdminClient`),
-  `TotallyHotArcRouter.Gui/Services/LogRegModelAdminStore.cs`, and a **Router Model** pane
+  `TotallyHotArcRouter.Gui.Components/Services/LogRegModelAdminStore.cs`, and a **Router Model** pane
   (`Components/RouterModelAdmin.razor`) added to `Governance.razor`'s tab list, following
   `ClusterModelAdmin.razor`'s layout and button-state vocabulary ("Train" / "Retrain" / "Training…" /
-  router-unreachable) exactly. Registered as a MAUI singleton in `MauiProgram.cs`.
+  router-unreachable) exactly. Registered in the WASM host (`Gui.Web`).
 
 **Exit:** `LogRegModelAdminGrpcServiceTests` (6 tests: no-artifact status, trained status, retrain-config
 context, trained/declined/already-running streaming outcomes) - all passing. `LogRegModelAdminClientTests`

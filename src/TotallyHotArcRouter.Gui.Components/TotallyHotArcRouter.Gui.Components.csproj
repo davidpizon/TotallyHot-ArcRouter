@@ -2,14 +2,14 @@
 
   <PropertyGroup>
     <!-- Browser-targetable Razor component library (web GUI migration plan Phase P5b): the dashboard's
-         Components/*, Services/* stores, Models, and Utils, extracted out of the Windows-only MAUI
+         Components/*, Services/* stores, and Models, extracted out of the Windows-only MAUI
          TotallyHotArcRouter.Gui project so they can also be referenced by the future WASM host
          (Phase P6) and the tray (Phase P8) without dragging in MAUI itself. net10.0, not
          net10.0-windows - SupportedPlatform browser below is what lets a consuming WASM project trim
          and publish this library for the browser. Phase P5a's IRouterChannelProvider indirection is
          what keeps this library itself free of real sockets/TLS/filesystem code: every store here talks
-         to the router only through that interface and IClipboardService/IManagementTokenProvider-style
-         seams, never TelemetryChannelFactory or ManagementTokenReader directly. -->
+         to the router only through that interface and IClipboardService-style seams, never
+         TelemetryChannelFactory directly. -->
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>TotallyHot.ArcRouter.Gui</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -33,15 +33,6 @@
   <ItemGroup>
     <!-- Provides ComponentBase, IJSRuntime, ElementReference, PointerEventArgs, etc. for Components/*.razor -->
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.12" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- MockData's literal fixture data (Models/DashboardData.cs) lives here instead of as C# object
-         initializers; embedded (not copied to output) so Models/DashboardData.cs's LoadFixture reads it
-         via Assembly.GetManifestResourceStream regardless of the process's working directory. -->
-    <EmbeddedResource Include="Models\DashboardMockData.json">
-      <LogicalName>TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

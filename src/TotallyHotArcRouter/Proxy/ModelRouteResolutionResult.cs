@@ -182,8 +182,8 @@ public sealed record ModelRouteResolutionResult
     /// Gets the request's task embedding, computed on the request path under a time budget
     /// (docs/router/live-feedback-learning-plan.md Phase 2b), or <see langword="null"/> when it was not
     /// computed (no embedding client configured, still warming up, budget exceeded, or the request had no
-    /// extractable text). Carried through so <c>ProxyMiddleware</c> can hand it to
-    /// <c>Router.Embeddings.PendingTaskEmbeddingCache</c> once the request's correlation id is known -
+    /// extractable text). Carried through so <c>ProxyMiddleware</c> can hand it to the pending-embedding
+    /// cache once the request's correlation id is known -
     /// <see cref="TotallyHot.ArcRouter.Proxy.RequestInterceptor.ResolveModelRouteAsync"/> computes the
     /// embedding but does not itself know the correlation id (it is only assigned later, alongside session
     /// and turn resolution).

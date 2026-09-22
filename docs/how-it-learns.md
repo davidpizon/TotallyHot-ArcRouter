@@ -324,7 +324,7 @@ That promotion created a counting problem worth explaining, because the fix is t
 this whole system.
 
 > Source: [`GEvalJudgeClient.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Judge/GEvalJudgeClient.cs) ·
-> [`JudgeShadowScoreQueue.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Judge/JudgeShadowScoreQueue.cs)
+> [`GraderQueue.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Judge/GraderQueue.cs)
 
 ### So where does cost actually come in?
 

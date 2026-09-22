@@ -65,7 +65,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 **Apache ECharts NOTICE** — reproduced as required by Apache-2.0 §4(d). The upstream `LICENSE` and
 `NOTICE` files are retained verbatim alongside the vendored bundle in
-`src/TotallyHotArcRouter.Gui/wwwroot/lib/echarts/`:
+`src/TotallyHotArcRouter.Gui.Web/wwwroot/lib/echarts/`:
 
 ```
 Apache ECharts
@@ -145,13 +145,11 @@ no obligation on downstream recipients of the application.
 |---|---|---|
 | Grpc.Tools (protobuf/gRPC codegen; `PrivateAssets=all`, so it flows to no consumer and ships in no artifact) | 2.83.0 | Apache-2.0 |
 | xunit.v3 | 4.0.0 | Apache-2.0 |
-| xunit.runner.visualstudio | 4.0.0 | Apache-2.0 |
 | Grpc.Core.Testing | 2.46.6 | Apache-2.0 |
 | AwesomeAssertions | 9.6.0 | Apache-2.0 |
 | Moq | 4.20.72 | BSD-3-Clause |
 | bunit | 2.9.0 | MIT |
 | AngleSharp | 1.7.3 | MIT |
-| Microsoft.NET.Test.Sdk | 18.9.0 | MIT |
 | Microsoft.Testing.Extensions.CodeCoverage (test-time coverage collector; supersedes coverlet.collector) | 18.11.0 | Microsoft Software License Terms (test targets only; not redistributable as a standalone offering) |
 | Microsoft.VisualStudio.Azure.Containers.Tools.Targets | 1.23.0 | Microsoft Software License Terms (build targets only; not redistributable as a standalone offering) |
 
