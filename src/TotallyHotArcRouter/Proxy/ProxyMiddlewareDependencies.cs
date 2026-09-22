@@ -143,7 +143,7 @@ public sealed record ProxyMiddlewareDependencies
     /// runs before it. Defaults to <see langword="null"/> (no entries recorded), so existing
     /// callers/tests are unaffected.
     /// </summary>
-    public PendingTaskEmbeddingCache? PendingTaskEmbeddingCache { get; init; }
+    public PendingValueCache<float[]>? PendingTaskEmbeddingCache { get; init; }
 
     /// <summary>
     /// Supplies <see cref="Models.RoutingOptions.SelfHostedRouterPricePerMillionTokens"/>, the rate the
@@ -161,7 +161,7 @@ public sealed record ProxyMiddlewareDependencies
     /// <see cref="PendingTaskEmbeddingCache"/>'s role exactly, for a different value. Defaults to
     /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
     /// </summary>
-    public PendingRequestCostCache? PendingRequestCostCache { get; init; }
+    public PendingValueCache<decimal>? PendingRequestCostCache { get; init; }
 
     /// <summary>
     /// Optional bridge (docs/router/self-organizing-classification-plan.md Phase T1c) between this
@@ -169,7 +169,7 @@ public sealed record ProxyMiddlewareDependencies
     /// <see cref="RequestInterceptor"/>) and its later-arriving verifier score. Defaults to
     /// <see langword="null"/> (no entries recorded), so existing callers/tests are unaffected.
     /// </summary>
-    public PendingRequestProvenanceCache? PendingRequestProvenanceCache { get; init; }
+    public PendingValueCache<PendingRequestProvenance>? PendingRequestProvenanceCache { get; init; }
 
     /// <summary>
     /// Optional bridge (docs/router/geval-shadow-scoring-plan.md §Raw-text preservation) between this
@@ -189,7 +189,7 @@ public sealed record ProxyMiddlewareDependencies
     /// any LLM grader being live. Defaults to <see langword="null"/> (no entries recorded), so existing
     /// callers/tests are unaffected.
     /// </summary>
-    public PendingResponseLengthCache? PendingResponseLengthCache { get; init; }
+    public PendingValueCache<int>? PendingResponseLengthCache { get; init; }
 
     /// <summary>
     /// Optional bridge between this request's newest user message and the judge's later-arriving background

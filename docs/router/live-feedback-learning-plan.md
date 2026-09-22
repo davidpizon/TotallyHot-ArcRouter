@@ -1,5 +1,14 @@
 # Live Feedback Learning Plan
 
+> **Names since changed.** This plan records the types as they were named when each phase shipped. They
+> have since been consolidated: the judge and portfolio dispatchers, queues, jobs, and drain workers are now
+> `GraderDispatcher`, `GraderQueue`, `GraderScoringJob`, and `GraderDrainService`
+> (`CompositeAsyncGraderDispatcher` is gone); both retention workers are one `ScoreTableRetentionService`
+> run once per table; the judge-specific `CompleteWithJudgeAsync`/`AbandonJudgeAsync` are now
+> `CompleteGraderAsync`/`AbandonGraderAsync`; and `PendingTaskEmbeddingCache`, `PendingRequestCostCache`,
+> `PendingRequestProvenanceCache`, and `PendingResponseLengthCache` are now `PendingValueCache<T>` instances.
+> See `docs/router/quality-verifier-architecture.md` for the current component list.
+
 Makes the router actually learn from its own traffic. Before this plan, exactly one of four Orchestrator
 voters participated in a live routing decision; the other three abstained on every real request because
 the data they need was never computed. This plan wires the feedback capture that was designed but never
