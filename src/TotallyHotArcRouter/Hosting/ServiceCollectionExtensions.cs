@@ -175,8 +175,10 @@ public static class ServiceCollectionExtensions
         // Score-table retention: one worker type, two instances, two SQLite tables. The shadow-judge
         // instance no-ops while JudgeOptions.Enabled is false; the grader-scores instance always runs
         // because analysis rows arrive regardless of which LLM grader is live. The drain worker is
-        // registered in AddJudge so it shares the queue/client graph.
-        services.AddHostedService(sp => new ScoreTableRetentionService(
+        // registered in AddJudge so it shares the queue/client graph. AddSingleton<IHostedService>, not
+        // AddHostedService: the factory overload of AddHostedService goes through TryAddEnumerable, which
+        // keys on the implementation type and would silently discard the second instance of the same type.
+        services.AddSingleton<IHostedService>(sp => new ScoreTableRetentionService(
             logger: sp.GetRequiredService<ILogger<ScoreTableRetentionService>>(),
             store: sp.GetRequiredService<IJudgeShadowScoreStore>(),
             options: sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),
@@ -184,7 +186,7 @@ public static class ServiceCollectionExtensions
             maxRows: static o => o.MaxRows,
             retentionDays: static o => o.RetentionDays,
             tableLabel: "Shadow judge"));
-        services.AddHostedService(sp => new ScoreTableRetentionService(
+        services.AddSingleton<IHostedService>(sp => new ScoreTableRetentionService(
             logger: sp.GetRequiredService<ILogger<ScoreTableRetentionService>>(),
             store: sp.GetRequiredService<IGraderScoreStore>(),
             options: sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),

@@ -152,9 +152,9 @@ public class JudgeJoinDeadlockFixTests
         };
     }
 
-    private static async Task<GraderScoringJob?> DequeueOneAsync(IGraderQueue queue)
+    private static async Task<GraderScoringJob?> DequeueOneAsync(IGraderQueue queue, string graderKey = GraderKeys.Judge)
     {
-        await foreach (var job in queue.DequeueAllAsync(TestContext.Current.CancellationToken)) return job;
+        await foreach (var job in queue.DequeueAllAsync(graderKey, TestContext.Current.CancellationToken)) return job;
         return null;
     }
 

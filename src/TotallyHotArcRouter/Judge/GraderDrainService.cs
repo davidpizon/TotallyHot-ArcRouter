@@ -6,7 +6,10 @@ using TotallyHot.ArcRouter.Quality.Grading;
 namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
-/// Background worker that continuously drains <see cref="IGraderQueue"/> for every LLM grader. For each
+/// Background worker that continuously drains <see cref="IGraderQueue"/> for every LLM grader, running one
+/// sequential consumer per grader lane (<see cref="GraderDispatcher.DispatchableKeys"/>) so a slow backbone
+/// for one grader never delays another grader's jobs; concurrency is bounded at one in-flight call per
+/// grader. For each
 /// dequeued job it looks up the matching <see cref="IPortfolioGraderClient"/> by
 /// <see cref="GraderScoringJob.GraderKey"/>, peeks the cached prompt/response, scores, and completes or
 /// abandons the aggregator's join. A missing or whitespace-only prompt fails closed (abandon with
@@ -81,9 +84,18 @@ public sealed class GraderDrainService : BackgroundService
     {
         _logger.LogInformation("Starting grader drain worker.");
 
+        await Task.WhenAll(GraderDispatcher.DispatchableKeys.Select(key => DrainLaneAsync(key, stoppingToken)))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Drains one grader's lane, processing its jobs one at a time until shutdown.</summary>
+    /// <param name="graderKey">The grader whose lane to drain.</param>
+    /// <param name="stoppingToken">A cancellation token.</param>
+    private async Task DrainLaneAsync(string graderKey, CancellationToken stoppingToken)
+    {
         try
         {
-            await foreach (var job in _queue.DequeueAllAsync(stoppingToken).ConfigureAwait(false))
+            await foreach (var job in _queue.DequeueAllAsync(graderKey, stoppingToken).ConfigureAwait(false))
                 await ProcessAsync(job: job, stoppingToken: stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

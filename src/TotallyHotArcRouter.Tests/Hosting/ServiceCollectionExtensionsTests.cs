@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
@@ -80,6 +81,54 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());
         Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
         Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
+    }
+
+    /// <summary>
+    /// Both score-table retention instances (shadow-judge and grader-scores) must reach the host. They
+    /// share one implementation type, so registering them through <c>AddHostedService</c>'s factory
+    /// overload would let <c>TryAddEnumerable</c> discard the second and leave <c>grader_scores</c>
+    /// unpurged.
+    /// </summary>
+    [Fact]
+    public void AddTotallyHotArcRouter_RegistersBothScoreTableRetentionInstances()
+    {
+        var services = new ServiceCollection();
+
+        services.AddTotallyHotArcRouter();
+
+        var factories = services
+            .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationFactory is not null)
+            .Select(d => d.ImplementationFactory!)
+            .ToList();
+        var fakeProvider = new ServiceCollection()
+            .AddLogging()
+            .AddOptions()
+            .AddSingleton<IJudgeShadowScoreStore>(Mock.Of<IJudgeShadowScoreStore>())
+            .AddSingleton<IGraderScoreStore>(Mock.Of<IGraderScoreStore>())
+            .BuildServiceProvider();
+
+        var retention = factories
+            .Select(f => TryCreate(f, fakeProvider))
+            .OfType<ScoreTableRetentionService>()
+            .ToList();
+
+        Assert.Equal(2, actual: retention.Count);
+    }
+
+    /// <summary>
+    /// Runs a hosted-service factory against a provider that only carries the retention workers'
+    /// dependencies; factories for other hosted services fail to resolve theirs and are skipped.
+    /// </summary>
+    private static object? TryCreate(Func<IServiceProvider, object> factory, IServiceProvider provider)
+    {
+        try
+        {
+            return factory(provider);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     [Fact]

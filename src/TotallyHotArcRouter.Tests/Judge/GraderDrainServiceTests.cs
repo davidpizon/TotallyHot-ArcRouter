@@ -233,6 +233,43 @@ public class GraderDrainServiceTests
         Assert.Equal(expected: "codejudge-not-registered", actual: Assert.Single(aggregator.Abandoned).Reason);
     }
 
+    /// <summary>
+    /// Each grader has its own lane and consumer, so a judge backbone that never returns must not hold up
+    /// a portfolio grader's job queued behind it - the single shared consumer this replaced serialized
+    /// every grader behind the slowest one.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_JudgeBackboneStalled_PortfolioLaneStillScores()
+    {
+        var cache = CreateCache();
+        cache.Set(correlationId: "corr-1", text: "the agent's response");
+        var queue = new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 }));
+        var judgeGate = new TaskCompletionSource<PortfolioGraderScoreResult?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var portfolioCalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = CreateService(cache: cache, queue: queue,
+            clients:
+            [
+                new GatedClient(GraderKeys.Judge, judgeGate.Task),
+                new GatedClient(GraderKeys.CodeJudge, Task.FromResult<PortfolioGraderScoreResult?>(
+                    new PortfolioGraderScoreResult(Score: 0.8, GraderModel: "free-model")), portfolioCalled)
+            ]);
+
+        queue.TryEnqueue(MakeJudgeJob("corr-1"));
+        queue.TryEnqueue(MakePortfolioJob(GraderKeys.CodeJudge));
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await portfolioCalled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            Assert.False(judgeGate.Task.IsCompleted);
+        }
+        finally
+        {
+            judgeGate.TrySetResult(null);
+            await service.StopAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
     private static GraderScoringJob MakeJudgeJob(string correlationId)
     {
         return new GraderScoringJob(CorrelationId: correlationId, GraderKey: GraderKeys.Judge,
@@ -269,10 +306,11 @@ public class GraderDrainServiceTests
         StaticOptionsMonitor<PortfolioGraderOptions>? portfolioOptions = null,
         IQualityScoreAggregator? aggregator = null,
         PendingPromptCache? promptCache = null,
-        PendingGraderBackboneCache? backboneCache = null)
+        PendingGraderBackboneCache? backboneCache = null,
+        IGraderQueue? queue = null)
     {
         return new GraderDrainService(
-            queue: new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 })),
+            queue: queue ?? new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 10 })),
             pendingResponseTextCache: cache,
             pendingPromptCache: promptCache ?? CreatePromptCache(),
             pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
@@ -305,6 +343,25 @@ public class GraderDrainServiceTests
             return Task.FromResult(score is { } value
                 ? new PortfolioGraderScoreResult(Score: value, GraderModel: backboneModel, UsedLogprobs: usedLogprobs)
                 : null);
+        }
+    }
+
+    /// <summary>
+    /// A client whose result is a caller-supplied task, so a test can hold one grader's backbone call
+    /// open indefinitely; optionally signals <paramref name="called"/> when it is invoked.
+    /// </summary>
+    private sealed class GatedClient(
+        string graderKey,
+        Task<PortfolioGraderScoreResult?> result,
+        TaskCompletionSource? called = null) : IPortfolioGraderClient
+    {
+        public string GraderKey => graderKey;
+
+        public Task<PortfolioGraderScoreResult?> ScoreAsync(PortfolioGraderScoreRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            called?.TrySetResult();
+            return result;
         }
     }
 

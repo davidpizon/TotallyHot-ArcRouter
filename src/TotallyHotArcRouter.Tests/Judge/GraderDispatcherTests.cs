@@ -79,17 +79,9 @@ public class GraderDispatcherTests
 
         Assert.Equal(new HashSet<string> { GraderKeys.CodeJudge, GraderKeys.IceScore, GraderKeys.Race }, actual: accepted);
 
-        var jobs = new List<GraderScoringJob>();
-        await foreach (var job in queue.DequeueAllAsync(TestContext.Current.CancellationToken))
-        {
-            jobs.Add(job);
-            if (jobs.Count == 3) break;
-        }
-
-        Assert.Equal(3, jobs.Count);
-        Assert.Contains(jobs, j => j.GraderKey == GraderKeys.CodeJudge);
-        Assert.Contains(jobs, j => j.GraderKey == GraderKeys.IceScore);
-        Assert.Contains(jobs, j => j.GraderKey == GraderKeys.Race);
+        Assert.Equal(expected: GraderKeys.CodeJudge, actual: (await DequeueOneAsync(queue, GraderKeys.CodeJudge)).GraderKey);
+        Assert.Equal(expected: GraderKeys.IceScore, actual: (await DequeueOneAsync(queue, GraderKeys.IceScore)).GraderKey);
+        Assert.Equal(expected: GraderKeys.Race, actual: (await DequeueOneAsync(queue, GraderKeys.Race)).GraderKey);
     }
 
     [Fact]
@@ -183,9 +175,9 @@ public class GraderDispatcherTests
         };
     }
 
-    private static async Task<GraderScoringJob> DequeueOneAsync(IGraderQueue queue)
+    private static async Task<GraderScoringJob> DequeueOneAsync(IGraderQueue queue, string graderKey = GraderKeys.Judge)
     {
-        await foreach (var job in queue.DequeueAllAsync(TestContext.Current.CancellationToken)) return job;
+        await foreach (var job in queue.DequeueAllAsync(graderKey, TestContext.Current.CancellationToken)) return job;
         throw new InvalidOperationException("queue was empty");
     }
 }

@@ -13,7 +13,11 @@ namespace TotallyHot.ArcRouter.Judge;
 /// </summary>
 public sealed class GraderDispatcher : IAsyncGraderDispatcher
 {
-    private static readonly string[] DispatchableKeys =
+    /// <summary>
+    /// Every grader key this dispatcher can enqueue. <see cref="GraderDrainService"/> runs one lane
+    /// consumer per key from this same list, so a dispatchable key can never lack a reader.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> DispatchableKeys =
     [
         GraderKeys.Judge, GraderKeys.CodeJudge, GraderKeys.IceScore, GraderKeys.Race
     ];
