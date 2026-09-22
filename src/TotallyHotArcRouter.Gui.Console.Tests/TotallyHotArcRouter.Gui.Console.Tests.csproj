@@ -10,10 +10,8 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <IsPackable>false</IsPackable>
-    <!-- xunit.v3 runs on Microsoft.Testing.Platform (MTP), which the .NET 10 SDK no longer bridges to
-         VSTest for `dotnet test` by default (see https://aka.ms/dotnet-test-mtp-error). This opts back
-         into `dotnet test` support so CI's `dotnet test` invocation keeps working. -->
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <!-- xunit.v3 test projects are self-hosting Microsoft.Testing.Platform executables. -->
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,12 +21,7 @@
          THIRD-PARTY-NOTICES.md. The assertion API is identical; only the root namespace differs
          (`using AwesomeAssertions;`), which is why no test assertion needed rewriting. -->
     <PackageReference Include="AwesomeAssertions" Version="9.6.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <PackageReference Include="xunit.v3" Version="4.0.1" />
   </ItemGroup>
 
