@@ -285,7 +285,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.verify-version.outputs.version }}
     steps:
       - name: Download all release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-asset-*
           path: release-assets
