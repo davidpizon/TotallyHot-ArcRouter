@@ -1,5 +1,14 @@
 # Phase Q4: Grader Reliability Measurement
 
+> **Names since changed.** This plan records the types as they were named when each phase shipped. They
+> have since been consolidated: the judge and portfolio dispatchers, queues, jobs, and drain workers are now
+> `GraderDispatcher`, `GraderQueue`, `GraderScoringJob`, and `GraderDrainService`
+> (`CompositeAsyncGraderDispatcher` is gone); both retention workers are one `ScoreTableRetentionService`
+> run once per table; the judge-specific `CompleteWithJudgeAsync`/`AbandonJudgeAsync` are now
+> `CompleteGraderAsync`/`AbandonGraderAsync`; and `PendingTaskEmbeddingCache`, `PendingRequestCostCache`,
+> `PendingRequestProvenanceCache`, and `PendingResponseLengthCache` are now `PendingValueCache<T>` instances.
+> See `docs/router/quality-verifier-architecture.md` for the current component list.
+
 Status: **shipped, CLI surface only — the gRPC/Governance-panel surface below is deliberately deferred.**
 Scoped in response to `src/PLAN.md`'s "Remaining work, in order" item 1: Q0–Q3 are shipped (three-grader
 portfolio registered, `ExtraWeights` set to modest, not-yet-tuned starting values); Q4 measures

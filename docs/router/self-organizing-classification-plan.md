@@ -1,5 +1,14 @@
 # Self-Organizing Request Classification Plan
 
+> **Names since changed.** This plan records the types as they were named when each phase shipped. They
+> have since been consolidated: the judge and portfolio dispatchers, queues, jobs, and drain workers are now
+> `GraderDispatcher`, `GraderQueue`, `GraderScoringJob`, and `GraderDrainService`
+> (`CompositeAsyncGraderDispatcher` is gone); both retention workers are one `ScoreTableRetentionService`
+> run once per table; the judge-specific `CompleteWithJudgeAsync`/`AbandonJudgeAsync` are now
+> `CompleteGraderAsync`/`AbandonGraderAsync`; and `PendingTaskEmbeddingCache`, `PendingRequestCostCache`,
+> `PendingRequestProvenanceCache`, and `PendingResponseLengthCache` are now `PendingValueCache<T>` instances.
+> See `docs/router/quality-verifier-architecture.md` for the current component list.
+
 Gives the router a taxonomy it learns from its own traffic, alongside the fixed nine-dimension
 vocabulary CodeRouterBench defines, and closes the biggest structural gap in
 `docs/router/live-feedback-learning-plan.md`'s voter set: three of the four Orchestrator voters
