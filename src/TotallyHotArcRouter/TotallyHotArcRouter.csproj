@@ -62,6 +62,7 @@
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
     <!-- Backs Program.cs's UseSystemd() call (web GUI migration plan Phase P10) so the host can run
          under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
