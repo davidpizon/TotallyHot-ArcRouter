@@ -23,8 +23,8 @@
          Grpc.Tools needs a normal SDK-style build, and this library is already the DTO/wire-contract
          layer LiveDataStore consumes. -->
     <PackageReference Include="Grpc.Net.Client" Version="2.83.0" />
-    <PackageReference Include="Google.Protobuf" Version="3.36.1" />
-    <PackageReference Include="Grpc.Tools" Version="2.83.0">
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+    <PackageReference Include="Grpc.Tools" Version="2.84.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
