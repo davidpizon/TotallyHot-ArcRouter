@@ -39,9 +39,9 @@ public sealed class PendingGraderBackboneCache
         _inner.Set(
             correlationId,
             value: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [graderKey] = backboneModel },
-            merge: existing =>
+            merge: static (existing, incoming) =>
             {
-                existing[graderKey] = backboneModel;
+                foreach (var (key, model) in incoming) existing[key] = model;
                 return existing;
             });
     }

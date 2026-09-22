@@ -134,15 +134,33 @@ public class PendingValueCacheTests
 
         cache.Set("corr-1", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["a"] = "1" });
         cache.Set("corr-1", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["b"] = "2" },
-            merge: existing =>
+            merge: static (existing, incoming) =>
             {
-                existing["b"] = "2";
+                foreach (var (key, value) in incoming) existing[key] = value;
                 return existing;
             });
 
         Assert.True(cache.TryTake("corr-1", out var map));
         Assert.Equal(expected: "1", actual: map["a"]);
         Assert.Equal(expected: "2", actual: map["b"]);
+    }
+
+    /// <summary>With no existing entry the incoming value is stored as-is and the combiner never runs.</summary>
+    [Fact]
+    public void Set_MergeOnAbsentKey_StoresTheIncomingValueWithoutCallingMerge()
+    {
+        var cache = Create();
+        var mergeCalled = false;
+
+        cache.Set("corr-1", [1f], merge: (existing, _) =>
+        {
+            mergeCalled = true;
+            return existing;
+        });
+
+        Assert.False(mergeCalled);
+        Assert.True(cache.TryTake("corr-1", out var value));
+        Assert.Equal(1f, actual: value[0]);
     }
 
     private static PendingValueCache<float[]> Create(int capacity = 2_000, int ttlSeconds = 300,

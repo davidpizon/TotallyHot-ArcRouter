@@ -81,15 +81,20 @@ public sealed class PendingValueCache<T>
     /// <summary>
     /// Records <paramref name="value"/> under <paramref name="correlationId"/>, evicting expired entries
     /// first and then the oldest entries beyond capacity. When <paramref name="merge"/> is provided and
-    /// the key already holds an unexpired value, that existing value is passed to <paramref name="merge"/>
-    /// and the result stored instead of replacing it outright.
+    /// the key already holds an unexpired value, the stored result is
+    /// <c>merge(existing, <paramref name="value"/>)</c> instead of <paramref name="value"/> alone.
     /// </summary>
     /// <param name="correlationId">The request correlation id that later readers will look up.</param>
-    /// <param name="value">The value to store, or the seed value when <paramref name="merge"/> runs.</param>
-    /// <param name="merge">
-    /// Optional combiner for additive caches (grader backbones). Invoked only when the key already exists.
+    /// <param name="value">
+    /// The incoming value. Stored as-is when the key is absent (or <paramref name="merge"/> is null), and
+    /// always passed to <paramref name="merge"/> otherwise - it is never silently discarded.
     /// </param>
-    public void Set(string correlationId, T value, Func<T, T>? merge = null)
+    /// <param name="merge">
+    /// Optional combiner for additive caches (grader backbones), called as <c>(existing, incoming)</c> and
+    /// only when the key already exists. Runs under the cache lock, so it must be quick and must not call
+    /// back into this cache.
+    /// </param>
+    public void Set(string correlationId, T value, Func<T, T, T>? merge = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
         if (value is null) throw new ArgumentNullException(nameof(value));
@@ -100,7 +105,7 @@ public sealed class PendingValueCache<T>
 
             if (merge is not null && _entries.TryGetValue(correlationId, out var existing))
             {
-                value = merge(existing.Value);
+                value = merge(existing.Value, value);
             }
             else if (!_entries.ContainsKey(correlationId))
             {
