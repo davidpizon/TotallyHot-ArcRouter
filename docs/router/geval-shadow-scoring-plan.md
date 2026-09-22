@@ -1,5 +1,14 @@
 # G-Eval Shadow Scoring and Judge-Verifier Plan
 
+> **Names since changed.** This plan records the types as they were named when each phase shipped. They
+> have since been consolidated: the judge and portfolio dispatchers, queues, jobs, and drain workers are now
+> `GraderDispatcher`, `GraderQueue`, `GraderScoringJob`, and `GraderDrainService`
+> (`CompositeAsyncGraderDispatcher` is gone); both retention workers are one `ScoreTableRetentionService`
+> run once per table; the judge-specific `CompleteWithJudgeAsync`/`AbandonJudgeAsync` are now
+> `CompleteGraderAsync`/`AbandonGraderAsync`; and `PendingTaskEmbeddingCache`, `PendingRequestCostCache`,
+> `PendingRequestProvenanceCache`, and `PendingResponseLengthCache` are now `PendingValueCache<T>` instances.
+> See `docs/router/quality-verifier-architecture.md` for the current component list.
+
 Status: **G1 shipped** (shadow judge observer, ephemeral response-text cache, `judge_shadow_scores` side
 table, `is_judge_scored` provenance columns). **G2 proposed**, gated on accumulated shadow data. **G3 shipped**
 (judge-row provenance and configurable learning-layer policy — see Phase G3 below).

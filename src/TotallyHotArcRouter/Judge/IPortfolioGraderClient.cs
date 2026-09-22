@@ -46,4 +46,8 @@ public sealed record PortfolioGraderScoreRequest(string Dimension, string Respon
 /// ineligible configured pick, and docs/router/grader-reliability-plan.md's self-preference-skew statistic
 /// needs to know what actually ran.
 /// </param>
-public sealed record PortfolioGraderScoreResult(double Score, string GraderModel);
+/// <param name="UsedLogprobs">
+/// Whether <see cref="Score"/> was computed via G-Eval's probability-weighted recipe. False for every
+/// portfolio grader; stamped only when the G-Eval judge produced this result, for the shadow-row persist.
+/// </param>
+public sealed record PortfolioGraderScoreResult(double Score, string GraderModel, bool UsedLogprobs = false);

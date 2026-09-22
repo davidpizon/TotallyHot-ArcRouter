@@ -17,7 +17,7 @@ failure modes (blank dashboards, user-data-folder hacks, `SetWebViewVisible` wor
 `MainPage.cs`, `WebViewUserData.cs`), and its tests can't run on Linux CI (the
 `windows-gui-build-and-test` job in `.github/workflows/dotnet-ci.yml` is disabled).
 
-The goal ([`docs/gui/web-gui-migration-plan.md`](../gui/web-gui-migration-plan.md)) is for the router
+The goal ([`docs/archive/gui/web-gui-migration-plan.md`](../archive/gui/web-gui-migration-plan.md)) is for the router
 (`src/TotallyHotArcRouter`, already `Microsoft.NET.Sdk.Web`) to serve the existing Razor dashboard to
 any browser, cross-platform, on a port configured in `appsettings.json`. This ADR covers the transport
 and hosting shape; ADR-0012 covers auth, ADR-0013 covers TLS trust, ADR-0014 covers cross-platform
@@ -131,6 +131,6 @@ Concretely:
 
 ## More Information
 
-See [`docs/gui/web-gui-migration-plan.md`](../gui/web-gui-migration-plan.md) phases P1–P2 (listener and
+See [`docs/archive/gui/web-gui-migration-plan.md`](../archive/gui/web-gui-migration-plan.md) phases P1–P2 (listener and
 port-scoping work) and P9 (retiring 5002 and REST `/admin`). Supersedes
 [ADR-0007](0007-provider-admin-client-stays-on-http.md).

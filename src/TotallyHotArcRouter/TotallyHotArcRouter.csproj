@@ -67,9 +67,9 @@
          under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
          when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.6" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.7" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.83.0">
+    <PackageReference Include="Grpc.Tools" Version="2.84.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -89,7 +89,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <!-- WordPiece tokenizer matching BGE's BERT-family vocabulary; used by OnnxEmbeddingClient to
          turn task text into the token ids OnnxRuntime's InferenceSession expects. -->
-    <PackageReference Include="FastBertTokenizer" Version="1.0.28" />
+    <PackageReference Include="FastBertTokenizer" Version="1.2.6" />
     <!-- Autoregressive generation (KV-cache, greedy sampling, tokenization) for the llm_router voter's
          local ONNX-hosted small instruct model (PLAN.md Phase L) - owns exactly the generation-loop
          complexity the plain Microsoft.ML.OnnxRuntime session above would otherwise require hand-rolling. -->

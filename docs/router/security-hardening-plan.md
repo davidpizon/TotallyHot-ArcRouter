@@ -1239,8 +1239,8 @@ visible rather than an apparent gap, and so a later pass has a starting list:
   `appsettings.json`) with no integrity verification. This is a code-execution-adjacent supply
   chain risk and is a strong candidate for the next pass.
 - **`scripts/fetch-coderouterbench.sh`** — data fetch and verification.
-- **GUI** — the MAUI Blazor Hybrid WebView, CSP, and render-mode configuration in
-  `src/TotallyHotArcRouter.Gui/`.
+- **GUI** — the Blazor WebAssembly dashboard (`src/TotallyHotArcRouter.Gui.Web/`,
+  `src/TotallyHotArcRouter.Gui.Components/`), CSP, and browser session auth.
 
 ---
 

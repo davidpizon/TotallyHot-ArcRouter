@@ -137,7 +137,7 @@ admin RPC with no credential at all, which is strictly weaker than today.
 
 ## More Information
 
-See [`docs/gui/web-gui-migration-plan.md`](../gui/web-gui-migration-plan.md) phase P4 (auth
+See [`docs/archive/gui/web-gui-migration-plan.md`](../archive/gui/web-gui-migration-plan.md) phase P4 (auth
 implementation and its DNS-rebinding/CSRF test matrix) and P9 (token-file import/delete, Copy/Regenerate
 UI). Builds on [`docs/adr/0011-router-served-blazor-webassembly-gui-over-grpc-web.md`](0011-router-served-blazor-webassembly-gui-over-grpc-web.md)
 for the web port this auth model gates, and on

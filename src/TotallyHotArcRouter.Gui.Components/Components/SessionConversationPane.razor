@@ -43,7 +43,7 @@
     /// </summary>
     private static string AgentColorFor(ConversationTurn turn)
     {
-        return ColorUtils.GetColorForAgent(turn.Agent);
+        return ChartPalette.ColorFor(turn.Agent);
     }
 
     /// <summary>Whether <paramref name="turn"/> captured a non-empty request summary.</summary>
