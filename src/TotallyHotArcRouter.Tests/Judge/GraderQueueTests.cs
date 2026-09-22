@@ -6,8 +6,7 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 
 /// <summary>
 /// Covers <see cref="GraderQueue"/>'s bounded, non-blocking, drop-on-full behavior - the routing hot path
-/// never blocks on judging - and its per-grader lanes, which keep one grader's backlog from shedding or
-/// delaying another's jobs.
+/// never blocks on judging - its per-grader lanes, and the single capacity bound shared across them.
 /// </summary>
 public class GraderQueueTests
 {
@@ -51,16 +50,32 @@ public class GraderQueueTests
         Assert.Equal(expected: ["corr-1", "corr-2"], actual: results);
     }
 
+    /// <summary>
+    /// The capacity bounds the combined backlog, not each lane: jobs spread across graders still hit the
+    /// same ceiling, so worst-case memory does not grow with the number of registered graders.
+    /// </summary>
     [Fact]
-    public void TryEnqueue_OneLaneFull_StillAcceptsAnotherGradersJob()
+    public void TryEnqueue_CapacityIsSharedAcrossLanes()
     {
-        var queue = new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 1 }));
+        var queue = new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 2 }));
 
         Assert.True(queue.TryEnqueue(MakeJob("corr-1")));
-        Assert.False(queue.TryEnqueue(MakeJob("corr-2")));
+        Assert.True(queue.TryEnqueue(MakeJob("corr-2", GraderKeys.CodeJudge)));
+
+        Assert.False(queue.TryEnqueue(MakeJob("corr-3", GraderKeys.Race)));
+        Assert.Equal(1, actual: queue.DroppedCount);
+    }
+
+    [Fact]
+    public async Task DequeueAllAsync_ReleasesCapacityForTheNextJob()
+    {
+        var queue = new GraderQueue(Options.Create(new JudgeOptions { QueueCapacity = 1 }));
+        Assert.True(queue.TryEnqueue(MakeJob("corr-1")));
+        Assert.False(queue.TryEnqueue(MakeJob("corr-2", GraderKeys.CodeJudge)));
+
+        await foreach (var _ in queue.DequeueAllAsync(GraderKeys.Judge, TestContext.Current.CancellationToken)) break;
 
         Assert.True(queue.TryEnqueue(MakeJob("corr-3", GraderKeys.CodeJudge)));
-        Assert.Equal(1, actual: queue.DroppedCount);
     }
 
     [Fact]

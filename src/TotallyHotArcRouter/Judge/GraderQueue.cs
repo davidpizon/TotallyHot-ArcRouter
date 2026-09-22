@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
 namespace TotallyHot.ArcRouter.Judge;
@@ -8,11 +9,12 @@ namespace TotallyHot.ArcRouter.Judge;
 /// A bounded, off-path work queue for every LLM grader (G-Eval judge and the CodeJudge/ICE-Score/RACE
 /// portfolio). <see cref="TryEnqueue"/> is non-blocking and sheds the job when full, so the routing hot
 /// path is never back-pressured by a slow backbone. Jobs are partitioned into one lane per grader key and
-/// each lane is drained independently, so a slow backbone for one grader can never stall the others.
+/// each lane is drained independently, so a slow backbone for one grader can never stall the others'
+/// scoring. Capacity is still one shared bound across all lanes, so the total backlog stays capped.
 /// </summary>
 public interface IGraderQueue
 {
-    /// <summary>The number of jobs dropped because their grader's lane was full, summed across lanes.</summary>
+    /// <summary>The number of jobs dropped because the queue was at capacity.</summary>
     /// <remarks>
     /// Reported by <c>UnusedMemberInSuper.Global</c>: every call reaches this through the implementing type
     /// rather than this interface. It is not dead - see the declaration's callers. Narrowing the interface
@@ -23,7 +25,7 @@ public interface IGraderQueue
 
     /// <summary>Attempts to enqueue a job onto its <see cref="GraderScoringJob.GraderKey"/> lane without blocking.</summary>
     /// <param name="job">The job to enqueue.</param>
-    /// <returns><see langword="true"/> if enqueued; <see langword="false"/> if that lane was full (dropped).</returns>
+    /// <returns><see langword="true"/> if enqueued; <see langword="false"/> if the queue was at capacity (dropped).</returns>
     bool TryEnqueue(GraderScoringJob job);
 
     /// <summary>
@@ -37,10 +39,11 @@ public interface IGraderQueue
 }
 
 /// <summary>
-/// An <see cref="IGraderQueue"/> backed by one bounded <see cref="Channel{T}"/> per grader key, each sized
-/// by <see cref="JudgeOptions.QueueCapacity"/> - the same per-queue bound the separate judge and portfolio
-/// queues had before they were collapsed. Lanes are created on first use by either side, so a writer and
-/// its reader always meet on the same channel regardless of which touches the key first.
+/// An <see cref="IGraderQueue"/> backed by one <see cref="Channel{T}"/> per grader key, with a single
+/// <see cref="JudgeOptions.QueueCapacity"/> bound on the number of jobs waiting across every lane combined.
+/// The shared bound keeps worst-case memory fixed no matter how many graders are registered, while the
+/// per-key lanes keep execution independent. Lanes are created on first use by either side, so a writer
+/// and its reader always meet on the same channel regardless of which touches the key first.
 /// </summary>
 public sealed class GraderQueue : IGraderQueue
 {
@@ -51,8 +54,10 @@ public sealed class GraderQueue : IGraderQueue
 
     private long _droppedCount;
 
+    private int _queuedCount;
+
     /// <summary>Initializes a new instance of the <see cref="GraderQueue"/> class.</summary>
-    /// <param name="options">The judge options carrying the per-lane queue capacity.</param>
+    /// <param name="options">The judge options carrying the shared queue capacity.</param>
     public GraderQueue(IOptions<JudgeOptions> options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -68,16 +73,28 @@ public sealed class GraderQueue : IGraderQueue
     {
         ArgumentNullException.ThrowIfNull(job);
 
-        if (Lane(job.GraderKey).Writer.TryWrite(job)) return true;
+        var lane = Lane(job.GraderKey);
 
+        // Reserve a slot in the shared bound before writing, and release it if either the bound or the
+        // write refuses, so concurrent enqueuers can never overshoot the capacity between check and write.
+        if (Interlocked.Increment(ref _queuedCount) <= _capacity && lane.Writer.TryWrite(job)) return true;
+
+        Interlocked.Decrement(ref _queuedCount);
         Interlocked.Increment(ref _droppedCount);
         return false;
     }
 
     /// <inheritdoc/>
-    public IAsyncEnumerable<GraderScoringJob> DequeueAllAsync(string graderKey, CancellationToken cancellationToken)
+    public async IAsyncEnumerable<GraderScoringJob> DequeueAllAsync(string graderKey,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        return Lane(graderKey).Reader.ReadAllAsync(cancellationToken);
+        await foreach (var job in Lane(graderKey).Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            // Released on dequeue, not on completion: the bound caps jobs waiting, and a job a consumer
+            // is already scoring no longer occupies queue memory.
+            Interlocked.Decrement(ref _queuedCount);
+            yield return job;
+        }
     }
 
     /// <summary>Returns the lane for <paramref name="graderKey"/>, creating it on first use.</summary>
@@ -85,15 +102,9 @@ public sealed class GraderQueue : IGraderQueue
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(graderKey);
 
-        // BoundedChannelFullMode.Wait makes TryWrite return false (without blocking) when the channel is
-        // full, which is what drop-on-full accounting needs - the Drop* modes would instead return true
-        // while silently discarding an item, hiding the drop from DroppedCount.
-        return _lanes.GetOrAdd(graderKey, static (_, capacity) => Channel.CreateBounded<GraderScoringJob>(
-            new BoundedChannelOptions(capacity)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,
-                SingleWriter = false
-            }), _capacity);
+        // Unbounded per lane because the shared _queuedCount reservation in TryEnqueue is the real bound;
+        // a per-lane channel bound on top of it could only ever be looser.
+        return _lanes.GetOrAdd(graderKey, static _ => Channel.CreateUnbounded<GraderScoringJob>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = false }));
     }
 }
