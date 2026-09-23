@@ -110,4 +110,19 @@ public class ModelRoutingOptionsTests
 
         Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
+
+    [Fact]
+    public void EnsureValid_Throws_WhenProviderKeyIsTheReservedBlankTemplate()
+    {
+        var options = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>
+            {
+                ["Other"] = new() { BaseUrl = "https://example.invalid" }
+            }
+        };
+
+        var ex = Assert.Throws<OptionsValidationException>(options.EnsureValid);
+        Assert.Contains(expectedSubstring: "reserved", actualString: ex.Message, comparisonType: StringComparison.Ordinal);
+    }
 }

@@ -248,6 +248,43 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void An_unknown_stored_type_is_kept_when_the_selection_stays_other()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, providerType: "Bedrock", providerName: "Bedrock");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        FindSaveButton(cut).Click();
+
+        saved.Should().NotBeNull();
+        saved!.ProviderType.Should().Be("Bedrock");
+    }
+
+    [Fact]
+    public void Choosing_a_template_replaces_a_preserved_stored_type()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, providerType: "Bedrock", providerName: "Bedrock");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        FindSaveButton(cut).Click();
+
+        saved.Should().NotBeNull();
+        saved!.ProviderType.Should().Be("anthropic");
+    }
+
+    [Fact]
     public void An_existing_provider_type_is_preselected_when_the_dialog_opens()
     {
         using var ctx = new BunitContext();

@@ -4,10 +4,13 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 
 /// <summary>
 /// Projects <c>ModelRouting:Providers</c> into the add-provider template list. The credential header
-/// (the entry whose name matches <see cref="ProviderOptions.AuthHeaderName"/>) is not a custom header:
-/// the editor records it as the auth header name and only pre-fills the remaining headers. A locked
-/// literal value is a secret and is omitted; an environment-variable name on that same header is kept,
-/// because the name is not the secret.
+/// (the entry whose name matches <see cref="ProviderOptions.AuthHeaderName"/>) is omitted entirely,
+/// including any environment-variable name on it: the editor records only
+/// <see cref="ProjectedProviderTemplate.AuthHeaderName"/>, and the operator adds the credential row
+/// by hand. A locked literal on any other header is a secret and is omitted; an environment-variable
+/// name on a non-credential header is kept, because the name is not the secret. The key
+/// <see cref="ModelRoutingOptions.ReservedBlankProviderKey"/> is rejected: the dialog uses that
+/// spelling for the blank choice, so a configured entry with the same key could never be selected.
 /// </summary>
 internal static class ProviderTemplateCatalog
 {
@@ -17,6 +20,11 @@ internal static class ProviderTemplateCatalog
     internal static IReadOnlyList<ProjectedProviderTemplate> Project(ModelRoutingOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        foreach (var key in options.Providers.Keys)
+            if (ModelRoutingOptions.IsReservedBlankProviderKey(key))
+                throw new InvalidOperationException(
+                    $"Provider key '{key}' is reserved for the blank add-provider template and cannot be configured.");
 
         var templates = new List<ProjectedProviderTemplate>(options.Providers.Count);
         foreach (var (key, provider) in options.Providers)

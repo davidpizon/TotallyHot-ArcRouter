@@ -14,6 +14,23 @@ public sealed class ModelRoutingOptions
     public const string SectionName = "ModelRouting";
 
     /// <summary>
+    /// Provider key reserved for the editor's blank add-provider choice. The dialog's fallback option
+    /// uses this spelling, so a <c>ModelRouting:Providers</c> entry with the same key would be hidden
+    /// behind that choice. Compared case-insensitively, matching <see cref="Providers"/>.
+    /// </summary>
+    public const string ReservedBlankProviderKey = "Other";
+
+    /// <summary>
+    /// Whether <paramref name="key"/> is <see cref="ReservedBlankProviderKey"/>, ignoring case.
+    /// </summary>
+    /// <param name="key">A provider dictionary key.</param>
+    /// <returns><see langword="true"/> when the key is reserved and must not be configured.</returns>
+    public static bool IsReservedBlankProviderKey(string key)
+    {
+        return string.Equals(a: key, b: ReservedBlankProviderKey, comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Gets the configured upstream providers, keyed by provider name.
     /// </summary>
     public Dictionary<string, ProviderOptions> Providers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
@@ -52,6 +69,10 @@ public sealed class ModelRoutingOptions
 
         foreach (var (name, provider) in Providers)
         {
+            if (IsReservedBlankProviderKey(name))
+                errors.Add(
+                    $"Provider key '{name}' is reserved for the blank add-provider template and cannot be configured.");
+
             if (!Uri.TryCreate(uriString: provider.BaseUrl, uriKind: UriKind.Absolute, result: out _))
                 errors.Add($"Provider '{name}' has an invalid BaseUrl '{provider.BaseUrl}'.");
 
@@ -103,15 +124,16 @@ public sealed record ProviderOptions
     public string BaseUrl { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the provider family this endpoint belongs to, as the name of a
-    /// <c>TotallyHot.ArcRouter.Gui.Admin.ProviderType</c> member (e.g. <c>Anthropic</c>, <c>OpenAI</c>,
-    /// <c>LocalRuntime</c>). Purely a record of what the operator selected in the provider editor, so that
-    /// reopening a provider restores the right type and its defaults - the routing and forwarding paths
-    /// never read it, and behavior is driven entirely by the concrete fields the type's template filled in.
+    /// Gets the add-provider template the operator selected: a <c>ModelRouting:Providers</c> key such as
+    /// <c>anthropic</c> or <c>bedrock-anthropic</c>, or a legacy family name
+    /// (<c>Anthropic</c>, <c>Bedrock</c>, <c>LocalRuntime</c>) stored before the dropdown listed those keys.
+    /// Purely a record of that selection, so reopening a provider restores it. The routing and forwarding
+    /// paths never read it; behavior comes from the concrete fields the template filled in.
     /// <para>
-    /// Stored as a string rather than the enum because that type lives in the GUI assembly, which this
-    /// project deliberately does not reference. <see langword="null"/> for a provider configured before this
-    /// field existed or written by hand; the editor falls back to <c>Other</c> in that case.
+    /// Stored as a string because the legacy names live in the GUI assembly, which this project deliberately
+    /// does not reference. <see langword="null"/> for a provider configured before this field existed or
+    /// written by hand; the editor shows <see cref="ModelRoutingOptions.ReservedBlankProviderKey"/> in that case and keeps this
+    /// value until the operator picks a real template.
     /// </para>
     /// </summary>
     public string? ProviderType { get; init; }

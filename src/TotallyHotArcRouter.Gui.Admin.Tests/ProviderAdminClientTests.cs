@@ -471,6 +471,52 @@ public sealed class ProviderAdminClientTests
     }
 
     [Fact]
+    public async Task GetProviderTemplatesAsync_MapsOptionalHeaderFields()
+    {
+        var response = new Contract.ProviderTemplateListResponse();
+        var template = new Contract.ProviderTemplateView
+        {
+            Key = "anthropic",
+            BaseUrl = "https://api.anthropic.com",
+            AuthHeaderName = "x-api-key",
+            IsFree = false
+        };
+        template.Headers.Add(new Contract.ProviderTemplateHeaderView { Name = "anthropic-version", Value = "2023-06-01" });
+        template.Headers.Add(new Contract.ProviderTemplateHeaderView { Name = "X-Region", ValueEnvVar = "AWS_REGION" });
+        template.Headers.Add(new Contract.ProviderTemplateHeaderView { Name = "X-Empty" });
+        response.Templates.Add(template);
+        var stub = new StubClient { ListProviderTemplatesResponse = response };
+        var client = new ProviderAdminClient(stub);
+
+        var projected = Assert.Single(await client.GetProviderTemplatesAsync(Ct));
+
+        Assert.Equal(expected: "anthropic", actual: projected.Key);
+        Assert.Equal(expected: "https://api.anthropic.com", actual: projected.BaseUrl);
+        Assert.Equal(expected: "x-api-key", actual: projected.AuthHeaderName);
+        Assert.False(projected.IsFree);
+        Assert.Equal(expected: 3, actual: projected.Headers.Count);
+        Assert.Equal(expected: "2023-06-01", actual: projected.Headers[0].Value);
+        Assert.Null(projected.Headers[0].ValueEnvVar);
+        Assert.Null(projected.Headers[1].Value);
+        Assert.Equal(expected: "AWS_REGION", actual: projected.Headers[1].ValueEnvVar);
+        Assert.Null(projected.Headers[2].Value);
+        Assert.Null(projected.Headers[2].ValueEnvVar);
+    }
+
+    [Fact]
+    public async Task GetProviderTemplatesAsync_Unavailable_BecomesTheReachabilityMessage()
+    {
+        var stub = new StubClient
+        { Failure = new RpcException(new Status(statusCode: StatusCode.Unavailable, detail: "failed to connect")) };
+        var client = new ProviderAdminClient(stub);
+
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() => client.GetProviderTemplatesAsync(Ct));
+
+        Assert.Equal(expected: "Could not read the provider templates: the router is not reachable.", actual: ex.Message);
+        Assert.True(ex.IsUnavailable);
+    }
+
+    [Fact]
     public void Constructor_NullClient_Throws()
     {
         Assert.Throws<ArgumentNullException>(() =>
@@ -502,6 +548,7 @@ public sealed class ProviderAdminClientTests
         public Contract.RateLimitHistoryResponse RateLimitHistoryResponse { get; init; } = new();
         public Contract.SetSecretResponse SetSecretResponse { get; init; } = new();
         public Contract.DeleteSecretResponse DeleteSecretResponse { get; init; } = new();
+        public Contract.ProviderTemplateListResponse ListProviderTemplatesResponse { get; init; } = new();
 
         public RpcException? Failure { get; init; }
 
@@ -521,6 +568,12 @@ public sealed class ProviderAdminClientTests
         public Contract.GetRateLimitHistoryRequest? LastRateLimitHistoryRequest { get; private set; }
         public Contract.SetSecretRequest? LastSetSecretRequest { get; private set; }
         public Contract.DeleteSecretRequest? LastDeleteSecretRequest { get; private set; }
+
+        public override AsyncUnaryCall<Contract.ProviderTemplateListResponse> ListProviderTemplatesAsync(
+            Contract.ListProviderTemplatesRequest request, CallOptions options)
+        {
+            return Call(ListProviderTemplatesResponse);
+        }
 
         public override AsyncUnaryCall<Contract.ProviderListResponse> ListProvidersAsync(
             Contract.ListProvidersRequest request, CallOptions options)

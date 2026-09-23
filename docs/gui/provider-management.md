@@ -84,38 +84,38 @@ flowchart LR
 
 ## Provider types
 
-The edit dialog's **Provider Type** dropdown selects a provider *family*, which pre-fills the base URL,
-the authentication shape, and any header the API requires. Each entry is a family rather than a single
-vendor: everything that authenticates identically shares one entry and differs only in a base URL the
-operator edits.
+The edit dialog's **Provider Type** dropdown lists one option per key in `ModelRouting:Providers`
+(`appsettings.json`), then a blank **Other** choice. Selecting a key pre-fills that entry's base URL,
+free-provider flag, auth-header name, and custom headers other than the credential header. The operator
+can change the base URL and headers afterward. The list is the configured catalog, not a hardcoded set
+of families: keys such as `alibaba` or `bedrock-anthropic` appear when they are configured, and a new
+key needs no GUI change.
 
-| Dropdown label | `ProviderType` | Requires auth | Auth header hint |
-|---|---|---|---|
-| Anthropic | `Anthropic` | yes | `x-api-key` |
-| OpenAI / Groq / DeepSeek | `OpenAI` | yes | `Authorization` |
-| Google Gemini | `GoogleGemini` | yes | `Authorization` |
-| Azure OpenAI | `AzureOpenAI` | yes | `api-key` |
-| Cohere | `Cohere` | yes | `Authorization` |
-| Ollama / LM Studio / llama.cpp | `LocalRuntime` | **no** | — |
-| AWS Bedrock | `Bedrock` | **no** (SigV4) | — |
-| Other | `Other` | yes | `Authorization` |
+`Other` is reserved. `ModelRoutingOptions` rejects a provider key with that spelling (any casing),
+because the dialog uses it as the blank choice. It means the operator fills the form in without a
+template. The credential row is not copied from the catalog: the dialog records the template's auth
+header name, and the operator adds the credential header themselves.
 
-The `OpenAI` entry covers every OpenAI-compatible endpoint — xAI, Together, OpenRouter, Mistral,
-Fireworks, Perplexity, vLLM — because they share the identical bearer-token shape. The Anthropic
-template also seeds the mandatory `anthropic-version: 2023-06-01` custom header, without which that API
-rejects every request.
+A stored `ProviderType` reopens on its catalog key when that key is present, case-insensitively.
+Legacy names that identify one shipped entry still map when that entry exists: `Anthropic` →
+`anthropic`, `OpenAI` → `openai`, `GoogleGemini` → `gemini`. Names that do not identify a single
+entry — `LocalRuntime`, `Bedrock`, `AzureOpenAI`, `Cohere`, a removed key, or a value written by
+hand — reopen as `Other` and keep the saved fields, including Bedrock's `Aws*` settings. Saving
+without picking a real template persists that stored type. Picking a template replaces it. A catalog
+that fails to load leaves only `Other` selectable and follows the same rule, so a missing RPC cannot
+rewrite a stored key to `Other`.
 
-The selection is persisted on `ProviderOptions.ProviderType` (as the enum member's **name**) purely so
-that reopening a provider restores its type and defaults. Nothing in the routing or forwarding path
-reads it; behavior comes entirely from the concrete fields the template filled in.
+The selection is persisted on `ProviderOptions.ProviderType` as that key or legacy name. Nothing in
+the routing or forwarding path reads it; behavior comes from the concrete fields.
 
 ## Authentication
 
 There is no dedicated credential field or fieldset: authentication is expressed as an ordinary entry in
 **Custom Headers** below, exactly like `anthropic-version` or any other header a provider's API needs.
 Selecting a **Provider Type** doesn't tick a checkbox — it shows a hint above Custom Headers naming the
-header the family authenticates with (e.g. `x-api-key` for Anthropic), so the operator knows what to add
-a row for. A local runtime or Bedrock (SigV4-signed by the AWS SDK) simply needs no such row.
+header the template authenticates with (e.g. `x-api-key` for the `anthropic` entry), so the operator
+knows what to add a row for. A template whose credential is not an HTTP header (a local runtime, or
+Bedrock signed with SigV4 by the AWS SDK) does not need that row.
 
 `AuthHeaderName` — which header is "the" credential header — is still stored on the provider, derived
 automatically from the selected type's template on save (or carried through unchanged for a type with no

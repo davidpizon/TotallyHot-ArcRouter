@@ -7,7 +7,11 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// </summary>
 public static class ProviderTemplates
 {
-    /// <summary>The dropdown value for a provider the operator fills in without a template.</summary>
+    /// <summary>
+    /// The dropdown value for a provider the operator fills in without a template. The same spelling is
+    /// reserved in the router as <c>ModelRoutingOptions.ReservedBlankProviderKey</c>, so a configured
+    /// provider cannot use it.
+    /// </summary>
     public const string OtherKey = "Other";
 
     /// <summary>
@@ -38,8 +42,11 @@ public static class ProviderTemplates
 
         if (string.IsNullOrWhiteSpace(stored)) return OtherKey;
 
+        // Materialize once. Both lookups below walk the same key set, and the caller often passes a
+        // deferred projection; enumerating that twice is wasted work and a Qodana warning.
+        var keys = templateKeys.ToArray();
         var trimmed = stored.Trim();
-        var direct = MatchKey(keys: templateKeys, candidate: trimmed);
+        var direct = MatchKey(keys: keys, candidate: trimmed);
         if (direct is not null) return direct;
 
         var legacy = trimmed switch
@@ -52,7 +59,7 @@ public static class ProviderTemplates
 
         if (legacy is not null)
         {
-            var mapped = MatchKey(keys: templateKeys, candidate: legacy);
+            var mapped = MatchKey(keys: keys, candidate: legacy);
             if (mapped is not null) return mapped;
         }
 

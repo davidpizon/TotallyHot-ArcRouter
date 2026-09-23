@@ -32,7 +32,9 @@ public class ModelRouteResolverTests
     public void TryResolve_EnvVarHeader_ResolvesValueFromEnvironment()
     {
         var environment = new Mock<IEnvironmentVariableProvider>();
-        environment.Setup(e => e.GetVariable("MY_PROVIDER_API_KEY")).Returns("Bearer resolved-from-env");
+        // A raw credential. ResolveExtraHeaders supplies the Bearer scheme on Authorization; a value that
+        // already starts with a scheme is left unchanged (see ProviderCredentialResolverTests).
+        environment.Setup(e => e.GetVariable("MY_PROVIDER_API_KEY")).Returns("resolved-from-env");
 
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "gpt-5.4",

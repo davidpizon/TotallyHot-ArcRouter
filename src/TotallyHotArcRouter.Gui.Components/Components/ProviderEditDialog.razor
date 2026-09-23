@@ -188,8 +188,9 @@
 
     /// <summary>
     /// Whether <see cref="Templates"/> failed to load. An empty list with this false is a real empty
-    /// catalog. When true, a save that stays on the fallback <c>Other</c> selection keeps
-    /// <see cref="ProviderEditModel.ProviderType"/> so a missing catalog cannot rewrite a stored key.
+    /// catalog. A save that stays on the fallback <c>Other</c> selection keeps a non-blank stored type
+    /// either way — a failed catalog and an unknown key such as <c>Bedrock</c> both reopen as
+    /// <c>Other</c> — so this flag does not by itself decide what is persisted.
     /// </summary>
     [Parameter]
     public bool TemplatesUnavailable { get; set; }
@@ -228,12 +229,12 @@
         _providerName = Model.ProviderName;
         _selectedTemplateKey = ProviderTemplates.ResolveStoredType(
             stored: Model.ProviderType, templateKeys: Templates.Select(template => template.Key));
-        // A failed catalog leaves only Other selectable, so resolving the stored key against it would
-        // persist Other on the next save. Keep the stored value until the operator picks a real template.
+        // Other is the fallback both when the catalog failed (TemplatesUnavailable) and when the stored
+        // type is not a current template key. Staying on that fallback must not persist Other over the
+        // stored value. Picking a real template clears the flag in OnProviderTypeChanged.
         _keepStoredProviderType = TemplatesUnavailable
-            && !string.IsNullOrWhiteSpace(Model.ProviderType)
-            && string.Equals(a: _selectedTemplateKey, b: ProviderTemplates.OtherKey,
-                comparisonType: StringComparison.OrdinalIgnoreCase);
+            ? !string.IsNullOrWhiteSpace(Model.ProviderType)
+            : KeepUnresolvedStoredType(stored: Model.ProviderType, selected: _selectedTemplateKey);
 
         foreach (var header in Model.Headers)
         {
@@ -259,7 +260,12 @@
         _baseline = CaptureBaseline();
     }
 
-    /// <summary>The configured templates followed by <see cref="ProviderTemplates.Other"/>.</summary>
+    /// <summary>
+    /// The configured templates followed by <see cref="ProviderTemplates.Other"/>. A catalog entry whose
+    /// key is <see cref="ProviderTemplates.OtherKey"/> is skipped: that spelling is reserved for the blank
+    /// choice, and the server rejects it. Skipping it here keeps an older server from offering two options
+    /// with the same value.
+    /// </summary>
     private IEnumerable<ProviderTemplates.ProviderEditorTemplate> OrderedTemplates
     {
         get
@@ -270,6 +276,26 @@
 
             yield return ProviderTemplates.Other;
         }
+    }
+
+    /// <summary>
+    /// Whether a save that is still on <see cref="ProviderTemplates.OtherKey"/> should persist
+    /// <paramref name="stored"/> instead. A stored blank choice is already <c>Other</c>, so it is sent
+    /// as the selection. Any other non-empty stored type is kept until the operator picks a template.
+    /// </summary>
+    /// <param name="stored">The type persisted on the provider.</param>
+    /// <param name="selected">The dropdown key resolved when the dialog opened.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="selected"/> is the blank choice and
+    /// <paramref name="stored"/> is a different non-empty value.
+    /// </returns>
+    private static bool KeepUnresolvedStoredType(string? stored, string selected)
+    {
+        if (string.IsNullOrWhiteSpace(stored)) return false;
+        if (!string.Equals(a: selected, b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return !string.Equals(a: stored.Trim(), b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Applies the newly selected template when the dropdown changes.</summary>
@@ -560,9 +586,10 @@
     /// <param name="Headers">The custom headers as edited, including any header used for authentication.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">
-    /// The selected template key (a <c>ModelRouting:Providers</c> key, or <c>Other</c>). When
-    /// <see cref="TemplatesUnavailable"/> is set and the operator did not pick a template, this is the
-    /// type already stored on the provider.
+    /// The selected template key (a <c>ModelRouting:Providers</c> key, or <c>Other</c>). When the
+    /// selection is still the blank fallback and the provider already had a different type — a failed
+    /// catalog (<see cref="TemplatesUnavailable"/>) or a key the catalog does not list — this is that
+    /// stored type.
     /// </param>
     /// <param name="ProviderName">
     /// A user-friendly display name for the provider; distinct from the unique
@@ -601,8 +628,8 @@
     /// The stored template key, a legacy family name, or empty. Reopens as that key when it is one of
     /// <see cref="Templates"/>; <c>Anthropic</c>, <c>OpenAI</c>, and <c>GoogleGemini</c> map onto
     /// <c>anthropic</c>, <c>openai</c>, and <c>gemini</c> when those keys are offered. Anything else
-    /// reopens as <c>Other</c> without rewriting the saved fields. When <see cref="TemplatesUnavailable"/>
-    /// is set, a save that stays on that fallback keeps this stored value.
+    /// reopens as <c>Other</c>. A save that stays on that fallback keeps this stored value, including
+    /// when <see cref="TemplatesUnavailable"/> left no other choice. Picking a real template replaces it.
     /// </param>
     /// <param name="ProviderName">
     /// A user-friendly display name for the provider, distinct from the unique

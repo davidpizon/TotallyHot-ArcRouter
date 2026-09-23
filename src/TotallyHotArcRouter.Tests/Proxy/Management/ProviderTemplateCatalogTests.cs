@@ -81,4 +81,23 @@ public sealed class ProviderTemplateCatalogTests
         Assert.Null(headers[1].Value);
         Assert.Equal(expected: "BOTH_TOKEN", actual: headers[1].ValueEnvVar);
     }
+
+    [Fact]
+    public void Project_RejectsTheReservedBlankProviderKey()
+    {
+        var options = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["other"] = new()
+                {
+                    BaseUrl = "https://example.invalid",
+                    AuthHeaderName = "Authorization"
+                }
+            }
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => ProviderTemplateCatalog.Project(options));
+        Assert.Contains(expectedSubstring: "reserved", actualString: ex.Message, comparisonType: StringComparison.Ordinal);
+    }
 }
