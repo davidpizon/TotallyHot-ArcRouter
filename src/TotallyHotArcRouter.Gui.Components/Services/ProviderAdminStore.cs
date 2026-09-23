@@ -147,7 +147,7 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
     public Task UpsertProviderAsync(string key, ProviderWriteRequest body,
         CancellationToken cancellationToken = default)
     {
-        Logger?.LogDebug("Updating provider {ProviderKey} with URL {ProviderUrl}.", key, body.BaseUrl);
+        Logger?.LogDebug("Updating provider {ProviderKey} at {ProviderUrl}.", key, RedactBaseUrlForLog(body.BaseUrl));
         return MutateAsync(() =>
             Client.UpsertProviderAsync(key: key, body: body, cancellationToken: cancellationToken));
     }
@@ -411,5 +411,23 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
             RecordFailure(exception: ex, description: "a price-override operation");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Scheme, host, port, and path of <paramref name="baseUrl"/> for a debug log. Userinfo, query, and
+    /// fragment are omitted: validation only requires an absolute URI, so those parts can carry credentials.
+    /// An unparseable value is replaced so the raw string is never written.
+    /// </summary>
+    /// <param name="baseUrl">The provider base URL about to be saved, or null when the write omits it.</param>
+    /// <returns>The URL with credential-bearing components removed, or <c>(invalid)</c>.</returns>
+    private static string RedactBaseUrlForLog(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) ||
+            !Uri.TryCreate(uriString: baseUrl, uriKind: UriKind.Absolute, result: out var uri))
+            return "(invalid)";
+
+        return uri.GetComponents(
+            components: UriComponents.Scheme | UriComponents.Host | UriComponents.Port | UriComponents.Path,
+            format: UriFormat.Unescaped);
     }
 }

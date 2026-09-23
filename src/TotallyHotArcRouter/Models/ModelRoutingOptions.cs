@@ -15,8 +15,9 @@ public sealed class ModelRoutingOptions
 
     /// <summary>
     /// Provider key reserved for the editor's blank add-provider choice. The dialog's fallback option
-    /// uses this spelling, so a <c>ModelRouting:Providers</c> entry with the same key would be hidden
-    /// behind that choice. Compared case-insensitively, matching <see cref="Providers"/>.
+    /// uses this spelling, so a provider with the same key cannot be configured in
+    /// <c>ModelRouting:Providers</c> or in the live store. Compared case-insensitively, matching
+    /// <see cref="Providers"/>.
     /// </summary>
     public const string ReservedBlankProviderKey = "Other";
 
