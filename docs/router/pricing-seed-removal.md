@@ -97,13 +97,13 @@ pinned it. Side effect worth knowing: `llama3` now reports token counts for the 
 
 ## Hazards
 
-1. **Persistence beats config.** `ProviderConfigStore` seeds from `appsettings.json` only when no
-   `model-routing.json` exists; after any provider edit, that file owns the config. So `"IsFree": true`
-   on `ollama` takes effect **on fresh installs only** — an existing install's persisted file has no
-   `IsFree` key, loads as `false`, and `llama3` reports null cost until someone ticks the box. This is
-   correct-by-design (no migration, no on-disk schema version), and it is why the `Free` badge sits on
-   the provider card rather than only inside the edit dialog: the flag's state has to be visible without
-   opening anything.
+1. **Persistence beats the template catalog.** When no `model-routing.json` exists the live provider
+   list starts empty; `appsettings.json` is not copied in. `"IsFree": true` on the `ollama` template
+   takes effect only when that template is selected in the editor. An existing persisted provider with
+   no `IsFree` key loads as `false`, and `llama3` reports null cost until someone ticks the box. This
+   is correct-by-design (no migration, no on-disk schema version), and it is why the `Free` badge sits
+   on the provider card rather than only inside the edit dialog: the flag's state has to be visible
+   without opening anything.
 2. **`ModelPrice.Free` is not a catalog row.** When the catalog lands it must not overwrite a free
    provider's zero — an `IsFree` provider costs nothing regardless of what any aggregator publishes
    about the model it serves.
@@ -131,9 +131,10 @@ nothing.
 **Manual end-to-end — not yet run.** The automated tests cover each behavior below at the unit level,
 but the live path has not been exercised:
 
-1. Move aside the `model-routing.json` next to the build output, so the store re-seeds from
-   `appsettings.json` and picks up `ollama.IsFree` (hazard 1).
+1. Move aside the `model-routing.json` next to the build output. The store starts with no providers
+   (hazard 1); it does not copy `appsettings.json`.
 2. `dotnet run --project src/TotallyHotArcRouter` — expect no `OptionsValidationException` at startup.
+   Add an `ollama` provider from the `ollama` template so `IsFree` is set, with a `llama3` model.
 3. With `ollama serve` running, POST `{"model":"llama3", …}`: forwards, and `spend_log.jsonl` records
    **0** cost with real token counts.
 4. POST `{"model":"gpt-5.4", …}` against a stub upstream: forwards, and the spend line has **null** cost

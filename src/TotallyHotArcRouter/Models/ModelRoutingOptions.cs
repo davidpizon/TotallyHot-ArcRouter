@@ -315,7 +315,7 @@ public sealed class ProviderHeader
     /// <para>
     /// Defaults to <see langword="true"/> so that a header persisted before this flag existed - and whose
     /// provenance is therefore unknown - stays hidden rather than becoming visible on upgrade. Known-public
-    /// values (the <c>appsettings.json</c> seed, the editor's provider templates) say <c>"Locked": false</c>
+    /// values (the <c>appsettings.json</c> template catalog, the editor's provider templates) say <c>"Locked": false</c>
     /// explicitly. Only meaningful for a literal value - it is ignored for an env-var-backed header, since
     /// its secret lives in the environment rather than in configuration. Every write path that resolves an
     /// env-var header persists this as <see langword="false"/>, but a legacy env-var header could still

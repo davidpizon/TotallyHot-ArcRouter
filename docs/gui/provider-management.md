@@ -161,11 +161,11 @@ no price table — the hand-maintained one was deleted as unverified placeholder
 arrive with [`model-price-catalog.md`](../router/model-price-catalog.md) — so every other model's cost
 reads as unknown. See [`telemetry.md`](../router/telemetry.md#pricing).
 
-**It defaults off, and only fresh installs get it seeded.** `appsettings.json` sets `IsFree: true` on
-`ollama`, but that seed applies only when no `model-routing.json` exists yet; once the file is written,
-it owns provider config and an absent `IsFree` key loads as `false`. So on an existing install a local
-provider reports unknown cost until someone ticks the box. That is why the badge is on the card rather
-than hidden in the dialog: the flag's state should be visible without opening anything.
+**It defaults off.** A missing `model-routing.json` starts with no providers, so nothing is free until
+one is added. `appsettings.json` sets `IsFree: true` on the `ollama` template; selecting that template
+in the edit dialog ticks the box. An existing persisted provider with no `IsFree` key loads as `false`
+and reports unknown cost until someone ticks the box. That is why the badge is on the card rather than
+hidden in the dialog: the flag's state should be visible without opening anything.
 
 ## Security
 
