@@ -9,7 +9,7 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// Maps the live-telemetry aggregation output (<see cref="LiveConversation"/> /
 /// <see cref="LiveConversationTurn"/>, produced by <c>TotallyHot.ArcRouter.Gui.Telemetry</c>) onto the
 /// dashboard's existing view-model shape (<see cref="Conversation"/> / <see cref="ConversationTurn"/>)
-/// so <c>LiveStream</c>, <c>ConversationCard</c>, <c>ConversationSummary</c>, and <c>TurnCard</c> can
+/// so <c>LiveStream</c>, <c>ConversationCard</c>, and <c>ConversationSummary</c> can
 /// render live data without knowing it isn't <see cref="MockData"/>.
 /// </summary>
 /// <remarks>

@@ -186,6 +186,8 @@ internal static class ProxyServiceCollectionExtensions
         // tray calls to read/toggle it), so a toggle takes effect on the very next request.
         services.AddSingleton<IRoutingGate, RoutingGateStore>();
 
+        services.AddHttpClient(ProxyMiddleware.HttpClientName);
+
         // ProxyMiddleware takes its ~25 optional collaborators as one ProxyMiddlewareDependencies
         // bag rather than individual constructor parameters, so the container can no longer
         // auto-assemble it via plain constructor injection - this factory does that assembly
@@ -212,12 +214,12 @@ internal static class ProxyServiceCollectionExtensions
             ToolCallNormalizerFactory = sp.GetService<ToolCallNormalizerFactory>(),
             RateLimitCapture = sp.GetService<IRateLimitHeaderCapture>(),
             UsageLedger = sp.GetService<IUsageLedger>(),
-            PendingTaskEmbeddingCache = sp.GetService<PendingTaskEmbeddingCache>(),
+            PendingTaskEmbeddingCache = sp.GetService<PendingValueCache<float[]>>(),
             RoutingOptions = sp.GetService<IOptions<RoutingOptions>>(),
-            PendingRequestCostCache = sp.GetService<PendingRequestCostCache>(),
-            PendingRequestProvenanceCache = sp.GetService<PendingRequestProvenanceCache>(),
+            PendingRequestCostCache = sp.GetService<PendingValueCache<decimal>>(),
+            PendingRequestProvenanceCache = sp.GetService<PendingValueCache<PendingRequestProvenance>>(),
             PendingResponseTextCache = sp.GetService<PendingResponseTextCache>(),
-            PendingResponseLengthCache = sp.GetService<PendingResponseLengthCache>(),
+            PendingResponseLengthCache = sp.GetService<PendingValueCache<int>>(),
             PendingPromptCache = sp.GetService<PendingPromptCache>(),
             TranscriptStore = sp.GetService<ITranscriptStore>(),
             InFlightGauge = sp.GetService<InFlightRequestGauge>(),
@@ -242,12 +244,12 @@ internal static class ProxyServiceCollectionExtensions
     /// </summary>
     internal static IServiceCollection AddManagement(this IServiceCollection services)
     {
-        // Shared management core (docs/router/mcp-endpoint-plan.md): both the REST /admin/* API and the
-        // MCP endpoint's provider tools project through this one facade, so credential masking, header
-        // resolution, and validation happen in exactly one place. Registered here so MCP (which lives in
-        // this outer container) can resolve it; ProxyServer builds its own instance from the same
-        // underlying stores for REST - the facade is stateless, so the two instances behave identically.
-        services.AddSingleton<HttpClient>();
+        // Shared management core (docs/router/mcp-endpoint.md): the gRPC-Web admin services and the MCP
+        // provider tools project through this one facade, so credential masking, header resolution, and
+        // validation happen in exactly one place. Registered here so MCP (which lives in this outer
+        // container) can resolve it; ProxyServer builds its own instance from the same underlying stores
+        // for the gRPC admin services - the facade is stateless, so the two instances behave identically.
+        services.AddHttpClient(ManagementFacade.HttpClientName);
         // The shared, rotatable management token (web GUI migration plan Phase P4): a single outer-
         // container singleton passed by reference into both McpHostedService (below, resolved via
         // ordinary constructor injection) and the proxy inner host (via ProxyServerDependencies in
@@ -260,12 +262,12 @@ internal static class ProxyServiceCollectionExtensions
         // ManagementFacade's constructor resolves the price-catalog repositories registered above
         // (PriceRepository, RateLimitRepository, ReportedUsageRepository) automatically, so the
         // Anthropic Usage card's rate-limit snapshot is available on this MCP-facing facade the same way
-        // it is on the REST one ProxyHostedService builds below.
+        // it is on the gRPC-Web one ProxyHostedService builds below.
         services.AddSingleton<ManagementFacade>();
 
         // MCP (Model Context Protocol) management endpoint - agent-facing access to the same
-        // provider/model/budget/price-source management as REST /admin/*, over a dedicated loopback TLS
-        // port. See docs/router/mcp-endpoint-plan.md.
+        // provider/model/budget/price-source management as the gRPC-Web admin services, over a dedicated
+        // loopback TLS port. See docs/router/mcp-endpoint.md.
         // Validated on start for the same reason as ProxyListenerOptions/WebInterfaceOptions below - see
         // ProxyListenerOptionsValidator, which also owns the pairwise collision checks against those two.
         services.AddOptions<McpOptions>()
@@ -296,9 +298,8 @@ internal static class ProxyServiceCollectionExtensions
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<ProxyListenerOptions>, ProxyListenerOptionsValidator>();
 
-        // The router-hosted web GUI's listener configuration (Phase P1). Not yet consumed by a running
-        // listener - Phase P2 adds that - but bound and validated from Phase P1 onward, same reasoning
-        // as ProxyListenerOptions above.
+        // The router-hosted WASM GUI's listener configuration. Bound and validated on start, same
+        // reasoning as ProxyListenerOptions above.
         services.AddOptions<WebInterfaceOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(WebInterfaceOptions.SectionName).Bind(options))
@@ -308,13 +309,13 @@ internal static class ProxyServiceCollectionExtensions
         // ProxyServer's inner Kestrel host is handed an already-constructed ProxyMiddleware instance rather
         // than a copy of this IServiceCollection. It never gets its own IHostedService registrations, so it
         // can never end up recursively constructing another ProxyHostedService.
-        // The /admin/* management API is served from the same host: pass the writable config store
+        // The gRPC-Web admin services are served from the same host: pass the writable config store
         // (edits reload the router live), the credential accessor for model discovery, and the
-        // always-present per-user management token (see ManagementAccessToken) that gates every
-        // /admin request by default - the same token the MCP endpoint requires, so both management
-        // surfaces are gated identically out of the box. The price catalog singletons are passed
-        // across for the same reason as the broadcaster: the inner host has its own container and
-        // cannot resolve them from this one. They back the Governance > Price Sources panel's gRPC API.
+        // always-present per-user management token (see ManagementAccessToken) that gates every admin
+        // RPC by default - the same token the MCP endpoint requires, so both management surfaces are
+        // gated identically out of the box. The price catalog singletons are passed across for the
+        // same reason as the broadcaster: the inner host has its own container and cannot resolve them
+        // from this one. They back the Governance > Price Sources panel's gRPC API.
         services.AddHostedService(sp =>
             new ProxyHostedService(
                 logger: sp.GetRequiredService<ILogger<ProxyHostedService>>(),
@@ -342,13 +343,14 @@ internal static class ProxyServiceCollectionExtensions
                     RoutingOptions = sp.GetRequiredService<IOptions<RoutingOptions>>(),
                     ModelRoutingTemplates = sp.GetRequiredService<IOptions<ModelRoutingOptions>>(),
 
-                    // The /admin/* management REST API. The writable config store makes edits reload the
-                    // router live; the rest is what the REST facade needs, passed across for the same
+                    // The gRPC-Web admin services. The writable config store makes edits reload the
+                    // router live; the rest is what ManagementFacade needs, passed across for the same
                     // reason as everything else here - the inner host has its own container and cannot
                     // resolve any of it from this one.
                     ManagementApi = new ManagementApiDependencies(sp.GetRequiredService<IProviderConfigStore>())
                     {
                         Environment = sp.GetRequiredService<IEnvironmentVariableProvider>(),
+                        HttpClientFactory = sp.GetRequiredService<IHttpClientFactory>(),
                         BudgetStore = sp.GetRequiredService<ProviderBudgetStore>(),
                         EndpointScanner = sp.GetRequiredService<ProviderEndpointScanner>(),
                         CapabilityStore = sp.GetRequiredService<ToolCallCapabilityStore>(),

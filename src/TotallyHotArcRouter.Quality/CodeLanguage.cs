@@ -11,13 +11,18 @@ public enum CodeLanguage
     /// <summary>C#. Validity comes from an authoritative in-process Roslyn parse.</summary>
     CSharp,
 
-    /// <summary>Python 3. Checked heuristically - no in-process Python parser is available to .NET.</summary>
+    /// <summary>
+    /// Python 3. Checked by <c>PythonStructuralParser</c> - language-aware but still non-authoritative,
+    /// because no in-process Python parser is available to .NET without also taking an interpreter.
+    /// </summary>
     Python,
 
     /// <summary>JavaScript (and TypeScript, checked as JavaScript).</summary>
     JavaScript,
 
-    /// <summary>POSIX shell. Checked heuristically.</summary>
+    /// <summary>
+    /// POSIX shell. Checked by <c>ShellStructuralParser</c> - language-aware but still non-authoritative.
+    /// </summary>
     Shell
 }
 
@@ -50,8 +55,8 @@ public static class CodeLanguages
     }
 
     /// <summary>
-    /// Indicates whether a real parser backs this language's syntax verdict, as opposed to the
-    /// delimiter-balance heuristic. Callers use it to decide how much weight a validity signal deserves;
+    /// Indicates whether a real parser backs this language's syntax verdict, as opposed to a
+    /// language-aware heuristic. Callers use it to decide how much weight a validity signal deserves;
     /// it is also what <see cref="QualityResult.SyntaxAuthoritative"/> ends up reporting.
     /// </summary>
     /// <param name="language">The language to test.</param>

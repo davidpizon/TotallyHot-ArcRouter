@@ -7,7 +7,7 @@ namespace TotallyHot.ArcRouter.Router;
 /// <summary>
 /// Adapts verifier-derived scores into <see cref="EmbeddingMemory"/> (docs/router/live-feedback-learning-plan.md
 /// Phase 2c) - the write side of the loop <see cref="Proxy.RequestInterceptor"/>'s Phase 2b embedding
-/// computation and <see cref="PendingTaskEmbeddingCache"/> exist to feed. A scored result whose
+/// computation and <see cref="PendingValueCache{T}"/> exist to feed. A scored result whose
 /// correlation id has no pending embedding (never computed, already claimed, or expired) is a lost
 /// learning opportunity, not an error - logged and dropped, exactly like every other best-effort
 /// observation path in this codebase. Also stamps <see cref="MemoryEntry.IsJudgeScored"/> from
@@ -19,9 +19,9 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
 {
     private readonly ILogger<EmbeddingMemoryScoreObserver> _logger;
     private readonly EmbeddingMemory _memory;
-    private readonly PendingTaskEmbeddingCache _pendingCache;
-    private readonly PendingRequestCostCache _pendingCostCache;
-    private readonly PendingRequestProvenanceCache _pendingProvenanceCache;
+    private readonly PendingValueCache<float[]> _pendingCache;
+    private readonly PendingValueCache<decimal> _pendingCostCache;
+    private readonly PendingValueCache<PendingRequestProvenance> _pendingProvenanceCache;
 
     /// <summary>Initializes a new instance of the <see cref="EmbeddingMemoryScoreObserver"/> class.</summary>
     /// <param name="memory">The embedding-keyed memory to write into.</param>
@@ -31,9 +31,9 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
     /// <param name="logger">The logger.</param>
     public EmbeddingMemoryScoreObserver(
         EmbeddingMemory memory,
-        PendingTaskEmbeddingCache pendingCache,
-        PendingRequestCostCache pendingCostCache,
-        PendingRequestProvenanceCache pendingProvenanceCache,
+        PendingValueCache<float[]> pendingCache,
+        PendingValueCache<decimal> pendingCostCache,
+        PendingValueCache<PendingRequestProvenance> pendingProvenanceCache,
         ILogger<EmbeddingMemoryScoreObserver> logger)
     {
         ArgumentNullException.ThrowIfNull(memory);
@@ -57,8 +57,7 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         // TryTake runs first, unconditionally consuming the pending-cache slot, so a result with no model
         // attribution still drains its entry instead of leaving it to age out via TTL/capacity eviction.
         if (string.IsNullOrEmpty(result.RequestCorrelationId) ||
-            !_pendingCache.TryTake(correlationId: result.RequestCorrelationId, embedding: out var embedding) ||
-            embedding is null)
+            !_pendingCache.TryTake(correlationId: result.RequestCorrelationId, value: out var embedding))
         {
             _logger.LogDebug(
                 message:
@@ -78,14 +77,14 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         // docs/router/self-organizing-classification-plan.md Phase T1c: cost, IsExploratory, and
         // Propensity are all known at request-resolution time (ModelRouteResolutionResult) but only
         // become available here, keyed by the same correlation id, once the verifier score arrives -
-        // exactly the timing problem PendingTaskEmbeddingCache already solves for the embedding. Three
+        // exactly the timing problem PendingValueCache already solves for the embedding. Three
         // parallel TryTake calls, not one merged lookup, because ProxyMiddleware sets the three caches
         // independently (they come from different points in that method) and a miss on any one of them
         // must not block recording the other two - a cost never recorded is still worth an embedding
         // memory entry.
         var recoveredCost = 0.0;
         if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
-            _pendingCostCache.TryTake(correlationId: result.RequestCorrelationId, cost: out var cachedCost))
+            _pendingCostCache.TryTake(correlationId: result.RequestCorrelationId, value: out var cachedCost))
             recoveredCost = (double)cachedCost;
         else
             _logger.LogDebug(
@@ -97,13 +96,11 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         var recoveredPropensity = 1.0;
         string? recoveredDimension = null;
         if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
-            _pendingProvenanceCache.TryTake(correlationId: result.RequestCorrelationId,
-                isExploratory: out var cachedIsExploratory, propensity: out var cachedPropensity,
-                dimension: out var cachedDimension))
+            _pendingProvenanceCache.TryTake(correlationId: result.RequestCorrelationId, value: out var cachedProvenance))
         {
-            recoveredIsExploratory = cachedIsExploratory;
-            recoveredPropensity = cachedPropensity;
-            recoveredDimension = cachedDimension;
+            recoveredIsExploratory = cachedProvenance.IsExploratory;
+            recoveredPropensity = cachedProvenance.Propensity;
+            recoveredDimension = cachedProvenance.Dimension;
         }
         else
         {

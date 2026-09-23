@@ -5,7 +5,7 @@ using TotallyHot.ArcRouter.Gui.Telemetry;
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
-/// Tests for <see cref="AdminStoreBase{TClient}"/>, the shared shape behind the eleven gRPC-backed
+/// Tests for <see cref="AdminStoreBase{TClient}"/>, the shared shape behind the gRPC-backed
 /// Governance and System Settings stores.
 /// </summary>
 /// <remarks>

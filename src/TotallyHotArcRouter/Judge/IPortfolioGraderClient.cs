@@ -30,9 +30,10 @@ public interface IPortfolioGraderClient
 /// <param name="Dimension">The task dimension the response was routed under.</param>
 /// <param name="ResponseText">The raw response text to grade.</param>
 /// <param name="Prompt">
-/// The task the response was written for, or empty when it could not be recovered
-/// (docs/research/code-quality-metrics-assessment.md §1: every grader here needs the requirement to score
-/// against, not just the answer in isolation).
+/// The user/task question the response was written to answer, recovered from
+/// <see cref="PendingPromptCache"/>. Required: every portfolio grader fails closed rather than grading
+/// the response in isolation when this is missing or whitespace-only
+/// (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
 /// </param>
 public sealed record PortfolioGraderScoreRequest(string Dimension, string ResponseText, string Prompt);
 
@@ -45,4 +46,8 @@ public sealed record PortfolioGraderScoreRequest(string Dimension, string Respon
 /// ineligible configured pick, and docs/router/grader-reliability-plan.md's self-preference-skew statistic
 /// needs to know what actually ran.
 /// </param>
-public sealed record PortfolioGraderScoreResult(double Score, string GraderModel);
+/// <param name="UsedLogprobs">
+/// Whether <see cref="Score"/> was computed via G-Eval's probability-weighted recipe. False for every
+/// portfolio grader; stamped only when the G-Eval judge produced this result, for the shadow-row persist.
+/// </param>
+public sealed record PortfolioGraderScoreResult(double Score, string GraderModel, bool UsedLogprobs = false);

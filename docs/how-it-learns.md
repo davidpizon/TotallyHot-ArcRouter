@@ -215,20 +215,40 @@ A background service replays receipts and asks the only question that really mat
 ensemble actually beat the simple baseline?**
 
 This is why every receipt stores which model the frozen baseline *would* have picked — the
-counterfactual. The comparison is scored as *regret*:
+counterfactual — together with the probing-prior score that pick was based on. The comparison is
+scored as *estimated regret* under \(r = \varepsilon_1 s + \varepsilon_2 \kappa\). That is **not**
+the same objective the rest of the system uses to pick a model: `CompositeRoutingPolicy`'s
+Orchestrator and Agent paths are cost-blind and never read `Epsilon1`/`Epsilon2`. Only
+`UtilityRoutingPolicy` uses the ε-weighted cost term for *selection* (and even there, \(\kappa\) is
+a blended catalog rate in USD per million tokens, not this request's USD). `TaxonomyComparisonService`
+still records estimated regret for non-utility traffic too — the report card is accounting after the
+fact, not a replay of the live vote.
 
 ```
-routed reward    = ε₁ · observed score  + ε₂ · actual cost
+routed reward    = ε₁ · observed score  + ε₂ · recorded/estimated serving cost
 baseline reward  = ε₁ · predicted score + ε₂ · counterfactual cost
 
 regret = baseline reward − routed reward     // positive means the router lost
 ```
 
-When the router happened to pick the same model as the baseline, the baseline's prediction is computed
-**leave-one-out** — with that observation removed — so it isn't graded on evidence it has already been
-fed. The router does not get to mark its own homework.
+The quality half of that difference — observed score minus the frozen policy's predicted score — is
+the **score-delta**. It is not stored as its own column; it is recovered from the two scores already
+on the row. The Cost Analytics "Routing ROI" chart publishes only the **cost** half (estimated net
+savings). The Governance Regret Harness publishes **exact** cumulative regret against the per-task
+oracle on CodeRouterBench, with DimensionBest as the frozen-policy column.
 
-> Source: [`TaxonomyComparisonService.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Transcripts/TaxonomyComparisonService.cs)
+There is **no leave-one-out** on the baseline half: a table-only prediction never absorbed the
+observation being compared, so there is nothing to hold out. (Leave-one-out still applies to the
+taxonomy-accuracy columns, which answer a different question.)
+
+The method, the sign convention, the qualifications (what is observed vs estimated vs null), and the
+source map are in the citable write-up:
+
+> **[Score-delta versus the frozen baseline](score-delta-methodology.md)**
+
+> Source: [`RewardWeights.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/CodeRouterBench/Evaluation/RewardWeights.cs) ·
+> [`TaxonomyComparisonService.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Transcripts/TaxonomyComparisonService.cs) ·
+> [`UntrainedBaselineSelector.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Router/UntrainedBaselineSelector.cs)
 
 ---
 
@@ -244,10 +264,10 @@ Code in the response is extracted and **parsed** — never run. The evidence col
 
 **s_syntax** is 1 if it parses, 0 if it doesn't. But with one twist that matters: the router tracks
 *whether it actually knows*. C# is parsed with Roslyn and JavaScript/TypeScript with Acornima — real
-parsers, real verdicts. Python and shell get a bracket-balance heuristic, because no in-process parser for
-them exists on .NET. So those verdicts are **flagged as non-authoritative and weighted at half**. A
-bracket count is not a compiler's opinion, and pretending otherwise would quietly inflate every Python
-score the router learns from.
+parsers, real verdicts. Python and shell get language-aware structural scanners (quoting, f-strings,
+here-documents, `case` arms), because no in-process compiler for them exists on .NET. So those verdicts
+are **flagged as non-authoritative and weighted at half**. A heuristic is not a compiler's opinion, and
+pretending otherwise would quietly inflate every Python score the router learns from.
 
 **s_analysis** is where the interesting judgement lives — four checks, each of which may *abstain*:
 
@@ -304,22 +324,30 @@ That promotion created a counting problem worth explaining, because the fix is t
 this whole system.
 
 > Source: [`GEvalJudgeClient.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Judge/GEvalJudgeClient.cs) ·
-> [`JudgeShadowScoreQueue.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Judge/JudgeShadowScoreQueue.cs)
+> [`GraderQueue.cs`](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/src/TotallyHotArcRouter/Judge/GraderQueue.cs)
 
 ### So where does cost actually come in?
 
 Worth being precise, because it's a genuine design decision and not an obvious one.
 
-**The live vote is cost-blind.** `dim_best`, `memory_knn`, and `cluster_best` all rank purely on
-*quality score*. None of them looks at price.
+**The live general vote is cost-blind.** `dim_best`, `memory_knn`, and `cluster_best` (the
+Orchestrator/Agent path in `CompositeRoutingPolicy`) all rank purely on *quality score*. None of them
+looks at price, and none of them reads `Epsilon1`/`Epsilon2`.
 
-Cost enters in exactly two places, both of them **accounting** rather than **selection**:
+Cost enters *selection* on **one** path: `UtilityRoutingPolicy`, which ranks
+\(\varepsilon_1 \cdot\) quality \(+ \varepsilon_2 \cdot\) blended catalog rate (USD per million
+tokens — different units from the per-request USD in estimated regret).
+
+Everywhere else, cost is **accounting** rather than **selection**:
 
 1. The reward function `r = ε₁·score + ε₂·cost` used by the offline evaluation harness.
-2. The live regret report card described in Step 7, using that same formula.
+2. The live regret report card described in Step 7, using that same *form* of \(r\) (configured
+   `RoutingOptions` weights, recorded on utility *and* non-utility traffic). See
+   [score-delta versus the frozen baseline](score-delta-methodology.md) for the as-built method.
 
-In other words: **the router chases quality, then measures whether that was worth the money.** Making
-cost a first-class vote would be a change in behaviour, not a change in wiring.
+In other words: **the default router chases quality, then measures whether that was worth the money.**
+The utility policy is the exception. Making cost a first-class vote on the Orchestrator path would be
+a change in behaviour, not a change in wiring.
 
 ---
 
@@ -377,7 +405,8 @@ the interpreter. Nothing needs to be configured correctly for this to hold.
 - *"It compiled, ran, and exited cleanly"* was the strongest signal available, and it is gone. The judge
   partially compensates. It does not replace it.
 - Python and shell lost their real syntax check — it used to be a subprocess that actually tried to parse
-  them. They now get a heuristic, marked as such and weighted at half.
+  them. They now get language-aware heuristics (not a raw bracket count), marked as such and weighted at
+  half.
 - What is left cannot tell you the code is *correct*. It can tell you it parses, that it is not a stub,
   that it is not cut off, and what a judge model thinks of it.
 
@@ -391,9 +420,10 @@ A system that grades itself should be candid about what it doesn't yet measure.
 - **Nothing here proves correctness.** The verifier can tell you code parses, is not a stub, and is not
   truncated; the judge can tell you a model opinion of it. Neither is a test suite. For live traffic
   there is no ground truth to check against, and this document should not be read as claiming otherwise.
-- **Python and shell are graded on a bracket count.** No in-process parser exists for them on .NET, so
-  their syntax verdict is a heuristic. It is flagged and weighted at half rather than hidden, but it is
-  still the weakest link in the static axis.
+- **Python and shell are still graded by a heuristic.** No in-process compiler exists for them on .NET, so
+  their syntax verdict is a language-aware scan (quoting, interpolations, here-documents, `case` arms)
+  rather than a compiler's opinion. It is flagged and weighted at half rather than hidden, but it is still
+  the weakest link in the static axis.
 - **The judge grades what it grades.** Probability-weighted G-Eval is a real improvement over sampling one
   digit, but it is still one model opinion of another work, with whatever blind spots that implies.
 - **The graders still cannot see the question.** The prompt now travels with the request as far as the

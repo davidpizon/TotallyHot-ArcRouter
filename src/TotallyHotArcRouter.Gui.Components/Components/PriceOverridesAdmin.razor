@@ -1,6 +1,6 @@
 @* Governance > Price Overrides pane: the §5.7 resolution ladder's top rung. Read-only diagnosis of which
    (source, aggregator model key) pairs the operator has mapped onto a configured model, plus add/remove.
-   Talks to the proxy's /admin/price-overrides REST API via the injected ProviderAdminStore - the same
+   Talks to the router via the injected ProviderAdminStore - the same
    store ProvidersAdmin uses, so both panes share one reachability/error shape.
    docs/router/token-tracking-implementation-plan.md Phase 3, §5.7. *@
 @implements IDisposable
@@ -17,8 +17,17 @@
             <div class="flex items-center gap-2 text-sm text-red-400 font-semibold">
                 <Icon Name="alert-triangle" Size="20"/> Router unreachable
             </div>
+            @* The store's own endpoint, not a default constant: naming an address the client was never
+               pointed at is worse than naming none while diagnosing a connectivity failure. *@
             <div class="text-xs text-slate-400">
-                Could not reach <span class="font-mono">@ProviderAdminStore.DefaultManagementAddress</span>. Is the proxy running?
+                @if (Store.ServerAddress is { Length: > 0 } serverAddress)
+                {
+                    <text>Could not reach <span class="font-mono">@serverAddress</span>. Is the proxy running?</text>
+                }
+                else
+                {
+                    <text>Could not reach the router. Is the proxy running?</text>
+                }
             </div>
             @if (!string.IsNullOrEmpty(Store.LastError))
             {
@@ -197,7 +206,7 @@
         {
             await operation();
         }
-        catch (ProviderAdminException ex)
+        catch (GrpcAdminException ex)
         {
             _opError = ex.Message;
         }

@@ -22,8 +22,8 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 {
     private readonly IHost _host;
 
-    // Non-null only when this server created its own management HttpClient (no caller-supplied one), so
-    // disposal frees exactly what this server owns and never a client the caller still uses elsewhere.
+    // Non-null only when the caller enabled the management API but supplied neither a client nor a factory,
+    // so direct construction keeps working; disposal frees exactly what this server created.
     private readonly HttpClient? _ownedManagementHttpClient;
 
     /// <summary>
@@ -120,11 +120,9 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         var regretHarnessAdmin = dependencies?.RegretHarnessAdmin;
         var judgeCalibrationAdmin = dependencies?.JudgeCalibrationAdmin;
 
-        // Own (and later dispose) the management client only when the caller didn't supply one. Note this
-        // runs whether or not the management API is enabled, exactly as before the parameter moved into
-        // ManagementApiDependencies - the client is this server's to dispose either way.
-        _ownedManagementHttpClient = managementApi?.HttpClient is null ? new HttpClient() : null;
-        var managementClient = managementApi?.HttpClient ?? _ownedManagementHttpClient!;
+        _ownedManagementHttpClient = managementApi is { HttpClient: null, HttpClientFactory: null }
+            ? new HttpClient()
+            : null;
 
         var serilogLogger = dependencies?.SerilogLogger;
 
@@ -189,8 +187,8 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // is the actual hot-swap mechanism: LocalCertificateAuthority.GetOrCreateLeaf()
                     // transparently mints and persists a replacement once the cached leaf enters its
                     // renewal window, with no restart and no re-trust needed by an already-trusting
-                    // client. Deliberately not caught here the way the old TelemetryTlsCertificate call
-                    // was: with the LLM proxy port now also TLS-only by default, a certificate failure
+                    // client. Deliberately not caught here: with the LLM proxy port now also TLS-only
+                    // by default, a certificate failure
                     // means the router cannot serve its core purpose at all, not just that telemetry is
                     // unavailable - so this now fails ProxyServer construction outright rather than
                     // silently degrading.
@@ -330,7 +328,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         var facade = new ManagementFacade(
                             store: managementApi.ConfigStore,
                             environment: managementApi.Environment ?? new EnvironmentVariableProvider(),
-                            httpClient: managementClient,
+                            httpClient: managementApi.HttpClient ?? _ownedManagementHttpClient,
                             dependencies: new ManagementFacadeDependencies
                             {
                                 BudgetStore = managementApi.BudgetStore,
@@ -349,7 +347,8 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                                 // provider card.
                                 Logger = logger,
                                 ModelRoutingTemplates = modelRoutingTemplates?.Value
-                            });
+                            },
+                            httpClientFactory: managementApi.HttpClientFactory);
                         var reportingService = new ManagementReportingService(
                             rollupStore: managementApi.UsageRollupStore,
                             comparisonStore: managementApi.TaxonomyComparisonStore);
@@ -523,8 +522,9 @@ public class ProxyServer : IAsyncDisposable, IDisposable
     internal IServiceProvider Services => _host.Services;
 
     /// <summary>
-    /// Disposes the inner host and, when this server created it, the management <see cref="HttpClient"/>,
-    /// so repeatedly creating and discarding servers (e.g. across tests) doesn't leak hosts or handlers.
+    /// Disposes the inner host and, when this server created it, the fallback management
+    /// <see cref="HttpClient"/>, so repeatedly creating and discarding servers (e.g. across tests) doesn't
+    /// leak hosts or handlers.
     /// </summary>
     public async ValueTask DisposeAsync()
     {

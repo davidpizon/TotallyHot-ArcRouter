@@ -32,7 +32,7 @@ public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdm
     public RouterSettingsAdminStore(
         IRouterChannelProvider channelProvider,
         ILogger<RouterSettingsAdminStore>? logger = null)
-        : base(client: new RouterSettingsAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new RouterSettingsAdminClient(channelProvider.CallInvoker), logger: logger)
     {
     }
 

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Proxy.Management;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -70,17 +71,25 @@ public sealed class ModelDialectResolver
 
     private readonly IEnvironmentVariableProvider _environment;
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
 
     /// <summary>Initializes a new instance of the <see cref="ModelDialectResolver"/> class.</summary>
-    /// <param name="httpClient">Client used to issue the metadata probes.</param>
+    /// <param name="httpClient">Client used to issue the metadata probes when no factory is supplied.</param>
     /// <param name="environment">Accessor used to resolve provider credentials and header env vars.</param>
-    public ModelDialectResolver(HttpClient httpClient, IEnvironmentVariableProvider environment)
+    /// <param name="httpClientFactory">
+    /// Creates a fresh <see cref="ManagementFacade.HttpClientName"/> client per probe. Required when
+    /// <paramref name="httpClient"/> is omitted.
+    /// </param>
+    public ModelDialectResolver(HttpClient? httpClient, IEnvironmentVariableProvider environment,
+        IHttpClientFactory? httpClientFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
+        if (httpClient is null && httpClientFactory is null)
+            throw new ArgumentNullException(nameof(httpClientFactory));
         ArgumentNullException.ThrowIfNull(environment);
 
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _environment = environment;
     }
 
@@ -353,7 +362,9 @@ public sealed class ModelDialectResolver
             request.Content = JsonContent.Create(new { model = modelId });
             ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);
 
-            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+            using var factoryClient = _httpClientFactory?.CreateClient(ManagementFacade.HttpClientName);
+            var client = factoryClient ?? _httpClient!;
+            using var response = await client.SendAsync(request: request, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) return default;
 
@@ -474,7 +485,9 @@ public sealed class ModelDialectResolver
             using var request = new HttpRequestMessage(method: HttpMethod.Get, requestUri: target);
             ProviderCredentialResolver.ApplyToRequest(request: request, provider: provider, environment: _environment);
 
-            using var response = await _httpClient.SendAsync(request: request, cancellationToken: cancellationToken)
+            using var factoryClient = _httpClientFactory?.CreateClient(ManagementFacade.HttpClientName);
+            var client = factoryClient ?? _httpClient!;
+            using var response = await client.SendAsync(request: request, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) return default;
 

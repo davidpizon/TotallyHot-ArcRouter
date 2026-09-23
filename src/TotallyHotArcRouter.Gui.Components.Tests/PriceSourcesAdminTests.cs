@@ -321,7 +321,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10),
             new PriceSourceStatus(Name: "openrouter", true, -10, 5));
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         await DragAsync(cut: cut, 0, 1);
@@ -338,7 +338,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10),
             new PriceSourceStatus(Name: "openrouter", true, -10, 5));
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         await DragAsync(cut: cut, 1, 0);
@@ -355,7 +355,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10),
             new PriceSourceStatus(Name: "openrouter", true, -10, 5));
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         cut.FindAll("button")
@@ -373,7 +373,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10),
             new PriceSourceStatus(Name: "openrouter", true, -10, 5));
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         // Out to the other rank and back again before releasing. The working order ends up identical to the
@@ -398,7 +398,7 @@ public sealed class PriceSourcesAdminTests
         var client = new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10),
             new PriceSourceStatus(Name: "openrouter", true, -10, 5));
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         // Pointerdown, then a release that JS never promoted to a drag because the pointer never travelled
@@ -447,7 +447,7 @@ public sealed class PriceSourcesAdminTests
     [Fact]
     public async Task A_lifted_card_is_rendered_pinned_so_re_renders_cannot_strip_it()
     {
-        using var ctx = NewContext(new FakeClient(
+        await using var ctx = NewContext(new FakeClient(
             new PriceSourceStatus(Name: "litellm", true, 0, 10),
             new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
@@ -579,7 +579,7 @@ public sealed class PriceSourcesAdminTests
             ReorderError =
                 new GrpcAdminException("The submitted order must name every existing price source exactly once.")
         };
-        using var ctx = NewContext(client);
+        await using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         await DragAsync(cut: cut, 0, 1);

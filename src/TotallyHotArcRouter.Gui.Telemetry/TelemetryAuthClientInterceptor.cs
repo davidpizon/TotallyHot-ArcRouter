@@ -9,8 +9,7 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// from the same file the proxy's <c>ManagementAccessToken</c> writes
 /// (<c>%ProgramData%\TotallyHotArcRouter\management-token.txt</c>); the file path and read logic are
 /// duplicated here rather than referenced, the same "one fact, two copies because of the process
-/// boundary" tradeoff <see cref="TelemetryChannelFactory.ValidateLoopbackCertificate"/> and
-/// <c>TotallyHot.ArcRouter.Gui.Admin.ManagementTokenReader</c> already accept.
+/// boundary" tradeoff <see cref="TelemetryChannelFactory.ValidateLoopbackCertificate"/> already accepts.
 /// </summary>
 public sealed class TelemetryAuthClientInterceptor : Interceptor
 {

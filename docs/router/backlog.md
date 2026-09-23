@@ -1,7 +1,7 @@
 # Router: Known Defects and Not-Yet-Implemented Work
 
 Router-side (`src/TotallyHotArcRouter/`) counterpart to [`../gui/backlog.md`](../gui/backlog.md), which
-covers `src/TotallyHotArcRouter.Gui/` only. Same structure: **Open** items are live gaps, **Recently
+covers `src/TotallyHotArcRouter.Gui.Components/` (and `Gui.Web`) only. Same structure: **Open** items are live gaps, **Recently
 completed** records what has landed so the narrative reads top-to-bottom.
 
 ## Open

@@ -4,10 +4,9 @@
     <!-- The cross-platform WASM dashboard (web GUI migration plan Phase P6), served by the router
          itself on the web port - see TotallyHotArcRouter.csproj's ReferenceOutputAssembly="false"
          ProjectReference to this project and ProxyServer.cs's MapStaticAssets/MapFallbackToFile
-         wiring. Hosts the same Components/*.razor this repo's MAUI dashboard (TotallyHotArcRouter.Gui)
-         uses, unmodified, from TotallyHotArcRouter.Gui.Components - only the composition root
-         (this project's Program.cs) and the browser-specific IRouterChannelProvider/IClipboardService
-         implementations differ from MauiProgram.cs. -->
+         wiring. Hosts Components/*.razor from TotallyHotArcRouter.Gui.Components; only the
+         composition root (this project's Program.cs) and the browser-specific
+         IRouterChannelProvider/IClipboardService implementations are host-specific. -->
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>TotallyHot.ArcRouter.Gui.Web</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -19,8 +18,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.12" PrivateAssets="all" />
     <!-- gRPC-Web: browsers cannot speak trailers-based HTTP/2 gRPC directly, so every admin/telemetry
          call from this host goes out through Grpc.Net.Client.Web's GrpcWebHandler instead - see
          WasmRouterChannelProvider.cs. -->
@@ -28,9 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Components/*, Services/* stores, Models, Utils (web GUI migration plan Phase P5b) - the same
-         library TotallyHotArcRouter.Gui (MAUI) references, so the dashboard UI itself is shared
-         verbatim between the two hosts. -->
+    <!-- Components/*, Services/* stores, Models, Utils - the dashboard UI this WASM host renders. -->
     <ProjectReference Include="..\TotallyHotArcRouter.Gui.Components\TotallyHotArcRouter.Gui.Components.csproj" />
   </ItemGroup>
 

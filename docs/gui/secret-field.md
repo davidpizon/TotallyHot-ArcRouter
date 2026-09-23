@@ -62,7 +62,7 @@ value" / "Unlock this value"); the tooltip is the description:
 
 ## Component API
 
-`src/TotallyHotArcRouter.Gui/Components/SecretField.razor`
+`src/TotallyHotArcRouter.Gui.Components/Components/SecretField.razor`
 
 | Parameter | Purpose |
 | --- | --- |

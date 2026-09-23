@@ -198,7 +198,7 @@ public sealed class ProvidersAdminLoadedTests
         // The budget panel renders EChart, which calls into echartsInterop; Loose mode records the calls
         // instead of failing them, matching EChartTests and DashboardTests.
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        ctx.Services.AddSingleton(new ProviderAdminStore(client: new ProviderAdminClient(client, "test-token")));
+        ctx.Services.AddSingleton(new ProviderAdminStore(client: new ProviderAdminClient(client)));
         return ctx;
     }
 
@@ -221,7 +221,7 @@ public sealed class ProvidersAdminLoadedTests
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton(toasts);
         ctx.Services.AddSingleton(new ProviderAdminStore(
-            client: new ProviderAdminClient(client, "test-token"), toasts: toasts));
+            client: new ProviderAdminClient(client), toasts: toasts));
         return (ctx, toasts);
     }
 

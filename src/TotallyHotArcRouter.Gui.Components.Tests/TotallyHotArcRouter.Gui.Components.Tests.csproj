@@ -17,30 +17,23 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <IsPackable>false</IsPackable>
-    <!-- xunit.v3 runs on Microsoft.Testing.Platform (MTP), which the .NET 10 SDK no longer bridges to
-         VSTest for `dotnet test` by default (see https://aka.ms/dotnet-test-mtp-error). This opts back
-         into `dotnet test` support so CI's `dotnet test` invocation keeps working. -->
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <!-- xunit.v3 test projects are self-hosting Microsoft.Testing.Platform executables. -->
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="bunit" Version="2.9.0" />
+    <PackageReference Include="bunit" Version="2.11.3" />
     <!-- bunit pulls in AngleSharp 1.4.0 transitively, which has a known moderate-severity mXSS
          vulnerability (GHSA-pgww-w46g-26qg). Pin directly to the patched version. -->
-    <PackageReference Include="AngleSharp" Version="1.7.3" />
+    <PackageReference Include="AngleSharp" Version="1.8.2" />
     <!-- AwesomeAssertions: the Apache-2.0 community fork of FluentAssertions. FluentAssertions 8.x moved to
          the Xceed Community License, which permits non-commercial use only and restricts *use*, not just
          redistribution - so it would constrain how this repository itself may be licensed and used. See
          THIRD-PARTY-NOTICES.md. The assertion API is identical; only the root namespace differs
          (`using AwesomeAssertions;`), which is why no test assertion needed rewriting. -->
     <PackageReference Include="AwesomeAssertions" Version="9.6.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.0" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="xunit.v3" Version="4.0.0" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -50,9 +43,8 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <!-- The former MAUI host project (referenced pre-retarget) pulled this in implicitly via its own SDK
-         targets; every test file here already assumes it is ambient, matching MauiProgram.cs's DI-heavy
-         composition-root style, so it is restored as an explicit global using rather than editing dozens
-         of files that never needed their own using for it before. -->
+         targets; every test file here already assumes it is ambient, so it is restored as an explicit
+         global using rather than editing dozens of files that never needed their own using for it. -->
     <Using Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
 

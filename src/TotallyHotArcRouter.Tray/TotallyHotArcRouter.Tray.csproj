@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <!-- Windows-only WinForms shell (web GUI migration plan Phase P8): a thin NotifyIcon/ContextMenuStrip
-         wrapper around TotallyHotArcRouter.Tray.Core's platform-agnostic status/routing/update logic.
+         wrapper around TotallyHotArcRouter.Tray.Core's platform-agnostic status/routing logic.
          net10.0-windows (not the net10.0-windows10.0.19041.0/UseMaui the old MAUI Gui project needs) -
          WinForms doesn't need the WinUI/UWP API surface, only System.Windows.Forms. -->
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -22,7 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.11" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>

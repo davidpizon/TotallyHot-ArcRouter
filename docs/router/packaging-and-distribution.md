@@ -55,8 +55,9 @@ otherwise.
   and `src/TotallyHotArcRouter.Updater.Tests/` are gone; `scripts/service/Install-RouterService.ps1`/
   `Uninstall-RouterService.ps1` are kept only as a clearly-marked dev-only path for a developer who wants a
   real Windows Service on a dev machine without building the MSI.
-- **One MSI installs both the Router and the GUI**, to `%ProgramFiles%\TotallyHotArcRouter\Router\` and
-  `\Gui\` respectively — no `\Updater\` directory. Neither runtime data location is referenced by the
+- **One MSI installs both the Router and the WinForms tray**, to `%ProgramFiles%\TotallyHotArcRouter\Router\` and
+  `\Tray\` respectively — no `\Updater\` or `\Gui\` directory. The WASM dashboard is static files inside the
+  Router publish output, not a third install tree. Neither runtime data location is referenced by the
   installer, so both are untouched by install, upgrade, and uninstall:
   `%ProgramData%\TotallyHotArcRouter\` (machine-wide operational state — see §3.1) and
   `%LOCALAPPDATA%\TotallyHot.ArcRouter\` (the per-user ONNX model caches, still per-user).
@@ -266,7 +267,11 @@ HEAD, and dispatches [`release.yml`](../../.github/workflows/release.yml) agains
 see the version without tagging. A tag pushed by hand (`git tag v1.4.3 && git push origin v1.4.3`) runs the
 same `release.yml` through its `push` trigger. `release.yml` verifies the tag, runs the CI suite, builds
 every asset with the tag's version, checks that the version actually landed in the MSI and the Router
-assembly, and publishes it all plus `checksums.txt` as a **prerelease**. `GitHubReleaseCheckClient` polls
+assembly, and publishes it all plus `checksums.txt` as a **prerelease**. The release body
+starts with [`docs/install/openai-compatible-drop-in.md`](../install/openai-compatible-drop-in.md)
+(one base URL, `model: auto`, copy-paste fences) so the release page itself is
+the drop-in; `generate_release_notes` then appends the changelog.
+`GitHubReleaseCheckClient` polls
 `/repos/{owner}/{repo}/releases/latest`, and that endpoint excludes prereleases by definition — so a build
 at this stage is invisible to every installed Router, and no code in the update pipeline needed changing to
 make that true. Testers install the RC by downloading its MSI from the release page by hand.

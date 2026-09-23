@@ -1,15 +1,16 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Tools;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting;
@@ -34,8 +35,6 @@ public class ServiceCollectionExtensionsTests
             filter: d => d.ServiceType == typeof(RouterMemory) && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(collection: services,
             filter: d => d.ServiceType == typeof(AgentAsARouter) && d.Lifetime == ServiceLifetime.Singleton);
-        Assert.Contains(collection: services,
-            filter: d => d.ServiceType == typeof(CheckSyntax) && d.Lifetime == ServiceLifetime.Transient);
         Assert.Contains(collection: services,
             filter: d =>
                 d.ServiceType == typeof(IEnvironmentVariableProvider) &&
@@ -77,12 +76,81 @@ public class ServiceCollectionExtensionsTests
         await using var provider = services.BuildServiceProvider();
 
         Assert.NotNull(provider.GetRequiredService<RouterMemory>());
-        Assert.NotNull(provider.GetRequiredService<CheckSyntax>());
         Assert.NotNull(provider.GetRequiredService<IModelRouteResolver>());
         Assert.NotNull(provider.GetRequiredService<RequestInterceptor>());
         Assert.NotNull(provider.GetRequiredService<ProxyMiddleware>());
         Assert.NotNull(provider.GetRequiredService<AgentAsARouter>());
         Assert.NotNull(provider.GetRequiredService<IRoutingPolicy>());
+    }
+
+    /// <summary>
+    /// Both score-table retention instances (shadow-judge and grader-scores) must reach the host. They
+    /// share one implementation type, so registering them through <c>AddHostedService</c>'s factory
+    /// overload would let <c>TryAddEnumerable</c> discard the second and leave <c>grader_scores</c>
+    /// unpurged.
+    /// </summary>
+    [Fact]
+    public void AddTotallyHotArcRouter_RegistersBothScoreTableRetentionInstances()
+    {
+        var services = new ServiceCollection();
+
+        services.AddTotallyHotArcRouter();
+
+        var factories = services
+            .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationFactory is not null)
+            .Select(d => d.ImplementationFactory!)
+            .ToList();
+        var fakeProvider = new ServiceCollection()
+            .AddLogging()
+            .AddOptions()
+            .AddSingleton(Mock.Of<IJudgeShadowScoreStore>())
+            .AddSingleton(Mock.Of<IGraderScoreStore>())
+            .BuildServiceProvider();
+
+        var retention = factories
+            .Select(f => TryCreate(f, fakeProvider))
+            .OfType<ScoreTableRetentionService>()
+            .ToList();
+
+        Assert.Equal(2, actual: retention.Count);
+    }
+
+    /// <summary>
+    /// Runs a hosted-service factory against a provider that only carries the retention workers'
+    /// dependencies; factories for other hosted services fail to resolve theirs and are skipped.
+    /// </summary>
+    private static object? TryCreate(Func<IServiceProvider, object> factory, IServiceProvider provider)
+    {
+        try
+        {
+            return factory(provider);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    [Fact]
+    public void AddTotallyHotArcRouter_PriceSourceClient_CarriesAttributionHeaders()
+    {
+        // The price sources no longer set these themselves: the named-client registration is now the one
+        // place they live, so pin it there.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.Configure<RoutingOptions>(_ => { });
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddTotallyHotArcRouter();
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(PriceSourceRegistry.HttpClientName);
+
+        Assert.Equal(expected: ["TotallyHot Arc Router"], actual: client.DefaultRequestHeaders.GetValues("X-Title"));
+        Assert.Equal(expected: ["https://github.com/davidpizon/TotallyHot-ArcRouter"],
+            actual: client.DefaultRequestHeaders.GetValues("HTTP-Referer"));
     }
 
     /// <summary>
@@ -127,9 +195,8 @@ public class ServiceCollectionExtensionsTests
     /// at hold-time - and must be absent from the write-time <see cref="IQualityScoreObserver"/> fan-out it
     /// used to occupy. A regression back to registering it as an observer would leave both assertions below
     /// green individually but silently reintroduce the deadlock, which is why they are asserted together.
-    /// Phase Q3 wraps the single <see cref="IAsyncGraderDispatcher"/> in a
-    /// <see cref="CompositeAsyncGraderDispatcher"/> fanning out to both the judge's dispatcher and the
-    /// portfolio's, so this also pins that both component dispatchers remain reachable in their own right.
+    /// Phase Q3 registers a single <see cref="GraderDispatcher"/> as the aggregator's
+    /// <see cref="IAsyncGraderDispatcher"/>, covering the G-Eval judge and the portfolio graders.
     /// </summary>
     [Fact]
     public async Task AddTotallyHotArcRouter_ResolvesJudgeDispatcher_AbsentFromObserverFanOut()
@@ -149,16 +216,14 @@ public class ServiceCollectionExtensionsTests
         await using var provider = services.BuildServiceProvider();
 
         var dispatcher = provider.GetRequiredService<IAsyncGraderDispatcher>();
-        Assert.IsType<CompositeAsyncGraderDispatcher>(dispatcher);
-        Assert.NotNull(provider.GetRequiredService<JudgeShadowScoreDispatcher>());
-        Assert.NotNull(provider.GetRequiredService<PortfolioGraderDispatcher>());
+        Assert.IsType<GraderDispatcher>(dispatcher);
 
         var observer = provider.GetRequiredService<IQualityScoreObserver>();
         var composite = Assert.IsType<CompositeRouterScoreObserver>(observer);
 
-        // JudgeShadowScoreDispatcher no longer implements IQualityScoreObserver at all - the whole point
+        // GraderDispatcher no longer implements IQualityScoreObserver at all - the whole point
         // of the seam split - so this checks the concrete type of every fanned-out observer rather than an
-        // "is JudgeShadowScoreDispatcher" pattern the compiler would reject as always false. Asserting the
+        // "is GraderDispatcher" pattern the compiler would reject as always false. Asserting the
         // full expected membership, not just an absence, is what keeps this test meaningful rather than
         // tautological.
         Assert.Equal(

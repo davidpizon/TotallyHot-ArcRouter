@@ -181,7 +181,7 @@ public sealed class RoutingOptions
     public int EmbeddingBudgetMs { get; init; } = 250;
 
     /// <summary>
-    /// Gets the maximum number of entries <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> holds
+    /// Gets the maximum number of entries the pending-embedding <see cref="TotallyHot.ArcRouter.PendingValueCache{T}"/> holds
     /// before evicting the oldest (FIFO) - docs/router/live-feedback-learning-plan.md Phase 2c. Bridges a
     /// request's task embedding (computed on the request path) to its later-arriving verifier score
     /// (correlated only by <see cref="TotallyHot.ArcRouter.Quality.QualityResult.RequestCorrelationId"/>);
@@ -191,7 +191,7 @@ public sealed class RoutingOptions
     public int PendingEmbeddingCacheCapacity { get; init; } = 2_000;
 
     /// <summary>
-    /// Gets how long, in seconds, <see cref="Router.Embeddings.PendingTaskEmbeddingCache"/> retains an
+    /// Gets how long, in seconds, the pending-embedding <see cref="TotallyHot.ArcRouter.PendingValueCache{T}"/> retains an
     /// entry before it expires unclaimed - a score that never arrives (verifier disabled, grading
     /// dropped, request aborted) must not hold its slot forever. Default comfortably exceeds a graded
     /// evaluation's expected turnaround.

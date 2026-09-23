@@ -6,10 +6,6 @@
     <RootNamespace>TotallyHot.ArcRouter</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>preview</LangVersion>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest</AnalysisLevel>
-    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <!-- Matches TotallyHotArcRouter.Gui.Admin/.Charts/.Console/.Telemetry: CS1591 (missing XML doc on a
          public member) becomes a build error via TreatWarningsAsErrors above, so undocumented public
          API can't creep back in. The generated gRPC server stub (Telemetry.cs/TelemetryGrpc.cs) already
@@ -66,14 +62,15 @@
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
     <!-- Backs Program.cs's UseSystemd() call (web GUI migration plan Phase P10) so the host can run
          under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
          when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.6" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.7" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.83.0">
+    <PackageReference Include="Grpc.Tools" Version="2.84.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -83,7 +80,6 @@
          framing. No IDL/codegen change - it wraps the same generated service types the native gRPC
          listener (port 5002, retired in Phase P9) already serves. -->
     <PackageReference Include="Grpc.AspNetCore.Web" Version="2.83.0" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <!-- First database dependency in the repo: the model price catalog's SQLite store
          (docs/router/model-price-catalog.md). Nothing used a database before - router memory is a
          plain JSON file. -->
@@ -94,7 +90,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <!-- WordPiece tokenizer matching BGE's BERT-family vocabulary; used by OnnxEmbeddingClient to
          turn task text into the token ids OnnxRuntime's InferenceSession expects. -->
-    <PackageReference Include="FastBertTokenizer" Version="1.0.28" />
+    <PackageReference Include="FastBertTokenizer" Version="1.2.6" />
     <!-- Autoregressive generation (KV-cache, greedy sampling, tokenization) for the llm_router voter's
          local ONNX-hosted small instruct model (PLAN.md Phase L) - owns exactly the generation-loop
          complexity the plain Microsoft.ML.OnnxRuntime session above would otherwise require hand-rolling. -->
@@ -118,7 +114,6 @@
          SQLitePCLRaw.lib.e_sqlite3 <= 2.1.10 carries GHSA-2m69-gcr7-jv3q, patched in 2.1.11+. This
          direct reference wins over the transitive 2.1.10 and clears the NuGet audit (NU1903). -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.80.1" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
     <PackageReference Include="Serilog" Version="4.4.0" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />

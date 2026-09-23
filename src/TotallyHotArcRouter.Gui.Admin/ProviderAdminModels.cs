@@ -1,7 +1,7 @@
 namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
-/// A provider as returned by the proxy's <c>GET /admin/providers</c> endpoint. Authentication is expressed
+/// A provider as returned by <see cref="ProviderAdminClient.GetProvidersAsync"/>. Authentication is expressed
 /// purely via <see cref="Headers"/>, which masks credentials the same way every other header does (see
 /// <see cref="ProviderHeaderView"/>).
 /// </summary>
@@ -254,7 +254,7 @@ public sealed record RateLimitExhaustionAdminView(TimeSpan TimeToExhaustion, dou
 public sealed record RateLimitHistoryPointAdminView(DateTimeOffset BucketUtc, long? Remaining, long? Limit);
 
 /// <summary>
-/// The <c>GET /admin/providers/{key}/rate-limit-history</c> response, mirroring the proxy's
+/// Per-dimension rate-limit history for one provider, mirroring the proxy's
 /// <c>RateLimitHistoryResponse</c>.
 /// </summary>
 /// <param name="Dimensions">History points per standard-family dimension name, chronologically ordered.</param>
@@ -333,13 +333,10 @@ public static class HeaderValueSource
     /// exactly like a locked <see cref="Literal"/> - see <see cref="ProviderHeaderView.Locked"/>.
     /// </summary>
     public const string Protected = "protected";
-
-    /// <summary>Neither a literal value, a protected-store reference, nor an environment variable is configured.</summary>
-    public const string None = "none";
 }
 
 /// <summary>
-/// A custom HTTP header as returned by <c>GET /admin/providers</c>. Because one provider's headers mix
+/// A custom HTTP header as returned by <see cref="ProviderAdminClient.GetProvidersAsync"/>. Because one provider's headers mix
 /// public configuration with secrets, readability is decided per header: an unlocked literal comes back in
 /// <see cref="Value"/> for the editor to show, while a locked one is write-only and reports only its
 /// <see cref="Source"/>. See <c>docs/gui/secret-field.md</c>.
@@ -363,7 +360,7 @@ public sealed record ProviderHeaderView(
     bool Locked = false);
 
 /// <summary>
-/// A custom HTTP header to write for a provider (<c>PUT /admin/providers/{key}</c>). A blank
+/// A custom HTTP header to write for a provider. A blank
 /// <see cref="Value"/> and blank <see cref="ValueEnvVar"/> together preserve whatever is already stored
 /// under this header's <see cref="Name"/>, since a locked value is never returned for the caller to resend.
 /// </summary>
@@ -382,10 +379,6 @@ public sealed record ProviderHeaderView(
 /// header.
 /// </param>
 public sealed record ProviderHeaderWriteModel(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
-
-/// <summary>The <c>GET /admin/providers</c> response envelope.</summary>
-/// <param name="Providers">All configured providers.</param>
-public sealed record ProvidersSnapshot(IReadOnlyList<ProviderAdminView> Providers);
 
 /// <summary>
 /// The body sent to add or edit a provider. Fields fall back to the existing provider's value when null.
@@ -424,8 +417,8 @@ public sealed record ProviderWriteRequest(
     string? ProviderType = null);
 
 /// <summary>
-/// The body sent to switch a provider on or off (<c>PUT /admin/providers/{key}/enabled</c>). The dedicated
-/// route preserves every other configured field, including the AWS ones a generic provider write drops.
+/// The body sent to switch a provider on or off. The dedicated
+/// RPC preserves every other configured field, including the AWS ones a generic provider write drops.
 /// </summary>
 /// <param name="Enabled">The provider's new on/off state.</param>
 public sealed record ProviderEnabledWriteRequest(bool Enabled);
@@ -435,15 +428,14 @@ public sealed record ProviderEnabledWriteRequest(bool Enabled);
 public sealed record ModelWriteRequest(string? ProviderModelId);
 
 /// <summary>
-/// The body sent to switch a model on or off (<c>PUT /admin/providers/{key}/models/{modelName}/enabled</c>).
+/// The body sent to switch a model on or off.
 /// The per-model twin of <see cref="ProviderEnabledWriteRequest"/>.
 /// </summary>
 /// <param name="Enabled">The model's new on/off state.</param>
 public sealed record ModelEnabledWriteRequest(bool Enabled);
 
 /// <summary>
-/// The body sent to pin how a model expresses tool calls
-/// (<c>PUT /admin/providers/{key}/models/{modelName}/tool-dialect</c>), overriding automatic detection.
+/// The body sent to pin how a model expresses tool calls, overriding automatic detection.
 /// </summary>
 /// <param name="Dialect">
 /// The dialect name to pin at operator confidence, which no automatic scan may overwrite, or
@@ -452,7 +444,7 @@ public sealed record ModelEnabledWriteRequest(bool Enabled);
 public sealed record ModelToolDialectWriteRequest(string? Dialect);
 
 /// <summary>
-/// One operator-authored price override, as returned by <c>GET /admin/price-overrides</c> - the §5.7
+/// One operator-authored price override, as returned by <see cref="ProviderAdminClient.GetPriceOverridesAsync"/> - the §5.7
 /// resolution ladder's top rung. Backs the Governance price-overrides pane.
 /// </summary>
 /// <param name="SourceName">The aggregator source this override applies to (e.g. <c>LiteLLM</c>).</param>
@@ -460,14 +452,14 @@ public sealed record ModelToolDialectWriteRequest(string? Dialect);
 /// <param name="ModelName">The client-facing <c>ModelName</c> the override resolves to.</param>
 public sealed record PriceOverrideView(string SourceName, string AggregatorModelKey, string ModelName);
 
-/// <summary>The body for adding or replacing a price override (<c>PUT /admin/price-overrides</c>).</summary>
+/// <summary>The body for adding or replacing a price override.</summary>
 /// <param name="SourceName">The aggregator source this override applies to.</param>
 /// <param name="AggregatorModelKey">The source's own model key this override matches, verbatim.</param>
 /// <param name="ModelName">The client-facing <c>ModelName</c> to resolve to; must already be configured.</param>
 public sealed record PriceOverrideWriteRequest(string SourceName, string AggregatorModelKey, string ModelName);
 
 /// <summary>
-/// One configured model's current price-resolution state, as returned by <c>GET /admin/price-resolution</c>.
+/// One configured model's current price-resolution state, as returned by <see cref="ProviderAdminClient.GetPriceResolutionDiagnosisAsync"/>.
 /// Backs the Governance price-overrides pane's read-only diagnosis view.
 /// </summary>
 /// <param name="ModelName">The client-facing <c>ModelName</c>.</param>
@@ -493,7 +485,7 @@ public static class ToolCallDialectNames
 }
 
 /// <summary>
-/// The body sent to set a provider's monthly budget caps (<c>PUT /admin/providers/{key}/budget</c>). A null
+/// The body sent to set a provider's monthly budget caps. A null
 /// cap clears that dimension; both null removes the budget entirely.
 /// </summary>
 /// <param name="DollarCap">The cap for the window, or null for no dollar budget.</param>
@@ -513,15 +505,7 @@ public sealed record ProviderBudgetWriteRequest(
     int? WindowHours = null);
 
 /// <summary>
-/// The body sent to store a secret (<c>PUT /admin/secrets/{name}</c>, docs/router/secrets-at-rest-plan.md §7).
-/// Mirrors the proxy's own <c>SecretWriteRequest</c> - this project deliberately doesn't reference the proxy assembly (see
-/// <see cref="ProviderAdminClient"/>'s remarks).
-/// </summary>
-/// <param name="Value">The secret value to store.</param>
-public sealed record SecretWriteRequest(string Value);
-
-/// <summary>
-/// The result of <c>POST /admin/providers/{key}/discover-models</c>: the model ids the provider's own
+/// The result of <see cref="ProviderAdminClient.DiscoverModelsAsync"/>: the model ids the provider's own
 /// endpoint reports, or an explanation when the provider doesn't support OpenAI-shaped discovery.
 /// </summary>
 /// <param name="Supported">Whether the provider answered an OpenAI-shaped model list.</param>
@@ -530,7 +514,7 @@ public sealed record SecretWriteRequest(string Value);
 public sealed record DiscoverModelsResult(bool Supported, IReadOnlyList<string> Models, string? Error);
 
 /// <summary>
-/// Totals over a preset window, as returned by <c>GET /admin/usage/summary</c> (Phase 4, §5.15). Backs the
+/// Totals over a preset window, as returned by <see cref="UsageQueryClient.GetSummaryAsync"/> (Phase 4, §5.15). Backs the
 /// header ticker's System Tokens tile and other summary displays.
 /// </summary>
 /// <param name="Requests">Total requests in the window.</param>
@@ -553,7 +537,7 @@ public sealed record UsageSummaryView(
     decimal CostUsd);
 
 /// <summary>
-/// One aggregated bucket, as returned by <c>GET /admin/usage/rollup</c> (Phase 4, §5.15) - the Model
+/// One aggregated bucket, as returned by <see cref="UsageQueryClient.GetRollupAsync"/> (Phase 4, §5.15) - the Model
 /// Distribution / Cost Analytics chart feed.
 /// </summary>
 /// <param name="BucketStartUtc">
@@ -585,7 +569,7 @@ public sealed record UsageRollupBucketView(
     decimal CostUsd);
 
 /// <summary>
-/// One request's routing return-on-investment, as returned by <c>GET /admin/usage/routing-roi</c>
+/// One request's routing return-on-investment, as returned by <see cref="UsageQueryClient.GetRoutingRoiAsync"/>
 /// (docs/router/self-organizing-classification-plan.md Phase T4) - the Cost Analytics "Routing ROI"
 /// screen's feed.
 /// </summary>
@@ -618,3 +602,54 @@ public sealed record RoutingRoiPointView(
     decimal? BaselineEstimatedCostUsd,
     decimal? EstimatedNetSavingsUsd,
     bool IsExploratory);
+
+/// <summary>
+/// One model's spend on the Report Card tab (GitHub issue #111), as returned by
+/// <c>UsageAdminService.GetLearningReportCard</c>.
+/// </summary>
+/// <param name="Model">The routed model this row aggregates.</param>
+/// <param name="CostUsd">Known USD cost for <paramref name="Model"/> in the requested window.</param>
+/// <param name="Requests">How many requests contributed to this row.</param>
+public sealed record ModelSpendRowView(string Model, decimal CostUsd, long Requests);
+
+/// <summary>
+/// One letter-grade bucket of observed quality scores on the Report Card tab.
+/// </summary>
+/// <param name="Grade">The letter grade (<c>A</c> through <c>F</c>).</param>
+/// <param name="Count">How many scored comparisons landed in this bucket.</param>
+/// <param name="Percent"><paramref name="Count"/> as a percentage of every scored comparison in the window.</param>
+public sealed record GradeMixRowView(string Grade, int Count, decimal Percent);
+
+/// <summary>
+/// One model's mean quality-score delta versus the frozen untrained baseline.
+/// </summary>
+/// <param name="Model">The model that actually served the compared requests.</param>
+/// <param name="MeanDelta">
+/// Mean of observed score minus frozen-baseline predicted score. Positive means the routed answers
+/// scored better than the frozen policy was predicted to.
+/// </param>
+/// <param name="SampleSize">How many comparisons contributed to <paramref name="MeanDelta"/>.</param>
+public sealed record ModelScoreDeltaRowView(string Model, double MeanDelta, int SampleSize);
+
+/// <summary>
+/// The Report Card tab's unified spend / grade-mix / score-delta snapshot, fed from the existing
+/// usage-rollup and taxonomy-comparison stores rather than a parallel metrics stack.
+/// </summary>
+/// <param name="SpendByModel">Per-model spend, cost-descending.</param>
+/// <param name="GradeMix">Observed-score letter-grade distribution, always A–F in that order.</param>
+/// <param name="MeanScoreDelta">
+/// Unweighted mean of per-request score deltas versus the frozen baseline, or <see langword="null"/>
+/// when no comparable row exists in the window.
+/// </param>
+/// <param name="ScoredRequests">How many comparison rows carried an observed quality score.</param>
+/// <param name="ComparableRequests">How many comparison rows had both an observed and a baseline predicted score.</param>
+/// <param name="ScoreDeltaByModel">Per-model mean score delta, largest win first.</param>
+/// <param name="TotalSpendUsd">Sum of <paramref name="SpendByModel"/> costs.</param>
+public sealed record LearningReportCardView(
+    IReadOnlyList<ModelSpendRowView> SpendByModel,
+    IReadOnlyList<GradeMixRowView> GradeMix,
+    double? MeanScoreDelta,
+    int ScoredRequests,
+    int ComparableRequests,
+    IReadOnlyList<ModelScoreDeltaRowView> ScoreDeltaByModel,
+    decimal TotalSpendUsd);

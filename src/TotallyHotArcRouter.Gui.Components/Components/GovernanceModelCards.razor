@@ -31,14 +31,14 @@
             <button @onclick="ReloadAsync" class="btn btn-ghost">Retry</button>
         </div>
     }
-    else if (Cards.Count == 0)
+    else if (_cards.Count == 0)
     {
         <div class="text-xs text-slate-500 p-3">No models configured.</div>
     }
     else
     {
         <div class="grid gap-3 p-1 ls-governance-grid">
-            @foreach (var card in Cards)
+            @foreach (var card in _cards)
             {
                 <div class="rounded-lg p-3 flex flex-col gap-1.5 ds-surface-card-bordered">
                     <div class="text-sm font-semibold text-slate-200">@card.ModelName</div>
@@ -62,13 +62,13 @@
     private sealed record ModelCard(string ModelName, string ProviderKey, string ProviderModelId, string SpendDisplay);
 
     /// <summary>The cards currently rendered, rebuilt on every load and provider change.</summary>
-    private List<ModelCard> Cards { get; set; } = [];
+    private List<ModelCard> _cards = [];
 
     protected override async Task OnInitializedAsync()
     {
         // Only ProviderStore.Changed - a provider/model edit is what should re-derive the card list.
-        // UsageStore.Changed is not subscribed to: LoadRollupAsync below deliberately doesn't raise it
-        // (see its own remarks), so subscribing here would have no effect anyway.
+        // Do not subscribe to UsageStore.Changed: LoadRollupAndBuildCardsAsync uses a
+        // DateTimeOffset.UtcNow range, so a Changed raised from LoadRollupAsync would re-fetch forever.
         ProviderStore.Changed += HandleChanged;
 
         if (!ProviderStore.IsLoaded)
@@ -92,7 +92,7 @@
     }
 
     // Shared by the initial load, the provider-changed refresh, and the unreachable-state Retry button -
-    // all three need the same "re-fetch the 30-day rollup, then re-derive Cards" sequence.
+    // all three need the same "re-fetch the 30-day rollup, then re-derive _cards" sequence.
     /// <summary>
     /// Reloads providers (if unreachable) and rebuilds the card list. Implements the unreachable state's Retry
     /// button.
@@ -107,7 +107,7 @@
         await LoadRollupAndBuildCardsAsync();
     }
 
-    /// <summary>Fetches the 30-day model-grouped spend rollup and rebuilds <see cref="Cards"/> from it.</summary>
+    /// <summary>Fetches the 30-day model-grouped spend rollup and rebuilds <see cref="_cards"/> from it.</summary>
     private async Task LoadRollupAndBuildCardsAsync()
     {
         var to = BucketAlignedTo();
@@ -127,7 +127,7 @@
     }
 
     /// <summary>
-    /// Rebuilds <see cref="Cards"/> from the configured providers/models, joined against the given spend rollup
+    /// Rebuilds <see cref="_cards"/> from the configured providers/models, joined against the given spend rollup
     /// buckets.
     /// </summary>
     private void BuildCards(IReadOnlyList<UsageRollupBucketView> buckets)
@@ -137,7 +137,7 @@
         var spendByProviderModelId = buckets.ToDictionary(
             keySelector: b => b.GroupKey, elementSelector: b => (b.CostUsd, b.UnpricedRequests), comparer: StringComparer.OrdinalIgnoreCase);
 
-        Cards = ProviderStore.Providers
+        _cards = ProviderStore.Providers
             .SelectMany(p => p.Models.Select(m => new ModelCard(
                 ModelName: m.ModelName,
                 ProviderKey: p.Key,

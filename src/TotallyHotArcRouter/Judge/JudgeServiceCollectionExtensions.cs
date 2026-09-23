@@ -13,15 +13,15 @@ internal static class JudgeServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the geval shadow judge (docs/router/geval-shadow-scoring-plan.md Phase G1) and the Phase Q3
-    /// portfolio graders: their caches, queues, clients, stores, dispatchers, and the availability flags
-    /// that promote them from shadow dispatchers to real quality-aggregator contributors, fanned into the
-    /// aggregator's single <see cref="IAsyncGraderDispatcher"/> seam via <see cref="CompositeAsyncGraderDispatcher"/>.
+    /// portfolio graders: their caches, one shared queue, clients, stores, the parameterized dispatcher
+    /// and drain, and the availability flags that promote them from shadow dispatchers to real
+    /// quality-aggregator contributors through the aggregator's single <see cref="IAsyncGraderDispatcher"/>
+    /// seam.
     /// </summary>
     internal static IServiceCollection AddJudge(this IServiceCollection services)
     {
-        // docs/router/geval-shadow-scoring-plan.md Phase G1: the shadow judge. Every collaborator
-        // (cache, queue, client, store, dispatcher) is registered unconditionally - PendingResponseTextCache
-        // and JudgeShadowScoreQueue are inert until something writes to them, and
+        // Every collaborator (cache, queue, client, store, dispatcher) is registered unconditionally -
+        // PendingResponseTextCache and GraderQueue are inert until something writes to them, and
         // SqliteJudgeShadowScoreStore shares RouterMemoryDatabase's file/schema, already created
         // unconditionally above.
         //
@@ -31,27 +31,29 @@ internal static class JudgeServiceCollectionExtensions
         // the System Settings window, and its backbone is whichever free model the operator set up in
         // the Providers screen (JudgeModelSelector), never a hardcoded endpoint.
         //
-        // Enabled is therefore a *live* flag, which is why JudgeShadowScoreDispatcher is started
-        // unconditionally by QualityScoreAggregator.SubmitAsync and gates per call instead - a
-        // construction-time check could never see a later toggle. Same reasoning at the drain worker,
-        // the retention loop, and ProxyMiddleware's response-text retention site.
+        // Enabled is therefore a *live* flag, which is why GraderDispatcher is started unconditionally
+        // by QualityScoreAggregator.SubmitAsync and gates per call instead - a construction-time check
+        // could never see a later toggle. Same reasoning at the drain worker, the retention loop, and
+        // ProxyMiddleware's response-text retention site.
         services.AddOptions<JudgeOptions>()
             .ValidateDataAnnotations();
         services.AddSingleton<IConfigureOptions<JudgeOptions>, JudgeSettingsConfigureOptions>();
         services.AddHttpClient(GEvalJudgeClient.HttpClientName);
         services.AddSingleton<PendingResponseTextCache>();
         services.AddSingleton<PendingPromptCache>();
-        services.AddSingleton<IJudgeShadowScoreQueue, JudgeShadowScoreQueue>();
+        services.AddSingleton<IGraderQueue, GraderQueue>();
         services.AddSingleton<JudgeModelSelector>();
         services.AddSingleton<IJudgeClient, GEvalJudgeClient>();
+        services.AddSingleton<IPortfolioGraderClient>(sp =>
+            new JudgeGraderClient(sp.GetRequiredService<IJudgeClient>()));
         services.AddSingleton<IJudgeShadowScoreStore, SqliteJudgeShadowScoreStore>();
-        services.AddSingleton<JudgeShadowScoreDispatcher>();
+        services.AddSingleton<GraderDispatcher>();
+        services.AddSingleton<IAsyncGraderDispatcher>(sp => sp.GetRequiredService<GraderDispatcher>());
 
-        // docs/router/grader-reliability-plan.md Phase Q4: per-grader score persistence, generalizing
-        // judge_shadow_scores to the whole portfolio (plus the static analyzer). PendingResponseLengthCache
-        // and PendingGraderBackboneCache are inert until something writes to them, same posture as
-        // PendingResponseTextCache above.
-        services.AddSingleton<PendingResponseLengthCache>();
+        // docs/router/grader-reliability-plan.md Phase Q4: per-grader score persistence. The length
+        // cache and PendingGraderBackboneCache are inert until something writes to them, same posture
+        // as PendingResponseTextCache above.
+        services.AddSingleton(sp => new PendingValueCache<int>(sp.GetRequiredService<IOptions<JudgeOptions>>()));
         services.AddSingleton<PendingGraderBackboneCache>();
         services.AddSingleton<IGraderScoreStore, SqliteGraderScoreStore>();
         services.AddSingleton<GraderScoreRecordObserver>();
@@ -75,24 +77,14 @@ internal static class JudgeServiceCollectionExtensions
 
         AddPortfolioGraders(services);
 
-        // The aggregator takes exactly one IAsyncGraderDispatcher; this fans it out to the judge's own
-        // dispatcher and the portfolio dispatcher below rather than letting either registration silently
-        // shadow the other.
-        services.AddSingleton<IAsyncGraderDispatcher>(sp => new CompositeAsyncGraderDispatcher(
-            dispatchers:
-            [
-                sp.GetRequiredService<JudgeShadowScoreDispatcher>(),
-                sp.GetRequiredService<PortfolioGraderDispatcher>()
-            ],
-            logger: sp.GetRequiredService<ILogger<CompositeAsyncGraderDispatcher>>()));
-
         return services;
     }
 
     /// <summary>
     /// Registers Phase Q3's CodeJudge/ICE-Score/RACE portfolio: shares the judge's backbone selection
-    /// (<see cref="JudgeModelSelector"/>) and pending-text caches, and is configured the same
-    /// stored-override-first way as the judge via <see cref="PortfolioGraderSettingsConfigureOptions"/>.
+    /// (<see cref="JudgeModelSelector"/>), pending-text caches, queue, dispatcher, and drain, and is
+    /// configured the same stored-override-first way as the judge via
+    /// <see cref="PortfolioGraderSettingsConfigureOptions"/>.
     /// </summary>
     private static void AddPortfolioGraders(IServiceCollection services)
     {
@@ -101,12 +93,10 @@ internal static class JudgeServiceCollectionExtensions
         services.AddHttpClient(CodeJudgeGraderClient.HttpClientNameConstant);
         services.AddHttpClient(IceScoreGraderClient.HttpClientNameConstant);
         services.AddHttpClient(RaceGraderClient.HttpClientNameConstant);
-        services.AddSingleton<IPortfolioGraderQueue, PortfolioGraderQueue>();
         services.AddSingleton<IPortfolioGraderClient, CodeJudgeGraderClient>();
         services.AddSingleton<IPortfolioGraderClient, IceScoreGraderClient>();
         services.AddSingleton<IPortfolioGraderClient, RaceGraderClient>();
-        services.AddSingleton<PortfolioGraderDispatcher>();
-        services.AddHostedService<PortfolioGraderDrainService>();
+        services.AddHostedService<GraderDrainService>();
 
         // Promotes the portfolio from shadow dispatchers to real contributors, mirroring JudgeAvailability's
         // registration above.

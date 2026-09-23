@@ -1,5 +1,4 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Charts;
 
 namespace TotallyHot.ArcRouter.Gui.Models;
@@ -7,9 +6,6 @@ namespace TotallyHot.ArcRouter.Gui.Models;
 /// <summary>Severity of a single routing-decision log step.</summary>
 public enum StepStatus
 {
-    /// <summary>The step succeeded normally.</summary>
-    Ok,
-
     /// <summary>The step completed but flags something worth the user's attention.</summary>
     Warn,
 
@@ -19,29 +15,6 @@ public enum StepStatus
 
 /// <summary>One step in the routing decision log shown in the Live Stream inspector.</summary>
 public sealed record RoutingStep(StepStatus Status, string Message);
-
-/// <summary>A single routing decision shown in the Live Stream tab.</summary>
-public sealed record RoutingEntry(
-    string Id,
-    string SessionId,
-    string TraceId,
-    string Agent,
-    string Model,
-    bool IsFallback,
-    int PromptTokens,
-    int CompletionTokens,
-    decimal ActualCost,
-    decimal WorstCaseCost,
-    decimal SavingsAmount,
-    decimal SavingsPercent,
-    string Timestamp,
-    IReadOnlyList<RoutingStep> RoutingSteps);
-
-/// <summary>A point on the cumulative savings time series.</summary>
-public sealed record CostDataPoint(string Time, decimal Cumulative);
-
-/// <summary>Cost-reduction percentage and absolute savings for one agent.</summary>
-public sealed record AgentRoi(string Agent, decimal Reduction, decimal Savings);
 
 /// <summary>Prompt/completion token volume for one time slot.</summary>
 public sealed record TokenBucket(string Slot, decimal Prompt, decimal Completion);
@@ -69,20 +42,19 @@ public sealed record ConversationTurn(
     string? ResponseSummary = null,
     bool IsFallback = false,
     // Real UTC instant of the turn (the display `Timestamp` above is a lossy "HH:mm:ss" string).
-    // Used by the Cost Analytics tab to bucket turns onto a time axis. Optional/defaulted so the
-    // hand-written mock turns below and any older call sites keep compiling; live turns get the real
-    // value from LiveConversationMapper.
+    // Used by the Cost Analytics tab to bucket turns onto a time axis. Optional/defaulted so test
+    // fixtures and older call sites keep compiling; live turns get the real value from
+    // LiveConversationMapper.
     DateTimeOffset TimestampUtc = default,
     // How TotalCost was arrived at (a Telemetry.CostConfidence name, e.g. "Catalog", "Unknown"), or null
-    // for a mock turn with no confidence concept. Backs the turn card's cost-stat confidence indicator
+    // when the source has no confidence concept. Backs the turn card's cost-stat confidence indicator
     // (docs/router/token-tracking-implementation-plan.md Phase 3, §5.6).
     string? CostConfidence = null,
     // The client's literal requested model, the model that actually served, and why they differ (a
-    // Telemetry.RoutingSubstitutionReason name), or null for a mock turn with no live-routing concept.
+    // Telemetry.RoutingSubstitutionReason name), or null when the source has no live-routing concept.
     // Plumbed through by Phase M2 (docs/router/orchestrator-live-path-plan.md §M2.2) and rendered by
     // Phase M3.1: LiveConversationMapper.BuildRoutingSteps turns a visible reason (anything but None or
-    // AutoSelect) into the Live Stream inspector's substitution warning step, and TurnCard extends its
-    // fallback styling/accessible label to the same condition.
+    // AutoSelect) into the Live Stream inspector's substitution warning step.
     string? RequestedModel = null,
     string? RoutedModel = null,
     string? SubstitutionReason = null);
@@ -122,66 +94,16 @@ public sealed record Conversation(
     bool IsUsedForTraining = false);
 
 /// <summary>
-/// Hard-coded mock data for the dashboard. The dashboard is not yet wired up to the live TotallyHot.ArcRouter
-/// proxy; replacing this class with real telemetry is the intended integration seam.
+/// Offline fallback fixtures for dashboard tabs that still need a corpus when the proxy has sent no
+/// live telemetry. Sessions no longer reads this class: that tab shows live and persisted conversations
+/// only (empty until the proxy or history store supplies them). Cost Analytics uses
+/// <see cref="BuildMetricHistory"/> when no live turns exist; Model Distribution uses
+/// <see cref="TokenBuckets"/> and <see cref="ModelShares"/> the same way. Tool Steps and Context Buffer
+/// keep these fallbacks until they have live sources.
 /// </summary>
 public static class MockData
 {
-    /// <summary>The manifest resource name <c>DashboardMockData.json</c> is embedded under.</summary>
-    private const string MockDataResourceName = "TotallyHot.ArcRouter.Gui.Models.DashboardMockData.json";
-
-    /// <summary>
-    /// The literal fixture data backing <see cref="Conversations"/> and <see cref="Entries"/>, lazily
-    /// deserialized once from the embedded <c>DashboardMockData.json</c> resource rather than kept as C#
-    /// object-initializer literals - the JSON shape is identical, but ~430 lines of literal test data no
-    /// longer has to be read (or recompiled) every time this source file is opened for its real logic,
-    /// <see cref="BuildMetricHistory"/>.
-    /// </summary>
-    private static readonly Lazy<MockDataFixture> Fixture = new(LoadFixture);
-
-    /// <summary>
-    /// Deserialization options for the mock data fixture: <see cref="StepStatus"/> is stored as its enum-member name,
-    /// not a number.
-    /// </summary>
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        Converters = { new JsonStringEnumConverter() }
-    };
-
-    /// <summary>Mock monthly cost trend for the Cost Analytics tab.</summary>
-    public static readonly IReadOnlyList<CostDataPoint> CostData =
-    [
-        new(Time: "Jun 1", 0m),
-        new(Time: "Jun 3", 4.20m),
-        new(Time: "Jun 5", 9.80m),
-        new(Time: "Jun 7", 17.60m),
-        new(Time: "Jun 9", 26.10m),
-        new(Time: "Jun 11", 38.40m),
-        new(Time: "Jun 13", 51.20m),
-        new(Time: "Jun 15", 67.80m),
-        new(Time: "Jun 17", 82.50m),
-        new(Time: "Jun 19", 99.10m),
-        new(Time: "Jun 21", 112.40m),
-        new(Time: "Jun 23", 124.70m),
-        new(Time: "Jun 25", 133.20m),
-        new(Time: "Jun 27", 138.90m),
-        new(Time: "Jun 29", 141.50m),
-        new(Time: "Jul 1", 142.36m)
-    ];
-
-    /// <summary>Mock per-agent ROI figures for the Cost Analytics tab.</summary>
-    public static readonly IReadOnlyList<AgentRoi> AgentRoi =
-    [
-        new(Agent: "Log Anomaly Detector", 91.67m, 38.20m),
-        new(Agent: "SQL Query Optimizer", 87.69m, 22.40m),
-        new(Agent: "Data Analyst Wrapper", 85.12m, 41.80m),
-        new(Agent: "Customer Support NLP", 84.30m, 18.60m),
-        new(Agent: "Summarization Pipeline", 79.50m, 12.40m),
-        new(Agent: "Embedding Generator", 78.20m, 5.80m),
-        new(Agent: "Code Review Bot", 64.10m, 2.90m)
-    ];
-
-    /// <summary>Mock daily prompt/completion token volumes for the Cost Analytics tab.</summary>
+    /// <summary>Mock daily prompt/completion token volumes for the Model Distribution tab.</summary>
     public static readonly IReadOnlyList<TokenBucket> TokenBuckets =
     [
         new(Slot: "Mon", 2_840_000m, 980_000m),
@@ -192,6 +114,38 @@ public static class MockData
         new(Slot: "Sat", 1_840_000m, 620_000m),
         new(Slot: "Sun", 1_240_000m, 380_000m)
     ];
+
+    /// <summary>Mock per-model spend for the Report Card tab's offline/no-proxy fallback.</summary>
+    public static readonly IReadOnlyList<ModelSpendRowView> ReportCardSpend =
+    [
+        new(Model: "gpt-4o-mini", 12.40m, 84),
+        new(Model: "claude-3-haiku", 8.10m, 51),
+        new(Model: "gemini-1.5-flash", 3.20m, 37)
+    ];
+
+    /// <summary>Mock A–F grade mix for the Report Card tab's offline/no-proxy fallback.</summary>
+    public static readonly IReadOnlyList<GradeMixRowView> ReportCardGradeMix =
+    [
+        new(Grade: "A", 42, 42.0m),
+        new(Grade: "B", 31, 31.0m),
+        new(Grade: "C", 18, 18.0m),
+        new(Grade: "D", 6, 6.0m),
+        new(Grade: "F", 3, 3.0m)
+    ];
+
+    /// <summary>Mock per-model score delta for the Report Card tab's offline/no-proxy fallback.</summary>
+    public static readonly IReadOnlyList<ModelScoreDeltaRowView> ReportCardScoreDelta =
+    [
+        new(Model: "gpt-4o-mini", 0.082, 40),
+        new(Model: "claude-3-haiku", 0.031, 28),
+        new(Model: "gemini-1.5-flash", -0.019, 22)
+    ];
+
+    /// <summary>Mock mean score delta for the Report Card tab's offline/no-proxy fallback.</summary>
+    public const double ReportCardMeanScoreDelta = 0.041;
+
+    /// <summary>Mock scored-request count for the Report Card tab's offline/no-proxy fallback.</summary>
+    public const int ReportCardScoredRequests = 100;
 
     /// <summary>Mock per-model token-volume market share for the Model Distribution tab.</summary>
     public static readonly IReadOnlyList<ModelShare> ModelShares =
@@ -238,33 +192,6 @@ public static class MockData
         (75 * 24 * 60, 5, 25), // all-time
         (110 * 24 * 60, 7, 14) // all-time
     ];
-
-    /// <summary>Mock conversation history for the Console tab.</summary>
-    public static IReadOnlyList<Conversation> Conversations => Fixture.Value.Conversations;
-
-    /// <summary>Mock routing decisions for the Live Stream tab.</summary>
-    public static IReadOnlyList<RoutingEntry> Entries => Fixture.Value.Entries;
-
-    /// <summary>
-    /// Reads and deserializes the <c>DashboardMockData.json</c> resource embedded in this assembly under
-    /// <see cref="MockDataResourceName"/>.
-    /// </summary>
-    /// <returns>The deserialized fixture data.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// The embedded resource is missing, or deserializes to <see langword="null"/> - both indicate the
-    /// resource was not packaged correctly rather than a runtime condition callers can recover from.
-    /// </exception>
-    private static MockDataFixture LoadFixture()
-    {
-        var assembly = typeof(MockData).Assembly;
-        using var stream = assembly.GetManifestResourceStream(MockDataResourceName)
-                           ?? throw new InvalidOperationException(
-                               $"Embedded resource '{MockDataResourceName}' was not found in {assembly.FullName}.");
-
-        return JsonSerializer.Deserialize<MockDataFixture>(utf8Json: stream, options: SerializerOptions)
-               ?? throw new InvalidOperationException(
-                   $"Embedded resource '{MockDataResourceName}' deserialized to null.");
-    }
 
     /// <summary>
     /// Builds a deterministic, timestamped corpus of turn-level metrics anchored to <paramref name="now"/>,
@@ -344,11 +271,4 @@ public static class MockData
 
         return points;
     }
-
-    /// <summary>The deserialization target for <c>DashboardMockData.json</c>'s top-level shape.</summary>
-    /// <param name="Conversations">Deserializes into <see cref="MockData.Conversations"/>.</param>
-    /// <param name="Entries">Deserializes into <see cref="MockData.Entries"/>.</param>
-    private sealed record MockDataFixture(
-        IReadOnlyList<Conversation> Conversations,
-        IReadOnlyList<RoutingEntry> Entries);
 }

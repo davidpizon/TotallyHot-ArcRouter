@@ -1,14 +1,13 @@
 using AwesomeAssertions;
 using TotallyHot.ArcRouter.Gui.Services;
-using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
 /// Tests for the parts of <see cref="LiveDataStore"/> that don't require a live gRPC server: initial
 /// property state, <see cref="LiveDataStore.ClearLogLines"/>, and the start/dispose lifecycle. The
-/// background <c>StreamEvents</c> loop itself targets an address nothing listens on, so it fails fast
-/// and retries quietly in the background - consistent with the class's own "not unit-tested" remarks
+/// background <c>StreamEvents</c> loop itself is backed by a stub that fails every RPC as unavailable,
+/// so it retries quietly in the background - consistent with the class's own "not unit-tested" remarks
 /// for the networking path; these tests only cover the surrounding, deterministic surface.
 /// </summary>
 public sealed class LiveDataStoreTests
@@ -18,7 +17,7 @@ public sealed class LiveDataStoreTests
     [Fact]
     public void Conversations_and_LogLines_start_empty()
     {
-        var store = new LiveDataStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
 
         store.Conversations.Should().BeEmpty();
         store.LogLines.Should().BeEmpty();
@@ -27,7 +26,7 @@ public sealed class LiveDataStoreTests
     [Fact]
     public void ClearLogLines_raises_LogLinesChanged()
     {
-        var store = new LiveDataStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
         var raised = false;
         store.LogLinesChanged += () => raised = true;
 
@@ -40,7 +39,7 @@ public sealed class LiveDataStoreTests
     [Fact]
     public async Task StartAsync_returns_immediately_and_can_be_disposed_right_away()
     {
-        var store = new LiveDataStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
 
         await store.StartAsync(TestContext.Current.CancellationToken);
         await store.DisposeAsync();
@@ -49,7 +48,7 @@ public sealed class LiveDataStoreTests
     [Fact]
     public async Task StartAsync_called_twice_cancels_the_first_loop_instead_of_leaking_it()
     {
-        var store = new LiveDataStore(channelProvider: new NativeRouterChannelProvider(UnreachableAddress));
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
 
         await store.StartAsync(TestContext.Current.CancellationToken);
         await store.StartAsync(TestContext.Current.CancellationToken);

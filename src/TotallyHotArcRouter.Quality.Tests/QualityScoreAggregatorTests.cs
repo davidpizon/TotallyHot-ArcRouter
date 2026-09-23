@@ -100,14 +100,14 @@ public class QualityScoreAggregatorTests
     }
 
     [Fact]
-    public async Task CompleteWithJudgeAsync_BlendsAndWritesExactlyOnce()
+    public async Task CompleteGraderAsync_JudgeKey_BlendsAndWritesExactlyOnce()
     {
         var observer = new RecordingObserver();
         var aggregator = Create(observer: observer, true);
         await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
 
-        var completed = await aggregator.CompleteWithJudgeAsync(correlationId: "corr-1", 0.0,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var completed = await aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge,
+            score: 0.0, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(completed);
         var written = Assert.Single(observer.Observed);
@@ -122,7 +122,7 @@ public class QualityScoreAggregatorTests
     // The race this design exists to prevent: a judge grade arriving after a sweep already wrote the
     // result must be discarded, not written as a second observation.
     [Fact]
-    public async Task CompleteWithJudgeAsync_AfterTheJoinClosed_WritesNothingMore()
+    public async Task CompleteGraderAsync_JudgeKey_AfterTheJoinClosed_WritesNothingMore()
     {
         var observer = new RecordingObserver();
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
@@ -133,21 +133,21 @@ public class QualityScoreAggregatorTests
         await aggregator.SweepExpiredAsync(TestContext.Current.CancellationToken);
         Assert.Single(observer.Observed);
 
-        var completed = await aggregator.CompleteWithJudgeAsync(correlationId: "corr-1", 0.9,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var completed = await aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge,
+            score: 0.9, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(completed);
         Assert.Single(observer.Observed);
     }
 
     [Fact]
-    public async Task CompleteWithJudgeAsync_UnknownCorrelationId_WritesNothing()
+    public async Task CompleteGraderAsync_JudgeKey_UnknownCorrelationId_WritesNothing()
     {
         var observer = new RecordingObserver();
         var aggregator = Create(observer: observer, true);
 
-        Assert.False(await aggregator.CompleteWithJudgeAsync(correlationId: "never-seen", 0.9,
-            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await aggregator.CompleteGraderAsync(correlationId: "never-seen", graderKey: GraderKeys.Judge,
+            score: 0.9, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Empty(observer.Observed);
     }
 
@@ -166,7 +166,7 @@ public class QualityScoreAggregatorTests
         Assert.Empty(observer.Observed);
         Assert.Equal(1, actual: aggregator.PendingCount);
 
-        await aggregator.CompleteWithJudgeAsync(correlationId: "corr-1", 0.5,
+        await aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge, score: 0.5,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Empty(observer.Observed); // CodeJudge still pending.
 
@@ -262,14 +262,14 @@ public class QualityScoreAggregatorTests
     }
 
     [Fact]
-    public async Task AbandonJudgeAsync_ReleasesTheHeldResultOnceWithTheGivenReason()
+    public async Task AbandonGraderAsync_JudgeKey_ReleasesTheHeldResultOnceWithTheGivenReason()
     {
         var observer = new RecordingObserver();
         var aggregator = Create(observer: observer, true);
         await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
 
-        var released = await aggregator.AbandonJudgeAsync(correlationId: "corr-1", reason: "judge-abstained",
-            cancellationToken: TestContext.Current.CancellationToken);
+        var released = await aggregator.AbandonGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge,
+            reason: "judge-abstained", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(released);
         var observed = Assert.Single(observer.Observed);
@@ -280,14 +280,14 @@ public class QualityScoreAggregatorTests
     // Phase Q1: the per-grader reasons map must record the judge's own reason independently of the
     // single legacy field, which a later write could otherwise overwrite for a different cause.
     [Fact]
-    public async Task AbandonJudgeAsync_StampsThePerGraderReasonAlongsideTheLegacyField()
+    public async Task AbandonGraderAsync_JudgeKey_StampsThePerGraderReasonAlongsideTheLegacyField()
     {
         var observer = new RecordingObserver();
         var aggregator = Create(observer: observer, true);
         await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
 
-        await aggregator.AbandonJudgeAsync(correlationId: "corr-1", reason: "judge-disabled",
-            cancellationToken: TestContext.Current.CancellationToken);
+        await aggregator.AbandonGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge,
+            reason: "judge-disabled", cancellationToken: TestContext.Current.CancellationToken);
 
         var observed = Assert.Single(observer.Observed);
         Assert.True(observed.GraderDegradedReasons.TryGetValue(key: "judge", value: out var reason));
@@ -326,15 +326,15 @@ public class QualityScoreAggregatorTests
     }
 
     [Fact]
-    public async Task AbandonJudgeAsync_ThenJudgeArrives_StillOnlyOneObservation()
+    public async Task AbandonGraderAsync_JudgeKey_ThenJudgeArrives_StillOnlyOneObservation()
     {
         var observer = new RecordingObserver();
         var aggregator = Create(observer: observer, true);
         await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
 
-        await aggregator.AbandonJudgeAsync(correlationId: "corr-1", reason: "judge-abstained",
-            cancellationToken: TestContext.Current.CancellationToken);
-        await aggregator.CompleteWithJudgeAsync(correlationId: "corr-1", 0.9,
+        await aggregator.AbandonGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge,
+            reason: "judge-abstained", cancellationToken: TestContext.Current.CancellationToken);
+        await aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge, score: 0.9,
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Single(observer.Observed);
@@ -445,7 +445,7 @@ public class QualityScoreAggregatorTests
 
         // Both paths race for the same held entry; only the one that wins the removal may write.
         await Task.WhenAll(
-            aggregator.CompleteWithJudgeAsync(correlationId: "corr-1", 0.9,
+            aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge, score: 0.9,
                 cancellationToken: TestContext.Current.CancellationToken),
             aggregator.SweepExpiredAsync(TestContext.Current.CancellationToken));
 
@@ -522,7 +522,7 @@ public class QualityScoreAggregatorTests
     }
 
     /// <summary>
-    /// A dispatcher that calls back into <see cref="Aggregator"/>'s <see cref="QualityScoreAggregator.CompleteWithJudgeAsync"/>
+    /// A dispatcher that calls back into <see cref="Aggregator"/>'s <see cref="QualityScoreAggregator.CompleteGraderAsync"/>
     /// synchronously, before returning its own accepted set - proving <see cref="QualityScoreAggregator.SubmitAsync"/>
     /// makes the held entry visible before dispatching, since this callback would otherwise find nothing to
     /// complete.
@@ -539,8 +539,8 @@ public class QualityScoreAggregatorTests
             CancellationToken cancellationToken = default)
         {
             CompletedSynchronously = Aggregator is not null && await Aggregator
-                .CompleteWithJudgeAsync(correlationId: result.RequestCorrelationId, 0.4,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                .CompleteGraderAsync(correlationId: result.RequestCorrelationId, graderKey: GraderKeys.Judge,
+                    score: 0.4, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             return new HashSet<string>(pendingGraderKeys, StringComparer.OrdinalIgnoreCase);
         }

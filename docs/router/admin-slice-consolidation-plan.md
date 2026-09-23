@@ -34,7 +34,7 @@ admin knob is the same **six-file vertical slice across three assemblies**, and 
 | Layer | Count | Lines | Consolidated? |
 |---|---|---|---|
 | `*AdminGrpcService` (router) | 11 | 1,783 | No — left alone, each is genuinely per-feature |
-| `*AdminClient` + `I*AdminClient` (`Gui.Telemetry`) | 11 | 2,666 | **Was half** — `GrpcAdminClientBase` had taken the channel/dispose/wrap scaffolding |
+| `*AdminClient` + `I*AdminClient` (`Gui.Telemetry`) | 11 | 2,666 | **Was half** — `GrpcAdminClientBase` had taken the channel/dispose/wrap scaffolding (channel ownership and disposal since removed: clients are built over the shared call invoker, see [ADR-0010](../adr/0010-collapse-the-per-feature-admin-slice-onto-shared-seams.md)) |
 | `*AdminException` subclasses | **12** | ~150 | **Now deleted** — every one added zero behavior over `GrpcAdminException` |
 | `*Store` (`Gui/Services`) | 11 | ~2,400 | **Now on `AdminStoreBase<TClient>`** |
 | `ProxyServer` ctor + endpoint blocks | 11 | ~200 | **Now an `IAdminServiceModule` registry** |

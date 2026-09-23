@@ -36,6 +36,12 @@ public interface IProviderConfigStore
     ProviderConfigSnapshot Snapshot { get; }
 
     /// <summary>Raised after a successful edit has been persisted and the snapshot swapped.</summary>
+    /// <remarks>
+    /// Reported by <c>EventNeverSubscribedTo.Global</c>: subscribers reach this through the implementing
+    /// type rather than this interface, so the scan sees no subscription on the declaration. It is
+    /// subscribed - unlike the three genuinely-unsubscribed events this PR removed.
+    /// </remarks>
+    // ReSharper disable once EventNeverSubscribedTo.Global
     event Action? Changed;
 
     /// <summary>
@@ -45,6 +51,12 @@ public interface IProviderConfigStore
     /// The supplied configuration is invalid (see
     /// <see cref="ModelRoutingOptions.EnsureValid"/>).
     /// </exception>
+    /// <remarks>
+    /// Reported by <c>UnusedMemberInSuper.Global</c>: every call reaches this through the implementing type
+    /// rather than this interface. It is not dead - see the declaration's callers. Narrowing the interface
+    /// to match today's call sites is a design change, not a scan fix (ADR-0008's stop rules).
+    /// </remarks>
+    // ReSharper disable once UnusedMemberInSuper.Global
     Task ReplaceAsync(ModelRoutingOptions next, CancellationToken cancellationToken = default);
 
     /// <summary>Adds or replaces a single provider (by key, case-insensitive), keeping the model list unchanged.</summary>

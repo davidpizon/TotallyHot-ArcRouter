@@ -29,11 +29,11 @@ internal sealed class RequestTelemetryPublisher
     private readonly IOptionsMonitor<PortfolioGraderOptions>? _portfolioGraderOptionsMonitor;
     private readonly ILogger _logger;
     private readonly PendingPromptCache? _pendingPromptCache;
-    private readonly PendingRequestCostCache? _pendingRequestCostCache;
-    private readonly PendingRequestProvenanceCache? _pendingRequestProvenanceCache;
-    private readonly PendingResponseLengthCache? _pendingResponseLengthCache;
+    private readonly PendingValueCache<decimal>? _pendingRequestCostCache;
+    private readonly PendingValueCache<PendingRequestProvenance>? _pendingRequestProvenanceCache;
+    private readonly PendingValueCache<int>? _pendingResponseLengthCache;
     private readonly PendingResponseTextCache? _pendingResponseTextCache;
-    private readonly PendingTaskEmbeddingCache? _pendingTaskEmbeddingCache;
+    private readonly PendingValueCache<float[]>? _pendingTaskEmbeddingCache;
     private readonly IModelPriceLookup? _priceLookup;
     private readonly IQualityIngress? _qualityIngress;
     private readonly IResponseTextExtractor _responseTextExtractor;
@@ -66,9 +66,9 @@ internal sealed class RequestTelemetryPublisher
         IModelPriceLookup? priceLookup,
         IBudgetEnforcer? budgetStore,
         IUsageLedger? usageLedger,
-        PendingTaskEmbeddingCache? pendingTaskEmbeddingCache,
-        PendingRequestCostCache? pendingRequestCostCache,
-        PendingRequestProvenanceCache? pendingRequestProvenanceCache,
+        PendingValueCache<float[]>? pendingTaskEmbeddingCache,
+        PendingValueCache<decimal>? pendingRequestCostCache,
+        PendingValueCache<PendingRequestProvenance>? pendingRequestProvenanceCache,
         PendingResponseTextCache? pendingResponseTextCache,
         ITranscriptStore? transcriptStore,
         IOptionsMonitor<RoutingOptions>? routingOptionsMonitor,
@@ -76,7 +76,7 @@ internal sealed class RequestTelemetryPublisher
         decimal selfHostedRouterPricePerMillionTokens,
         PendingPromptCache? pendingPromptCache = null,
         IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null,
-        PendingResponseLengthCache? pendingResponseLengthCache = null)
+        PendingValueCache<int>? pendingResponseLengthCache = null)
     {
         _logger = logger;
         _sessionIdResolver = sessionIdResolver;
@@ -626,16 +626,16 @@ internal sealed class RequestTelemetryPublisher
         // computed taskEmbedding well before session/turn resolution ran, so it could not key this itself.
         // Recorded here, immediately once both halves exist, rather than passed to RequestInterceptor.
         if (taskEmbedding is not null)
-            _pendingTaskEmbeddingCache?.Set(correlationId: correlationId, embedding: taskEmbedding);
+            _pendingTaskEmbeddingCache?.Set(correlationId, taskEmbedding);
 
         // docs/router/self-organizing-classification-plan.md Phase T1c: mirrors the embedding cache
         // Set above exactly - same correlation id, same "this is the earliest point the value is known
         // alongside the correlation id" reasoning - so EmbeddingMemoryScoreObserver can recover the real
         // cost and provenance once the verifier score arrives instead of writing cost 0.0 / certain
         // non-exploratory provenance unconditionally.
-        _pendingRequestCostCache?.Set(correlationId: correlationId, cost: estimatedCostUsd ?? 0m);
-        _pendingRequestProvenanceCache?.Set(correlationId: correlationId, isExploratory: isExploratory,
-            propensity: propensity, dimension: classification?.Dimension);
+        _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
+        _pendingRequestProvenanceCache?.Set(correlationId,
+            new PendingRequestProvenance(isExploratory, propensity, classification?.Dimension));
 
         // docs/router/geval-shadow-scoring-plan.md §Raw-text preservation: the response text is already in
         // hand from the TryExtractText call above (responseSummary's source) - this adds retention only,
@@ -654,12 +654,12 @@ internal sealed class RequestTelemetryPublisher
         // static analyzer's GraderKeys.Analysis score always fires and deserves a verbosity-skew row too,
         // regardless of whether any LLM grader is currently live.
         if (responseSummary is not null)
-            _pendingResponseLengthCache?.Set(correlationId: correlationId, length: responseText.Length);
+            _pendingResponseLengthCache?.Set(correlationId, responseText.Length);
 
         // Mirrors the response-text retention immediately above, for the other half of the pair every LLM
         // grader needs to grade against a requirement rather than in isolation
         // (docs/research/code-quality-metrics-assessment.md §1). Gated the same way.
-        if (!string.IsNullOrEmpty(newestUserMessage) && AnyLlmGraderEnabled())
+        if (GraderQuestionText.IsPresent(newestUserMessage) && AnyLlmGraderEnabled())
             _pendingPromptCache?.Set(correlationId: correlationId, prompt: newestUserMessage);
 
         return (newestUserMessage, requestSummary, responseSummary, responseText, correlationId);

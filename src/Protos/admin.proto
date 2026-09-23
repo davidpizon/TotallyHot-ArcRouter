@@ -2,27 +2,23 @@ syntax = "proto3";
 
 package TotallyHot.ArcRouter.admin.v1;
 
-// docs/router/tracked-todos.md #7: the REST->gRPC migration for the Governance UI's provider/usage admin
-// surfaces. A separate file from telemetry.proto (and a separate csharp_namespace) rather than more
-// services appended there: TotallyHotArcRouter.Gui.Admin - the plain net10.0 library hosting
-// ProviderAdminClient/UsageQueryClient - deliberately does not reference TotallyHotArcRouter.Gui.Telemetry
-// (see that project's own csproj comment), so it compiles its own copy of whatever .proto it needs. When
-// that copy shared telemetry.proto's csharp_namespace, the two independently-compiled assemblies produced
-// identically-named types (TelemetryEvent, TelemetryService, etc.) in the same namespace, which the MAUI
-// TotallyHotArcRouter.Gui project - referencing both libraries for its telemetry stream and its admin
-// surface - could not resolve (CS0433, ambiguous type). A distinct package/csharp_namespace here means the
-// two compiled outputs never collide, so both libraries keep their independence.
+// docs/router/tracked-todos.md #7: the Governance UI's provider/usage admin gRPC-Web surface. A
+// separate file from telemetry.proto (and a separate csharp_namespace) rather than more services
+// appended there: TotallyHotArcRouter.Gui.Admin compiles its own copy of whatever .proto it needs
+// and does not reference TotallyHotArcRouter.Gui.Telemetry (see that project's own csproj comment).
+// When that copy shared telemetry.proto's csharp_namespace, the two independently-compiled assemblies
+// produced identically-named types (TelemetryEvent, TelemetryService, etc.) in the same namespace,
+// which any project that referenced both libraries (the WASM host via Gui.Components, formerly the
+// MAUI TotallyHotArcRouter.Gui) could not resolve (CS0433). A distinct package/csharp_namespace here
+// means the two compiled outputs never collide.
 option csharp_namespace = "TotallyHot.ArcRouter.Admin.Contract";
 
 import "google/protobuf/timestamp.proto";
 
 // docs/router/tracked-todos.md #7: the Governance UI's Providers card management plane - provider/model
 // CRUD, budgets, discovery, endpoint capability scanning, price overrides, rate-limit history, and
-// secrets. Originally migrated off the plain-HTTP /admin/* REST surface (ProviderAdminEndpoints), which
-// shared the LLM-forwarding proxy port; that REST surface and the dedicated gRPC-only port it moved onto
-// were both later deleted/retired (web GUI migration plan Phases P2/P9) once gRPC-Web gave the browser
-// dashboard direct access to this same service on the router's one web port - there is no REST admin
-// surface left to keep parity with. Provider/model mutations
+// secrets. Served over gRPC-Web on the router's web port (web GUI migration plan Phases P2/P9 retired
+// the REST /admin/* surface and the dedicated gRPC-only port). Provider/model mutations
 // (UpsertProvider through SetModelToolDialect, plus ScanCapabilities/RefreshFromEndpoint) return the full
 // refreshed ProviderListResponse, the same "full state after the mutation" convention as
 // RefreshPriceSourcesResponse and friends, so the GUI's ProviderAdminStore never needs a follow-up
@@ -423,8 +419,8 @@ message ProviderListResponse {
 }
 
 // docs/router/tracked-todos.md #7: the Governance/Model Distribution/Cost Analytics GUI tabs' read-only
-// usage-query surface. Replaces the plain-HTTP /admin/usage/* REST surface (UsageAdminEndpoints). All
-// four RPCs are read-only, unlike ProviderAdminService above - no mutation, no security-boundary
+// usage-query surface. All
+// five RPCs are read-only, unlike ProviderAdminService above - no mutation, no security-boundary
 // concerns beyond the same management-token gate every service on this endpoint shares.
 service UsageAdminService {
   // Totals for the header ticker and summary tiles over a preset window ("day", "week", "month", "all").
@@ -435,6 +431,11 @@ service UsageAdminService {
 
   // docs/router/self-organizing-classification-plan.md Phase T4: the Cost Analytics "Routing ROI" feed.
   rpc GetRoutingRoi (GetRoutingRoiRequest) returns (RoutingRoiResponse);
+
+  // Issue #111: the Report Card tab's unified spend / grade-mix / score-delta snapshot. Aggregates the
+  // existing usage-rollup (spend by model) and taxonomy-comparison (grade mix + frozen-baseline score
+  // delta) stores - not a parallel metrics pipeline.
+  rpc GetLearningReportCard (GetLearningReportCardRequest) returns (LearningReportCardResponse);
 
   // §5.12: streams the same rollup buckets GetUsageRollup returns, one message per bucket, so the GUI can
   // render a CSV or JSON download without buffering the whole range server-side first. Export is a
@@ -508,6 +509,43 @@ message RoutingRoiEntry {
 
 message RoutingRoiResponse {
   repeated RoutingRoiEntry entries = 1;
+}
+
+message GetLearningReportCardRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+}
+
+// One model's spend in the Report Card tab. Mirrors ModelSpendRow field-for-field.
+message ModelSpendRow {
+  string model = 1;
+  string cost_usd = 2;
+  int64 requests = 3;
+}
+
+// One letter-grade bucket of observed quality scores. Mirrors GradeMixRow field-for-field.
+message GradeMixRow {
+  string grade = 1;
+  int32 count = 2;
+  string percent = 3;
+}
+
+// One model's mean observed-minus-baseline score. Mirrors ModelScoreDeltaRow field-for-field.
+message ModelScoreDeltaRow {
+  string model = 1;
+  double mean_delta = 2;
+  int32 sample_size = 3;
+}
+
+// The Report Card tab's aggregated snapshot. Mirrors LearningReportCard field-for-field.
+message LearningReportCardResponse {
+  repeated ModelSpendRow spend_by_model = 1;
+  repeated GradeMixRow grade_mix = 2;
+  optional double mean_score_delta = 3;
+  int32 scored_requests = 4;
+  int32 comparable_requests = 5;
+  repeated ModelScoreDeltaRow score_delta_by_model = 6;
+  string total_spend_usd = 7;
 }
 
 message ExportUsageRollupRequest {

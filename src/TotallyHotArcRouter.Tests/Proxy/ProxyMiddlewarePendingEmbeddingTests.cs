@@ -13,7 +13,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// <summary>
 /// Covers docs/router/live-feedback-learning-plan.md Phase 2c's request-path half: once
 /// <see cref="RequestInterceptor"/> has computed a task embedding, a completed request must populate
-/// <see cref="PendingTaskEmbeddingCache"/> so <see cref="TotallyHot.ArcRouter.Router.EmbeddingMemoryScoreObserver"/> can later
+/// <see cref="PendingValueCache{T}"/> so <see cref="TotallyHot.ArcRouter.Router.EmbeddingMemoryScoreObserver"/> can later
 /// claim it by correlation id.
 /// </summary>
 public class ProxyMiddlewarePendingEmbeddingTests
@@ -30,7 +30,7 @@ public class ProxyMiddlewarePendingEmbeddingTests
             modelRouteResolver: resolver,
             embeddingClient: new FakeEmbeddingClient([1f, 2f, 3f]),
             embeddingWarmupState: warmupState);
-        var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions()));
+        var pendingCache = new PendingValueCache<float[]>(Options.Create(new RoutingOptions()));
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -72,7 +72,7 @@ public class ProxyMiddlewarePendingEmbeddingTests
         // No embedding client configured at all - the pre-Phase-2 default.
         var interceptor =
             new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
-        var pendingCache = new PendingTaskEmbeddingCache(Options.Create(new RoutingOptions()));
+        var pendingCache = new PendingValueCache<float[]>(Options.Create(new RoutingOptions()));
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {

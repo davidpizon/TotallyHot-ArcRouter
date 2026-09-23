@@ -40,7 +40,7 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
         IRouterChannelProvider channelProvider,
         bool supportsApply = true,
         ILogger<UpdateStore>? logger = null)
-        : base(client: new UpdateAdminClient(channelProvider.CallInvoker), logger: logger, ownsClient: true)
+        : base(client: new UpdateAdminClient(channelProvider.CallInvoker), logger: logger)
     {
         var httpClient = Own(new HttpClient());
         _applier = new MsiUpdateApplier(httpClient: httpClient, logger: NullLogger<MsiUpdateApplier>.Instance);

@@ -25,7 +25,7 @@ public sealed record ManagementFacadeDependencies
     /// <summary>
     /// Probes which API flavors a provider's endpoint answers (docs/router/tool-call-normalization.md §3.3).
     /// Scanning also requires <see cref="CapabilityStore"/>, which is where results are persisted; with
-    /// either absent, <c>POST /admin/providers/{key}/scan-capabilities</c> is unavailable.
+    /// either absent, scanning via <see cref="ManagementFacade.ScanCapabilitiesAsync"/> is unavailable.
     /// </summary>
     public ProviderEndpointScanner? EndpointScanner { get; init; }
 
@@ -39,18 +39,18 @@ public sealed record ManagementFacadeDependencies
     public PriceRepository? PriceRepository { get; init; }
 
     /// <summary>
-    /// Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot/history to <c>GET /admin/providers</c>
-    /// .
+    /// Supplies each provider's captured <c>anthropic-ratelimit-*</c> snapshot/history to
+    /// <see cref="ManagementFacade.ListProviders"/>.
     /// </summary>
     public RateLimitRepository? RateLimitRepository { get; init; }
 
     /// <summary>
     /// Supplies each provider's own reported usage (docs/router/secrets-at-rest-plan.md §8.1) to
-    /// <c>GET /admin/providers</c>.
+    /// <see cref="ManagementFacade.ListProviders"/>.
     /// </summary>
     public ReportedUsageRepository? ReportedUsageRepository { get; init; }
 
-    /// <summary>Operator price overrides, backing <c>PUT/DELETE /admin/price-overrides</c>.</summary>
+    /// <summary>Operator price overrides, backing <see cref="ManagementFacade"/>'s price-override methods.</summary>
     public ModelAliasOverrideStore? OverrideStore { get; init; }
 
     /// <summary>
