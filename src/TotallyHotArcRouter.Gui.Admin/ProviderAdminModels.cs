@@ -30,10 +30,11 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// Providers. Enforced immediately on the next request by the proxy's routing path, no restart needed.
 /// </param>
 /// <param name="ProviderType">
-/// The name of the <see cref="Admin.ProviderType"/> member the operator selected for this provider, or
-/// <see langword="null"/> for one configured before the field existed (the editor then shows
-/// <see cref="Admin.ProviderType.Other"/>). Round-tripping this is what lets the editor reopen a provider
-/// with its own type - and therefore its own credential defaults - already selected.
+/// The add-provider template key the operator selected, or a legacy <see cref="Admin.ProviderType"/>
+/// member name. <see langword="null"/> for a provider configured before the field existed. The editor
+/// reopens a stored key directly, maps <c>Anthropic</c>, <c>OpenAI</c>, and <c>GoogleGemini</c> onto
+/// <c>anthropic</c>, <c>openai</c>, and <c>gemini</c> when those templates exist, and shows <c>Other</c>
+/// for every other stored value without rewriting the saved fields.
 /// </param>
 /// <param name="EndpointCapabilities">
 /// Which API flavors this provider's endpoint last answered to, as recorded by the proxy's own capability
@@ -407,10 +408,11 @@ public sealed record ProvidersSnapshot(IReadOnlyList<ProviderAdminView> Provider
 /// non-empty becomes the trimmed string.
 /// </param>
 /// <param name="ProviderType">
-/// The name of the <see cref="Admin.ProviderType"/> member selected in the
-/// editor. Normalized exactly like <paramref name="ProviderName"/>: null preserves the existing value, so a
-/// partial write can't silently reset a provider's type; any other value is trimmed, and empty/whitespace
-/// becomes null (an explicit clear).
+/// The selected add-provider template key (a <c>ModelRouting:Providers</c> key, or <c>Other</c>), or a
+/// legacy <see cref="Admin.ProviderType"/> member name already stored on the provider. Normalized exactly
+/// like <paramref name="ProviderName"/>: null preserves the existing value, so a partial write can't
+/// silently reset a provider's type; any other value is trimmed, and empty/whitespace becomes null (an
+/// explicit clear).
 /// </param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,

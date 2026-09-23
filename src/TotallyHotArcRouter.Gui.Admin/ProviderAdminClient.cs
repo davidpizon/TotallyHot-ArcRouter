@@ -84,6 +84,30 @@ public sealed class ProviderAdminClient
         return ToViews(response);
     }
 
+    /// <summary>
+    /// Lists the add-provider templates from <c>ModelRouting:Providers</c>. This is not the live provider list.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>One template per appsettings provider key, in configuration order.</returns>
+    /// <exception cref="ProviderAdminException">The request failed or the proxy returned an error.</exception>
+    public async Task<IReadOnlyList<ProviderTemplates.ProviderEditorTemplate>> GetProviderTemplatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var response = await CallAsync((client, options) =>
+            client.ListProviderTemplatesAsync(new Contract.ListProviderTemplatesRequest(), options), cancellationToken)
+            .ConfigureAwait(false);
+
+        return response.Templates.Select(template => new ProviderTemplates.ProviderEditorTemplate(
+            Key: template.Key,
+            BaseUrl: template.BaseUrl,
+            AuthHeaderName: template.AuthHeaderName,
+            IsFree: template.IsFree,
+            Headers: template.Headers.Select(header => new ProviderTemplates.ProviderTemplateHeader(
+                Name: header.Name,
+                Value: header.HasValue ? header.Value : null,
+                ValueEnvVar: header.HasValueEnvVar ? header.ValueEnvVar : null)).ToList())).ToList();
+    }
+
     /// <summary>Adds or replaces a provider by key.</summary>
     /// <param name="key">The provider key.</param>
     /// <param name="body">The provider fields to write.</param>

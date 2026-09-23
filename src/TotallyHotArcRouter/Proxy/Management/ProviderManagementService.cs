@@ -47,6 +47,7 @@ internal sealed class ProviderManagementService
     private readonly ISecretReader? _secretReader;
     private readonly ISecretWriter? _secretWriter;
 
+    private readonly ModelRoutingOptions? _routingTemplates;
     private readonly IProviderConfigStore _store;
 
     /// <summary>
@@ -78,6 +79,7 @@ internal sealed class ProviderManagementService
         _secretReader = dependencies?.SecretReader;
         _interactionStatus = dependencies?.InteractionStatusStore;
         _logger = dependencies?.Logger;
+        _routingTemplates = dependencies?.ModelRoutingTemplates;
         _dialectResolver = new ModelDialectResolver(httpClient: httpClient, environment: environment);
         _buildProvidersResponse = buildProvidersResponse;
     }
@@ -717,16 +719,17 @@ internal sealed class ProviderManagementService
     private ProviderOptions MergeProvider(string providerKey, ProviderWriteRequest request, ProviderOptions? existing)
     {
         // A `with` over the existing provider (or a default one when adding), rather than a hand-listed
-        // rebuild. Only the fields this request can actually change are named below; everything else -
-        // the four Aws* fields, and anything added to ProviderOptions later - carries across by
-        // construction. The previous hand-written list had silently fallen behind the type and was
-        // resetting exactly those fields on every edit (docs/router/backlog.md item 1).
+        // rebuild. Only the fields this request can actually change are named below; everything else
+        // carries across by construction. Aws* fields are then replaced by ApplyTemplateAwsFields when
+        // this write names a provider type and a template catalog is configured. The previous hand-written
+        // list had silently fallen behind the type and was resetting fields on every edit
+        // (docs/router/backlog.md item 1).
         //
         // `new ProviderOptions()`'s own defaults reproduce the old terminal fallbacks exactly: BaseUrl "",
         // AuthHeaderName "Authorization", IsFree false, Enabled true, Headers [].
         var baseline = existing ?? new ProviderOptions();
 
-        return baseline with
+        var merged = baseline with
         {
             // Name: null from the request preserves the existing value; any other value (including empty/whitespace)
             // is normalized - empty/whitespace becomes null (explicitly cleared).
@@ -749,6 +752,41 @@ internal sealed class ProviderManagementService
                     existingHeaders: baseline.Headers),
             IsFree = request.IsFree ?? baseline.IsFree,
             Enabled = request.Enabled ?? baseline.Enabled
+        };
+
+        return ApplyTemplateAwsFields(merged: merged, request: request);
+    }
+
+    /// <summary>
+    /// Copies Bedrock credential fields from the selected add-provider template. The editor does not
+    /// show those fields, so a save whose <see cref="ProviderWriteRequest.ProviderType"/> names a
+    /// <c>ModelRouting:Providers</c> key takes that entry's <c>Aws*</c> values, and a type that is not a
+    /// template key (including <c>Other</c>) clears them. A null type is a partial write and leaves the
+    /// stored values alone. When no template catalog was supplied, this is a no-op so existing callers
+    /// keep the previous preserve-on-edit behavior.
+    /// </summary>
+    private ProviderOptions ApplyTemplateAwsFields(ProviderOptions merged, ProviderWriteRequest request)
+    {
+        if (_routingTemplates is null || request.ProviderType is null) return merged;
+
+        if (merged.ProviderType is not null &&
+            _routingTemplates.Providers.TryGetValue(key: merged.ProviderType, value: out var template))
+        {
+            return merged with
+            {
+                AwsRegion = template.AwsRegion,
+                AwsAccessKeyIdEnvVar = template.AwsAccessKeyIdEnvVar,
+                AwsSecretAccessKeyEnvVar = template.AwsSecretAccessKeyEnvVar,
+                AwsSessionTokenEnvVar = template.AwsSessionTokenEnvVar
+            };
+        }
+
+        return merged with
+        {
+            AwsRegion = null,
+            AwsAccessKeyIdEnvVar = null,
+            AwsSecretAccessKeyEnvVar = null,
+            AwsSessionTokenEnvVar = null
         };
     }
 

@@ -68,6 +68,13 @@ public sealed record ProxyServerDependencies
     /// </summary>
     public IOptions<RoutingOptions>? RoutingOptions { get; init; }
 
+    /// <summary>
+    /// The appsettings <c>ModelRouting</c> section. The add-provider dialog lists these providers as
+    /// templates, and a save whose provider type matches a key copies that entry's Bedrock credential
+    /// fields. When omitted, the template list is empty and Bedrock fields are left untouched on edit.
+    /// </summary>
+    public IOptions<ModelRoutingOptions>? ModelRoutingTemplates { get; init; }
+
     /// <summary>The <c>/admin/*</c> REST management API on the plain-HTTP port. <see langword="null"/> leaves it unmapped.</summary>
     public ManagementApiDependencies? ManagementApi { get; init; }
 

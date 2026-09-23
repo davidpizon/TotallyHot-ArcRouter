@@ -79,6 +79,12 @@ public sealed class ProviderAdminStore : IDisposable
     public IReadOnlyList<ProviderAdminView> Providers { get; private set; } = [];
 
     /// <summary>
+    /// Add-provider templates from <c>ModelRouting:Providers</c>, loaded alongside <see cref="Providers"/>.
+    /// Empty when the template request fails; the dialog still offers <c>Other</c>.
+    /// </summary>
+    public IReadOnlyList<ProviderTemplates.ProviderEditorTemplate> Templates { get; private set; } = [];
+
+    /// <summary>
     /// The configured price overrides (§5.7's operator-override rung), refreshed after each load or
     /// successful edit via <see cref="LoadPriceOverridesAsync"/>. Empty until that is called at least
     /// once - the Governance price-overrides pane loads it independently of <see cref="Providers"/> since
@@ -137,6 +143,16 @@ public sealed class ProviderAdminStore : IDisposable
         try
         {
             Providers = await _client.GetProvidersAsync(cancellationToken);
+            try
+            {
+                Templates = await _client.GetProviderTemplatesAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Templates = [];
+                _logger?.LogWarning(exception: ex, message: "Failed to load add-provider templates.");
+            }
+
             IsReachable = true;
             LastError = null;
         }

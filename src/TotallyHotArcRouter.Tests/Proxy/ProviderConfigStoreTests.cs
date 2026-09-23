@@ -8,7 +8,7 @@ using TotallyHot.ArcRouter.Proxy;
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
 /// <summary>
-/// Covers <see cref="ProviderConfigStore"/>: first-run seeding (in memory, no file written until an
+/// Covers <see cref="ProviderConfigStore"/>: an empty first run (in memory, no file written until an
 /// edit), load-from-file precedence, validated persistence, atomic version bumps, provider/model
 /// mutators, and concurrent-write safety.
 /// </summary>
@@ -37,36 +37,41 @@ public sealed class ProviderConfigStoreTests : IDisposable
         };
     }
 
-    private ProviderConfigStore CreateStore(ModelRoutingOptions seed)
+    private ProviderConfigStore CreateStore()
     {
         return new ProviderConfigStore(
             logger: Mock.Of<ILogger<ProviderConfigStore>>(),
-            seed: Options.Create(seed),
             options: Options.Create(new ProviderConfigStoreOptions { FilePath = _tempPath }));
     }
 
-    [Fact]
-    public void Constructor_NoFile_SeedsFromOptionsInMemory_WithoutWritingFile()
+    /// <summary>Writes <paramref name="initial"/> to the store file, then loads it.</summary>
+    private ProviderConfigStore CreateStoreFrom(ModelRoutingOptions initial)
     {
-        var store = CreateStore(SeedOptions());
+        File.WriteAllText(path: _tempPath, contents: JsonSerializer.Serialize(initial));
+        return CreateStore();
+    }
+
+    [Fact]
+    public void Constructor_NoFile_StartsEmpty_WithoutWritingFile()
+    {
+        var store = CreateStore();
 
         Assert.Equal(0, actual: store.Snapshot.Version);
-        Assert.True(store.Snapshot.Options.Providers.ContainsKey("openai"));
-        Assert.Single(store.Snapshot.Options.ModelList);
-        // Seeding must not touch disk: an unreconfigured proxy leaves no file behind.
+        Assert.Empty(store.Snapshot.Options.Providers);
+        Assert.Empty(store.Snapshot.Options.ModelList);
+        // An unreconfigured proxy leaves no file behind.
         Assert.False(File.Exists(_tempPath));
     }
 
     [Fact]
-    public void Constructor_FileExists_LoadsFromFile_AndIgnoresSeed()
+    public void Constructor_FileExists_LoadsFromFile()
     {
-        // A persisted file with "anthropic" wins over a seed that only knows "openai".
         var persisted = SeedOptions(providerKey: "anthropic", modelName: "claude-opus-4.6");
         File.WriteAllText(path: _tempPath,
             contents: JsonSerializer.Serialize(value: persisted,
                 options: new JsonSerializerOptions { WriteIndented = true }));
 
-        var store = CreateStore(SeedOptions(providerKey: "openai", modelName: "gpt-5.4"));
+        var store = CreateStore();
 
         Assert.True(store.Snapshot.Options.Providers.ContainsKey("anthropic"));
         Assert.False(store.Snapshot.Options.Providers.ContainsKey("openai"));
@@ -77,7 +82,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     public async Task ReplaceAsync_RoundTripsIsFree_ThroughTheFile()
     {
         var seed = SeedOptions(providerKey: "ollama", modelName: "llama3");
-        var store = CreateStore(seed);
+        var store = CreateStoreFrom(seed);
 
         await store.ReplaceAsync(next: new ModelRoutingOptions
         {
@@ -88,11 +93,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
             ModelList = seed.ModelList
         }, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.True(new ProviderConfigStore(
-                logger: Mock.Of<ILogger<ProviderConfigStore>>(),
-                seed: Options.Create(SeedOptions()),
-                options: Options.Create(new ProviderConfigStoreOptions { FilePath = _tempPath }))
-            .Snapshot.Options.Providers["ollama"].IsFree);
+        Assert.True(CreateStore().Snapshot.Options.Providers["ollama"].IsFree);
     }
 
     // IsFree is a new key: every model-routing.json written before it existed lacks it. Those files must
@@ -108,7 +109,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
                                            }
                                            """);
 
-        var store = CreateStore(SeedOptions());
+        var store = CreateStore();
 
         Assert.False(store.Snapshot.Options.Providers["openai"].IsFree);
     }
@@ -126,7 +127,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
                                            }
                                            """);
 
-        var store = CreateStore(SeedOptions());
+        var store = CreateStore();
 
         var model = store.Snapshot.Options.ModelList.Single();
         Assert.True(model.Enabled);
@@ -140,7 +141,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
             contents: JsonSerializer.Serialize(value: SeedOptions(),
                 options: new JsonSerializerOptions { WriteIndented = true }));
 
-        var store = CreateStore(SeedOptions());
+        var store = CreateStore();
 
         // System.Text.Json loses the case-insensitive comparer on deserialize; Normalize restores it.
         Assert.True(store.Snapshot.Options.Providers.ContainsKey("OPENAI"));
@@ -149,7 +150,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     [Fact]
     public async Task ReplaceAsync_PersistsToFile_BumpsVersion_AndReloadsOnNewStore()
     {
-        var store = CreateStore(SeedOptions());
+        var store = CreateStoreFrom(SeedOptions());
 
         var next = SeedOptions(providerKey: "moonshot", modelName: "kimi-k2.5");
         await store.ReplaceAsync(next: next, cancellationToken: TestContext.Current.CancellationToken);
@@ -159,7 +160,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
         Assert.True(File.Exists(_tempPath));
 
         // A fresh store over the same path must load the persisted config (starting again at version 0).
-        var reloaded = CreateStore(SeedOptions());
+        var reloaded = CreateStore();
         Assert.Equal(0, actual: reloaded.Snapshot.Version);
         Assert.True(reloaded.Snapshot.Options.Providers.ContainsKey("moonshot"));
     }
@@ -167,7 +168,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     [Fact]
     public async Task ReplaceAsync_InvalidConfiguration_Throws_AndDoesNotPersistOrAdvance()
     {
-        var store = CreateStore(SeedOptions());
+        var store = CreateStoreFrom(SeedOptions());
 
         var invalid = new ModelRoutingOptions
         {
@@ -181,13 +182,13 @@ public sealed class ProviderConfigStoreTests : IDisposable
 
         Assert.Equal(0, actual: store.Snapshot.Version);
         Assert.True(store.Snapshot.Options.Providers.ContainsKey("openai"));
-        Assert.False(File.Exists(_tempPath));
+        Assert.Equal(expected: "gpt-5.4", actual: store.Snapshot.Options.ModelList.Single().ModelName);
     }
 
     [Fact]
     public async Task UpsertProviderAsync_AddsProvider_KeepingModels()
     {
-        var store = CreateStore(SeedOptions());
+        var store = CreateStoreFrom(SeedOptions());
 
         await store.UpsertProviderAsync(
             key: "ollama",
@@ -202,7 +203,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     [Fact]
     public async Task RemoveProviderAsync_StillReferencedByModel_CascadesToItsModels()
     {
-        var store = CreateStore(SeedOptions());
+        var store = CreateStoreFrom(SeedOptions());
 
         // "openai" still has the "gpt-5.4" model pointing at it. Removal cascades rather than being
         // rejected: leaving that model behind would strand it on a provider that no longer exists.
@@ -231,7 +232,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
                 new ModelRouteEntry { ModelName = "mistral", Provider = "ollama", ProviderModelId = "mistral" }
             ]
         };
-        var store = CreateStore(seed);
+        var store = CreateStoreFrom(seed);
 
         await store.RemoveProviderAsync(key: "openai", cancellationToken: TestContext.Current.CancellationToken);
 
@@ -258,7 +259,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
                 new ModelRouteEntry { ModelName = "c", Provider = "p", ProviderModelId = "c" }
             ]
         };
-        var store = CreateStore(seed);
+        var store = CreateStoreFrom(seed);
 
         await store.UpsertModelAsync(
             entry: new ModelRouteEntry { ModelName = "b", Provider = "p", ProviderModelId = "b-updated" },
@@ -284,7 +285,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
                 new ModelRouteEntry { ModelName = "b", Provider = "p", ProviderModelId = "b" }
             ]
         };
-        var store = CreateStore(seed);
+        var store = CreateStoreFrom(seed);
 
         await store.RemoveModelAsync(modelName: "a", cancellationToken: TestContext.Current.CancellationToken);
 
@@ -294,7 +295,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     [Fact]
     public async Task ReplaceAsync_ConcurrentEdits_ProduceValidFileAndSequentialVersions()
     {
-        var store = CreateStore(SeedOptions());
+        var store = CreateStoreFrom(SeedOptions());
         const int writers = 20;
 
         var tasks = Enumerable.Range(0, count: writers).Select(i => store.ReplaceAsync(
@@ -317,7 +318,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     [Fact]
     public async Task ReplaceAsync_RaisesChanged()
     {
-        var store = CreateStore(SeedOptions());
+        var store = CreateStoreFrom(SeedOptions());
         var raised = 0;
         store.Changed += () => Interlocked.Increment(ref raised);
 

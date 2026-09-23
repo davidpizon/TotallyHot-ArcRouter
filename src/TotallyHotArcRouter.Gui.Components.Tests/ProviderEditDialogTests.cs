@@ -165,7 +165,7 @@ public sealed class ProviderEditDialogTests
             parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
@@ -179,7 +179,7 @@ public sealed class ProviderEditDialogTests
 
         var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
 
         cut.Find("[data-testid='base-url']").GetAttribute("value").Should().Be("https://api.anthropic.com");
         // Anthropic's API rejects every request without this header, so the template supplies it.
@@ -193,7 +193,7 @@ public sealed class ProviderEditDialogTests
 
         var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.LocalRuntime));
+        cut.Find("[data-testid='provider-type']").Change("ollama");
 
         // A local runtime costs nothing, so its models report a known $0.00 rather than an unknown cost.
         cut.Find("[data-testid='is-free']").HasAttribute("checked").Should().BeTrue();
@@ -211,11 +211,11 @@ public sealed class ProviderEditDialogTests
             parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
-        saved!.ProviderType.Should().Be(nameof(ProviderType.Anthropic));
+        saved!.ProviderType.Should().Be("anthropic");
     }
 
     [Fact]
@@ -228,7 +228,7 @@ public sealed class ProviderEditDialogTests
 
         // Guards the round-trip bug: ProvidersAdmin used to hardcode "Other", so an Anthropic provider
         // always reopened as Other and lost its type on the next save.
-        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be("anthropic");
     }
 
     [Fact]
@@ -536,6 +536,7 @@ public sealed class ProviderEditDialogTests
         string providerType = "",
         string providerName = "")
     {
+        parameters.Add(parameterSelector: p => p.Templates, value: SampleTemplates());
         parameters.Add(parameterSelector: p => p.Model, value: new ProviderEditDialog.ProviderEditModel(
             Key: key,
             IsNew: isNew,
@@ -545,6 +546,64 @@ public sealed class ProviderEditDialogTests
             IsFree: isFree,
             ProviderType: providerType,
             ProviderName: providerName));
+    }
+
+    [Fact]
+    public void Switching_templates_without_edits_replaces_custom_headers()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        cut.Markup.Should().Contain("anthropic-version");
+
+        cut.Find("[data-testid='provider-type']").Change("openai");
+
+        cut.Find("[data-testid='base-url']").GetAttribute("value").Should().Be("https://api.openai.com");
+        cut.Markup.Should().NotContain("anthropic-version");
+    }
+
+    [Fact]
+    public void Switching_templates_after_a_base_url_edit_keeps_custom_headers()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        cut.Find("[data-testid='base-url']").Input("https://api.anthropic.com/custom");
+        cut.Find("[data-testid='provider-type']").Change("openai");
+
+        cut.Find("[data-testid='base-url']").GetAttribute("value").Should().Be("https://api.openai.com");
+        cut.Markup.Should().Contain("anthropic-version");
+    }
+
+    [Fact]
+    public void Selecting_other_without_edits_clears_template_headers()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        cut.Find("[data-testid='provider-type']").Change(ProviderTemplates.OtherKey);
+
+        cut.Find("[data-testid='base-url']").GetAttribute("value").Should().BeNullOrEmpty();
+        cut.Markup.Should().NotContain("anthropic-version");
+    }
+
+    private static IReadOnlyList<ProviderTemplates.ProviderEditorTemplate> SampleTemplates()
+    {
+        return
+        [
+            new(Key: "anthropic", BaseUrl: "https://api.anthropic.com", AuthHeaderName: "x-api-key", IsFree: false,
+                Headers: [new ProviderTemplates.ProviderTemplateHeader(Name: "anthropic-version", Value: "2023-06-01")]),
+            new(Key: "openai", BaseUrl: "https://api.openai.com", AuthHeaderName: "Authorization", IsFree: false,
+                Headers: []),
+            new(Key: "ollama", BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization", IsFree: true,
+                Headers: [])
+        ];
     }
 
     private static IElement FindSaveButton(IRenderedComponent<ProviderEditDialog> cut)

@@ -321,10 +321,12 @@ public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 /// non-empty becomes the trimmed string.
 /// </param>
 /// <param name="ProviderType">
-/// The provider family selected in the editor (see
-/// <see cref="ProviderOptions.ProviderType"/>). Normalized exactly like <paramref name="ProviderName"/>:
-/// null keeps the existing value, so a partial write can't silently reset a provider's type; any other
-/// value is trimmed, and empty/whitespace becomes null (an explicit clear).
+/// The add-provider template key selected in the editor (a <c>ModelRouting:Providers</c> key, or
+/// <c>Other</c>), stored on <see cref="ProviderOptions.ProviderType"/>. When this names a template key and
+/// a template catalog is configured, that entry's Bedrock credential fields are copied onto the provider.
+/// Normalized exactly like <paramref name="ProviderName"/>: null keeps the existing value, so a partial
+/// write can't silently reset a provider's type; any other value is trimmed, and empty/whitespace becomes
+/// null (an explicit clear).
 /// </param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,

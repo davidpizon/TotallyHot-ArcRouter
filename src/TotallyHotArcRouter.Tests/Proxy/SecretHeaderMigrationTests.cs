@@ -63,7 +63,6 @@ public sealed class SecretHeaderMigrationTests : IDisposable
     {
         return new ProviderConfigStore(
             logger: Mock.Of<ILogger<ProviderConfigStore>>(),
-            seed: Options.Create(new ModelRoutingOptions()),
             options: Options.Create(new ProviderConfigStoreOptions { FilePath = _tempPath }),
             secretWriter: secretWriter);
     }

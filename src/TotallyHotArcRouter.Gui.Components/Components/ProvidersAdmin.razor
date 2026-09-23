@@ -422,6 +422,7 @@ else
 @if (_showDialog)
 {
     <ProviderEditDialog Model="@_dialogModel"
+                        Templates="@Store.Templates"
                         Error="@_dialogError"
                         OnSave="SaveDialog"
                         OnCancel="CancelDialog"/>

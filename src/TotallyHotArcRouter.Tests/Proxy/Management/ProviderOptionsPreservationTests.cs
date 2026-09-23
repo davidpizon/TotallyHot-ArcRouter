@@ -367,4 +367,78 @@ public sealed class ProviderOptionsPreservationTests
         var updated = store.Snapshot.Options.Providers["bedrock"];
         Assert.Equal(expected: "New Provider Name", actual: updated.Name);
     }
+
+    [Fact]
+    public async Task UpsertProvider_CopiesAwsFieldsFromTheMatchingTemplate()
+    {
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions());
+        var templates = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["bedrock-anthropic"] = new()
+                {
+                    BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
+                    AuthHeaderName = "Authorization",
+                    AwsRegion = "us-east-1",
+                    AwsAccessKeyIdEnvVar = "AWS_ACCESS_KEY_ID",
+                    AwsSecretAccessKeyEnvVar = "AWS_SECRET_ACCESS_KEY",
+                    AwsSessionTokenEnvVar = "AWS_SESSION_TOKEN"
+                }
+            }
+        };
+        var facade = new ManagementFacade(
+            store: store,
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies { ModelRoutingTemplates = templates });
+
+        await facade.UpsertProviderAsync(
+            key: "new-bedrock",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+                AuthHeaderName: "Authorization",
+                ProviderType: "bedrock-anthropic"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var saved = store.Snapshot.Options.Providers["new-bedrock"];
+        Assert.Equal(expected: "us-east-1", actual: saved.AwsRegion);
+        Assert.Equal(expected: "AWS_ACCESS_KEY_ID", actual: saved.AwsAccessKeyIdEnvVar);
+        Assert.Equal(expected: "AWS_SECRET_ACCESS_KEY", actual: saved.AwsSecretAccessKeyEnvVar);
+        Assert.Equal(expected: "AWS_SESSION_TOKEN", actual: saved.AwsSessionTokenEnvVar);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_ClearsAwsFieldsWhenTheSelectedTypeIsNotATemplate()
+    {
+        var store = StoreWith(FullyPopulated());
+        var facade = new ManagementFacade(
+            store: store,
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies
+            {
+                ModelRoutingTemplates = new ModelRoutingOptions
+                {
+                    Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                    }
+                }
+            });
+
+        await facade.UpsertProviderAsync(
+            key: "bedrock",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://api.openai.com",
+                null,
+                ProviderType: "Other"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var saved = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Null(saved.AwsRegion);
+        Assert.Null(saved.AwsAccessKeyIdEnvVar);
+        Assert.Null(saved.AwsSecretAccessKeyEnvVar);
+        Assert.Null(saved.AwsSessionTokenEnvVar);
+    }
 }

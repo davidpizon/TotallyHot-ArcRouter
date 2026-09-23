@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -85,4 +86,12 @@ public sealed record ManagementFacadeDependencies
     /// reaches the operator-facing file sink rather than an unconfigured inner logger.
     /// </summary>
     public ILogger? Logger { get; init; }
+
+    /// <summary>
+    /// The appsettings <c>ModelRouting</c> section, used as the add-provider template catalog. When a
+    /// provider write names a <see cref="ProviderOptions.ProviderType"/> that matches a key here, that
+    /// entry's <c>Aws*</c> fields are copied onto the saved provider. When absent, those fields are left
+    /// untouched (the previous preserve-on-edit behavior).
+    /// </summary>
+    public ModelRoutingOptions? ModelRoutingTemplates { get; init; }
 }

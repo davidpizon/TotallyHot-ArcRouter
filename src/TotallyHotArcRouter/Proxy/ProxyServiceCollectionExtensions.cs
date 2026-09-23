@@ -340,6 +340,7 @@ internal static class ProxyServiceCollectionExtensions
                     SerilogLogger = Log.Logger,
                     // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
                     RoutingOptions = sp.GetRequiredService<IOptions<RoutingOptions>>(),
+                    ModelRoutingTemplates = sp.GetRequiredService<IOptions<ModelRoutingOptions>>(),
 
                     // The /admin/* management REST API. The writable config store makes edits reload the
                     // router live; the rest is what the REST facade needs, passed across for the same

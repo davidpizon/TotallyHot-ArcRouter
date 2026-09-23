@@ -33,6 +33,11 @@ import "google/protobuf/timestamp.proto";
 // ManagementErrorType by ProviderAdminGrpcService.
 service ProviderAdminService {
   rpc ListProviders (ListProvidersRequest) returns (ProviderListResponse);
+
+  // The add-provider dialog's template catalog: one entry per ModelRouting:Providers key in
+  // appsettings.json. Not the live provider list (that is ListProviders). A missing model-routing.json
+  // starts with no providers; these entries only pre-fill the dialog.
+  rpc ListProviderTemplates (ListProviderTemplatesRequest) returns (ProviderTemplateListResponse);
   rpc UpsertProvider (UpsertProviderRequest) returns (ProviderListResponse);
   rpc RemoveProvider (RemoveProviderRequest) returns (ProviderListResponse);
   rpc SetProviderBudget (SetProviderBudgetRequest) returns (ProviderListResponse);
@@ -77,6 +82,29 @@ service ProviderAdminService {
 }
 
 message ListProvidersRequest {}
+
+message ListProviderTemplatesRequest {}
+
+// A non-credential header the add-provider dialog inserts when this template is selected.
+message ProviderTemplateHeaderView {
+  string name = 1;
+  optional string value = 2;
+  optional string value_env_var = 3;
+}
+
+// One ModelRouting:Providers entry, projected for the editor. The credential header is
+// auth_header_name and is not repeated in headers.
+message ProviderTemplateView {
+  string key = 1;
+  string base_url = 2;
+  string auth_header_name = 3;
+  bool is_free = 4;
+  repeated ProviderTemplateHeaderView headers = 5;
+}
+
+message ProviderTemplateListResponse {
+  repeated ProviderTemplateView templates = 1;
+}
 
 // A single custom header to store for a provider. Mirrors HeaderWriteRequest (ManagementFacadeModels.cs).
 message HeaderWrite {

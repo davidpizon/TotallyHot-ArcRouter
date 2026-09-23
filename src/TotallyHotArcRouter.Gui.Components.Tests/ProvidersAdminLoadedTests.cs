@@ -528,7 +528,7 @@ public sealed class ProvidersAdminLoadedTests
 
         // The round-trip bug: OpenEdit used to hardcode "Other", so an Anthropic provider always reopened
         // as Other and lost its type on the next save.
-        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be("anthropic");
         cut.Find("[data-testid='provider-name']").GetAttribute("value").Should().Be("Anthropic Prod");
     }
 
@@ -544,7 +544,7 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.WaitForAssertion(() => client.LastUpsertProviderRequest.Should().NotBeNull());
         client.LastUpsertProviderRequest!.Key.Should().Be("anthropic");
-        client.LastUpsertProviderRequest.ProviderType.Should().Be("Anthropic");
+        client.LastUpsertProviderRequest.ProviderType.Should().Be("anthropic");
     }
 
     [Fact]
@@ -763,6 +763,31 @@ public sealed class ProvidersAdminLoadedTests
             Contract.ListProvidersRequest request, CallOptions options)
         {
             return Ok(Response);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderTemplateListResponse> ListProviderTemplatesAsync(
+            Contract.ListProviderTemplatesRequest request, CallOptions options)
+        {
+            var response = new Contract.ProviderTemplateListResponse
+            {
+                Templates =
+                {
+                    new Contract.ProviderTemplateView
+                    {
+                        Key = "anthropic",
+                        BaseUrl = "https://api.anthropic.com",
+                        AuthHeaderName = "x-api-key",
+                        IsFree = false,
+                        Headers = { new Contract.ProviderTemplateHeaderView { Name = "anthropic-version", Value = "2023-06-01" } }
+                    }
+                }
+            };
+            return new AsyncUnaryCall<Contract.ProviderTemplateListResponse>(
+                responseAsync: Task.FromResult(response),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
 
         public override AsyncUnaryCall<Contract.ProviderListResponse> UpsertProviderAsync(
