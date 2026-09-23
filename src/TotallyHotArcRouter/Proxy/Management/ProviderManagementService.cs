@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
@@ -760,23 +761,25 @@ internal sealed class ProviderManagementService
             Enabled = request.Enabled ?? baseline.Enabled
         };
 
-        return ApplyTemplateAwsFields(merged: merged, request: request);
+        return ApplyTemplateAwsFields(merged: merged, request: request, baseline: baseline);
     }
 
     /// <summary>
     /// Copies Bedrock credential fields from the selected add-provider template. The editor does not
     /// show those fields, so a save whose <see cref="ProviderWriteRequest.ProviderType"/> names a
-    /// <c>ModelRouting:Providers</c> key takes that entry's <c>Aws*</c> values, and a type that is not a
-    /// template key (including <c>Other</c>) clears them. A null type is a partial write and leaves the
-    /// stored values alone. When no template catalog was supplied, this is a no-op so existing callers
-    /// keep the previous preserve-on-edit behavior.
+    /// <c>ModelRouting:Providers</c> key takes that entry's <c>Aws*</c> values. A type that is not a
+    /// template key clears them only when the stored type was itself a template key — that is the
+    /// operator switching away. A legacy value such as <c>Bedrock</c> reopens as <c>Other</c> and must
+    /// keep the credentials already stored. A null type is a partial write and leaves the stored values
+    /// alone. When no template catalog was supplied, this is a no-op so existing callers keep the
+    /// previous preserve-on-edit behavior.
     /// </summary>
-    private ProviderOptions ApplyTemplateAwsFields(ProviderOptions merged, ProviderWriteRequest request)
+    private ProviderOptions ApplyTemplateAwsFields(
+        ProviderOptions merged, ProviderWriteRequest request, ProviderOptions baseline)
     {
         if (_routingTemplates is null || request.ProviderType is null) return merged;
 
-        if (merged.ProviderType is not null &&
-            _routingTemplates.Providers.TryGetValue(key: merged.ProviderType, value: out var template))
+        if (TryGetRoutingTemplate(merged.ProviderType, out var template))
         {
             return merged with
             {
@@ -787,6 +790,9 @@ internal sealed class ProviderManagementService
             };
         }
 
+        if (!TryGetRoutingTemplate(baseline.ProviderType, out _))
+            return merged;
+
         return merged with
         {
             AwsRegion = null,
@@ -794,6 +800,23 @@ internal sealed class ProviderManagementService
             AwsSecretAccessKeyEnvVar = null,
             AwsSessionTokenEnvVar = null
         };
+    }
+
+    /// <summary>
+    /// Looks up <paramref name="providerType"/> in the add-provider template catalog.
+    /// </summary>
+    /// <param name="providerType">The type on the write or on the stored provider.</param>
+    /// <param name="template">The matching template, when one exists.</param>
+    /// <returns>Whether <paramref name="providerType"/> names a catalog entry.</returns>
+    private bool TryGetRoutingTemplate(string? providerType, [NotNullWhen(true)] out ProviderOptions? template)
+    {
+        if (providerType is null || _routingTemplates is null)
+        {
+            template = null;
+            return false;
+        }
+
+        return _routingTemplates.Providers.TryGetValue(key: providerType, value: out template);
     }
 
     /// <summary>

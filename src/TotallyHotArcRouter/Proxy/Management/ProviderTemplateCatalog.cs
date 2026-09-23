@@ -5,7 +5,9 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// <summary>
 /// Projects <c>ModelRouting:Providers</c> into the add-provider template list. The credential header
 /// (the entry whose name matches <see cref="ProviderOptions.AuthHeaderName"/>) is not a custom header:
-/// the editor records it as the auth header name and only pre-fills the remaining headers.
+/// the editor records it as the auth header name and only pre-fills the remaining headers. A locked
+/// literal value is a secret and is omitted; an environment-variable name on that same header is kept,
+/// because the name is not the secret.
 /// </summary>
 internal static class ProviderTemplateCatalog
 {
@@ -30,10 +32,18 @@ internal static class ProviderTemplateCatalog
                 if (string.Equals(a: header.Name.Trim(), b: authHeaderName, comparisonType: StringComparison.OrdinalIgnoreCase))
                     continue;
 
+                var literal = string.IsNullOrEmpty(header.Value) ? null : header.Value;
+                if (header.Locked)
+                    literal = null;
+
+                var envVar = string.IsNullOrWhiteSpace(header.ValueEnvVar) ? null : header.ValueEnvVar.Trim();
+                if (literal is null && envVar is null)
+                    continue;
+
                 headers.Add(new ProjectedProviderTemplateHeader(
                     Name: header.Name.Trim(),
-                    Value: string.IsNullOrEmpty(header.Value) ? null : header.Value,
-                    ValueEnvVar: string.IsNullOrWhiteSpace(header.ValueEnvVar) ? null : header.ValueEnvVar.Trim()));
+                    Value: literal,
+                    ValueEnvVar: envVar));
             }
 
             templates.Add(new ProjectedProviderTemplate(

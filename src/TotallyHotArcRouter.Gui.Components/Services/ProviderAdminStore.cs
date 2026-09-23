@@ -70,9 +70,17 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
 
     /// <summary>
     /// Add-provider templates from <c>ModelRouting:Providers</c>, loaded alongside <see cref="Providers"/>.
-    /// Empty when the template request fails; the dialog still offers <c>Other</c>.
+    /// Empty when the template request fails; the dialog still offers <c>Other</c>. A failure is
+    /// distinguished from a genuinely empty catalog by <see cref="TemplatesUnavailable"/>.
     /// </summary>
     public IReadOnlyList<ProviderTemplates.ProviderEditorTemplate> Templates { get; private set; } = [];
+
+    /// <summary>
+    /// Whether the last provider load could not read the template catalog. The dialog uses this to keep
+    /// a stored provider type across a save: an empty <see cref="Templates"/> list alone would resolve
+    /// every existing key to <c>Other</c> and persist that downgrade.
+    /// </summary>
+    public bool TemplatesUnavailable { get; private set; }
 
     /// <summary>
     /// The configured price overrides (§5.7's operator-override rung), refreshed after each load or
@@ -116,10 +124,12 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
                 try
                 {
                     Templates = await Client.GetProviderTemplatesAsync(ct);
+                    TemplatesUnavailable = false;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Templates = [];
+                    TemplatesUnavailable = true;
                     Logger?.LogWarning(exception: ex, message: "Failed to load add-provider templates.");
                 }
             },

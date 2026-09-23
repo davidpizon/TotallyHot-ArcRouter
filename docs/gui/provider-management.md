@@ -35,11 +35,12 @@ flowchart LR
 ```
 
 - **`IProviderConfigStore`** (`src/TotallyHotArcRouter/Proxy/ProviderConfigStore.cs`) is the writable source
-  of truth for `ModelRouting` (providers + model allowlist). It seeds from `appsettings.json` on first
-  run (in memory — nothing is written until an edit), then persists the whole config to
-  `model-routing.json` and becomes the source of truth on later startups. `ModelRouteResolver` reads
-  its snapshots and rebuilds its lookup whenever the version advances, so edits take effect **without
-  restarting the proxy**.
+  of truth for the live provider list and model allowlist. On first run, when no `model-routing.json`
+  exists yet, that list starts empty and stays in memory until the first edit; nothing is written until
+  then. `ModelRouting:Providers` in `appsettings.json` is the add-provider template catalog, not a copy
+  of this list. After an edit the whole configuration is persisted to `model-routing.json` and that file
+  is the source of truth on later startups. `ModelRouteResolver` reads the store's snapshots and rebuilds
+  its lookup whenever the version advances, so edits take effect **without restarting the proxy**.
 - **`ProviderAdminService`** (`src/Protos/admin.proto`, implemented by
   `src/TotallyHotArcRouter/Proxy/Management/ProviderAdminGrpcService.cs`) is mapped on the router's single
   web port, wrapped in gRPC-Web so the browser dashboard can call it directly - there is no separate REST

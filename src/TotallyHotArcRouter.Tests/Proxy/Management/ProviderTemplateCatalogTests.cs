@@ -45,4 +45,40 @@ public sealed class ProviderTemplateCatalogTests
         Assert.True(templates[1].IsFree);
         Assert.Empty(templates[1].Headers);
     }
+
+    [Fact]
+    public void Project_OmitsLockedLiteralValues()
+    {
+        var options = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new()
+                {
+                    BaseUrl = "https://example.invalid",
+                    AuthHeaderName = "Authorization",
+                    Headers =
+                    [
+                        new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01", Locked = false },
+                        new ProviderHeader { Name = "X-Secret", Value = "super-secret", Locked = true },
+                        new ProviderHeader
+                        {
+                            Name = "X-Both",
+                            Value = "also-secret",
+                            ValueEnvVar = "BOTH_TOKEN",
+                            Locked = true
+                        }
+                    ]
+                }
+            }
+        };
+
+        var headers = ProviderTemplateCatalog.Project(options)[0].Headers;
+
+        Assert.Equal(expected: 2, actual: headers.Count);
+        Assert.Equal(expected: "2023-06-01", actual: headers[0].Value);
+        Assert.Equal(expected: "X-Both", actual: headers[1].Name);
+        Assert.Null(headers[1].Value);
+        Assert.Equal(expected: "BOTH_TOKEN", actual: headers[1].ValueEnvVar);
+    }
 }

@@ -219,6 +219,35 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void A_failed_template_catalog_does_not_rewrite_the_stored_provider_type_on_save()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            parameters.Add(parameterSelector: p => p.Templates,
+                value: (IReadOnlyList<ProviderTemplates.ProviderEditorTemplate>)[]);
+            parameters.Add(parameterSelector: p => p.TemplatesUnavailable, value: true);
+            parameters.Add(parameterSelector: p => p.Model, value: new ProviderEditDialog.ProviderEditModel(
+                Key: Key,
+                IsNew: false,
+                BaseUrl: OriginalBaseUrl,
+                AuthHeaderName: "x-api-key",
+                Headers: [],
+                IsFree: false,
+                ProviderType: "anthropic",
+                ProviderName: "Anthropic"));
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        FindSaveButton(cut).Click();
+
+        saved.Should().NotBeNull();
+        saved!.ProviderType.Should().Be("anthropic");
+    }
+
+    [Fact]
     public void An_existing_provider_type_is_preselected_when_the_dialog_opens()
     {
         using var ctx = new BunitContext();

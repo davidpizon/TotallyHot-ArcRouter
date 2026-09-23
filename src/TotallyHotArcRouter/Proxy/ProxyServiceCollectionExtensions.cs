@@ -43,9 +43,10 @@ internal static class ProxyServiceCollectionExtensions
         services.AddOptions<ModelRoutingOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(ModelRoutingOptions.SectionName).Bind(options));
-        // Writable, live-reloadable provider/model configuration (see ProviderConfigStore). Seeded
-        // from the appsettings-bound ModelRoutingOptions above on first run; becomes the source of
-        // truth once edited via the management API. ModelRouteResolver reads its snapshots.
+        // Writable, live-reloadable provider/model configuration (see ProviderConfigStore). Starts
+        // empty on first run; ModelRouting:Providers above is the add-provider template catalog, not
+        // a seed of this list. Becomes the source of truth once edited via the management API.
+        // ModelRouteResolver reads its snapshots.
         services.AddOptions<ProviderConfigStoreOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(ProviderConfigStoreOptions.SectionName).Bind(options));

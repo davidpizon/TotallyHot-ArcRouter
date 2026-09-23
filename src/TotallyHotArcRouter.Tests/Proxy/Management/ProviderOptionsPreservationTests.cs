@@ -409,9 +409,9 @@ public sealed class ProviderOptionsPreservationTests
     }
 
     [Fact]
-    public async Task UpsertProvider_ClearsAwsFieldsWhenTheSelectedTypeIsNotATemplate()
+    public async Task UpsertProvider_ClearsAwsFieldsWhenSwitchingAwayFromATemplate()
     {
-        var store = StoreWith(FullyPopulated());
+        var store = StoreWith(FullyPopulated() with { ProviderType = "openai" });
         var facade = new ManagementFacade(
             store: store,
             environment: Mock.Of<IEnvironmentVariableProvider>(),
@@ -440,5 +440,39 @@ public sealed class ProviderOptionsPreservationTests
         Assert.Null(saved.AwsAccessKeyIdEnvVar);
         Assert.Null(saved.AwsSecretAccessKeyEnvVar);
         Assert.Null(saved.AwsSessionTokenEnvVar);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_KeepsAwsFieldsWhenALegacyTypeSavesAsOther()
+    {
+        var store = StoreWith(FullyPopulated() with { ProviderType = "Bedrock" });
+        var facade = new ManagementFacade(
+            store: store,
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies
+            {
+                ModelRoutingTemplates = new ModelRoutingOptions
+                {
+                    Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                    }
+                }
+            });
+
+        await facade.UpsertProviderAsync(
+            key: "bedrock",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+                null,
+                ProviderType: "Other"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var saved = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Equal(expected: "us-east-1", actual: saved.AwsRegion);
+        Assert.Equal(expected: "AWS_ID", actual: saved.AwsAccessKeyIdEnvVar);
+        Assert.Equal(expected: "AWS_SECRET", actual: saved.AwsSecretAccessKeyEnvVar);
+        Assert.Equal(expected: "AWS_TOKEN", actual: saved.AwsSessionTokenEnvVar);
     }
 }

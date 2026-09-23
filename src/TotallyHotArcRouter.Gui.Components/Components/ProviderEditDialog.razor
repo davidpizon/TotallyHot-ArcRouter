@@ -186,11 +186,20 @@
     [Parameter]
     public IReadOnlyList<ProviderTemplates.ProviderEditorTemplate> Templates { get; set; } = [];
 
+    /// <summary>
+    /// Whether <see cref="Templates"/> failed to load. An empty list with this false is a real empty
+    /// catalog. When true, a save that stays on the fallback <c>Other</c> selection keeps
+    /// <see cref="ProviderEditModel.ProviderType"/> so a missing catalog cannot rewrite a stored key.
+    /// </summary>
+    [Parameter]
+    public bool TemplatesUnavailable { get; set; }
+
     private string _key = string.Empty;
     private string _baseUrl = string.Empty;
     private bool _isFree;
     private string _providerName = string.Empty;
     private string _selectedTemplateKey = ProviderTemplates.OtherKey;
+    private bool _keepStoredProviderType;
     private readonly List<HeaderRow> _headers = [];
     private FormBaseline _baseline;
 
@@ -219,6 +228,12 @@
         _providerName = Model.ProviderName;
         _selectedTemplateKey = ProviderTemplates.ResolveStoredType(
             stored: Model.ProviderType, templateKeys: Templates.Select(template => template.Key));
+        // A failed catalog leaves only Other selectable, so resolving the stored key against it would
+        // persist Other on the next save. Keep the stored value until the operator picks a real template.
+        _keepStoredProviderType = TemplatesUnavailable
+            && !string.IsNullOrWhiteSpace(Model.ProviderType)
+            && string.Equals(a: _selectedTemplateKey, b: ProviderTemplates.OtherKey,
+                comparisonType: StringComparison.OrdinalIgnoreCase);
 
         foreach (var header in Model.Headers)
         {
@@ -261,6 +276,9 @@
     private void OnProviderTypeChanged(ChangeEventArgs e)
     {
         var key = AsString(e.Value);
+        if (!string.Equals(a: key, b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase))
+            _keepStoredProviderType = false;
+
         var template = OrderedTemplates.FirstOrDefault(candidate =>
             string.Equals(a: candidate.Key, b: key, comparisonType: StringComparison.OrdinalIgnoreCase));
         if (template is null) return;
@@ -460,7 +478,7 @@
             BaseUrl: _baseUrl.Trim(),
             AuthHeaderName: authHeaderName,
             Headers: BuildHeaders(authHeaderName),
-            ProviderType: _selectedTemplateKey,
+            ProviderType: _keepStoredProviderType ? Model.ProviderType.Trim() : _selectedTemplateKey,
             ProviderName: _providerName.Trim(),
             IsFree: _isFree);
 
@@ -542,7 +560,9 @@
     /// <param name="Headers">The custom headers as edited, including any header used for authentication.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">
-    /// The selected template key (a <c>ModelRouting:Providers</c> key, or <c>Other</c>).
+    /// The selected template key (a <c>ModelRouting:Providers</c> key, or <c>Other</c>). When
+    /// <see cref="TemplatesUnavailable"/> is set and the operator did not pick a template, this is the
+    /// type already stored on the provider.
     /// </param>
     /// <param name="ProviderName">
     /// A user-friendly display name for the provider; distinct from the unique
@@ -581,7 +601,8 @@
     /// The stored template key, a legacy family name, or empty. Reopens as that key when it is one of
     /// <see cref="Templates"/>; <c>Anthropic</c>, <c>OpenAI</c>, and <c>GoogleGemini</c> map onto
     /// <c>anthropic</c>, <c>openai</c>, and <c>gemini</c> when those keys are offered. Anything else
-    /// reopens as <c>Other</c> without rewriting the saved fields.
+    /// reopens as <c>Other</c> without rewriting the saved fields. When <see cref="TemplatesUnavailable"/>
+    /// is set, a save that stays on that fallback keeps this stored value.
     /// </param>
     /// <param name="ProviderName">
     /// A user-friendly display name for the provider, distinct from the unique

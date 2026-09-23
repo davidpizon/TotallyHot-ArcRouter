@@ -59,6 +59,13 @@ public static class ProviderTemplates
         return OtherKey;
     }
 
+    /// <summary>
+    /// Returns the catalog key that matches <paramref name="candidate"/>, ignoring case, so the dropdown
+    /// shows the configured spelling rather than the stored one.
+    /// </summary>
+    /// <param name="keys">The appsettings provider keys currently offered as templates.</param>
+    /// <param name="candidate">The stored type or a legacy family name to look up.</param>
+    /// <returns>The matching key, or <see langword="null"/> when none matches.</returns>
     private static string? MatchKey(IEnumerable<string> keys, string candidate)
     {
         foreach (var key in keys)
