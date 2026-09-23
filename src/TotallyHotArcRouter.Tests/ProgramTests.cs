@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using System.Text.Json;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
@@ -8,8 +9,17 @@ using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Tests;
 
-public class ProgramTests
+public class ProgramTests : IDisposable
 {
+    private readonly List<string> _tempFilesToCleanup = [];
+
+    public void Dispose()
+    {
+        foreach (var path in _tempFilesToCleanup)
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
     [Fact]
     public void CreateHostBuilder_BuildsSuccessfully()
     {
@@ -102,10 +112,9 @@ public class ProgramTests
 
     // End-to-end regression: RequestInterceptor's construction-time validation actually fires when
     // wired through the real host, not just when constructed directly in RequestInterceptorTests.
-    // A minimal, explicit in-memory ModelRouting configuration is layered on top of whatever
-    // Host.CreateDefaultBuilder's default appsettings.json discovery does or doesn't find, so this
-    // test's outcome depends only on RequestInterceptor's own validation logic, not on the test
-    // run's working/content-root directory happening to contain the real app's appsettings.json.
+    // A minimal, explicit persisted ModelRouting configuration is created from a temporary model-routing.json
+    // file, matching what ProviderConfigStore actually loads at runtime, so this test's outcome depends
+    // only on RequestInterceptor's own validation logic against the persisted model list.
     [Fact]
     public void CreateHostBuilder_WithUnconfiguredModelFlag_ThrowsWhenRequestInterceptorIsResolved()
     {
@@ -122,16 +131,29 @@ public class ProgramTests
         Assert.NotNull(host.Services.GetRequiredService<RequestInterceptor>());
     }
 
-    private static IHost BuildHostWithMinimalModelRouting(string[] args)
+    private IHost BuildHostWithMinimalModelRouting(string[] args)
     {
+        var tempPath = Path.Combine(path1: Path.GetTempPath(), path2: $"model-routing-{Guid.NewGuid():N}.json");
+        _tempFilesToCleanup.Add(tempPath);
+
+        var options = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+            },
+            ModelList =
+            [
+                new ModelRouteEntry { ModelName = "gpt-5.4", Provider = "openai", ProviderModelId = "gpt-5.4-test" }
+            ]
+        };
+
+        File.WriteAllText(path: tempPath, contents: JsonSerializer.Serialize(options));
+
         return Program.CreateHostBuilder(args)
             .ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ModelRouting:Providers:openai:BaseUrl"] = "https://api.openai.com",
-                ["ModelRouting:Providers:openai:AuthHeaderName"] = "Authorization",
-                ["ModelRouting:ModelList:0:ModelName"] = "gpt-5.4",
-                ["ModelRouting:ModelList:0:Provider"] = "openai",
-                ["ModelRouting:ModelList:0:ProviderModelId"] = "gpt-5.4-test"
+                ["ProviderConfig:FilePath"] = tempPath
             }))
             .Build();
     }
