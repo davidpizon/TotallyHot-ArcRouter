@@ -288,7 +288,7 @@ Usage:
 | --- | --- |
 | `Title` (required) | The uppercase header title. |
 | `CloseAriaLabel` (required) | The close glyph's accessible name - the button's only content is an SVG, so without one a screen reader announces an unnamed button. |
-| `OnClose` (required) | `EventCallback` invoked by the backdrop click, the close glyph, and (when `EnableEscapeToClose` is set) Escape. The shell never closes itself - the caller decides what closing means. A caller whose own public parameter is named `OnCancel` (matching `docs/gui/DESIGN.md`'s historical either/or) wires it straight through: `OnClose="OnCancel"`. |
+| `OnClose` (required) | `EventCallback` invoked by a backdrop press-and-release, the close glyph, and (when `EnableEscapeToClose` is set) Escape. The shell never closes itself - the caller decides what closing means. A caller whose own public parameter is named `OnCancel` (matching `docs/gui/DESIGN.md`'s historical either/or) wires it straight through: `OnClose="OnCancel"`. |
 | `ChildContent` (required) | The body, rendered inside the scrollable `.overlay-content` wrapper. |
 | `ContentClass` (optional, default `overlay-content p-5 space-y-4`) | The body wrapper's classes - override the `space-y-*` gap for a denser layout (`ProviderEditDialog` uses `overlay-content p-5 space-y-3`) while keeping the `overlay-content p-5` base. |
 | `EnableEscapeToClose` (optional, default `false`) | Whether Escape closes the dialog, bound on the panel (not the body) so it fires regardless of which descendant has focus. Off by default - only opt in for a dialog that genuinely wants it (`RemoveProviderDialog`, `UnlockSecretFieldDialog` do; `SettingsModal`, `ProviderEditDialog` don't). |
@@ -297,8 +297,8 @@ What `DialogShell` renders, and the contract behind it:
 
 | Element | Contract |
 | --- | --- |
-| Backdrop | `.overlay-backdrop` (`rgba(0,0,0,0.7)` + `backdrop-filter:blur(4px)`, both from the CSS class - no inline `style`), `z-50`, centers its panel. Backdrop click invokes `OnClose` |
-| Dismissal | Backdrop click closes; panel carries `@onclick:stopPropagation="true"` so body clicks don't |
+| Backdrop | `.overlay-backdrop` (`rgba(0,0,0,0.7)` + `backdrop-filter:blur(4px)`, both from the CSS class - no inline `style`), `z-50`, centers its panel. A primary-button press and release that both land on the backdrop invoke `OnClose` |
+| Dismissal | Backdrop dismissal requires the press to start on the backdrop. A release on the backdrop after a press inside the panel — selecting text that runs past the dialog — does not close. The panel stops `mousedown`, `mouseup`, and `click` from bubbling so a gesture that crosses the panel edge is not a backdrop click |
 | Panel | `.overlay-panel w-full max-w-md rounded-lg border border-slate-700`. `.overlay-panel`'s own CSS supplies `background: var(--surface-card)` (`#181818`) and the **dynamic sizing**: max-width `min(90vw, 700px)`, min-width `min(100% - 2rem, 400px)`, max-height `calc(100vh - 120px)`, `display: flex; flex-direction: column` |
 | Header | `px-5 py-4`, `border-b border-slate-700`, title left / close `x` right. **Always stays fixed** during content scroll |
 | Title | `text-sm font-semibold text-slate-200 tracking-wide uppercase` — **not** a large heading |

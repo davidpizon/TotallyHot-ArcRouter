@@ -5,10 +5,15 @@
    the backdrop-dismiss, stop-propagation, header layout, and (optionally) Escape-to-close behavior stay
    identical everywhere instead of being copy-pasted and drifting per dialog. *@
 <div class="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center"
-     @onclick="OnClose">
+     @onmousedown="RememberBackdropPress"
+     @onmouseup="HandleBackdropMouseUp">
     <div class="overlay-panel w-full max-w-md rounded-lg border border-slate-700"
          tabindex="@(EnableEscapeToClose ? "-1" : null)"
          @onkeydown="HandlePanelKeyDown"
+         @onmousedown="ClearBackdropPress"
+         @onmousedown:stopPropagation="true"
+         @onmouseup="ClearBackdropPress"
+         @onmouseup:stopPropagation="true"
          @onclick:stopPropagation="true">
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
             <span class="text-sm font-semibold text-slate-200 tracking-wide uppercase">@Title</span>
@@ -42,8 +47,10 @@
     public string CloseAriaLabel { get; set; } = string.Empty;
 
     /// <summary>
-    /// Invoked when the dialog should close: the backdrop, the close glyph, and - when
-    /// <see cref="EnableEscapeToClose"/> is set - the Escape key. The shell never closes itself; the
+    /// Invoked when the dialog should close: a primary-button press and release that both land on
+    /// the backdrop, the close glyph, and - when <see cref="EnableEscapeToClose"/> is set - the
+    /// Escape key. A release on the backdrop after a press inside the panel does not close, so
+    /// selecting text past the dialog edge leaves it open. The shell never closes itself; the
     /// caller decides what closing means (dismiss an edit, cancel a confirmation, etc.).
     /// </summary>
     [Parameter]
@@ -74,12 +81,54 @@
     public bool EnableEscapeToClose { get; set; }
 
     /// <summary>
+    /// True after a primary-button press whose target was the backdrop itself. The panel stops
+    /// pointer events from bubbling, so a press that starts inside the dialog never sets this.
+    /// </summary>
+    private bool _pressedOnBackdrop;
+
+    /// <summary>
     /// Closes the dialog when Escape is pressed anywhere within the panel, but only when
     /// <see cref="EnableEscapeToClose"/> opts in.
     /// </summary>
     private async Task HandlePanelKeyDown(KeyboardEventArgs args)
     {
         if (EnableEscapeToClose && args.Key == "Escape")
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Records that the current gesture began on the backdrop. A text selection that starts inside
+    /// the panel and ends on the backdrop would otherwise dismiss the dialog: the browser dispatches
+    /// the resulting <c>mouseup</c> (and the synthesized <c>click</c>) on the backdrop, the nearest
+    /// common ancestor, which a bare backdrop <c>@onclick</c> treats as a click-outside.
+    /// </summary>
+    /// <param name="args">The backdrop's pointer-down event.</param>
+    private void RememberBackdropPress(MouseEventArgs args)
+    {
+        _pressedOnBackdrop = args.Button == 0;
+    }
+
+    /// <summary>
+    /// Forgets a backdrop press when the pointer is pressed or released inside the panel, so a
+    /// gesture that crosses the panel boundary does not dismiss on a later backdrop <c>mouseup</c>.
+    /// </summary>
+    private void ClearBackdropPress()
+    {
+        _pressedOnBackdrop = false;
+    }
+
+    /// <summary>
+    /// Dismisses only when the same primary-button gesture both started and ended on the backdrop.
+    /// Releasing outside after selecting text inside the dialog leaves it open.
+    /// </summary>
+    /// <param name="args">The backdrop's pointer-up event.</param>
+    private async Task HandleBackdropMouseUp(MouseEventArgs args)
+    {
+        var shouldClose = _pressedOnBackdrop && args.Button == 0;
+        _pressedOnBackdrop = false;
+        if (shouldClose)
         {
             await OnClose.InvokeAsync();
         }
