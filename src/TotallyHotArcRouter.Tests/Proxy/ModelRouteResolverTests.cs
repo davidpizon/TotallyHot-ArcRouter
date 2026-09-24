@@ -89,6 +89,8 @@ public class ModelRouteResolverTests
 
         Assert.True(resolved);
         Assert.Contains("X-API-KEY", route!.ConfiguredHeaderNames);
+        // The emitted name must be the trimmed one too, or the padded name is rejected when it is forwarded.
+        Assert.Equal(expected: "x-api-key", actual: Assert.Single(route.ExtraHeaders).Key);
     }
 
     [Fact]
