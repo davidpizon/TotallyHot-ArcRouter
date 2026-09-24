@@ -115,8 +115,7 @@ public sealed class ProviderOptionsPreservationTests
 
         // A minimal edit: change only the base URL. Everything else must survive untouched.
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid",
-                null),
+                BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
@@ -191,7 +190,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null),
+                BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(expected: "Anthropic", actual: store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -204,7 +203,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null, ProviderType: "OpenAI"),
+                BaseUrl: "https://changed.invalid", ProviderType: "OpenAI"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(expected: "OpenAI", actual: store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -222,7 +221,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null, ProviderType: blank),
+                BaseUrl: "https://changed.invalid", ProviderType: blank),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -235,7 +234,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null, ProviderType: "  OpenAI  "),
+                BaseUrl: "https://changed.invalid", ProviderType: "  OpenAI  "),
             cancellationToken: TestContext.Current.CancellationToken);
 
         // Stored untrimmed, this would fail Enum.TryParse in the editor and silently show "Other".
@@ -251,7 +250,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null),
+                BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
@@ -273,8 +272,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "fresh", request: new ProviderWriteRequest(
-                BaseUrl: "https://fresh.invalid",
-                null),
+                BaseUrl: "https://fresh.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var created = store.Snapshot.Options.Providers["fresh"];
@@ -294,7 +292,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: null),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -310,7 +307,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: ""),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -326,7 +322,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: "  \t\n  "),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -342,7 +337,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: "New Provider Name"),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -358,7 +352,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: "  New Provider Name  "),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -427,7 +420,6 @@ public sealed class ProviderOptionsPreservationTests
             key: "bedrock",
             request: new ProviderWriteRequest(
                 BaseUrl: "https://api.openai.com",
-                null,
                 ProviderType: "Other"),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -461,7 +453,6 @@ public sealed class ProviderOptionsPreservationTests
             key: "bedrock",
             request: new ProviderWriteRequest(
                 BaseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-                null,
                 ProviderType: "Other"),
             cancellationToken: TestContext.Current.CancellationToken);
 

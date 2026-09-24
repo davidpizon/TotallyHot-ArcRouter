@@ -1,4 +1,3 @@
-@using System.Diagnostics.CodeAnalysis
 @* Add/edit-provider modal for the Governance tab's provider manager. Captures the endpoint, the provider
    family, and any custom headers (including authentication, expressed as an ordinary header such as
    Authorization). Mirrors SettingsModal's overlay/stop-propagation/EventCallback pattern. *@
@@ -631,7 +630,7 @@
         /// <see cref="Locked"/> because an env-var row is never locked, yet must lock again if the operator
         /// switches it to a literal.
         /// </summary>
-        public bool SecretByTemplate { get; set; }
+        public bool SecretByTemplate { get; init; }
 
         /// <summary>
         /// Whether this header already has a stored literal value that was withheld from this
