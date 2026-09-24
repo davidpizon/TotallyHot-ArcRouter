@@ -25,7 +25,7 @@ public class ModelRouteResolverTests
         Assert.Equal(expected: "gpt-5.4", actual: route!.ModelName);
         Assert.Equal(expected: "gpt-5.4-2026-01", actual: route.ProviderModelId);
         Assert.Equal(expected: "https://api.openai.com/", actual: route.UpstreamBaseUrl.ToString());
-        Assert.Contains("Authorization", route.ConfiguredHeaderNames!);
+        Assert.Contains("Authorization", route.ConfiguredHeaderNames);
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class ModelRouteResolverTests
         var resolved = resolver.TryResolve(modelName: "claude-sonnet-5", route: out var route);
 
         Assert.True(resolved);
-        Assert.Contains("X-API-KEY", route!.ConfiguredHeaderNames!);
+        Assert.Contains("X-API-KEY", route!.ConfiguredHeaderNames);
     }
 
     [Fact]
