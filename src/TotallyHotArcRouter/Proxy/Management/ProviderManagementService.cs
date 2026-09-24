@@ -1002,6 +1002,30 @@ internal sealed class ProviderManagementService
     }
 
     /// <summary>
+    /// Scheme, host, port, and path of <paramref name="uri"/> for a log line. Userinfo, query, and fragment
+    /// are omitted: <c>BaseUrl</c> validation only requires an absolute URI, so those components can carry
+    /// credentials (e.g. <c>https://user:pass@host</c> or an API-key query string).
+    /// </summary>
+    /// <param name="uri">A URI built from a provider's configured <c>BaseUrl</c>.</param>
+    /// <returns>The URI with credential-bearing components removed.</returns>
+    private static string RedactUriForLog(Uri uri)
+    {
+        return uri.GetComponents(
+            components: UriComponents.Scheme | UriComponents.Host | UriComponents.Port | UriComponents.Path,
+            format: UriFormat.Unescaped);
+    }
+
+    /// <summary>
+    /// Strips CR/LF (and other control characters) from a configuration-controlled value before it is
+    /// interpolated into a log line, so an invalid header name cannot forge additional log entries.
+    /// </summary>
+    /// <param name="value">A value that reached validation but was rejected (e.g. a malformed header name).</param>
+    private static string SanitizeForLog(string value)
+    {
+        return string.Concat(value.Where(c => !char.IsControl(c)));
+    }
+
+    /// <summary>
     /// Runs a store mutation and maps it to a <see cref="ManagementResult{T}"/>, translating validation/argument
     /// failures into <see cref="ManagementErrorType.InvalidRequest"/>.
     /// </summary>
@@ -1071,10 +1095,10 @@ internal sealed class ProviderManagementService
                 // which configures no credential must not warn on every successful refresh.
                 var rejected = rejectedHeaders.Count == 0
                     ? "none"
-                    : string.Join(separator: ", ", values: rejectedHeaders);
+                    : string.Join(separator: ", ", values: rejectedHeaders.Select(SanitizeForLog));
                 _logger?.LogWarning(
                     "Model discovery failed for {Url}: provider returned {StatusCode}. Authorization header sent: {AuthorizationSent}. Rejected header names: {RejectedHeaders}. {Detail}",
-                    target, statusCode, authorizationSent, rejected, detail ?? "No error body.");
+                    RedactUriForLog(target), statusCode, authorizationSent, rejected, detail ?? "No error body.");
                 var error = $"Provider returned {statusCode} for {target}.";
                 if (detail is not null) error = $"{error} {detail}";
                 if (authorizationConfigured && !authorizationSent)
@@ -1090,7 +1114,7 @@ internal sealed class ProviderManagementService
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            _logger?.LogWarning(ex, "Model discovery failed for {Url}.", target);
+            _logger?.LogWarning(ex, "Model discovery failed for {Url}.", RedactUriForLog(target));
             return new DiscoverModelsResponse(false, Models: [], Error: ex.Message);
         }
     }
