@@ -591,6 +591,80 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).HasAttribute("disabled").Should().BeFalse();
     }
 
+    [Fact]
+    public void A_new_providers_name_colliding_with_an_existing_provider_blocks_save()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: ["OpenAI API"]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("OpenAI API");
+        cut.Find("[data-testid='base-url']").Input("https://api.example.com");
+
+        cut.Find("[data-testid='dialog-error']").TextContent
+            .Should().Contain("Provider name 'OpenAI API' is already in use by another provider.");
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Name_collision_detection_is_case_insensitive_and_trims_whitespace()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: ["OpenAI API"]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("  openai api  ");
+        cut.Find("[data-testid='base-url']").Input("https://api.example.com");
+
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Renaming_away_from_a_collision_re_enables_save()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: ["OpenAI API"]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("OpenAI API");
+        cut.Find("[data-testid='base-url']").Input("https://api.example.com");
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
+
+        cut.Find("[data-testid='provider-name']").Input("My OpenAI Instance");
+
+        cut.FindAll("[data-testid='dialog-error']").Should().BeEmpty();
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Editing_a_provider_without_changing_its_own_name_does_not_block_save()
+    {
+        using var ctx = new BunitContext();
+
+        // The edited provider's own current name is excluded from ExistingProviderNames by the caller
+        // (ProvidersAdmin), so keeping it unchanged must not trip the collision check.
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: false, providerName: "OpenAI API");
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: []);
+        });
+
+        cut.FindAll("[data-testid='dialog-error']").Should().BeEmpty();
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeFalse();
+    }
+
     private static void SeedEditParameters(
         ComponentParameterCollectionBuilder<ProviderEditDialog> parameters,
         bool isNew = false,

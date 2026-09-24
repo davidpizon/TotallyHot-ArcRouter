@@ -15,9 +15,12 @@ public sealed class ModelRoutingOptions
 
     /// <summary>
     /// Provider key reserved for the editor's blank add-provider choice. The dialog's fallback option
-    /// uses this spelling, so a provider with the same key cannot be configured in
-    /// <c>ModelRouting:Providers</c> or in the live store. Compared case-insensitively, matching
-    /// <see cref="Providers"/>.
+    /// uses this spelling, so a provider with the same key cannot be configured in the
+    /// <c>ModelRouting:Providers</c> appsettings template catalog (see
+    /// <see cref="TotallyHot.ArcRouter.Proxy.Management.ProviderTemplateCatalog"/>). Not enforced against
+    /// <see cref="Providers"/> in the live store: a pre-existing live provider may legitimately use this
+    /// spelling as its dictionary key, and rejecting it there would break startup for that configuration.
+    /// Compared case-insensitively.
     /// </summary>
     public const string ReservedBlankProviderKey = "Other";
 
@@ -25,7 +28,7 @@ public sealed class ModelRoutingOptions
     /// Whether <paramref name="key"/> is <see cref="ReservedBlankProviderKey"/>, ignoring case.
     /// </summary>
     /// <param name="key">A provider dictionary key.</param>
-    /// <returns><see langword="true"/> when the key is reserved and must not be configured.</returns>
+    /// <returns><see langword="true"/> when the key matches the reserved spelling.</returns>
     public static bool IsReservedBlankProviderKey(string key)
     {
         return string.Equals(a: key, b: ReservedBlankProviderKey, comparisonType: StringComparison.OrdinalIgnoreCase);
@@ -68,17 +71,18 @@ public sealed class ModelRoutingOptions
                 errors.Add($"ModelList entry '{entry.ModelName}' must have a non-empty ProviderModelId.");
         }
 
+        var seenProviderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var (name, provider) in Providers)
         {
-            if (IsReservedBlankProviderKey(name))
-                errors.Add(
-                    $"Provider key '{name}' is reserved for the blank add-provider template and cannot be configured.");
-
             if (!Uri.TryCreate(uriString: provider.BaseUrl, uriKind: UriKind.Absolute, result: out _))
                 errors.Add($"Provider '{name}' has an invalid BaseUrl '{provider.BaseUrl}'.");
 
             if (string.IsNullOrWhiteSpace(provider.AuthHeaderName))
                 errors.Add($"Provider '{name}' must have a non-empty AuthHeaderName.");
+
+            if (!string.IsNullOrWhiteSpace(provider.Name) && !seenProviderNames.Add(provider.Name.Trim()))
+                errors.Add($"Provider name '{provider.Name.Trim()}' is used by more than one provider.");
 
             foreach (var header in provider.Headers)
                 if (string.IsNullOrWhiteSpace(header.Name))

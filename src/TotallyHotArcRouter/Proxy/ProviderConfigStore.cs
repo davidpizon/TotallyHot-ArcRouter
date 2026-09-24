@@ -361,51 +361,8 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     }
 
     /// <summary>
-    /// Removes any providers with keys matching <see cref="ModelRoutingOptions.ReservedBlankProviderKey"/>,
-    /// which is reserved for the UI's blank provider option and cannot be configured in the live store.
-    /// Also cascades to remove any models that routed through removed providers. This is a one-time migration
-    /// for legacy configurations that may have used this key before it was reserved.
-    /// </summary>
-    private ModelRoutingOptions RemoveLegacyReservedProviders(ModelRoutingOptions options)
-    {
-        var hasReservedKey = options.Providers.Keys.Any(key => ModelRoutingOptions.IsReservedBlankProviderKey(key));
-        if (!hasReservedKey) return options;
-
-        var providers = new Dictionary<string, ProviderOptions>(dictionary: options.Providers,
-            comparer: StringComparer.OrdinalIgnoreCase);
-        var removedKeys = new List<string>();
-
-        foreach (var key in options.Providers.Keys)
-        {
-            if (ModelRoutingOptions.IsReservedBlankProviderKey(key))
-            {
-                providers.Remove(key);
-                removedKeys.Add(key);
-            }
-        }
-
-        var models = options.ModelList
-            .Where(m => !removedKeys.Any(k => string.Equals(k, m.Provider, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-
-        var migrated = new ModelRoutingOptions
-        {
-            Providers = providers,
-            ModelList = models
-        };
-
-        _logger.LogInformation(
-            message:
-            "Removed {Count} legacy provider(s) with reserved key(s) from {FilePath}: {RemovedKeys}. Also cascaded removal of {ModelCount} model(s) that routed through them.",
-            removedKeys.Count, _filePath, string.Join(separator: ", ", removedKeys),
-            options.ModelList.Count - models.Count);
-
-        return migrated;
-    }
-
-    /// <summary>
-    /// Reads and deserializes the configuration file from disk, normalizing the result, removing any
-    /// legacy reserved provider keys, and validating before returning.
+    /// Reads and deserializes the configuration file from disk, normalizing the result and validating it
+    /// before returning.
     /// </summary>
     private ModelRoutingOptions LoadFromFile()
     {
@@ -415,7 +372,6 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
                          $"Provider configuration file '{_filePath}' deserialized to null.");
 
         var normalized = Normalize(loaded);
-        normalized = RemoveLegacyReservedProviders(normalized);
         normalized.EnsureValid();
         return normalized;
     }

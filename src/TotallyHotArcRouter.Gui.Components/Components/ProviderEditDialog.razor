@@ -195,6 +195,15 @@
     [Parameter]
     public bool TemplatesUnavailable { get; set; }
 
+    /// <summary>
+    /// The display names of every other currently configured provider (excluding the one this dialog is
+    /// editing, when <see cref="ProviderEditModel.IsNew"/> is <see langword="false"/>), used to reject a
+    /// name that collides with an existing provider before the operator can save. The server enforces this
+    /// too (<c>ModelRoutingOptions.EnsureValid</c>) - this is purely for immediate feedback.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<string> ExistingProviderNames { get; set; } = [];
+
     private string _key = string.Empty;
     private string _baseUrl = string.Empty;
     private bool _isFree;
@@ -205,16 +214,34 @@
     private FormBaseline _baseline;
 
     /// <summary>The proxy-reported error, or the local validation reason when the form is not yet valid.</summary>
-    private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError : Error;
+    private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError ?? DuplicateNameError : Error;
 
     /// <summary>
-    /// Whether the form has enough to submit: a base URL, a display name when adding a new provider, and no duplicate
-    /// header names.
+    /// Whether the form has enough to submit: a base URL, a display name when adding a new provider, no
+    /// duplicate header names, and a display name that does not collide with another provider's.
     /// </summary>
     private bool CanSave =>
         !string.IsNullOrWhiteSpace(_baseUrl)
         && (!Model.IsNew || !string.IsNullOrWhiteSpace(_providerName))
-        && DuplicateHeaderError is null;
+        && DuplicateHeaderError is null
+        && DuplicateNameError is null;
+
+    /// <summary>
+    /// Why the entered display name cannot be saved, or <see langword="null"/> when it is blank or unique.
+    /// Compared case-insensitively, trimmed, against <see cref="ExistingProviderNames"/>.
+    /// </summary>
+    private string? DuplicateNameError
+    {
+        get
+        {
+            var trimmed = _providerName.Trim();
+            if (trimmed.Length == 0) return null;
+
+            var collides = ExistingProviderNames.Any(name =>
+                string.Equals(a: name, b: trimmed, comparisonType: StringComparison.OrdinalIgnoreCase));
+            return collides ? $"Provider name '{trimmed}' is already in use by another provider." : null;
+        }
+    }
 
     // Seed the editable fields from the parameters exactly once, when the dialog opens. The dialog is
     // conditionally rendered (@if (_showDialog)) so a fresh instance — and thus a single OnInitialized —
