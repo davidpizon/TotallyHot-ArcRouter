@@ -115,6 +115,6 @@ public class FailoverCandidateRankerTests
             Provider: "prov-" + modelName,
             ProviderModelId: modelName + "-upstream",
             UpstreamBaseUrl: new Uri($"https://{modelName}.test"),
-            ExtraHeaders: []);
+            ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>());
     }
 }

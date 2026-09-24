@@ -167,7 +167,7 @@ internal static class UpstreamRequestBuilder
         {
             if (AlwaysSkippedRequestHeaders.Contains(value: header.Key, comparer: StringComparer.OrdinalIgnoreCase) ||
                 requestHopByHopHeaders.Contains(header.Key) ||
-                configuredHeaderNames?.Contains(header.Key) == true)
+                configuredHeaderNames.Contains(header.Key))
                 continue;
 
             requestMessage.Headers.TryAddWithoutValidation(name: header.Key, values: [.. header.Value]);

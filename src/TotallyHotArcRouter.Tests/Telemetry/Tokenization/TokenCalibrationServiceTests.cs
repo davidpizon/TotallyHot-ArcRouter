@@ -333,7 +333,7 @@ public class TokenCalibrationServiceTests
             route = new ResolvedModelRoute(
                 ModelName: modelName, Provider: provider, ProviderModelId: modelName,
                 UpstreamBaseUrl: new Uri("https://example.invalid"),
-                ExtraHeaders: []);
+                ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>());
             return true;
         }
 

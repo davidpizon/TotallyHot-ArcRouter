@@ -272,7 +272,7 @@
             {
                 Name = header.Name,
                 UseEnvVar = useEnvVar,
-                Locked = hasStoredSecret && header.Locked,
+                Locked = !useEnvVar && header.Locked,
                 // An unlocked literal comes back in full and is shown as ordinary editable text. A locked
                 // one is never returned, so its row starts blank - HasStoredLiteralValue drives the
                 // "saved" placeholder below, and leaving the field blank on save preserves the stored

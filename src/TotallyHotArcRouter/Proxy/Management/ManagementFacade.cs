@@ -421,8 +421,7 @@ public sealed class ManagementFacade
                         // header never carries a value to drop (h.Value is always null once migrated/written
                         // there), but still reports Locked so the GUI's "saved, blank keeps it" placeholder
                         // keeps working identically to a locked literal.
-                        var locked = (source == HeaderValueSource.Literal || source == HeaderValueSource.Protected) &&
-                                     h.Locked;
+                        var locked = source != HeaderValueSource.EnvVar && h.Locked;
                         // ValueEnvVar is only meaningful for an envVar-sourced header; a header with both
                         // fields somehow set (legacy/bad data) classifies as literal, and must not also
                         // surface the env-var name - that would violate HeaderView's documented contract.

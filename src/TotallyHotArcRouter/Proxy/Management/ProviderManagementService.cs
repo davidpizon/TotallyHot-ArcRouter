@@ -950,10 +950,10 @@ internal sealed class ProviderManagementService
             Value = preservedValue,
             ValueEnvVar = existing?.ValueEnvVar,
             ValueSecretRef = preservedSecretRef,
-            // Only a literal or a protected-store reference can be a secret, so a preserved env-var (or
-            // valueless) header stores unlocked no matter what the caller asked for.
-            Locked = (!string.IsNullOrWhiteSpace(preservedValue) || !string.IsNullOrWhiteSpace(preservedSecretRef)) &&
-                     locked
+            // An env-var reference holds only a variable name, so it stores unlocked no matter what the caller
+            // asked for. Any other row keeps its lock, including a valueless one: a template's locked
+            // credential row is saved empty and must still lock the first key typed into it later.
+            Locked = locked && string.IsNullOrWhiteSpace(existing?.ValueEnvVar)
         };
     }
 
@@ -1103,8 +1103,9 @@ internal sealed class ProviderManagementService
                     RedactUriForLog(target), statusCode, authorizationSent, rejected, detail ?? "No error body.");
                 // This string reaches the admin client and the interaction status, so it gets the same
                 // redacted target as the log line: BaseUrl may carry userinfo or an API key in its query.
+                // The upstream detail stays in the log only: a provider or reverse proxy can echo the
+                // Authorization value back in its error body, and this string reaches the admin client.
                 var error = $"Provider returned {statusCode} for {RedactUriForLog(target)}.";
-                if (detail is not null) error = $"{error} {detail}";
                 if (authorizationConfigured && !authorizationSent)
                     error += " No Authorization header was sent; the configured credential did not resolve.";
                 if (rejectedHeaders.Count > 0)

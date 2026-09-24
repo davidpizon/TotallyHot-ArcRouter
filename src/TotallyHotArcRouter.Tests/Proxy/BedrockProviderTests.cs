@@ -567,7 +567,7 @@ public class BedrockProviderTests
     {
         var route = new ResolvedModelRoute(ModelName: "m", Provider: "bedrock-anthropic",
             ProviderModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-            UpstreamBaseUrl: new Uri("https://example.com"), ExtraHeaders: []);
+            UpstreamBaseUrl: new Uri("https://example.com"), ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>());
         var factory = new BedrockRuntimeClientFactory();
 
         Assert.Throws<InvalidOperationException>(() => factory.Create(route));

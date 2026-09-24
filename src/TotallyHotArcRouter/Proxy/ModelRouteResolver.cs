@@ -105,7 +105,7 @@ public sealed record ResolvedModelRoute(
     string ProviderModelId,
     Uri UpstreamBaseUrl,
     IReadOnlyList<KeyValuePair<string, string>> ExtraHeaders,
-    IReadOnlySet<string>? ConfiguredHeaderNames = null,
+    IReadOnlySet<string> ConfiguredHeaderNames,
     bool IsFree = false,
     string? AwsRegion = null,
     string? AwsAccessKeyId = null,
@@ -136,7 +136,7 @@ public sealed record ResolvedModelRoute(
         builder.Append(", ExtraHeaders = [")
             .Append(string.Join(separator: ", ", values: ExtraHeaders.Select(h => $"{h.Key}=<redacted>"))).Append(']');
         builder.Append(", ConfiguredHeaderNames = [")
-            .Append(string.Join(separator: ", ", values: ConfiguredHeaderNames ?? (IEnumerable<string>)[])).Append(']');
+            .Append(string.Join(separator: ", ", values: ConfiguredHeaderNames)).Append(']');
         builder.Append(", IsFree = ").Append(IsFree);
         builder.Append(", AwsRegion = ").Append(AwsRegion);
         builder.Append(", AwsAccessKeyId = ").Append(AwsAccessKeyId);

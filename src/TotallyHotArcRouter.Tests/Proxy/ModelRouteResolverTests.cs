@@ -100,6 +100,7 @@ public class ModelRouteResolverTests
             ProviderModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
             UpstreamBaseUrl: new Uri("https://bedrock-runtime.us-east-1.amazonaws.com"),
             ExtraHeaders: [new KeyValuePair<string, string>(key: "x-api-key", value: "another-secret-value")],
+            ConfiguredHeaderNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "x-api-key" },
             AwsRegion: "us-east-1",
             AwsAccessKeyId: "AKIAEXAMPLE",
             AwsSecretAccessKey: "wJalrXUtnFEMI/EXAMPLESECRETKEY",
@@ -127,7 +128,7 @@ public class ModelRouteResolverTests
             Provider: "openai",
             ProviderModelId: "gpt-5.4-2026-01",
             UpstreamBaseUrl: new Uri("https://api.openai.com"),
-            ExtraHeaders: []);
+            ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>());
 
         var text = route.ToString();
 

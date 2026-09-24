@@ -36,6 +36,26 @@ public sealed class ManagementFacadeTests
         };
     }
 
+    [Fact]
+    public async Task UpsertProviderAsync_ALockedValuelessHeader_StaysLockedAndListsAsLocked()
+    {
+        // A template's locked credential row is saved empty; it must still lock the key typed into it later.
+        var store = new InMemoryProviderConfigStore(SeedOptions());
+        var facade = CreateFacade(store: store);
+
+        var result = await facade.UpsertProviderAsync(
+            key: "custom",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://api.example.invalid",
+                Headers: [new HeaderWriteRequest(Name: "Authorization", Value: null, ValueEnvVar: null, Locked: true)]),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.True(Assert.Single(store.Snapshot.Options.Providers["custom"].Headers).Locked);
+        var view = result.Value!.Providers.Single(p => p.Key == "custom");
+        Assert.True(Assert.Single(view.Headers).Locked);
+    }
+
     private static ManagementFacade CreateFacade(
         IProviderConfigStore? store = null,
         ProviderBudgetStore? budgetStore = null,

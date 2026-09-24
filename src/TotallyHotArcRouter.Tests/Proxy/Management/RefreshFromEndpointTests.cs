@@ -391,6 +391,32 @@ public sealed class RefreshFromEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFails_TheErrorNeverEchoesTheUpstreamBody()
+    {
+        // A provider or reverse proxy can echo the Authorization value in its error body.
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://api.example.invalid/v1" }
+            }
+        });
+        var handler = DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("{\"error\":\"bad key sk-echoed-secret\"}")
+        }));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "401", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "sk-echoed-secret", actualString: message);
+    }
+
+    [Fact]
     public async Task RefreshFromEndpoint_WhenTheRequestThrows_TheErrorNeverCarriesTheExceptionMessage()
     {
         // HttpRequestException messages can embed the requested URI, so the admin-facing error is generic.
