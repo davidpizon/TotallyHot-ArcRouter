@@ -72,12 +72,11 @@ internal static class UpstreamRequestBuilder
         requestMessage.Content.Headers.TryAddWithoutValidation(name: "Content-Type", value: "application/json");
 
         // Provider-configured custom headers (e.g. anthropic-version, and whichever header carries
-        // authentication). Added only when the client didn't already send that header, so a client
-        // supplying its own value keeps it rather than having it clobbered or duplicated. Client headers
-        // were copied above - except the auth header, which was skipped there by name (and thus sourced
-        // from here instead) only when the provider actually has one configured; for a provider with no
-        // auth header configured, the client's own header of that name was left in place and nothing here
-        // touches it.
+        // authentication). CopyClientHeaders already dropped every client header whose name the provider
+        // configures (route.ConfiguredHeaderNames), so the operator's value is the only one of that name
+        // that can reach the upstream and a client cannot override it. The Contains guard is then only a
+        // duplicate-name safety net for ExtraHeaders itself. A header the provider does not configure is
+        // relayed from the client untouched, and nothing here touches it.
         foreach (var (headerName, headerValue) in route.ExtraHeaders)
             if (!requestMessage.Headers.Contains(headerName))
                 requestMessage.Headers.TryAddWithoutValidation(name: headerName, value: headerValue);
