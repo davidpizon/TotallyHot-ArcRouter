@@ -45,8 +45,8 @@ internal static class UpstreamRequestBuilder
     /// </summary>
     /// <param name="context">The inbound client request, source of the method, path, query, and headers.</param>
     /// <param name="route">
-    /// The candidate being attempted - supplies the base URL, upstream model id, auth-header
-    /// configuration, and any provider-configured extra headers.
+    /// The candidate being attempted - supplies the base URL, upstream model id, the configured header
+    /// names, and any provider-configured extra headers.
     /// </param>
     /// <param name="translator">The provider's translator, or <see langword="null"/> for a passthrough provider.</param>
     /// <param name="rewrittenBody">The request body after <c>RequestInterceptor</c>'s model rewrite, in OpenAI shape.</param>
@@ -144,7 +144,7 @@ internal static class UpstreamRequestBuilder
     /// <summary>
     /// Copies the client's own headers onto the upstream message, skipping the ones that must never be
     /// relayed (<see cref="AlwaysSkippedRequestHeaders"/>), the hop-by-hop set nominated by this request's
-    /// <c>Connection</c> header, and - conditionally - the provider's configured auth header.
+    /// <c>Connection</c> header, and every header name the provider itself configures.
     /// </summary>
     private static void CopyClientHeaders(HttpContext context, ResolvedModelRoute route,
         HttpRequestMessage requestMessage)
@@ -154,22 +154,20 @@ internal static class UpstreamRequestBuilder
                 ? requestConnectionValues
                 : default);
 
-        // A client header matching the provider's configured auth header name is only skipped when the
-        // provider's configuration actually declares one - otherwise an unauthenticated provider (e.g. a
-        // free local runtime with no auth header entry) would silently drop a client's own header of that
-        // name with nothing forwarded in its place. This is deliberately based on configuration intent
-        // rather than whether the header resolved into route.ExtraHeaders *this request*: a provider whose
-        // credential env var is temporarily unset must still have the client's own header stripped
-        // (failing closed with no credential forwarded), not let the client's header through as a stand-in
-        // for the operator-configured one.
-        var providerSuppliesAuthHeader = route.AuthHeaderConfigured;
+        // A client header whose name the provider configures is always skipped, so the operator's value is
+        // the only one of that name that reaches the upstream and the client cannot override it. This is
+        // deliberately based on configuration intent rather than whether the header resolved into
+        // route.ExtraHeaders *this request*: a provider whose credential env var is temporarily unset must
+        // still have the client's own header stripped (failing closed with nothing forwarded), not let the
+        // client's header through as a stand-in for the operator-configured one. A name the provider does
+        // not configure is forwarded as before, so a pass-through header is not silently dropped.
+        var configuredHeaderNames = route.ConfiguredHeaderNames;
 
         foreach (var header in context.Request.Headers)
         {
             if (AlwaysSkippedRequestHeaders.Contains(value: header.Key, comparer: StringComparer.OrdinalIgnoreCase) ||
                 requestHopByHopHeaders.Contains(header.Key) ||
-                (providerSuppliesAuthHeader && string.Equals(a: header.Key, b: route.AuthHeaderName,
-                    comparisonType: StringComparison.OrdinalIgnoreCase)))
+                configuredHeaderNames?.Contains(header.Key) == true)
                 continue;
 
             requestMessage.Headers.TryAddWithoutValidation(name: header.Key, values: [.. header.Value]);

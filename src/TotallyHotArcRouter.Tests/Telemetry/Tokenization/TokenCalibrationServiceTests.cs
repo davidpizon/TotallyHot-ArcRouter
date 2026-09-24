@@ -332,7 +332,7 @@ public class TokenCalibrationServiceTests
 
             route = new ResolvedModelRoute(
                 ModelName: modelName, Provider: provider, ProviderModelId: modelName,
-                UpstreamBaseUrl: new Uri("https://example.invalid"), AuthHeaderName: "x-api-key",
+                UpstreamBaseUrl: new Uri("https://example.invalid"),
                 ExtraHeaders: []);
             return true;
         }

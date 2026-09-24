@@ -107,13 +107,15 @@ On the write side, `HeaderWriteRequest.Locked` is a `bool?` and qualifies the bl
 | --- | --- |
 | `true` | Preserve the stored value — the caller was never shown it, so it could not resend it. |
 | `false` | Clear it — the caller could see the field in full and left it empty. This is how the editor's unlock reaches storage. |
-| `null` | Legacy: preserve, and store any literal as locked. For callers that predate the flag. |
+| `null` | Leave the lock as it is: a header already locked stays locked, a new one starts unlocked, and a blank value preserves what is stored. |
 
-`ProviderHeader.Locked` likewise defaults to **`true`** when absent from JSON. A header persisted before
-this flag existed has unknown provenance, so it stays hidden rather than becoming visible on upgrade —
-the operator must unlock it (and thus retype it) to make it readable. Values known to be public say
-`"Locked": false` explicitly: the `anthropic-version` seed in `appsettings.json`, and the default
-headers merged in by the editor's provider templates.
+`ProviderHeader.Locked` defaults to **`false`** when absent from JSON: nothing is locked unless a template
+or the operator says so
+([ADR-0016](../adr/0016-remove-authheadername-and-mark-secrets-per-header.md)). In the `appsettings.json`
+template catalog the flag is the per-template declaration that a header is a secret (e.g.
+`"Locked": true` on an API-key header), so the editor offers an empty locked row for it. A `null` write
+never unlocks a header that is already locked, so a caller that omits the flag cannot expose a stored
+secret by accident.
 
 An **env-var-backed** header never shows a padlock and always stores unlocked. It holds only a variable
 *name*; the secret itself lives in the environment, outside the configuration file, so there is nothing
@@ -126,11 +128,10 @@ carry a mix of public and private header data. See
 [`provider-management.md`](provider-management.md#custom-headers).
 
 There is no separate Credentials fieldset - authentication is an ordinary custom header, so the
-credential row is a secret field like any other. It carries one exception to the unlocked default: on
-save, the literal header whose name matches the provider's `AuthHeaderName` is stored **locked**
-regardless of its padlock state in the dialog. That is why a freshly added `Authorization` or
-`x-api-key` row shows unlocked while you are typing it, then comes back blank and masked the next time
-the dialog opens - a credential is never left readable back through the management API.
+credential row is a secret field like any other. A provider template declares its credential header
+`Locked`, so choosing the template gives you a locked row already; a header you add by hand starts
+**unlocked** and is only locked if you click its padlock. Nothing locks a row on your behalf, so lock any
+row that carries a key.
 
 ## Adding a secret field elsewhere
 

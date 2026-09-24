@@ -583,6 +583,8 @@ foreach (var header in context.Request.Headers)
     if (AlwaysSkippedRequestHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) ||
         requestHopByHopHeaders.Contains(header.Key) ||
         (providerSuppliesAuthHeader && string.Equals(header.Key, route.AuthHeaderName, …)))
+        // ^ as of this snapshot. Since ADR-0016 the condition is `route.ConfiguredHeaderNames.Contains(header.Key)`:
+        //   every header name the provider configures is stripped, not just one "credential" name.
     {
         continue;
     }

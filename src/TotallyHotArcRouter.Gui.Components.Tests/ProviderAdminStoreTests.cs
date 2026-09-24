@@ -60,7 +60,7 @@ public sealed class ProviderAdminStoreTests
     {
         var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
         var body = new ProviderWriteRequest(
-            BaseUrl: "https://example.com", AuthHeaderName: "Authorization");
+            BaseUrl: "https://example.com");
 
         var act = () => store.UpsertProviderAsync(key: "test", body: body);
 
@@ -74,8 +74,7 @@ public sealed class ProviderAdminStoreTests
         var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress),
             logger: logger);
         var body = new ProviderWriteRequest(
-            BaseUrl: "https://operator:secret-token@api.example.com:8443/v1?api_key=secret-token#frag",
-            AuthHeaderName: "Authorization");
+            BaseUrl: "https://operator:secret-token@api.example.com:8443/v1?api_key=secret-token#frag");
 
         var act = () => store.UpsertProviderAsync(key: "openai", body: body);
 

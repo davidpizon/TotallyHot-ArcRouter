@@ -81,19 +81,22 @@ message ListProvidersRequest {}
 
 message ListProviderTemplatesRequest {}
 
-// A non-credential header the add-provider dialog inserts when this template is selected.
+// A header the add-provider dialog inserts when this template is selected. A locked header is a secret:
+// its value is stored in the protected store once the operator sets one, and is never projected here.
 message ProviderTemplateHeaderView {
   string name = 1;
   optional string value = 2;
   optional string value_env_var = 3;
+  bool locked = 4;
 }
 
-// One ModelRouting:Providers entry, projected for the editor. The credential header is
-// auth_header_name and is not repeated in headers.
+// One ModelRouting:Providers entry, projected for the editor. Field 3 was auth_header_name, removed with
+// ADR-0016: a provider's credential is now just a locked header in `headers`.
 message ProviderTemplateView {
+  reserved 3;
+  reserved "auth_header_name";
   string key = 1;
   string base_url = 2;
-  string auth_header_name = 3;
   bool is_free = 4;
   repeated ProviderTemplateHeaderView headers = 5;
 }
@@ -109,8 +112,9 @@ message HeaderWrite {
   optional string value = 2;
   optional string value_env_var = 3;
   // Whether the literal value is a secret to withhold from future reads. Unset (proto3 field-presence)
-  // is the legacy shape: blank preserves the stored value, a non-blank literal stores locked. An explicit
-  // false clears a previously-locked value - see HeaderWriteRequest's remarks for the full rule.
+  // means "leave the lock as it is": a header already locked stays locked, a new one starts unlocked, and
+  // blank preserves the stored value. An explicit false clears a previously-locked value - see
+  // HeaderWriteRequest's remarks for the full rule.
   optional bool locked = 4;
 }
 
@@ -118,9 +122,10 @@ message HeaderWrite {
 // "keep the existing value" for every field except headers, where unset (vs. an empty repeated field)
 // distinguishes "leave headers alone" from "replace with no headers" - see has_headers below.
 message UpsertProviderRequest {
+  reserved 3;
+  reserved "auth_header_name";
   string key = 1;
   optional string base_url = 2;
-  optional string auth_header_name = 3;
   repeated HeaderWrite headers = 4;
   // Whether `headers` above should be applied at all - proto3 can't distinguish an empty repeated field
   // from an absent one, so this flag carries ProviderWriteRequest.Headers' null-vs-empty-list distinction
@@ -389,10 +394,11 @@ message ProviderRateLimitState {
 // A provider as returned to a management caller, with credentials masked. Mirrors ProviderView
 // (ManagementFacadeModels.cs) field-for-field.
 message ProviderState {
+  reserved 4;
+  reserved "auth_header_name";
   string key = 1;
   optional string name = 2;
   string base_url = 3;
-  string auth_header_name = 4;
   repeated ModelState models = 5;
   repeated HeaderState headers = 6;
   bool is_free = 7;

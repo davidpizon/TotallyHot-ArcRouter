@@ -374,7 +374,6 @@ public sealed class RefreshFromEndpointTests : IDisposable
                 ["xai"] = new()
                 {
                     BaseUrl = "https://api.x.ai/v1",
-                    AuthHeaderName = "Authorization",
                     Headers = [new ProviderHeader { Name = "Authorization", Value = "xai-test-key" }]
                 }
             }

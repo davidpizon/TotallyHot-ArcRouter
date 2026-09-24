@@ -57,12 +57,11 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
             {
                 Key = template.Key,
                 BaseUrl = template.BaseUrl,
-                AuthHeaderName = template.AuthHeaderName,
                 IsFree = template.IsFree
             };
             foreach (var header in template.Headers)
             {
-                var headerWire = new Contract.ProviderTemplateHeaderView { Name = header.Name };
+                var headerWire = new Contract.ProviderTemplateHeaderView { Name = header.Name, Locked = header.Locked };
                 if (header.Value is not null) headerWire.Value = header.Value;
                 if (header.ValueEnvVar is not null) headerWire.ValueEnvVar = header.ValueEnvVar;
                 wire.Headers.Add(headerWire);
@@ -90,7 +89,6 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
 
         var write = new ProviderWriteRequest(
             BaseUrl: request.HasBaseUrl ? request.BaseUrl : null,
-            AuthHeaderName: request.HasAuthHeaderName ? request.AuthHeaderName : null,
             Headers: headers,
             IsFree: request.HasIsFree ? request.IsFree : null,
             Enabled: request.HasEnabled ? request.Enabled : null,
@@ -358,7 +356,6 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         {
             Key = provider.Key,
             BaseUrl = provider.BaseUrl,
-            AuthHeaderName = provider.AuthHeaderName,
             IsFree = provider.IsFree,
             DollarSpent = provider.DollarSpent.ToString(CultureInfo.InvariantCulture),
             TokensUsed = provider.TokensUsed,

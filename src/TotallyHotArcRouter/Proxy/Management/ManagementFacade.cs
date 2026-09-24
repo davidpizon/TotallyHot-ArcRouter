@@ -443,7 +443,6 @@ public sealed class ManagementFacade
                     Key: kvp.Key,
                     Name: kvp.Value.Name,
                     BaseUrl: kvp.Value.BaseUrl,
-                    AuthHeaderName: kvp.Value.AuthHeaderName,
                     Models: models,
                     Headers: headers,
                     IsFree: kvp.Value.IsFree,

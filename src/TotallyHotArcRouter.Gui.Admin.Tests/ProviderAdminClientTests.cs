@@ -30,7 +30,7 @@ public sealed class ProviderAdminClientTests
     {
         var provider = new Contract.ProviderState
         {
-            Key = key, BaseUrl = baseUrl, AuthHeaderName = "Authorization", DollarSpent = "0", Enabled = enabled,
+            Key = key, BaseUrl = baseUrl, DollarSpent = "0", Enabled = enabled,
             WindowKind = "Monthly"
         };
         provider.Models.AddRange(models);
@@ -118,7 +118,7 @@ public sealed class ProviderAdminClientTests
 
         await client.UpsertProviderAsync(
             key: "ollama",
-            body: new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization",
+            body: new ProviderWriteRequest(BaseUrl: "http://localhost:11434/v1",
                 IsFree: true, ProviderName: "Ollama"),
             cancellationToken: Ct);
 
@@ -136,7 +136,7 @@ public sealed class ProviderAdminClientTests
         var client = new ProviderAdminClient(stub);
 
         await client.UpsertProviderAsync(key: "openai",
-            body: new ProviderWriteRequest(BaseUrl: null, AuthHeaderName: null), cancellationToken: Ct);
+            body: new ProviderWriteRequest(BaseUrl: null), cancellationToken: Ct);
 
         Assert.False(stub.LastUpsertProviderRequest!.ReplaceHeaders);
         Assert.Empty(stub.LastUpsertProviderRequest.Headers);
@@ -149,7 +149,7 @@ public sealed class ProviderAdminClientTests
         var client = new ProviderAdminClient(stub);
 
         await client.UpsertProviderAsync(key: "openai",
-            body: new ProviderWriteRequest(BaseUrl: null, AuthHeaderName: null,
+            body: new ProviderWriteRequest(BaseUrl: null,
                 Headers: [new ProviderHeaderWriteModel(Name: "anthropic-version", Value: "2023-06-01", null)]),
             cancellationToken: Ct);
 
@@ -471,6 +471,23 @@ public sealed class ProviderAdminClientTests
     }
 
     [Fact]
+    public async Task GetProviderTemplatesAsync_MapsTheLockedFlag()
+    {
+        var response = new Contract.ProviderTemplateListResponse();
+        var template = new Contract.ProviderTemplateView { Key = "openai", BaseUrl = "https://api.openai.com" };
+        template.Headers.Add(new Contract.ProviderTemplateHeaderView
+            { Name = "Authorization", ValueEnvVar = "OPENAI_API_KEY", Locked = true });
+        template.Headers.Add(new Contract.ProviderTemplateHeaderView { Name = "X-Region", Value = "us" });
+        response.Templates.Add(template);
+        var client = new ProviderAdminClient(new StubClient { ListProviderTemplatesResponse = response });
+
+        var projected = Assert.Single(await client.GetProviderTemplatesAsync(Ct));
+
+        Assert.True(projected.Headers[0].Locked);
+        Assert.False(projected.Headers[1].Locked);
+    }
+
+    [Fact]
     public async Task GetProviderTemplatesAsync_MapsOptionalHeaderFields()
     {
         var response = new Contract.ProviderTemplateListResponse();
@@ -478,7 +495,6 @@ public sealed class ProviderAdminClientTests
         {
             Key = "anthropic",
             BaseUrl = "https://api.anthropic.com",
-            AuthHeaderName = "x-api-key",
             IsFree = false
         };
         template.Headers.Add(new Contract.ProviderTemplateHeaderView { Name = "anthropic-version", Value = "2023-06-01" });
@@ -492,7 +508,6 @@ public sealed class ProviderAdminClientTests
 
         Assert.Equal(expected: "anthropic", actual: projected.Key);
         Assert.Equal(expected: "https://api.anthropic.com", actual: projected.BaseUrl);
-        Assert.Equal(expected: "x-api-key", actual: projected.AuthHeaderName);
         Assert.False(projected.IsFree);
         Assert.Equal(expected: 3, actual: projected.Headers.Count);
         Assert.Equal(expected: "2023-06-01", actual: projected.Headers[0].Value);

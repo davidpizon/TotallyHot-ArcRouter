@@ -37,7 +37,6 @@ public partial class ProvidersAdmin
         Key: string.Empty,
         false,
         BaseUrl: string.Empty,
-        AuthHeaderName: "Authorization",
         Headers: [],
         false,
         ProviderType: "Other",
@@ -126,7 +125,6 @@ public partial class ProvidersAdmin
             Key: string.Empty,
             true,
             BaseUrl: string.Empty,
-            AuthHeaderName: "Authorization",
             Headers: [],
             false,
             ProviderType: "Other",
@@ -142,7 +140,6 @@ public partial class ProvidersAdmin
             Key: provider.Key,
             false,
             BaseUrl: provider.BaseUrl,
-            AuthHeaderName: provider.AuthHeaderName,
             Headers: provider.Headers,
             IsFree: provider.IsFree,
             // A provider stored before ProviderType existed has none; the dialog falls back to "Other"
@@ -169,7 +166,6 @@ public partial class ProvidersAdmin
     {
         var body = new ProviderWriteRequest(
             BaseUrl: result.BaseUrl,
-            AuthHeaderName: result.AuthHeaderName,
             Headers: result.Headers,
             IsFree: result.IsFree,
             ProviderName: result.ProviderName,

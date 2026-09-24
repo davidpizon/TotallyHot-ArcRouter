@@ -31,10 +31,14 @@ public sealed class ProviderOptionsRedactionTests
     {
         return new ProviderOptions
         {
+            Name = "Example Provider",
             BaseUrl = "https://api.example.invalid/v1",
             ProviderType = "Anthropic",
-            AuthHeaderName = "x-api-key",
-            Headers = [new ProviderHeader { Name = "anthropic-version", Value = Secret }],
+            Headers =
+            [
+                new ProviderHeader { Name = "anthropic-version", Value = Secret },
+                new ProviderHeader { Name = "x-api-key", Value = Secret }
+            ],
             IsFree = true,
             Enabled = false,
             AwsRegion = "us-east-1",

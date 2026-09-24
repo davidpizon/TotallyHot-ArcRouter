@@ -19,7 +19,7 @@ public sealed class ReportedUsageViewTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["anthropic"] = new() { BaseUrl = "https://api.anthropic.com", AuthHeaderName = "x-api-key" }
+                ["anthropic"] = new() { BaseUrl = "https://api.anthropic.com" }
             }
         };
     }

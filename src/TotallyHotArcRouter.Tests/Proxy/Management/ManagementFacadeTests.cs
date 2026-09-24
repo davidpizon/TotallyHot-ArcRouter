@@ -26,8 +26,7 @@ public sealed class ManagementFacadeTests
                 ["openai"] = new()
                 {
                     BaseUrl = "https://api.openai.com",
-                    AuthHeaderName = "Authorization",
-                    Headers = [new ProviderHeader { Name = "X-Literal", Value = "literal-secret" }]
+                    Headers = [new ProviderHeader { Name = "X-Literal", Value = "literal-secret", Locked = true }]
                 }
             },
             ModelList =
@@ -100,10 +99,9 @@ public sealed class ManagementFacadeTests
     }
 
     [Fact]
-    public void ListProviders_HeaderStoredBeforeTheLockedFlagExisted_IsReportedLocked()
+    public void ListProviders_HeaderWithoutTheLockedFlag_IsReportedUnlockedAndReadable()
     {
-        // The migration guarantee: a header persisted without the flag has unknown provenance, so it must
-        // stay hidden rather than become visible on upgrade.
+        // Nothing is locked by default (ADR-0016): a header stored without the flag is public configuration.
         var legacy = JsonSerializer.Deserialize<ProviderHeader>(
             """{"Name":"X-Legacy","Value":"who-knows"}""")!;
 
@@ -117,9 +115,9 @@ public sealed class ManagementFacadeTests
 
         var header = Assert.Single(Assert.Single(CreateFacade(store).ListProviders().Providers).Headers);
 
-        Assert.True(legacy.Locked);
-        Assert.True(header.Locked);
-        Assert.Null(header.Value);
+        Assert.False(legacy.Locked);
+        Assert.False(header.Locked);
+        Assert.Equal(expected: "who-knows", actual: header.Value);
     }
 
     [Fact]
@@ -184,7 +182,6 @@ public sealed class ManagementFacadeTests
         // back blank must mean "keep what's there".
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null)]);
 
         var result = await facade.UpsertProviderAsync(key: "openai", request: request,
@@ -206,7 +203,6 @@ public sealed class ManagementFacadeTests
         // with a blank value must still preserve the stored secret, not treat it as a different header.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "x-literal", null, null)]);
 
         var result = await facade.UpsertProviderAsync(key: "openai", request: request,
@@ -225,7 +221,6 @@ public sealed class ManagementFacadeTests
 
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", Value: "new-secret", null)]);
 
         await facade.UpsertProviderAsync(key: "openai", request: request,
@@ -243,7 +238,6 @@ public sealed class ManagementFacadeTests
         // A locked header's value was never returned, so the caller could not resend it: blank keeps it.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null, true)]);
 
         await facade.UpsertProviderAsync(key: "openai", request: request,
@@ -264,7 +258,6 @@ public sealed class ManagementFacadeTests
         // empty, so blank means blank. Preserving here would leave a secret the operator believes is gone.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null, false)]);
 
         await facade.UpsertProviderAsync(key: "openai", request: request,
@@ -293,7 +286,6 @@ public sealed class ManagementFacadeTests
 
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", null, null, true)]);
 
         await facade.UpsertProviderAsync(key: "openai", request: request,
@@ -305,16 +297,15 @@ public sealed class ManagementFacadeTests
     }
 
     [Fact]
-    public async Task UpsertProviderAsync_LegacyHeaderWriteWithoutTheFlag_PreservesBlankAndStoresLocked()
+    public async Task UpsertProviderAsync_HeaderWriteWithoutTheFlag_KeepsTheCurrentLockAndStartsNewHeadersUnlocked()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());
         var facade = CreateFacade(store);
 
-        // Callers that predate the flag (MCP, hand-rolled REST) omit it; their headers must keep the old
-        // write-only meaning rather than silently becoming readable.
+        // Callers that omit the flag (MCP, hand-rolled REST): a header that is already locked must not
+        // silently become readable, and a new header is not locked on their behalf.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers:
             [
                 new HeaderWriteRequest(Name: "X-Literal", null, null),
@@ -325,8 +316,10 @@ public sealed class ManagementFacadeTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         var stored = store.Snapshot.Options.Providers["openai"].Headers;
-        Assert.Equal(expected: "literal-secret", actual: stored.Single(h => h.Name == "X-Literal").Value);
-        Assert.True(stored.Single(h => h.Name == "X-New").Locked);
+        var kept = stored.Single(h => h.Name == "X-Literal");
+        Assert.Equal(expected: "literal-secret", actual: kept.Value);
+        Assert.True(kept.Locked);
+        Assert.False(stored.Single(h => h.Name == "X-New").Locked);
     }
 
     [Fact]
@@ -338,7 +331,6 @@ public sealed class ManagementFacadeTests
         // An env-var header holds a variable name, not a secret - there is nothing for a lock to withhold.
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", null, ValueEnvVar: "SOME_VAR", true)]);
 
         await facade.UpsertProviderAsync(key: "openai", request: request,
@@ -355,7 +347,6 @@ public sealed class ManagementFacadeTests
 
         var request = new ProviderWriteRequest(
             BaseUrl: "https://api.openai.com",
-            null,
             Headers: [new HeaderWriteRequest(Name: "X-Literal", null, ValueEnvVar: "SOME_VAR")]);
 
         await facade.UpsertProviderAsync(key: "openai", request: request,

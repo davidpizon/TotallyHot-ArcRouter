@@ -38,7 +38,6 @@ public sealed class ProviderOptionsPreservationTests
             Name = "Example Provider",
             ProviderType = "Anthropic",
             BaseUrl = "https://example.invalid",
-            AuthHeaderName = "x-api-key",
             Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
             IsFree = true,
             Enabled = false,
@@ -280,7 +279,6 @@ public sealed class ProviderOptionsPreservationTests
 
         var created = store.Snapshot.Options.Providers["fresh"];
         Assert.Equal(expected: "https://fresh.invalid", actual: created.BaseUrl);
-        Assert.Equal(expected: "Authorization", actual: created.AuthHeaderName);
         Assert.True(created.Enabled);
         Assert.False(created.IsFree);
         Assert.Empty(created.Headers);
@@ -379,7 +377,6 @@ public sealed class ProviderOptionsPreservationTests
                 ["bedrock-anthropic"] = new()
                 {
                     BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
-                    AuthHeaderName = "Authorization",
                     AwsRegion = "us-east-1",
                     AwsAccessKeyIdEnvVar = "AWS_ACCESS_KEY_ID",
                     AwsSecretAccessKeyEnvVar = "AWS_SECRET_ACCESS_KEY",
@@ -397,7 +394,6 @@ public sealed class ProviderOptionsPreservationTests
             key: "new-bedrock",
             request: new ProviderWriteRequest(
                 BaseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-                AuthHeaderName: "Authorization",
                 ProviderType: "bedrock-anthropic"),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -422,7 +418,7 @@ public sealed class ProviderOptionsPreservationTests
                 {
                     Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                        ["openai"] = new() { BaseUrl = "https://api.openai.com" }
                     }
                 }
             });
@@ -456,7 +452,7 @@ public sealed class ProviderOptionsPreservationTests
                 {
                     Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                        ["openai"] = new() { BaseUrl = "https://api.openai.com" }
                     }
                 }
             });

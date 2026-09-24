@@ -126,7 +126,7 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void Save_falls_back_to_the_auth_header_name_parameter_when_the_provider_type_has_no_template()
+    public void Save_adds_no_implicit_headers_when_the_provider_type_has_no_template()
     {
         using var ctx = new BunitContext();
 
@@ -140,36 +140,70 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
-        // No ProviderType parameter is seeded, so the dialog falls back to Other - which every provider
-        // configured before the ProviderType field existed also falls back to. Other's own template says
-        // "Authorization", but that must not override an already-configured non-default header (the
-        // "x-api-key" the AuthHeaderName parameter was seeded with here): Other isn't an authoritative
-        // choice the operator actually made. See Save_derives_auth_header_name_from_the_selected_provider_type
-        // for the case where they do pick a templated type.
-        saved!.AuthHeaderName.Should().Be("x-api-key");
+        // With no template to declare one, no header (and so no lock) appears on its own: only a template's
+        // declaration or the operator's own padlock ever locks a row.
+        saved!.Headers.Should().BeEmpty();
     }
 
     [Fact]
-    public void Save_derives_auth_header_name_from_the_selected_provider_type()
+    public void A_template_credential_row_starts_on_its_env_var_and_saves_unlocked()
     {
         using var ctx = new BunitContext();
 
-        // AuthHeaderName must track the header the operator actually authenticates with, not a value left
-        // over from before this dialog stopped letting them edit it directly - so switching provider type to
-        // one with a documented auth header (Anthropic's x-api-key) must override whatever the AuthHeaderName
-        // parameter (or, absent a selected type, its template) would otherwise have produced.
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
+            SeedEditParameters(parameters: parameters, isNew: true, providerName: "OpenAI");
             parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
-        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        cut.Find("[data-testid='provider-type']").Change("openai");
+
+        cut.Find("[data-testid='header-name-0']").GetAttribute("value").Should().Be("Authorization");
+        cut.Find("[data-testid='header-source-0']").GetAttribute("value").Should().Be("env");
+        cut.Find("[data-testid='header-value-0']").GetAttribute("value").Should().Be("OPENAI_API_KEY");
+
         FindSaveButton(cut).Click();
 
-        saved.Should().NotBeNull();
-        saved!.AuthHeaderName.Should().Be("x-api-key");
+        // An env-var row holds only a variable name, so it is never stored locked.
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.ValueEnvVar.Should().Be("OPENAI_API_KEY");
+        header.Locked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Switching_a_template_credential_row_to_a_literal_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, providerName: "OpenAI");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='provider-type']").Change("openai");
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed-by-the-operator");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("sk-typed-by-the-operator");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_template_that_declares_no_credential_adds_no_header_rows()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+            SeedEditParameters(parameters: parameters, isNew: true));
+
+        cut.Find("[data-testid='provider-type']").Change("ollama");
+
+        cut.FindAll("[data-testid^='header-name-']").Should().BeEmpty();
     }
 
     [Fact]
@@ -233,7 +267,6 @@ public sealed class ProviderEditDialogTests
                 Key: Key,
                 IsNew: false,
                 BaseUrl: OriginalBaseUrl,
-                AuthHeaderName: "x-api-key",
                 Headers: [],
                 IsFree: false,
                 ProviderType: "anthropic",
@@ -460,14 +493,13 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void A_header_named_after_the_auth_header_is_always_saved_locked()
+    public void A_manually_added_header_is_saved_unlocked_until_the_operator_locks_it()
     {
         using var ctx = new BunitContext();
 
-        // Regression test: AddHeader() starts a new row unlocked by default (correct for ordinary public
-        // configuration like anthropic-version), but the credential-carrying header must never be
-        // persisted readable just because the operator forgot to click its padlock - the management API
-        // echoes an unlocked literal value back on every future read of this dialog.
+        // Nothing is locked implicitly (ADR-0016): AddHeader() starts a row unlocked, and only a
+        // template's declaration or the operator's own padlock locks it. The management API echoes an
+        // unlocked literal back on every read, which is what makes the padlock a real choice.
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
@@ -475,9 +507,7 @@ public sealed class ProviderEditDialogTests
             parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
-        // With no ProviderType parameter set, the dialog falls back to Other - not an authoritative
-        // template choice, so ResolveSavedAuthHeaderName preserves the seeded AuthHeaderName ("x-api-key")
-        // rather than overwriting it with Other's own "Authorization".
+        // With no ProviderType parameter set, the dialog falls back to Other, which adds no rows of its own.
         cut.Find("[data-testid='add-header']").Click();
         cut.Find("[data-testid='header-name-0']").Input("x-api-key");
         cut.Find("[data-testid='header-value-0']").Input("super-secret-key");
@@ -490,7 +520,7 @@ public sealed class ProviderEditDialogTests
         var header = saved!.Headers.Should().ContainSingle().Subject;
         header.Name.Should().Be("x-api-key");
         header.Value.Should().Be("super-secret-key");
-        header.Locked.Should().BeTrue();
+        header.Locked.Should().BeFalse();
     }
 
     [Fact]
@@ -681,7 +711,6 @@ public sealed class ProviderEditDialogTests
             Key: key,
             IsNew: isNew,
             BaseUrl: baseUrl,
-            AuthHeaderName: authHeaderName,
             Headers: headers ?? [],
             IsFree: isFree,
             ProviderType: providerType,
@@ -737,11 +766,15 @@ public sealed class ProviderEditDialogTests
     {
         return
         [
-            new(Key: "anthropic", BaseUrl: "https://api.anthropic.com", AuthHeaderName: "x-api-key", IsFree: false,
+            new(Key: "anthropic", BaseUrl: "https://api.anthropic.com", IsFree: false,
                 Headers: [new ProviderTemplates.ProviderTemplateHeader(Name: "anthropic-version", Value: "2023-06-01")]),
-            new(Key: "openai", BaseUrl: "https://api.openai.com", AuthHeaderName: "Authorization", IsFree: false,
-                Headers: []),
-            new(Key: "ollama", BaseUrl: "http://localhost:11434/v1", AuthHeaderName: "Authorization", IsFree: true,
+            new(Key: "openai", BaseUrl: "https://api.openai.com", IsFree: false,
+                Headers:
+                [
+                    new ProviderTemplates.ProviderTemplateHeader(Name: "Authorization", Value: null,
+                        ValueEnvVar: "OPENAI_API_KEY", Locked: true)
+                ]),
+            new(Key: "ollama", BaseUrl: "http://localhost:11434/v1", IsFree: true,
                 Headers: [])
         ];
     }

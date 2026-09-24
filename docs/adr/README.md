@@ -59,3 +59,4 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0013](0013-name-constrained-local-ca-for-router-tls.md) | Router-generated, name-constrained local CA for trusted HTTPS on every listener | accepted |
 | [0014](0014-cross-platform-service-layout-and-secret-backend.md) | Cross-platform data paths, machine-wide service layout, and a non-Windows secret backend | accepted |
 | [0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) | Machine-scoped protection and an administrator-only ACL for the shared secret store | accepted |
+| [0016](0016-remove-authheadername-and-mark-secrets-per-header.md) | Remove `AuthHeaderName`; mark secret headers per header and strip every configured header name | proposed |

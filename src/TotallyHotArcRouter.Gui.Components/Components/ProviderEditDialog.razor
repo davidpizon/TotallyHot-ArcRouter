@@ -58,7 +58,7 @@
             </button>
         </div>
         <div class="text-xs text-slate-600 mb-1.5">
-            Add this provider's authentication header here (e.g. <span class="font-mono">@AuthHeaderHint</span>) if it needs a key.
+            Add any header this provider needs. Lock the ones that carry a secret, such as an API key.
         </div>
         @if (_headers.Count == 0)
         {
@@ -161,7 +161,6 @@
         Key: string.Empty,
         false,
         BaseUrl: string.Empty,
-        AuthHeaderName: "Authorization",
         Headers: [],
         false,
         ProviderType: string.Empty,
@@ -369,15 +368,23 @@
         }
     }
 
-    /// <summary>Builds an editor row from a template header. A non-empty literal wins over an env-var name.</summary>
+    /// <summary>
+    /// Builds an editor row from a template header. A non-empty literal wins over an env-var name. A locked
+    /// template header is a secret: the row remembers that (<see cref="HeaderRow.SecretByTemplate"/>) so that
+    /// typing a literal key locks it, and it is locked from the start when it has no env var to point at.
+    /// An env-var row is never locked, since it holds only a variable name.
+    /// </summary>
     private static HeaderRow ToHeaderRow(ProviderTemplates.ProviderTemplateHeader header)
     {
         var literal = !string.IsNullOrEmpty(header.Value);
+        var useEnvVar = !literal && !string.IsNullOrWhiteSpace(header.ValueEnvVar);
         return new HeaderRow
         {
             Name = header.Name,
-            UseEnvVar = !literal && !string.IsNullOrWhiteSpace(header.ValueEnvVar),
-            Value = literal ? header.Value! : header.ValueEnvVar ?? string.Empty
+            UseEnvVar = useEnvVar,
+            Value = literal ? header.Value! : header.ValueEnvVar ?? string.Empty,
+            SecretByTemplate = header.Locked,
+            Locked = header.Locked && !useEnvVar
         };
     }
 
@@ -396,15 +403,14 @@
     /// <summary>
     /// Switches a header between a literal value and an environment-variable reference. An env-var
     /// header names a variable rather than holding a secret, so it can never be locked - switching to it
-    /// drops the lock rather than leaving a padlock the markup no longer renders.
+    /// drops the lock rather than leaving a padlock the markup no longer renders. Switching back to a
+    /// literal restores the lock the template declared, if any, so a template's secret row is locked again
+    /// when the operator types a key into it.
     /// </summary>
     private static void SetHeaderSource(HeaderRow header, ChangeEventArgs e)
     {
         header.UseEnvVar = string.Equals(a: AsString(e.Value), b: "env", comparisonType: StringComparison.Ordinal);
-        if (header.UseEnvVar)
-        {
-            header.Locked = false;
-        }
+        header.Locked = !header.UseEnvVar && header.SecretByTemplate;
     }
 
     /// <summary>
@@ -461,61 +467,6 @@
         }
     }
 
-    /// <summary>
-    /// Looks up the selected template's auth header (e.g. Anthropic's <c>x-api-key</c>).
-    /// <see cref="ProviderTemplates.OtherKey"/> is excluded: it is the fallback for a provider stored
-    /// before a template key existed, so treating its <c>Authorization</c> as authoritative would
-    /// overwrite an already-working non-default header name on a save that never changed the dropdown.
-    /// </summary>
-    private bool TryGetTemplateAuthHeaderName([NotNullWhen(true)] out string? authHeaderName)
-    {
-        if (!string.Equals(a: _selectedTemplateKey, b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase))
-        {
-            var template = Templates.FirstOrDefault(candidate =>
-                string.Equals(a: candidate.Key, b: _selectedTemplateKey, comparisonType: StringComparison.OrdinalIgnoreCase));
-            if (template is not null && !string.IsNullOrWhiteSpace(template.AuthHeaderName))
-            {
-                authHeaderName = template.AuthHeaderName;
-                return true;
-            }
-        }
-
-        authHeaderName = null;
-        return false;
-    }
-
-    /// <summary>
-    /// The auth header name to show in the "add a header" hint: the selected provider type's
-    /// documented auth header when known, falling back to the provider's existing
-    /// <see cref="ProviderEditModel.AuthHeaderName"/> (and then <c>Authorization</c>) otherwise. Keeps the
-    /// hint from steering an operator toward the wrong header name for providers that don't use
-    /// <c>Authorization</c>.
-    /// </summary>
-    private string AuthHeaderHint =>
-        TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
-            ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(Model.AuthHeaderName)
-                ? "Authorization"
-                : Model.AuthHeaderName.Trim();
-
-    /// <summary>
-    /// The <see cref="ProviderEditResult.AuthHeaderName"/> to save. It must track the header the
-    /// operator actually authenticates with rather than a stale value from before this dialog stopped
-    /// letting them edit it directly: prefers the selected provider type's documented auth header (the same
-    /// lookup as <see cref="AuthHeaderHint"/>), falling back to the existing
-    /// <see cref="ProviderEditModel.AuthHeaderName"/> for types with no authoritative template entry - which
-    /// keeps an already-configured provider's non-default header (e.g. "x-api-key") intact across saves that
-    /// don't change its type.
-    /// </summary>
-    private string ResolveSavedAuthHeaderName()
-    {
-        return TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
-            ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(Model.AuthHeaderName)
-                ? "Authorization"
-                : Model.AuthHeaderName.Trim();
-    }
-
     /// <summary>Builds a <see cref="ProviderEditResult"/> from the form's current fields and raises <see cref="OnSave"/>.</summary>
     private async Task Save()
     {
@@ -524,13 +475,10 @@
             return;
         }
 
-        var authHeaderName = ResolveSavedAuthHeaderName();
-
         var result = new ProviderEditResult(
             Key: Model.IsNew ? Guid.NewGuid().ToString() : Model.Key,
             BaseUrl: _baseUrl.Trim(),
-            AuthHeaderName: authHeaderName,
-            Headers: BuildHeaders(authHeaderName),
+            Headers: BuildHeaders(),
             ProviderType: _keepStoredProviderType ? Model.ProviderType.Trim() : _selectedTemplateKey,
             ProviderName: _providerName.Trim(),
             IsFree: _isFree);
@@ -543,13 +491,11 @@
     /// each value maps to a literal or env-var reference per its selected source. A blank literal value is
     /// sent as-is (not resolved locally): under a locked row the management API preserves whatever is
     /// already stored under that header's name, and under an unlocked one it clears it - which is what
-    /// carries a padlock unlock through to storage. The literal header whose name matches
-    /// <paramref name="authHeaderName"/> is always saved locked, regardless of the row's padlock state: it's
-    /// the provider's credential, and an operator forgetting to lock that one specific row (the row an
-    /// unrelated "Add header" click starts unlocked) must not leave the secret readable back through the
-    /// management API on every future load of this dialog.
+    /// carries a padlock unlock through to storage. A row is saved locked only when its padlock is on -
+    /// either because the template declared it a secret or because the operator locked it. Nothing is
+    /// locked implicitly (docs/adr/0016-remove-authheadername-and-mark-secrets-per-header.md).
     /// </summary>
-    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders(string authHeaderName)
+    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders()
     {
         return _headers
             .Where(h => !string.IsNullOrWhiteSpace(h.Name))
@@ -559,7 +505,7 @@
                     Name: h.Name.Trim(),
                     Value: h.Value,
                     null,
-                    Locked: h.Locked || string.Equals(a: h.Name.Trim(), b: authHeaderName, comparisonType: StringComparison.OrdinalIgnoreCase)))
+                    Locked: h.Locked))
             .ToList();
     }
 
@@ -604,12 +550,6 @@
     /// </summary>
     /// <param name="Key">The provider key (auto-generated as a GUID when adding a new provider).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
-    /// <param name="AuthHeaderName">
-    /// The auth header name, resolved by <see cref="ResolveSavedAuthHeaderName"/>
-    /// from the selected provider type's template (falling back to the provider's existing configuration for
-    /// types with no template entry). The proxy uses it to identify which forwarded header is "the" credential
-    /// header, e.g. to avoid double-sending it.
-    /// </param>
     /// <param name="Headers">The custom headers as edited, including any header used for authentication.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">
@@ -625,7 +565,6 @@
     public sealed record ProviderEditResult(
         string Key,
         string BaseUrl,
-        string AuthHeaderName,
         IReadOnlyList<ProviderHeaderWriteModel> Headers,
         string ProviderType,
         string ProviderName,
@@ -643,12 +582,6 @@
     /// </param>
     /// <param name="IsNew">Whether the dialog is adding a new provider (vs. editing an existing one).</param>
     /// <param name="BaseUrl">The initial base URL.</param>
-    /// <param name="AuthHeaderName">
-    /// The provider's existing auth header name. The dialog no longer edits
-    /// it directly; on save it is only used as a fallback for provider types with no
-    /// <see cref="ProviderTemplates"/> entry (see <see cref="ResolveSavedAuthHeaderName"/>) - otherwise the
-    /// selected type's documented auth header wins.
-    /// </param>
     /// <param name="Headers">The provider's existing custom headers, seeded into the editable rows.</param>
     /// <param name="IsFree">Whether the existing provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">
@@ -666,7 +599,6 @@
         string Key,
         bool IsNew,
         string BaseUrl,
-        string AuthHeaderName,
         IReadOnlyList<ProviderHeaderView> Headers,
         bool IsFree,
         string ProviderType,
@@ -693,6 +625,13 @@
         /// configuration; the operator locks the ones that turn out to carry a secret.
         /// </summary>
         public bool Locked { get; set; }
+
+        /// <summary>
+        /// Whether the template this row came from declared it a secret. Kept apart from
+        /// <see cref="Locked"/> because an env-var row is never locked, yet must lock again if the operator
+        /// switches it to a literal.
+        /// </summary>
+        public bool SecretByTemplate { get; set; }
 
         /// <summary>
         /// Whether this header already has a stored literal value that was withheld from this

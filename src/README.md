@@ -79,18 +79,20 @@ To add a new provider, add an entry under `ModelRouting:Providers`:
 ```json
 "my-provider": {
   "BaseUrl": "https://api.my-provider.com",
-  "AuthHeaderName": "Authorization",
   "Headers": [
-    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY" }
+    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY", "Locked": true }
   ]
 }
 ```
 
-`AuthHeaderName` itself carries no credential — it only records which header
-is "the" auth header, so the proxy can strip a client-sent header of the
-same name before forwarding (see [Provider API keys](#provider-api-keys)
-below for how the header's actual value is composed, including a scheme
-prefix like `Bearer`).
+A provider has no dedicated credential field: authentication is an ordinary entry in `Headers`. In the
+add-provider template catalog, `"Locked": true` marks a header as a secret — the editor shows an empty
+locked row for it and stores the value write-only once one is typed. A provider that authenticates by
+other means (a local runtime such as Ollama, or Bedrock signed by the AWS SDK) simply declares no
+credential header. Every header name a provider configures is stripped from the client's request before
+forwarding, and from the upstream response before it reaches the client, so the configured value is the
+only one of that name in play (see [Provider API keys](#provider-api-keys) below for how the header's
+actual value is composed, including a scheme prefix like `Bearer`).
 
 ### Provider base URLs
 
@@ -154,7 +156,6 @@ value in this order:
 ```json
 "my-provider": {
   "BaseUrl": "https://api.my-provider.com",
-  "AuthHeaderName": "Authorization",
   "Headers": [
     { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY" }
   ]

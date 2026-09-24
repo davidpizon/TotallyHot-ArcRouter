@@ -39,7 +39,6 @@ public sealed class ProtectedSecretHeaderTests
                 ["anthropic"] = new()
                 {
                     BaseUrl = "https://api.anthropic.com",
-                    AuthHeaderName = "x-api-key",
                     Headers = [header]
                 }
             },
@@ -74,7 +73,6 @@ public sealed class ProtectedSecretHeaderTests
                 key: "anthropic",
                 request: new ProviderWriteRequest(
                     BaseUrl: "https://api.anthropic.com",
-                    AuthHeaderName: "x-api-key",
                     Headers: [new HeaderWriteRequest(Name: "x-api-key", Value: "sk-ant-secret", null, true)]),
                 cancellationToken: TestContext.Current.CancellationToken);
 
@@ -123,7 +121,6 @@ public sealed class ProtectedSecretHeaderTests
                 key: "anthropic",
                 request: new ProviderWriteRequest(
                     BaseUrl: "https://api.anthropic.com",
-                    AuthHeaderName: "x-api-key",
                     Headers: [new HeaderWriteRequest(Name: "x-api-key", null, null)]),
                 cancellationToken: TestContext.Current.CancellationToken);
 
@@ -163,7 +160,6 @@ public sealed class ProtectedSecretHeaderTests
                 key: "anthropic",
                 request: new ProviderWriteRequest(
                     BaseUrl: "https://api.anthropic.com",
-                    AuthHeaderName: "x-api-key",
                     Headers: [new HeaderWriteRequest(Name: "x-api-key", null, null, false)]),
                 cancellationToken: TestContext.Current.CancellationToken);
 
@@ -202,7 +198,6 @@ public sealed class ProtectedSecretHeaderTests
                 key: "anthropic",
                 request: new ProviderWriteRequest(
                     BaseUrl: "https://api.anthropic.com",
-                    AuthHeaderName: "x-api-key",
                     Headers: [new HeaderWriteRequest(Name: "x-api-key", null, ValueEnvVar: "ANTHROPIC_API_KEY")]),
                 cancellationToken: TestContext.Current.CancellationToken);
 
@@ -240,7 +235,7 @@ public sealed class ProtectedSecretHeaderTests
             // The full header set no longer includes x-api-key at all.
             var result = await facade.UpsertProviderAsync(
                 key: "anthropic",
-                request: new ProviderWriteRequest(BaseUrl: "https://api.anthropic.com", AuthHeaderName: "x-api-key",
+                request: new ProviderWriteRequest(BaseUrl: "https://api.anthropic.com",
                     Headers: []),
                 cancellationToken: TestContext.Current.CancellationToken);
 

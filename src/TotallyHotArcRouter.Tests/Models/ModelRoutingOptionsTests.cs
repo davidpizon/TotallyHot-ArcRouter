@@ -98,20 +98,6 @@ public class ModelRoutingOptionsTests
     }
 
     [Fact]
-    public void EnsureValid_Throws_WhenProviderAuthHeaderNameIsMissing()
-    {
-        var options = new ModelRoutingOptions
-        {
-            Providers = new Dictionary<string, ProviderOptions>
-            {
-                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "" }
-            }
-        };
-
-        Assert.Throws<OptionsValidationException>(() => options.EnsureValid());
-    }
-
-    [Fact]
     public void EnsureValid_DoesNotThrow_WhenProviderKeyIsTheReservedBlankTemplateSpelling()
     {
         // "Other" is a valid live provider key: it is only reserved for the appsettings template

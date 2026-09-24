@@ -853,7 +853,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
 
             route = new ResolvedModelRoute(
                 ModelName: modelName, Provider: "openai", ProviderModelId: modelName,
-                UpstreamBaseUrl: new Uri("https://example.invalid"), AuthHeaderName: "Authorization", ExtraHeaders: []);
+                UpstreamBaseUrl: new Uri("https://example.invalid"), ExtraHeaders: []);
             return true;
         }
 

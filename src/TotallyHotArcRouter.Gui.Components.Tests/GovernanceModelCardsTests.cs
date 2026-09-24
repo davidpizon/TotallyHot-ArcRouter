@@ -20,7 +20,7 @@ public sealed class GovernanceModelCardsTests
         var response = new Contract.ProviderListResponse();
         response.Providers.Add(new Contract.ProviderState
         {
-            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", AuthHeaderName = "Authorization",
+            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1",
             DollarSpent = "0", WindowKind = "Monthly", Enabled = true,
             Models = { new Contract.ModelState { ModelName = "gpt-5.4", ProviderModelId = "gpt-5-4-provider-id", Enabled = true, PresentUpstream = true } }
         });

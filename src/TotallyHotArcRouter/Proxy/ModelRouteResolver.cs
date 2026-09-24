@@ -66,23 +66,17 @@ public sealed record AvailableModel(string ModelName, string Provider);
 /// <param name="Provider">The provider key the model routes to.</param>
 /// <param name="ProviderModelId">The model identifier to send to the upstream provider.</param>
 /// <param name="UpstreamBaseUrl">The absolute base URL of the upstream provider.</param>
-/// <param name="AuthHeaderName">
-/// The HTTP header name identified as this provider's credential header. The credential's actual value
-/// travels as an ordinary entry in <see cref="ExtraHeaders"/> - this only tells the forwarding path which
-/// client-sent header of the same name to drop, so the client cannot override or duplicate it.
-/// </param>
 /// <param name="ExtraHeaders">
 /// Resolved custom headers (name/value) to add to the forwarded request, from the provider's
 /// configured <see cref="ProviderOptions.Headers"/>.
 /// </param>
-/// <param name="AuthHeaderConfigured">
-/// Whether the provider's configuration declares a header named <paramref name="AuthHeaderName"/> in
-/// <see cref="ProviderOptions.Headers"/> - regardless of whether that header's value actually resolved into
+/// <param name="ConfiguredHeaderNames">
+/// Every header name the provider's configuration declares in <see cref="ProviderOptions.Headers"/>
+/// (case-insensitive) - regardless of whether that header's value actually resolved into
 /// <paramref name="ExtraHeaders"/> this request (e.g. its <see cref="ProviderHeader.ValueEnvVar"/> is
-/// currently unset). The forwarding path strips a client-sent header of this name only when this is
-/// <see langword="true"/>, so a missing env var can never turn into "the provider forgot to send its own
-/// credential, so the client's is let through instead" - it should fail closed (no credential reaches the
-/// upstream) rather than let the client supply one the operator didn't intend to accept.
+/// currently unset). The forwarding path drops a client-sent request header, and an upstream response
+/// header, of any of these names, so the operator's configuration is the only source of those headers and a
+/// missing env var can never turn into "the client's value is let through instead" - it fails closed.
 /// </param>
 /// <param name="IsFree">
 /// Whether this route's provider costs nothing (<see cref="ProviderOptions.IsFree"/>), making the
@@ -110,9 +104,8 @@ public sealed record ResolvedModelRoute(
     string Provider,
     string ProviderModelId,
     Uri UpstreamBaseUrl,
-    string AuthHeaderName,
     IReadOnlyList<KeyValuePair<string, string>> ExtraHeaders,
-    bool AuthHeaderConfigured = false,
+    IReadOnlySet<string>? ConfiguredHeaderNames = null,
     bool IsFree = false,
     string? AwsRegion = null,
     string? AwsAccessKeyId = null,
@@ -140,10 +133,10 @@ public sealed record ResolvedModelRoute(
         builder.Append(", Provider = ").Append(Provider);
         builder.Append(", ProviderModelId = ").Append(ProviderModelId);
         builder.Append(", UpstreamBaseUrl = ").Append(UpstreamBaseUrl);
-        builder.Append(", AuthHeaderName = ").Append(AuthHeaderName);
         builder.Append(", ExtraHeaders = [")
             .Append(string.Join(separator: ", ", values: ExtraHeaders.Select(h => $"{h.Key}=<redacted>"))).Append(']');
-        builder.Append(", AuthHeaderConfigured = ").Append(AuthHeaderConfigured);
+        builder.Append(", ConfiguredHeaderNames = [")
+            .Append(string.Join(separator: ", ", values: ConfiguredHeaderNames ?? (IEnumerable<string>)[])).Append(']');
         builder.Append(", IsFree = ").Append(IsFree);
         builder.Append(", AwsRegion = ").Append(AwsRegion);
         builder.Append(", AwsAccessKeyId = ").Append(AwsAccessKeyId);
@@ -224,9 +217,10 @@ public sealed class ModelRouteResolver : IModelRouteResolver
         var (entry, provider) = match;
         var extraHeaders = ProviderCredentialResolver.ResolveExtraHeaders(provider: provider, environment: _environment,
             secretReader: _secretReader);
-        var authHeaderConfigured = provider.Headers.Any(h =>
-            !string.IsNullOrWhiteSpace(h.Name) && string.Equals(a: h.Name.Trim(), b: provider.AuthHeaderName.Trim(),
-                comparisonType: StringComparison.OrdinalIgnoreCase));
+        var configuredHeaderNames = provider.Headers
+            .Where(h => !string.IsNullOrWhiteSpace(h.Name))
+            .Select(h => h.Name.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var (awsAccessKeyId, awsSecretAccessKey, awsSessionToken) =
             ProviderCredentialResolver.ResolveAwsCredentials(provider: provider, environment: _environment);
 
@@ -235,9 +229,8 @@ public sealed class ModelRouteResolver : IModelRouteResolver
             Provider: entry.Provider,
             ProviderModelId: entry.ProviderModelId,
             UpstreamBaseUrl: new Uri(uriString: provider.BaseUrl, uriKind: UriKind.Absolute),
-            AuthHeaderName: provider.AuthHeaderName,
             ExtraHeaders: extraHeaders,
-            AuthHeaderConfigured: authHeaderConfigured,
+            ConfiguredHeaderNames: configuredHeaderNames,
             IsFree: provider.IsFree,
             AwsRegion: provider.AwsRegion,
             AwsAccessKeyId: awsAccessKeyId,

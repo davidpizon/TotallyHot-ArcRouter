@@ -733,7 +733,7 @@ internal sealed class ProviderManagementService
         // (docs/router/backlog.md item 1).
         //
         // `new ProviderOptions()`'s own defaults reproduce the old terminal fallbacks exactly: BaseUrl "",
-        // AuthHeaderName "Authorization", IsFree false, Enabled true, Headers [].
+        // IsFree false, Enabled true, Headers [].
         var baseline = existing ?? new ProviderOptions();
 
         var merged = baseline with
@@ -749,7 +749,6 @@ internal sealed class ProviderManagementService
             ProviderType = request.ProviderType is null
                 ? baseline.ProviderType
                 : NormalizeNameField(request.ProviderType),
-            AuthHeaderName = request.AuthHeaderName ?? baseline.AuthHeaderName,
             // The caller always sends the full header set (a null list means "keep existing", e.g. a
             // legacy/partial caller); a provided list replaces it wholesale, one header at a time through
             // ResolveHeader so a blank value preserves what's already stored under that name.
@@ -880,8 +879,9 @@ internal sealed class ProviderManagementService
     /// operator can lock an already-stored secret without retyping it - and it is also what makes the
     /// blank rule safe to relax: an <em>explicitly unlocked</em> blank write clears the stored value
     /// (including deleting any protected-store entry), because the caller was shown that value in full and
-    /// chose to empty the field. That is how the editor's unlock destroys a secret. Null (the legacy shape)
-    /// keeps the old preserve-on-blank behavior in every case.
+    /// chose to empty the field. That is how the editor's unlock destroys a secret. Null means "leave the
+    /// lock as it is": a header that is already locked stays locked, a new one starts unlocked, and a blank
+    /// write preserves what is stored.
     /// </para>
     /// </summary>
     /// <param name="providerKey">The provider key being upserted, used to name this header's protected-store entry.</param>
@@ -895,16 +895,18 @@ internal sealed class ProviderManagementService
     {
         var name = request.Name!.Trim();
 
-        // A caller that predates the flag stored every literal write-only, so its headers keep meaning
-        // "locked" rather than silently becoming readable.
-        var locked = request.Locked ?? true;
-
         // HTTP header names are case-insensitive, so "X-Foo" and "x-foo" must be treated as the same
         // header when looking up the value to preserve or clean up - otherwise a casing mismatch between
         // what was stored and what the caller resends silently drops the stored secret instead of keeping
         // it, or leaves its protected-store entry orphaned.
         var existing = existingHeaders.FirstOrDefault(h =>
             string.Equals(a: h.Name, b: name, comparisonType: StringComparison.OrdinalIgnoreCase));
+
+        // Nothing is locked by default (ADR-0016), but a caller that omits the flag must not silently
+        // unlock a secret that is already stored either - that would hand its value back on the next
+        // read. So an omitted flag keeps the header's current lock, and a header that does not exist yet
+        // starts unlocked.
+        var locked = request.Locked ?? existing?.Locked ?? false;
 
         if (!string.IsNullOrWhiteSpace(request.Value))
         {
@@ -1091,8 +1093,8 @@ internal sealed class ProviderManagementService
                 var detail = await ReadProviderErrorDetailAsync(response: response, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
                 var statusCode = (int)response.StatusCode;
-                // Logged only on failure. A local runtime whose AuthHeaderName default is Authorization but
-                // which configures no credential must not warn on every successful refresh.
+                // Logged only on failure. A local runtime that configures no credential must not warn on
+                // every successful refresh.
                 var rejected = rejectedHeaders.Count == 0
                     ? "none"
                     : string.Join(separator: ", ", values: rejectedHeaders.Select(SanitizeForLog));
