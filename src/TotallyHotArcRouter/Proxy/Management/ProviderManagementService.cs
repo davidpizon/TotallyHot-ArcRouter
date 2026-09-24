@@ -1119,7 +1119,10 @@ internal sealed class ProviderManagementService
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
             _logger?.LogWarning(ex, "Model discovery failed for {Url}.", RedactUriForLog(target));
-            return new DiscoverModelsResponse(false, Models: [], Error: ex.Message);
+            // ex.Message can embed the requested URI (userinfo, query key), so the admin client gets a generic
+            // message built from the redacted target; the full exception stays in the log above.
+            return new DiscoverModelsResponse(false, Models: [],
+                Error: $"Model discovery request to {RedactUriForLog(target)} failed ({ex.GetType().Name}); see the router log for details.");
         }
     }
 

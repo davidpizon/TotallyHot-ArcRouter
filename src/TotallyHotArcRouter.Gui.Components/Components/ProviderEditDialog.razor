@@ -361,8 +361,11 @@
         {
             foreach (var templateHeader in template.Headers)
             {
-                if (!_headers.Any(h => string.Equals(a: h.Name, b: templateHeader.Name, comparisonType: StringComparison.OrdinalIgnoreCase)))
+                var existing = _headers.FirstOrDefault(h => string.Equals(a: h.Name, b: templateHeader.Name, comparisonType: StringComparison.OrdinalIgnoreCase));
+                if (existing is null)
                     _headers.Add(ToHeaderRow(templateHeader));
+                else if (templateHeader.Locked && !existing.UseEnvVar)
+                    existing.Locked = true; // the template declares this credential secret; an operator-typed literal must not save readable
             }
         }
     }

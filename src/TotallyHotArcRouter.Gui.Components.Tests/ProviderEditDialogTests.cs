@@ -764,6 +764,31 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void Selecting_a_template_after_edits_locks_an_existing_literal_row_it_declares_secret()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, providerName: "OpenAI");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        // An operator-typed literal that matches the template's credential name must not save readable
+        // just because the form was no longer pristine when the template was applied.
+        cut.Find("[data-testid='add-header']").Click();
+        cut.Find("input[placeholder='Header-Name']").Input("Authorization");
+        cut.Find("input[placeholder='value']").Input("sk-typed-first");
+        cut.Find("[data-testid='provider-type']").Change("openai");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("sk-typed-first");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
     public void Switching_templates_after_a_base_url_edit_keeps_custom_headers()
     {
         using var ctx = new BunitContext();

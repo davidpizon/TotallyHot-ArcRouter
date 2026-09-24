@@ -391,6 +391,31 @@ public sealed class RefreshFromEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshFromEndpoint_WhenTheRequestThrows_TheErrorNeverCarriesTheExceptionMessage()
+    {
+        // HttpRequestException messages can embed the requested URI, so the admin-facing error is generic.
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://user:userinfo-secret@api.example.invalid/v1?api_key=query-secret" }
+            }
+        });
+        var handler = DiscoveryHandler(request =>
+            throw new HttpRequestException($"Connection failed for {request.RequestUri}"));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "api.example.invalid", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "userinfo-secret", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "query-secret", actualString: message);
+    }
+
+    [Fact]
     public async Task RefreshFromEndpoint_SendsARawAuthorizationKeyWithABearerPrefix()
     {
         string? authorization = null;
