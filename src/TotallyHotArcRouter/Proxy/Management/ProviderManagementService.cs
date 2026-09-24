@@ -1101,12 +1101,14 @@ internal sealed class ProviderManagementService
                 _logger?.LogWarning(
                     "Model discovery failed for {Url}: provider returned {StatusCode}. Authorization header sent: {AuthorizationSent}. Rejected header names: {RejectedHeaders}. {Detail}",
                     RedactUriForLog(target), statusCode, authorizationSent, rejected, detail ?? "No error body.");
-                var error = $"Provider returned {statusCode} for {target}.";
+                // This string reaches the admin client and the interaction status, so it gets the same
+                // redacted target as the log line: BaseUrl may carry userinfo or an API key in its query.
+                var error = $"Provider returned {statusCode} for {RedactUriForLog(target)}.";
                 if (detail is not null) error = $"{error} {detail}";
                 if (authorizationConfigured && !authorizationSent)
                     error += " No Authorization header was sent; the configured credential did not resolve.";
                 if (rejectedHeaders.Count > 0)
-                    error += " Header names not sent: " + string.Join(separator: ", ", values: rejectedHeaders) + ".";
+                    error += " Header names not sent: " + rejected + ".";
                 return new DiscoverModelsResponse(false, Models: [], Error: error);
             }
 

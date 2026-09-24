@@ -364,6 +364,33 @@ public sealed class RefreshFromEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFails_TheErrorNeverCarriesCredentialsFromTheBaseUrl()
+    {
+        // BaseUrl validation only requires an absolute URI, so userinfo and a query string can carry
+        // credentials. The failure message goes to the admin client and the interaction status, not just
+        // the log, so it must be built from the redacted URI too.
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://user:userinfo-secret@api.example.invalid/v1?api_key=query-secret" }
+            }
+        });
+        var handler = DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "401", actualString: message);
+        Assert.Contains(expectedSubstring: "api.example.invalid", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "userinfo-secret", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "query-secret", actualString: message);
+    }
+
+    [Fact]
     public async Task RefreshFromEndpoint_SendsARawAuthorizationKeyWithABearerPrefix()
     {
         string? authorization = null;

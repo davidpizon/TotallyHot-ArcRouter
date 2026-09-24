@@ -194,6 +194,36 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void Reopening_a_provider_and_switching_its_env_var_credential_to_a_literal_still_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        // The rows of a stored provider come from stored state, not from the template, so nothing was
+        // copied onto them when the dialog opened - the template's declaration has to be looked up.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "OPENAI_API_KEY")
+                ],
+                providerType: "openai");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed-after-reopening");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("sk-typed-after-reopening");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
     public void A_template_that_declares_no_credential_adds_no_header_rows()
     {
         using var ctx = new BunitContext();
