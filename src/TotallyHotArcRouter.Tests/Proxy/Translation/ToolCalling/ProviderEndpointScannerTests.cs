@@ -567,7 +567,6 @@ public sealed class ProviderEndpointScannerTests
         var provider = new ProviderOptions
         {
             BaseUrl = "https://api.anthropic.com",
-            AuthHeaderName = "x-api-key",
             Headers =
             [
                 new ProviderHeader { Name = "x-api-key", Value = "sk-test" },

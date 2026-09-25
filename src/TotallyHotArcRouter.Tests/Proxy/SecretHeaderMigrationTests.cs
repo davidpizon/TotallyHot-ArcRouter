@@ -44,7 +44,6 @@ public sealed class SecretHeaderMigrationTests : IDisposable
                 ["anthropic"] = new()
                 {
                     BaseUrl = "https://api.anthropic.com",
-                    AuthHeaderName = "x-api-key",
                     Headers =
                     [
                         new ProviderHeader { Name = "x-api-key", Value = "sk-ant-secret", Locked = true },

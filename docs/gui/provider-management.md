@@ -112,15 +112,18 @@ the routing or forwarding path reads it; behavior comes from the concrete fields
 
 There is no dedicated credential field or fieldset: authentication is expressed as an ordinary entry in
 **Custom Headers** below, exactly like `anthropic-version` or any other header a provider's API needs.
-Selecting a **Provider Type** doesn't tick a checkbox — it shows a hint above Custom Headers naming the
-header the template authenticates with (e.g. `x-api-key` for the `anthropic` entry), so the operator
-knows what to add a row for. A template whose credential is not an HTTP header (a local runtime, or
-Bedrock signed with SigV4 by the AWS SDK) does not need that row.
+Selecting a **Provider Type** inserts the template's headers into Custom Headers, including — for a
+provider that needs a key — an empty **locked** row named for the credential header (e.g. `x-api-key` for
+the `anthropic` entry). It starts on its usual environment variable when the template names one (e.g.
+`ANTHROPIC_API_KEY`); switch it to **Value** to type a key instead, and the row locks. A template whose
+credential is not an HTTP header (a local runtime, or Bedrock signed with SigV4 by the AWS SDK) adds no
+such row. There is no separate "credential header" setting: which header is secret is stated per header
+by its padlock (see
+[ADR-0016](../adr/0016-remove-authheadername-and-mark-secrets-per-header.md)).
 
-`AuthHeaderName` — which header is "the" credential header — is still stored on the provider, derived
-automatically from the selected type's template on save (or carried through unchanged for a type with no
-template). It is not itself a credential: it exists so the proxy can strip a client-sent header of the
-same name before forwarding, so a client can't override or duplicate the configured one.
+Every header name a provider configures — secret or not — is stripped from the client's request before
+forwarding, and from the upstream response before it reaches the client, so a client can't override or
+duplicate the configured one.
 
 ## Custom headers
 
@@ -140,14 +143,12 @@ Consequently a blank literal box means different things per header: under a lock
 the stored value, and under an unlocked one it means the value is genuinely empty. Env-var-sourced
 headers show no padlock — they hold a variable name, not a secret.
 
-One exception to "defaulting to unlocked": on save, the literal header whose name matches the provider's
-`AuthHeaderName` (the credential header) is always stored locked, regardless of its padlock state in the
-dialog. This is why a freshly added `Authorization` or `x-api-key` row shows unlocked while you're
-editing it, but its value has disappeared the next time you reopen the dialog — that row is the
-credential, and it is never left readable back through the management API.
+Nothing is locked implicitly. A row is stored locked only when its padlock is on — either because the
+template declared it a secret, or because the operator locked it. A header you add by hand and type a
+key into stays **readable** back through the management API until you lock it, so lock any row that
+carries a credential.
 
-Headers already in `model-routing.json` before the padlock existed load as **locked**, so nothing that
-was previously write-only becomes visible on upgrade.
+A header stored without the flag is public configuration and loads unlocked.
 
 ## Free providers
 

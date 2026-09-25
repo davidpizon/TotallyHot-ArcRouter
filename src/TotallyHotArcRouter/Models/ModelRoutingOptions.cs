@@ -15,9 +15,12 @@ public sealed class ModelRoutingOptions
 
     /// <summary>
     /// Provider key reserved for the editor's blank add-provider choice. The dialog's fallback option
-    /// uses this spelling, so a provider with the same key cannot be configured in
-    /// <c>ModelRouting:Providers</c> or in the live store. Compared case-insensitively, matching
-    /// <see cref="Providers"/>.
+    /// uses this spelling, so a provider with the same key cannot be configured in the
+    /// <c>ModelRouting:Providers</c> appsettings template catalog (see
+    /// <see cref="TotallyHot.ArcRouter.Proxy.Management.ProviderTemplateCatalog"/>). Not enforced against
+    /// <see cref="Providers"/> in the live store: a pre-existing live provider may legitimately use this
+    /// spelling as its dictionary key, and rejecting it there would break startup for that configuration.
+    /// Compared case-insensitively.
     /// </summary>
     public const string ReservedBlankProviderKey = "Other";
 
@@ -25,7 +28,7 @@ public sealed class ModelRoutingOptions
     /// Whether <paramref name="key"/> is <see cref="ReservedBlankProviderKey"/>, ignoring case.
     /// </summary>
     /// <param name="key">A provider dictionary key.</param>
-    /// <returns><see langword="true"/> when the key is reserved and must not be configured.</returns>
+    /// <returns><see langword="true"/> when the key matches the reserved spelling.</returns>
     public static bool IsReservedBlankProviderKey(string key)
     {
         return string.Equals(a: key, b: ReservedBlankProviderKey, comparisonType: StringComparison.OrdinalIgnoreCase);
@@ -68,17 +71,15 @@ public sealed class ModelRoutingOptions
                 errors.Add($"ModelList entry '{entry.ModelName}' must have a non-empty ProviderModelId.");
         }
 
+        var seenProviderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var (name, provider) in Providers)
         {
-            if (IsReservedBlankProviderKey(name))
-                errors.Add(
-                    $"Provider key '{name}' is reserved for the blank add-provider template and cannot be configured.");
-
             if (!Uri.TryCreate(uriString: provider.BaseUrl, uriKind: UriKind.Absolute, result: out _))
                 errors.Add($"Provider '{name}' has an invalid BaseUrl '{provider.BaseUrl}'.");
 
-            if (string.IsNullOrWhiteSpace(provider.AuthHeaderName))
-                errors.Add($"Provider '{name}' must have a non-empty AuthHeaderName.");
+            if (!string.IsNullOrWhiteSpace(provider.Name) && !seenProviderNames.Add(provider.Name.Trim()))
+                errors.Add($"Provider name '{provider.Name.Trim()}' is used by more than one provider.");
 
             foreach (var header in provider.Headers)
                 if (string.IsNullOrWhiteSpace(header.Name))
@@ -140,13 +141,6 @@ public sealed record ProviderOptions
     public string? ProviderType { get; init; }
 
     /// <summary>
-    /// Gets the name of the HTTP header identified as this provider's credential header (e.g.
-    /// <c>Authorization</c> or <c>x-api-key</c>). Authentication itself is expressed as an ordinary entry in
-    /// <see cref="Headers"/> - this only records which of those headers carries it, for display purposes.
-    /// </summary>
-    public string AuthHeaderName { get; init; } = "Authorization";
-
-    /// <summary>
     /// Gets additional static HTTP headers to send on every upstream request to this provider (both
     /// proxied traffic and model discovery), beyond the auth header. Provider-agnostic: e.g. Anthropic's
     /// required <c>anthropic-version: 2023-06-01</c> is just an entry here rather than special-cased in code.
@@ -204,7 +198,7 @@ public sealed record ProviderOptions
     /// Bedrock slice of unified API translation - see
     /// <c>docs/router/unified-api-translation.md</c> §4.2). Unused for every non-Bedrock provider, which
     /// leave it <see langword="null"/>. Unlike every other provider's single static
-    /// <see cref="AuthHeaderName"/>-carried credential, Bedrock is invoked through the AWS SDK rather
+    /// header-carried credential, Bedrock is invoked through the AWS SDK rather
     /// than a forwarded <c>HttpRequestMessage</c> - the SDK computes the actual endpoint and
     /// signs each request itself, so <see cref="BaseUrl"/> is present only to satisfy the existing
     /// provider-wide "must have a valid BaseUrl" validation and is otherwise informational.
@@ -256,9 +250,9 @@ public sealed record ProviderOptions
     // that prints every property verbatim - which is the secret leak this method exists to prevent.
     private bool PrintMembers(StringBuilder builder)
     {
-        builder.Append("BaseUrl = ").Append(BaseUrl);
+        builder.Append("Name = ").Append(Name);
+        builder.Append(", BaseUrl = ").Append(BaseUrl);
         builder.Append(", ProviderType = ").Append(ProviderType);
-        builder.Append(", AuthHeaderName = ").Append(AuthHeaderName);
         // Header names are shown and values are not, matching ResolvedModelRoute.ExtraHeaders. A
         // List<ProviderHeader> would print as its type name today rather than its contents, so this is
         // defensive rather than a live leak - but it stops one the moment ProviderHeader becomes a record
@@ -314,16 +308,15 @@ public sealed class ProviderHeader
     /// still sent upstream; they are only withheld from callers of the management API, which is what makes
     /// unlocking destructive - there is no way to show a value that was never returned.
     /// <para>
-    /// Defaults to <see langword="true"/> so that a header persisted before this flag existed - and whose
-    /// provenance is therefore unknown - stays hidden rather than becoming visible on upgrade. Known-public
-    /// values (the <c>appsettings.json</c> template catalog, the editor's provider templates) say <c>"Locked": false</c>
-    /// explicitly. Only meaningful for a literal value - it is ignored for an env-var-backed header, since
-    /// its secret lives in the environment rather than in configuration. Every write path that resolves an
-    /// env-var header persists this as <see langword="false"/>, but a legacy env-var header could still
-    /// read back <see langword="true"/> (the default) until it is next rewritten.
+    /// Defaults to <see langword="false"/>: nothing is locked unless a template or the operator says so
+    /// (docs/adr/0016-remove-authheadername-and-mark-secrets-per-header.md). In the <c>appsettings.json</c>
+    /// template catalog the flag is the per-template declaration that the header is a secret, stored in the
+    /// protected store once a value is set. Only meaningful for a literal value - it is ignored for an
+    /// env-var-backed header, since its secret lives in the environment rather than in configuration. Every
+    /// write path that resolves an env-var header persists this as <see langword="false"/>.
     /// </para>
     /// </summary>
-    public bool Locked { get; init; } = true;
+    public bool Locked { get; init; }
 }
 
 /// <summary>

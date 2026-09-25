@@ -41,7 +41,9 @@ internal static class ProviderCredentialResolver
 
             var value = ResolveHeaderValue(header: header, environment: environment, secretReader: secretReader);
             value = ApplyAuthorizationScheme(headerName: header.Name, value: value);
-            if (value is not null) resolved.Add(new KeyValuePair<string, string>(key: header.Name, value: value));
+            if (value is not null) // Trimmed so the emitted name matches ResolvedModelRoute.ConfiguredHeaderNames (also trimmed): a padded
+            // " x-api-key " would otherwise strip the client's header yet be rejected as an invalid name upstream.
+            resolved.Add(new KeyValuePair<string, string>(key: header.Name.Trim(), value: value));
         }
 
         return resolved;

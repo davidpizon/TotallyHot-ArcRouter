@@ -18,9 +18,9 @@ public sealed class ProviderAdminModelsTests
             { new(Name: "Authorization", Source: HeaderValueSource.Literal, null) };
 
         var a = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: models, Headers: headers);
+            Models: models, Headers: headers);
         var b = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: models, Headers: headers);
+            Models: models, Headers: headers);
         var differentName = a with { Name = "Something Else" };
 
         Assert.Equal(expected: a, actual: b);
@@ -81,7 +81,7 @@ public sealed class ProviderAdminModelsTests
     public void ProviderAdminView_AdminActionAndLiveTraffic_DefaultToNull()
     {
         var view = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: [], Headers: []);
+            Models: [], Headers: []);
 
         Assert.Null(view.AdminAction);
         Assert.Null(view.LiveTraffic);
@@ -96,7 +96,6 @@ public sealed class ProviderAdminModelsTests
             Key: "openai",
             Name: "OpenAI API",
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization",
             Models: [],
             Headers: [],
             AdminAction: new ProviderInteractionStatusAdminView(false, Operation: "Refresh from endpoint",
@@ -121,7 +120,6 @@ public sealed class ProviderAdminModelsTests
             Key: "openai",
             Name: "OpenAI API",
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization",
             Models: [],
             Headers: [],
             LiveTraffic: new ProviderInteractionStatusAdminView(
@@ -196,7 +194,6 @@ public sealed class ProviderAdminModelsTests
             Key: "anthropic",
             Name: "Anthropic Prod",
             BaseUrl: "https://api.anthropic.com",
-            AuthHeaderName: "x-api-key",
             Models: [],
             Headers: [],
             UsageLastRecordedAtUtc: DateTimeOffset.Parse(input: "2026-03-01T08:00:00Z",
@@ -235,7 +232,7 @@ public sealed class ProviderAdminModelsTests
     public void ProviderAdminView_UsageLastRecordedAtUtcAndRateLimit_DefaultToNull()
     {
         var view = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: [], Headers: []);
+            Models: [], Headers: []);
 
         Assert.Null(view.UsageLastRecordedAtUtc);
         Assert.Null(view.RateLimit);
@@ -245,7 +242,7 @@ public sealed class ProviderAdminModelsTests
     public void ProviderAdminView_HasStoredAdminKey_DefaultsToFalse()
     {
         var view = new ProviderAdminView(Key: "anthropic", Name: "Anthropic", BaseUrl: "https://api.anthropic.com",
-            AuthHeaderName: "x-api-key", Models: [], Headers: []);
+            Models: [], Headers: []);
 
         Assert.False(view.HasStoredAdminKey);
     }
@@ -258,7 +255,6 @@ public sealed class ProviderAdminModelsTests
             Key: "anthropic",
             Name: "Anthropic Prod",
             BaseUrl: "https://api.anthropic.com",
-            AuthHeaderName: "x-api-key",
             Models: [],
             Headers: [],
             HasStoredAdminKey: true,
@@ -291,7 +287,6 @@ public sealed class ProviderAdminModelsTests
 
         Assert.Equal(expected: ProviderTemplates.OtherKey, actual: template.Key);
         Assert.Equal(expected: string.Empty, actual: template.BaseUrl);
-        Assert.Equal(expected: "Authorization", actual: template.AuthHeaderName);
         Assert.False(template.IsFree);
         Assert.Empty(template.Headers);
     }

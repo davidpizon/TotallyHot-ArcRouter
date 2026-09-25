@@ -663,6 +663,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         routedModel: route.ModelName,
                         substitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback: isFallback,
                             resolutionReason: resolution.SubstitutionReason)),
+                    configuredHeaderNames: route.ConfiguredHeaderNames,
                     preReadErrorBody: preReadErrorBody,
                     embeddedErrorMessage: embeddedErrorMessage,
                     statusCode: statusCode);

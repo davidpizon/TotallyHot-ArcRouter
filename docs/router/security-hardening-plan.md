@@ -570,7 +570,8 @@ regardless.
 **Today: Medium · Exposed: High · CWE-644**
 
 **Evidence.** Header forwarding is deny-list based — everything the client sends goes upstream
-except five always-skipped names, hop-by-hop headers, and the provider's own auth header:
+except five always-skipped names, hop-by-hop headers, and every header name the provider itself
+configures (ADR-0016; before it, only the single provider "auth header" name):
 
 ```csharp
 // src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs:58
@@ -582,7 +583,7 @@ foreach (var header in context.Request.Headers)
 {
     if (AlwaysSkippedRequestHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) ||
         requestHopByHopHeaders.Contains(header.Key) ||
-        (providerSuppliesAuthHeader && string.Equals(header.Key, route.AuthHeaderName, …)))
+        route.ConfiguredHeaderNames.Contains(header.Key))
     {
         continue;
     }
@@ -590,7 +591,9 @@ foreach (var header in context.Request.Headers)
 }
 ```
 
-And operator-configured headers are applied **only if the client did not already send that name**:
+Because every configured name is stripped from the client above, the operator-configured headers
+that follow always win for those names; the `Contains` guard only protects against duplicate names
+within `ExtraHeaders` itself:
 
 ```csharp
 // src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs:510-516
@@ -603,14 +606,15 @@ foreach (var (headerName, headerValue) in route.ExtraHeaders)
 **Impact.** A local client can inject arbitrary headers into the router's authenticated session
 with a third-party provider — `OpenAI-Organization`, `OpenAI-Project`, `anthropic-beta`,
 per-provider routing or billing headers — attributing spend or unlocking behaviors the operator did
-not configure. It can also **suppress** an operator-configured non-auth header by sending its own
-value: `anthropic-version` is the concrete case, and downgrading it changes the API contract the
-translators were written against.
+not configure. The remaining exposure is headers the provider does **not** configure, which still pass through.
+(Before ADR-0016 a client could also suppress an operator-configured non-auth header such as
+`anthropic-version` by sending its own value; that is closed, since every configured name is now
+stripped from the client.)
 
-The auth header itself is safe: it is stripped from the client whenever the provider declares one,
-based on configuration intent rather than on whether the credential resolved, so a provider with an
-unset env var fails closed rather than letting the client's header stand in. That behavior is
-correct and should be preserved by any fix here.
+Configured headers, credentials included, are stripped from the client based on configuration
+intent rather than on whether the value resolved, so a provider with an unset env var fails closed
+rather than letting the client's header stand in. That behavior is correct and should be preserved
+by any fix here.
 
 **Remediation.**
 

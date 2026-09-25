@@ -364,6 +364,106 @@ public sealed class RefreshFromEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFails_TheErrorNeverCarriesCredentialsFromTheBaseUrl()
+    {
+        // BaseUrl validation only requires an absolute URI, so userinfo and a query string can carry
+        // credentials. The failure message goes to the admin client and the interaction status, not just
+        // the log, so it must be built from the redacted URI too.
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://user:userinfo-secret@api.example.invalid/v1?api_key=query-secret" }
+            }
+        });
+        var handler = DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "401", actualString: message);
+        Assert.Contains(expectedSubstring: "api.example.invalid", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "userinfo-secret", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "query-secret", actualString: message);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFails_TheErrorNeverCarriesATokenFromTheBaseUrlPath()
+    {
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://api.example.invalid/v1/path-secret" }
+            }
+        });
+        var handler = DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "api.example.invalid", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "path-secret", actualString: message);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFails_TheErrorNeverEchoesTheUpstreamBody()
+    {
+        // A provider or reverse proxy can echo the Authorization value in its error body.
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://api.example.invalid/v1" }
+            }
+        });
+        var handler = DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("{\"error\":\"bad key sk-echoed-secret\"}")
+        }));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "401", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "sk-echoed-secret", actualString: message);
+    }
+
+    [Fact]
+    public async Task RefreshFromEndpoint_WhenTheRequestThrows_TheErrorNeverCarriesTheExceptionMessage()
+    {
+        // HttpRequestException messages can embed the requested URI, so the admin-facing error is generic.
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://user:userinfo-secret@api.example.invalid/v1?api_key=query-secret" }
+            }
+        });
+        var handler = DiscoveryHandler(request =>
+            throw new HttpRequestException($"Connection failed for {request.RequestUri}"));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "api.example.invalid", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "userinfo-secret", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "query-secret", actualString: message);
+    }
+
+    [Fact]
     public async Task RefreshFromEndpoint_SendsARawAuthorizationKeyWithABearerPrefix()
     {
         string? authorization = null;
@@ -374,7 +474,6 @@ public sealed class RefreshFromEndpointTests : IDisposable
                 ["xai"] = new()
                 {
                     BaseUrl = "https://api.x.ai/v1",
-                    AuthHeaderName = "Authorization",
                     Headers = [new ProviderHeader { Name = "Authorization", Value = "xai-test-key" }]
                 }
             }

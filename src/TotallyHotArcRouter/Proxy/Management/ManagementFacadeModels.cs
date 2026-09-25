@@ -78,7 +78,6 @@ public static class HeaderValueSource
 /// <param name="Key">The provider key.</param>
 /// <param name="Name">The user-friendly display name for this provider; null when not set.</param>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
-/// <param name="AuthHeaderName">The header carrying the credential.</param>
 /// <param name="Models">The models configured to route to this provider.</param>
 /// <param name="Headers">The provider's configured custom headers, masked (see <see cref="HeaderView"/>).</param>
 /// <param name="IsFree">Whether this provider costs nothing, making its models' cost a known zero rather than unknown.</param>
@@ -154,7 +153,6 @@ public sealed record ProviderView(
     string Key,
     string? Name,
     string BaseUrl,
-    string AuthHeaderName,
     IReadOnlyList<ModelView> Models,
     IReadOnlyList<HeaderView> Headers,
     bool IsFree = false,
@@ -302,7 +300,6 @@ public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 /// omitted. Authentication is expressed purely via <paramref name="Headers"/>.
 /// </summary>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
-/// <param name="AuthHeaderName">The header carrying the credential.</param>
 /// <param name="Headers">
 /// The full set of custom headers to store (replaces the existing set, one header at
 /// a time via the blank-preserves-existing rule); null keeps the existing headers (legacy callers).
@@ -330,7 +327,6 @@ public sealed record ProvidersResponse(IReadOnlyList<ProviderView> Providers);
 /// </param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
-    string? AuthHeaderName,
     IReadOnlyList<HeaderWriteRequest>? Headers = null,
     bool? IsFree = null,
     bool? Enabled = null,
@@ -357,9 +353,11 @@ public sealed record ProviderEnabledWriteRequest(bool Enabled);
 /// header whether or not <paramref name="Value"/> is resent, so a value can be locked without retyping it,
 /// and it also decides what a blank write means: <see langword="true"/> preserves the stored value (the
 /// caller was never shown it), while an explicit <see langword="false"/> clears it (the caller could see
-/// the field and left it empty - this is how the editor's unlock clears a secret). Null is the legacy
-/// shape, kept for callers that predate the flag: blank preserves, and a literal stores locked. Ignored
-/// for an env-var-backed header, which always stores unlocked.
+/// the field and left it empty - this is how the editor's unlock clears a secret). Null means "leave the
+/// lock as it is": a header already locked stays locked, a new one starts unlocked, and a blank write
+/// preserves whatever is stored. Nothing is locked unless the caller says so
+/// (docs/adr/0016-remove-authheadername-and-mark-secrets-per-header.md), but nothing already locked is
+/// unlocked by omission. Ignored for an env-var-backed header, which always stores unlocked.
 /// </param>
 public sealed record HeaderWriteRequest(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
 

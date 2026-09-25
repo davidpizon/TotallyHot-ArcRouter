@@ -629,7 +629,6 @@ public class ConstrainedToolCallTests
             Provider: Provider,
             ProviderModelId: Model,
             UpstreamBaseUrl: new Uri("http://127.0.0.1:1234/v1"),
-            AuthHeaderName: "Authorization",
-            ExtraHeaders: []);
+            ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>());
     }
 }

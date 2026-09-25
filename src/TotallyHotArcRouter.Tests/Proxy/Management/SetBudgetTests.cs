@@ -16,7 +16,7 @@ public sealed class SetBudgetTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com" }
             },
             ModelList =
             [

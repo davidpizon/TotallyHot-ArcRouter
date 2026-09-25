@@ -11,7 +11,6 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// Governance UI.
 /// </param>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
-/// <param name="AuthHeaderName">The header carrying the credential (e.g. <c>Authorization</c>).</param>
 /// <param name="Models">The models configured to route to this provider.</param>
 /// <param name="Headers">The provider's configured custom headers (literal values are returned; secrets live in env vars).</param>
 /// <param name="IsFree">
@@ -87,7 +86,6 @@ public sealed record ProviderAdminView(
     string Key,
     string? Name,
     string BaseUrl,
-    string AuthHeaderName,
     IReadOnlyList<ModelAdminView> Models,
     IReadOnlyList<ProviderHeaderView> Headers,
     bool IsFree = false,
@@ -374,9 +372,9 @@ public sealed record ProviderHeaderView(
 /// Whether the literal value is a secret to withhold from future reads. Travels with
 /// the header whether or not <paramref name="Value"/> is resent, so a stored secret can be locked without
 /// retyping it, and it qualifies the blank rule: blank under <see langword="true"/> preserves the stored
-/// value, while blank under an explicit <see langword="false"/> clears it (the editor's unlock). Null is
-/// the legacy shape - blank preserves, and a literal stores locked. Ignored for an env-var-backed
-/// header.
+/// value, while blank under an explicit <see langword="false"/> clears it (the editor's unlock). Null means
+/// "leave the lock as it is" - a header already locked stays locked, a new one starts unlocked, and blank
+/// preserves. Ignored for an env-var-backed header.
 /// </param>
 public sealed record ProviderHeaderWriteModel(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
 
@@ -385,7 +383,6 @@ public sealed record ProviderHeaderWriteModel(string? Name, string? Value, strin
 /// Authentication is expressed purely via <see cref="Headers"/>.
 /// </summary>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
-/// <param name="AuthHeaderName">The header carrying the credential.</param>
 /// <param name="Headers">
 /// The full set of custom headers to store (replaces the existing set, one header at
 /// a time via <see cref="ProviderHeaderWriteModel"/>'s blank-preserves-existing rule); null keeps them.
@@ -409,7 +406,6 @@ public sealed record ProviderHeaderWriteModel(string? Name, string? Value, strin
 /// </param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
-    string? AuthHeaderName,
     IReadOnlyList<ProviderHeaderWriteModel>? Headers = null,
     bool? IsFree = null,
     bool? Enabled = null,

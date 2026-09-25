@@ -111,6 +111,11 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// <param name="responseMessage">The upstream response. Not disposed here - the caller owns it.</param>
     /// <param name="translator">The provider's translator, or <see langword="null"/> for a passthrough provider.</param>
     /// <param name="routingHeaders">The ArcRouter-authored headers to set before the first body byte.</param>
+    /// <param name="configuredHeaderNames">
+    /// The header names the provider configures (<see cref="ResolvedModelRoute.ConfiguredHeaderNames"/>). An
+    /// upstream response header of any of these names is not relayed to the client, so a credential the
+    /// provider echoes back never leaves the router. <see langword="null"/> relays every header.
+    /// </param>
     /// <param name="preReadErrorBody">
     /// The error body already buffered during classification, when one was; otherwise
     /// <see langword="null"/>.
@@ -122,12 +127,14 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         HttpResponseMessage responseMessage,
         IPayloadTranslator? translator,
         RoutingResponseHeaders routingHeaders,
+        IReadOnlySet<string>? configuredHeaderNames,
         byte[]? preReadErrorBody,
         string? embeddedErrorMessage,
         int statusCode)
     {
         var isStreaming = CopyStatusAndHeaders(context: context, responseMessage: responseMessage,
-            translator: translator, routingHeaders: routingHeaders, statusCode: statusCode);
+            translator: translator, routingHeaders: routingHeaders, configuredHeaderNames: configuredHeaderNames,
+            statusCode: statusCode);
 
         if (preReadErrorBody is not null && embeddedErrorMessage is not null)
         {
@@ -210,7 +217,8 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
 
     /// <summary>
     /// Relays the upstream's status code, copies its forwardable headers onto the client response, drops
-    /// the ones a translated body invalidates, and stamps ArcRouter's own routing headers. Returns whether
+    /// the ones a translated body invalidates, drops any the provider itself configures, and stamps
+    /// ArcRouter's own routing headers. Returns whether
     /// the upstream answered with an SSE stream, which decides the body path.
     /// </summary>
     private static bool CopyStatusAndHeaders(
@@ -218,6 +226,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         HttpResponseMessage responseMessage,
         IPayloadTranslator? translator,
         RoutingResponseHeaders routingHeaders,
+        IReadOnlySet<string>? configuredHeaderNames,
         int statusCode)
     {
         var responseHopByHopHeaders = ProxyMiddleware.GetHopByHopHeaderNames(responseMessage.Headers.Connection);
@@ -228,14 +237,16 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
 
         foreach (var header in responseMessage.Headers)
         {
-            if (responseHopByHopHeaders.Contains(header.Key)) continue;
+            if (responseHopByHopHeaders.Contains(header.Key) || configuredHeaderNames?.Contains(header.Key) == true)
+                continue;
 
             context.Response.Headers[header.Key] = header.Value.ToArray();
         }
 
         foreach (var header in responseMessage.Content.Headers)
         {
-            if (responseHopByHopHeaders.Contains(header.Key)) continue;
+            if (responseHopByHopHeaders.Contains(header.Key) || configuredHeaderNames?.Contains(header.Key) == true)
+                continue;
 
             context.Response.Headers[header.Key] = header.Value.ToArray();
         }

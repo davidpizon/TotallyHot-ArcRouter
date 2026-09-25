@@ -101,7 +101,7 @@ public class ProxyMiddlewareTests
     {
         // Regression test: a BYOK client (e.g. an IDE extension) sends its own placeholder "Authorization"
         // header to satisfy its own client library, not knowing it's talking to Anthropic. Providers whose
-        // AuthHeaderName is something other than "Authorization" (e.g. Anthropic's "x-api-key") must never
+        // credential header is something other than "Authorization" (e.g. Anthropic's "x-api-key") must never
         // forward that client header upstream alongside the injected credential - some upstreams reject the
         // request outright ("Invalid Anthropic API Key") when both a bogus Authorization and a valid
         // x-api-key are present.
@@ -149,9 +149,9 @@ public class ProxyMiddlewareTests
     [Fact]
     public async Task InvokeAsync_ProviderAuthHeaderConfiguredButUnresolved_StripsClientsHeaderAndForwardsNoCredential()
     {
-        // Regression test: a provider whose configuration declares an auth header (here, sourced from an
+        // Regression test: a provider whose configuration declares a header (here, sourced from an
         // env var that happens to be unset at request time) must still have a client-sent header of that
-        // same name stripped. Before route.AuthHeaderConfigured existed, whether the client's header was
+        // same name stripped. Before route.ConfiguredHeaderNames existed, whether the client's header was
         // stripped depended on whether the provider's own header happened to resolve this request - so a
         // missing env var would let a client-supplied credential slip through unmodified instead of the
         // request failing closed with no credential at all. Uses a non-"Authorization" header name because
@@ -199,9 +199,9 @@ public class ProxyMiddlewareTests
     [Fact]
     public async Task InvokeAsync_ProviderWithNoAuthHeaderConfigured_ForwardsTheClientsHeaderUnmodified()
     {
-        // Regression test: an unauthenticated provider (e.g. a free local runtime) declares no header
-        // matching AuthHeaderName at all, so route.AuthHeaderConfigured is false and a client's own header
-        // of that name must pass through untouched rather than being dropped with nothing to replace it.
+        // Regression test: an unauthenticated provider (e.g. a free local runtime) declares no header of
+        // that name at all, so it is absent from route.ConfiguredHeaderNames and a client's own header of
+        // that name must pass through untouched rather than being dropped with nothing to replace it.
         var loggerMock = new Mock<ILogger<ProxyMiddleware>>();
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "local-model",
@@ -430,7 +430,7 @@ public class ProxyMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_DoesNotClobberCustomHeader_WhenClientAlreadySentIt()
+    public async Task InvokeAsync_ConfiguredHeaderWins_WhenClientSendsTheSameName()
     {
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "gpt-5.4", providerModelId: "gpt-5.4", baseUrl: "https://example.com",
@@ -440,8 +440,9 @@ public class ProxyMiddlewareTests
 
         var handler = new DelegatingHandlerStub(request =>
         {
-            // The client's own value wins; the provider default is not added on top or in place of it.
-            Assert.Equal(expected: "2099-01-01", actual: Assert.Single(request.Headers.GetValues("anthropic-version")));
+            // The operator's configured value is the only one forwarded: a header the provider configures
+            // is stripped from the client's request, so the client cannot override or duplicate it.
+            Assert.Equal(expected: "2023-06-01", actual: Assert.Single(request.Headers.GetValues("anthropic-version")));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
         });
 
@@ -453,6 +454,36 @@ public class ProxyMiddlewareTests
         await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DropsConfiguredHeaderNamesFromTheUpstreamResponse()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gpt-5.4", providerModelId: "gpt-5.4", baseUrl: "https://example.com",
+            headers: [new ProviderHeader { Name = "x-echoed-credential", Value = "operator-value" }]);
+        var interceptor =
+            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+
+        var handler = new DelegatingHandlerStub(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") };
+            // A provider that echoes a configured header back must not hand it to the client; an unrelated
+            // response header still passes through.
+            response.Headers.TryAddWithoutValidation(name: "X-Echoed-Credential", value: "operator-value");
+            response.Headers.TryAddWithoutValidation(name: "x-request-id", value: "req-123");
+            return Task.FromResult(response);
+        });
+
+        var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
+            httpClient: new HttpClient(handler));
+
+        var context = BuildForwardableContext();
+        await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
+
+        Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
+        Assert.False(context.Response.Headers.ContainsKey("x-echoed-credential"));
+        Assert.Equal(expected: "req-123", actual: context.Response.Headers["x-request-id"].ToString());
     }
 
     private static DefaultHttpContext BuildForwardableContext()

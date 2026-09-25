@@ -28,7 +28,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [providerKey] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                [providerKey] = new() { BaseUrl = "https://api.openai.com" }
             },
             ModelList =
             [
@@ -104,7 +104,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     {
         File.WriteAllText(path: _tempPath, """
                                            {
-                                             "Providers": { "openai": { "BaseUrl": "https://api.openai.com", "AuthHeaderName": "Authorization" } },
+                                             "Providers": { "openai": { "BaseUrl": "https://api.openai.com" } },
                                              "ModelList": [ { "ModelName": "gpt-5.4", "Provider": "openai", "ProviderModelId": "gpt-5.4" } ]
                                            }
                                            """);
@@ -122,7 +122,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
     {
         File.WriteAllText(path: _tempPath, """
                                            {
-                                             "Providers": { "openai": { "BaseUrl": "https://api.openai.com", "AuthHeaderName": "Authorization" } },
+                                             "Providers": { "openai": { "BaseUrl": "https://api.openai.com" } },
                                              "ModelList": [ { "ModelName": "gpt-5.4", "Provider": "openai", "ProviderModelId": "gpt-5.4" } ]
                                            }
                                            """);
@@ -192,7 +192,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
 
         await store.UpsertProviderAsync(
             key: "ollama",
-            provider: new ProviderOptions { BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization" },
+            provider: new ProviderOptions { BaseUrl = "http://localhost:11434/v1" },
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(store.Snapshot.Options.Providers.ContainsKey("ollama"));
@@ -250,7 +250,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["p"] = new() { BaseUrl = "https://example.com", AuthHeaderName = "Authorization" }
+                ["p"] = new() { BaseUrl = "https://example.com" }
             },
             ModelList =
             [
@@ -277,7 +277,7 @@ public sealed class ProviderConfigStoreTests : IDisposable
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["p"] = new() { BaseUrl = "https://example.com", AuthHeaderName = "Authorization" }
+                ["p"] = new() { BaseUrl = "https://example.com" }
             },
             ModelList =
             [

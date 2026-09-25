@@ -15,14 +15,12 @@ public static class ProviderTemplates
     public const string OtherKey = "Other";
 
     /// <summary>
-    /// The blank template: no base URL, no custom headers, and <c>Authorization</c> as the credential
-    /// header name. Selecting it while the form is still untouched clears whatever the previous template
-    /// filled in.
+    /// The blank template: no base URL and no custom headers. Selecting it while the form is still untouched
+    /// clears whatever the previous template filled in.
     /// </summary>
     public static ProviderEditorTemplate Other { get; } = new(
         Key: OtherKey,
         BaseUrl: string.Empty,
-        AuthHeaderName: "Authorization",
         IsFree: false,
         Headers: []);
 
@@ -83,27 +81,29 @@ public static class ProviderTemplates
     }
 
     /// <summary>
-    /// A static HTTP header a template adds to the editor's custom-header rows. The credential header
-    /// is not one of these: it is identified by <see cref="ProviderEditorTemplate.AuthHeaderName"/> and
-    /// is not pre-filled as a row.
+    /// A header a template adds to the editor's custom-header rows. A credential is just a header with
+    /// <paramref name="Locked"/> set: the editor inserts an empty locked row for the operator to fill in.
     /// </summary>
     /// <param name="Name">The header name (e.g. <c>anthropic-version</c>).</param>
     /// <param name="Value">The literal value, when the header is not read from the environment.</param>
     /// <param name="ValueEnvVar">The environment-variable name, when <paramref name="Value"/> is empty.</param>
-    public sealed record ProviderTemplateHeader(string Name, string? Value, string? ValueEnvVar = null);
+    /// <param name="Locked">
+    /// Whether the value is a secret, stored write-only once the operator sets one. Takes effect when the
+    /// row holds a literal; an env-var row is never locked because it stores only a variable name.
+    /// </param>
+    public sealed record ProviderTemplateHeader(string Name, string? Value, string? ValueEnvVar = null,
+        bool Locked = false);
 
     /// <summary>
     /// One add-provider template: the defaults applied when its key is selected in the editor.
     /// </summary>
     /// <param name="Key">The <c>ModelRouting:Providers</c> key, or <see cref="OtherKey"/>.</param>
     /// <param name="BaseUrl">The provider base URL. Empty for <see cref="Other"/>.</param>
-    /// <param name="AuthHeaderName">The header name that carries the credential.</param>
     /// <param name="IsFree">Whether requests to this provider cost nothing.</param>
-    /// <param name="Headers">Custom headers other than <paramref name="AuthHeaderName"/>.</param>
+    /// <param name="Headers">The headers the editor inserts, including any empty locked (secret) rows.</param>
     public sealed record ProviderEditorTemplate(
         string Key,
         string BaseUrl,
-        string AuthHeaderName,
         bool IsFree,
         IReadOnlyList<ProviderTemplateHeader> Headers);
 }

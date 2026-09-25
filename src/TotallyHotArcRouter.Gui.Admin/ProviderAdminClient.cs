@@ -66,12 +66,12 @@ public sealed class ProviderAdminClient
         return response.Templates.Select(template => new ProviderTemplates.ProviderEditorTemplate(
             Key: template.Key,
             BaseUrl: template.BaseUrl,
-            AuthHeaderName: template.AuthHeaderName,
             IsFree: template.IsFree,
             Headers: template.Headers.Select(header => new ProviderTemplates.ProviderTemplateHeader(
                 Name: header.Name,
                 Value: header.HasValue ? header.Value : null,
-                ValueEnvVar: header.HasValueEnvVar ? header.ValueEnvVar : null)).ToList())).ToList();
+                ValueEnvVar: header.HasValueEnvVar ? header.ValueEnvVar : null,
+                Locked: header.Locked)).ToList())).ToList();
     }
 
     /// <summary>Adds or replaces a provider by key.</summary>
@@ -85,7 +85,6 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.UpsertProviderRequest { Key = key, ReplaceHeaders = body.Headers is not null };
         if (body.BaseUrl is not null) request.BaseUrl = body.BaseUrl;
-        if (body.AuthHeaderName is not null) request.AuthHeaderName = body.AuthHeaderName;
         if (body.IsFree.HasValue) request.IsFree = body.IsFree.Value;
         if (body.Enabled.HasValue) request.Enabled = body.Enabled.Value;
         if (body.ProviderName is not null) request.ProviderName = body.ProviderName;
@@ -476,7 +475,6 @@ public sealed class ProviderAdminClient
             Key: provider.Key,
             Name: provider.HasName ? provider.Name : null,
             BaseUrl: provider.BaseUrl,
-            AuthHeaderName: provider.AuthHeaderName,
             Models: provider.Models.Select(ToView).ToList(),
             Headers: provider.Headers.Select(ToView).ToList(),
             IsFree: provider.IsFree,
