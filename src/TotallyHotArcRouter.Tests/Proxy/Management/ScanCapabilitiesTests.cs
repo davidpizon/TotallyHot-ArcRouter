@@ -345,7 +345,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
 
         await facade.UpsertProviderAsync(
             key: "lmstudio",
-            request: new ProviderWriteRequest(BaseUrl: "http://localhost:1234/v1", null),
+            request: new ProviderWriteRequest(BaseUrl: "http://localhost:1234/v1"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(capabilities.GetProviderCapabilities("lmstudio")!.OpenAiCompatible);
@@ -360,7 +360,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
 
         var result = await facade.UpsertProviderAsync(
             key: "lmstudio",
-            request: new ProviderWriteRequest(BaseUrl: "http://localhost:1234/v1", null),
+            request: new ProviderWriteRequest(BaseUrl: "http://localhost:1234/v1"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
@@ -376,7 +376,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
 
         var result = await facade.UpsertProviderAsync(
             key: "lmstudio",
-            request: new ProviderWriteRequest(BaseUrl: "https://changed.invalid", null),
+            request: new ProviderWriteRequest(BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
@@ -396,7 +396,7 @@ public sealed class ScanCapabilitiesTests : IDisposable
 
         var result = await facade.UpsertProviderAsync(
             key: "lmstudio",
-            request: new ProviderWriteRequest(BaseUrl: "https://changed.invalid", null),
+            request: new ProviderWriteRequest(BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);

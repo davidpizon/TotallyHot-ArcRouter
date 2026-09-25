@@ -28,7 +28,8 @@ public sealed class TelemetryAuthInterceptor : Interceptor
     /// <summary>Initializes a new instance of the <see cref="TelemetryAuthInterceptor"/> class.</summary>
     /// <param name="tokenProvider">Verifies the <c>x-admin-token</c> metadata entry.</param>
     /// <param name="sessionTickets">Verifies the ADR-0012 session cookie, when the token is absent.</param>
-    public TelemetryAuthInterceptor(IManagementTokenProvider tokenProvider, ManagementSessionTicketService sessionTickets)
+    public TelemetryAuthInterceptor(IManagementTokenProvider tokenProvider,
+        ManagementSessionTicketService sessionTickets)
     {
         ArgumentNullException.ThrowIfNull(tokenProvider);
         ArgumentNullException.ThrowIfNull(sessionTickets);
@@ -94,6 +95,7 @@ public sealed class TelemetryAuthInterceptor : Interceptor
         if (_tokenProvider.Verify(presented)) return;
 
         if (_sessionTickets.IsValid(TryReadSessionCookie(context))) return;
+
 
         throw new RpcException(new Status(statusCode: StatusCode.Unauthenticated,
             detail: "Missing or invalid management token or session."));

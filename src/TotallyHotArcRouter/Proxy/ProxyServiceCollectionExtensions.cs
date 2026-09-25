@@ -43,9 +43,10 @@ internal static class ProxyServiceCollectionExtensions
         services.AddOptions<ModelRoutingOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(ModelRoutingOptions.SectionName).Bind(options));
-        // Writable, live-reloadable provider/model configuration (see ProviderConfigStore). Seeded
-        // from the appsettings-bound ModelRoutingOptions above on first run; becomes the source of
-        // truth once edited via the management API. ModelRouteResolver reads its snapshots.
+        // Writable, live-reloadable provider/model configuration (see ProviderConfigStore). Starts
+        // empty on first run; ModelRouting:Providers above is the add-provider template catalog, not
+        // a seed of this list. Becomes the source of truth once edited via the management API.
+        // ModelRouteResolver reads its snapshots.
         services.AddOptions<ProviderConfigStoreOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(ProviderConfigStoreOptions.SectionName).Bind(options));
@@ -341,6 +342,7 @@ internal static class ProxyServiceCollectionExtensions
                     SerilogLogger = Log.Logger,
                     // Backs the Governance > Routing Mode panel's gRPC API (docs/router/orchestrator-live-path-plan.md §M3.2).
                     RoutingOptions = sp.GetRequiredService<IOptions<RoutingOptions>>(),
+                    ModelRoutingTemplates = sp.GetRequiredService<IOptions<ModelRoutingOptions>>(),
 
                     // The gRPC-Web admin services. The writable config store makes edits reload the
                     // router live; the rest is what ManagementFacade needs, passed across for the same

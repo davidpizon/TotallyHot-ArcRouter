@@ -38,7 +38,6 @@ public sealed class ProviderOptionsPreservationTests
             Name = "Example Provider",
             ProviderType = "Anthropic",
             BaseUrl = "https://example.invalid",
-            AuthHeaderName = "x-api-key",
             Headers = [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }],
             IsFree = true,
             Enabled = false,
@@ -116,8 +115,7 @@ public sealed class ProviderOptionsPreservationTests
 
         // A minimal edit: change only the base URL. Everything else must survive untouched.
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid",
-                null),
+                BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
@@ -192,7 +190,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null),
+                BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(expected: "Anthropic", actual: store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -205,7 +203,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null, ProviderType: "OpenAI"),
+                BaseUrl: "https://changed.invalid", ProviderType: "OpenAI"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(expected: "OpenAI", actual: store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -223,7 +221,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null, ProviderType: blank),
+                BaseUrl: "https://changed.invalid", ProviderType: blank),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Null(store.Snapshot.Options.Providers["bedrock"].ProviderType);
@@ -236,7 +234,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null, ProviderType: "  OpenAI  "),
+                BaseUrl: "https://changed.invalid", ProviderType: "  OpenAI  "),
             cancellationToken: TestContext.Current.CancellationToken);
 
         // Stored untrimmed, this would fail Enum.TryParse in the editor and silently show "Other".
@@ -252,7 +250,7 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
-                BaseUrl: "https://changed.invalid", null),
+                BaseUrl: "https://changed.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
@@ -274,13 +272,11 @@ public sealed class ProviderOptionsPreservationTests
         var facade = CreateFacade(store);
 
         await facade.UpsertProviderAsync(key: "fresh", request: new ProviderWriteRequest(
-                BaseUrl: "https://fresh.invalid",
-                null),
+                BaseUrl: "https://fresh.invalid"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var created = store.Snapshot.Options.Providers["fresh"];
         Assert.Equal(expected: "https://fresh.invalid", actual: created.BaseUrl);
-        Assert.Equal(expected: "Authorization", actual: created.AuthHeaderName);
         Assert.True(created.Enabled);
         Assert.False(created.IsFree);
         Assert.Empty(created.Headers);
@@ -296,7 +292,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: null),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -312,7 +307,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: ""),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -328,7 +322,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: "  \t\n  "),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -344,7 +337,6 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: "New Provider Name"),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -360,11 +352,114 @@ public sealed class ProviderOptionsPreservationTests
 
         await facade.UpsertProviderAsync(key: "bedrock", request: new ProviderWriteRequest(
                 BaseUrl: "https://changed.invalid",
-                null,
                 ProviderName: "  New Provider Name  "),
             cancellationToken: TestContext.Current.CancellationToken);
 
         var updated = store.Snapshot.Options.Providers["bedrock"];
         Assert.Equal(expected: "New Provider Name", actual: updated.Name);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_CopiesAwsFieldsFromTheMatchingTemplate()
+    {
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions());
+        var templates = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["bedrock-anthropic"] = new()
+                {
+                    BaseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
+                    AwsRegion = "us-east-1",
+                    AwsAccessKeyIdEnvVar = "AWS_ACCESS_KEY_ID",
+                    AwsSecretAccessKeyEnvVar = "AWS_SECRET_ACCESS_KEY",
+                    AwsSessionTokenEnvVar = "AWS_SESSION_TOKEN"
+                }
+            }
+        };
+        var facade = new ManagementFacade(
+            store: store,
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies { ModelRoutingTemplates = templates });
+
+        await facade.UpsertProviderAsync(
+            key: "new-bedrock",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+                ProviderType: "bedrock-anthropic"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var saved = store.Snapshot.Options.Providers["new-bedrock"];
+        Assert.Equal(expected: "us-east-1", actual: saved.AwsRegion);
+        Assert.Equal(expected: "AWS_ACCESS_KEY_ID", actual: saved.AwsAccessKeyIdEnvVar);
+        Assert.Equal(expected: "AWS_SECRET_ACCESS_KEY", actual: saved.AwsSecretAccessKeyEnvVar);
+        Assert.Equal(expected: "AWS_SESSION_TOKEN", actual: saved.AwsSessionTokenEnvVar);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_ClearsAwsFieldsWhenSwitchingAwayFromATemplate()
+    {
+        var store = StoreWith(FullyPopulated() with { ProviderType = "openai" });
+        var facade = new ManagementFacade(
+            store: store,
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies
+            {
+                ModelRoutingTemplates = new ModelRoutingOptions
+                {
+                    Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["openai"] = new() { BaseUrl = "https://api.openai.com" }
+                    }
+                }
+            });
+
+        await facade.UpsertProviderAsync(
+            key: "bedrock",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://api.openai.com",
+                ProviderType: "Other"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var saved = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Null(saved.AwsRegion);
+        Assert.Null(saved.AwsAccessKeyIdEnvVar);
+        Assert.Null(saved.AwsSecretAccessKeyEnvVar);
+        Assert.Null(saved.AwsSessionTokenEnvVar);
+    }
+
+    [Fact]
+    public async Task UpsertProvider_KeepsAwsFieldsWhenALegacyTypeSavesAsOther()
+    {
+        var store = StoreWith(FullyPopulated() with { ProviderType = "Bedrock" });
+        var facade = new ManagementFacade(
+            store: store,
+            environment: Mock.Of<IEnvironmentVariableProvider>(),
+            httpClient: new HttpClient(),
+            dependencies: new ManagementFacadeDependencies
+            {
+                ModelRoutingTemplates = new ModelRoutingOptions
+                {
+                    Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["openai"] = new() { BaseUrl = "https://api.openai.com" }
+                    }
+                }
+            });
+
+        await facade.UpsertProviderAsync(
+            key: "bedrock",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+                ProviderType: "Other"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var saved = store.Snapshot.Options.Providers["bedrock"];
+        Assert.Equal(expected: "us-east-1", actual: saved.AwsRegion);
+        Assert.Equal(expected: "AWS_ID", actual: saved.AwsAccessKeyIdEnvVar);
+        Assert.Equal(expected: "AWS_SECRET", actual: saved.AwsSecretAccessKeyEnvVar);
+        Assert.Equal(expected: "AWS_TOKEN", actual: saved.AwsSessionTokenEnvVar);
     }
 }

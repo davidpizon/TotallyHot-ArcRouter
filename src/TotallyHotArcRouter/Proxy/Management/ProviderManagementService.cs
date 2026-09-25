@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
@@ -44,9 +45,11 @@ internal sealed class ProviderManagementService
     private readonly HttpClient? _httpClient;
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IProviderInteractionStatusStore? _interactionStatus;
+    private readonly ILogger? _logger;
     private readonly ISecretReader? _secretReader;
     private readonly ISecretWriter? _secretWriter;
 
+    private readonly ModelRoutingOptions? _routingTemplates;
     private readonly IProviderConfigStore _store;
 
     /// <summary>
@@ -83,6 +86,8 @@ internal sealed class ProviderManagementService
         _secretWriter = dependencies?.SecretWriter;
         _secretReader = dependencies?.SecretReader;
         _interactionStatus = dependencies?.InteractionStatusStore;
+        _logger = dependencies?.Logger;
+        _routingTemplates = dependencies?.ModelRoutingTemplates;
         _dialectResolver = new ModelDialectResolver(httpClient: httpClient, environment: environment,
             httpClientFactory: httpClientFactory);
         _buildProvidersResponse = buildProvidersResponse;
@@ -721,16 +726,17 @@ internal sealed class ProviderManagementService
     private ProviderOptions MergeProvider(string providerKey, ProviderWriteRequest request, ProviderOptions? existing)
     {
         // A `with` over the existing provider (or a default one when adding), rather than a hand-listed
-        // rebuild. Only the fields this request can actually change are named below; everything else -
-        // the four Aws* fields, and anything added to ProviderOptions later - carries across by
-        // construction. The previous hand-written list had silently fallen behind the type and was
-        // resetting exactly those fields on every edit (docs/router/backlog.md item 1).
+        // rebuild. Only the fields this request can actually change are named below; everything else
+        // carries across by construction. Aws* fields are then replaced by ApplyTemplateAwsFields when
+        // this write names a provider type and a template catalog is configured. The previous hand-written
+        // list had silently fallen behind the type and was resetting fields on every edit
+        // (docs/router/backlog.md item 1).
         //
         // `new ProviderOptions()`'s own defaults reproduce the old terminal fallbacks exactly: BaseUrl "",
-        // AuthHeaderName "Authorization", IsFree false, Enabled true, Headers [].
+        // IsFree false, Enabled true, Headers [].
         var baseline = existing ?? new ProviderOptions();
 
-        return baseline with
+        var merged = baseline with
         {
             // Name: null from the request preserves the existing value; any other value (including empty/whitespace)
             // is normalized - empty/whitespace becomes null (explicitly cleared).
@@ -743,7 +749,6 @@ internal sealed class ProviderManagementService
             ProviderType = request.ProviderType is null
                 ? baseline.ProviderType
                 : NormalizeNameField(request.ProviderType),
-            AuthHeaderName = request.AuthHeaderName ?? baseline.AuthHeaderName,
             // The caller always sends the full header set (a null list means "keep existing", e.g. a
             // legacy/partial caller); a provided list replaces it wholesale, one header at a time through
             // ResolveHeader so a blank value preserves what's already stored under that name.
@@ -754,6 +759,63 @@ internal sealed class ProviderManagementService
             IsFree = request.IsFree ?? baseline.IsFree,
             Enabled = request.Enabled ?? baseline.Enabled
         };
+
+        return ApplyTemplateAwsFields(merged: merged, request: request, baseline: baseline);
+    }
+
+    /// <summary>
+    /// Copies Bedrock credential fields from the selected add-provider template. The editor does not
+    /// show those fields, so a save whose <see cref="ProviderWriteRequest.ProviderType"/> names a
+    /// <c>ModelRouting:Providers</c> key takes that entry's <c>Aws*</c> values. A type that is not a
+    /// template key clears them only when the stored type was itself a template key — that is the
+    /// operator switching away. A legacy value such as <c>Bedrock</c> reopens as <c>Other</c> and must
+    /// keep the credentials already stored. A null type is a partial write and leaves the stored values
+    /// alone. When no template catalog was supplied, this is a no-op so existing callers keep the
+    /// previous preserve-on-edit behavior.
+    /// </summary>
+    private ProviderOptions ApplyTemplateAwsFields(
+        ProviderOptions merged, ProviderWriteRequest request, ProviderOptions baseline)
+    {
+        if (_routingTemplates is null || request.ProviderType is null) return merged;
+
+        if (TryGetRoutingTemplate(merged.ProviderType, out var template))
+        {
+            return merged with
+            {
+                AwsRegion = template.AwsRegion,
+                AwsAccessKeyIdEnvVar = template.AwsAccessKeyIdEnvVar,
+                AwsSecretAccessKeyEnvVar = template.AwsSecretAccessKeyEnvVar,
+                AwsSessionTokenEnvVar = template.AwsSessionTokenEnvVar
+            };
+        }
+
+        if (!TryGetRoutingTemplate(baseline.ProviderType, out _))
+            return merged;
+
+        return merged with
+        {
+            AwsRegion = null,
+            AwsAccessKeyIdEnvVar = null,
+            AwsSecretAccessKeyEnvVar = null,
+            AwsSessionTokenEnvVar = null
+        };
+    }
+
+    /// <summary>
+    /// Looks up <paramref name="providerType"/> in the add-provider template catalog.
+    /// </summary>
+    /// <param name="providerType">The type on the write or on the stored provider.</param>
+    /// <param name="template">The matching template, when one exists.</param>
+    /// <returns>Whether <paramref name="providerType"/> names a catalog entry.</returns>
+    private bool TryGetRoutingTemplate(string? providerType, [NotNullWhen(true)] out ProviderOptions? template)
+    {
+        if (providerType is null || _routingTemplates is null)
+        {
+            template = null;
+            return false;
+        }
+
+        return _routingTemplates.Providers.TryGetValue(key: providerType, value: out template);
     }
 
     /// <summary>
@@ -817,8 +879,9 @@ internal sealed class ProviderManagementService
     /// operator can lock an already-stored secret without retyping it - and it is also what makes the
     /// blank rule safe to relax: an <em>explicitly unlocked</em> blank write clears the stored value
     /// (including deleting any protected-store entry), because the caller was shown that value in full and
-    /// chose to empty the field. That is how the editor's unlock destroys a secret. Null (the legacy shape)
-    /// keeps the old preserve-on-blank behavior in every case.
+    /// chose to empty the field. That is how the editor's unlock destroys a secret. Null means "leave the
+    /// lock as it is": a header that is already locked stays locked, a new one starts unlocked, and a blank
+    /// write preserves what is stored.
     /// </para>
     /// </summary>
     /// <param name="providerKey">The provider key being upserted, used to name this header's protected-store entry.</param>
@@ -832,16 +895,18 @@ internal sealed class ProviderManagementService
     {
         var name = request.Name!.Trim();
 
-        // A caller that predates the flag stored every literal write-only, so its headers keep meaning
-        // "locked" rather than silently becoming readable.
-        var locked = request.Locked ?? true;
-
         // HTTP header names are case-insensitive, so "X-Foo" and "x-foo" must be treated as the same
         // header when looking up the value to preserve or clean up - otherwise a casing mismatch between
         // what was stored and what the caller resends silently drops the stored secret instead of keeping
         // it, or leaves its protected-store entry orphaned.
         var existing = existingHeaders.FirstOrDefault(h =>
             string.Equals(a: h.Name, b: name, comparisonType: StringComparison.OrdinalIgnoreCase));
+
+        // Nothing is locked by default (ADR-0016), but a caller that omits the flag must not silently
+        // unlock a secret that is already stored either - that would hand its value back on the next
+        // read. So an omitted flag keeps the header's current lock, and a header that does not exist yet
+        // starts unlocked.
+        var locked = request.Locked ?? existing?.Locked ?? false;
 
         if (!string.IsNullOrWhiteSpace(request.Value))
         {
@@ -885,10 +950,14 @@ internal sealed class ProviderManagementService
             Value = preservedValue,
             ValueEnvVar = existing?.ValueEnvVar,
             ValueSecretRef = preservedSecretRef,
-            // Only a literal or a protected-store reference can be a secret, so a preserved env-var (or
-            // valueless) header stores unlocked no matter what the caller asked for.
-            Locked = (!string.IsNullOrWhiteSpace(preservedValue) || !string.IsNullOrWhiteSpace(preservedSecretRef)) &&
-                     locked
+            // A purely env-var-backed row (no literal, no protected-store reference) holds only a variable
+            // name, so it stores unlocked no matter what the caller asked for. Any other row keeps its lock,
+            // including a legacy row carrying both a literal and an env var (the literal is the source) and a
+            // valueless one: a template's locked credential row is saved empty and must still lock the first
+            // key typed into it later.
+            Locked = locked && !(!string.IsNullOrWhiteSpace(existing?.ValueEnvVar)
+                && string.IsNullOrWhiteSpace(preservedValue)
+                && string.IsNullOrWhiteSpace(preservedSecretRef))
         };
     }
 
@@ -939,6 +1008,31 @@ internal sealed class ProviderManagementService
     }
 
     /// <summary>
+    /// Scheme, host, and port of <paramref name="uri"/> for a log line or admin-facing error. Userinfo, path,
+    /// query, and fragment are omitted: <c>BaseUrl</c> validation only requires an absolute URI, so any of
+    /// those components can carry credentials (e.g. <c>https://user:pass@host</c>, an API-key query string, or
+    /// a token in a path segment such as <c>/v1/&lt;token&gt;</c>).
+    /// </summary>
+    /// <param name="uri">A URI built from a provider's configured <c>BaseUrl</c>.</param>
+    /// <returns>The URI with credential-bearing components removed.</returns>
+    private static string RedactUriForLog(Uri uri)
+    {
+        return uri.GetComponents(
+            components: UriComponents.SchemeAndServer,
+            format: UriFormat.Unescaped);
+    }
+
+    /// <summary>
+    /// Strips CR/LF (and other control characters) from a configuration-controlled value before it is
+    /// interpolated into a log line, so an invalid header name cannot forge additional log entries.
+    /// </summary>
+    /// <param name="value">A value that reached validation but was rejected (e.g. a malformed header name).</param>
+    private static string SanitizeForLog(string value)
+    {
+        return string.Concat(value.Where(c => !char.IsControl(c)));
+    }
+
+    /// <summary>
     /// Runs a store mutation and maps it to a <see cref="ManagementResult{T}"/>, translating validation/argument
     /// failures into <see cref="ManagementErrorType.InvalidRequest"/>.
     /// </summary>
@@ -983,9 +1077,15 @@ internal sealed class ProviderManagementService
 
         // The provider's credentials and configured custom headers, sent identically to the forwarding path.
         // This is how a provider that requires an extra header for discovery gets it (e.g. Anthropic's
-        // anthropic-version) without any provider-specific code here.
-        ProviderCredentialResolver.ApplyToRequest(request: requestMessage, provider: provider,
+        // anthropic-version) without any provider-specific code here. Rejected names are logged and named
+        // in the error: TryAddWithoutValidation drops an invalid name instead of throwing, and a dropped
+        // Authorization header is exactly a 401 that looks like a bad key.
+        var rejectedHeaders = ProviderCredentialResolver.ApplyToRequest(request: requestMessage, provider: provider,
             environment: _environment, secretReader: _secretReader);
+        var authorizationConfigured = provider.Headers.Any(header =>
+            !string.IsNullOrWhiteSpace(header.Name)
+            && header.Name.Trim().Equals(value: "Authorization", comparisonType: StringComparison.OrdinalIgnoreCase));
+        var authorizationSent = requestMessage.Headers.Contains("Authorization");
 
         try
         {
@@ -994,10 +1094,27 @@ internal sealed class ProviderManagementService
             using var response = await client
                 .SendAsync(request: requestMessage, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return new DiscoverModelsResponse(
-                    false,
-                    Models: [],
-                    Error: $"Provider returned {(int)response.StatusCode} for {target}.");
+            {
+                var statusCode = (int)response.StatusCode;
+                // Logged only on failure. A local runtime that configures no credential must not warn on
+                // every successful refresh.
+                var rejected = rejectedHeaders.Count == 0
+                    ? "none"
+                    : string.Join(separator: ", ", values: rejectedHeaders.Select(SanitizeForLog));
+                _logger?.LogWarning(
+                    "Model discovery failed for {Url}: provider returned {StatusCode}. Authorization header sent: {AuthorizationSent}. Rejected header names: {RejectedHeaders}.",
+                    RedactUriForLog(target), statusCode, authorizationSent, rejected);
+                // This string reaches the admin client and the interaction status, so it gets the same
+                // redacted target as the log line: BaseUrl may carry userinfo or an API key in its query.
+                // The upstream error body is deliberately in neither: a provider or reverse proxy can echo the
+                // Authorization value back in it, and it is not redacted against the resolved secrets.
+                var error = $"Provider returned {statusCode} for {RedactUriForLog(target)}.";
+                if (authorizationConfigured && !authorizationSent)
+                    error += " No Authorization header was sent; the configured credential did not resolve.";
+                if (rejectedHeaders.Count > 0)
+                    error += " Header names not sent: " + rejected + ".";
+                return new DiscoverModelsResponse(false, Models: [], Error: error);
+            }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var models = ParseModelIds(body);
@@ -1005,7 +1122,12 @@ internal sealed class ProviderManagementService
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            return new DiscoverModelsResponse(false, Models: [], Error: ex.Message);
+            // ex.Message and its stack can embed the requested URI (userinfo, query key, path token), so
+            // neither the log nor the admin client gets the raw exception: only its type and the redacted target.
+            _logger?.LogWarning("Model discovery failed for {Url}: {ExceptionType}.",
+                RedactUriForLog(target), ex.GetType().Name);
+            return new DiscoverModelsResponse(false, Models: [],
+                Error: $"Model discovery request to {RedactUriForLog(target)} failed ({ex.GetType().Name}); see the router log for details.");
         }
     }
 

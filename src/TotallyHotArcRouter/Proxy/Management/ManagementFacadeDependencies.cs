@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
@@ -76,4 +77,21 @@ public sealed record ManagementFacadeDependencies
     /// every provider simply reports no interaction history on either track.
     /// </summary>
     public IProviderInteractionStatusStore? InteractionStatusStore { get; init; }
+
+    /// <summary>
+    /// Writes model-discovery failures (a non-success status from <c>GET /v1/models</c>, a missing
+    /// credential, a header name HTTP refused). The provider card already shows that failure; this is what
+    /// puts the same fact in the log file. Optional because tests construct the facade without a logger,
+    /// and because the facade is built inside the inner host — pass the outer host's logger so the line
+    /// reaches the operator-facing file sink rather than an unconfigured inner logger.
+    /// </summary>
+    public ILogger? Logger { get; init; }
+
+    /// <summary>
+    /// The appsettings <c>ModelRouting</c> section, used as the add-provider template catalog. When a
+    /// provider write names a <see cref="ProviderOptions.ProviderType"/> that matches a key here, that
+    /// entry's <c>Aws*</c> fields are copied onto the saved provider. When absent, those fields are left
+    /// untouched (the previous preserve-on-edit behavior).
+    /// </summary>
+    public ModelRoutingOptions? ModelRoutingTemplates { get; init; }
 }

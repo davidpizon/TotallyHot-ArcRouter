@@ -300,7 +300,8 @@ ran at the time), scoped to the surface this pillar needs.
 
 **What PR 3 did:**
 1. Added the `gemini` provider to `appsettings.json` (`https://generativelanguage.googleapis.com`,
-   `AuthHeaderName: x-goog-api-key` with a `Headers` entry sourcing it from `GEMINI_API_KEY` — the raw
+   a `Headers` entry `x-goog-api-key` sourcing it from `GEMINI_API_KEY` (originally also recorded as
+   `AuthHeaderName`, since removed by ADR-0016) — the raw
    key in the header, **not** the `?key=` query form, so the secret never lands in a URL), two
    `ModelList` entries (`gemini-2.5-pro`, `gemini-2.5-flash`), and both to
    `RouterConstants.SupportedModels`.

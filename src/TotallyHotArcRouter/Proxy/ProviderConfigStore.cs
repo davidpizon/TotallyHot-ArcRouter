@@ -24,16 +24,11 @@ public sealed record ProviderConfigSnapshot(ModelRoutingOptions Options, int Ver
 /// <remarks>
 /// Config layering (an <c>appsettings.json</c> overlay) can override a key but cannot <em>delete</em>
 /// one, so removal of a provider/model requires a single document that owns the whole configuration -
-/// which is this store. On first run, when no persisted file exists yet, the store seeds itself from
-/// the <c>appsettings.json</c>-bound <see cref="ModelRoutingOptions"/> and holds it
-/// <em>
-/// in memory
-/// only
-/// </em>
-/// ; nothing is written to disk until the first edit, so a proxy that is never reconfigured
-/// behaves exactly as it did before this store existed (and leaves no file behind). Once an edit is
-/// made, the full configuration is persisted and that file becomes the source of truth on subsequent
-/// startups.
+/// which is this store. On first run, when no persisted file exists yet, the store starts empty and
+/// holds that empty configuration <em>in memory only</em>; nothing is written to disk until the first
+/// edit. <c>ModelRouting:Providers</c> in <c>appsettings.json</c> is the add-provider template catalog,
+/// not a seed of this list. Once an edit is made, the full configuration is persisted and that file
+/// becomes the source of truth on subsequent startups.
 /// </remarks>
 public interface IProviderConfigStore
 {
@@ -116,11 +111,10 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProviderConfigStore"/> class, loading the persisted
-    /// configuration when a file exists, or otherwise seeding from <paramref name="seed"/> in memory
-    /// (without writing anything to disk).
+    /// configuration when a file exists, or otherwise starting from an empty provider list and model list
+    /// in memory (without writing anything to disk).
     /// </summary>
     /// <param name="logger">The logger.</param>
-    /// <param name="seed">The <c>appsettings.json</c>-bound configuration to seed from on first run.</param>
     /// <param name="options">Store settings (persistence path).</param>
     /// <param name="secretWriter">
     /// Optional writer for the protected secret store, used for the one-time migration of an
@@ -128,15 +122,13 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
     /// (<c>docs/router/secrets-at-rest-plan.md</c> §5). Defaults to <see langword="null"/>, in which case no
     /// migration runs and locked literals already on disk are left exactly where they are.
     /// </param>
-    /// <exception cref="OptionsValidationException">The effective configuration (loaded or seeded) is invalid.</exception>
+    /// <exception cref="OptionsValidationException">The effective configuration (loaded or initial) is invalid.</exception>
     public ProviderConfigStore(
         ILogger<ProviderConfigStore> logger,
-        IOptions<ModelRoutingOptions> seed,
         IOptions<ProviderConfigStoreOptions> options,
         ISecretWriter? secretWriter = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(seed);
         ArgumentNullException.ThrowIfNull(options);
 
         _logger = logger;
@@ -156,11 +148,11 @@ public sealed class ProviderConfigStore : IProviderConfigStore, IDisposable
         }
         else
         {
-            initial = Normalize(seed.Value);
+            initial = new ModelRoutingOptions();
             initial.EnsureValid();
             _logger.LogInformation(
                 message:
-                "No provider configuration file at {FilePath}; seeded from appsettings (held in memory, not yet persisted).",
+                "No provider configuration file at {FilePath}; starting with no providers (held in memory, not yet persisted).",
                 _filePath);
         }
 

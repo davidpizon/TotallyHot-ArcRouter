@@ -98,16 +98,51 @@ public class ModelRoutingOptionsTests
     }
 
     [Fact]
-    public void EnsureValid_Throws_WhenProviderAuthHeaderNameIsMissing()
+    public void EnsureValid_DoesNotThrow_WhenProviderKeyIsTheReservedBlankTemplateSpelling()
+    {
+        // "Other" is a valid live provider key: it is only reserved for the appsettings template
+        // catalog (ProviderTemplateCatalog), not for the live store, since a pre-existing configuration
+        // may legitimately use it as a dictionary key.
+        var options = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>
+            {
+                ["Other"] = new() { BaseUrl = "https://example.invalid" }
+            }
+        };
+
+        options.EnsureValid();
+    }
+
+    [Fact]
+    public void EnsureValid_Throws_WhenTwoProvidersShareTheSameDisplayName()
     {
         var options = new ModelRoutingOptions
         {
             Providers = new Dictionary<string, ProviderOptions>
             {
-                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "" }
+                ["openai-1"] = new() { Name = "My Provider", BaseUrl = "https://api.openai.com" },
+                ["openai-2"] = new() { Name = "my provider", BaseUrl = "https://api.openai.com" }
             }
         };
 
-        Assert.Throws<OptionsValidationException>(options.EnsureValid);
+        var ex = Assert.Throws<OptionsValidationException>(options.EnsureValid);
+        Assert.Contains(expectedSubstring: "used by more than one provider", actualString: ex.Message,
+            comparisonType: StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnsureValid_DoesNotThrow_WhenMultipleProvidersHaveNoDisplayName()
+    {
+        var options = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>
+            {
+                ["openai-1"] = new() { BaseUrl = "https://api.openai.com" },
+                ["openai-2"] = new() { BaseUrl = "https://api.openai.com" }
+            }
+        };
+
+        options.EnsureValid();
     }
 }

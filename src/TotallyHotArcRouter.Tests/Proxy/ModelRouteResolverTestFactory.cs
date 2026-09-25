@@ -44,7 +44,6 @@ internal static class ModelRouteResolverTestFactory
                 [providerName] = new()
                 {
                     BaseUrl = baseUrl,
-                    AuthHeaderName = authHeaderName,
                     Headers = allHeaders,
                     IsFree = isFree,
                     AwsRegion = awsRegion

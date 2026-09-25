@@ -44,7 +44,6 @@ public sealed class SecretHeaderMigrationTests : IDisposable
                 ["anthropic"] = new()
                 {
                     BaseUrl = "https://api.anthropic.com",
-                    AuthHeaderName = "x-api-key",
                     Headers =
                     [
                         new ProviderHeader { Name = "x-api-key", Value = "sk-ant-secret", Locked = true },
@@ -63,7 +62,6 @@ public sealed class SecretHeaderMigrationTests : IDisposable
     {
         return new ProviderConfigStore(
             logger: Mock.Of<ILogger<ProviderConfigStore>>(),
-            seed: Options.Create(new ModelRoutingOptions()),
             options: Options.Create(new ProviderConfigStoreOptions { FilePath = _tempPath }),
             secretWriter: secretWriter);
     }

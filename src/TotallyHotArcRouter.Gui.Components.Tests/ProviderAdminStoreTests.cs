@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
@@ -59,11 +60,34 @@ public sealed class ProviderAdminStoreTests
     {
         var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
         var body = new ProviderWriteRequest(
-            BaseUrl: "https://example.com", AuthHeaderName: "Authorization");
+            BaseUrl: "https://example.com");
 
         var act = () => store.UpsertProviderAsync(key: "test", body: body);
 
         await act.Should().ThrowAsync<GrpcAdminException>();
+    }
+
+    [Fact]
+    public async Task UpsertProviderAsync_logs_the_base_url_without_userinfo_path_or_query()
+    {
+        var logger = new CapturingLogger();
+        var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress),
+            logger: logger);
+        var body = new ProviderWriteRequest(
+            BaseUrl: "https://operator:secret-token@api.example.com:8443/v1/path-token?api_key=secret-token#frag");
+
+        var act = () => store.UpsertProviderAsync(key: "openai", body: body);
+
+        await act.Should().ThrowAsync<GrpcAdminException>();
+        var message = logger.Messages.Should()
+            .ContainSingle(m => m.Contains("Updating provider", StringComparison.Ordinal)).Which;
+        message.Should().Contain("openai");
+        message.Should().Contain("https://api.example.com:8443");
+        message.Should().NotContain("path-token");
+        message.Should().NotContain("secret-token");
+        message.Should().NotContain("operator");
+        message.Should().NotContain("api_key");
+        logger.Messages.Should().NotContain(m => m.Contains("secret-token", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -151,6 +175,22 @@ public sealed class ProviderAdminStoreTests
                 getStatusFunc: () => Status.DefaultSuccess,
                 getTrailersFunc: () => [],
                 disposeAction: () => { });
+        }
+    }
+
+    /// <summary>Records formatted log messages so a test can assert what left the store.</summary>
+    private sealed class CapturingLogger : ILogger<ProviderAdminStore>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
         }
     }
 }

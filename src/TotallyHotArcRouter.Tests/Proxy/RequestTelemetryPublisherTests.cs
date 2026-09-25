@@ -466,8 +466,7 @@ public class RequestTelemetryPublisherTests
             Provider: provider,
             ProviderModelId: "provider-model-id",
             UpstreamBaseUrl: new Uri("https://example.test"),
-            AuthHeaderName: "Authorization",
-            ExtraHeaders: [],
+            ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>(),
             IsFree: isFree);
     }
 

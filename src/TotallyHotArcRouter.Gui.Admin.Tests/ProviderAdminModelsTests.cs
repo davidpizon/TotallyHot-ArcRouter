@@ -18,9 +18,9 @@ public sealed class ProviderAdminModelsTests
             { new(Name: "Authorization", Source: HeaderValueSource.Literal, null) };
 
         var a = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: models, Headers: headers);
+            Models: models, Headers: headers);
         var b = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: models, Headers: headers);
+            Models: models, Headers: headers);
         var differentName = a with { Name = "Something Else" };
 
         Assert.Equal(expected: a, actual: b);
@@ -81,7 +81,7 @@ public sealed class ProviderAdminModelsTests
     public void ProviderAdminView_AdminActionAndLiveTraffic_DefaultToNull()
     {
         var view = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: [], Headers: []);
+            Models: [], Headers: []);
 
         Assert.Null(view.AdminAction);
         Assert.Null(view.LiveTraffic);
@@ -96,7 +96,6 @@ public sealed class ProviderAdminModelsTests
             Key: "openai",
             Name: "OpenAI API",
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization",
             Models: [],
             Headers: [],
             AdminAction: new ProviderInteractionStatusAdminView(false, Operation: "Refresh from endpoint",
@@ -121,7 +120,6 @@ public sealed class ProviderAdminModelsTests
             Key: "openai",
             Name: "OpenAI API",
             BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization",
             Models: [],
             Headers: [],
             LiveTraffic: new ProviderInteractionStatusAdminView(
@@ -196,7 +194,6 @@ public sealed class ProviderAdminModelsTests
             Key: "anthropic",
             Name: "Anthropic Prod",
             BaseUrl: "https://api.anthropic.com",
-            AuthHeaderName: "x-api-key",
             Models: [],
             Headers: [],
             UsageLastRecordedAtUtc: DateTimeOffset.Parse(input: "2026-03-01T08:00:00Z",
@@ -235,7 +232,7 @@ public sealed class ProviderAdminModelsTests
     public void ProviderAdminView_UsageLastRecordedAtUtcAndRateLimit_DefaultToNull()
     {
         var view = new ProviderAdminView(Key: "openai", Name: "OpenAI API", BaseUrl: "https://api.openai.com",
-            AuthHeaderName: "Authorization", Models: [], Headers: []);
+            Models: [], Headers: []);
 
         Assert.Null(view.UsageLastRecordedAtUtc);
         Assert.Null(view.RateLimit);
@@ -245,7 +242,7 @@ public sealed class ProviderAdminModelsTests
     public void ProviderAdminView_HasStoredAdminKey_DefaultsToFalse()
     {
         var view = new ProviderAdminView(Key: "anthropic", Name: "Anthropic", BaseUrl: "https://api.anthropic.com",
-            AuthHeaderName: "x-api-key", Models: [], Headers: []);
+            Models: [], Headers: []);
 
         Assert.False(view.HasStoredAdminKey);
     }
@@ -258,7 +255,6 @@ public sealed class ProviderAdminModelsTests
             Key: "anthropic",
             Name: "Anthropic Prod",
             BaseUrl: "https://api.anthropic.com",
-            AuthHeaderName: "x-api-key",
             Models: [],
             Headers: [],
             HasStoredAdminKey: true,
@@ -285,93 +281,49 @@ public sealed class ProviderAdminModelsTests
     }
 
     [Fact]
-    public void ProviderTemplates_HasATemplateForEveryProviderType()
+    public void ProviderTemplates_Other_IsBlank()
     {
-        foreach (var providerType in Enum.GetValues<ProviderType>())
-            Assert.True(
-                condition: ProviderTemplates.Templates.ContainsKey(providerType),
-                userMessage: $"No template registered for {providerType}.");
-    }
+        var template = ProviderTemplates.Other;
 
-    [Fact]
-    public void ProviderTemplates_Ordered_ListsEveryProviderTypeExactlyOnce()
-    {
-        // The editor renders its dropdown from Ordered, so a type missing here is a type the operator can
-        // never select - and one listed twice is a duplicated option.
-        Assert.Equal(
-            expected: Enum.GetValues<ProviderType>().OrderBy(t => t).ToList(),
-            actual: [.. ProviderTemplates.Ordered.OrderBy(t => t)]);
-        Assert.Equal(expected: ProviderTemplates.Ordered.Count, actual: ProviderTemplates.Ordered.Distinct().Count());
-    }
-
-    [Fact]
-    public void ProviderTemplates_Ordered_PutsOtherLast()
-    {
-        Assert.Equal(expected: ProviderType.Other, actual: ProviderTemplates.Ordered[^1]);
-    }
-
-    [Fact]
-    public void ProviderTemplates_DisplayName_LabelsFamiliesRatherThanEnumNames()
-    {
-        Assert.Equal(expected: "OpenAI / Groq / DeepSeek", actual: ProviderTemplates.DisplayName(ProviderType.OpenAI));
-        Assert.Equal(expected: "Ollama / LM Studio / llama.cpp",
-            actual: ProviderTemplates.DisplayName(ProviderType.LocalRuntime));
-        Assert.Equal(expected: "Anthropic", actual: ProviderTemplates.DisplayName(ProviderType.Anthropic));
-    }
-
-    [Fact]
-    public void ProviderTemplates_Anthropic_UsesTheApiKeyHeaderAndSuppliesTheVersionHeader()
-    {
-        var template = ProviderTemplates.Templates[ProviderType.Anthropic];
-
-        Assert.Equal(expected: "https://api.anthropic.com", actual: template.BaseUrl);
-        Assert.True(template.RequiresAuth);
-        Assert.Equal(expected: "x-api-key", actual: template.AuthHeaderName);
-        // Without anthropic-version every request 400s, which used to be the operator's problem to discover.
-        var header = Assert.Single(template.DefaultHeaders);
-        Assert.Equal(expected: "anthropic-version", actual: header.Name);
-        Assert.Equal(expected: "2023-06-01", actual: header.Value);
-    }
-
-    [Fact]
-    public void ProviderTemplates_OpenAI_UsesAuthorizationHeader()
-    {
-        var template = ProviderTemplates.Templates[ProviderType.OpenAI];
-
-        Assert.Equal(expected: "https://api.openai.com/v1", actual: template.BaseUrl);
-        Assert.True(template.RequiresAuth);
-        Assert.Equal(expected: "Authorization", actual: template.AuthHeaderName);
-        Assert.Empty(template.DefaultHeaders);
-    }
-
-    [Fact]
-    public void ProviderTemplates_Other_RequiresACredential()
-    {
-        var template = ProviderTemplates.Templates[ProviderType.Other];
-
+        Assert.Equal(expected: ProviderTemplates.OtherKey, actual: template.Key);
         Assert.Equal(expected: string.Empty, actual: template.BaseUrl);
-        // "Other" now means an unknown *remote* API: every unauthenticated case has its own type.
-        Assert.True(template.RequiresAuth);
-        Assert.Equal(expected: "Authorization", actual: template.AuthHeaderName);
+        Assert.False(template.IsFree);
+        Assert.Empty(template.Headers);
+    }
+
+    [Fact]
+    public void ResolveStoredType_MapsLegacyFamiliesThatIdentifyOneTemplateKey()
+    {
+        var keys = new[] { "anthropic", "openai", "gemini", "ollama" };
+
+        Assert.Equal(expected: "anthropic",
+            actual: ProviderTemplates.ResolveStoredType(stored: nameof(ProviderType.Anthropic), templateKeys: keys));
+        Assert.Equal(expected: "openai",
+            actual: ProviderTemplates.ResolveStoredType(stored: nameof(ProviderType.OpenAI), templateKeys: keys));
+        Assert.Equal(expected: "gemini",
+            actual: ProviderTemplates.ResolveStoredType(stored: nameof(ProviderType.GoogleGemini), templateKeys: keys));
     }
 
     [Theory]
-    [InlineData(ProviderType.LocalRuntime)]
-    [InlineData(ProviderType.Bedrock)]
-    public void ProviderTemplates_UnauthenticatedTypes_ExplainWhyTheyNeedNoCredential(ProviderType providerType)
+    [InlineData(nameof(ProviderType.LocalRuntime))]
+    [InlineData(nameof(ProviderType.Bedrock))]
+    [InlineData(nameof(ProviderType.AzureOpenAI))]
+    [InlineData(nameof(ProviderType.Cohere))]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ResolveStoredType_AmbiguousOrMissingValuesReopenAsOther(string? stored)
     {
-        var template = ProviderTemplates.Templates[providerType];
+        var keys = new[] { "anthropic", "openai", "ollama", "bedrock-anthropic" };
 
-        Assert.False(template.RequiresAuth);
-        // The absence of a credential is surprising enough to need saying, or an operator assumes it's a bug.
-        Assert.False(string.IsNullOrWhiteSpace(template.AuthHint));
+        Assert.Equal(expected: ProviderTemplates.OtherKey,
+            actual: ProviderTemplates.ResolveStoredType(stored: stored, templateKeys: keys));
     }
 
     [Fact]
-    public void ProviderTemplates_LocalRuntime_DefaultsToFree()
+    public void ResolveStoredType_PrefersAStoredKeyOverTheLegacyMap()
     {
-        Assert.True(ProviderTemplates.Templates[ProviderType.LocalRuntime].DefaultsToFree);
-        Assert.False(ProviderTemplates.Templates[ProviderType.OpenAI].DefaultsToFree);
+        Assert.Equal(expected: "anthropic",
+            actual: ProviderTemplates.ResolveStoredType(stored: "ANTHROPIC", templateKeys: ["anthropic"]));
     }
 
     [Fact]

@@ -24,20 +24,21 @@ dotnet build
 
 ## 2. Set provider API keys
 
-Providers are configured in `appsettings.json` under `ModelRouting:Providers`.
-Authentication is an ordinary entry in each provider's `Headers` list — a
-header whose value is read from an environment variable at request time. Set
-only the variables for the providers you plan to use:
+`ModelRouting:Providers` in `appsettings.json` is the add-provider template
+catalog. The live provider list is `model-routing.json`; a first run with no
+such file starts empty and does not copy those templates in. Authentication
+is an ordinary entry in each provider's `Headers` list — a header whose
+value is read from an environment variable at request time. Set only the
+variables for the providers you plan to use:
 
 ```bash
-# OpenAI, Qwen, GLM, Kimi, and MiniMax send auth as "Authorization: Bearer <key>" - since
-# there is no separate scheme field (see below), the "Bearer " prefix must be part of the
-# variable's value itself.
-export OPENAI_API_KEY="Bearer <your-openai-key>"
-export QWEN_API_KEY="Bearer <your-alibaba-key>"
-export GLM_API_KEY="Bearer <your-zhipu-key>"
-export KIMI_API_KEY="Bearer <your-moonshot-key>"
-export MINIMAX_API_KEY="Bearer <your-minimax-key>"
+# OpenAI, Qwen, GLM, Kimi, and MiniMax authenticate with Authorization. A raw key is
+# sent as "Bearer <key>". A value that already starts with a scheme is forwarded unchanged.
+export OPENAI_API_KEY="<your-openai-key>"
+export QWEN_API_KEY="<your-alibaba-key>"
+export GLM_API_KEY="<your-zhipu-key>"
+export KIMI_API_KEY="<your-moonshot-key>"
+export MINIMAX_API_KEY="<your-minimax-key>"
 
 # Anthropic sends its raw key with no scheme prefix.
 export ANTHROPIC_API_KEY="<your-anthropic-key>"
@@ -78,18 +79,20 @@ To add a new provider, add an entry under `ModelRouting:Providers`:
 ```json
 "my-provider": {
   "BaseUrl": "https://api.my-provider.com",
-  "AuthHeaderName": "Authorization",
   "Headers": [
-    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY" }
+    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY", "Locked": true }
   ]
 }
 ```
 
-`AuthHeaderName` itself carries no credential — it only records which header
-is "the" auth header, so the proxy can strip a client-sent header of the
-same name before forwarding (see [Provider API keys](#provider-api-keys)
-below for how the header's actual value is composed, including a scheme
-prefix like `Bearer`).
+A provider has no dedicated credential field: authentication is an ordinary entry in `Headers`. In the
+add-provider template catalog, `"Locked": true` marks a header as a secret — the editor shows an empty
+locked row for it and stores the value write-only once one is typed. A provider that authenticates by
+other means (a local runtime such as Ollama, or Bedrock signed by the AWS SDK) simply declares no
+credential header. Every header name a provider configures is stripped from the client's request before
+forwarding, and from the upstream response before it reaches the client, so the configured value is the
+only one of that name in play (see [Provider API keys](#provider-api-keys) below for how the header's
+actual value is composed, including a scheme prefix like `Bearer`).
 
 ### Provider base URLs
 
@@ -153,19 +156,17 @@ value in this order:
 ```json
 "my-provider": {
   "BaseUrl": "https://api.my-provider.com",
-  "AuthHeaderName": "Authorization",
   "Headers": [
-    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY" }
+    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY", "Locked": true }
   ]
 }
 ```
 
-A scheme prefix (e.g. `Bearer`) is not composed for you — there is no
-separate scheme field, so `MY_PROVIDER_API_KEY` must hold the full header
-value (`Bearer sk-my-literal-key`) when the provider expects one. A provider
-whose key has no scheme (Anthropic's `x-api-key`, Gemini's
-`x-goog-api-key`) needs no such prefix; see the `anthropic` and `gemini`
-entries in `appsettings.json`.
+An `Authorization` value that is only a raw credential is sent as
+`Bearer` plus that value. A value that already starts with a scheme
+(`Bearer sk-my-literal-key`) is forwarded unchanged. Other header names are
+not rewritten: Anthropic's `x-api-key` and Gemini's `x-goog-api-key` stay
+the raw key. See the matching entries in `appsettings.json`.
 
 Prefer `ValueEnvVar` for anything checked into source control —
 `appsettings.json` is typically committed to git, so a literal `Value`

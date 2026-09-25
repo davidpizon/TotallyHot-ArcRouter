@@ -126,7 +126,7 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void Save_falls_back_to_the_auth_header_name_parameter_when_the_provider_type_has_no_template()
+    public void Save_adds_no_implicit_headers_when_the_provider_type_has_no_template()
     {
         using var ctx = new BunitContext();
 
@@ -140,36 +140,176 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
-        // No ProviderType parameter is seeded, so the dialog falls back to Other - which every provider
-        // configured before the ProviderType field existed also falls back to. Other's own template says
-        // "Authorization", but that must not override an already-configured non-default header (the
-        // "x-api-key" the AuthHeaderName parameter was seeded with here): Other isn't an authoritative
-        // choice the operator actually made. See Save_derives_auth_header_name_from_the_selected_provider_type
-        // for the case where they do pick a templated type.
-        saved!.AuthHeaderName.Should().Be("x-api-key");
+        // With no template to declare one, no header (and so no lock) appears on its own: only a template's
+        // declaration or the operator's own padlock ever locks a row.
+        saved!.Headers.Should().BeEmpty();
     }
 
     [Fact]
-    public void Save_derives_auth_header_name_from_the_selected_provider_type()
+    public void A_template_credential_row_starts_on_its_env_var_and_saves_unlocked()
     {
         using var ctx = new BunitContext();
 
-        // AuthHeaderName must track the header the operator actually authenticates with, not a value left
-        // over from before this dialog stopped letting them edit it directly - so switching provider type to
-        // one with a documented auth header (Anthropic's x-api-key) must override whatever the AuthHeaderName
-        // parameter (or, absent a selected type, its template) would otherwise have produced.
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
-            SeedEditParameters(parameters);
+            SeedEditParameters(parameters: parameters, isNew: true, providerName: "OpenAI");
             parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").Change("openai");
+
+        cut.Find("[data-testid='header-name-0']").GetAttribute("value").Should().Be("Authorization");
+        cut.Find("[data-testid='header-source-0']").GetAttribute("value").Should().Be("env");
+        cut.Find("[data-testid='header-value-0']").GetAttribute("value").Should().Be("OPENAI_API_KEY");
+
         FindSaveButton(cut).Click();
 
-        saved.Should().NotBeNull();
-        saved!.AuthHeaderName.Should().Be("x-api-key");
+        // An env-var row holds only a variable name, so it is never stored locked.
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.ValueEnvVar.Should().Be("OPENAI_API_KEY");
+        header.Locked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Switching_a_template_credential_row_to_a_literal_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, providerName: "OpenAI");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='provider-type']").Change("openai");
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed-by-the-operator");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("sk-typed-by-the-operator");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void With_the_catalog_unavailable_switching_an_env_var_credential_to_a_literal_still_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        // No template can be looked up, so the dialog cannot know the credential is a declared secret;
+        // it must lock rather than save the typed key readable.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "OPENAI_API_KEY")
+                ],
+                providerType: "openai");
+            parameters.Add(parameterSelector: p => p.TemplatesUnavailable, value: true);
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed-without-catalog");
+        FindSaveButton(cut).Click();
+
+        saved!.Headers.Should().ContainSingle().Subject.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Reopening_a_provider_and_switching_its_env_var_credential_to_a_literal_still_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        // The rows of a stored provider come from stored state, not from the template, so nothing was
+        // copied onto them when the dialog opened - the template's declaration has to be looked up.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "OPENAI_API_KEY")
+                ],
+                providerType: "openai");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed-after-reopening");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("sk-typed-after-reopening");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Reopening_a_provider_with_an_unresolved_type_and_switching_its_env_var_credential_to_a_literal_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        // The stored type names no current template, so nothing can say whether the row is a secret: lock it.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "LEGACY_API_KEY")
+                ],
+                providerType: "retired-template");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed");
+        FindSaveButton(cut).Click();
+
+        saved!.Headers.Should().ContainSingle().Subject.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Switching_a_row_from_an_env_var_to_a_literal_starts_with_an_empty_value()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "X-Custom", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "MY_ENV_VAR")
+                ]);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").GetAttribute("value").Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public void A_template_that_declares_no_credential_adds_no_header_rows()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+            SeedEditParameters(parameters: parameters, isNew: true));
+
+        cut.Find("[data-testid='provider-type']").Change("ollama");
+
+        cut.FindAll("[data-testid^='header-name-']").Should().BeEmpty();
     }
 
     [Fact]
@@ -179,7 +319,7 @@ public sealed class ProviderEditDialogTests
 
         var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
 
         cut.Find("[data-testid='base-url']").GetAttribute("value").Should().Be("https://api.anthropic.com");
         // Anthropic's API rejects every request without this header, so the template supplies it.
@@ -193,7 +333,7 @@ public sealed class ProviderEditDialogTests
 
         var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.LocalRuntime));
+        cut.Find("[data-testid='provider-type']").Change("ollama");
 
         // A local runtime costs nothing, so its models report a known $0.00 rather than an unknown cost.
         cut.Find("[data-testid='is-free']").HasAttribute("checked").Should().BeTrue();
@@ -211,11 +351,76 @@ public sealed class ProviderEditDialogTests
             parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
-        cut.Find("[data-testid='provider-type']").Change(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
         FindSaveButton(cut).Click();
 
         saved.Should().NotBeNull();
-        saved!.ProviderType.Should().Be(nameof(ProviderType.Anthropic));
+        saved!.ProviderType.Should().Be("anthropic");
+    }
+
+    [Fact]
+    public void A_failed_template_catalog_does_not_rewrite_the_stored_provider_type_on_save()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            parameters.Add(parameterSelector: p => p.Templates,
+                value: (IReadOnlyList<ProviderTemplates.ProviderEditorTemplate>)[]);
+            parameters.Add(parameterSelector: p => p.TemplatesUnavailable, value: true);
+            parameters.Add(parameterSelector: p => p.Model, value: new ProviderEditDialog.ProviderEditModel(
+                Key: Key,
+                IsNew: false,
+                BaseUrl: OriginalBaseUrl,
+                Headers: [],
+                IsFree: false,
+                ProviderType: "anthropic",
+                ProviderName: "Anthropic"));
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        FindSaveButton(cut).Click();
+
+        saved.Should().NotBeNull();
+        saved!.ProviderType.Should().Be("anthropic");
+    }
+
+    [Fact]
+    public void An_unknown_stored_type_is_kept_when_the_selection_stays_other()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, providerType: "Bedrock", providerName: "Bedrock");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        FindSaveButton(cut).Click();
+
+        saved.Should().NotBeNull();
+        saved!.ProviderType.Should().Be("Bedrock");
+    }
+
+    [Fact]
+    public void Choosing_a_template_replaces_a_preserved_stored_type()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, providerType: "Bedrock", providerName: "Bedrock");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        FindSaveButton(cut).Click();
+
+        saved.Should().NotBeNull();
+        saved!.ProviderType.Should().Be("anthropic");
     }
 
     [Fact]
@@ -228,7 +433,7 @@ public sealed class ProviderEditDialogTests
 
         // Guards the round-trip bug: ProvidersAdmin used to hardcode "Other", so an Anthropic provider
         // always reopened as Other and lost its type on the next save.
-        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be("anthropic");
     }
 
     [Fact]
@@ -394,14 +599,13 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
-    public void A_header_named_after_the_auth_header_is_always_saved_locked()
+    public void A_manually_added_header_is_saved_unlocked_until_the_operator_locks_it()
     {
         using var ctx = new BunitContext();
 
-        // Regression test: AddHeader() starts a new row unlocked by default (correct for ordinary public
-        // configuration like anthropic-version), but the credential-carrying header must never be
-        // persisted readable just because the operator forgot to click its padlock - the management API
-        // echoes an unlocked literal value back on every future read of this dialog.
+        // Nothing is locked implicitly (ADR-0016): AddHeader() starts a row unlocked, and only a
+        // template's declaration or the operator's own padlock locks it. The management API echoes an
+        // unlocked literal back on every read, which is what makes the padlock a real choice.
         ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
@@ -409,9 +613,7 @@ public sealed class ProviderEditDialogTests
             parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
-        // With no ProviderType parameter set, the dialog falls back to Other - not an authoritative
-        // template choice, so ResolveSavedAuthHeaderName preserves the seeded AuthHeaderName ("x-api-key")
-        // rather than overwriting it with Other's own "Authorization".
+        // With no ProviderType parameter set, the dialog falls back to Other, which adds no rows of its own.
         cut.Find("[data-testid='add-header']").Click();
         cut.Find("[data-testid='header-name-0']").Input("x-api-key");
         cut.Find("[data-testid='header-value-0']").Input("super-secret-key");
@@ -424,7 +626,7 @@ public sealed class ProviderEditDialogTests
         var header = saved!.Headers.Should().ContainSingle().Subject;
         header.Name.Should().Be("x-api-key");
         header.Value.Should().Be("super-secret-key");
-        header.Locked.Should().BeTrue();
+        header.Locked.Should().BeFalse();
     }
 
     [Fact]
@@ -525,6 +727,97 @@ public sealed class ProviderEditDialogTests
         FindSaveButton(cut).HasAttribute("disabled").Should().BeFalse();
     }
 
+    [Fact]
+    public void A_new_providers_name_colliding_with_an_existing_provider_blocks_save()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: ["OpenAI API"]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("OpenAI API");
+        cut.Find("[data-testid='base-url']").Input("https://api.example.com");
+
+        cut.Find("[data-testid='provider-name-error']").TextContent
+            .Should().Contain("Provider name 'OpenAI API' is already in use by another provider.");
+        cut.FindAll("[data-testid='dialog-error']").Should().BeEmpty();
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Name_collision_detection_trims_the_existing_names_too()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: [" OpenAI API "]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("OpenAI API");
+
+        cut.Find("[data-testid='provider-name-error']").TextContent.Should().Contain("already in use");
+    }
+
+    [Fact]
+    public void Name_collision_detection_is_case_insensitive_and_trims_whitespace()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: ["OpenAI API"]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("  openai api  ");
+        cut.Find("[data-testid='base-url']").Input("https://api.example.com");
+
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Renaming_away_from_a_collision_re_enables_save()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: ["OpenAI API"]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("OpenAI API");
+        cut.Find("[data-testid='base-url']").Input("https://api.example.com");
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
+
+        cut.Find("[data-testid='provider-name']").Input("My OpenAI Instance");
+
+        cut.FindAll("[data-testid='dialog-error']").Should().BeEmpty();
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Editing_a_provider_without_changing_its_own_name_does_not_block_save()
+    {
+        using var ctx = new BunitContext();
+
+        // The edited provider's own current name is excluded from ExistingProviderNames by the caller
+        // (ProvidersAdmin), so keeping it unchanged must not trip the collision check.
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: false, providerName: "OpenAI API");
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: []);
+        });
+
+        cut.FindAll("[data-testid='dialog-error']").Should().BeEmpty();
+        FindSaveButton(cut).HasAttribute("disabled").Should().BeFalse();
+    }
+
     private static void SeedEditParameters(
         ComponentParameterCollectionBuilder<ProviderEditDialog> parameters,
         bool isNew = false,
@@ -536,15 +829,130 @@ public sealed class ProviderEditDialogTests
         string providerType = "",
         string providerName = "")
     {
+        parameters.Add(parameterSelector: p => p.Templates, value: SampleTemplates());
         parameters.Add(parameterSelector: p => p.Model, value: new ProviderEditDialog.ProviderEditModel(
             Key: key,
             IsNew: isNew,
             BaseUrl: baseUrl,
-            AuthHeaderName: authHeaderName,
             Headers: headers ?? [],
             IsFree: isFree,
             ProviderType: providerType,
             ProviderName: providerName));
+    }
+
+    [Fact]
+    public void Switching_templates_without_edits_replaces_custom_headers()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        cut.Markup.Should().Contain("anthropic-version");
+
+        cut.Find("[data-testid='provider-type']").Change("openai");
+
+        cut.Find("[data-testid='base-url']").GetAttribute("value").Should().Be("https://api.openai.com");
+        cut.Markup.Should().NotContain("anthropic-version");
+    }
+
+    [Fact]
+    public void Selecting_a_template_after_edits_locks_an_existing_literal_row_it_declares_secret()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, providerName: "OpenAI");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        // An operator-typed literal that matches the template's credential name must not save readable
+        // just because the form was no longer pristine when the template was applied.
+        cut.Find("[data-testid='add-header']").Click();
+        cut.Find("input[placeholder='Header-Name']").Input("Authorization");
+        cut.Find("input[placeholder='value']").Input("sk-typed-first");
+        cut.Find("[data-testid='provider-type']").Change("openai");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Value.Should().Be("sk-typed-first");
+        header.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Reopening_an_unlocked_literal_the_template_declares_secret_locks_it_and_never_renders_the_value()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                providerType: "openai",
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.Literal,
+                        ValueEnvVar: null, Value: "sk-exposed", Locked: false)
+                ]);
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        // The value the server returned for the unlocked row must not reach the password input's DOM.
+        cut.Markup.Should().NotContain("sk-exposed");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Locked.Should().BeTrue();
+        header.Value.Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Switching_templates_after_a_base_url_edit_keeps_custom_headers()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        cut.Find("[data-testid='base-url']").Input("https://api.anthropic.com/custom");
+        cut.Find("[data-testid='provider-type']").Change("openai");
+
+        cut.Find("[data-testid='base-url']").GetAttribute("value").Should().Be("https://api.openai.com");
+        cut.Markup.Should().Contain("anthropic-version");
+    }
+
+    [Fact]
+    public void Selecting_other_without_edits_clears_template_headers()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters => SeedEditParameters(parameters: parameters, true));
+
+        cut.Find("[data-testid='provider-type']").Change("anthropic");
+        cut.Find("[data-testid='provider-type']").Change(ProviderTemplates.OtherKey);
+
+        cut.Find("[data-testid='base-url']").GetAttribute("value").Should().BeNullOrEmpty();
+        cut.Markup.Should().NotContain("anthropic-version");
+    }
+
+    private static IReadOnlyList<ProviderTemplates.ProviderEditorTemplate> SampleTemplates()
+    {
+        return
+        [
+            new(Key: "anthropic", BaseUrl: "https://api.anthropic.com", IsFree: false,
+                Headers: [new ProviderTemplates.ProviderTemplateHeader(Name: "anthropic-version", Value: "2023-06-01")]),
+            new(Key: "openai", BaseUrl: "https://api.openai.com", IsFree: false,
+                Headers:
+                [
+                    new ProviderTemplates.ProviderTemplateHeader(Name: "Authorization", Value: null,
+                        ValueEnvVar: "OPENAI_API_KEY", Locked: true)
+                ]),
+            new(Key: "ollama", BaseUrl: "http://localhost:11434/v1", IsFree: true,
+                Headers: [])
+        ];
     }
 
     private static IElement FindSaveButton(IRenderedComponent<ProviderEditDialog> cut)

@@ -20,7 +20,7 @@ public sealed class ProviderMcpToolsTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com" }
             },
             ModelList =
             [
@@ -44,7 +44,7 @@ public sealed class ProviderMcpToolsTests
 
         var result = await tools.UpsertProviderAsync(
             key: "openai",
-            request: new ProviderWriteRequest(BaseUrl: "https://api.openai.com/v2", null),
+            request: new ProviderWriteRequest(BaseUrl: "https://api.openai.com/v2"),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.IsType<ProvidersResponse>(result);

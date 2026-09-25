@@ -90,6 +90,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
         var broadcaster = dependencies?.Telemetry ?? new TelemetryBroadcaster();
         var managementTokenProvider = dependencies?.ManagementTokenProvider;
         var routingOptions = dependencies?.RoutingOptions;
+        var modelRoutingTemplates = dependencies?.ModelRoutingTemplates;
 
         var managementApi = dependencies?.ManagementApi;
 
@@ -295,6 +296,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // caller's own RoutingOptions defaults instead of leaving the service unmapped. It is
                     // also what covers LogRegModelAdminGrpcService's own IOptions<RoutingOptions>.
                     services.AddSingleton(routingOptions ?? Options.Create(new RoutingOptions()));
+                    services.AddSingleton(modelRoutingTemplates ?? Options.Create(new ModelRoutingOptions()));
 
 
                     // The Governance UI's "Software Update" section API (Phase 2). Always registered -
@@ -339,7 +341,12 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                                 SecretWriter = managementApi.SecretWriter,
                                 SecretReader = managementApi.SecretReader,
                                 InteractionStatusStore = managementApi.InteractionStatusStore ??
-                                                         new ProviderInteractionStatusStore()
+                                                         new ProviderInteractionStatusStore(),
+                                // Outer-host logger: the inner host's own ILogger is not the file sink the
+                                // operator reads. Model-discovery 401s were previously visible only on the
+                                // provider card.
+                                Logger = logger,
+                                ModelRoutingTemplates = modelRoutingTemplates?.Value
                             },
                             httpClientFactory: managementApi.HttpClientFactory);
                         var reportingService = new ManagementReportingService(

@@ -25,14 +25,16 @@ public class ModelRouteResolverTests
         Assert.Equal(expected: "gpt-5.4", actual: route!.ModelName);
         Assert.Equal(expected: "gpt-5.4-2026-01", actual: route.ProviderModelId);
         Assert.Equal(expected: "https://api.openai.com/", actual: route.UpstreamBaseUrl.ToString());
-        Assert.Equal(expected: "Authorization", actual: route.AuthHeaderName);
+        Assert.Contains("Authorization", route.ConfiguredHeaderNames);
     }
 
     [Fact]
     public void TryResolve_EnvVarHeader_ResolvesValueFromEnvironment()
     {
         var environment = new Mock<IEnvironmentVariableProvider>();
-        environment.Setup(e => e.GetVariable("MY_PROVIDER_API_KEY")).Returns("Bearer resolved-from-env");
+        // A raw credential. ResolveExtraHeaders supplies the Bearer scheme on Authorization; a value that
+        // already starts with a scheme is left unchanged (see ProviderCredentialResolverTests).
+        environment.Setup(e => e.GetVariable("MY_PROVIDER_API_KEY")).Returns("resolved-from-env");
 
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "gpt-5.4",
@@ -70,25 +72,25 @@ public class ModelRouteResolverTests
     }
 
     [Fact]
-    public void TryResolve_AuthHeaderNameHasSurroundingWhitespace_StillMatchesConfiguredHeader()
+    public void TryResolve_ConfiguredHeaderNameHasSurroundingWhitespace_IsTrimmedAndMatchedCaseInsensitively()
     {
-        // Regression test: ManagementFacade.MergeProvider stores AuthHeaderName verbatim (no trim), so a
-        // provider persisted with e.g. " x-api-key " must still be recognized as having that header
-        // configured - otherwise ProxyMiddleware's client-header-stripping decision (route.AuthHeaderConfigured)
-        // would wrongly conclude no auth header is configured and let a client-sent "x-api-key" pass through
+        // Regression test: a header persisted with a padded name, e.g. " x-api-key ", must still be
+        // recognized as configured - otherwise ProxyMiddleware's client-header-stripping decision
+        // (route.ConfiguredHeaderNames) would miss it and let a client-sent "x-api-key" pass through
         // unstripped, alongside (or instead of) the provider's own.
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "claude-sonnet-5",
             providerModelId: "claude-sonnet-5",
             baseUrl: "https://api.anthropic.com",
-            authHeaderName: " x-api-key ",
             apiKey: null,
-            headers: [new ProviderHeader { Name = "x-api-key", Value = "real-anthropic-key" }]);
+            headers: [new ProviderHeader { Name = " x-api-key ", Value = "real-anthropic-key" }]);
 
         var resolved = resolver.TryResolve(modelName: "claude-sonnet-5", route: out var route);
 
         Assert.True(resolved);
-        Assert.True(route!.AuthHeaderConfigured);
+        Assert.Contains("X-API-KEY", route!.ConfiguredHeaderNames);
+        // The emitted name must be the trimmed one too, or the padded name is rejected when it is forwarded.
+        Assert.Equal(expected: "x-api-key", actual: Assert.Single(route.ExtraHeaders).Key);
     }
 
     [Fact]
@@ -99,8 +101,8 @@ public class ModelRouteResolverTests
             Provider: "bedrock-anthropic",
             ProviderModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
             UpstreamBaseUrl: new Uri("https://bedrock-runtime.us-east-1.amazonaws.com"),
-            AuthHeaderName: "Authorization",
             ExtraHeaders: [new KeyValuePair<string, string>(key: "x-api-key", value: "another-secret-value")],
+            ConfiguredHeaderNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "x-api-key" },
             AwsRegion: "us-east-1",
             AwsAccessKeyId: "AKIAEXAMPLE",
             AwsSecretAccessKey: "wJalrXUtnFEMI/EXAMPLESECRETKEY",
@@ -128,8 +130,7 @@ public class ModelRouteResolverTests
             Provider: "openai",
             ProviderModelId: "gpt-5.4-2026-01",
             UpstreamBaseUrl: new Uri("https://api.openai.com"),
-            AuthHeaderName: "Authorization",
-            ExtraHeaders: []);
+            ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>());
 
         var text = route.ToString();
 
@@ -264,7 +265,7 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new() { BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1" }
             },
             ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3" }]
         };
@@ -279,7 +280,7 @@ public class ModelRouteResolverTests
         await store.UpsertProviderAsync(
             key: "local",
             provider: new ProviderOptions
-            { BaseUrl = "http://192.168.1.50:11434/v1", AuthHeaderName = "Authorization" },
+            { BaseUrl = "http://192.168.1.50:11434/v1" },
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(resolver.TryResolve(modelName: "llama3", route: out var after));
@@ -295,7 +296,7 @@ public class ModelRouteResolverTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["local"] = new() { BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization" }
+                ["local"] = new() { BaseUrl = "http://localhost:11434/v1" }
             },
             ModelList = [new ModelRouteEntry { ModelName = "llama3", Provider = "local", ProviderModelId = "llama3" }]
         };

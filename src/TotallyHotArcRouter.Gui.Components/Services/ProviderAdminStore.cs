@@ -69,6 +69,20 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
     public IReadOnlyList<ProviderAdminView> Providers { get; private set; } = [];
 
     /// <summary>
+    /// Add-provider templates from <c>ModelRouting:Providers</c>, loaded alongside <see cref="Providers"/>.
+    /// Empty when the template request fails; the dialog still offers <c>Other</c>. A failure is
+    /// distinguished from a genuinely empty catalog by <see cref="TemplatesUnavailable"/>.
+    /// </summary>
+    public IReadOnlyList<ProviderTemplates.ProviderEditorTemplate> Templates { get; private set; } = [];
+
+    /// <summary>
+    /// Whether the last provider load could not read the template catalog. The dialog uses this to keep
+    /// a stored provider type across a save: an empty <see cref="Templates"/> list alone would resolve
+    /// every existing key to <c>Other</c> and persist that downgrade.
+    /// </summary>
+    public bool TemplatesUnavailable { get; private set; }
+
+    /// <summary>
     /// The configured price overrides (§5.7's operator-override rung), refreshed after each load or
     /// successful edit via <see cref="LoadPriceOverridesAsync"/>. Empty until that is called at least
     /// once - the Governance price-overrides pane loads it independently of <see cref="Providers"/> since
@@ -102,8 +116,23 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
     /// <param name="cancellationToken">Cancels the load.</param>
     public Task LoadAsync(CancellationToken cancellationToken = default)
     {
+        Logger?.LogDebug("Refreshing provider agent list.");
         return LoadGuardedAsync(
-            async ct => Providers = await Client.GetProvidersAsync(ct),
+            async ct =>
+            {
+                Providers = await Client.GetProvidersAsync(ct);
+                try
+                {
+                    Templates = await Client.GetProviderTemplatesAsync(ct);
+                    TemplatesUnavailable = false;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Templates = [];
+                    TemplatesUnavailable = true;
+                    Logger?.LogWarning(exception: ex, message: "Failed to load add-provider templates.");
+                }
+            },
             "load the providers",
             cancellationToken,
             onFailure: () => _toasts?.ShowError(title: "Providers unreachable",
@@ -118,6 +147,7 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
     public Task UpsertProviderAsync(string key, ProviderWriteRequest body,
         CancellationToken cancellationToken = default)
     {
+        Logger?.LogDebug("Updating provider {ProviderKey} at {ProviderUrl}.", key, RedactBaseUrlForLog(body.BaseUrl));
         return MutateAsync(() =>
             Client.UpsertProviderAsync(key: key, body: body, cancellationToken: cancellationToken));
     }
@@ -381,5 +411,24 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
             RecordFailure(exception: ex, description: "a price-override operation");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Scheme, host, and port of <paramref name="baseUrl"/> for a debug log. Userinfo, path, query, and
+    /// fragment are omitted: validation only requires an absolute URI, so those parts can carry credentials
+    /// (for example a token in a path segment).
+    /// An unparseable value is replaced so the raw string is never written.
+    /// </summary>
+    /// <param name="baseUrl">The provider base URL about to be saved, or null when the write omits it.</param>
+    /// <returns>The URL with credential-bearing components removed, or <c>(invalid)</c>.</returns>
+    private static string RedactBaseUrlForLog(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) ||
+            !Uri.TryCreate(uriString: baseUrl, uriKind: UriKind.Absolute, result: out var uri))
+            return "(invalid)";
+
+        return uri.GetComponents(
+            components: UriComponents.Scheme | UriComponents.Host | UriComponents.Port,
+            format: UriFormat.Unescaped);
     }
 }

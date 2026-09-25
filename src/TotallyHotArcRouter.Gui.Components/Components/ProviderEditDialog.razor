@@ -1,4 +1,3 @@
-@using System.Diagnostics.CodeAnalysis
 @* Add/edit-provider modal for the Governance tab's provider manager. Captures the endpoint, the provider
    family, and any custom headers (including authentication, expressed as an ordinary header such as
    Authorization). Mirrors SettingsModal's overlay/stop-propagation/EventCallback pattern. *@
@@ -11,19 +10,24 @@
         <div class="text-xs text-slate-500 mb-1">Provider Name</div>
         <input type="text" data-testid="provider-name" value="@_providerName" @oninput="e => _providerName = AsString(e.Value)"
                placeholder="e.g. My Anthropic Instance"
-               class="w-full px-3 py-2 text-sm ds-input"/>
+               aria-invalid="@(DuplicateNameError is null ? "false" : "true")"
+               aria-describedby="@(DuplicateNameError is null ? null : "provider-name-error")"
+               class="w-full px-3 py-2 text-sm ds-input @(DuplicateNameError is null ? "" : "border-red-500")"/>
+        @if (DuplicateNameError is { } nameError)
+        {
+            <div id="provider-name-error" class="rounded px-3 py-2 mt-2 mb-1 text-xs ds-step-critical" data-testid="provider-name-error">@nameError</div>
+        }
     </div>
 
     <div>
         <div class="text-xs text-slate-500 mb-1">Provider Type</div>
-        @* Rendered from ProviderTemplates.Ordered rather than hardcoded options: the label is a
-                   family ("OpenAI / Groq / DeepSeek") while the value stays the enum member name that
-                   round-trips through storage, and the two cannot drift apart. *@
-        <select data-testid="provider-type" value="@_selectedProviderType.ToString()" @onchange="OnProviderTypeChanged"
+        @* One option per ModelRouting:Providers key, then Other. The value is the key persisted as
+           ProviderType, so reopening the dialog selects the same template. *@
+        <select data-testid="provider-type" value="@_selectedTemplateKey" @onchange="OnProviderTypeChanged"
                 class="w-full px-2 py-2 text-sm ds-input">
-            @foreach (var providerType in ProviderTemplates.Ordered)
+            @foreach (var template in OrderedTemplates)
             {
-                <option value="@providerType.ToString()">@ProviderTemplates.DisplayName(providerType)</option>
+                <option value="@template.Key">@template.Key</option>
             }
         </select>
     </div>
@@ -59,7 +63,7 @@
             </button>
         </div>
         <div class="text-xs text-slate-600 mb-1.5">
-            Add this provider's authentication header here (e.g. <span class="font-mono">@AuthHeaderHint</span>) if it needs a key.
+            Add any header this provider needs. Lock the ones that carry a secret, such as an API key.
         </div>
         @if (_headers.Count == 0)
         {
@@ -162,7 +166,6 @@
         Key: string.Empty,
         false,
         BaseUrl: string.Empty,
-        AuthHeaderName: "Authorization",
         Headers: [],
         false,
         ProviderType: string.Empty,
@@ -180,24 +183,72 @@
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
+    /// <summary>
+    /// Add-provider templates from <c>ModelRouting:Providers</c>. <see cref="ProviderTemplates.Other"/> is
+    /// always offered after these, even when this list is empty.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<ProviderTemplates.ProviderEditorTemplate> Templates { get; set; } = [];
+
+    /// <summary>
+    /// Whether <see cref="Templates"/> failed to load. An empty list with this false is a real empty
+    /// catalog. A save that stays on the fallback <c>Other</c> selection keeps a non-blank stored type
+    /// either way — a failed catalog and an unknown key such as <c>Bedrock</c> both reopen as
+    /// <c>Other</c> — so this flag does not by itself decide what is persisted.
+    /// </summary>
+    [Parameter]
+    public bool TemplatesUnavailable { get; set; }
+
+    /// <summary>
+    /// The display names of every other currently configured provider (excluding the one this dialog is
+    /// editing, when <see cref="ProviderEditModel.IsNew"/> is <see langword="false"/>), used to reject a
+    /// name that collides with an existing provider before the operator can save. The server enforces this
+    /// too (<c>ModelRoutingOptions.EnsureValid</c>) - this is purely for immediate feedback.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<string> ExistingProviderNames { get; set; } = [];
+
     private string _key = string.Empty;
     private string _baseUrl = string.Empty;
     private bool _isFree;
     private string _providerName = string.Empty;
-    private ProviderType _selectedProviderType;
+    private string _selectedTemplateKey = ProviderTemplates.OtherKey;
+    private bool _keepStoredProviderType;
     private readonly List<HeaderRow> _headers = [];
+    private FormBaseline _baseline;
 
-    /// <summary>The proxy-reported error, or the local validation reason when the form is not yet valid.</summary>
+    /// <summary>
+    /// The proxy-reported error, or the duplicate-header reason when the form is not yet valid. A colliding
+    /// provider name is not included: it is shown next to the name field via <see cref="DuplicateNameError"/>.
+    /// </summary>
     private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError : Error;
 
     /// <summary>
-    /// Whether the form has enough to submit: a base URL, a display name when adding a new provider, and no duplicate
-    /// header names.
+    /// Whether the form has enough to submit: a base URL, a display name when adding a new provider, no
+    /// duplicate header names, and a display name that does not collide with another provider's.
     /// </summary>
     private bool CanSave =>
         !string.IsNullOrWhiteSpace(_baseUrl)
         && (!Model.IsNew || !string.IsNullOrWhiteSpace(_providerName))
-        && DuplicateHeaderError is null;
+        && DuplicateHeaderError is null
+        && DuplicateNameError is null;
+
+    /// <summary>
+    /// Why the entered display name cannot be saved, or <see langword="null"/> when it is blank or unique.
+    /// Compared case-insensitively, trimmed, against <see cref="ExistingProviderNames"/>.
+    /// </summary>
+    private string? DuplicateNameError
+    {
+        get
+        {
+            var trimmed = _providerName.Trim();
+            if (trimmed.Length == 0) return null;
+
+            var collides = ExistingProviderNames.Any(name =>
+                string.Equals(a: name.Trim(), b: trimmed, comparisonType: StringComparison.OrdinalIgnoreCase));
+            return collides ? $"Provider name '{trimmed}' is already in use by another provider." : null;
+        }
+    }
 
     // Seed the editable fields from the parameters exactly once, when the dialog opens. The dialog is
     // conditionally rendered (@if (_showDialog)) so a fresh instance — and thus a single OnInitialized —
@@ -210,10 +261,14 @@
         _baseUrl = Model.BaseUrl;
         _isFree = Model.IsFree;
         _providerName = Model.ProviderName;
-        _selectedProviderType = Enum.TryParse<ProviderType>(value: Model.ProviderType, result: out var providerType)
-                                && ProviderTemplates.Templates.ContainsKey(providerType)
-            ? providerType
-            : ProviderType.Other;
+        _selectedTemplateKey = ProviderTemplates.ResolveStoredType(
+            stored: Model.ProviderType, templateKeys: Templates.Select(template => template.Key));
+        // Other is the fallback both when the catalog failed (TemplatesUnavailable) and when the stored
+        // type is not a current template key. Staying on that fallback must not persist Other over the
+        // stored value. Picking a real template clears the flag in OnProviderTypeChanged.
+        _keepStoredProviderType = TemplatesUnavailable
+            ? !string.IsNullOrWhiteSpace(Model.ProviderType)
+            : KeepUnresolvedStoredType(stored: Model.ProviderType, selected: _selectedTemplateKey);
 
         foreach (var header in Model.Headers)
         {
@@ -222,53 +277,129 @@
             // returned either), so it drives the same "saved, blank keeps it" placeholder - see
             // docs/router/secrets-at-rest-plan.md §4.
             var hasStoredSecret = header.Source == HeaderValueSource.Literal || header.Source == HeaderValueSource.Protected;
+            // A literal row also locks when the selected template declares the header a secret, even if
+            // the stored row came back unlocked, so saving it unchanged cannot keep the credential readable.
+            var locked = !useEnvVar && (header.Locked || TemplateDeclaresSecret(header.Name));
             _headers.Add(new HeaderRow
             {
                 Name = header.Name,
                 UseEnvVar = useEnvVar,
-                Locked = hasStoredSecret && header.Locked,
+                Locked = locked,
                 // An unlocked literal comes back in full and is shown as ordinary editable text. A locked
-                // one is never returned, so its row starts blank - HasStoredLiteralValue drives the
-                // "saved" placeholder below, and leaving the field blank on save preserves the stored
-                // value (mirrors the API key field's blank-keeps-existing behavior).
-                Value = useEnvVar ? header.ValueEnvVar ?? string.Empty : header.Value ?? string.Empty,
-                HasStoredLiteralValue = hasStoredSecret && header.Locked
+                // one is never shown - including a literal locked here only because the template declares
+                // it secret, whose returned value is dropped so it never reaches the password input's DOM.
+                // HasStoredLiteralValue drives the "saved" placeholder below, and leaving the field blank on
+                // save preserves the stored value (mirrors the API key field's blank-keeps-existing behavior).
+                Value = useEnvVar ? header.ValueEnvVar ?? string.Empty : locked ? string.Empty : header.Value ?? string.Empty,
+                HasStoredLiteralValue = hasStoredSecret && locked
             });
         }
+
+        _baseline = CaptureBaseline();
     }
 
-    /// <summary>Applies the newly selected provider type's template when the dropdown changes.</summary>
-    private void OnProviderTypeChanged(ChangeEventArgs e)
+    /// <summary>
+    /// The configured templates followed by <see cref="ProviderTemplates.Other"/>. A catalog entry whose
+    /// key is <see cref="ProviderTemplates.OtherKey"/> is skipped: that spelling is reserved for the blank
+    /// choice, and the server rejects it. Skipping it here keeps an older server from offering two options
+    /// with the same value.
+    /// </summary>
+    private IEnumerable<ProviderTemplates.ProviderEditorTemplate> OrderedTemplates
     {
-        if (Enum.TryParse<ProviderType>(value: AsString(e.Value), result: out var providerType)
-            && ProviderTemplates.Templates.ContainsKey(providerType))
+        get
         {
-            _selectedProviderType = providerType;
-            ApplyProviderTemplate(providerType);
+            foreach (var template in Templates)
+                if (!string.Equals(a: template.Key, b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase))
+                    yield return template;
+
+            yield return ProviderTemplates.Other;
         }
     }
 
     /// <summary>
-    /// Overwrites the endpoint shape with the selected family's defaults, and merges in any headers
-    /// that family's API requires. Deliberately clobbers rather than merges the endpoint fields: picking a
-    /// type is a statement about what this provider *is*.
+    /// Whether a save that is still on <see cref="ProviderTemplates.OtherKey"/> should persist
+    /// <paramref name="stored"/> instead. A stored blank choice is already <c>Other</c>, so it is sent
+    /// as the selection. Any other non-empty stored type is kept until the operator picks a template.
     /// </summary>
-    private void ApplyProviderTemplate(ProviderType providerType)
+    /// <param name="stored">The type persisted on the provider.</param>
+    /// <param name="selected">The dropdown key resolved when the dialog opened.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="selected"/> is the blank choice and
+    /// <paramref name="stored"/> is a different non-empty value.
+    /// </returns>
+    private static bool KeepUnresolvedStoredType(string? stored, string selected)
     {
-        var template = ProviderTemplates.Templates[providerType];
+        if (string.IsNullOrWhiteSpace(stored)) return false;
+        if (!string.Equals(a: selected, b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase))
+            return false;
 
+        return !string.Equals(a: stored.Trim(), b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Applies the newly selected template when the dropdown changes.</summary>
+    private void OnProviderTypeChanged(ChangeEventArgs e)
+    {
+        var key = AsString(e.Value);
+        if (!string.Equals(a: key, b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase))
+            _keepStoredProviderType = false;
+
+        var template = OrderedTemplates.FirstOrDefault(candidate =>
+            string.Equals(a: candidate.Key, b: key, comparisonType: StringComparison.OrdinalIgnoreCase));
+        if (template is null) return;
+
+        ApplyProviderTemplate(template);
+    }
+
+    /// <summary>
+    /// Overwrites the endpoint shape with the selected template. Custom headers are replaced only while
+    /// the form still matches the values it had when it opened or when the previous template was applied.
+    /// After the operator edits the base URL, the free checkbox, or a header, later templates only add
+    /// headers whose names are not already present.
+    /// </summary>
+    private void ApplyProviderTemplate(ProviderTemplates.ProviderEditorTemplate template)
+    {
+        var pristine = IsPristine();
+        _selectedTemplateKey = template.Key;
         _baseUrl = template.BaseUrl;
-        _isFree = template.DefaultsToFree;
+        _isFree = template.IsFree;
 
-        // Merge, never replace: a header the operator already entered under the same name wins, so
-        // switching type twice doesn't reset a hand-tuned anthropic-version.
-        foreach (var templateHeader in template.DefaultHeaders)
+        if (pristine)
         {
-            if (!_headers.Any(h => string.Equals(a: h.Name, b: templateHeader.Name, comparisonType: StringComparison.OrdinalIgnoreCase)))
+            _headers.Clear();
+            foreach (var templateHeader in template.Headers)
+                _headers.Add(ToHeaderRow(templateHeader));
+            _baseline = CaptureBaseline();
+        }
+        else
+        {
+            foreach (var templateHeader in template.Headers)
             {
-                _headers.Add(new HeaderRow { Name = templateHeader.Name, Value = templateHeader.Value });
+                var existing = _headers.FirstOrDefault(h => string.Equals(a: h.Name, b: templateHeader.Name, comparisonType: StringComparison.OrdinalIgnoreCase));
+                if (existing is null)
+                    _headers.Add(ToHeaderRow(templateHeader));
+                else if (templateHeader.Locked && !existing.UseEnvVar)
+                    existing.Locked = true; // the template declares this credential secret; an operator-typed literal must not save readable
             }
         }
+    }
+
+    /// <summary>
+    /// Builds an editor row from a template header. A non-empty literal wins over an env-var name. A locked
+    /// template header is a secret, so the row is locked from the start when it has no env var to point at;
+    /// an env-var row is never locked, since it holds only a variable name (see
+    /// <see cref="TemplateDeclaresSecret"/> for how it locks again if switched to a literal).
+    /// </summary>
+    private static HeaderRow ToHeaderRow(ProviderTemplates.ProviderTemplateHeader header)
+    {
+        var literal = !string.IsNullOrEmpty(header.Value);
+        var useEnvVar = !literal && !string.IsNullOrWhiteSpace(header.ValueEnvVar);
+        return new HeaderRow
+        {
+            Name = header.Name,
+            UseEnvVar = useEnvVar,
+            Value = literal ? header.Value! : header.ValueEnvVar ?? string.Empty,
+            Locked = header.Locked && !useEnvVar
+        };
     }
 
     /// <summary>Appends a blank custom-header row.</summary>
@@ -286,15 +417,42 @@
     /// <summary>
     /// Switches a header between a literal value and an environment-variable reference. An env-var
     /// header names a variable rather than holding a secret, so it can never be locked - switching to it
-    /// drops the lock rather than leaving a padlock the markup no longer renders.
+    /// drops the lock rather than leaving a padlock the markup no longer renders. Switching back to a
+    /// literal restores the lock the template declared, if any, so a template's secret row is locked again
+    /// when the operator types a key into it. While the template catalog is unavailable nothing can be
+    /// looked up (the catalog failed, or the stored provider type no longer resolves to a template), so the row locks unconditionally: a padlock the operator can undo is the safe default,
+    /// whereas a typed credential saved unlocked would be returned by the provider list.
     /// </summary>
-    private static void SetHeaderSource(HeaderRow header, ChangeEventArgs e)
+    private void SetHeaderSource(HeaderRow header, ChangeEventArgs e)
     {
-        header.UseEnvVar = string.Equals(a: AsString(e.Value), b: "env", comparisonType: StringComparison.Ordinal);
-        if (header.UseEnvVar)
-        {
-            header.Locked = false;
-        }
+        var useEnvVar = string.Equals(a: AsString(e.Value), b: "env", comparisonType: StringComparison.Ordinal);
+        // Each source starts with an empty field, so an env-var name is never saved as the literal secret
+        // (and a typed literal is never saved as an env-var name) by switching back and forth.
+        if (useEnvVar != header.UseEnvVar) header.Value = string.Empty;
+        header.UseEnvVar = useEnvVar;
+        header.Locked = !useEnvVar &&
+            (TemplatesUnavailable || _keepStoredProviderType || TemplateDeclaresSecret(header.Name));
+    }
+
+    /// <summary>
+    /// Whether the selected template declares a header named <paramref name="headerName"/> a secret
+    /// (<see cref="ProviderTemplates.ProviderTemplateHeader.Locked"/>). Looked up by name at the moment it is
+    /// needed rather than copied onto the row when the row is created, so it also holds for the rows of a
+    /// provider that is being reopened: those come from stored state, not from the template, yet their
+    /// credential must still lock when the operator switches it from an env var to a typed key.
+    /// <see cref="ProviderTemplates.OtherKey"/> declares nothing.
+    /// </summary>
+    private bool TemplateDeclaresSecret(string headerName)
+    {
+        if (string.Equals(a: _selectedTemplateKey, b: ProviderTemplates.OtherKey, comparisonType: StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var template = Templates.FirstOrDefault(candidate =>
+            string.Equals(a: candidate.Key, b: _selectedTemplateKey, comparisonType: StringComparison.OrdinalIgnoreCase));
+        var name = headerName.Trim();
+        return template is not null && template.Headers.Any(templateHeader =>
+            templateHeader.Locked &&
+            string.Equals(a: templateHeader.Name.Trim(), b: name, comparisonType: StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -351,61 +509,6 @@
         }
     }
 
-    /// <summary>
-    /// Looks up the selected provider type's documented auth header (e.g. Anthropic's
-    /// <c>x-api-key</c>), the source both <see cref="AuthHeaderHint"/> and
-    /// <see cref="ResolveSavedAuthHeaderName"/> defer to when it's authoritative. <see cref="ProviderType.Other"/>
-    /// is deliberately excluded even though it has a template entry: it's the type every provider configured
-    /// before this field existed falls back to, so treating its "Authorization" as authoritative would
-    /// silently overwrite an already-working non-default header name (e.g. "x-api-key") the moment such a
-    /// provider is saved through this dialog without the operator touching provider type at all.
-    /// </summary>
-    private bool TryGetTemplateAuthHeaderName([NotNullWhen(true)] out string? authHeaderName)
-    {
-        if (_selectedProviderType != ProviderType.Other
-            && ProviderTemplates.Templates.TryGetValue(key: _selectedProviderType, value: out var template)
-            && !string.IsNullOrWhiteSpace(template.AuthHeaderName))
-        {
-            authHeaderName = template.AuthHeaderName;
-            return true;
-        }
-
-        authHeaderName = null;
-        return false;
-    }
-
-    /// <summary>
-    /// The auth header name to show in the "add a header" hint: the selected provider type's
-    /// documented auth header when known, falling back to the provider's existing
-    /// <see cref="ProviderEditModel.AuthHeaderName"/> (and then <c>Authorization</c>) otherwise. Keeps the
-    /// hint from steering an operator toward the wrong header name for providers that don't use
-    /// <c>Authorization</c>.
-    /// </summary>
-    private string AuthHeaderHint =>
-        TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
-            ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(Model.AuthHeaderName)
-                ? "Authorization"
-                : Model.AuthHeaderName.Trim();
-
-    /// <summary>
-    /// The <see cref="ProviderEditResult.AuthHeaderName"/> to save. It must track the header the
-    /// operator actually authenticates with rather than a stale value from before this dialog stopped
-    /// letting them edit it directly: prefers the selected provider type's documented auth header (the same
-    /// lookup as <see cref="AuthHeaderHint"/>), falling back to the existing
-    /// <see cref="ProviderEditModel.AuthHeaderName"/> for types with no authoritative template entry - which
-    /// keeps an already-configured provider's non-default header (e.g. "x-api-key") intact across saves that
-    /// don't change its type.
-    /// </summary>
-    private string ResolveSavedAuthHeaderName()
-    {
-        return TryGetTemplateAuthHeaderName(out var templateAuthHeaderName)
-            ? templateAuthHeaderName
-            : string.IsNullOrWhiteSpace(Model.AuthHeaderName)
-                ? "Authorization"
-                : Model.AuthHeaderName.Trim();
-    }
-
     /// <summary>Builds a <see cref="ProviderEditResult"/> from the form's current fields and raises <see cref="OnSave"/>.</summary>
     private async Task Save()
     {
@@ -414,14 +517,11 @@
             return;
         }
 
-        var authHeaderName = ResolveSavedAuthHeaderName();
-
         var result = new ProviderEditResult(
             Key: Model.IsNew ? Guid.NewGuid().ToString() : Model.Key,
             BaseUrl: _baseUrl.Trim(),
-            AuthHeaderName: authHeaderName,
-            Headers: BuildHeaders(authHeaderName),
-            ProviderType: _selectedProviderType.ToString(),
+            Headers: BuildHeaders(),
+            ProviderType: _keepStoredProviderType ? Model.ProviderType.Trim() : _selectedTemplateKey,
             ProviderName: _providerName.Trim(),
             IsFree: _isFree);
 
@@ -433,13 +533,11 @@
     /// each value maps to a literal or env-var reference per its selected source. A blank literal value is
     /// sent as-is (not resolved locally): under a locked row the management API preserves whatever is
     /// already stored under that header's name, and under an unlocked one it clears it - which is what
-    /// carries a padlock unlock through to storage. The literal header whose name matches
-    /// <paramref name="authHeaderName"/> is always saved locked, regardless of the row's padlock state: it's
-    /// the provider's credential, and an operator forgetting to lock that one specific row (the row an
-    /// unrelated "Add header" click starts unlocked) must not leave the secret readable back through the
-    /// management API on every future load of this dialog.
+    /// carries a padlock unlock through to storage. A row is saved locked only when its padlock is on -
+    /// either because the template declared it a secret or because the operator locked it. Nothing is
+    /// locked implicitly (docs/adr/0016-remove-authheadername-and-mark-secrets-per-header.md).
     /// </summary>
-    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders(string authHeaderName)
+    private IReadOnlyList<ProviderHeaderWriteModel> BuildHeaders()
     {
         return _headers
             .Where(h => !string.IsNullOrWhiteSpace(h.Name))
@@ -449,7 +547,7 @@
                     Name: h.Name.Trim(),
                     Value: h.Value,
                     null,
-                    Locked: h.Locked || string.Equals(a: h.Name.Trim(), b: authHeaderName, comparisonType: StringComparison.OrdinalIgnoreCase)))
+                    Locked: h.Locked))
             .ToList();
     }
 
@@ -460,22 +558,47 @@
     }
 
     /// <summary>
+    /// Whether the templated fields still match <see cref="_baseline"/>. The provider display name is
+    /// not part of the comparison: typing it is required for a new provider and must not pin the headers.
+    /// </summary>
+    private bool IsPristine()
+    {
+        return _baseline == CaptureBaseline();
+    }
+
+    /// <summary>Snapshots the fields a template owns, for the pristine check.</summary>
+    private FormBaseline CaptureBaseline()
+    {
+        return new FormBaseline(BaseUrl: _baseUrl, IsFree: _isFree, Headers: HeaderFingerprint());
+    }
+
+    /// <summary>A stable encoding of the custom-header rows, including lock state.</summary>
+    private string HeaderFingerprint()
+    {
+        return string.Join(separator: "\n", values: _headers.Select(header =>
+            string.Join(separator: "\u001f", header.Name, header.UseEnvVar, header.Value, header.Locked,
+                header.HasStoredLiteralValue)));
+    }
+
+    /// <summary>The templated fields last applied, or the form as it was when the dialog opened.</summary>
+    /// <param name="BaseUrl">The base URL at that moment.</param>
+    /// <param name="IsFree">The free-provider flag at that moment.</param>
+    /// <param name="Headers">The <see cref="HeaderFingerprint"/> at that moment.</param>
+    private readonly record struct FormBaseline(string BaseUrl, bool IsFree, string Headers);
+
+    /// <summary>
     /// The values captured by the dialog when the user saves. Authentication is expressed purely
     /// as a custom header (see <see cref="Headers"/>).
     /// </summary>
     /// <param name="Key">The provider key (auto-generated as a GUID when adding a new provider).</param>
     /// <param name="BaseUrl">The provider base URL.</param>
-    /// <param name="AuthHeaderName">
-    /// The auth header name, resolved by <see cref="ResolveSavedAuthHeaderName"/>
-    /// from the selected provider type's template (falling back to the provider's existing configuration for
-    /// types with no template entry). The proxy uses it to identify which forwarded header is "the" credential
-    /// header, e.g. to avoid double-sending it.
-    /// </param>
     /// <param name="Headers">The custom headers as edited, including any header used for authentication.</param>
     /// <param name="IsFree">Whether the provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">
-    /// The selected provider family (a <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/>
-    /// member name).
+    /// The selected template key (a <c>ModelRouting:Providers</c> key, or <c>Other</c>). When the
+    /// selection is still the blank fallback and the provider already had a different type — a failed
+    /// catalog (<see cref="TemplatesUnavailable"/>) or a key the catalog does not list — this is that
+    /// stored type.
     /// </param>
     /// <param name="ProviderName">
     /// A user-friendly display name for the provider; distinct from the unique
@@ -484,7 +607,6 @@
     public sealed record ProviderEditResult(
         string Key,
         string BaseUrl,
-        string AuthHeaderName,
         IReadOnlyList<ProviderHeaderWriteModel> Headers,
         string ProviderType,
         string ProviderName,
@@ -502,17 +624,14 @@
     /// </param>
     /// <param name="IsNew">Whether the dialog is adding a new provider (vs. editing an existing one).</param>
     /// <param name="BaseUrl">The initial base URL.</param>
-    /// <param name="AuthHeaderName">
-    /// The provider's existing auth header name. The dialog no longer edits
-    /// it directly; on save it is only used as a fallback for provider types with no
-    /// <see cref="ProviderTemplates"/> entry (see <see cref="ResolveSavedAuthHeaderName"/>) - otherwise the
-    /// selected type's documented auth header wins.
-    /// </param>
     /// <param name="Headers">The provider's existing custom headers, seeded into the editable rows.</param>
     /// <param name="IsFree">Whether the existing provider is flagged as costing nothing.</param>
     /// <param name="ProviderType">
-    /// The name of the provider's <see cref="TotallyHot.ArcRouter.Gui.Admin.ProviderType"/>
-    /// member, or empty/unrecognized for a provider stored before the field existed (falls back to <c>Other</c>).
+    /// The stored template key, a legacy family name, or empty. Reopens as that key when it is one of
+    /// <see cref="Templates"/>; <c>Anthropic</c>, <c>OpenAI</c>, and <c>GoogleGemini</c> map onto
+    /// <c>anthropic</c>, <c>openai</c>, and <c>gemini</c> when those keys are offered. Anything else
+    /// reopens as <c>Other</c>. A save that stays on that fallback keeps this stored value, including
+    /// when <see cref="TemplatesUnavailable"/> left no other choice. Picking a real template replaces it.
     /// </param>
     /// <param name="ProviderName">
     /// A user-friendly display name for the provider, distinct from the unique
@@ -522,7 +641,6 @@
         string Key,
         bool IsNew,
         string BaseUrl,
-        string AuthHeaderName,
         IReadOnlyList<ProviderHeaderView> Headers,
         bool IsFree,
         string ProviderType,

@@ -1,6 +1,8 @@
 using System.Globalization;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
@@ -22,13 +24,19 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.ProviderAdminServiceBase
 {
     private readonly ManagementFacade _facade;
+    private readonly ModelRoutingOptions _templates;
 
     /// <summary>Initializes a new instance of the <see cref="ProviderAdminGrpcService"/> class.</summary>
     /// <param name="facade">The shared management facade backing every read/write.</param>
-    public ProviderAdminGrpcService(ManagementFacade facade)
+    /// <param name="templates">
+    /// The appsettings <c>ModelRouting</c> section. Its <c>Providers</c> dictionary is the add-provider
+    /// template catalog. Defaults to an empty catalog when omitted (tests that construct the service directly).
+    /// </param>
+    public ProviderAdminGrpcService(ManagementFacade facade, IOptions<ModelRoutingOptions>? templates = null)
     {
         ArgumentNullException.ThrowIfNull(facade);
         _facade = facade;
+        _templates = templates?.Value ?? new ModelRoutingOptions();
     }
 
     /// <inheritdoc/>
@@ -36,6 +44,33 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         ServerCallContext context)
     {
         return Task.FromResult(ToWire(_facade.ListProviders()));
+    }
+
+    /// <inheritdoc/>
+    public override Task<Contract.ProviderTemplateListResponse> ListProviderTemplates(
+        Contract.ListProviderTemplatesRequest request, ServerCallContext context)
+    {
+        var response = new Contract.ProviderTemplateListResponse();
+        foreach (var template in ProviderTemplateCatalog.Project(_templates))
+        {
+            var wire = new Contract.ProviderTemplateView
+            {
+                Key = template.Key,
+                BaseUrl = template.BaseUrl,
+                IsFree = template.IsFree
+            };
+            foreach (var header in template.Headers)
+            {
+                var headerWire = new Contract.ProviderTemplateHeaderView { Name = header.Name, Locked = header.Locked };
+                if (header.Value is not null) headerWire.Value = header.Value;
+                if (header.ValueEnvVar is not null) headerWire.ValueEnvVar = header.ValueEnvVar;
+                wire.Headers.Add(headerWire);
+            }
+
+            response.Templates.Add(wire);
+        }
+
+        return Task.FromResult(response);
     }
 
     /// <inheritdoc/>
@@ -54,7 +89,6 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
 
         var write = new ProviderWriteRequest(
             BaseUrl: request.HasBaseUrl ? request.BaseUrl : null,
-            AuthHeaderName: request.HasAuthHeaderName ? request.AuthHeaderName : null,
             Headers: headers,
             IsFree: request.HasIsFree ? request.IsFree : null,
             Enabled: request.HasEnabled ? request.Enabled : null,
@@ -322,7 +356,6 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         {
             Key = provider.Key,
             BaseUrl = provider.BaseUrl,
-            AuthHeaderName = provider.AuthHeaderName,
             IsFree = provider.IsFree,
             DollarSpent = provider.DollarSpent.ToString(CultureInfo.InvariantCulture),
             TokensUsed = provider.TokensUsed,

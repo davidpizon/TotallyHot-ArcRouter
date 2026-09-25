@@ -30,7 +30,7 @@ public sealed class ProviderAdminGrpcServiceTests
         {
             Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                ["openai"] = new() { BaseUrl = "https://api.openai.com" }
             },
             ModelList =
             [
@@ -64,6 +64,48 @@ public sealed class ProviderAdminGrpcServiceTests
         {
             return handler(request);
         }
+    }
+
+    [Fact]
+    public async Task ListProviderTemplates_ProjectsLockedRowsWithoutTheirValuesAndPublicRowsInFull()
+    {
+        var templates = new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["anthropic"] = new()
+                {
+                    BaseUrl = "https://api.anthropic.com",
+                    Headers =
+                    [
+                        new ProviderHeader { Name = "x-api-key", ValueEnvVar = "ANTHROPIC_API_KEY", Locked = true },
+                        new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01", Locked = false }
+                    ]
+                },
+                ["ollama"] = new() { BaseUrl = "http://localhost:11434/v1", IsFree = true }
+            }
+        };
+        var facade = new ManagementFacade(store: new InMemoryProviderConfigStore(SeedOptions()),
+            environment: Mock.Of<IEnvironmentVariableProvider>(), httpClient: new HttpClient());
+        var service = new ProviderAdminGrpcService(facade: facade,
+            templates: Microsoft.Extensions.Options.Options.Create(templates));
+
+        var response = await service.ListProviderTemplates(request: new Contract.ListProviderTemplatesRequest(),
+            context: CreateContext());
+
+        var anthropic = response.Templates.Single(t => t.Key == "anthropic");
+        var credential = anthropic.Headers.Single(h => h.Name == "x-api-key");
+        Assert.True(credential.Locked);
+        Assert.Equal(expected: "ANTHROPIC_API_KEY", actual: credential.ValueEnvVar);
+        Assert.False(credential.HasValue);
+
+        var version = anthropic.Headers.Single(h => h.Name == "anthropic-version");
+        Assert.False(version.Locked);
+        Assert.Equal(expected: "2023-06-01", actual: version.Value);
+
+        var ollama = response.Templates.Single(t => t.Key == "ollama");
+        Assert.True(ollama.IsFree);
+        Assert.Empty(ollama.Headers);
     }
 
     private static ServerCallContext CreateContext()
@@ -323,7 +365,7 @@ public sealed class ProviderAdminGrpcServiceTests
             {
                 Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["openai"] = new() { BaseUrl = "https://api.openai.com", AuthHeaderName = "Authorization" }
+                    ["openai"] = new() { BaseUrl = "https://api.openai.com" }
                 }
             },
             dependencies: new ManagementFacadeDependencies

@@ -35,7 +35,8 @@ dropped field is written out as its default and is gone until someone hand-edits
 #### 1a. `MergeProvider` drops `EnableToolCallGuard` and all four `Aws*` fields
 
 [`MergeProvider`](../../src/TotallyHotArcRouter/Proxy/Management/ManagementFacade.cs) (~L227–251) sets
-`BaseUrl`, `AuthHeaderName`, `Headers`, `IsFree`, and `Enabled`. It omits:
+`BaseUrl`, `Headers`, `IsFree`, and `Enabled` (it also set `AuthHeaderName`, since removed by
+[ADR-0016](../adr/0016-remove-authheadername-and-mark-secrets-per-header.md)). It omits:
 
 - `EnableToolCallGuard`
 - `AwsRegion`, `AwsAccessKeyIdEnvVar`, `AwsSecretAccessKeyEnvVar`, `AwsSessionTokenEnvVar`

@@ -36,7 +36,7 @@ public sealed class ProvidersAdminLoadedTests
         var anthropic = new Contract.ProviderState
         {
             Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
-            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", IsFree = false, DollarCap = "100",
+            ProviderType = "Anthropic", IsFree = false, DollarCap = "100",
             TokenCap = 1_000_000, DollarSpent = "42.5", TokensUsed = 250000, Enabled = true, WindowKind = "Monthly",
             EndpointCapabilities = new Contract.EndpointCapabilitiesState
             {
@@ -59,14 +59,14 @@ public sealed class ProvidersAdminLoadedTests
 
         response.Providers.Add(new Contract.ProviderState
         {
-            Key = "ollama", BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization",
+            Key = "ollama", BaseUrl = "http://localhost:11434/v1",
             ProviderType = "LocalRuntime", IsFree = true, DollarSpent = "0", TokensUsed = 0, Enabled = false,
             WindowKind = "Monthly"
         });
 
         response.Providers.Add(new Contract.ProviderState
         {
-            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", AuthHeaderName = "Authorization",
+            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1",
             ProviderType = "OpenAI", IsFree = false, DollarSpent = "3.25", TokensUsed = 900, Enabled = true,
             WindowKind = "Monthly",
             EndpointCapabilities = new Contract.EndpointCapabilitiesState
@@ -88,7 +88,7 @@ public sealed class ProvidersAdminLoadedTests
         var anthropic = new Contract.ProviderState
         {
             Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
-            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "0", Enabled = true,
+            ProviderType = "Anthropic", DollarSpent = "0", Enabled = true,
             WindowKind = "Monthly", HasStoredAdminKey = true,
             ReportedUsage = new Contract.ProviderReportedUsageState
             {
@@ -122,7 +122,7 @@ public sealed class ProvidersAdminLoadedTests
         response.Providers.Add(new Contract.ProviderState
         {
             Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
-            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
+            ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
             Enabled = true, WindowKind = "Monthly",
             UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
             RateLimit = rateLimit
@@ -154,7 +154,7 @@ public sealed class ProvidersAdminLoadedTests
         response.Providers.Add(new Contract.ProviderState
         {
             Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
-            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
+            ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
             Enabled = true, WindowKind = "Monthly",
             UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
             RateLimit = rateLimit
@@ -170,17 +170,17 @@ public sealed class ProvidersAdminLoadedTests
         response.Providers.Add(new Contract.ProviderState
         {
             Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
-            AuthHeaderName = "x-api-key", ProviderType = "Anthropic", DollarSpent = "0", Enabled = true,
+            ProviderType = "Anthropic", DollarSpent = "0", Enabled = true,
             WindowKind = "Monthly"
         });
         response.Providers.Add(new Contract.ProviderState
         {
-            Key = "ollama", BaseUrl = "http://localhost:11434/v1", AuthHeaderName = "Authorization",
+            Key = "ollama", BaseUrl = "http://localhost:11434/v1",
             ProviderType = "LocalRuntime", IsFree = true, DollarSpent = "0", Enabled = false, WindowKind = "Monthly"
         });
         response.Providers.Add(new Contract.ProviderState
         {
-            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", AuthHeaderName = "Authorization",
+            Key = "openai", Name = "OpenAI", BaseUrl = "https://api.openai.com/v1",
             ProviderType = "OpenAI", DollarSpent = "0", Enabled = true, WindowKind = "Monthly",
             AdminAction = new Contract.ProviderInteractionState
             {
@@ -528,7 +528,7 @@ public sealed class ProvidersAdminLoadedTests
 
         // The round-trip bug: OpenEdit used to hardcode "Other", so an Anthropic provider always reopened
         // as Other and lost its type on the next save.
-        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be(nameof(ProviderType.Anthropic));
+        cut.Find("[data-testid='provider-type']").GetAttribute("value").Should().Be("anthropic");
         cut.Find("[data-testid='provider-name']").GetAttribute("value").Should().Be("Anthropic Prod");
     }
 
@@ -544,7 +544,7 @@ public sealed class ProvidersAdminLoadedTests
 
         cut.WaitForAssertion(() => client.LastUpsertProviderRequest.Should().NotBeNull());
         client.LastUpsertProviderRequest!.Key.Should().Be("anthropic");
-        client.LastUpsertProviderRequest.ProviderType.Should().Be("Anthropic");
+        client.LastUpsertProviderRequest.ProviderType.Should().Be("anthropic");
     }
 
     [Fact]
@@ -763,6 +763,30 @@ public sealed class ProvidersAdminLoadedTests
             Contract.ListProvidersRequest request, CallOptions options)
         {
             return Ok(Response);
+        }
+
+        public override AsyncUnaryCall<Contract.ProviderTemplateListResponse> ListProviderTemplatesAsync(
+            Contract.ListProviderTemplatesRequest request, CallOptions options)
+        {
+            var response = new Contract.ProviderTemplateListResponse
+            {
+                Templates =
+                {
+                    new Contract.ProviderTemplateView
+                    {
+                        Key = "anthropic",
+                        BaseUrl = "https://api.anthropic.com",
+                        IsFree = false,
+                        Headers = { new Contract.ProviderTemplateHeaderView { Name = "anthropic-version", Value = "2023-06-01" } }
+                    }
+                }
+            };
+            return new AsyncUnaryCall<Contract.ProviderTemplateListResponse>(
+                responseAsync: Task.FromResult(response),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
         }
 
         public override AsyncUnaryCall<Contract.ProviderListResponse> UpsertProviderAsync(

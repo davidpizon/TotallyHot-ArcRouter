@@ -11,7 +11,6 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// Governance UI.
 /// </param>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
-/// <param name="AuthHeaderName">The header carrying the credential (e.g. <c>Authorization</c>).</param>
 /// <param name="Models">The models configured to route to this provider.</param>
 /// <param name="Headers">The provider's configured custom headers (literal values are returned; secrets live in env vars).</param>
 /// <param name="IsFree">
@@ -30,10 +29,11 @@ namespace TotallyHot.ArcRouter.Gui.Admin;
 /// Providers. Enforced immediately on the next request by the proxy's routing path, no restart needed.
 /// </param>
 /// <param name="ProviderType">
-/// The name of the <see cref="Admin.ProviderType"/> member the operator selected for this provider, or
-/// <see langword="null"/> for one configured before the field existed (the editor then shows
-/// <see cref="Admin.ProviderType.Other"/>). Round-tripping this is what lets the editor reopen a provider
-/// with its own type - and therefore its own credential defaults - already selected.
+/// The add-provider template key the operator selected, or a legacy <see cref="Admin.ProviderType"/>
+/// member name. <see langword="null"/> for a provider configured before the field existed. The editor
+/// reopens a stored key directly, maps <c>Anthropic</c>, <c>OpenAI</c>, and <c>GoogleGemini</c> onto
+/// <c>anthropic</c>, <c>openai</c>, and <c>gemini</c> when those templates exist, and shows <c>Other</c>
+/// for every other stored value without rewriting the saved fields.
 /// </param>
 /// <param name="EndpointCapabilities">
 /// Which API flavors this provider's endpoint last answered to, as recorded by the proxy's own capability
@@ -86,7 +86,6 @@ public sealed record ProviderAdminView(
     string Key,
     string? Name,
     string BaseUrl,
-    string AuthHeaderName,
     IReadOnlyList<ModelAdminView> Models,
     IReadOnlyList<ProviderHeaderView> Headers,
     bool IsFree = false,
@@ -373,9 +372,9 @@ public sealed record ProviderHeaderView(
 /// Whether the literal value is a secret to withhold from future reads. Travels with
 /// the header whether or not <paramref name="Value"/> is resent, so a stored secret can be locked without
 /// retyping it, and it qualifies the blank rule: blank under <see langword="true"/> preserves the stored
-/// value, while blank under an explicit <see langword="false"/> clears it (the editor's unlock). Null is
-/// the legacy shape - blank preserves, and a literal stores locked. Ignored for an env-var-backed
-/// header.
+/// value, while blank under an explicit <see langword="false"/> clears it (the editor's unlock). Null means
+/// "leave the lock as it is" - a header already locked stays locked, a new one starts unlocked, and blank
+/// preserves. Ignored for an env-var-backed header.
 /// </param>
 public sealed record ProviderHeaderWriteModel(string? Name, string? Value, string? ValueEnvVar, bool? Locked = null);
 
@@ -384,7 +383,6 @@ public sealed record ProviderHeaderWriteModel(string? Name, string? Value, strin
 /// Authentication is expressed purely via <see cref="Headers"/>.
 /// </summary>
 /// <param name="BaseUrl">The provider's absolute base URL.</param>
-/// <param name="AuthHeaderName">The header carrying the credential.</param>
 /// <param name="Headers">
 /// The full set of custom headers to store (replaces the existing set, one header at
 /// a time via <see cref="ProviderHeaderWriteModel"/>'s blank-preserves-existing rule); null keeps them.
@@ -400,14 +398,14 @@ public sealed record ProviderHeaderWriteModel(string? Name, string? Value, strin
 /// non-empty becomes the trimmed string.
 /// </param>
 /// <param name="ProviderType">
-/// The name of the <see cref="Admin.ProviderType"/> member selected in the
-/// editor. Normalized exactly like <paramref name="ProviderName"/>: null preserves the existing value, so a
-/// partial write can't silently reset a provider's type; any other value is trimmed, and empty/whitespace
-/// becomes null (an explicit clear).
+/// The selected add-provider template key (a <c>ModelRouting:Providers</c> key, or <c>Other</c>), or a
+/// legacy <see cref="Admin.ProviderType"/> member name already stored on the provider. Normalized exactly
+/// like <paramref name="ProviderName"/>: null preserves the existing value, so a partial write can't
+/// silently reset a provider's type; any other value is trimmed, and empty/whitespace becomes null (an
+/// explicit clear).
 /// </param>
 public sealed record ProviderWriteRequest(
     string? BaseUrl,
-    string? AuthHeaderName,
     IReadOnlyList<ProviderHeaderWriteModel>? Headers = null,
     bool? IsFree = null,
     bool? Enabled = null,

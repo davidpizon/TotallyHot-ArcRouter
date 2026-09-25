@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Bunit;
+using Microsoft.AspNetCore.Components.Web;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
@@ -210,14 +211,18 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
-    public void Clicking_the_backdrop_invokes_OnClose()
+    public async Task Clicking_the_backdrop_invokes_OnClose()
     {
         using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _);
         var closed = false;
 
         var cut =
             ctx.Render<SettingsModal>(p => p.Add(parameterSelector: c => c.OnClose, callback: () => closed = true));
-        cut.Find("div").Click();
+        var backdrop = cut.Find("div.overlay-backdrop");
+
+        // Backdrop dismissal uses pointer events (mousedown + mouseup on backdrop)
+        await backdrop.TriggerEventAsync("onmousedown", new MouseEventArgs());
+        await backdrop.TriggerEventAsync("onmouseup", new MouseEventArgs());
 
         closed.Should().BeTrue();
     }

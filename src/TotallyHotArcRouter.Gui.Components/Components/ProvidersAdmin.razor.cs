@@ -37,7 +37,6 @@ public partial class ProvidersAdmin
         Key: string.Empty,
         false,
         BaseUrl: string.Empty,
-        AuthHeaderName: "Authorization",
         Headers: [],
         false,
         ProviderType: "Other",
@@ -106,6 +105,19 @@ public partial class ProvidersAdmin
         await Store.LoadAsync();
     }
 
+    /// <summary>
+    /// The display names of every currently configured provider other than the one <see cref="_dialogModel"/>
+    /// is editing (all of them, when adding a new provider), passed to <see cref="ProviderEditDialog"/> so it
+    /// can reject a name that collides with an existing provider before the operator can save.
+    /// </summary>
+    private IReadOnlyList<string> ExistingProviderNames =>
+        Store.Providers
+            .Where(p => !string.Equals(a: p.Key, b: _dialogModel.Key, comparisonType: StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .ToList();
+
     /// <summary>Opens the edit dialog seeded with blank/default fields for adding a new provider.</summary>
     private void OpenAdd()
     {
@@ -113,7 +125,6 @@ public partial class ProvidersAdmin
             Key: string.Empty,
             true,
             BaseUrl: string.Empty,
-            AuthHeaderName: "Authorization",
             Headers: [],
             false,
             ProviderType: "Other",
@@ -129,7 +140,6 @@ public partial class ProvidersAdmin
             Key: provider.Key,
             false,
             BaseUrl: provider.BaseUrl,
-            AuthHeaderName: provider.AuthHeaderName,
             Headers: provider.Headers,
             IsFree: provider.IsFree,
             // A provider stored before ProviderType existed has none; the dialog falls back to "Other"
@@ -156,7 +166,6 @@ public partial class ProvidersAdmin
     {
         var body = new ProviderWriteRequest(
             BaseUrl: result.BaseUrl,
-            AuthHeaderName: result.AuthHeaderName,
             Headers: result.Headers,
             IsFree: result.IsFree,
             ProviderName: result.ProviderName,

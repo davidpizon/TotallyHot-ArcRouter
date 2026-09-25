@@ -1,12 +1,14 @@
 namespace TotallyHot.ArcRouter.Gui.Admin;
 
 /// <summary>
-/// The type of AI provider, used to categorize providers and apply provider-specific defaults and validation rules.
+/// Legacy provider-family names persisted on <c>ProviderOptions.ProviderType</c> before the add-provider
+/// dropdown listed <c>ModelRouting:Providers</c> keys. <see cref="ProviderTemplates.ResolveStoredType"/>
+/// maps <see cref="Anthropic"/>, <see cref="OpenAI"/>, and <see cref="GoogleGemini"/> onto the matching
+/// template key when that key is configured. The other members do not identify a single template, so a
+/// provider stored with one of them reopens as <see cref="Other"/>.
 /// <para>
-/// Members are <em>families</em>, not individual vendors. Every endpoint that authenticates the same way
-/// shares one member, because that is the only axis this enum drives: <see cref="ProviderTemplates"/> maps
-/// each member to a base URL, an auth-header shape, and any headers the API requires. Two vendors whose
-/// only difference is the base URL therefore need no second member - the operator edits the URL.
+/// Members are <em>families</em>, not individual vendors. New providers persist the appsettings key
+/// (for example <c>anthropic</c>) rather than a member name.
 /// </para>
 /// </summary>
 /// <remarks>

@@ -48,6 +48,32 @@ public sealed class ProviderAdminClient
         return ToViews(response);
     }
 
+    /// <summary>
+    /// Lists the add-provider templates from <c>ModelRouting:Providers</c>. This is not the live provider list.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>One template per appsettings provider key, in configuration order.</returns>
+    /// <exception cref="GrpcAdminException">The request failed or the proxy returned an error.</exception>
+    public async Task<IReadOnlyList<ProviderTemplates.ProviderEditorTemplate>> GetProviderTemplatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var response = await CallAsync(
+            (client, ct) => client.ListProviderTemplatesAsync(new Contract.ListProviderTemplatesRequest(),
+                cancellationToken: ct),
+            "Could not read the provider templates",
+            cancellationToken).ConfigureAwait(false);
+
+        return response.Templates.Select(template => new ProviderTemplates.ProviderEditorTemplate(
+            Key: template.Key,
+            BaseUrl: template.BaseUrl,
+            IsFree: template.IsFree,
+            Headers: template.Headers.Select(header => new ProviderTemplates.ProviderTemplateHeader(
+                Name: header.Name,
+                Value: header.HasValue ? header.Value : null,
+                ValueEnvVar: header.HasValueEnvVar ? header.ValueEnvVar : null,
+                Locked: header.Locked)).ToList())).ToList();
+    }
+
     /// <summary>Adds or replaces a provider by key.</summary>
     /// <param name="key">The provider key.</param>
     /// <param name="body">The provider fields to write.</param>
@@ -59,7 +85,6 @@ public sealed class ProviderAdminClient
     {
         var request = new Contract.UpsertProviderRequest { Key = key, ReplaceHeaders = body.Headers is not null };
         if (body.BaseUrl is not null) request.BaseUrl = body.BaseUrl;
-        if (body.AuthHeaderName is not null) request.AuthHeaderName = body.AuthHeaderName;
         if (body.IsFree.HasValue) request.IsFree = body.IsFree.Value;
         if (body.Enabled.HasValue) request.Enabled = body.Enabled.Value;
         if (body.ProviderName is not null) request.ProviderName = body.ProviderName;
@@ -450,7 +475,6 @@ public sealed class ProviderAdminClient
             Key: provider.Key,
             Name: provider.HasName ? provider.Name : null,
             BaseUrl: provider.BaseUrl,
-            AuthHeaderName: provider.AuthHeaderName,
             Models: provider.Models.Select(ToView).ToList(),
             Headers: provider.Headers.Select(ToView).ToList(),
             IsFree: provider.IsFree,

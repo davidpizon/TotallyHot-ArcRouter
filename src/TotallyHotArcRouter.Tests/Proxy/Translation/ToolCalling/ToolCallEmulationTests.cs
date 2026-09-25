@@ -740,8 +740,7 @@ public class ToolCallEmulationTests
             Provider: "lmstudio",
             ProviderModelId: "tiny",
             UpstreamBaseUrl: new Uri("http://127.0.0.1:1234/v1"),
-            AuthHeaderName: "Authorization",
-            ExtraHeaders: []);
+            ExtraHeaders: [], ConfiguredHeaderNames: new HashSet<string>());
     }
 
     /// <summary>
