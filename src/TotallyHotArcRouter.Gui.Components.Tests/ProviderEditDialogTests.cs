@@ -253,6 +253,55 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void Reopening_a_provider_with_an_unresolved_type_and_switching_its_env_var_credential_to_a_literal_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        // The stored type names no current template, so nothing can say whether the row is a secret: lock it.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "LEGACY_API_KEY")
+                ],
+                providerType: "retired-template");
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed");
+        FindSaveButton(cut).Click();
+
+        saved!.Headers.Should().ContainSingle().Subject.Locked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Switching_a_row_from_an_env_var_to_a_literal_starts_with_an_empty_value()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "X-Custom", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "MY_ENV_VAR")
+                ]);
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").GetAttribute("value").Should().BeNullOrEmpty();
+    }
+
+    [Fact]
     public void A_template_that_declares_no_credential_adds_no_header_rows()
     {
         using var ctx = new BunitContext();
@@ -697,6 +746,22 @@ public sealed class ProviderEditDialogTests
         cut.Find("[data-testid='dialog-error']").TextContent
             .Should().Contain("Provider name 'OpenAI API' is already in use by another provider.");
         FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Name_collision_detection_trims_the_existing_names_too()
+    {
+        using var ctx = new BunitContext();
+
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(parameters: parameters, isNew: true, key: string.Empty, baseUrl: string.Empty);
+            parameters.Add(parameterSelector: p => p.ExistingProviderNames, value: [" OpenAI API "]);
+        });
+
+        cut.Find("[data-testid='provider-name']").Input("OpenAI API");
+
+        cut.Find("[data-testid='dialog-error']").TextContent.Should().Contain("already in use");
     }
 
     [Fact]
