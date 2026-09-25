@@ -950,10 +950,14 @@ internal sealed class ProviderManagementService
             Value = preservedValue,
             ValueEnvVar = existing?.ValueEnvVar,
             ValueSecretRef = preservedSecretRef,
-            // An env-var reference holds only a variable name, so it stores unlocked no matter what the caller
-            // asked for. Any other row keeps its lock, including a valueless one: a template's locked
-            // credential row is saved empty and must still lock the first key typed into it later.
-            Locked = locked && string.IsNullOrWhiteSpace(existing?.ValueEnvVar)
+            // A purely env-var-backed row (no literal, no protected-store reference) holds only a variable
+            // name, so it stores unlocked no matter what the caller asked for. Any other row keeps its lock,
+            // including a legacy row carrying both a literal and an env var (the literal is the source) and a
+            // valueless one: a template's locked credential row is saved empty and must still lock the first
+            // key typed into it later.
+            Locked = locked && !(!string.IsNullOrWhiteSpace(existing?.ValueEnvVar)
+                && string.IsNullOrWhiteSpace(preservedValue)
+                && string.IsNullOrWhiteSpace(preservedSecretRef))
         };
     }
 

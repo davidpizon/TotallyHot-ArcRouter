@@ -269,6 +269,36 @@ public sealed class ManagementFacadeTests
     }
 
     [Fact]
+    public async Task UpsertProviderAsync_LockedLegacyRowWithLiteralAndEnvVar_BlankWriteKeepsTheLock()
+    {
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openai"] = new()
+                {
+                    BaseUrl = "https://api.openai.com",
+                    Headers = [new ProviderHeader { Name = "X-Legacy", Value = "literal-secret", ValueEnvVar = "SOME_VAR", Locked = true }]
+                }
+            }
+        });
+        var facade = CreateFacade(store);
+
+        // The literal is the effective source of such a row, so a blank write must not unlock it and
+        // let ListProviders return the secret.
+        await facade.UpsertProviderAsync(
+            key: "openai",
+            request: new ProviderWriteRequest(
+                BaseUrl: "https://api.openai.com",
+                Headers: [new HeaderWriteRequest(Name: "X-Legacy", null, null, true)]),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var stored = store.Snapshot.Options.Providers["openai"].Headers.Single();
+        Assert.Equal(expected: "literal-secret", actual: stored.Value);
+        Assert.True(stored.Locked);
+    }
+
+    [Fact]
     public async Task UpsertProviderAsync_ExplicitlyUnlockedHeaderBlank_ClearsTheStoredValue()
     {
         var store = new InMemoryProviderConfigStore(SeedOptions());

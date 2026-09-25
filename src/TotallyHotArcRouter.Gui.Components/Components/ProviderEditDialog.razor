@@ -272,7 +272,9 @@
             {
                 Name = header.Name,
                 UseEnvVar = useEnvVar,
-                Locked = !useEnvVar && header.Locked,
+                // A literal row also locks when the selected template declares the header a secret, even if
+                // the stored row came back unlocked, so saving it unchanged cannot keep the credential readable.
+                Locked = !useEnvVar && (header.Locked || TemplateDeclaresSecret(header.Name)),
                 // An unlocked literal comes back in full and is shown as ordinary editable text. A locked
                 // one is never returned, so its row starts blank - HasStoredLiteralValue drives the
                 // "saved" placeholder below, and leaving the field blank on save preserves the stored
