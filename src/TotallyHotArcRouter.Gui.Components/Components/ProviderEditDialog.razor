@@ -10,7 +10,13 @@
         <div class="text-xs text-slate-500 mb-1">Provider Name</div>
         <input type="text" data-testid="provider-name" value="@_providerName" @oninput="e => _providerName = AsString(e.Value)"
                placeholder="e.g. My Anthropic Instance"
-               class="w-full px-3 py-2 text-sm ds-input"/>
+               aria-invalid="@(DuplicateNameError is null ? "false" : "true")"
+               aria-describedby="@(DuplicateNameError is null ? null : "provider-name-error")"
+               class="w-full px-3 py-2 text-sm ds-input @(DuplicateNameError is null ? "" : "border-red-500")"/>
+        @if (DuplicateNameError is { } nameError)
+        {
+            <div id="provider-name-error" class="rounded px-3 py-2 mt-2 mb-1 text-xs ds-step-critical" data-testid="provider-name-error">@nameError</div>
+        }
     </div>
 
     <div>
@@ -211,8 +217,11 @@
     private readonly List<HeaderRow> _headers = [];
     private FormBaseline _baseline;
 
-    /// <summary>The proxy-reported error, or the local validation reason when the form is not yet valid.</summary>
-    private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError ?? DuplicateNameError : Error;
+    /// <summary>
+    /// The proxy-reported error, or the duplicate-header reason when the form is not yet valid. A colliding
+    /// provider name is not included: it is shown next to the name field via <see cref="DuplicateNameError"/>.
+    /// </summary>
+    private string? DisplayedError => string.IsNullOrEmpty(Error) ? DuplicateHeaderError : Error;
 
     /// <summary>
     /// Whether the form has enough to submit: a base URL, a display name when adding a new provider, no

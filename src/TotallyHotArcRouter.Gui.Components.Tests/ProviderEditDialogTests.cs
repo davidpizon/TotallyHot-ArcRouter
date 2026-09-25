@@ -741,8 +741,9 @@ public sealed class ProviderEditDialogTests
         cut.Find("[data-testid='provider-name']").Input("OpenAI API");
         cut.Find("[data-testid='base-url']").Input("https://api.example.com");
 
-        cut.Find("[data-testid='dialog-error']").TextContent
+        cut.Find("[data-testid='provider-name-error']").TextContent
             .Should().Contain("Provider name 'OpenAI API' is already in use by another provider.");
+        cut.FindAll("[data-testid='dialog-error']").Should().BeEmpty();
         FindSaveButton(cut).HasAttribute("disabled").Should().BeTrue();
     }
 
@@ -759,7 +760,7 @@ public sealed class ProviderEditDialogTests
 
         cut.Find("[data-testid='provider-name']").Input("OpenAI API");
 
-        cut.Find("[data-testid='dialog-error']").TextContent.Should().Contain("already in use");
+        cut.Find("[data-testid='provider-name-error']").TextContent.Should().Contain("already in use");
     }
 
     [Fact]
