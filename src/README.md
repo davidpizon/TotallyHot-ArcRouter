@@ -157,7 +157,7 @@ value in this order:
 "my-provider": {
   "BaseUrl": "https://api.my-provider.com",
   "Headers": [
-    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY" }
+    { "Name": "Authorization", "ValueEnvVar": "MY_PROVIDER_API_KEY", "Locked": true }
   ]
 }
 ```
