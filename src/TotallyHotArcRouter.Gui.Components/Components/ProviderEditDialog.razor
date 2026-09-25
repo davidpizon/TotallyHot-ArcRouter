@@ -268,19 +268,21 @@
             // returned either), so it drives the same "saved, blank keeps it" placeholder - see
             // docs/router/secrets-at-rest-plan.md §4.
             var hasStoredSecret = header.Source == HeaderValueSource.Literal || header.Source == HeaderValueSource.Protected;
+            // A literal row also locks when the selected template declares the header a secret, even if
+            // the stored row came back unlocked, so saving it unchanged cannot keep the credential readable.
+            var locked = !useEnvVar && (header.Locked || TemplateDeclaresSecret(header.Name));
             _headers.Add(new HeaderRow
             {
                 Name = header.Name,
                 UseEnvVar = useEnvVar,
-                // A literal row also locks when the selected template declares the header a secret, even if
-                // the stored row came back unlocked, so saving it unchanged cannot keep the credential readable.
-                Locked = !useEnvVar && (header.Locked || TemplateDeclaresSecret(header.Name)),
+                Locked = locked,
                 // An unlocked literal comes back in full and is shown as ordinary editable text. A locked
-                // one is never returned, so its row starts blank - HasStoredLiteralValue drives the
-                // "saved" placeholder below, and leaving the field blank on save preserves the stored
-                // value (mirrors the API key field's blank-keeps-existing behavior).
-                Value = useEnvVar ? header.ValueEnvVar ?? string.Empty : header.Value ?? string.Empty,
-                HasStoredLiteralValue = hasStoredSecret && header.Locked
+                // one is never shown - including a literal locked here only because the template declares
+                // it secret, whose returned value is dropped so it never reaches the password input's DOM.
+                // HasStoredLiteralValue drives the "saved" placeholder below, and leaving the field blank on
+                // save preserves the stored value (mirrors the API key field's blank-keeps-existing behavior).
+                Value = useEnvVar ? header.ValueEnvVar ?? string.Empty : locked ? string.Empty : header.Value ?? string.Empty,
+                HasStoredLiteralValue = hasStoredSecret && locked
             });
         }
 

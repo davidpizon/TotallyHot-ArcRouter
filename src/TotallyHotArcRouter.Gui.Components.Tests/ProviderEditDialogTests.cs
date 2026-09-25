@@ -818,6 +818,34 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void Reopening_an_unlocked_literal_the_template_declares_secret_locks_it_and_never_renders_the_value()
+    {
+        using var ctx = new BunitContext();
+
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                providerType: "openai",
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.Literal,
+                        ValueEnvVar: null, Value: "sk-exposed", Locked: false)
+                ]);
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        // The value the server returned for the unlocked row must not reach the password input's DOM.
+        cut.Markup.Should().NotContain("sk-exposed");
+        FindSaveButton(cut).Click();
+
+        var header = saved!.Headers.Should().ContainSingle().Subject;
+        header.Locked.Should().BeTrue();
+        header.Value.Should().BeNullOrEmpty();
+    }
+
+    [Fact]
     public void Switching_templates_after_a_base_url_edit_keeps_custom_headers()
     {
         using var ctx = new BunitContext();
