@@ -194,6 +194,35 @@ public sealed class ProviderEditDialogTests
     }
 
     [Fact]
+    public void With_the_catalog_unavailable_switching_an_env_var_credential_to_a_literal_still_locks_it()
+    {
+        using var ctx = new BunitContext();
+
+        // No template can be looked up, so the dialog cannot know the credential is a declared secret;
+        // it must lock rather than save the typed key readable.
+        ProviderEditDialog.ProviderEditResult? saved = null;
+        var cut = ctx.Render<ProviderEditDialog>(parameters =>
+        {
+            SeedEditParameters(
+                parameters: parameters,
+                headers:
+                [
+                    new ProviderHeaderView(Name: "Authorization", Source: HeaderValueSource.EnvVar,
+                        ValueEnvVar: "OPENAI_API_KEY")
+                ],
+                providerType: "openai");
+            parameters.Add(parameterSelector: p => p.TemplatesUnavailable, value: true);
+            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
+        });
+
+        cut.Find("[data-testid='header-source-0']").Change("literal");
+        cut.Find("[data-testid='header-value-0']").Input("sk-typed-without-catalog");
+        FindSaveButton(cut).Click();
+
+        saved!.Headers.Should().ContainSingle().Subject.Locked.Should().BeTrue();
+    }
+
+    [Fact]
     public void Reopening_a_provider_and_switching_its_env_var_credential_to_a_literal_still_locks_it()
     {
         using var ctx = new BunitContext();

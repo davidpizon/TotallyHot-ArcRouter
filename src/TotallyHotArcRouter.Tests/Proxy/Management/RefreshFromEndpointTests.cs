@@ -391,6 +391,28 @@ public sealed class RefreshFromEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshFromEndpoint_WhenDiscoveryFails_TheErrorNeverCarriesATokenFromTheBaseUrlPath()
+    {
+        var store = new InMemoryProviderConfigStore(new ModelRoutingOptions
+        {
+            Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["custom"] = new() { BaseUrl = "https://api.example.invalid/v1/path-secret" }
+            }
+        });
+        var handler = DiscoveryHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        var facade = Facade(store: store, discoveryHandler: handler,
+            interactionStatusStore: new ProviderInteractionStatusStore());
+
+        var result = await facade.RefreshFromEndpointAsync(key: "custom",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var message = Assert.Single(result.Value!.Providers).AdminAction!.Message;
+        Assert.Contains(expectedSubstring: "api.example.invalid", actualString: message);
+        Assert.DoesNotContain(expectedSubstring: "path-secret", actualString: message);
+    }
+
+    [Fact]
     public async Task RefreshFromEndpoint_WhenDiscoveryFails_TheErrorNeverEchoesTheUpstreamBody()
     {
         // A provider or reverse proxy can echo the Authorization value in its error body.

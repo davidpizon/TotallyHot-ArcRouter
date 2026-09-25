@@ -1004,16 +1004,17 @@ internal sealed class ProviderManagementService
     }
 
     /// <summary>
-    /// Scheme, host, port, and path of <paramref name="uri"/> for a log line. Userinfo, query, and fragment
-    /// are omitted: <c>BaseUrl</c> validation only requires an absolute URI, so those components can carry
-    /// credentials (e.g. <c>https://user:pass@host</c> or an API-key query string).
+    /// Scheme, host, and port of <paramref name="uri"/> for a log line or admin-facing error. Userinfo, path,
+    /// query, and fragment are omitted: <c>BaseUrl</c> validation only requires an absolute URI, so any of
+    /// those components can carry credentials (e.g. <c>https://user:pass@host</c>, an API-key query string, or
+    /// a token in a path segment such as <c>/v1/&lt;token&gt;</c>).
     /// </summary>
     /// <param name="uri">A URI built from a provider's configured <c>BaseUrl</c>.</param>
     /// <returns>The URI with credential-bearing components removed.</returns>
     private static string RedactUriForLog(Uri uri)
     {
         return uri.GetComponents(
-            components: UriComponents.Scheme | UriComponents.Host | UriComponents.Port | UriComponents.Path,
+            components: UriComponents.SchemeAndServer,
             format: UriFormat.Unescaped);
     }
 
