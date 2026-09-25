@@ -284,7 +284,6 @@ public sealed class ProviderEditDialogTests
     {
         using var ctx = new BunitContext();
 
-        ProviderEditDialog.ProviderEditResult? saved = null;
         var cut = ctx.Render<ProviderEditDialog>(parameters =>
         {
             SeedEditParameters(
@@ -294,7 +293,6 @@ public sealed class ProviderEditDialogTests
                     new ProviderHeaderView(Name: "X-Custom", Source: HeaderValueSource.EnvVar,
                         ValueEnvVar: "MY_ENV_VAR")
                 ]);
-            parameters.Add(parameterSelector: p => p.OnSave, callback: r => saved = r);
         });
 
         cut.Find("[data-testid='header-source-0']").Change("literal");
