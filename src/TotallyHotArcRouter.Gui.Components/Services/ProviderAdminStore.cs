@@ -414,8 +414,9 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
     }
 
     /// <summary>
-    /// Scheme, host, port, and path of <paramref name="baseUrl"/> for a debug log. Userinfo, query, and
-    /// fragment are omitted: validation only requires an absolute URI, so those parts can carry credentials.
+    /// Scheme, host, and port of <paramref name="baseUrl"/> for a debug log. Userinfo, path, query, and
+    /// fragment are omitted: validation only requires an absolute URI, so those parts can carry credentials
+    /// (for example a token in a path segment).
     /// An unparseable value is replaced so the raw string is never written.
     /// </summary>
     /// <param name="baseUrl">The provider base URL about to be saved, or null when the write omits it.</param>
@@ -427,7 +428,7 @@ public sealed class ProviderAdminStore : AdminStoreBase<ProviderAdminClient>
             return "(invalid)";
 
         return uri.GetComponents(
-            components: UriComponents.Scheme | UriComponents.Host | UriComponents.Port | UriComponents.Path,
+            components: UriComponents.Scheme | UriComponents.Host | UriComponents.Port,
             format: UriFormat.Unescaped);
     }
 }

@@ -496,7 +496,7 @@ public sealed class RefreshFromEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task RefreshFromEndpoint_WhenDiscoveryReturns401_LogsTheFailure()
+    public async Task RefreshFromEndpoint_WhenDiscoveryReturns401_LogsTheStatusWithoutTheUpstreamBody()
     {
         var logger = new Mock<ILogger>();
         logger.Setup(l => l.IsEnabled(LogLevel.Warning)).Returns(true);
@@ -514,7 +514,7 @@ public sealed class RefreshFromEndpointTests : IDisposable
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
                     state.ToString()!.Contains("401", StringComparison.Ordinal)
-                    && state.ToString()!.Contains("Incorrect API key provided", StringComparison.Ordinal)),
+                    && !state.ToString()!.Contains("Incorrect API key provided", StringComparison.Ordinal)),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

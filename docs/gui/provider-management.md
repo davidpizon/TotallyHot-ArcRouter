@@ -86,15 +86,16 @@ flowchart LR
 
 The edit dialog's **Provider Type** dropdown lists one option per key in `ModelRouting:Providers`
 (`appsettings.json`), then a blank **Other** choice. Selecting a key pre-fills that entry's base URL,
-free-provider flag, auth-header name, and custom headers other than the credential header. The operator
-can change the base URL and headers afterward. The list is the configured catalog, not a hardcoded set
+free-provider flag, and every header the template projects, including the credential row (a locked
+literal, or an env-var-backed value when the template names one). The operator can change the base URL
+and headers afterward. The list is the configured catalog, not a hardcoded set
 of families: keys such as `alibaba` or `bedrock-anthropic` appear when they are configured, and a new
 key needs no GUI change.
 
-`Other` is reserved. `ModelRoutingOptions` rejects a provider key with that spelling (any casing),
-because the dialog uses it as the blank choice. It means the operator fills the form in without a
-template. The credential row is not copied from the catalog: the dialog records the template's auth
-header name, and the operator adds the credential header themselves.
+`Other` is reserved. The `appsettings.json` template catalog rejects a provider key with that spelling
+(any casing; `ProviderTemplateCatalog.Project`), because the dialog uses it as the blank choice. The live
+provider store still allows it. It means the operator fills the form in without a template, adding any
+credential header themselves.
 
 A stored `ProviderType` reopens on its catalog key when that key is present, case-insensitively.
 Legacy names that identify one shipped entry still map when that entry exists: `Anthropic` →

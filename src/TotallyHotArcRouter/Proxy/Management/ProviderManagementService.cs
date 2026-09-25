@@ -1095,8 +1095,6 @@ internal sealed class ProviderManagementService
                 .SendAsync(request: requestMessage, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                var detail = await ReadProviderErrorDetailAsync(response: response, cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
                 var statusCode = (int)response.StatusCode;
                 // Logged only on failure. A local runtime that configures no credential must not warn on
                 // every successful refresh.
@@ -1104,12 +1102,12 @@ internal sealed class ProviderManagementService
                     ? "none"
                     : string.Join(separator: ", ", values: rejectedHeaders.Select(SanitizeForLog));
                 _logger?.LogWarning(
-                    "Model discovery failed for {Url}: provider returned {StatusCode}. Authorization header sent: {AuthorizationSent}. Rejected header names: {RejectedHeaders}. {Detail}",
-                    RedactUriForLog(target), statusCode, authorizationSent, rejected, detail ?? "No error body.");
+                    "Model discovery failed for {Url}: provider returned {StatusCode}. Authorization header sent: {AuthorizationSent}. Rejected header names: {RejectedHeaders}.",
+                    RedactUriForLog(target), statusCode, authorizationSent, rejected);
                 // This string reaches the admin client and the interaction status, so it gets the same
                 // redacted target as the log line: BaseUrl may carry userinfo or an API key in its query.
-                // The upstream detail stays in the log only: a provider or reverse proxy can echo the
-                // Authorization value back in its error body, and this string reaches the admin client.
+                // The upstream error body is deliberately in neither: a provider or reverse proxy can echo the
+                // Authorization value back in it, and it is not redacted against the resolved secrets.
                 var error = $"Provider returned {statusCode} for {RedactUriForLog(target)}.";
                 if (authorizationConfigured && !authorizationSent)
                     error += " No Authorization header was sent; the configured credential did not resolve.";
@@ -1124,70 +1122,13 @@ internal sealed class ProviderManagementService
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            _logger?.LogWarning(ex, "Model discovery failed for {Url}.", RedactUriForLog(target));
-            // ex.Message can embed the requested URI (userinfo, query key), so the admin client gets a generic
-            // message built from the redacted target; the full exception stays in the log above.
+            // ex.Message and its stack can embed the requested URI (userinfo, query key, path token), so
+            // neither the log nor the admin client gets the raw exception: only its type and the redacted target.
+            _logger?.LogWarning("Model discovery failed for {Url}: {ExceptionType}.",
+                RedactUriForLog(target), ex.GetType().Name);
             return new DiscoverModelsResponse(false, Models: [],
                 Error: $"Model discovery request to {RedactUriForLog(target)} failed ({ex.GetType().Name}); see the router log for details.");
         }
-    }
-
-    /// <summary>
-    /// Pulls a short, non-secret reason out of a failed model-list response so the log and the provider
-    /// card can say why, not only the status code. xAI and OpenAI put that reason on <c>error</c> (a string
-    /// or an object with <c>message</c>). Anything else — HTML, an empty body — contributes nothing.
-    /// </summary>
-    private static async Task<string?> ReadProviderErrorDetailAsync(HttpResponseMessage response,
-        CancellationToken cancellationToken)
-    {
-        string body;
-        try
-        {
-            body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or IOException)
-        {
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(body)) return null;
-
-        var trimmed = body.Trim();
-        if (trimmed[0] == '{')
-        {
-            try
-            {
-                using var document = JsonDocument.Parse(trimmed);
-                if (document.RootElement.TryGetProperty(propertyName: "error", value: out var error))
-                {
-                    if (error.ValueKind == JsonValueKind.String)
-                        return TruncateDetail(error.GetString());
-                    if (error.ValueKind == JsonValueKind.Object
-                        && error.TryGetProperty(propertyName: "message", value: out var message)
-                        && message.ValueKind == JsonValueKind.String)
-                        return TruncateDetail(message.GetString());
-                }
-            }
-            catch (JsonException)
-            {
-                return null;
-            }
-
-            return null;
-        }
-
-        // A non-JSON body is usually an HTML error page. Logging it adds noise and can be large.
-        return trimmed.Contains('<') ? null : TruncateDetail(trimmed);
-    }
-
-    /// <summary>Collapses a provider error string onto one line and caps it so a log record stays readable.</summary>
-    private static string? TruncateDetail(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return null;
-
-        var singleLine = value.ReplaceLineEndings(" ").Trim();
-        const int max = 240;
-        return singleLine.Length <= max ? singleLine : singleLine[..max];
     }
 
     /// <summary>Parses an OpenAI-shaped model-list JSON body and returns the <c>id</c> of each entry in its <c>data</c> array.</summary>

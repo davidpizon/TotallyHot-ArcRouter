@@ -68,13 +68,13 @@ public sealed class ProviderAdminStoreTests
     }
 
     [Fact]
-    public async Task UpsertProviderAsync_logs_the_base_url_without_userinfo_or_query()
+    public async Task UpsertProviderAsync_logs_the_base_url_without_userinfo_path_or_query()
     {
         var logger = new CapturingLogger();
         var store = new ProviderAdminStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress),
             logger: logger);
         var body = new ProviderWriteRequest(
-            BaseUrl: "https://operator:secret-token@api.example.com:8443/v1?api_key=secret-token#frag");
+            BaseUrl: "https://operator:secret-token@api.example.com:8443/v1/path-token?api_key=secret-token#frag");
 
         var act = () => store.UpsertProviderAsync(key: "openai", body: body);
 
@@ -82,7 +82,8 @@ public sealed class ProviderAdminStoreTests
         var message = logger.Messages.Should()
             .ContainSingle(m => m.Contains("Updating provider", StringComparison.Ordinal)).Which;
         message.Should().Contain("openai");
-        message.Should().Contain("https://api.example.com:8443/v1");
+        message.Should().Contain("https://api.example.com:8443");
+        message.Should().NotContain("path-token");
         message.Should().NotContain("secret-token");
         message.Should().NotContain("operator");
         message.Should().NotContain("api_key");
