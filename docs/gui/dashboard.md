@@ -254,9 +254,8 @@ flowchart TD
      so Pull Now resets the countdown off its own response. Past the due time it reads "due now" rather
      than counting negative: the panel can see the schedule but not the running cycle.
 
-   A proposed (not yet implemented) fourth section - per-model pricing/spend cards driven by real
-   `ModelRouting` config, with a functional date-range picker - is specified in
-   [`governance-model-cards.md`](governance-model-cards.md).
+   A per-model pricing/spend cards section was once proposed in
+   [`governance-model-cards.md`](governance-model-cards.md); it was withdrawn and the Governance tab has no Models page.
 
 6. **Console** (`ConsoleTab.razor`, full spec in [`console-tab-plan.md`](console-tab-plan.md)) - a
    real-time, color-coded log stream: every Serilog log event the proxy emits, normalized to

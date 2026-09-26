@@ -1,16 +1,11 @@
 # Governance Tab: Per-Model Cards (Configured Models + Live Pricing + Spend)
 
-> **Status: Spend half implemented (Phase 4 of
-> [`../router/token-tracking-implementation-plan.md`](../router/token-tracking-implementation-plan.md));
-> price half still proposed.** `Governance.razor` now has a "Models" sub-view
-> (`Components/GovernanceModelCards.razor`) rendering one card per `ModelRouting:ModelList` entry via
-> `ProviderAdminStore.Providers` (not the SignalR/gRPC push sketched in section 2 below - the
-> already-loaded `/admin/providers` model list was sufficient) with real spend from
-> `UsageStore`/`GET /admin/usage/rollup` (§5.15) over a fixed 30-day window, not the date-range picker
-> section 4 sketches. Every card still reads **"Price unavailable"**: this doc's dependency #1, a
-> live model price catalog channel to the GUI
-> ([`../router/model-price-catalog.md`](../router/model-price-catalog.md)), remains unbuilt, so
-> sections 3 and 4 below (pricing) are still a proposed design, not current behavior.
+> **Status: Withdrawn.** The Governance > Models sub-view (`GovernanceModelCards.razor`), which
+> rendered one spend card per `ModelRouting:ModelList` entry, was removed from the GUI; the Governance
+> tab no longer has a "Models" page. This document is kept only as design history for the proposed
+> per-model pricing cards and the live price-catalog dependency
+> ([`../router/model-price-catalog.md`](../router/model-price-catalog.md)). Everything below describes a
+> design that is not current behavior.
 
 ## Dependency
 

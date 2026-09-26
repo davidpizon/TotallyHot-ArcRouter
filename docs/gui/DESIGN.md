@@ -806,8 +806,7 @@ following classes have been added to support this, on top of the earlier round b
 - `.drag-enabled`/`.drag-disabled` cursor + `.drag-enabled.card-lifted` — replaced
   `PriceSourcesAdmin`'s conditional `style="cursor:@cursor"` with class binding
 - `.ls-provider-budget-chart`, `.ls-provider-trend-chart` — `ProvidersAdmin` chart container sizing
-- `.ls-price-overrides-grid`, `.ls-governance-grid` — grid-template-columns for `PriceOverridesAdmin`/
-  `GovernanceModelCards`
+- `.ls-price-overrides-grid` — grid-template-columns for `PriceOverridesAdmin`
 - `.ls-livestream-right-panel`, `.ls-model-distribution-panel` — panel sizing for `LiveStream`/
   `ModelDistribution`
 

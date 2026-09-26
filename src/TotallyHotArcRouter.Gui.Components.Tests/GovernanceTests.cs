@@ -42,21 +42,18 @@ public sealed class GovernanceTests
 
         // The toggle offers every sub-view, and Providers (ProvidersAdmin) is mounted first.
         cut.FindAll("button").Select(b => b.TextContent.Trim()).Should()
-            .Contain(["Providers", "Models", "Price Sources", "Benchmark Data"]);
+            .Contain(["Providers", "Price Sources", "Benchmark Data"]);
         cut.Markup.Should().Contain("Loading providers");
     }
 
     [Fact]
-    public async Task Switching_to_the_models_sub_view_renders_GovernanceModelCards()
+    public void Models_sub_view_is_gone()
     {
-        await using var ctx = NewContext();
+        using var ctx = NewContext();
 
         var cut = ctx.Render<Governance>();
-        // See Switching_to_the_price_sources_sub_view_renders_PriceSourcesAdmin's remarks on why this is
-        // InvokeAsync-wrapped.
-        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Models").Click());
 
-        cut.Markup.Should().Contain("Loading");
+        cut.FindAll("button").Select(b => b.TextContent.Trim()).Should().NotContain("Models");
     }
 
     [Fact]
