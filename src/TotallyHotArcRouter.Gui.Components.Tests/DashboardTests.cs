@@ -10,7 +10,7 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// <summary>
 /// Tests for the root <see cref="Dashboard"/> component: tab switching, the budget-alert status banner
 /// (now driven off real per-provider budget state from <see cref="ProviderAdminStore"/>, which is
-/// unreachable here so the banner reads "System Status: OK"), and the Settings modal toggle.
+/// unreachable here so the indicator reads "Budget Status: OK"), and the Settings modal toggle.
 /// </summary>
 public sealed class DashboardTests
 {
@@ -40,7 +40,9 @@ public sealed class DashboardTests
 
         var cut = ctx.Render<Dashboard>();
 
-        cut.Markup.Should().Contain("Router Optimization Engine");
+        cut.Markup.Should().Contain("img/logo.svg");
+        cut.Markup.Should().Contain("TotallyHot Arc Router");
+        cut.Markup.Should().NotContain("Router Optimization Engine");
         cut.Markup.Should().Contain("No conversations yet.");
         cut.Markup.Should().Contain(OpenAiCompatibleDropIn.BaseUrl);
     }
@@ -48,13 +50,14 @@ public sealed class DashboardTests
     [Fact]
     public void Shows_ok_status_when_no_provider_budgets_are_breached()
     {
-        // The budget banner is driven by real provider budget state; with the management API unreachable
-        // there are no providers (and so no breaches), so the banner shows the nominal OK state.
+        // The budget status indicator is driven by real provider budget state; with the management API unreachable
+        // there are no providers (and so no breaches), so it shows the nominal OK state.
         using var ctx = NewContext();
 
         var cut = ctx.Render<Dashboard>();
 
-        cut.Markup.Should().Contain("System Status: OK");
+        cut.Markup.Should().Contain("Budget Status:");
+        cut.Find("header").TextContent.Should().MatchRegex(@"Budget Status:\s*OK");
         cut.Markup.Should().NotContain("BREACHED");
         cut.Markup.Should().NotContain("APPROACHING LIMIT");
     }

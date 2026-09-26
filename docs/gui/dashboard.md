@@ -82,7 +82,7 @@ scrolling internally where their content can overflow.
 
 ```mermaid
 flowchart TD
-    Header["🤖 Router Optimization Engine — status banner — Settings"]
+    Header["Logo + TotallyHot Arc Router — status banner — Settings"]
     Ticker["Total Saved · System Tokens · Avg. Cost Reduction · ● LIVE"]
     Tabs["Sessions | Cost Analytics | Model Distribution | Report Card | Governance | Console"]
     Content["Active tab content"]
@@ -92,13 +92,13 @@ flowchart TD
 
 ### Header
 
-- Brand: `🤖 Router Optimization Engine`.
-- Status banner (center): reads live per-provider budget utilization from `ProviderAdminStore` (real
+- Brand: the app logo (`img/logo.svg`, 36px) followed by the wordmark "TotallyHot Arc Router" (`text-sm font-bold tracking-tight text-slate-100`).
+- Budget Status indicator (ticker row, after the token tiles, left side): reads live per-provider budget utilization from `ProviderAdminStore` (real
   caps + current-month spend). Providers with no budget are ignored.
-  - All budgeted providers under 80%: green pulsing dot + "System Status: OK".
+  - All budgeted providers under 80%: green pulsing dot + "Budget Status: OK".
   - Any provider ≥ 100%: red "🚨 N PROVIDER BREACHED" (or "N BREACHED" alongside approaching count).
   - Any provider ≥ 80% and < 100%: amber "⚠️ N PROVIDER APPROACHING LIMIT".
-  - Clicking the banner (when there's an alert) jumps to the **Governance** tab's Providers view.
+  - Clicking the indicator (when there's an alert) jumps to the **Governance** tab's Providers view.
 - **Settings** button (top right) opens the settings modal.
 - Ticker row: three aggregate stats (Total Saved, System Tokens, Avg. Cost Reduction) plus a `LIVE`
   indicator with a pulsing dot. System Tokens is real (`UsageStore.LoadSummaryAsync("all")`); the other
