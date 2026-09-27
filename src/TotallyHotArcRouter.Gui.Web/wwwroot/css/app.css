@@ -1364,10 +1364,6 @@ input[type="number"] {
   grid-template-columns: 1fr 1fr 1fr auto;
 }
 
-.ls-governance-grid {
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-}
-
 .ls-livestream-right-panel {
   min-width: 0;
 }

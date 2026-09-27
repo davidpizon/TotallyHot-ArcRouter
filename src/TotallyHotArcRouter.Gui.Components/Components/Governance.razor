@@ -1,6 +1,8 @@
-@* Governance tab: provider/credential/model management (now including per-provider monthly budgets) and
-   price data source control. The two concerns share the tab via a sub-view toggle. Budgets used to be a
-   third sub-view of hardcoded mock pools; they now live on each real provider's card in ProvidersAdmin. *@
+@* Governance tab: nine operator/admin panes sharing one sub-view toggle - Providers (credential/model
+   management plus per-provider monthly budgets), Price Sources, Price Overrides, Benchmark Data, Routing
+   Mode, Cluster Model, Router Model, Regret Harness, and Judge Calibration. Budgets used to be a separate
+   sub-view of hardcoded mock pools; they now live on each real provider's card in ProvidersAdmin. See
+   docs/gui/dashboard.md §"Governance" for what each pane does. *@
 <div class="h-full flex flex-col">
     @* Sub-view toggle *@
     <div class="flex items-center gap-1 mb-3 shrink-0">
@@ -18,12 +20,6 @@
     {
         <div class="flex-1 min-h-0">
             <ProvidersAdmin/>
-        </div>
-    }
-    else if (_view == GovView.Models)
-    {
-        <div class="flex-1 min-h-0">
-            <GovernanceModelCards/>
         </div>
     }
     else if (_view == GovView.PriceSources)
@@ -81,7 +77,6 @@
     private enum GovView
     {
         Providers,
-        Models,
         PriceSources,
         PriceOverrides,
         BenchmarkData,
@@ -95,7 +90,6 @@
     private static readonly (GovView View, string Label)[] Views =
     [
         (GovView.Providers, "Providers"),
-        (GovView.Models, "Models"),
         (GovView.PriceSources, "Price Sources"),
         (GovView.PriceOverrides, "Price Overrides"),
         (GovView.BenchmarkData, "Benchmark Data"),

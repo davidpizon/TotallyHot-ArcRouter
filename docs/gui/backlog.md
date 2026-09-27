@@ -72,11 +72,9 @@ data sources in
   earlier version of this bullet, which described the input as purely client-side; that was already
   stale by the time of writing.) [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md)'s
   deeper per-request usage ledger (`UsageLedger`/`IUsageLedger`) is also implemented, separately
-  from this budget/spend path. A first cut of
-  [`governance-model-cards.md`](governance-model-cards.md)'s per-model pricing/spend section now
-  exists (Governance > Models) with real spend from `UsageStore`, but every card still reads "Price
-  unavailable" — that doc's dependency #1, a live model price catalog channel to the GUI, is still
-  unbuilt, so the price half of the card is not yet done.
+  from this budget/spend path. The
+  per-model cards proposed in [`governance-model-cards.md`](governance-model-cards.md) were built as a
+  Governance > Models sub-view and later removed; that doc is now design history only.
 - ~~**Header ticker** (Total Saved / System Tokens / Avg. Cost Reduction) — still three hardcoded
   numbers~~. **Partially done** (Phase 4 §5.15): System Tokens is now real, from
   `UsageStore.LoadSummaryAsync("all")`. Total Saved and Avg. Cost Reduction stay mock and are still
