@@ -358,8 +358,8 @@ public sealed class PriceSourcesAdminTests
         await using var ctx = NewContext(client);
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
+        await cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).ClickAsync();
         cut.Markup.Should().Contain("Last pull refreshed");
 
         await DragAsync(cut: cut, 0, 1);
