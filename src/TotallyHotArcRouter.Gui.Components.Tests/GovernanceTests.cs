@@ -11,9 +11,10 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
 /// Tests for <see cref="Governance"/>: a sub-view toggle between <see cref="ProvidersAdmin"/>,
-/// <see cref="GovernanceModelCards"/>, <see cref="PriceSourcesAdmin"/>, <c>PriceOverridesAdmin</c>, and
-/// <see cref="BenchmarkData"/> (Providers is the default). Each sub-view's own behavior is covered by its
-/// own test file; here they're only smoke-tested via the toggle.
+/// <see cref="PriceSourcesAdmin"/>, <c>PriceOverridesAdmin</c>, <see cref="BenchmarkData"/>,
+/// <c>RoutingModeAdmin</c>, <c>ClusterModelAdmin</c>, <c>RouterModelAdmin</c>, <c>RegretHarnessAdmin</c>,
+/// and <c>JudgeCalibrationAdmin</c> (Providers is the default). Each sub-view's own behavior is covered
+/// by its own test file; here they're only smoke-tested via the toggle.
 /// </summary>
 public sealed class GovernanceTests
 {

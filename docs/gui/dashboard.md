@@ -82,8 +82,8 @@ scrolling internally where their content can overflow.
 
 ```mermaid
 flowchart TD
-    Header["Logo + TotallyHot Arc Router — status banner — Settings"]
-    Ticker["Total Saved · System Tokens · Avg. Cost Reduction · ● LIVE"]
+    Header["Logo + wordmark — Settings"]
+    Ticker["Budget Status · Total Saved · System Tokens · Avg. Cost Reduction · ● LIVE"]
     Tabs["Sessions | Cost Analytics | Model Distribution | Report Card | Governance | Console"]
     Content["Active tab content"]
 
@@ -225,7 +225,7 @@ flowchart TD
    (`LearningReportCardAggregator.GradeFromScore`). Score delta is observed score minus the frozen
    baseline's predicted score; a missing baseline prediction is skipped rather than drawn as zero.
 
-5. **Governance** (`Governance.razor`) - two sub-views behind a toggle:
+5. **Governance** (`Governance.razor`) - nine sub-views behind a toggle:
 
    - **Providers** (default, `ProvidersAdmin.razor`, full spec in
      [`provider-management.md`](provider-management.md)) - add/remove/edit provider endpoints,
@@ -256,6 +256,48 @@ flowchart TD
 
    A per-model pricing/spend cards section was once proposed in
    [`governance-model-cards.md`](governance-model-cards.md); it was withdrawn and the Governance tab has no Models page.
+
+   - **Price Overrides** (`PriceOverridesAdmin.razor`) - the top rung of the price-catalog resolution
+     ladder ([`model-price-catalog.md`](../router/model-price-catalog.md) §5.7): read-only diagnosis of
+     which configured models the automatic ladder still can't map an aggregator's naming onto, plus
+     add/remove of an operator-supplied `(source, aggregator model key)` → configured-model mapping.
+     Shares the injected `ProviderAdminStore` with Providers, so both panes share one
+     reachability/error shape.
+   - **Benchmark Data** (`BenchmarkData.razor`) - shows the CodeRouterBench corpus's freshness relative
+     to the published Hugging Face dataset and lets the operator sync it on demand, over the
+     `BenchmarkDataAdminService` gRPC API. No licensing constraint applies (unlike Price Sources' D5),
+     since the corpus is public benchmark data, so file names, sizes, and row counts are shown freely.
+   - **Routing Mode** (`RoutingModeAdmin.razor`,
+     [`orchestrator-live-path-plan.md`](../router/orchestrator-live-path-plan.md) §M3) - a read-only
+     report of whether the Orchestrator ensemble is the live routing policy, each voter's enablement and
+     weight, and the exploration setting, over the `RoutingModeAdminService` gRPC API. No mutation
+     controls: flipping any of this today means an `appsettings.json` change and a restart, so this pane
+     only ever reports what is currently bound.
+   - **Cluster Model** (`ClusterModelAdmin.razor`,
+     [`self-organizing-classification-plan.md`](../router/self-organizing-classification-plan.md) Phase
+     T5) - reports the trained self-organizing cluster model's status (artifact presence, chosen k,
+     per-cluster sizes and names, row-count provenance, training timestamp, entries accumulated since
+     the last retrain) and runs a retrain on demand with streamed bootstrap-embedding progress, over the
+     `ClusterModelAdminService` gRPC API. Also surfaces the transcript retention settings that gate the
+     corpus this model trains from.
+   - **Router Model** (`RouterModelAdmin.razor`,
+     [`live-feedback-learning-plan.md`](../router/live-feedback-learning-plan.md) Phase 5) - reports the
+     trained logreg voter's status (artifact presence, embedding dimension, row-count provenance, models
+     represented, training timestamp, entries accumulated since the last retrain) and runs a retrain on
+     demand with streamed bootstrap-embedding progress, over the `RouterModelAdminService` gRPC API.
+     Also surfaces the retrain threshold and live-sample-weight configuration.
+   - **Regret Harness** (`RegretHarnessAdmin.razor`,
+     [`regret-evaluation-harness-plan.md`](../router/regret-evaluation-harness-plan.md) N6) - reports
+     the last completed comparison run's report and re-runs it on demand with streamed coarse stage
+     progress, over the `RegretHarnessAdminService` gRPC API. Read-only and informational: unlike the
+     Router Model/Cluster Model panes, a run never mutates a live voter or writes an artifact the router
+     depends on.
+   - **Judge Calibration** (`JudgeCalibrationAdmin.razor`,
+     [`geval-shadow-scoring-plan.md`](../router/geval-shadow-scoring-plan.md) Phase G2) - how the G-Eval
+     judge's opinion compares with the static verifier's grade on the same requests, over the
+     `JudgeCalibrationAdminService` gRPC API. Read-only in the strongest sense: it starts nothing and
+     mutates nothing, and there is no run to trigger - the router recomputes on every read, so Refresh
+     and the initial load are the same call.
 
 6. **Console** (`ConsoleTab.razor`, full spec in [`console-tab-plan.md`](console-tab-plan.md)) - a
    real-time, color-coded log stream: every Serilog log event the proxy emits, normalized to
