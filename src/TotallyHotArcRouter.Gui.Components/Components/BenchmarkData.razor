@@ -52,9 +52,9 @@
         }
 
         @* ml-auto goes on this wrapper, not the button itself: .btn's own `margin: 0.25rem` shorthand
-           loads later in the compiled Tailwind blob and, at equal specificity, silently overwrites a
-           `margin-left: auto` placed directly on a .btn-classed element - see
-           docs/gui/DESIGN.md §7 on this stylesheet's cascade order. *@
+           is declared later in the compiled app.css than `.ml-auto`, and at equal selector specificity
+           the later declaration wins - so `margin-left: auto` placed directly on a .btn-classed element
+           gets silently overwritten back to 0.25rem. *@
         <div class="flex items-center mb-3">
             <div class="ml-auto">
                 <button @onclick="RunResync"

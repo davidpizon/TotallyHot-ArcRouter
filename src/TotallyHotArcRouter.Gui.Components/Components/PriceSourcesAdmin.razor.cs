@@ -104,7 +104,7 @@ public partial class PriceSourcesAdmin
         return RunAsync(() => Store.SetEnabledAsync(name: source.Name, enabled: !source.Enabled));
     }
 
-    /// <summary>Runs an ingestion cycle now. Implements the Pull Now button.</summary>
+    /// <summary>Runs an ingestion cycle now. Implements the Update button.</summary>
     private Task PullNow()
     {
         return RunAsync(() => Store.RefreshAsync());
@@ -294,8 +294,8 @@ public partial class PriceSourcesAdmin
     /// <remarks>
     /// It stops at "due now" rather than counting into negative time or auto-refreshing: the panel cannot see
     /// the cycle start, only its own arithmetic, so "due now" is the last thing it actually knows. The pull
-    /// itself lands whether or not anyone is looking, and the next interaction - or Pull Now - brings back
-    /// fresh counts and a fresh anchor.
+    /// itself lands whether or not anyone is looking, and the next interaction - or the Update button -
+    /// brings back fresh counts and a fresh anchor.
     /// </remarks>
     private string DescribeCountdown()
     {

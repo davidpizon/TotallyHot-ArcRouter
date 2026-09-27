@@ -83,7 +83,7 @@ public partial class BenchmarkData
     }
 
     /// <summary>
-    /// The top-of-page Resync button's label: "Updating…" while either card's store is mid-sync,
+    /// The top-of-page Update button's label: "Updating…" while either card's store is mid-sync,
     /// otherwise "Update".
     /// </summary>
     private string ResyncLabel()
@@ -93,9 +93,9 @@ public partial class BenchmarkData
 
     /// <summary>
     /// Runs both cards' sync operations together: the same call <see cref="RunAction"/> and
-    /// <see cref="RunVoterAction"/> make individually, so a single Resync click updates the corpus and the
-    /// local voter model in one step. Each already reports its own failures into its own card's error
-    /// banner, so running them concurrently is safe.
+    /// <see cref="RunVoterAction"/> make individually, so a single click on the top-of-page Update button
+    /// updates the corpus and the local voter model in one step. Each already reports its own failures
+    /// into its own card's error banner, so running them concurrently is safe.
     /// </summary>
     private Task RunResync()
     {
@@ -106,7 +106,7 @@ public partial class BenchmarkData
     /// The Task Matrix header button's label. The button is only enabled while an update is actually
     /// available, so the label just needs to distinguish that from a failed freshness probe: "Check
     /// Failed" when the last probe could not reach Hugging Face (surfaced even though the button stays
-    /// disabled in this state - re-checking is the top Resync button's job), "Updating…" for the duration
+    /// disabled in this state - re-checking is the top-of-page Update button's job), "Updating…" for the duration
     /// of a sync, and "Update" otherwise.
     /// </summary>
     private string ActionLabel()
@@ -122,7 +122,7 @@ public partial class BenchmarkData
     /// <summary>
     /// Updates the corpus. Only reachable while the header button is enabled (an update is available), but
     /// still recheck-first when freshness is unknown (CheckFailed, or no status yet) rather than
-    /// downloading blind - mirrors the top-of-page Resync button's per-card logic.
+    /// downloading blind - mirrors the top-of-page Update button's per-card logic.
     /// </summary>
     private Task RunAction()
     {
