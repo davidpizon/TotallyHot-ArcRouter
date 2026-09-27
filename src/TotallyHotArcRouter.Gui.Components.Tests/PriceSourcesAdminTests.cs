@@ -36,7 +36,7 @@ public sealed class PriceSourcesAdminTests
         cut.Markup.Should().Contain("litellm");
         cut.Markup.Should().Contain("ENABLED");
         cut.Markup.Should().Contain("1,247");
-        cut.Markup.Should().Contain("Pull Now");
+        cut.Markup.Should().Contain("Update");
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public sealed class PriceSourcesAdminTests
         cut.Markup.Should().Contain("Next pull in 4m");
 
         cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
 
         // Reset off the pull's own response - no follow-up call, no window showing a pull that already ran.
         cut.Markup.Should().Contain("Next pull in 5h 59m");
@@ -187,7 +187,7 @@ public sealed class PriceSourcesAdminTests
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
 
         client.RefreshCount.Should().Be(1);
         cut.Markup.Should().Contain("Last pull refreshed 42 prices");
@@ -205,7 +205,7 @@ public sealed class PriceSourcesAdminTests
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().Contain("simulated source outage");
     }
@@ -359,7 +359,7 @@ public sealed class PriceSourcesAdminTests
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
         cut.Markup.Should().Contain("Last pull refreshed");
 
         await DragAsync(cut: cut, 0, 1);
@@ -601,7 +601,7 @@ public sealed class PriceSourcesAdminTests
 
         var cut = ctx.Render<PriceSourcesAdmin>();
         cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Pull Now", comparisonType: StringComparison.Ordinal)).Click();
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
 
         cut.Markup.Should().Contain("Router unreachable");
     }

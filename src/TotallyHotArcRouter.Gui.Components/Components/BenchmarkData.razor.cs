@@ -83,12 +83,12 @@ public partial class BenchmarkData
     }
 
     /// <summary>
-    /// The top-of-page Resync button's label: "Resyncing…" while either card's store is mid-sync,
-    /// otherwise "Resync".
+    /// The top-of-page Resync button's label: "Updating…" while either card's store is mid-sync,
+    /// otherwise "Update".
     /// </summary>
     private string ResyncLabel()
     {
-        return Store.IsSyncing || VoterStore.IsSyncing ? "Resyncing…" : "Resync";
+        return Store.IsSyncing || VoterStore.IsSyncing ? "Updating…" : "Update";
     }
 
     /// <summary>

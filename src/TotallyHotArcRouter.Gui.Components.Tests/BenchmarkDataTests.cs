@@ -1,3 +1,4 @@
+using AngleSharp.Dom;
 using AwesomeAssertions;
 using Bunit;
 using System.Runtime.CompilerServices;
@@ -25,6 +26,15 @@ public sealed class BenchmarkDataTests
         ctx.Services.AddSingleton(new BenchmarkDataStore(client));
         ctx.Services.AddSingleton(new LlmRouterModelStore(voterClient));
         return ctx;
+    }
+
+    /// <summary>
+    /// The top-of-page button, identified by its wrapping ml-auto div rather than a class on the button
+    /// itself - see BenchmarkData.razor's comment on why ml-auto can't sit directly on a .btn element.
+    /// </summary>
+    private static bool IsTopPageButton(IElement button)
+    {
+        return button.ParentElement?.ClassList.Contains("ml-auto") == true;
     }
 
     [Fact]
@@ -72,8 +82,9 @@ public sealed class BenchmarkDataTests
         disclosure.HasAttribute("inert").Should().BeTrue();
 
         // The per-card button is disabled once current - there is nothing for it to update - and
-        // re-verifying against Hugging Face is now the top-of-page Resync button's job.
-        var button = cut.FindAll("button").First(b =>
+        // re-verifying against Hugging Face is now the top-of-page Update button's job. Excludes that
+        // top button (the only one carrying ml-auto) since it now shares the "Update" label too.
+        var button = cut.FindAll("button").Where(b => !IsTopPageButton(b)).First(b =>
             b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeTrue();
 
@@ -91,7 +102,8 @@ public sealed class BenchmarkDataTests
             new BenchmarkFileStatusInfo(FileName: "models.json", false, 0, 0, null)));
 
         var cut = ctx.Render<BenchmarkData>();
-        var button = cut.FindAll("button").First(b =>
+        // Excludes the top-of-page button (ml-auto), which now shares the "Update" label too.
+        var button = cut.FindAll("button").Where(b => !IsTopPageButton(b)).First(b =>
             b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeFalse();
 
@@ -166,7 +178,7 @@ public sealed class BenchmarkDataTests
         // HoldBeforeFinalStatus below) keeps running after Click() returns, so the two progress bars
         // and their later disappearance are asserted via WaitForAssertion rather than by awaiting Click().
         await cut.InvokeAsync(() =>
-            cut.FindAll("button")
+            cut.FindAll("button").Where(b => !IsTopPageButton(b))
                 .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
         await cut.WaitForAssertionAsync(() => cut.FindAll("[role=progressbar]").Should().HaveCount(2));
@@ -202,13 +214,14 @@ public sealed class BenchmarkDataTests
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button")
+        cut.FindAll("button").Where(b => !IsTopPageButton(b))
             .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
 
         client.SyncCount.Should().Be(1);
         // Once current, the button keeps its "Update" label but disables itself rather than exposing a
-        // clickable "Re-verify"/"Current" affordance.
-        var button = cut.FindAll("button").First(b =>
+        // clickable "Re-verify"/"Current" affordance. Excludes the top-of-page button (ml-auto), which
+        // now shares the "Update" label too.
+        var button = cut.FindAll("button").Where(b => !IsTopPageButton(b)).First(b =>
             b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
         button.HasAttribute("disabled").Should().BeTrue();
     }
@@ -218,14 +231,14 @@ public sealed class BenchmarkDataTests
     {
         // The individual per-card button disables itself once current, so this "Current -> sync, not
         // recheck" behavior (re-running the sync is the only way to confirm the ledger's recorded
-        // checksums still match what's on disk) is now only reachable through the top Resync button.
+        // checksums still match what's on disk) is now only reachable through the top Update button
+        // (selected by its unique ml-auto class - its label now matches the per-card buttons' too).
         var client = new FakeClient(state: BenchmarkDataAdminState.Current,
             new BenchmarkFileStatusInfo(FileName: "models.json", true, 1_400, 3, SyncedAtUtc: DateTimeOffset.UtcNow));
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
+        cut.FindAll("button").Single(IsTopPageButton).Click();
 
         client.SyncCount.Should().Be(1);
         client.RecheckCount.Should().Be(0);
@@ -235,13 +248,12 @@ public sealed class BenchmarkDataTests
     public void Resyncing_a_checkfailed_corpus_rechecks_rather_than_syncing_blind()
     {
         // Same reasoning as Resyncing_a_current_corpus_runs_a_sync_rather_than_a_recheck: the per-card
-        // button is disabled in CheckFailed, so retrying the check now goes through Resync.
+        // button is disabled in CheckFailed, so retrying the check now goes through the top button.
         var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "boom");
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
+        cut.FindAll("button").Single(IsTopPageButton).Click();
 
         client.RecheckCount.Should().Be(1);
         client.SyncCount.Should().Be(0);
@@ -259,8 +271,7 @@ public sealed class BenchmarkDataTests
         using var ctx = NewContext(client: client, voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
+        cut.FindAll("button").Single(IsTopPageButton).Click();
 
         client.SyncCount.Should().Be(1);
         voterClient.SyncCount.Should().Be(1);
@@ -279,20 +290,16 @@ public sealed class BenchmarkDataTests
         var cut = ctx.Render<BenchmarkData>();
 
         await cut.InvokeAsync(() =>
-            cut.FindAll("button")
+            cut.FindAll("button").Where(b => !IsTopPageButton(b))
                 .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click());
 
         await cut.WaitForAssertionAsync(() =>
-            cut.FindAll("button").First(b =>
-                    b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal))
-                .HasAttribute("disabled").Should().BeTrue());
+            cut.FindAll("button").Single(IsTopPageButton).HasAttribute("disabled").Should().BeTrue());
 
         tcs.SetResult();
 
         await cut.WaitForAssertionAsync(() =>
-            cut.FindAll("button").First(b =>
-                    b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal))
-                .HasAttribute("disabled").Should().BeFalse());
+            cut.FindAll("button").Single(IsTopPageButton).HasAttribute("disabled").Should().BeFalse());
     }
 
     [Fact]
@@ -316,7 +323,7 @@ public sealed class BenchmarkDataTests
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button")
+        cut.FindAll("button").Where(b => !IsTopPageButton(b))
             .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal)).Click();
         cut.FindAll("button")
             .First(b => b.TextContent.Contains(value: "Show", comparisonType: StringComparison.Ordinal)).Click();
@@ -389,10 +396,10 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void Voter_current_state_renders_a_disabled_update_button()
     {
-        // The voter section's own button (last "Update" button in the DOM, after the Task Matrix panel's)
-        // disables itself once current - there is nothing for it to update. Re-running the sync to
-        // re-verify already-cached files (checksum verification is in-memory only and doesn't survive a
-        // process restart) is now the top Resync button's job.
+        // The voter section's own button (last "Update" button in the DOM, after the Task Matrix panel's
+        // and the top-of-page one) disables itself once current - there is nothing for it to update.
+        // Re-running the sync to re-verify already-cached files (checksum verification is in-memory only
+        // and doesn't survive a process restart) is now the top Update button's job.
         var voterClient = new FakeVoterClient();
         using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
@@ -410,8 +417,7 @@ public sealed class BenchmarkDataTests
         using var ctx = NewContext(client: new FakeClient(BenchmarkDataAdminState.Current), voterClient: voterClient);
 
         var cut = ctx.Render<BenchmarkData>();
-        cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
+        cut.FindAll("button").Single(IsTopPageButton).Click();
 
         voterClient.SyncCount.Should().Be(1);
     }
@@ -554,9 +560,8 @@ public sealed class BenchmarkDataTests
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
-        // The per-card button is disabled in CheckFailed, so this now goes through Resync.
-        cut.FindAll("button")
-            .First(b => b.TextContent.Contains(value: "Resync", comparisonType: StringComparison.Ordinal)).Click();
+        // The per-card button is disabled in CheckFailed, so this now goes through the top button.
+        cut.FindAll("button").Single(IsTopPageButton).Click();
 
         cut.Markup.Should().NotContain("Router unreachable");
         cut.Markup.Should().Contain("Could not recheck the benchmark data");
