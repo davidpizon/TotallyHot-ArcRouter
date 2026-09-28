@@ -10,6 +10,7 @@ REST → gRPC — REST endpoints deleted in the web GUI migration) are removed.
 | [3](#3-research-deepseek-tool-call-delimiters-and-register-a-deepseek-dialect) | Open | Research DeepSeek tool-call delimiters and register a `deepseek` dialect |
 | [5](#5-get-a-human-review-of-phase-5s-three-design-decisions) | Open | Get a human review of Phase 5's three design decisions |
 | [6](#6-build-a-real-iprovidercostreconciler-for-gemini) | Open | Build a real `IProviderCostReconciler` for Gemini |
+| [8](#8-capture-and-analyze-real-claude-code-and-codex-traffic-before-deciding-adr-0017s-pin-policy) | Open | Capture and analyze real Claude Code and Codex traffic before deciding ADR-0017's pin policy |
 
 ---
 
@@ -272,5 +273,136 @@ billing API to reconcile against at all. Neither should be revisited under this 
 client (there is no way to test against real GCP billing data in CI). Since this cannot be verified
 end-to-end without a real GCP billing export, the PR that adds it should say so explicitly rather than
 implying parity with the Anthropic/OpenAI reconcilers' live-tested confidence.
+
+---
+
+## #8 Capture and analyze real Claude Code and Codex traffic before deciding ADR-0017's pin policy
+
+**Repo:** ArcRouter · **Status:** Open · **Filed:** 2026-09-28, from the review of PR #156 (harness
+presets) · **Blocks:** ADR-0017, open as
+[PR #159](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/159)
+
+### Why this is open
+
+ADR-0017 ([PR #159](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/159)) proposes restricting (pinning) an `auto`-routed request to capable models only when it carries a
+harness-specific tool or a feature only some backends honor. Its whole payoff depends on a fact nobody
+has measured: **how often real harness traffic carries those features.**
+
+The working assumption is that Claude Code sends `cache_control` (prompt caching) on most requests and
+Codex sends encrypted reasoning items (`include: ["reasoning.encrypted_content"]` plus `reasoning` input
+items) on most requests. Neither is confirmed. If they are near-universal *and* turn out to need pinning,
+feature-gated pinning degenerates into "always pin this harness", and building an inbound translator
+for that harness's dialect buys no routing freedom. If they are rare, or safely strippable, the
+translator is worth building. The ADR's PR stays open, unmerged, until this item answers that.
+
+Nothing in the router records this today. `TranscriptRecord`
+(`src/TotallyHotArcRouter/Transcripts/TranscriptRecord.cs`) keeps only the extracted newest-user-message
+text, not the request's structure. The Debug-level body log in `ProxyMiddleware` is truncated. Neither can
+answer "which fields and block types did this request carry".
+
+### What to do
+
+1. **Build a structural capture, not a content capture.** Add an opt-in, off-by-default census that
+   writes one JSON line per request with the request's *shape* and no user content:
+   - Harness identity, *derived from* `User-Agent` but never the raw value: the leading product token
+     only if it matches a fixed allowlist of known harnesses (e.g. `claude-cli`, `codex_cli_rs`), plus
+     the version parsed from that token. Any other `User-Agent` is recorded as `other` with its length.
+     This normalized name and version are the only header-derived values the census stores.
+   - Inbound path, which gives the dialect (`/v1/messages`, `/v1/responses`, `/v1/chat/completions`).
+   - The requested model, recorded as a value only when it is `auto`, a harness preset's name, or a model
+     id present in the router's own provider configuration. Any other model string is recorded as
+     `other` with its length. This is enough to separate step 3's `auto` and real-model-id captures.
+   - Every JSON key path present, with its value type and array length, under a key-name rule: keys at
+     protocol-structural levels (top-level request fields, message and input-item objects, content
+     blocks, tool definitions, `reasoning`, `thinking`) are kept verbatim, including unknown ones,
+     because they are the harness-drift signal step 5 looks for. Keys inside client- or model-chosen
+     maps (tool-call `input`/`arguments`, a tool schema's `properties`, `metadata`, and any object the
+     census does not recognize) are replaced with a fixed `*` segment, so a key name can never carry a
+     path, identifier or other user text.
+   - String values from a fixed allowlist only: content-block and item `type`, `role`, tool `type` and
+     tool `name`, `include` entries, `anthropic-beta` flags, `reasoning.effort`, `thinking.type`, and
+     the model rule above. All other strings are recorded as a length, never as a value. Prompts, code,
+     file paths and tool arguments must not be stored.
+   - Request header *names*, body size, message/item count, and the estimated prompt token count. No
+     header value is stored beyond the normalized harness identity above.
+   - A conversation key, so a marker's persistence across turns can be measured. Take it from
+     `SessionIdResolver` (`src/TotallyHotArcRouter/Telemetry/SessionIdResolver.cs`) when the harness
+     sends an explicit session id, and store only a salted hash of it (salt per capture run, never
+     written out). Otherwise fall back to history-prefix matching. That fallback needs extending first:
+     `MessageHistoryContinuityMatcher`
+     (`src/TotallyHotArcRouter/Telemetry/MessageHistoryContinuityMatcher.cs`) only fingerprints the
+     `messages` array, so it would give every `/v1/responses` request a fresh key. It needs to
+     fingerprint Responses `input` items the same way, and to chain requests that carry
+     `previous_response_id` onto the response they name. Record which source produced each key
+     (explicit / `messages` prefix / `input` prefix / response chain). Confirm on the first captured
+     sessions which explicit id each harness actually sends, and base the persistence analysis only on
+     keys whose source was confirmed stable.
+   - Response side: the streaming event types and content-block/item types seen. A signed thinking
+     block or encrypted reasoning item created in a response is what lands in the next request's history.
+
+   Put the census's detection code where ADR-0017's feature detectors will live
+   (`RequestBodyIntrospection`), so the census becomes the detector rather than throwaway tooling.
+   Optionally keep a *small* set (≤ 20 per harness) of full raw bodies for translator test fixtures.
+   Keep them outside the repo, scrub them by hand before any are committed, and never commit one that
+   holds real code or secrets.
+
+2. **Capture in a routing setup where every turn succeeds.** Point each harness at the router with
+   `auto`, but give the router a candidate pool of backends that speak that harness's dialect natively
+   (Anthropic for Claude Code; OpenAI Responses for Codex). A mixed pool would fail turns mid-session
+   and distort the traffic being measured.
+
+3. **Capture a second configuration with a real model id.** Harnesses gate features on the model name:
+   Codex picks its tool set by model family, and Claude Code gates thinking and context size by model id.
+   So for each harness, capture sessions with the harness preset's `auto` *and* with the harness's
+   default real model id. Compare the two.
+
+4. **Reach a substantial volume.** Minimums per harness, per configuration in step 3:
+   - At least **30 working sessions** and **2,000 requests**, over at least **5 separate days**.
+   - At least **2 repositories**: this .NET repo, plus one in another language.
+   - At least one current harness version, recorded. Capture a second version if one ships during
+     the window.
+   - Scenario coverage, each hit at least 3 times:
+     - Claude Code: a fresh session; a long session through at least one compaction; multi-step tool
+       loops; subagent (Task) use; plan mode; a resumed session; thinking on and off; MCP tools present.
+     - Codex: a fresh session; file edits via `apply_patch`; shell execution; a long session through
+       `/compact`; a resumed session; at least two reasoning-effort levels.
+   - Optional: a smaller sample from Aider and Cursor (Chat Completions dialect), to check whether any
+     backend-specific fields ride along on the Chat Completions path too.
+
+5. **Analyze and write it up** in `docs/router/harness-traffic-census.md`:
+   - Per harness and configuration: the share of requests carrying each field and block type, sorted
+     by frequency, and the co-occurrence of the candidate markers in ADR-0017's initial table.
+   - **Unknown fields:** anything the census saw that ADR-0017's table does not list. Harness drift is
+     the main way this policy will go stale.
+   - **Persistence:** once a marker appears in a conversation (e.g. a signed thinking block in the
+     history), for what share of the remaining turns does it stay present? That share decides whether
+     ADR-0017 also needs conversation stickiness.
+   - A proposed **Pin / Prefer / Strip** classification for every observed marker, each with its evidence.
+   - The **headline number** per harness: the share of requests that would still carry at least one
+     Pin marker under the proposed classification, checked against ADR-0017's decision threshold.
+   - Measured context sizes against the candidate models' context windows (ADR-0002's stored values).
+
+### Acceptance
+
+- `docs/router/harness-traffic-census.md` exists with the tables above, drawn from traffic that meets
+  the minimums in step 4. The report states the exact counts, dates and harness versions it covers.
+- The census capture is opt-in, off by default, and stores no prompt, code, path, argument or header
+  value. The one exception is the normalized harness name and version from step 1, taken from an
+  allowlisted `User-Agent` product token. Unit tests assert that a known secret-shaped string does not
+  appear in the census output when it is placed (a) in a string value, (b) as an object key inside tool
+  arguments and inside `metadata`, (c) as the requested model, (d) in a non-allowlisted `User-Agent`
+  and another header's value, and (e) as an explicit session id.
+- ADR-0017's PR (#159), kept open until now, is updated from the report: its marker table is replaced
+  by the measured classification and its decision rule is applied per harness. Then the ADR is set to
+  `accepted` and the PR merges (an ADR is accepted when its PR merges), or the PR is closed if the
+  census rejects the approach.
+- No raw request body lands in the repository unless it has been scrubbed and reviewed as a fixture.
+
+### Notes
+
+- The census is research instrumentation. Leave it opt-in and off by default after this item closes. If
+  ADR-0017 is accepted, its detectors reuse the same code on the hot path.
+- Don't infer the answer from vendor docs instead of doing the capture. What the docs allow and what
+  the harness sends by default are different questions, and only the second one sets the pin policy.
 
 ---
