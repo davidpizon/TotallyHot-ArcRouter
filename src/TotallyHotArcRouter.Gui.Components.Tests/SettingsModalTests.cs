@@ -213,7 +213,7 @@ public sealed class SettingsModalTests
     [Fact]
     public async Task Clicking_the_backdrop_invokes_OnClose()
     {
-        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _);
+        await using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _);
         var closed = false;
 
         var cut =
