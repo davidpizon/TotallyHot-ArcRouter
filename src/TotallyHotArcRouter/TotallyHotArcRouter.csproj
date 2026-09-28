@@ -69,7 +69,7 @@
          when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
     <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.7" />
-    <PackageReference Include="Grpc.AspNetCore" Version="2.83.0" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.84.0" />
     <PackageReference Include="Grpc.Tools" Version="2.84.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -79,7 +79,7 @@
          trailers-based HTTP/2 gRPC directly) can call them via grpc-web's HTTP/1.1-or-HTTP/2-safe
          framing. No IDL/codegen change - it wraps the same generated service types the native gRPC
          listener (port 5002, retired in Phase P9) already serves. -->
-    <PackageReference Include="Grpc.AspNetCore.Web" Version="2.83.0" />
+    <PackageReference Include="Grpc.AspNetCore.Web" Version="2.84.0" />
     <!-- First database dependency in the repo: the model price catalog's SQLite store
          (docs/router/model-price-catalog.md). Nothing used a database before - router memory is a
          plain JSON file. -->
@@ -94,7 +94,7 @@
     <!-- Autoregressive generation (KV-cache, greedy sampling, tokenization) for the llm_router voter's
          local ONNX-hosted small instruct model (PLAN.md Phase L) - owns exactly the generation-loop
          complexity the plain Microsoft.ML.OnnxRuntime session above would otherwise require hand-rolling. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.16.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.17.0" />
     <!-- Local tiktoken encodings for the counterfactual token estimator (ADR-0009). Encoding data is
          embedded in the .Data.* packages, so unlike the ONNX artifacts there is no first-run download.
          cl100k_base covers the GPT-4/3.5 family, o200k_base the GPT-4o family; Claude models are counted
