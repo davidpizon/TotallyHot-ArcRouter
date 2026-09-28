@@ -38,12 +38,15 @@ is a Node process; if it ignores the OS store, set `NODE_EXTRA_CA_CERTS` to `rou
 
 ## Limitation
 
-Claude Code sends Anthropic Messages bodies to `POST /v1/messages`. Arc Router already accepts
-that path. It rewrites `model` to the selected backend's id and, when that backend is Anthropic,
-forwards the rest of the Messages body unchanged. `"model": "auto"` is a routing request, so the
-chosen backend can be something else. This router does not translate a native Messages body into
-another provider's API. A turn whose route is not Anthropic fails unless that backend accepts the
-Anthropic body on the forwarded path. This preset does not add that translation.
+Claude Code sends Anthropic Messages bodies to `POST /v1/messages`. Arc Router accepts that path
+and rewrites `model` to the selected backend's id. When the selected backend is Anthropic, the
+router leaves the rest of the Messages body unchanged and forwards it.
+
+There is no supported end-to-end translation of that native Messages turn onto another provider.
+A Gemini or Bedrock candidate still runs its request and response translator on `/v1/messages`;
+only the Anthropic translator skips that path. Those translators read an OpenAI chat-completions
+body and write an OpenAI-shaped response, which is the wrong shape for Claude Code. `"model":
+"auto"` can select one of those backends. This preset does not add a Messages round trip.
 
 Two Claude Code behaviors change whenever `ANTHROPIC_BASE_URL` is not `api.anthropic.com`: Remote
 Control stays off, and MCP tool search stays off unless you set `ENABLE_TOOL_SEARCH=true`. The
