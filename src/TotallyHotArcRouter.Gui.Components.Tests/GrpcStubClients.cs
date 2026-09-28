@@ -15,8 +15,6 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 internal sealed class StubProviderAdminServiceClient : Contract.ProviderAdminService.ProviderAdminServiceClient
 {
-    public Contract.ProviderListResponse ListProvidersResponse { get; init; } = new();
-
     public RpcException? Failure { get; init; }
 
     public override AsyncUnaryCall<Contract.ProviderListResponse> ListProvidersAsync(
@@ -24,7 +22,7 @@ internal sealed class StubProviderAdminServiceClient : Contract.ProviderAdminSer
     {
         return new AsyncUnaryCall<Contract.ProviderListResponse>(
             responseAsync: Failure is null
-                ? Task.FromResult(ListProvidersResponse)
+                ? Task.FromResult(new Contract.ProviderListResponse())
                 : Task.FromException<Contract.ProviderListResponse>(Failure),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => Status.DefaultSuccess,
@@ -36,8 +34,6 @@ internal sealed class StubProviderAdminServiceClient : Contract.ProviderAdminSer
 /// <summary>See <see cref="StubProviderAdminServiceClient"/>'s remarks - the <c>UsageAdminService</c> counterpart.</summary>
 internal sealed class StubUsageAdminServiceClient : Contract.UsageAdminService.UsageAdminServiceClient
 {
-    public Contract.UsageRollupResponse RollupResponse { get; init; } = new();
-
     public RpcException? Failure { get; init; }
 
     public override AsyncUnaryCall<Contract.UsageRollupResponse> GetUsageRollupAsync(
@@ -45,7 +41,7 @@ internal sealed class StubUsageAdminServiceClient : Contract.UsageAdminService.U
     {
         return new AsyncUnaryCall<Contract.UsageRollupResponse>(
             responseAsync: Failure is null
-                ? Task.FromResult(RollupResponse)
+                ? Task.FromResult(new Contract.UsageRollupResponse())
                 : Task.FromException<Contract.UsageRollupResponse>(Failure),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => Status.DefaultSuccess,
