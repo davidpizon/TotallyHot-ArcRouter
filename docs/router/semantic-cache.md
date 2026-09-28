@@ -84,7 +84,7 @@ Scope is the resolved provider key plus the upstream provider model id, plus a h
 ## Invalidation
 
 - **TTL.** Entries expire from the time they were stored. Shortening `TimeToLive` takes effect on the next lookup. Lengthening it can serve an entry that is still inside the new window. A hit does not refresh the timestamp.
-- **Clear.** `ISemanticResponseCache.Clear()` drops every entry. Raising `CacheEpoch` does the same on the next lookup or store, which is the config-file way to clear without a restart. Restarting the process also clears the cache: the store is in memory, not a database.
+- **Clear.** `SemanticResponseCache.Clear()` drops every entry. Raising `CacheEpoch` does the same on the next lookup or store, which is the config-file way to clear without a restart. Restarting the process also clears the cache: the store is in memory, not a database.
 - **Embedding model change.** Entries stamped with a different `ModelIdentity` are not served.
 - **Scope change.** A different model, alias that resolves elsewhere, or different generation settings is a miss. Saved entries for the old scope are left alone until they expire, are evicted, or the cache is cleared.
 

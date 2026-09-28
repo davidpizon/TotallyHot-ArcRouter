@@ -5,11 +5,11 @@ using TotallyHot.ArcRouter.Proxy;
 namespace TotallyHot.ArcRouter.Cache;
 
 /// <summary>
-/// The proxy's adapter for <see cref="ISemanticResponseCache"/>. Looks up before the upstream call and
+/// The proxy's adapter for <see cref="SemanticResponseCache"/>. Looks up before the upstream call and
 /// stores after a complete successful response, and writes the log lines the Console tab shows.
 /// </summary>
 /// <remarks>
-/// A null cache, or a cache with <see cref="ISemanticResponseCache.IsEnabled"/> false, returns without
+/// A null cache, or a cache with <see cref="SemanticResponseCache.IsEnabled"/> false, returns without
 /// logging, without a header, and without touching stored entries. That is the default.
 /// </remarks>
 internal sealed class SemanticCacheCoordinator
@@ -92,7 +92,8 @@ internal sealed class SemanticCacheCoordinator
             context.Items[ProbeItemKey] = probe;
             var modelName = LogRedaction.Sanitize(route.ModelName);
 
-            if (result.IsHit && result.Body is not null && result.ContentType is not null && !context.Response.HasStarted)
+            if (result is { IsHit: true, Body: { } responseBody, ContentType: { } contentType } &&
+                !context.Response.HasStarted)
             {
                 _logger.LogInformation(
                     message:
@@ -104,10 +105,10 @@ internal sealed class SemanticCacheCoordinator
                     routedModel: route.ModelName,
                     substitutionReason: resolution.SubstitutionReason).WriteTo(context);
                 context.Response.StatusCode = StatusCodes.Status200OK;
-                context.Response.ContentType = result.ContentType;
-                context.Response.ContentLength = result.Body.Length;
+                context.Response.ContentType = contentType;
+                context.Response.ContentLength = responseBody.Length;
                 context.Response.Headers[HeaderName] = "hit";
-                await context.Response.Body.WriteAsync(buffer: result.Body, cancellationToken: context.RequestAborted);
+                await context.Response.Body.WriteAsync(buffer: responseBody, cancellationToken: context.RequestAborted);
                 return true;
             }
 

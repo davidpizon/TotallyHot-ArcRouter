@@ -6,38 +6,6 @@ using TotallyHot.ArcRouter.Router.Embeddings;
 namespace TotallyHot.ArcRouter.Cache;
 
 /// <summary>
-/// In-process store of saved completions, keyed by the routing embedding plus a compatibility scope.
-/// </summary>
-/// <remarks>
-/// The implementation does not embed text. Callers pass the vector
-/// <see cref="TotallyHot.ArcRouter.Proxy.RequestInterceptor"/> already computed with
-/// <see cref="IEmbeddingClient"/>, and similarity is
-/// <see cref="EmbeddingMemory.CosineSimilarity"/>. A second embedding stack is intentionally absent.
-/// Entries live in memory: a process restart clears them, as does <see cref="Clear"/> and a change to
-/// <see cref="SemanticCacheOptions.CacheEpoch"/>.
-/// </remarks>
-public interface ISemanticResponseCache
-{
-    /// <summary>
-    /// Gets whether lookup and store are active. When <see langword="false"/>, <see cref="Count"/> may
-    /// still reflect entries from an earlier enabled period, but they are not read or added to.
-    /// </summary>
-    bool IsEnabled { get; }
-
-    /// <summary>Gets how many answers are currently stored, including ones a disabled cache will not serve.</summary>
-    int Count { get; }
-
-    /// <summary>
-    /// Gets how many cosine comparisons lookups have performed. Stays at 0 across disabled lookups, which
-    /// return before scanning. Useful for tests and for confirming a disabled cache is not doing work.
-    /// </summary>
-    int ComparisonCount { get; }
-
-    /// <summary>Drops every stored answer.</summary>
-    void Clear();
-}
-
-/// <summary>
 /// The inputs a lookup needs: the routing task embedding, the compatibility scope, and the model name
 /// used only for logs.
 /// </summary>
@@ -111,15 +79,24 @@ internal sealed class SemanticCacheLookupResult
 }
 
 /// <summary>
-/// The default <see cref="ISemanticResponseCache"/>: a lock-guarded list of answers, expired by
-/// <see cref="SemanticCacheOptions.TimeToLive"/> at lookup time and trimmed to
+/// In-process store of saved completions, keyed by the routing embedding plus a compatibility scope.
+/// Entries expire by <see cref="SemanticCacheOptions.TimeToLive"/> at lookup time and are trimmed to
 /// <see cref="SemanticCacheOptions.MaxEntries"/> on store.
 /// </summary>
-public sealed class SemanticResponseCache : ISemanticResponseCache
+/// <remarks>
+/// The cache does not embed text. Callers pass the vector
+/// <see cref="TotallyHot.ArcRouter.Proxy.RequestInterceptor"/> already computed with
+/// <see cref="IEmbeddingClient"/>, and similarity is
+/// <see cref="EmbeddingMemory.CosineSimilarity"/>. A second embedding stack is intentionally absent.
+/// The proxy talks to this type directly: lookup inputs are internal, so a separate interface would only
+/// have been a second name for the same class. Entries live in memory: a process restart clears them,
+/// as does <see cref="Clear"/> and a change to <see cref="SemanticCacheOptions.CacheEpoch"/>.
+/// </remarks>
+public sealed class SemanticResponseCache
 {
     private readonly IEmbeddingClient? _embeddingClient;
     private readonly List<Entry> _entries = [];
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly IOptionsMonitor<SemanticCacheOptions> _options;
     private readonly TimeProvider _time;
     private int _appliedEpoch;
@@ -147,10 +124,13 @@ public sealed class SemanticResponseCache : ISemanticResponseCache
         _appliedEpoch = options.CurrentValue.CacheEpoch;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Gets whether lookup and store are active. When <see langword="false"/>, <see cref="Count"/> may
+    /// still reflect entries from an earlier enabled period, but they are not read or added to.
+    /// </summary>
     public bool IsEnabled => _options.CurrentValue.Enabled;
 
-    /// <inheritdoc/>
+    /// <summary>Gets how many answers are currently stored, including ones a disabled cache will not serve.</summary>
     public int Count
     {
         get
@@ -162,7 +142,10 @@ public sealed class SemanticResponseCache : ISemanticResponseCache
         }
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Gets how many cosine comparisons lookups have performed. Stays at 0 across disabled lookups, which
+    /// return before scanning. Useful for tests and for confirming a disabled cache is not doing work.
+    /// </summary>
     public int ComparisonCount
     {
         get
@@ -174,7 +157,7 @@ public sealed class SemanticResponseCache : ISemanticResponseCache
         }
     }
 
-    /// <inheritdoc/>
+    /// <summary>Drops every stored answer.</summary>
     public void Clear()
     {
         lock (_gate)
@@ -313,12 +296,12 @@ public sealed class SemanticResponseCache : ISemanticResponseCache
                 return false;
 
             _entries.Add(new Entry(
-                Embedding: probe.Embedding.ToArray(),
-                ScopeKey: probe.ScopeKey,
-                EmbeddingModelIdentity: CurrentIdentity(),
-                ResponseBody: responseBody.ToArray(),
-                ContentType: contentType,
-                StoredAtUtc: _time.GetUtcNow()));
+                embedding: probe.Embedding.ToArray(),
+                scopeKey: probe.ScopeKey,
+                embeddingModelIdentity: CurrentIdentity(),
+                responseBody: responseBody.ToArray(),
+                contentType: contentType,
+                storedAtUtc: _time.GetUtcNow()));
 
             var overflow = _entries.Count - options.MaxEntries;
             if (overflow > 0)
@@ -349,18 +332,18 @@ public sealed class SemanticResponseCache : ISemanticResponseCache
 
     /// <summary>One stored answer and the vector that retrieved it.</summary>
     private sealed class Entry(
-        float[] Embedding,
-        string ScopeKey,
-        string EmbeddingModelIdentity,
-        byte[] ResponseBody,
-        string ContentType,
-        DateTimeOffset StoredAtUtc)
+        float[] embedding,
+        string scopeKey,
+        string embeddingModelIdentity,
+        byte[] responseBody,
+        string contentType,
+        DateTimeOffset storedAtUtc)
     {
-        public float[] Embedding { get; } = Embedding;
-        public string ScopeKey { get; } = ScopeKey;
-        public string EmbeddingModelIdentity { get; } = EmbeddingModelIdentity;
-        public byte[] ResponseBody { get; } = ResponseBody;
-        public string ContentType { get; } = ContentType;
-        public DateTimeOffset StoredAtUtc { get; } = StoredAtUtc;
+        public float[] Embedding { get; } = embedding;
+        public string ScopeKey { get; } = scopeKey;
+        public string EmbeddingModelIdentity { get; } = embeddingModelIdentity;
+        public byte[] ResponseBody { get; } = responseBody;
+        public string ContentType { get; } = contentType;
+        public DateTimeOffset StoredAtUtc { get; } = storedAtUtc;
     }
 }

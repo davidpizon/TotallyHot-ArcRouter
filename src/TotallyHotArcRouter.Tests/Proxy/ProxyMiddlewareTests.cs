@@ -1471,8 +1471,8 @@ public class ProxyMiddlewareTests
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
                     state!.ToString()!.Contains("Resolved session", StringComparison.Ordinal) &&
-                    !state!.ToString()!.Contains('\r') &&
-                    !state!.ToString()!.Contains('\n')),
+                    state!.ToString()!.IndexOf('\r') < 0 &&
+                    state!.ToString()!.IndexOf('\n') < 0),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times: Times.Once);

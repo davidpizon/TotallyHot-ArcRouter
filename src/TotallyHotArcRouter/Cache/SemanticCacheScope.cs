@@ -52,7 +52,7 @@ internal static class SemanticCacheScope
             return false;
         }
 
-        if (body["tools"] is JsonArray tools && tools.Count > 0)
+        if (body["tools"] is JsonArray { Count: > 0 })
         {
             refusalReason = "tools";
             return false;
@@ -231,7 +231,7 @@ internal static class SemanticCacheScope
             if (role is not null && role.Equals(value: "tool", comparisonType: StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            if (message["tool_calls"] is JsonArray toolCalls && toolCalls.Count > 0) return true;
+            if (message["tool_calls"] is JsonArray { Count: > 0 }) return true;
 
             if (message["function_call"] is JsonObject) return true;
 
@@ -268,7 +268,7 @@ internal static class SemanticCacheScope
         switch (node)
         {
             case JsonObject obj:
-                if (obj["tool_calls"] is JsonArray calls && calls.Count > 0) return true;
+                if (obj["tool_calls"] is JsonArray { Count: > 0 }) return true;
 
                 if (obj["function_call"] is JsonObject) return true;
 

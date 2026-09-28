@@ -205,7 +205,6 @@ internal static class ProxyServiceCollectionExtensions
             })
             .ValidateOnStart();
         services.AddSingleton<SemanticResponseCache>();
-        services.AddSingleton<ISemanticResponseCache>(sp => sp.GetRequiredService<SemanticResponseCache>());
 
         // ProxyMiddleware takes its ~25 optional collaborators as one ProxyMiddlewareDependencies
         // bag rather than individual constructor parameters, so the container can no longer
