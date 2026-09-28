@@ -55,9 +55,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 | Serilog.Settings.Configuration | 10.0.1 | Copyright Serilog Contributors |
 | Serilog.Sinks.Console | 6.1.1 | Copyright Serilog Contributors |
 | Serilog.Sinks.File | 7.0.0 | Copyright Serilog Contributors |
-| Grpc.AspNetCore | 2.83.0 | Copyright The gRPC Authors |
-| Grpc.AspNetCore.Web | 2.83.0 | Copyright The gRPC Authors |
-| Grpc.Net.Client | 2.83.0 | Copyright The gRPC Authors |
+| Grpc.AspNetCore | 2.84.0 | Copyright The gRPC Authors |
+| Grpc.AspNetCore.Web | 2.84.0 | Copyright The gRPC Authors |
+| Grpc.Net.Client | 2.84.0 | Copyright The gRPC Authors |
+| Grpc.Net.Client.Web | 2.84.0 | Copyright The gRPC Authors |
 | AWSSDK.BedrockRuntime | 4.0.101.6 | Copyright Amazon.com, Inc. or its affiliates |
 | ModelContextProtocol | 2.2.0 | © Model Context Protocol a Series of LF Projects, LLC. |
 | ModelContextProtocol.AspNetCore | 2.2.0 | © Model Context Protocol a Series of LF Projects, LLC. |
