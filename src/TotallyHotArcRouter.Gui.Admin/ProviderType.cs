@@ -24,6 +24,9 @@ public enum ProviderType
     /// A custom or unknown remote API. Defaults to an <c>Authorization</c> header with no suggested
     /// credential, which is the most common shape for an API this list does not name.
     /// </summary>
+    // Never referenced by name, but still needed: it is the default (0), the fallback for a stored name
+    // that no longer parses, and a name existing providers may already have persisted (see remarks).
+    // ReSharper disable once UnusedMember.Global
     Other = 0,
 
     /// <summary>
