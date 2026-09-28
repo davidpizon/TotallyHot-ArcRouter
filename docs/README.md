@@ -64,6 +64,7 @@ paths so existing links resolve.
 | [`router/orchestrator-live-path-plan.md`](router/orchestrator-live-path-plan.md) | Orchestrator on the live path; requested-vs-routed end to end | Shipped (M1–M4) |
 | [`archive/router/phase-m2-plan.md`](archive/router/phase-m2-plan.md) | M2 slice (historical) | Archived — see orchestrator-live-path-plan |
 | [`router/memory-persistence.md`](router/memory-persistence.md) | `RouterMemory` / `EmbeddingMemory` SQLite persistence | Shipped |
+| [`router/semantic-cache.md`](router/semantic-cache.md) | Optional local semantic response cache (off by default). Not provider prompt caching | Shipped |
 | [`router/live-feedback-learning-plan.md`](router/live-feedback-learning-plan.md) | Live feedback capture, embedding-backed `logreg`, its trainer and admin surface | Phases 1–5 shipped; 6 partial |
 | [`router/self-organizing-classification-plan.md`](router/self-organizing-classification-plan.md) | Transcripts, clustering, the `cluster_best` voter, adaptive-routing toggle | Shipped (T1–T6) |
 | [`archive/router/routing-roi-regret-plan.md`](archive/router/routing-roi-regret-plan.md) | Routing ROI: expense and regret vs the frozen untrained baseline (historical). As-built method: [`score-delta-methodology.md`](score-delta-methodology.md) | Archived — see self-organizing-classification-plan T4 |

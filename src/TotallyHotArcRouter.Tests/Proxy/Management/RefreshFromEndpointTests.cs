@@ -513,8 +513,8 @@ public sealed class RefreshFromEndpointTests : IDisposable
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("401", StringComparison.Ordinal)
-                    && !state.ToString()!.Contains("Incorrect API key provided", StringComparison.Ordinal)),
+                    state!.ToString()!.Contains("401", StringComparison.Ordinal)
+                    && !state!.ToString()!.Contains("Incorrect API key provided", StringComparison.Ordinal)),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

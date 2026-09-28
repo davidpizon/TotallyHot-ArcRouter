@@ -90,7 +90,7 @@ public class ProxyMiddlewareTests
                 LogLevel.Information,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("Proxy middleware caught request to", StringComparison.Ordinal)),
+                    state!.ToString()!.Contains("Proxy middleware caught request to", StringComparison.Ordinal)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times: Times.Once);
@@ -1470,9 +1470,9 @@ public class ProxyMiddlewareTests
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("Resolved session", StringComparison.Ordinal) &&
-                    !state.ToString()!.Contains('\r') &&
-                    !state.ToString()!.Contains('\n')),
+                    state!.ToString()!.Contains("Resolved session", StringComparison.Ordinal) &&
+                    !state!.ToString()!.Contains('\r') &&
+                    !state!.ToString()!.Contains('\n')),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times: Times.Once);
