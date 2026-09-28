@@ -66,12 +66,16 @@ public sealed class OpenAiCompatibleDropInTests
     }
 
     [Fact]
-    public void BuildMarkdown_rejects_blank_lead_in_or_tls_link()
+    public void BuildMarkdown_rejects_blank_lead_in_tls_link_or_harness_link()
     {
         Assert.Throws<ArgumentException>(() =>
-            OpenAiCompatibleDropIn.BuildMarkdown(leadIn: " ", tlsLink: "[tls](docs/x.md)"));
+            OpenAiCompatibleDropIn.BuildMarkdown(leadIn: " ", tlsLink: "[tls](docs/x.md)",
+                harnessLink: "[harnesses](docs/install/harnesses/README.md)"));
         Assert.Throws<ArgumentException>(() =>
-            OpenAiCompatibleDropIn.BuildMarkdown(leadIn: "Go", tlsLink: " "));
+            OpenAiCompatibleDropIn.BuildMarkdown(leadIn: "Go", tlsLink: " ",
+                harnessLink: "[harnesses](docs/install/harnesses/README.md)"));
+        Assert.Throws<ArgumentException>(() =>
+            OpenAiCompatibleDropIn.BuildMarkdown(leadIn: "Go", tlsLink: "[tls](docs/x.md)", harnessLink: " "));
     }
 
     [Fact]

@@ -3,6 +3,11 @@
 Status: **Shipped — Phase H (B1, B2) and Phase I (B3–B5) both landed.** See the status blockquotes under B3–B5 for what shipped exactly as specified versus where implementation deliberately narrowed the scope (documented there, not silently).
 Scope: **two repos** — the proxy (this repo) and the VS Code extension (`spark-vscode-extension`, published as `davidpizon.oai-compatible-copilot`).
 
+Ready-made presets for Claude Code, Cursor, Codex, and Aider are in
+[`docs/install/harnesses/`](../install/harnesses/README.md). They point those harnesses at the same
+loopback drop-in (`"model": "auto"`), and each guide states where that harness's API shape differs
+from the OpenAI chat-completions path. The Copilot extension notes below are unchanged.
+
 ## Context
 
 The `oai-compatible-copilot` extension registers a **single** language-model chat provider (vendor `oaicopilot`) that exposes one model to GitHub Copilot Chat and forwards its traffic to the Agentic Router proxy at `http://127.0.0.1:5001/v1`. From VS Code's perspective this single model is a **BYOK (Bring Your Own Key)** main agent.
