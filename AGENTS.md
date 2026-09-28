@@ -12,6 +12,7 @@ This repository contains the TotallyHot Arc Router project.
 - Use `src/PLAN.md` for the current C# migration roadmap.
 
 ## Working Rules
+- **Approved plan before coding.** Set by David on 2026-09-28. Do not start implementation on a boarded item (a GitHub issue signed off for work — issue #165 and every later item) until a plan at `docs/plans/issue-<N>-<slug>.md` has David's explicit sign-off (for example, a comment on the issue or on the plan pull request). The implementation pull request must link that approved plan. Full rule: [`docs/router/standing-rules.md`](docs/router/standing-rules.md).
 - Keep changes minimal and scoped to the user request.
 - Prefer the existing repository conventions and document any deliberate deviation.
 - When editing C# code, follow .NET 10 best practices: nullable reference types, async/await where appropriate, dependency injection, options binding, and structured logging.
@@ -137,4 +138,5 @@ Requires Windows Developer Mode and `git config core.symlinks true`.
 - `docs/adr/README.md` — Architecture Decision Records: when to write one, template, and process
 - [ADR-0008](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md) — CodeGraph + Serena dual-engine code-smell pipeline
 - `docs/router/code-smell-refactoring-plan.md` — in-flight mechanical smell-refactor work list
+- `docs/router/standing-rules.md` — Standing rules for boarded work; approved plan before coding
 
