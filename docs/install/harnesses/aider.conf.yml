@@ -1,0 +1,11 @@
+# Copy to .aider.conf.yml in the git repository you want Aider to edit,
+# or run: aider --config <path-to-this-file>
+# See docs/install/harnesses/aider.md.
+
+openai-api-base: https://localhost:47101/v1
+openai-api-key: not-needed
+model: openai/auto
+weak-model: openai/auto
+editor-model: openai/auto
+edit-format: diff
+show-model-warnings: false

@@ -1,0 +1,13 @@
+# Copy these keys into the user config ~/.codex/config.toml (or $CODEX_HOME/config.toml).
+# Codex ignores model_provider and model_providers in a project-local .codex/config.toml.
+# Also export OPENAI_API_KEY=not-needed in the environment Codex inherits.
+# See docs/install/harnesses/codex.md.
+
+model = "auto"
+model_provider = "arcrouter"
+
+[model_providers.arcrouter]
+name = "TotallyHot Arc Router"
+base_url = "https://localhost:47101/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"

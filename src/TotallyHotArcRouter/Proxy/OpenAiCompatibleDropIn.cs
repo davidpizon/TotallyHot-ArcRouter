@@ -110,7 +110,8 @@ public static class OpenAiCompatibleDropIn
     public static string BuildReadmeMarkdown() =>
         BuildMarkdown(
             leadIn: $"One OpenAI-compatible base URL. Send `\"model\": \"{Model}\"` and the router picks the model.",
-            tlsLink: "[client TLS setup](docs/router/client-tls-setup.md)");
+            tlsLink: "[client TLS setup](docs/router/client-tls-setup.md)",
+            harnessLink: "[Harness presets](docs/install/harnesses/README.md)");
 
     /// <summary>
     /// GitHub Release body preamble. Absolute links, because a relative <c>docs/...</c> path 404s on
@@ -123,20 +124,26 @@ public static class OpenAiCompatibleDropIn
             leadIn:
             "Download the installer for your OS from the assets below, then point any OpenAI-compatible client at **one** base URL and send " +
             $"`\"model\": \"{Model}\"`.",
-            tlsLink: $"[client TLS setup]({ClientTlsSetupUrl})");
+            tlsLink: $"[client TLS setup]({ClientTlsSetupUrl})",
+            harnessLink:
+            "[Harness presets](https://github.com/davidpizon/TotallyHot-ArcRouter/blob/main/docs/install/harnesses/README.md)");
 
     /// <summary>
-    /// Shared markdown body for README and release notes. Lead-in and TLS link are the only surfaces
-    /// that differ; the copy-paste fences are identical so a user who learned the snippet from one
-    /// place finds the same bytes on the other.
+    /// Shared markdown body for README and release notes. Lead-in, TLS link, and harness-preset link
+    /// are the only surfaces that differ; the copy-paste fences are identical so a user who learned
+    /// the snippet from one place finds the same bytes on the other.
     /// </summary>
     /// <param name="leadIn">Opening sentence under the heading.</param>
     /// <param name="tlsLink">Markdown link to the TLS trust doc, relative or absolute.</param>
+    /// <param name="harnessLink">
+    /// Markdown link to the harness-preset index. Relative in the README, absolute on the release page.
+    /// </param>
     /// <returns>The full section, including the heading, with LF line endings and a trailing newline.</returns>
-    public static string BuildMarkdown(string leadIn, string tlsLink)
+    public static string BuildMarkdown(string leadIn, string tlsLink, string harnessLink)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(leadIn);
         ArgumentException.ThrowIfNullOrWhiteSpace(tlsLink);
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessLink);
 
         var markdown =
             $"""
@@ -165,6 +172,8 @@ public static class OpenAiCompatibleDropIn
             ```
 
             Dashboard: `{DashboardUrl}`. Windows/Linux/macOS installers already trust the local CA. Docker and browsers that ignore the OS store: {tlsLink}. The `OPENAI_API_KEY` value is a placeholder — LLM forwarding is not authenticated; it only satisfies clients that refuse an empty key.
+
+            Harness presets for Claude Code, Cursor, Codex, and Aider: {harnessLink}.
             """;
 
         // Raw string literals take their line endings from this source file's checkout, so a Windows

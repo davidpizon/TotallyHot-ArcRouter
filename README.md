@@ -44,6 +44,8 @@ curl https://localhost:47101/v1/chat/completions \
 
 Dashboard: `https://localhost:47104`. Windows/Linux/macOS installers already trust the local CA. Docker and browsers that ignore the OS store: [client TLS setup](docs/router/client-tls-setup.md). The `OPENAI_API_KEY` value is a placeholder — LLM forwarding is not authenticated; it only satisfies clients that refuse an empty key.
 
+Harness presets for Claude Code, Cursor, Codex, and Aider: [Harness presets](docs/install/harnesses/README.md).
+
 ## Install
 
 TotallyHot Arc Router is cross-platform: Windows, Linux, and macOS all run the same router, with a
