@@ -304,19 +304,39 @@ answer "which fields and block types did this request carry".
 
 1. **Build a structural capture, not a content capture.** Add an opt-in, off-by-default census that
    writes one JSON line per request with the request's *shape* and no user content:
-   - Harness identity: `User-Agent`, and the harness version when it can be parsed from it.
-   - Inbound path, which gives the dialect (`/v1/messages`, `/v1/responses`, `/v1/chat/completions`), and
-     the requested model.
-   - Every JSON key path present, with its value type and array length.
+   - Harness identity, *derived from* `User-Agent` but never the raw value: the leading product token
+     only if it matches a fixed allowlist of known harnesses (e.g. `claude-cli`, `codex_cli_rs`), plus
+     the version parsed from that token. Any other `User-Agent` is recorded as `other` with its length.
+     This normalized name and version are the only header-derived values the census stores.
+   - Inbound path, which gives the dialect (`/v1/messages`, `/v1/responses`, `/v1/chat/completions`).
+   - The requested model, recorded as a value only when it is `auto`, a harness preset's name, or a model
+     id present in the router's own provider configuration. Any other model string is recorded as
+     `other` with its length. This is enough to separate step 3's `auto` and real-model-id captures.
+   - Every JSON key path present, with its value type and array length, under a key-name rule: keys at
+     protocol-structural levels (top-level request fields, message and input-item objects, content
+     blocks, tool definitions, `reasoning`, `thinking`) are kept verbatim, including unknown ones,
+     because they are the harness-drift signal step 5 looks for. Keys inside client- or model-chosen
+     maps (tool-call `input`/`arguments`, a tool schema's `properties`, `metadata`, and any object the
+     census does not recognize) are replaced with a fixed `*` segment, so a key name can never carry a
+     path, identifier or other user text.
    - String values from a fixed allowlist only: content-block and item `type`, `role`, tool `type` and
-     tool `name`, `include` entries, `anthropic-beta` flags, `reasoning.effort`, `thinking.type`. All
-     other strings are recorded as a length, never as a value. Prompts, code, file paths and tool
-     arguments must not be stored.
-   - Request header *names* (never values), body size, message/item count, and the estimated prompt
-     token count.
-   - A conversation key from `MessageHistoryContinuityMatcher`
-     (`src/TotallyHotArcRouter/Telemetry/MessageHistoryContinuityMatcher.cs`), so a marker's persistence
-     across turns can be measured.
+     tool `name`, `include` entries, `anthropic-beta` flags, `reasoning.effort`, `thinking.type`, and
+     the model rule above. All other strings are recorded as a length, never as a value. Prompts, code,
+     file paths and tool arguments must not be stored.
+   - Request header *names*, body size, message/item count, and the estimated prompt token count. No
+     header value is stored beyond the normalized harness identity above.
+   - A conversation key, so a marker's persistence across turns can be measured. Take it from
+     `SessionIdResolver` (`src/TotallyHotArcRouter/Telemetry/SessionIdResolver.cs`) when the harness
+     sends an explicit session id, and store only a salted hash of it (salt per capture run, never
+     written out). Otherwise fall back to history-prefix matching. That fallback needs extending first:
+     `MessageHistoryContinuityMatcher`
+     (`src/TotallyHotArcRouter/Telemetry/MessageHistoryContinuityMatcher.cs`) only fingerprints the
+     `messages` array, so it would give every `/v1/responses` request a fresh key. It needs to
+     fingerprint Responses `input` items the same way, and to chain requests that carry
+     `previous_response_id` onto the response they name. Record which source produced each key
+     (explicit / `messages` prefix / `input` prefix / response chain). Confirm on the first captured
+     sessions which explicit id each harness actually sends, and base the persistence analysis only on
+     keys whose source was confirmed stable.
    - Response side: the streaming event types and content-block/item types seen. A signed thinking
      block or encrypted reasoning item created in a response is what lands in the next request's history.
 
@@ -367,8 +387,11 @@ answer "which fields and block types did this request carry".
 - `docs/router/harness-traffic-census.md` exists with the tables above, drawn from traffic that meets
   the minimums in step 4. The report states the exact counts, dates and harness versions it covers.
 - The census capture is opt-in, off by default, and stores no prompt, code, path, argument or header
-  value. It has a unit test that feeds a body containing a known secret-shaped string and asserts the
-  string does not appear in the census output.
+  value. The one exception is the normalized harness name and version from step 1, taken from an
+  allowlisted `User-Agent` product token. Unit tests assert that a known secret-shaped string does not
+  appear in the census output when it is placed (a) in a string value, (b) as an object key inside tool
+  arguments and inside `metadata`, (c) as the requested model, (d) in a non-allowlisted `User-Agent`
+  and another header's value, and (e) as an explicit session id.
 - ADR-0017's PR (#159), kept open until now, is updated from the report: its marker table is replaced
   by the measured classification and its decision rule is applied per harness. Then the ADR is set to
   `accepted` and the PR merges (an ADR is accepted when its PR merges), or the PR is closed if the
