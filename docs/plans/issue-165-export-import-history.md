@@ -2,7 +2,7 @@
 
 **Status:** Proposed. Awaiting David's approval. No implementation in this change.
 **Issue:** [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165) — "Feature: Export/import full agent conversation history as a zip file".
-**Related:** [`tracked-todos.md` #8](tracked-todos.md#8-capture-and-analyze-real-claude-code-and-codex-traffic-before-deciding-adr-0017s-pin-policy) (live, content-free traffic census).
+**Related:** [`tracked-todos.md` #8](../router/tracked-todos.md#8-capture-and-analyze-real-claude-code-and-codex-traffic-before-deciding-adr-0017s-pin-policy) (live, content-free traffic census).
 **ADR-0008 Amendment 1:** Binding. This plan adds a feature. It does not schedule a smell audit and it does not change `ProxyMiddleware`, `RequestInterceptor`, or `ManagementFacade` except to call a new best-effort writer from the existing post-response telemetry path.
 
 David's request, exact words:
