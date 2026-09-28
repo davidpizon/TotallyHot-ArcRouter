@@ -160,6 +160,29 @@ what D1 always said; it is now enabled (`src/.editorconfig`), and its verdict is
 has essentially no dead code: 2 `IDE0051` hits, both false positives, and 0 each for `IDE0052` and
 `CA1823`. **Do not accept a grep-based dead-code list from a future survey without this check.**
 
+### Catalog entry (2026-09-28): whole-repository health survey — **Serena partial**
+
+**Not pain-triggered.** The maintainer asked for a general health check, and also directed that every
+Critical/Major finding be scheduled without an observed cost. Both are recorded deviations from
+Amendment 1 rules 1 and 3, not precedent. The survey was the first to include the test projects and the
+Installer. Serena was activated, but only one of its reference queries completed, so severity is the
+agent's classification against this ADR's matrix.
+
+Full findings, the roadmap, and the end condition are in
+[`codebase-health-survey-2026-09-28.md`](../router/codebase-health-survey-2026-09-28.md). Headline
+items:
+- **HS-01 (Critical, plausible security defect):** the MSI's `UninstallCertificate` action runs after
+  `RemoveFiles` has deleted the exe it needs, so the local root CA stays machine-trusted after uninstall.
+- **HS-02 (Critical, ADR first):** request completion waits on synchronous SQLite telemetry writes.
+- **HS-03 to HS-09 (Major):** hot-path, GUI and startup inefficiencies, plus test-construction
+  duplication.
+
+Catalog drift since 2026-09-02:
+- `ProviderManagementService` (S3) grew from 889 to 1,036 lines, and `RequestInterceptor` (S2) from 670
+  to 761. Neither is scheduled.
+- `TrayWindowManager` no longer exists, which retires the old plan's A3 and the S-table row that
+  mentioned it.
+
 ### Non-smell use: the CodeGraph step applied to a correctness bug
 
 Step 1 of this pipeline (map with CodeGraph first) is not exclusive to smell surveys — it is the
