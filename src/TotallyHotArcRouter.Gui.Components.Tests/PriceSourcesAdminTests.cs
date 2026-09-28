@@ -194,6 +194,48 @@ public sealed class PriceSourcesAdminTests
     }
 
     [Fact]
+    public async Task The_update_button_shows_updating_while_a_pull_is_in_flight_and_reverts_once_it_completes()
+    {
+        // Every other test here only ever clicks while idle, so none of them actually exercises or
+        // distinguishes the busy "Updating…" label from the idle "Update" one - this fills that gap and
+        // also pins the disabled state on both sides of the pull.
+        var tcs = new TaskCompletionSource();
+        var client = new FakeClient(new PriceSourceStatus(Name: "litellm", true, 0, 0))
+        {
+            HoldBeforeRefreshCompletes = tcs.Task
+        };
+        await using var ctx = NewContext(client);
+        var cut = ctx.Render<PriceSourcesAdmin>();
+
+        var idleButton = cut.FindAll("button")
+            .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
+        idleButton.TextContent.Should().Contain("Update").And.NotContain("Updating");
+        idleButton.HasAttribute("disabled").Should().BeFalse();
+
+        // Click(), not ClickAsync(): the held-open operation means the click handler's own task never
+        // completes on its own, so only the fire-and-forget dispatch is awaited here - the same reasoning
+        // as BenchmarkDataTests' HoldBeforeFinalStatus-based tests.
+        await cut.InvokeAsync(() => idleButton.Click());
+
+        await cut.WaitForAssertionAsync(() =>
+        {
+            var busyButton = cut.FindAll("button")
+                .First(b => b.TextContent.Contains(value: "Updating", comparisonType: StringComparison.Ordinal));
+            busyButton.HasAttribute("disabled").Should().BeTrue();
+        });
+
+        tcs.SetResult();
+
+        await cut.WaitForAssertionAsync(() =>
+        {
+            var finishedButton = cut.FindAll("button")
+                .First(b => b.TextContent.Contains(value: "Update", comparisonType: StringComparison.Ordinal));
+            finishedButton.TextContent.Should().Contain("Update").And.NotContain("Updating");
+            finishedButton.HasAttribute("disabled").Should().BeFalse();
+        });
+    }
+
+    [Fact]
     public void Surfaces_a_failed_pull_outcome_inline()
     {
         var client = new FakeClient(
@@ -633,6 +675,13 @@ public sealed class PriceSourcesAdminTests
         public PriceRefreshOutcome RefreshOutcome { get; init; } =
             new(Source: "litellm", true, 42, null);
 
+        /// <summary>
+        /// When set, awaited inside <see cref="RefreshAsync"/> before it returns - lets a test assert on the
+        /// store's mid-refresh state (still <c>IsRefreshing</c>) and then let the cycle finish by completing
+        /// this task. Mirrors <c>BenchmarkDataTests.FakeClient.HoldBeforeFinalStatus</c>.
+        /// </summary>
+        public Task? HoldBeforeRefreshCompletes { get; init; }
+
         public (string Name, bool Enabled)? LastSetEnabled { get; private set; }
 
         public IReadOnlyList<string>? LastReorderRequest { get; private set; }
@@ -659,9 +708,9 @@ public sealed class PriceSourcesAdminTests
             return Task.FromResult(Snapshot());
         }
 
-        public Task<PriceRefreshResult> RefreshAsync(CancellationToken cancellationToken = default)
+        public async Task<PriceRefreshResult> RefreshAsync(CancellationToken cancellationToken = default)
         {
-            if (RefreshError is not null) return Task.FromException<PriceRefreshResult>(RefreshError);
+            if (RefreshError is not null) throw RefreshError;
 
             RefreshCount++;
             _sources =
@@ -671,11 +720,14 @@ public sealed class PriceSourcesAdminTests
                     : s)
             ];
             _anchor = DateTimeOffset.UtcNow;
-            return Task.FromResult(new PriceRefreshResult(
+
+            if (HoldBeforeRefreshCompletes is { } hold) await hold;
+
+            return new PriceRefreshResult(
                 Outcomes: [RefreshOutcome],
                 FreshPriceCount: RefreshOutcome.PriceCount,
                 Sources: _sources,
-                Schedule: new PriceSourceSchedule(PollInterval: PollInterval, ScheduleAnchorUtc: _anchor)));
+                Schedule: new PriceSourceSchedule(PollInterval: PollInterval, ScheduleAnchorUtc: _anchor));
         }
 
         public Task<PriceRefreshResult> ReorderAsync(IReadOnlyList<string> namesInPriorityOrder,

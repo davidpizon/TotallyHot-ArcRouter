@@ -171,8 +171,8 @@ public sealed class PriceSourceStore : AdminStoreBase<IPriceSourceAdminClient>
             // described the reorder that just ran.
             LastRefreshOutcomes = result.Outcomes;
 
-            // The cycle that just ran re-anchored the schedule, so this is what resets the countdown after a
-            // Pull Now - no follow-up call, and no window where the panel counts down to a pull that has
+            // The cycle that just ran re-anchored the schedule, so this is what resets the countdown after an
+            // Update - no follow-up call, and no window where the panel counts down to a pull that has
             // already happened.
             Schedule = result.Schedule;
             RecordSuccess();
