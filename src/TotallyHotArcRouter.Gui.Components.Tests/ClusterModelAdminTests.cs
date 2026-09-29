@@ -181,13 +181,13 @@ public sealed class ClusterModelAdminTests
 
         public GrpcAdminException? Error { get; set; }
 
-        public IReadOnlyList<ClusterRetrainEvent> RetrainEvents { get; set; } = [];
+        public IReadOnlyList<ClusterRetrainEvent> RetrainEvents { get; init; } = [];
 
         /// <summary>
         /// Optional gate awaited immediately before yielding a <see cref="ClusterRetrainEvent.Result"/>
         /// event, so a test can observe the streaming-but-not-yet-final state before releasing it.
         /// </summary>
-        public TaskCompletionSource<bool>? Gate { get; set; }
+        public TaskCompletionSource<bool>? Gate { get; init; }
 
         public Task<ClusterModelStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
         {

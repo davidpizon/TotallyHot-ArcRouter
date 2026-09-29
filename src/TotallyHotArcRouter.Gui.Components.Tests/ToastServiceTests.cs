@@ -5,7 +5,7 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
 /// Tests for <see cref="ToastService"/>: the app-wide error-toast notification store backing
-/// <see cref="ToastHost"/>. The auto-dismiss tests override the constructor's <c>autoDismissAfter</c> to a
+/// <c>ToastHost</c>. The auto-dismiss tests override the constructor's <c>autoDismissAfter</c> to a
 /// few milliseconds rather than waiting out the real 6-second default, per the project's 5-second test
 /// ceiling.
 /// </summary>

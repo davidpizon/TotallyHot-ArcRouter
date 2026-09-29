@@ -173,6 +173,7 @@
     // so an unreachable proxy leaves the ticker showing what it always showed rather than a jarring "0".
     private string _systemTokensDisplay = "12.4M";
 
+    /// <inheritdoc/>
     protected override async Task OnInitializedAsync()
     {
         LiveDataStore.Changed += HandleLiveDataChanged;
@@ -299,6 +300,7 @@
         return worst;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         LiveDataStore.Changed -= HandleLiveDataChanged;

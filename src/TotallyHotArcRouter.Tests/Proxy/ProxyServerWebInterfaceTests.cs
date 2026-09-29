@@ -256,7 +256,7 @@ public sealed class ProxyServerWebInterfaceTests
             using var httpClient = new HttpClient(handler);
             var response = await httpClient.PostAsync(
                 requestUri: $"https://localhost:{proxyPort}/TotallyHot.ArcRouter.telemetry.v1.RoutingModeAdminService/GetRoutingMode",
-                content: new ByteArrayContent([0, 0, 0, 0, 0]) { Headers = { ContentType = new("application/grpc-web+proto") } },
+                content: new ByteArrayContent("     "u8.ToArray()) { Headers = { ContentType = new("application/grpc-web+proto") } },
                 cancellationToken: Ct);
 
             // Never a grpc-web response - the request was routed straight into proxyMiddleware, which (with
@@ -398,7 +398,7 @@ public sealed class ProxyServerWebInterfaceTests
             {
                 var response = await httpClient.PostAsync(
                     requestUri: $"{scheme}://localhost:{port}/TotallyHot.ArcRouter.telemetry.v1.RoutingModeAdminService/GetRoutingMode",
-                    content: new ByteArrayContent([0, 0, 0, 0, 0]) { Headers = { ContentType = new("application/grpc-web+proto") } },
+                    content: new ByteArrayContent("     "u8.ToArray()) { Headers = { ContentType = new("application/grpc-web+proto") } },
                     cancellationToken: Ct);
 
                 Assert.NotEqual(expected: "application/grpc-web+proto", actual: response.Content.Headers.ContentType?.MediaType);

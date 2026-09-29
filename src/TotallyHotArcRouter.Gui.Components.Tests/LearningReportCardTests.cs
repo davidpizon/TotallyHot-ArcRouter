@@ -57,7 +57,7 @@ public sealed class LearningReportCardTests
     [Fact]
     public async Task Clicking_a_time_filter_switches_the_active_selection()
     {
-        using var ctx = CreateContext();
+        await using var ctx = CreateContext();
 
         var cut = ctx.Render<LearningReportCard>();
         // InvokeAsync makes Find-then-Click atomic on the renderer's synchronization context: the initial

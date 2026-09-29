@@ -52,7 +52,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     private readonly TimeSpan _pollInterval;
     private readonly Task _pollTask;
 
-    private readonly object _stateGate = new();
+    private readonly Lock _stateGate = new();
     private RouterConnectionState _connectionState = RouterConnectionState.Unreachable;
     private bool _isEnabled = true;
     private bool _wasUsable;
@@ -161,7 +161,7 @@ public sealed class RoutingGateMonitor : IAsyncDisposable
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
-        _pollCts.Cancel();
+        await _pollCts.CancelAsync().ConfigureAwait(false);
         try
         {
             await _pollTask.ConfigureAwait(false);

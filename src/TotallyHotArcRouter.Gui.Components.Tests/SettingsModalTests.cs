@@ -660,7 +660,7 @@ public sealed class SettingsModalTests
             null);
 
         /// <summary>When set, every call fails with it - how a test stands in for a Router that isn't running.</summary>
-        public GrpcAdminException? Failure { get; set; }
+        public GrpcAdminException? Failure { get; init; }
 
         public Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
         {
@@ -703,11 +703,11 @@ public sealed class SettingsModalTests
             EligibleJudgeModels: ["free-judge"],
             true);
 
-        public GrpcAdminException? Failure { get; set; }
+        public GrpcAdminException? Failure { get; init; }
 
         public int ClearTranscriptsCallCount { get; private set; }
 
-        public int ClearTranscriptsRowsDeleted { get; set; }
+        public int ClearTranscriptsRowsDeleted { get; init; }
 
         public Task<RouterSettingsInfo> GetAsync(CancellationToken cancellationToken = default)
         {
@@ -752,9 +752,9 @@ public sealed class SettingsModalTests
     /// <summary>A controllable <see cref="ICostReconciliationAdminClient"/> double; empty provider list by default.</summary>
     private sealed class FakeCostReconciliationAdminClient : ICostReconciliationAdminClient
     {
-        public IReadOnlyList<ProviderReconciliationStatus> Status { get; set; } = [];
+        public IReadOnlyList<ProviderReconciliationStatus> Status { get; } = [];
 
-        public GrpcAdminException? Failure { get; set; }
+        public GrpcAdminException? Failure { get; init; }
 
         public Task<IReadOnlyList<ProviderReconciliationStatus>> GetStatusAsync(
             CancellationToken cancellationToken = default)
@@ -775,18 +775,15 @@ public sealed class SettingsModalTests
 
     private sealed class FakeManagementTokenAdminClient : IManagementTokenAdminClient
     {
-        public GrpcAdminException? Failure { get; set; }
         public string Token { get; set; } = "fake-management-token";
 
         public Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
         {
-            return Failure is null ? Task.FromResult(Token) : Task.FromException<string>(Failure);
+            return Task.FromResult(Token);
         }
 
         public Task<string> RegenerateAsync(CancellationToken cancellationToken = default)
         {
-            if (Failure is not null) return Task.FromException<string>(Failure);
-
             Token = "fake-regenerated-token";
             return Task.FromResult(Token);
         }

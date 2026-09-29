@@ -1,3 +1,4 @@
+using AngleSharp.Dom;
 using AwesomeAssertions;
 using Bunit;
 using TotallyHot.ArcRouter.Gui.Components;
@@ -52,7 +53,7 @@ public sealed class ConsoleTabTests
         using var ctx = NewContext();
 
         var cut = ctx.Render<ConsoleTab>();
-        var toggle = () => cut.FindAll("button").First(b => b.TextContent.Contains("Auto-Scroll"));
+        IElement toggle() => cut.FindAll("button").First(b => b.TextContent.Contains("Auto-Scroll"));
 
         toggle().Click();
         toggle().Click();

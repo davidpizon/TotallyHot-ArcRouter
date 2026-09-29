@@ -36,7 +36,7 @@ public static class LoopbackRequestGuard
     /// <summary>Removes one wrapping <c>[</c>/<c>]</c> pair from an IPv6 literal, if present; returns other values unchanged.</summary>
     private static string StripBrackets(string value)
     {
-        return value.Length >= 2 && value[0] == '[' && value[^1] == ']' ? value[1..^1] : value;
+        return value is ['[', .., ']'] ? value[1..^1] : value;
     }
 
     /// <summary>

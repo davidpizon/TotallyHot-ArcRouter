@@ -304,7 +304,7 @@
         {
             <div class="flex items-center justify-between text-xs text-slate-400">
                 <span class="font-mono text-slate-200">@provider.Provider</span>
-                @if (provider.LastReportedCostUsd is { } reported && provider.LastLocalCostUsd is { } local)
+                @if (provider is { LastReportedCostUsd: { } reported, LastLocalCostUsd: { } local })
                 {
                     <span>
                         Reported <span class="font-mono text-slate-200">$@reported.ToString("F2")</span>

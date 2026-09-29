@@ -64,6 +64,7 @@
     private bool _justCopied;
     private volatile bool _pendingScroll;
 
+    /// <inheritdoc/>
     protected override void OnInitialized()
     {
         LiveDataStore.LogLinesChanged += HandleLogLinesChanged;
@@ -78,6 +79,7 @@
         InvokeAsync(StateHasChanged);
     }
 
+    /// <inheritdoc/>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)

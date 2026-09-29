@@ -360,7 +360,8 @@ public class StartupHealthCheckHostedServiceTests
 
         using var stopCts = new CancellationTokenSource();
         stopCts.Cancel();
-        var hostLifetime = Mock.Of<IHostApplicationLifetime>(lifetime => lifetime.ApplicationStopping == stopCts.Token);
+        var stoppingToken = stopCts.Token;
+        var hostLifetime = Mock.Of<IHostApplicationLifetime>(lifetime => lifetime.ApplicationStopping == stoppingToken);
         var embeddingClient = new Mock<IEmbeddingClient>(MockBehavior.Strict);
         var warmupState = new EmbeddingWarmupState();
 

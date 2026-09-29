@@ -155,7 +155,7 @@ else
                                        deliberate stop, mirroring the provider-level "stopped vs. unhealthy"
                                        distinction ProxyMiddleware already logs separately. *@
                         <div @key="model.ModelName" class="flex items-center justify-between text-xs">
-                            <span class="font-mono @(model.Enabled && model.PresentUpstream ? "state-enabled subtle" : "state-disabled")">@model.ModelName</span>
+                            <span class="font-mono @(model is { Enabled: true, PresentUpstream: true } ? "state-enabled subtle" : "state-disabled")">@model.ModelName</span>
                             <div class="flex items-center gap-2">
                                 @if (!model.PresentUpstream)
                                 {
