@@ -250,8 +250,12 @@
       Uninstalling the CA is best-effort and only on a genuine uninstall, never on an upgrade's internal
       remove-then-reinstall (upgrades must keep the CA trusted throughout - re-trusting it on every
       version bump would be a needless UAC-adjacent operation and a window where HTTPS clients see a
-      broken chain). REMOVE="ALL" is Windows Installer's own signal for "this is the final removal", true
-      for a real uninstall and false for MajorUpgrade's internal RemoveExistingProducts pass.
+      broken chain). REMOVE="ALL" alone does NOT distinguish the two: the old package's uninstall session
+      that MajorUpgrade's RemoveExistingProducts pass runs also sets REMOVE=ALL. UPGRADINGPRODUCTCODE is
+      set only in that upgrade case, so the condition below requires it to be absent. The action must
+      also be scheduled Before="RemoveFiles" - RemoveFiles (3500) runs before InstallFiles (4000), so
+      scheduling it after InstallFiles would run it after its own exe was already deleted (and
+      Return="ignore" would hide the failure).
     -->
     <CustomAction Id="UninstallCertificate"
                   FileRef="RouterServiceExe"
@@ -265,7 +269,7 @@
            StartServices so the leaf the router mints on its first real start is already trusted the
            moment a client connects, not racing the CA install against the service's own startup. -->
       <Custom Action="InstallCertificate" After="InstallFiles" Condition="NOT Installed" />
-      <Custom Action="UninstallCertificate" After="InstallFiles" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="UninstallCertificate" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
     <Feature Id="Main" Title="TotallyHot ArcRouter" Level="1">
