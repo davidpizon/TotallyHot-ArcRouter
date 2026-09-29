@@ -212,7 +212,9 @@ public class OllamaProviderTests
         await middleware.InvokeAsync(context: context, next: _ => Task.CompletedTask);
 
         Assert.Equal(expected: StatusCodes.Status200OK, actual: context.Response.StatusCode);
-        Assert.Equal(3, actual: flushCounting.FlushCount);
+        // One flush per upstream chunk (3), plus the one Response.CompleteAsync() issues when the middleware
+        // finishes the response ahead of telemetry persistence.
+        Assert.Equal(4, actual: flushCounting.FlushCount);
     }
 
     /// <summary>
