@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using TotallyHot.ArcRouter.Cache;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
@@ -185,6 +186,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
     private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
     private readonly UpstreamResponseWriter _upstreamResponseWriter;
+    private readonly SemanticCacheCoordinator _semanticCache;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProxyMiddleware"/> class.
@@ -274,6 +276,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         _bedrockInvocationHandler = new BedrockInvocationHandler(logger: logger,
             bedrockClientFactory: _bedrockClientFactory, circuitBreaker: _circuitBreaker,
             requestTelemetryPublisher: _requestTelemetryPublisher);
+        _semanticCache = new SemanticCacheCoordinator(cache: dependencies?.SemanticResponseCache, logger: logger);
     }
 
     /// <summary>
@@ -369,6 +372,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 routedModel: resolution.Candidates[0].Route.ModelName);
             return;
         }
+
+        // Optional local semantic cache (docs/router/semantic-cache.md). Off unless SemanticCache:Enabled
+        // is set; a miss or a disabled cache falls through to the candidate loop unchanged.
+        if (await _semanticCache.TryServeAsync(context: context, resolution: resolution))
+            return;
 
         var candidates = resolution.Candidates;
 
@@ -677,6 +685,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                 var nativeResponseBytes = written.NativeResponseBytes;
                 var tailScanner = written.TailScanner;
                 var isStreaming = written.IsStreaming;
+
+                _semanticCache.Remember(context: context, statusCode: statusCode,
+                    responseBody: capturedResponseBytes, isStreaming: isStreaming,
+                    contentType: context.Response.ContentType);
 
                 var totalDurationMs = stopwatch.ElapsedMilliseconds;
 

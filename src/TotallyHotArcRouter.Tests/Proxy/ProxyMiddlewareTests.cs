@@ -90,7 +90,7 @@ public class ProxyMiddlewareTests
                 LogLevel.Information,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("Proxy middleware caught request to", StringComparison.Ordinal)),
+                    state!.ToString()!.Contains("Proxy middleware caught request to", StringComparison.Ordinal)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times: Times.Once);
@@ -1414,6 +1414,20 @@ public class ProxyMiddlewareTests
         return context;
     }
 
+    /// <summary>
+    /// True when the rendered log line names the resolved session and contains no CR or LF.
+    /// Moq matches log state with an expression tree, which cannot hold a null-forgiving operator
+    /// without a Qodana finding, so the null check lives in this method.
+    /// </summary>
+    private static bool DescribesSanitizedSession(object? state)
+    {
+        var text = state?.ToString();
+        return text is not null
+            && text.Contains("Resolved session", StringComparison.Ordinal)
+            && text.IndexOf('\r') < 0
+            && text.IndexOf('\n') < 0;
+    }
+
     // A client-supplied session id is logged (LogDebug "Resolved session {SessionId}...") but is
     // otherwise attacker-controlled, arbitrary text - a value containing CR/LF must not be able to
     // forge extra-looking lines in a text log sink (CodeQL: "Log entries created from user input").
@@ -1469,10 +1483,7 @@ public class ProxyMiddlewareTests
             expression: logger => logger.Log(
                 LogLevel.Debug,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("Resolved session", StringComparison.Ordinal) &&
-                    !state.ToString()!.Contains('\r') &&
-                    !state.ToString()!.Contains('\n')),
+                It.Is<It.IsAnyType>((state, _) => DescribesSanitizedSession(state)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times: Times.Once);

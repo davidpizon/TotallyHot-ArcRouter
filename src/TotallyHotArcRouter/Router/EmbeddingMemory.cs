@@ -301,7 +301,14 @@ public sealed class EmbeddingMemory : IDisposable
     /// <see cref="Embeddings.IEmbeddingClient"/> are already unit-normalized, so this reduces to a plain
     /// dot product for those callers - the division guards any vector that is not.
     /// </summary>
-    private static double CosineSimilarity(float[] left, float[] right)
+    /// <param name="left">The first vector.</param>
+    /// <param name="right">The second vector, which must be the same length as <paramref name="left"/>.</param>
+    /// <returns>The cosine similarity in [-1, 1], or 0 when either vector has zero magnitude.</returns>
+    /// <remarks>
+    /// Shared with the local semantic response cache (<c>docs/router/semantic-cache.md</c>) so a
+    /// similarity figure there is the same comparison routing kNN already uses.
+    /// </remarks>
+    internal static double CosineSimilarity(float[] left, float[] right)
     {
         if (left.Length != right.Length)
             throw new ArgumentException(message: "Vectors must be the same length to compute cosine similarity.",

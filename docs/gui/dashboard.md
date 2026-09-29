@@ -179,7 +179,10 @@ flowchart TD
      Turn Cost a stepped cumulative area recolored per active model; Tokens a cumulative stepped area
      with exponential-runaway detection (hatched zone + rippling alert); Tool Steps a per-turn bar
      segmented by the model that handled each stretch of steps; Cache Hit a stepped % line with a
-     gradient track; TTFT a stepped latency line over per-model background zones with spikes pinned;
+     gradient track (this series is the upstream provider's prompt-cache token rate, from
+     `cache_read_tokens` — not the optional local semantic cache in
+     [`../router/semantic-cache.md`](../router/semantic-cache.md), which is off by default and shows
+     hits in the Console tab and the `X-ArcRouter-Semantic-Cache` header); TTFT a stepped latency line over per-model background zones with spikes pinned;
      Context Buffer a stepped % line with a fixed 90% threshold and pulsing breaches. Colors are
      deterministic via `TotallyHot.ArcRouter.Gui.Charts.ChartPalette` (which `Utils/ColorUtils` now delegates
      to). The chart models are built by `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder.Build` (pure,

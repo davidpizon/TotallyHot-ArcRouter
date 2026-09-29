@@ -56,7 +56,7 @@ public sealed class McpHostedServiceTests
                     LogLevel.Warning,
                     It.IsAny<EventId>(),
                     It.Is<It.IsAnyType>((state, _) =>
-                        state.ToString()!.Contains("The MCP endpoint could not start", StringComparison.Ordinal)),
+                        state!.ToString()!.Contains("The MCP endpoint could not start", StringComparison.Ordinal)),
                     null,
                     It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
                 times: Times.Once);

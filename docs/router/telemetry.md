@@ -157,7 +157,7 @@ Both parsers handle streaming and non-streaming responses:
 | `PromptTokens` | Standard input tokens. For Anthropic, this is `input_tokens` - tokens **after** the last cache breakpoint, not the request's full input. |
 | `CompletionTokens` | Output tokens. |
 | `CacheCreationTokens` | Input tokens written to a new prompt cache entry. Parsed natively from Anthropic responses; on OpenAI-shaped bodies it appears only via the `cache_creation_input_tokens` extension field an enriched translated-Anthropic response carries (see the normalization block below). `0` when absent. |
-| `CacheReadTokens` | Input tokens served from an existing cache entry. Parsed natively from Anthropic responses, and normalized out of OpenAI's inclusive `prompt_tokens_details.cached_tokens` by `OpenAiUsageParser` (see below). `0` when absent. |
+| `CacheReadTokens` | Input tokens served from an existing **provider prompt-cache** entry. Parsed natively from Anthropic responses, and normalized out of OpenAI's inclusive `prompt_tokens_details.cached_tokens` by `OpenAiUsageParser` (see below). `0` when absent. This is not the optional local semantic response cache ([`semantic-cache.md`](semantic-cache.md)), which reuses a whole saved answer and does not write these fields. |
 | `TotalInputTokens` (computed) | `PromptTokens + CacheCreationTokens + CacheReadTokens` - the true total input size a request carried. This is the *only* place this formula is defined; nothing else should re-derive it. |
 
 `ModelPrice.EstimateCost(UsageInfo)` prices all four components, falling back to the standard input

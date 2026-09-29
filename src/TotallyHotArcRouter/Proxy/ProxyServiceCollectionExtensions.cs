@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Serilog;
+using TotallyHot.ArcRouter.Cache;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
@@ -189,6 +190,22 @@ internal static class ProxyServiceCollectionExtensions
 
         services.AddHttpClient(ProxyMiddleware.HttpClientName);
 
+        // Local semantic response cache (docs/router/semantic-cache.md). Registered even when disabled
+        // so flipping SemanticCache:Enabled takes effect without a code change; the coordinator no-ops
+        // while Enabled is false. The embedding client is the routing one - the cache only reads its
+        // model identity and never embeds on its own.
+        services.AddOptions<SemanticCacheOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(SemanticCacheOptions.SectionName).Bind(options))
+            .ValidateDataAnnotations()
+            .Validate(options =>
+            {
+                options.EnsureValid();
+                return true;
+            })
+            .ValidateOnStart();
+        services.AddSingleton<SemanticResponseCache>();
+
         // ProxyMiddleware takes its ~25 optional collaborators as one ProxyMiddlewareDependencies
         // bag rather than individual constructor parameters, so the container can no longer
         // auto-assemble it via plain constructor injection - this factory does that assembly
@@ -230,7 +247,8 @@ internal static class ProxyServiceCollectionExtensions
             RoutingGate = sp.GetService<IRoutingGate>(),
             CapabilityStore = sp.GetService<IToolCallCapabilityStore>(),
             ContextWindowStore = sp.GetService<IModelContextWindowStore>(),
-            InteractionStatusStore = sp.GetService<IProviderInteractionStatusStore>()
+            InteractionStatusStore = sp.GetService<IProviderInteractionStatusStore>(),
+            SemanticResponseCache = sp.GetService<SemanticResponseCache>()
         });
 
         services.AddSingleton<ProxyMiddleware>();

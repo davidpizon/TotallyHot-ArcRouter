@@ -97,7 +97,7 @@ public class ProxyHostedServiceTests
             expression: logger => logger.Log(
                 level,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(expectedText, StringComparison.Ordinal)),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString()!.Contains(expectedText, StringComparison.Ordinal)),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times: Times.Once);

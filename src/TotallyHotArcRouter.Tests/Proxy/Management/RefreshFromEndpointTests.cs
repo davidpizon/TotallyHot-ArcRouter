@@ -512,9 +512,7 @@ public sealed class RefreshFromEndpointTests : IDisposable
         logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("401", StringComparison.Ordinal)
-                    && !state.ToString()!.Contains("Incorrect API key provided", StringComparison.Ordinal)),
+                It.Is<It.IsAnyType>((state, _) => LogsStatusWithoutTheUpstreamBody(state)),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -611,6 +609,19 @@ public sealed class RefreshFromEndpointTests : IDisposable
         Assert.True(provider.AdminAction!.Ok);
         Assert.False(provider.LiveTraffic!.Ok);
         Assert.Equal(expected: "out of credits", actual: provider.LiveTraffic.Message);
+    }
+
+    /// <summary>
+    /// True when the warning names the HTTP status and does not repeat the upstream error body.
+    /// The check lives in a method because Moq's matcher is an expression tree, and a null-forgiving
+    /// operator in that tree is a Qodana finding.
+    /// </summary>
+    private static bool LogsStatusWithoutTheUpstreamBody(object? state)
+    {
+        var text = state?.ToString();
+        return text is not null
+            && text.Contains("401", StringComparison.Ordinal)
+            && text.IndexOf("Incorrect API key provided", StringComparison.Ordinal) < 0;
     }
 
     private sealed class DelegatingHandlerStub(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)

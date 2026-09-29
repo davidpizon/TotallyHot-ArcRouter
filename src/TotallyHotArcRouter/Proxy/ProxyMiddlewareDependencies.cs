@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Cache;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -283,4 +284,11 @@ public sealed record ProxyMiddlewareDependencies
     /// <see langword="null"/>, which is behaviorally inert (no LiveTraffic state is ever recorded).
     /// </summary>
     public IProviderInteractionStatusStore? InteractionStatusStore { get; init; }
+
+    /// <summary>
+    /// Optional local semantic response cache (<c>docs/router/semantic-cache.md</c>). When
+    /// <see langword="null"/>, or when <see cref="SemanticCacheOptions.Enabled"/> is false, lookup and
+    /// store are skipped and forwarding is unchanged. Distinct from provider prompt caching.
+    /// </summary>
+    public SemanticResponseCache? SemanticResponseCache { get; init; }
 }
