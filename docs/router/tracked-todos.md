@@ -396,14 +396,14 @@ answer "which fields and block types did this request carry".
   arguments and inside `metadata`, (c) as the requested model, (d) in a non-allowlisted `User-Agent`
   and another header's value, and (e) as an explicit session id.
 - PR #159 (ADR-0017) merged on 2026-09-28 before this census; the census is still open. The ADR is
-  updated from the report: its marker table is replaced by the measured classification and its
-  decision rule is applied per harness.
+  accepted and is not rewritten. The measured classification stays in the census report, and its
+  decision rule is applied per harness. If the measurements change the accepted policy, write a
+  superseding ADR per [docs/adr/README.md](../adr/README.md#changing-a-past-decision).
 - No raw request body lands in the repository unless it has been scrubbed and reviewed as a fixture.
 
 ### Notes
 
-- The census is research instrumentation. Leave it opt-in and off by default after this item closes. If
-  ADR-0017 is accepted, its detectors reuse the same code on the hot path.
+- The census is research instrumentation. Leave it opt-in and off by default after this item closes. ADR-0017 is accepted, so its detectors reuse the same code on the hot path.
 - Don't infer the answer from vendor docs instead of doing the capture. What the docs allow and what
   the harness sends by default are different questions, and only the second one sets the pin policy.
 
