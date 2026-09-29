@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using TotallyHot.ArcRouter.Gui.Services;
+using TotallyHot.ArcRouter.Gui.Telemetry;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -54,5 +55,50 @@ public sealed class LiveDataStoreTests
         await store.StartAsync(TestContext.Current.CancellationToken);
 
         await store.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Incremental per-session aggregation must produce exactly what a full re-aggregation of the whole
+    /// event history produces, including the order of conversations.
+    /// </summary>
+    [Fact]
+    public void Incremental_aggregation_matches_full_reaggregation()
+    {
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
+        var start = DateTimeOffset.UtcNow.AddMinutes(-30);
+        var events = new List<RoutingTelemetryEventDto>();
+        for (var i = 0; i < 300; i++)
+        {
+            var dto = new RoutingTelemetryEventDto(
+                SessionId: $"s{i % 7}", TurnNumber: i / 7, IsSessionSynthesized: false,
+                RequestedModel: "auto", ResolvedModel: $"m{i % 3}", Provider: "p", IsFallback: i % 11 == 0,
+                PromptTokens: i, CompletionTokens: 2 * i, EstimatedCostUsd: i / 100m, IsStreaming: false,
+                LatencyToHeadersMs: i, TotalDurationMs: i, StatusCode: 200,
+                TimestampUtc: start.AddSeconds(i % 50 == 0 ? 0 : i), RoutedModel: $"m{i % 3}");
+            events.Add(dto);
+            store.OnRoutingTelemetryReceived(dto);
+        }
+
+        var expected = ConversationAggregator.Aggregate(events).Select(LiveConversationMapper.ToModel).ToList();
+
+        store.Conversations.Should().BeEquivalentTo(expected, options => options.WithStrictOrdering());
+    }
+
+    /// <summary>The live view keeps at most <see cref="LiveDataStore.MaxRetainedSessions"/> sessions.</summary>
+    [Fact]
+    public void Retention_is_bounded_to_the_most_recent_sessions()
+    {
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
+        var start = DateTimeOffset.UtcNow.AddHours(-2);
+        for (var i = 0; i < LiveDataStore.MaxRetainedSessions + 25; i++)
+            store.OnRoutingTelemetryReceived(new RoutingTelemetryEventDto(
+                SessionId: $"s{i}", TurnNumber: 0, IsSessionSynthesized: false, RequestedModel: "auto",
+                ResolvedModel: "m", Provider: "p", IsFallback: false, PromptTokens: 1, CompletionTokens: 1,
+                EstimatedCostUsd: 0m, IsStreaming: false, LatencyToHeadersMs: 1, TotalDurationMs: 1, StatusCode: 200,
+                TimestampUtc: start.AddSeconds(i), RoutedModel: "m"));
+
+        store.Conversations.Should().HaveCount(LiveDataStore.MaxRetainedSessions);
+        store.Conversations.Select(c => c.Id).Should().NotContain("s0");
+        store.Conversations[0].Id.Should().Be($"s{LiveDataStore.MaxRetainedSessions + 24}");
     }
 }
