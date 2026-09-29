@@ -104,18 +104,25 @@ await host.RunAsync();
 
 // Shared by the startup bootstrap above and ManagementTokenAdminStore's reauthenticateAsync registration:
 // issues (or re-issues) this tab's ADR-0012 loopback session cookie via POST {baseAddress}/auth/session.
-// A short-lived HttpClient is deliberately created per call rather than injected - this runs both before
-// and after the DI container is fully wired up (the bootstrap call happens right after builder.Build(),
-// the reauthenticateAsync call happens on demand, much later, from inside a DI factory), so there is no
-// single natural place to register a long-lived one that both call sites could share.
+// One process-wide HttpClient is reused for every call (see AuthSessionClient below) rather than one per
+// call: this runs both before and after the DI container is fully wired up (the bootstrap call happens
+// right after builder.Build(), the reauthenticateAsync call happens on demand, much later, from inside a
+// DI factory), so there is no single natural place to register one that both call sites could share.
 static async Task<HttpResponseMessage> PostAuthSessionAsync(string baseAddress)
 {
-    // Must await inside this method's own using block, not return the unawaited Task from it: disposing
-    // sessionClient happens synchronously as this method returns, which - for a non-async method just
-    // returning PostAsync's Task directly - happened before the in-flight request actually completed
-    // (a real, latent bug this rewrite also fixes, found while touching this function for AppRoot's
-    // sake: HttpClient.Dispose() while a request is in flight can abort it under its default handler).
-    using var sessionClient = new HttpClient();
-    sessionClient.BaseAddress = new Uri(baseAddress);
-    return await sessionClient.PostAsync(requestUri: "auth/session", content: null).ConfigureAwait(false);
+    return await AuthSessionClient.Shared(baseAddress).PostAsync(requestUri: "auth/session", content: null).ConfigureAwait(false);
+}
+
+/// <summary>
+/// Holds the single long-lived <see cref="HttpClient"/> used to issue the ADR-0012 session cookie, avoiding
+/// per-call client construction (socket exhaustion). The base address is fixed for the lifetime of the tab.
+/// </summary>
+internal static class AuthSessionClient
+{
+    private static HttpClient? _client;
+
+    /// <summary>Returns the shared client, creating it on first use with the given base address.</summary>
+    /// <param name="baseAddress">The router's base address; only the first call's value is used.</param>
+    public static HttpClient Shared(string baseAddress) =>
+        _client ??= new HttpClient { BaseAddress = new Uri(baseAddress) };
 }
