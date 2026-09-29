@@ -193,7 +193,7 @@ public sealed class BenchmarkDataTests
     public void CheckFailed_state_renders_the_reason_and_a_disabled_button()
     {
         using var ctx =
-            NewContext(new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "failed to connect"));
+            NewContext(new FakeClient(state: BenchmarkDataAdminState.CheckFailed, reason: "failed to connect"));
 
         var cut = ctx.Render<BenchmarkData>();
 
@@ -249,7 +249,7 @@ public sealed class BenchmarkDataTests
     {
         // Same reasoning as Resyncing_a_current_corpus_runs_a_sync_rather_than_a_recheck: the per-card
         // button is disabled in CheckFailed, so retrying the check now goes through the top button.
-        var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "boom");
+        var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, reason: "boom");
         using var ctx = NewContext(client);
 
         var cut = ctx.Render<BenchmarkData>();
@@ -553,7 +553,7 @@ public sealed class BenchmarkDataTests
     [Fact]
     public void A_rejected_recheck_keeps_the_panel_on_screen()
     {
-        var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, Reason: "boom")
+        var client = new FakeClient(state: BenchmarkDataAdminState.CheckFailed, reason: "boom")
         {
             RecheckError = new GrpcAdminException("Could not recheck the benchmark data: boom")
         };
@@ -578,10 +578,10 @@ public sealed class BenchmarkDataTests
         {
         }
 
-        public FakeClient(BenchmarkDataAdminState state, string? Reason, params BenchmarkFileStatusInfo[] files)
+        public FakeClient(BenchmarkDataAdminState state, string? reason, params BenchmarkFileStatusInfo[] files)
         {
             _initialState = state;
-            _reason = Reason;
+            _reason = reason;
             _files = files;
         }
 
@@ -653,8 +653,8 @@ public sealed class BenchmarkDataTests
     /// A configurable, reachable-by-default <see cref="ILlmRouterModelAdminClient"/> fake, so
     /// <see cref="NewContext"/> can register a <see cref="LlmRouterModelStore"/> for the Local Voter Model
     /// section without needing a live proxy. Defaults to no files (a "Current" vacuously-true status) for
-    /// tests that don't exercise this section; tests that do pass <see cref="Files"/> and/or
-    /// <see cref="SyncEvents"/>.
+    /// tests that don't exercise this section; tests that do pass <see cref="FakeVoterClient.Files"/> and/or
+    /// <see cref="FakeVoterClient.SyncEvents"/>.
     /// </summary>
     private sealed class FakeVoterClient : ILlmRouterModelAdminClient
     {

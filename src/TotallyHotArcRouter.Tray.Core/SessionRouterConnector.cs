@@ -62,26 +62,18 @@ public sealed class SessionRouterConnector : ISessionRouterConnector
 /// <see cref="GrpcChannel"/>, which is the hop the connector seam exists to avoid in tests.
 /// </remarks>
 [ExcludeFromCodeCoverage]
-internal sealed class SessionRouterChannelProvider : IRouterChannelProvider, IDisposable
+internal sealed class SessionRouterChannelProvider(GrpcChannel channel, string serverAddress)
+    : IRouterChannelProvider, IDisposable
 {
-    private readonly GrpcChannel _channel;
-
-    public SessionRouterChannelProvider(GrpcChannel channel, string serverAddress)
-    {
-        _channel = channel;
-        ServerAddress = serverAddress;
-        CallInvoker = channel.CreateCallInvoker();
-    }
+    /// <inheritdoc/>
+    public CallInvoker CallInvoker { get; } = channel.CreateCallInvoker();
 
     /// <inheritdoc/>
-    public CallInvoker CallInvoker { get; }
-
-    /// <inheritdoc/>
-    public string ServerAddress { get; }
+    public string ServerAddress { get; } = serverAddress;
 
     /// <summary>Disposes the underlying channel, closing its connection and releasing the session cookie's handler.</summary>
     public void Dispose()
     {
-        _channel.Dispose();
+        channel.Dispose();
     }
 }

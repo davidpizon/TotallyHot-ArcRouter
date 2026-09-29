@@ -108,7 +108,6 @@ public sealed class ProvidersAdminLoadedTests
     // "As of ... stale" branch distinctly from the fresh-and-projected one.
     private static Contract.ProviderListResponse ProvidersWithStaleRateLimit()
     {
-        var response = new Contract.ProviderListResponse();
         var rateLimit = new Contract.ProviderRateLimitState
         {
             ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")),
@@ -119,15 +118,20 @@ public sealed class ProvidersAdminLoadedTests
             Limit = 200000, Remaining = 158000,
             ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
         };
-        response.Providers.Add(new Contract.ProviderState
+        return new Contract.ProviderListResponse
         {
-            Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
-            ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
-            Enabled = true, WindowKind = "Monthly",
-            UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
-            RateLimit = rateLimit
-        });
-        return response;
+            Providers =
+            {
+                new Contract.ProviderState
+                {
+                    Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
+                    ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
+                    Enabled = true, WindowKind = "Monthly",
+                    UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
+                    RateLimit = rateLimit
+                }
+            }
+        };
     }
 
     // Same anthropic provider as DefaultProviders, but with a populated usageLastRecordedAtUtc and

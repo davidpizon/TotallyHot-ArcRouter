@@ -183,7 +183,7 @@ public sealed class DashboardTests
 
     private sealed class FakePersistedSessionsClient : IPersistedSessionsClient
     {
-        public PersistedSessionsResult Result { get; set; } = new(true, Transcripts: []);
+        public PersistedSessionsResult Result { get; init; } = new(true, Transcripts: []);
 
         public Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default)
         {

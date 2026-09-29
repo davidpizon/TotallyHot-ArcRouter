@@ -17,6 +17,7 @@
     private string? _rendered;
     private bool _disposed;
 
+    /// <inheritdoc/>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // JS interop is only valid after the element exists; re-render only when the model actually
@@ -37,6 +38,7 @@
         }
     }
 
+    /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
         _disposed = true;

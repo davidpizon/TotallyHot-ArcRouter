@@ -120,7 +120,7 @@
                                              ValueChanged="value => header.Value = value"
                                              Locked="@header.Locked"
                                              LockedChanged="locked => SetHeaderLocked(header: header, locked: locked)"
-                                             Placeholder="@(header.Locked && header.HasStoredLiteralValue ? "•••••••• (saved, blank keeps it)" : "value")"
+                                             Placeholder="@(header is { Locked: true, HasStoredLiteralValue: true } ? "•••••••• (saved, blank keeps it)" : "value")"
                                              TestId="@($"header-value-{index}")"
                                              Class="flex-1 min-w-0"/>
                             }
@@ -254,6 +254,7 @@
     // is created each time it's shown. This must NOT run on every OnParametersSet: the parent re-renders
     // on every live-telemetry tick, and copying the parameters back into the fields there would silently
     // revert the user's in-progress edits between typing and clicking Save.
+    /// <inheritdoc/>
     protected override void OnInitialized()
     {
         _baseUrl = Model.BaseUrl;

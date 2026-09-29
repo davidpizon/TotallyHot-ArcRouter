@@ -117,7 +117,7 @@ public sealed class PersistedSessionStoreTests
 
     private sealed class FakePersistedSessionsClient : IPersistedSessionsClient, IDisposable
     {
-        public PersistedSessionsResult Result { get; set; } = new(true, Transcripts: []);
+        public PersistedSessionsResult Result { get; init; } = new(true, Transcripts: []);
 
         public Exception? Failure { get; set; }
 

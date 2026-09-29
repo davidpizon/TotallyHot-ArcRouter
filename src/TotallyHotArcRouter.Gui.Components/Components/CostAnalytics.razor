@@ -176,6 +176,7 @@
     /// <summary>The display definition for the currently selected metric.</summary>
     private MetricDef CurrentDef => MetricDefs.First(d => d.Metric == _metric);
 
+    /// <inheritdoc/>
     protected override void OnInitialized()
     {
         // Only seed the initial session scope here; the first compute happens in OnParametersSet, which
@@ -191,6 +192,7 @@
     // call instantly anyway, but there's no reason to re-request the same wide range every render). The
     // retention-matching 370-day span is what the ledger itself is bounded to
     // (Storage:UsageLedgerRetentionDays), so this asks for exactly as much history as could exist.
+    /// <inheritdoc/>
     protected override async Task OnInitializedAsync()
     {
         // Aligned to the start of the current UTC day, not DateTimeOffset.UtcNow - rollups are stored at
@@ -274,6 +276,7 @@
 
     // Runs right after OnInitialized on first render, and again whenever the Dashboard re-renders on
     // LiveDataStore.Changed (new live telemetry) - keeps the chart auto-refreshing as new turns arrive.
+    /// <inheritdoc/>
     protected override void OnParametersSet()
     {
         Recompute();

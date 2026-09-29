@@ -105,9 +105,7 @@ public sealed class WindowsCertificateTrustStoreTests
         using var certificate = CreateSelfSignedTestCertificate();
         var store = new WindowsCertificateTrustStore(name: StoreName.My, location: StoreLocation.CurrentUser);
 
-        var act = () => store.Uninstall(certificate);
-
-        var exception = Record.Exception(act);
-        Assert.Null(exception);
+        // Would throw (and fail the test) if uninstalling an absent certificate weren't a no-op.
+        store.Uninstall(certificate);
     }
 }

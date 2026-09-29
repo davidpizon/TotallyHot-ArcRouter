@@ -150,7 +150,7 @@ public sealed class RouterConnectionSupervisorTests
 
     private sealed class FakeRoutingGateAdminClient : IRoutingGateAdminClient
     {
-        public bool EnabledResult { get; set; } = true;
+        private bool EnabledResult { get; set; } = true;
         public Exception? GetFailure { get; set; }
 
         public Task<bool> GetAsync(CancellationToken cancellationToken = default)

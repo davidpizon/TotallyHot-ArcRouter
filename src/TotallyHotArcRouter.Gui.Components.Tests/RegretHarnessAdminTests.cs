@@ -180,7 +180,7 @@ public sealed class RegretHarnessAdminTests
 
         public GrpcAdminException? Error { get; set; }
 
-        public IReadOnlyList<RegretHarnessRunEvent> RunEvents { get; set; } = [];
+        public IReadOnlyList<RegretHarnessRunEvent> RunEvents { get; init; } = [];
 
         /// <summary>
         /// Optional gate awaited immediately before yielding a <see cref="RegretHarnessRunEvent.Result"/>

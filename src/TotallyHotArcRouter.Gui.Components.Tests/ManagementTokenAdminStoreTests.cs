@@ -85,10 +85,10 @@ public sealed class ManagementTokenAdminStoreTests
     private sealed class FakeManagementTokenAdminClient : IManagementTokenAdminClient, IDisposable
     {
         public bool Disposed { get; private set; }
-        public Exception? GetFailure { get; set; }
-        public Exception? RegenerateFailure { get; set; }
-        public string RegenerateResult { get; set; } = string.Empty;
-        public string TokenResult { get; set; } = string.Empty;
+        public Exception? GetFailure { get; init; }
+        public Exception? RegenerateFailure { get; init; }
+        public string RegenerateResult { get; init; } = string.Empty;
+        public string TokenResult { get; init; } = string.Empty;
 
         public void Dispose()
         {

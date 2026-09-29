@@ -80,13 +80,15 @@ public static class TelemetryChannelFactory
             CookieContainer = new CookieContainer()
         };
 
+        // One HttpClient for the session call and the channel: DisposeHttpClient below hands its (and the
+        // handler's) ownership to the channel once built, so it is only disposed here on failure.
+        // Infinite timeout: the channel reuses this client for long-lived streams (StreamEvents), which
+        // HttpClient's 100-second default would cancel; it must be set before the first request.
+        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+
         try
         {
-            // disposeHandler: false - GrpcChannelOptions.DisposeHttpClient below takes over ownership of
-            // the same handler once the channel is built; this HttpClient's own disposal must not tear it
-            // down first.
-            using var sessionClient = new HttpClient(handler, disposeHandler: false);
-            using var response = await sessionClient
+            using var response = await client
                 .PostAsync(requestUri: $"{serverAddress}/auth/session", content: null,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -94,13 +96,13 @@ public static class TelemetryChannelFactory
         }
         catch
         {
-            handler.Dispose();
+            client.Dispose();
             throw;
         }
 
         return GrpcChannel.ForAddress(
             address: serverAddress,
-            channelOptions: new GrpcChannelOptions { HttpHandler = handler, DisposeHttpClient = true });
+            channelOptions: new GrpcChannelOptions { HttpClient = client, DisposeHttpClient = true });
     }
 
     /// <summary>

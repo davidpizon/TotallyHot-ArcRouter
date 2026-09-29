@@ -13,7 +13,7 @@ public sealed class CostReconciliationStoreTests
 {
     private static readonly IReadOnlyList<ProviderReconciliationStatus> SampleProviders =
     [
-        new ProviderReconciliationStatus("openai", new DateOnly(2026, 1, 15), 10.50m, 9.75m,
+        new("openai", new DateOnly(2026, 1, 15), 10.50m, 9.75m,
             new DateTimeOffset(2026, 1, 16, 3, 0, 0, offset: TimeSpan.Zero))
     ];
 
@@ -93,13 +93,13 @@ public sealed class CostReconciliationStoreTests
 
     private sealed class FakeCostReconciliationAdminClient : ICostReconciliationAdminClient, IDisposable
     {
-        public IReadOnlyList<ProviderReconciliationStatus> StatusResult { get; set; } = [];
+        public IReadOnlyList<ProviderReconciliationStatus> StatusResult { get; init; } = [];
 
-        public Exception? StatusFailure { get; set; }
+        public Exception? StatusFailure { get; init; }
 
-        public IReadOnlyList<ProviderReconciliationStatus> RunNowResult { get; set; } = [];
+        public IReadOnlyList<ProviderReconciliationStatus> RunNowResult { get; init; } = [];
 
-        public Exception? RunNowFailure { get; set; }
+        public Exception? RunNowFailure { get; init; }
 
         public Action? OnRunNow { get; set; }
 

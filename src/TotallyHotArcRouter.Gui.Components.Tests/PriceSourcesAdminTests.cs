@@ -421,7 +421,7 @@ public sealed class PriceSourcesAdminTests
         // Out to the other rank and back again before releasing. The working order ends up identical to the
         // store's, so there is nothing to persist - and, critically, the card must not be left detached over
         // the one it swapped with. That was the reported bug this drag model replaced.
-        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        await Card(cut: cut, 0).PointerDownAsync(new PointerEventArgs { Button = 0 });
         await cut.InvokeAsync(cut.Instance.DragStarted);
         await cut.InvokeAsync(() => cut.Instance.MoveDraggedTo(1));
         await cut.InvokeAsync(() => cut.Instance.MoveDraggedTo(0));
@@ -445,7 +445,7 @@ public sealed class PriceSourcesAdminTests
         var cut = ctx.Render<PriceSourcesAdmin>();
         // Pointerdown, then a release that JS never promoted to a drag because the pointer never travelled
         // far enough. This is what every click on the enable/disable toggle looks like from the card.
-        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        await Card(cut: cut, 0).PointerDownAsync(new PointerEventArgs { Button = 0 });
         await cut.InvokeAsync(cut.Instance.EndDrag);
 
         client.ReorderCount.Should().Be(0);
@@ -494,7 +494,7 @@ public sealed class PriceSourcesAdminTests
             new PriceSourceStatus(Name: "openrouter", true, -10, 5)));
 
         var cut = ctx.Render<PriceSourcesAdmin>();
-        Card(cut: cut, 0).PointerDown(new PointerEventArgs { Button = 0 });
+        await Card(cut: cut, 0).PointerDownAsync(new PointerEventArgs { Button = 0 });
         await cut.InvokeAsync(cut.Instance.DragStarted);
 
         // JS adds card-pinned itself for immediacy, but Blazor has to render it too: Blazor rewrites the
@@ -577,7 +577,7 @@ public sealed class PriceSourcesAdminTests
     /// </summary>
     private static async Task DragAsync(IRenderedComponent<PriceSourcesAdmin> cut, int from, int toIndex)
     {
-        Card(cut: cut, index: from).PointerDown(new PointerEventArgs { Button = 0 });
+        await Card(cut: cut, index: from).PointerDownAsync(new PointerEventArgs { Button = 0 });
         await cut.InvokeAsync(cut.Instance.DragStarted);
         await cut.InvokeAsync(() => cut.Instance.MoveDraggedTo(toIndex));
         await cut.InvokeAsync(cut.Instance.EndDrag);

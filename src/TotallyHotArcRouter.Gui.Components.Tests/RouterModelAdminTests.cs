@@ -173,7 +173,7 @@ public sealed class RouterModelAdminTests
 
         public GrpcAdminException? Error { get; set; }
 
-        public IReadOnlyList<LogRegRetrainEvent> RetrainEvents { get; set; } = [];
+        public IReadOnlyList<LogRegRetrainEvent> RetrainEvents { get; init; } = [];
 
         /// <summary>
         /// Optional gate awaited immediately before yielding a <see cref="LogRegRetrainEvent.Result"/>

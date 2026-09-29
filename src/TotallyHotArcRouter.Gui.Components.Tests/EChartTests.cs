@@ -34,7 +34,7 @@ public sealed class EChartTests
         using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
-        var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{\"a\":1}"));
+        ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{\"a\":1}"));
 
         var invocation = ctx.JSInterop.Invocations.Should().ContainSingle(i => i.Identifier == "echartsInterop.render")
             .Subject;
@@ -68,7 +68,7 @@ public sealed class EChartTests
     [Fact]
     public void Disposing_calls_the_JS_dispose_hook()
     {
-        using var ctx = new BunitContext();
+        var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));

@@ -40,6 +40,7 @@
     private bool _focusPending = true;
 
     // Cancel gets initial focus (not Regenerate) since it is the non-destructive default.
+    /// <inheritdoc/>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (_focusPending)
