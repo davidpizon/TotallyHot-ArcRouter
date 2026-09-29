@@ -348,8 +348,10 @@ public class RequestInterceptor
             body = await reader.ReadToEndAsync(cancellationToken);
         }
 
-        _logger.LogDebug(message: "[INTERCEPTOR] Intercepted agent request message: {RequestBody}",
-            TruncateForLog(SanitizeForLog(body)));
+        // Guarded: agentic bodies routinely exceed 100 KB, and the argument copies the whole body.
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug(message: "[INTERCEPTOR] Intercepted agent request message: {RequestBody}",
+                LogRedaction.TruncateSanitize(body));
 
         if (string.IsNullOrWhiteSpace(body))
             return ModelRouteResolutionResult.Failure("Request body must be a JSON object containing a 'model' field.");

@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -692,9 +691,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                 var totalDurationMs = stopwatch.ElapsedMilliseconds;
 
-                _logger.LogDebug(
-                    message: "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
-                    LogRedaction.Truncate(LogRedaction.Sanitize(Encoding.UTF8.GetString(capturedResponseBytes))));
+                // Guarded: the argument decodes up to 4 MB, which must not be paid when Debug is off.
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(
+                        message: "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
+                        LogRedaction.DecodeTruncateSanitize(capturedResponseBytes));
 
                 await _interceptor.InterceptResponseAsync(context);
 

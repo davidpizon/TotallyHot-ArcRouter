@@ -161,7 +161,7 @@ internal sealed class RoutingCandidateBuilder(
         // Build the ordered list of upstreams to try: the (possibly substituted) primary, then every
         // other currently-eligible configured model ranked by RouterMemory score - the dynamic
         // replacement for the old static per-model Fallbacks list. Each candidate gets its own
-        // rewritten body because a backup on a different provider needs a different upstream model
+        // (lazily rewritten) body because a backup on a different provider needs a different upstream model
         // id substituted into the same request.
         var candidates = new List<RouteCandidate>
             { RequestBodyIntrospection.BuildCandidate(jsonObject: jsonObject, route: route) };
@@ -174,7 +174,7 @@ internal sealed class RoutingCandidateBuilder(
             // failing call. Keyed on the full target, not ProviderModelId alone, so two genuinely
             // distinct providers that happen to share a model-id string are both kept as valid hops.
             if (seenTargets.Add(CircuitBreakerTargetKey.FromRoute(fallbackRoute)))
-                candidates.Add(RequestBodyIntrospection.BuildCandidate(jsonObject: jsonObject, route: fallbackRoute));
+                candidates.Add(RequestBodyIntrospection.BuildFallbackCandidate(primary: candidates[0], route: fallbackRoute));
 
         return new RoutingCandidateBuildResult(Candidates: candidates, Route: route,
             SubstitutionReason: substitutionReason, ExplicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);

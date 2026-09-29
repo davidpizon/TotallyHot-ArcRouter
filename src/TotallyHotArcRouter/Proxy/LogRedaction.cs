@@ -34,4 +34,32 @@ internal static class LogRedaction
             ? value
             : string.Concat(str0: value.AsSpan(0, length: MaxLoggedBodyLength), str1: "...[truncated]");
     }
+
+    /// <summary>
+    /// Decodes a captured UTF-8 payload for a Debug log line, then truncates and sanitizes it - cheaply.
+    /// Only the first <c>MaxLoggedBodyLength * 4</c> bytes are decoded (UTF-8 is at most 4 bytes per
+    /// character, so that prefix always holds at least <see cref="MaxLoggedBodyLength"/> characters), and
+    /// truncation runs before <see cref="Sanitize"/> so its <c>Replace</c> copies touch at most the capped
+    /// prefix rather than a multi-megabyte body. The result equals <c>Truncate(Sanitize(fullText))</c>
+    /// because truncation keeps a prefix and sanitization is character-for-character.
+    /// </summary>
+    /// <param name="utf8Bytes">The captured payload bytes.</param>
+    /// <returns>A bounded, CR/LF-free string safe to place in a log message argument.</returns>
+    public static string DecodeTruncateSanitize(ReadOnlySpan<byte> utf8Bytes)
+    {
+        var prefix = utf8Bytes.Length > MaxLoggedBodyLength * 4 ? utf8Bytes[..(MaxLoggedBodyLength * 4)] : utf8Bytes;
+        return Sanitize(Truncate(System.Text.Encoding.UTF8.GetString(prefix)));
+    }
+
+    /// <summary>
+    /// Truncates and then sanitizes a text payload for a Debug log line, so <see cref="Sanitize"/>'s
+    /// <c>Replace</c> copies touch at most <see cref="MaxLoggedBodyLength"/> characters. Same result as
+    /// <c>Truncate(Sanitize(value))</c>.
+    /// </summary>
+    /// <param name="value">The (possibly very large) text payload.</param>
+    /// <returns>A bounded, CR/LF-free string safe to place in a log message argument.</returns>
+    public static string TruncateSanitize(string? value)
+    {
+        return Sanitize(Truncate(value ?? string.Empty));
+    }
 }
