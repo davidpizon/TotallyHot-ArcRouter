@@ -119,7 +119,7 @@ public sealed class PersistedSessionStoreTests
     {
         public PersistedSessionsResult Result { get; init; } = new(true, Transcripts: []);
 
-        public Exception? Failure { get; set; }
+        public Exception? Failure { get; init; }
 
         public bool Disposed { get; private set; }
 
