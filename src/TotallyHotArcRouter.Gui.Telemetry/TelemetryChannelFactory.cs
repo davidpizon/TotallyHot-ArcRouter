@@ -82,7 +82,9 @@ public static class TelemetryChannelFactory
 
         // One HttpClient for the session call and the channel: DisposeHttpClient below hands its (and the
         // handler's) ownership to the channel once built, so it is only disposed here on failure.
-        var client = new HttpClient(handler);
+        // Infinite timeout: the channel reuses this client for long-lived streams (StreamEvents), which
+        // HttpClient's 100-second default would cancel; it must be set before the first request.
+        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
 
         try
         {

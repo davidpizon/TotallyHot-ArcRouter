@@ -44,7 +44,7 @@ public sealed class EChartTests
     [Fact]
     public void Does_not_re_render_when_the_json_is_unchanged()
     {
-        var ctx = new BunitContext();
+        using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));
@@ -56,7 +56,7 @@ public sealed class EChartTests
     [Fact]
     public void Re_renders_when_the_json_changes()
     {
-        var ctx = new BunitContext();
+        using var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
 
         var cut = ctx.Render<EChart>(p => p.Add(parameterSelector: c => c.ModelJson, value: "{}"));

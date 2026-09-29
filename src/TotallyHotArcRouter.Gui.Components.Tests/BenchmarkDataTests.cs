@@ -598,7 +598,7 @@ public sealed class BenchmarkDataTests
         public IReadOnlyList<BenchmarkSyncEvent> SyncEvents { get; init; } = [];
 
         /// <summary>
-        /// When set, awaited after every queued <see cref="FakeVoterClient.SyncEvents"/> entry has been yielded and before
+        /// When set, awaited after every queued <see cref="SyncEvents"/> entry has been yielded and before
         /// the async enumerable completes - so a test can assert on the store's mid-sync state (still
         /// <c>IsSyncing</c>, since the store's <c>finally</c> only runs once enumeration ends) and then
         /// let the sync finish by completing this task.
