@@ -752,24 +752,16 @@ public sealed class SettingsModalTests
     /// <summary>A controllable <see cref="ICostReconciliationAdminClient"/> double; empty provider list by default.</summary>
     private sealed class FakeCostReconciliationAdminClient : ICostReconciliationAdminClient
     {
-        public IReadOnlyList<ProviderReconciliationStatus> Status { get; } = [];
-
-        public GrpcAdminException? Failure { get; init; }
-
         public Task<IReadOnlyList<ProviderReconciliationStatus>> GetStatusAsync(
             CancellationToken cancellationToken = default)
         {
-            return Failure is null
-                ? Task.FromResult(Status)
-                : Task.FromException<IReadOnlyList<ProviderReconciliationStatus>>(Failure);
+            return Task.FromResult<IReadOnlyList<ProviderReconciliationStatus>>([]);
         }
 
         public Task<IReadOnlyList<ProviderReconciliationStatus>> RunNowAsync(
             CancellationToken cancellationToken = default)
         {
-            return Failure is null
-                ? Task.FromResult(Status)
-                : Task.FromException<IReadOnlyList<ProviderReconciliationStatus>>(Failure);
+            return Task.FromResult<IReadOnlyList<ProviderReconciliationStatus>>([]);
         }
     }
 

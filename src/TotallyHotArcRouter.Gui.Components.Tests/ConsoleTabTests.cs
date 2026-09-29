@@ -53,10 +53,10 @@ public sealed class ConsoleTabTests
         using var ctx = NewContext();
 
         var cut = ctx.Render<ConsoleTab>();
-        IElement toggle() => cut.FindAll("button").First(b => b.TextContent.Contains("Auto-Scroll"));
+        IElement Toggle() => cut.FindAll("button").First(b => b.TextContent.Contains("Auto-Scroll"));
 
-        toggle().Click();
-        toggle().Click();
+        Toggle().Click();
+        Toggle().Click();
 
         cut.Markup.Should().Contain("Auto-Scroll: ON");
     }
