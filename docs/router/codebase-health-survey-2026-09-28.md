@@ -436,3 +436,19 @@ The same gate as [`code-smell-refactoring-plan.md` § Validation gate](code-smel
   or `RequestTelemetryPublisher` (HS-02 through HS-05, and HS-09 step 3).
 
 HS-01 adds its VM install/uninstall/upgrade check.
+
+---
+
+## Implementation status (branch `code-cleanup`)
+
+| ID | Status | Notes |
+|---|---|---|
+| HS-01 | Done, **not VM-verified** | `UninstallCertificate` now runs `Before="RemoveFiles"` with `REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE`; comment corrected. Installer builds. The install/uninstall/upgrade VM check in the plan is still owed. Outcome logging was not added. |
+| HS-02 | Step 1 done; step 2 **proposed** | `Response.CompleteAsync()` now precedes telemetry. Step 2 (bounded channel writer) is [ADR-0018](../adr/0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md), status `proposed`; no code yet. Client-visible EOF latency was not measured. |
+| HS-03 | Done | Failover candidates share the primary's flags and rewrite their body lazily from the primary's serialized snapshot. No allocation benchmark run. |
+| HS-04 | Done | `IsEnabled(Debug)` guards; truncate-before-sanitize; response decode limited to a byte prefix. |
+| HS-05 | **Not done** | Measure-first item; needs the ONNX model and a benchmark harness. |
+| HS-06 | Partly done | Single pass, no intermediate lists, query magnitude precomputed, judge filter before scoring. Results are bit-identical. **Not done:** SIMD (`TensorPrimitives`), copy-on-write snapshot, top-k heap, and the BenchmarkDotNet baseline. |
+| HS-07 | Partly done | Per-session incremental aggregation; retention capped at 500 sessions. **Not done:** `Changed` coalescing, and the `Dashboard.razor` per-render rebuilds. |
+| HS-08 | Partly done | Startup price pull bounded by `PriceCatalog:StartupFetchBudgetSeconds` (default 10) and continues in the background; explicit 30 s client timeout. **Not done:** concurrent source fetching. |
+| HS-09 | Partly done | `RequestInterceptorBuilder`, `HttpContextFactory`, `TempDirectory` added; 82 of 159 interceptor sites migrated; `ICircuitBreaker` now `GetRequiredService` with a DI sharing test. **Not done:** `ProxyMiddlewareBuilder`, migration of the remaining sites. |
