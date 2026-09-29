@@ -5,6 +5,7 @@ using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -144,7 +145,7 @@ public class ProxyMiddlewareModelEnabledTests
         string requestedModel = "primary")
     {
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,

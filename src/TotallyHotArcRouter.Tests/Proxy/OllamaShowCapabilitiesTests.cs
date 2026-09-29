@@ -7,6 +7,7 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Tests.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -213,7 +214,7 @@ public class OllamaShowCapabilitiesTests
     private static ProxyMiddleware Middleware(IModelRouteResolver resolver, FakeToolCallCapabilityStore? store)
     {
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new ThrowingHandler();
 
         return new ProxyMiddleware(

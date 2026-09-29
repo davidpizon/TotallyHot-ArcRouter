@@ -4,6 +4,7 @@ using Moq;
 using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -58,7 +59,7 @@ public class InFlightRequestGaugeTests
             providerName: "test",
             apiKey: null);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
         {
             // Observed at the deepest point of the request - the upstream call - where background work
@@ -99,7 +100,7 @@ public class InFlightRequestGaugeTests
             providerName: "test",
             apiKey: null);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new HttpRequestException("connection refused"));
 

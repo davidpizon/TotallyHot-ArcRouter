@@ -10,6 +10,7 @@ using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -77,7 +78,7 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var result = await interceptor.ResolveModelRouteAsync(context: CreateContextWithBody(body),
             cancellationToken: TestContext.Current.CancellationToken);
@@ -95,7 +96,7 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://api.openai.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4","temperature":0.7}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -136,7 +137,7 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://api.openai.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"agentic-router"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -334,7 +335,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"auto"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -438,7 +439,7 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var models = interceptor.ListAvailableModels();
 
@@ -455,7 +456,7 @@ public class RequestInterceptorTests
             ("gpt-5.4", "openai", "gpt-5.4"),
             ("kimi-k2.5", "moonshot", "kimi-k2.5"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var models = interceptor.ListAvailableModels();
 
@@ -577,7 +578,7 @@ public class RequestInterceptorTests
             ("primary", "prov-a", "primary-upstream", "https://a.example.com"),
             ("backup", "prov-b", "backup-upstream", "https://b.example.com"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -604,7 +605,7 @@ public class RequestInterceptorTests
             ("primary", "prov-a", "shared-id", "https://a.example.com"),
             ("backup", "prov-b", "shared-id", "https://b.example.com"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -621,7 +622,7 @@ public class RequestInterceptorTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
             baseUrl: "https://api.openai.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -816,7 +817,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -875,7 +876,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -907,7 +908,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -938,7 +939,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"unknown-model"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -979,7 +980,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -1015,7 +1016,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"primary"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -1045,7 +1046,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,
@@ -1079,7 +1080,7 @@ public class RequestInterceptorTests
         var resolver = new ModelRouteResolver(store: new InMemoryProviderConfigStore(options),
             environment: Mock.Of<IEnvironmentVariableProvider>());
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"totally-unknown-name"}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,

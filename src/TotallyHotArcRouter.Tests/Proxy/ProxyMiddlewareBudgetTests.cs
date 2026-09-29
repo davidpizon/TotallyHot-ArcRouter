@@ -6,6 +6,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -159,7 +160,7 @@ public class ProxyMiddlewareBudgetTests
         string requestedModel = "primary")
     {
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,

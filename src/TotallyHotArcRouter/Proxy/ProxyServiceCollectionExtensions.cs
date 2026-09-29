@@ -228,7 +228,7 @@ internal static class ProxyServiceCollectionExtensions
             Translators = sp.GetService<IReadOnlyDictionary<string, IPayloadTranslator>>(),
             BedrockClientFactory = sp.GetService<IBedrockRuntimeClientFactory>(),
             BudgetStore = sp.GetService<IBudgetEnforcer>(),
-            CircuitBreaker = sp.GetService<ICircuitBreaker>(),
+            CircuitBreaker = sp.GetRequiredService<ICircuitBreaker>(),
             ToolCallNormalizerFactory = sp.GetService<ToolCallNormalizerFactory>(),
             RateLimitCapture = sp.GetService<IRateLimitHeaderCapture>(),
             UsageLedger = sp.GetService<IUsageLedger>(),

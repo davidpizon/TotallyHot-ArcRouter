@@ -4,6 +4,7 @@ using System.Net;
 using System.Text;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -87,7 +88,7 @@ public sealed class ProxyMiddlewareRoutingGateTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -127,7 +128,7 @@ public sealed class ProxyMiddlewareRoutingGateTests
         IRoutingGate? routingGate)
     {
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
