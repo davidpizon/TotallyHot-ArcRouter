@@ -36,15 +36,22 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class LiveDataStore : IAsyncDisposable
 {
     /// <summary>
+    /// The most sessions the live view retains. Sessions beyond this (least recently active first) are
+    /// dropped from memory; they are still served from the persisted session store.
+    /// </summary>
+    internal const int MaxRetainedSessions = 500;
+
+    /// <summary>
     /// Fixed delay between reconnect attempts. See "Known gap: no built-in reconnect" in
     /// docs/router/grpc-migration.md.
     /// </summary>
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(2);
 
     private readonly Contract.TelemetryService.TelemetryServiceClient _client;
-    private readonly List<RoutingTelemetryEventDto> _events = [];
+    private readonly Dictionary<string, SessionEntry> _sessions = new(StringComparer.Ordinal);
 
     private readonly object _lock = new();
+    private long _nextSessionOrder;
     private readonly LogBuffer _logBuffer = new();
     private readonly ILogger<LiveDataStore>? _logger;
     private readonly string _serverAddress;
@@ -267,18 +274,59 @@ public sealed class LiveDataStore : IAsyncDisposable
     }
 
     /// <summary>
-    /// Appends a routing telemetry event, rebuilds the aggregated conversation list, and raises <see cref="Changed"/>
-    /// .
+    /// Folds one routing telemetry event into its session, re-aggregates only that session, refreshes the
+    /// ordered conversation list, and raises <see cref="Changed"/>. Per-event cost is proportional to the
+    /// touched session's own turn count plus one sort of the session list, not to the whole history.
+    /// Retention is bounded to <see cref="MaxRetainedSessions"/>: the least recently active session is
+    /// dropped beyond that (older sessions remain available from the persisted store).
     /// </summary>
-    private void OnRoutingTelemetryReceived(RoutingTelemetryEventDto dto)
+    internal void OnRoutingTelemetryReceived(RoutingTelemetryEventDto dto)
     {
         lock (_lock)
         {
-            _events.Add(dto);
-            _conversations = [.. ConversationAggregator.Aggregate(_events).Select(LiveConversationMapper.ToModel)];
+            if (!_sessions.TryGetValue(key: dto.SessionId, value: out var entry))
+            {
+                entry = new SessionEntry(FirstSeenOrder: _nextSessionOrder++);
+                _sessions[dto.SessionId] = entry;
+            }
+
+            entry.Events.Add(dto);
+            var aggregated = ConversationAggregator.Aggregate(entry.Events)[0];
+            entry.LastTimestampUtc = aggregated.LastTimestampUtc;
+            entry.Model = LiveConversationMapper.ToModel(aggregated);
+
+            if (_sessions.Count > MaxRetainedSessions)
+            {
+                var stalest = _sessions.MinBy(pair => pair.Value.LastTimestampUtc).Key;
+                _sessions.Remove(stalest);
+            }
+
+            // Most recently active first; the secondary key reproduces the full re-aggregation's
+            // first-appearance tie order (LINQ's OrderByDescending is stable over GroupBy order).
+            _conversations = [.. _sessions.Values
+                .OrderByDescending(e => e.LastTimestampUtc)
+                .ThenBy(e => e.FirstSeenOrder)
+                .Select(e => e.Model!)];
         }
 
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// One session's retained events plus its cached aggregation, so an arriving event re-aggregates only
+    /// the session it belongs to.
+    /// </summary>
+    /// <param name="FirstSeenOrder">Arrival order of the session's first event, the tie-break for equal activity times.</param>
+    private sealed record SessionEntry(long FirstSeenOrder)
+    {
+        /// <summary>Gets the session's events in arrival order.</summary>
+        public List<RoutingTelemetryEventDto> Events { get; } = [];
+
+        /// <summary>Gets or sets the timestamp of the session's most recent turn.</summary>
+        public DateTimeOffset LastTimestampUtc { get; set; }
+
+        /// <summary>Gets or sets the session's mapped dashboard view model.</summary>
+        public Conversation? Model { get; set; }
     }
 
     /// <summary>Appends a log line to the buffer and raises <see cref="LogLinesChanged"/>.</summary>
@@ -301,13 +349,13 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// the proxy's own durable history (<see cref="UsageStore"/> reads that separately, straight from
     /// the proxy, and is unaffected by this). Clears both fields under <see cref="_lock"/> alongside
     /// <see cref="OnRoutingTelemetryReceived"/> so a telemetry event racing with a reset can never leave
-    /// <see cref="_events"/> and <see cref="Conversations"/> out of sync.
+    /// <see cref="_sessions"/> and <see cref="Conversations"/> out of sync.
     /// </summary>
     public void ClearEvents()
     {
         lock (_lock)
         {
-            _events.Clear();
+            _sessions.Clear();
             _conversations = [];
         }
 

@@ -23,6 +23,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TotallyHotArcRouter.Gui.Components.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Declares this library buildable/trimmable for the browser (wasm-tools), the same annotation
          Microsoft's own "Hosted Blazor WebAssembly" template puts on a shared Razor class library -
          without it, a future WASM host referencing this project has no signal that browser-targeted

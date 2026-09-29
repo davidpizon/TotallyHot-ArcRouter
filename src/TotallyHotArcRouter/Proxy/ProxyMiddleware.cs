@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -692,9 +691,27 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                 var totalDurationMs = stopwatch.ElapsedMilliseconds;
 
-                _logger.LogDebug(
-                    message: "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
-                    LogRedaction.Truncate(LogRedaction.Sanitize(Encoding.UTF8.GetString(capturedResponseBytes))));
+                // Guarded: the argument decodes up to 4 MB, which must not be paid when Debug is off.
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(
+                        message: "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
+                        LogRedaction.DecodeTruncateSanitize(capturedResponseBytes));
+
+                // Finish the response now, so the client sees end-of-stream (the terminating chunk for chunked
+                // and SSE bodies) without waiting on the telemetry persistence below, which is synchronous
+                // SQLite I/O. Kestrel would otherwise send it only when this middleware returns. The
+                // in-flight gauge scope opened above still spans the persistence, so background work stays
+                // paused until it finishes. Best-effort: a client that already disconnected must not turn
+                // into a proxy error.
+                try
+                {
+                    await context.Response.CompleteAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(exception: ex,
+                        message: "Completing the response early failed; telemetry persistence continues.");
+                }
 
                 await _interceptor.InterceptResponseAsync(context);
 

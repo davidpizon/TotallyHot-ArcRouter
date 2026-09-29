@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -29,7 +30,7 @@ public class ProxyMiddlewareTests
             authHeaderScheme: "Bearer",
             apiKey: "secret-key");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(async request =>
         {
@@ -114,7 +115,7 @@ public class ProxyMiddlewareTests
             authHeaderScheme: "",
             apiKey: "real-anthropic-key");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -166,7 +167,7 @@ public class ProxyMiddlewareTests
             apiKey: null,
             headers: [new ProviderHeader { Name = "x-api-key", ValueEnvVar = "PROXY_MIDDLEWARE_TESTS_UNSET_VAR" }]);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -210,7 +211,7 @@ public class ProxyMiddlewareTests
             authHeaderName: "x-api-key",
             apiKey: null);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -248,7 +249,7 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
             baseUrl: "https://api.openai.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -292,7 +293,7 @@ public class ProxyMiddlewareTests
             providerName: "lmstudio",
             apiKey: null);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         Uri? forwardedUri = null;
         var handler = new DelegatingHandlerStub(request =>
@@ -372,7 +373,7 @@ public class ProxyMiddlewareTests
             providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://example.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(async request =>
         {
@@ -412,7 +413,7 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4", baseUrl: "https://example.com",
             headers: [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }]);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -436,7 +437,7 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4", baseUrl: "https://example.com",
             headers: [new ProviderHeader { Name = "anthropic-version", Value = "2023-06-01" }]);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -463,7 +464,7 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4", baseUrl: "https://example.com",
             headers: [new ProviderHeader { Name = "x-echoed-credential", Value = "operator-value" }]);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ =>
         {
@@ -506,7 +507,7 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
             baseUrl: "https://example.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -542,7 +543,7 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
             baseUrl: "https://example.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ =>
         {
@@ -583,7 +584,7 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4",
             baseUrl: "https://api.openai.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ => throw new HttpRequestException("upstream unavailable"));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
             httpClient: new HttpClient(handler));
@@ -613,7 +614,7 @@ public class ProxyMiddlewareTests
             ("gpt-5.4", "openai", "gpt-5.4-2026-01"),
             ("claude-opus-4.6", "anthropic", "claude-opus-4-6"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /v1/models."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -660,7 +661,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /v1/models."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -716,7 +717,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /v1/models."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -739,7 +740,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /v1/models."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -763,7 +764,7 @@ public class ProxyMiddlewareTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://api.openai.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(request =>
         {
@@ -799,7 +800,7 @@ public class ProxyMiddlewareTests
             ("gpt-5.4", "openai", "gpt-5.4-2026-01"),
             ("claude-opus-4.6", "anthropic", "claude-opus-4-6"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /api/tags."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -842,7 +843,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /api/tags."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -872,7 +873,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /api/show."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -897,7 +898,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /api/tags."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -922,7 +923,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /api/show."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -957,7 +958,7 @@ public class ProxyMiddlewareTests
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4-2026-01"));
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             throw new InvalidOperationException("Upstream should never be called for /api/show."));
         var middleware = new ProxyMiddleware(logger: Mock.Of<ILogger<ProxyMiddleware>>(), interceptor: interceptor,
@@ -989,7 +990,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -1051,7 +1052,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -1111,7 +1112,7 @@ public class ProxyMiddlewareTests
             providerName: "ollama",
             isFree: true);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -1166,7 +1167,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -1225,7 +1226,7 @@ public class ProxyMiddlewareTests
             modelName: "llama3", providerModelId: "llama3", baseUrl: "http://localhost:11434/v1",
             providerName: "ollama", isFree: true);
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
@@ -1259,7 +1260,7 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
@@ -1297,7 +1298,7 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
@@ -1337,7 +1338,7 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
@@ -1372,7 +1373,7 @@ public class ProxyMiddlewareTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("""{"id":"c1","choices":[]}""", encoding: Encoding.UTF8,
@@ -1442,7 +1443,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
 
@@ -1500,7 +1501,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -1555,7 +1556,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
 
@@ -1610,7 +1611,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") }));
 
@@ -1656,7 +1657,7 @@ public class ProxyMiddlewareTests
             baseUrl: "https://example.com",
             providerName: "openai");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted)
         { Content = new StringContent("forwarded") }));
 
@@ -1708,7 +1709,7 @@ public class ProxyMiddlewareTests
             baseUrl: "http://localhost:11434/v1",
             providerName: "ollama");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {

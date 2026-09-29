@@ -6,6 +6,7 @@ using System.Text;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -22,7 +23,7 @@ public class RequestInterceptorEmbeddingTests
         var resolver = ModelRouteResolverTestFactory.Create(modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01",
             baseUrl: "https://api.openai.com");
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var context = CreateContextWithBody("""{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}""");
 
         var result = await interceptor.ResolveModelRouteAsync(context: context,

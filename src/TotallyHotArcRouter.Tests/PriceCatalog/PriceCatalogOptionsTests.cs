@@ -144,4 +144,23 @@ public class PriceCatalogOptionsTests
 
         Assert.True(liteLlm.DefaultPriorityScore > openRouter.DefaultPriorityScore);
     }
+
+    /// <summary>A non-positive startup fetch budget would make the startup <c>Task.Delay</c> invalid, so it is rejected.</summary>
+    /// <param name="seconds">The configured budget.</param>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void EnsureValid_Throws_WhenStartupFetchBudgetNotPositive(int seconds)
+    {
+        var options = new PriceCatalogOptions { StartupFetchBudgetSeconds = seconds };
+
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
+    }
+
+    /// <summary>A positive startup fetch budget is accepted.</summary>
+    [Fact]
+    public void EnsureValid_Succeeds_WhenStartupFetchBudgetPositive()
+    {
+        new PriceCatalogOptions { StartupFetchBudgetSeconds = 1 }.EnsureValid();
+    }
 }

@@ -28,10 +28,36 @@ internal static class RequestBodyIntrospection
         var rewrittenBody = Encoding.UTF8.GetBytes(jsonObject.ToJsonString());
         return new RouteCandidate(
             Route: route,
-            RewrittenBody: rewrittenBody,
+            LazyRewrittenBody: new Lazy<byte[]>(rewrittenBody),
             CarriesTools: CarriesTools(jsonObject),
             CarriesToolHistory: CarriesToolHistory(jsonObject),
             CarriesResponseFormat: CarriesResponseFormat(jsonObject));
+    }
+
+    /// <summary>
+    /// Builds a failover candidate that shares the primary candidate's route-independent flags
+    /// (<c>Carries*</c> depend only on the request, not the route, so they are not re-walked per model) and
+    /// defers its body rewrite until first read. The rewrite works from the primary's already-serialized
+    /// body, a snapshot that later mutation of the parsed request cannot disturb, and changes only
+    /// <c>model</c>.
+    /// </summary>
+    /// <param name="primary">The already-built primary candidate whose body and flags are reused.</param>
+    /// <param name="route">The fallback route whose upstream model id replaces <c>model</c>.</param>
+    /// <returns>The failover candidate with a lazily produced body.</returns>
+    public static RouteCandidate BuildFallbackCandidate(RouteCandidate primary, ResolvedModelRoute route)
+    {
+        var primaryBody = primary.RewrittenBody;
+        return new RouteCandidate(
+            Route: route,
+            LazyRewrittenBody: new Lazy<byte[]>(() =>
+            {
+                var body = (JsonObject)JsonNode.Parse(primaryBody)!;
+                body["model"] = route.ProviderModelId;
+                return Encoding.UTF8.GetBytes(body.ToJsonString());
+            }),
+            CarriesTools: primary.CarriesTools,
+            CarriesToolHistory: primary.CarriesToolHistory,
+            CarriesResponseFormat: primary.CarriesResponseFormat);
     }
 
     /// <summary>

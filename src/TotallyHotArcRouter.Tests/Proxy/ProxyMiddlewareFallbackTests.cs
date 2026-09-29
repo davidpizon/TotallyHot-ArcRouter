@@ -10,6 +10,7 @@ using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -328,7 +329,7 @@ public class ProxyMiddlewareFallbackTests
             : Ok("served-by-backup"));
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -368,7 +369,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -421,7 +422,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -479,7 +480,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -529,7 +530,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -585,7 +586,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -677,7 +678,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -720,7 +721,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -1764,7 +1765,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -1809,7 +1810,7 @@ public class ProxyMiddlewareFallbackTests
         });
 
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,
@@ -1894,7 +1895,7 @@ public class ProxyMiddlewareFallbackTests
         CancellationToken requestAborted = default)
     {
         var interceptor =
-            new RequestInterceptor(logger: NullLogger<RequestInterceptor>.Instance, modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var middleware = new ProxyMiddleware(
             logger: NullLogger<ProxyMiddleware>.Instance,
             interceptor: interceptor,

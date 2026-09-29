@@ -134,6 +134,22 @@ public class RouterCompositionTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// The interceptor and the middleware must consult one circuit breaker: the middleware records
+    /// failures, the interceptor reads them when ranking candidates. The middleware's breaker is now
+    /// resolved with <c>GetRequiredService</c>, so a lost registration fails loudly instead of silently
+    /// giving each hub a private breaker.
+    /// </summary>
+    [Fact]
+    public void RouterComposition_MiddlewareDependencies_ShareTheContainersCircuitBreaker()
+    {
+        var provider = BuildProvider(new RoutingOptions { EmbeddingMemoryDatabasePath = IsolatedDatabasePath() });
+
+        var dependencies = provider.GetRequiredService<ProxyMiddlewareDependencies>();
+
+        Assert.Same(expected: provider.GetRequiredService<ICircuitBreaker>(), actual: dependencies.CircuitBreaker);
+    }
+
+    /// <summary>
     /// A unique, <b>rooted</b> database path under this test's own temp directory. Rooted is the
     /// load-bearing part: <c>RouterMemoryDatabase</c> resolves a relative path against the machine-shared
     /// directory, which is the installed router's database. See the type's remarks.

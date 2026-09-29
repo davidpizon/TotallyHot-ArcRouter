@@ -167,6 +167,58 @@ public class StartupHealthCheckHostedServiceTests
     }
 
     /// <summary>
+    /// A price source that never answers must not hold startup (and so the proxy's port) hostage past
+    /// <see cref="PriceCatalogOptions.StartupFetchBudgetSeconds"/>.
+    /// </summary>
+    [Fact]
+    public async Task StartAsync_HangingPriceSource_ReturnsWithinStartupFetchBudget()
+    {
+        using var temp = new TempDatabase();
+        var sourceRepository = temp.CreateSourceRepository();
+        var hangingClient = new Mock<IPriceSourceClient>();
+        hangingClient.SetupGet(c => c.Name).Returns(PriceCatalogOptions.LiteLlmSourceName);
+        hangingClient.Setup(c => c.FetchAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken token) => Task.Delay(Timeout.Infinite, token)
+                .ContinueWith<IReadOnlyList<NormalizedPrice>>(_ => [], token));
+        var registry = Mock.Of<IPriceSourceRegistry>(r => r.EnabledClients == new[] { hangingClient.Object });
+        var ingestionService = new PriceCatalogIngestionService(
+            registry: registry, repository: temp.CreateRepository(), sourceRepository: sourceRepository,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            logger: NullLogger<PriceCatalogIngestionService>.Instance);
+
+        var transcriptDb = CreateTranscriptDatabase(temp);
+        var service = new StartupHealthCheckHostedService(
+            logger: NullLogger<StartupHealthCheckHostedService>.Instance,
+            database: temp.Database,
+            repository: sourceRepository,
+            ingestionService: ingestionService,
+            toggleStore: temp.CreateToggleStore(sourceRepository),
+            budgetStore: temp.CreateBudgetStore(),
+            toolCallCapabilityStore: temp.CreateToolCallCapabilityStore(),
+            usageLedger: temp.CreateUsageLedger(),
+            rollupStore: temp.CreateRollupStore(),
+            storageOptions: Options.Create(new StorageOptions()),
+            routerMemoryDatabase: CreateRouterMemoryDatabase(temp),
+            routerMemory: new RouterMemory(),
+            embeddingMemory: CreateEmbeddingMemory(temp),
+            benchmarkDatabase: CreateBenchmarkDatabase(temp),
+            benchmarkStatusService: CreateBenchmarkStatusService(temp),
+            transcriptDatabase: transcriptDb,
+            transcriptStore: new SqliteTranscriptStore(
+                database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions())),
+            transcriptOptions: Options.Create(new TranscriptOptions()),
+            hostLifetime: CreateHostApplicationLifetime(),
+            priceCatalogOptions: Options.Create(new PriceCatalogOptions { StartupFetchBudgetSeconds = 1 }));
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        stopwatch.Stop();
+
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(4),
+            $"StartAsync took {stopwatch.Elapsed}, expected to return near the 1 s budget.");
+    }
+
+    /// <summary>
     /// Builds a service with every dependency minimally stubbed, for tests that only care about the
     /// embedding warm-up step and would otherwise have to repeat every other constructor argument.
     /// </summary>

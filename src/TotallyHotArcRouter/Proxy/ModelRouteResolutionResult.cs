@@ -16,9 +16,11 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// payload translator).
 /// </summary>
 /// <param name="Route">The resolved upstream route for this candidate.</param>
-/// <param name="RewrittenBody">
-/// The request body with <c>model</c> rewritten to
-/// <see cref="ResolvedModelRoute.ProviderModelId"/>.
+/// <param name="LazyRewrittenBody">
+/// Produces the request body with <c>model</c> rewritten to <see cref="ResolvedModelRoute.ProviderModelId"/>,
+/// on first read of <see cref="RewrittenBody"/>. Lazy because usually only the primary candidate is ever
+/// attempted; eagerly serializing a full body for every configured failover model was O(models x body)
+/// allocation per request. Read <see cref="RewrittenBody"/>, not this.
 /// </param>
 /// <param name="CarriesTools">
 /// Whether the client's request body carried a non-empty <c>tools</c> array. Read off the
@@ -64,10 +66,17 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// </param>
 public sealed record RouteCandidate(
     ResolvedModelRoute Route,
-    byte[] RewrittenBody,
+    Lazy<byte[]> LazyRewrittenBody,
     bool CarriesTools,
     bool CarriesToolHistory = false,
-    bool CarriesResponseFormat = false);
+    bool CarriesResponseFormat = false)
+{
+    /// <summary>
+    /// Gets the request body with <c>model</c> rewritten to this candidate's upstream model id, producing
+    /// it on first access and caching it thereafter.
+    /// </summary>
+    public byte[] RewrittenBody => LazyRewrittenBody.Value;
+}
 
 /// <summary>
 /// The outcome of resolving and rewriting a request body against the known-model allowlist.

@@ -264,36 +264,82 @@ public sealed class EmbeddingMemory : IDisposable
         var options = _optionsMonitor.CurrentValue;
         var modelIdentity = _embeddingClient.ModelIdentity;
 
-        List<MemoryEntry> snapshot;
+        MemoryEntry[] snapshot;
         lock (_syncLock)
         {
             snapshot = [.. _entries];
         }
 
-        var comparable = snapshot
-            .Where(entry =>
-                entry.TaskEmbedding.Length == queryEmbedding.Length &&
-                entry.MatchesEmbeddingModel(modelIdentity))
-            .ToList();
+        // One pass, no intermediate lists: comparability and the judge-row policy are cheap per-entry
+        // checks, applied before the expensive dot product so a skipped row never pays for scoring. The
+        // query's magnitude is computed once rather than once per entry. Filtering judge rows before
+        // ranking is equivalent to filtering after it - the filter never reorders - and the final ordering
+        // is the same stable descending sort as before, so ties keep insertion (oldest-first) order.
+        var queryMagnitude = Math.Sqrt(SumOfSquares(queryEmbedding));
+        var skippedCount = 0;
+        var scored = new List<(MemoryEntry Entry, double Similarity)>();
+        foreach (var entry in snapshot)
+        {
+            if (entry.TaskEmbedding.Length != queryEmbedding.Length || !entry.MatchesEmbeddingModel(modelIdentity))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            if (judgeRowPolicy is not null &&
+                JudgeRowWeighting.ResolveWeight(entry.IsJudgeScored, judgeRowPolicy.Value, judgeRowWeight) is null)
+                continue;
+
+            var similarity = CosineSimilarityToQuery(query: queryEmbedding, queryMagnitude: queryMagnitude,
+                other: entry.TaskEmbedding);
+            if (similarity >= options.EmbeddingSimilarityThreshold) scored.Add((entry, similarity));
+        }
 
         // One aggregate line per retrieval, never one per entry: after a model change every entry in the
         // working set is skipped at once, and logging each would recreate the very flood this filter
         // exists to stop.
-        if (comparable.Count != snapshot.Count)
+        if (skippedCount > 0)
             _logger.LogDebug(
                 message:
                 "Skipped {SkippedCount} of {TotalCount} embedding memory entries not comparable to the current embedding model {ModelIdentity}.",
-                snapshot.Count - comparable.Count,
-                snapshot.Count,
+                skippedCount,
+                snapshot.Length,
                 modelIdentity);
 
-        return [.. comparable
-            .Select(entry => (Entry: entry,
-                Similarity: CosineSimilarity(left: queryEmbedding, right: entry.TaskEmbedding)))
-            .Where(candidate => candidate.Similarity >= options.EmbeddingSimilarityThreshold)
+        return [.. scored
             .OrderByDescending(candidate => candidate.Similarity)
-            .Where(candidate => judgeRowPolicy is null || JudgeRowWeighting.ResolveWeight(candidate.Entry.IsJudgeScored, judgeRowPolicy.Value, judgeRowWeight) is not null)
             .Take(options.MaxNeighborCount)];
+    }
+
+    /// <summary>Sums the squares of a vector's components in <see langword="double"/> arithmetic.</summary>
+    /// <param name="vector">The vector.</param>
+    private static double SumOfSquares(float[] vector)
+    {
+        double sum = 0;
+        foreach (var component in vector) sum += (double)component * component;
+        return sum;
+    }
+
+    /// <summary>
+    /// <see cref="CosineSimilarity"/> against a query whose magnitude is already known,
+    /// producing bit-identical results without recomputing the query's magnitude for every stored entry.
+    /// The operation order matches the two-vector overload exactly.
+    /// </summary>
+    /// <param name="query">The query vector.</param>
+    /// <param name="queryMagnitude">The square root of the sum of squares of <paramref name="query"/>.</param>
+    /// <param name="other">The stored vector, the same length as <paramref name="query"/>.</param>
+    private static double CosineSimilarityToQuery(float[] query, double queryMagnitude, float[] other)
+    {
+        double dot = 0, otherSquares = 0;
+        for (var i = 0; i < query.Length; i++)
+        {
+            dot += (double)query[i] * other[i];
+            otherSquares += (double)other[i] * other[i];
+        }
+
+        if (queryMagnitude <= 0 || otherSquares <= 0) return 0;
+
+        return dot / (queryMagnitude * Math.Sqrt(otherSquares));
     }
 
     /// <summary>

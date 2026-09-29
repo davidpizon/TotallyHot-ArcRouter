@@ -7,6 +7,7 @@ using System.Text;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Tests.TestSupport;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -71,7 +72,7 @@ public class ProxyMiddlewarePendingEmbeddingTests
             modelName: "gpt-5.4", providerModelId: "gpt-5.4-2026-01", baseUrl: "https://example.com");
         // No embedding client configured at all - the pre-Phase-2 default.
         var interceptor =
-            new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver);
+            RequestInterceptorBuilder.For(resolver);
         var pendingCache = new PendingValueCache<float[]>(Options.Create(new RoutingOptions()));
 
         var handler = new DelegatingHandlerStub(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

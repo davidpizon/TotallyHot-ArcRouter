@@ -194,6 +194,9 @@ internal static class PriceCatalogServiceCollectionExtensions
         services.AddSingleton<IModelContextWindowStore>(sp => sp.GetRequiredService<ToolCallCapabilityStore>());
         services.AddHttpClient(PriceSourceRegistry.HttpClientName, client =>
         {
+            // Explicit rather than the 100 s default: a price feed that has not answered in 30 s is not
+            // going to, and the sequential pull otherwise stacks one full default timeout per source.
+            client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.Add(name: "X-Title", value: "TotallyHot Arc Router");
             client.DefaultRequestHeaders.Add(name: "HTTP-Referer",
                 value: "https://github.com/davidpizon/TotallyHot-ArcRouter");

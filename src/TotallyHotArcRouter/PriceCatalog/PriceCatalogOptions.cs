@@ -64,6 +64,14 @@ public sealed class PriceCatalogOptions
     public int PollIntervalHours { get; init; } = 6;
 
     /// <summary>
+    /// Gets how many seconds the startup health check waits for its initial price pull before letting
+    /// startup continue. Without a bound, a black-holed network (captive portal, corporate proxy) would hold
+    /// the proxy's port unbound for up to one HTTP timeout per source. The pull is not cancelled when the
+    /// budget elapses; it keeps running in the background and its outcome is logged when it finishes.
+    /// </summary>
+    public int StartupFetchBudgetSeconds { get; init; } = 10;
+
+    /// <summary>
     /// Gets the per-source configuration, keyed by source name. Carries only the optional endpoint
     /// override; the enable/disable toggle is <em>not</em> here - it lives in <c>aggregator_sources.enabled</c>
     /// and is managed from Governance → Price Sources (D6). Recognized keys are <see cref="KnownSources"/>'
@@ -84,6 +92,9 @@ public sealed class PriceCatalogOptions
         if (PollIntervalHours is < MinPollIntervalHours or > MaxPollIntervalHours)
             errors.Add(
                 $"PollIntervalHours must be between {MinPollIntervalHours} and {MaxPollIntervalHours} (was {PollIntervalHours}).");
+
+        if (StartupFetchBudgetSeconds <= 0)
+            errors.Add($"StartupFetchBudgetSeconds must be positive (was {StartupFetchBudgetSeconds}).");
 
         foreach (var (name, source) in Sources)
         {
