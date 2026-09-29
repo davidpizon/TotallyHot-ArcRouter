@@ -115,6 +115,7 @@ static async Task<HttpResponseMessage> PostAuthSessionAsync(string baseAddress)
     // returning PostAsync's Task directly - happened before the in-flight request actually completed
     // (a real, latent bug this rewrite also fixes, found while touching this function for AppRoot's
     // sake: HttpClient.Dispose() while a request is in flight can abort it under its default handler).
-    using var sessionClient = new HttpClient { BaseAddress = new Uri(baseAddress) };
+    using var sessionClient = new HttpClient();
+    sessionClient.BaseAddress = new Uri(baseAddress);
     return await sessionClient.PostAsync(requestUri: "auth/session", content: null).ConfigureAwait(false);
 }

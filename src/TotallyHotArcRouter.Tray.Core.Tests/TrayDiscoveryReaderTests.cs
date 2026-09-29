@@ -49,7 +49,7 @@ public sealed class TrayDiscoveryReaderTests
             var result = TrayDiscoveryReader.TryRead(path);
 
             result.Should().NotBeNull();
-            result!.WebUrl.Should().Be("https://localhost:5004");
+            result.WebUrl.Should().Be("https://localhost:5004");
         }
         finally
         {
@@ -70,7 +70,7 @@ public sealed class TrayDiscoveryReaderTests
             var result = TrayDiscoveryReader.TryRead(path);
 
             result.Should().NotBeNull();
-            result!.WebUrl.Should().BeNull();
+            result.WebUrl.Should().BeNull();
         }
         finally
         {

@@ -219,7 +219,7 @@
             .ToList();
 
         await RefreshRoiAsync();
-        _roiPollTimer = new Timer(callback: _ => _ = PollRoiAsync(), null, dueTime: RoiPollInterval, period: RoiPollInterval);
+        _roiPollTimer = new Timer(callback: state => _ = PollRoiAsync(), null, dueTime: RoiPollInterval, period: RoiPollInterval);
         Recompute();
     }
 

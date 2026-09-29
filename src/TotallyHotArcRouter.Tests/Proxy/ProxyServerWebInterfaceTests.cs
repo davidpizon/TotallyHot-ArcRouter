@@ -251,7 +251,8 @@ public sealed class ProxyServerWebInterfaceTests
         {
             // The primary proxy port is TLS by default since web GUI migration plan Phase P7 (ADR-0013) -
             // trusting the test/dev cert here, not asserting anything about OS trust.
-            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
             using var httpClient = new HttpClient(handler);
             var response = await httpClient.PostAsync(
                 requestUri: $"https://localhost:{proxyPort}/TotallyHot.ArcRouter.telemetry.v1.RoutingModeAdminService/GetRoutingMode",
@@ -278,7 +279,8 @@ public sealed class ProxyServerWebInterfaceTests
         await server.StartAsync(Ct);
         try
         {
-            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
             using var trustingClient = new HttpClient(handler);
             var response = await trustingClient.GetAsync(requestUri: $"https://localhost:{webPort}/admin/providers",
                 cancellationToken: Ct);
@@ -300,7 +302,8 @@ public sealed class ProxyServerWebInterfaceTests
         await server.StartAsync(Ct);
         try
         {
-            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
             using var trustingClient = new HttpClient(handler);
             var response = await trustingClient.GetAsync(requestUri: $"https://localhost:{webPort}/v1/chat/completions",
                 cancellationToken: Ct);
@@ -327,7 +330,8 @@ public sealed class ProxyServerWebInterfaceTests
         await server.StartAsync(Ct);
         try
         {
-            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
             using var trustingClient = new HttpClient(handler);
 
             var index = await trustingClient.GetAsync(requestUri: $"https://localhost:{webPort}/", cancellationToken: Ct);
@@ -357,7 +361,8 @@ public sealed class ProxyServerWebInterfaceTests
         await server.StartAsync(Ct);
         try
         {
-            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
             using var httpClient = new HttpClient(handler);
             using var channel = GrpcChannel.ForAddress($"https://localhost:{webPort}",
                 new GrpcChannelOptions { HttpClient = httpClient });
@@ -386,7 +391,8 @@ public sealed class ProxyServerWebInterfaceTests
             // Both the primary proxy port (TLS since Phase P7) and the opt-in plain-HTTP one must behave
             // identically as far as routing goes - proxy traffic reaches proxyMiddleware, gRPC/admin is
             // unreachable on either - even though only one of them is encrypted.
-            using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+            using var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
             using var httpClient = new HttpClient(handler);
             foreach (var (scheme, port) in new[] { ("https", proxyPort), ("http", plainHttpPort) })
             {

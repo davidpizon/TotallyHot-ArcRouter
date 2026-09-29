@@ -111,7 +111,7 @@ public sealed class ProxyListenerOptionsValidatorTests
     public void Validate_NullOptions_Throws()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            CreateValidator().Validate(name: null, options: (ProxyListenerOptions)null!));
+            CreateValidator().Validate(name: null, options: null!));
     }
 
     [Fact]
