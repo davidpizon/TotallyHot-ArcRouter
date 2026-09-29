@@ -154,7 +154,7 @@ public class PriceCatalogOptionsTests
     {
         var options = new PriceCatalogOptions { StartupFetchBudgetSeconds = seconds };
 
-        Assert.Throws<Microsoft.Extensions.Options.OptionsValidationException>(options.EnsureValid);
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
     }
 
     /// <summary>A positive startup fetch budget is accepted.</summary>

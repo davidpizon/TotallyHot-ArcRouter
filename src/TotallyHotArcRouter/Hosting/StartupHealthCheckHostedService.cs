@@ -191,7 +191,7 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             // startup-only token, so a cycle that outlives the budget is still cancelled at shutdown and
             // awaited by StopAsync. The startup token is bridged in so an aborted startup still cancels it.
             _cycleCts = CancellationTokenSource.CreateLinkedTokenSource(_hostLifetime.ApplicationStopping);
-            using var startupAbortRegistration = cancellationToken.Register(static state =>
+            await using var startupAbortRegistration = cancellationToken.Register(static state =>
                 ((CancellationTokenSource)state!).Cancel(), _cycleCts);
             var cycleTask = _ingestionService.RunCycleAsync(_cycleCts.Token);
             var budgetTask = Task.Delay(delay: _startupFetchBudget, cancellationToken: cancellationToken);
