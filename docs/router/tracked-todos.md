@@ -5,6 +5,9 @@ entries, GitHub issues, or PRs). Complements [`backlog.md`](backlog.md). Done an
 (#1 spark-vscode-extension TypeScript, #2 design-doc write, #4 zero-coverage pass, #7 `/admin/*`
 REST → gRPC — REST endpoints deleted in the web GUI migration) are removed.
 
+Standing rules for boarded work (a GitHub issue signed off for implementation) live in
+[`standing-rules.md`](standing-rules.md). A plan must be written and approved before coding starts.
+
 | # | Status | Title |
 |---|---|---|
 | [3](#3-research-deepseek-tool-call-delimiters-and-register-a-deepseek-dialect) | Open | Research DeepSeek tool-call delimiters and register a `deepseek` dialect |
@@ -279,8 +282,8 @@ implying parity with the Anthropic/OpenAI reconcilers' live-tested confidence.
 ## #8 Capture and analyze real Claude Code and Codex traffic before deciding ADR-0017's pin policy
 
 **Repo:** ArcRouter · **Status:** Open · **Filed:** 2026-09-28, from the review of PR #156 (harness
-presets) · **Blocks:** ADR-0017, open as
-[PR #159](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/159)
+presets) · **ADR-0017:** [PR #159](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/159)
+merged on 2026-09-28 before this census; the census is still open
 
 ### Why this is open
 
@@ -293,7 +296,7 @@ Codex sends encrypted reasoning items (`include: ["reasoning.encrypted_content"]
 items) on most requests. Neither is confirmed. If they are near-universal *and* turn out to need pinning,
 feature-gated pinning degenerates into "always pin this harness", and building an inbound translator
 for that harness's dialect buys no routing freedom. If they are rare, or safely strippable, the
-translator is worth building. The ADR's PR stays open, unmerged, until this item answers that.
+translator is worth building. PR #159 merged on 2026-09-28 before this census; the census is still open.
 
 Nothing in the router records this today. `TranscriptRecord`
 (`src/TotallyHotArcRouter/Transcripts/TranscriptRecord.cs`) keeps only the extracted newest-user-message
@@ -392,16 +395,15 @@ answer "which fields and block types did this request carry".
   appear in the census output when it is placed (a) in a string value, (b) as an object key inside tool
   arguments and inside `metadata`, (c) as the requested model, (d) in a non-allowlisted `User-Agent`
   and another header's value, and (e) as an explicit session id.
-- ADR-0017's PR (#159), kept open until now, is updated from the report: its marker table is replaced
-  by the measured classification and its decision rule is applied per harness. Then the ADR is set to
-  `accepted` and the PR merges (an ADR is accepted when its PR merges), or the PR is closed if the
-  census rejects the approach.
+- PR #159 (ADR-0017) merged on 2026-09-28 before this census; the census is still open. The ADR is
+  accepted and is not rewritten. The measured classification stays in the census report, and its
+  decision rule is applied per harness. If the measurements change the accepted policy, write a
+  superseding ADR per [docs/adr/README.md](../adr/README.md#changing-a-past-decision).
 - No raw request body lands in the repository unless it has been scrubbed and reviewed as a fixture.
 
 ### Notes
 
-- The census is research instrumentation. Leave it opt-in and off by default after this item closes. If
-  ADR-0017 is accepted, its detectors reuse the same code on the hot path.
+- The census is research instrumentation. Leave it opt-in and off by default after this item closes. ADR-0017 is accepted, so its detectors reuse the same code on the hot path.
 - Don't infer the answer from vendor docs instead of doing the capture. What the docs allow and what
   the harness sends by default are different questions, and only the second one sets the pin policy.
 

@@ -128,6 +128,7 @@ paths so existing links resolve.
 |---|---|
 | [`router/backlog.md`](router/backlog.md) | Router-side known defects and not-yet-implemented work |
 | [`router/tracked-todos.md`](router/tracked-todos.md) | Open working items carried across sessions |
+| [`router/standing-rules.md`](router/standing-rules.md) | Standing rules for boarded work; approved plan before coding |
 | [`archive/README.md`](archive/README.md) | Closed plans and the historical React kit |
 
 ## Citation
