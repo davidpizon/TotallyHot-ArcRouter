@@ -141,7 +141,7 @@ public sealed class LinuxCertificateTrustStore : ICertificateTrustStore
     private static void RunUpdateCaCertificates()
     {
         using var process = System.Diagnostics.Process.Start(fileName: "update-ca-certificates", arguments: "");
-        process?.WaitForExit();
+        process.WaitForExit();
     }
 }
 
@@ -186,6 +186,6 @@ public sealed class MacCertificateTrustStore : ICertificateTrustStore
     private static void RunSecurity(string arguments)
     {
         using var process = System.Diagnostics.Process.Start(fileName: "security", arguments: arguments);
-        process?.WaitForExit();
+        process.WaitForExit();
     }
 }

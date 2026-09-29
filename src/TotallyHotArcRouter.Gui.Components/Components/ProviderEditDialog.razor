@@ -208,7 +208,6 @@
     [Parameter]
     public IReadOnlyList<string> ExistingProviderNames { get; set; } = [];
 
-    private string _key = string.Empty;
     private string _baseUrl = string.Empty;
     private bool _isFree;
     private string _providerName = string.Empty;
@@ -257,7 +256,6 @@
     // revert the user's in-progress edits between typing and clicking Save.
     protected override void OnInitialized()
     {
-        _key = Model.Key;
         _baseUrl = Model.BaseUrl;
         _isFree = Model.IsFree;
         _providerName = Model.ProviderName;

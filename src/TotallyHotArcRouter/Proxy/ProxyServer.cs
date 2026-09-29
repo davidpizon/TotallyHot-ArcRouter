@@ -141,7 +141,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                 if (serilogLogger is not null)
                 {
                     logging.ClearProviders();
-                    logging.AddProvider(new SerilogLoggerProvider(logger: serilogLogger, false));
+                    logging.AddProvider(new SerilogLoggerProvider(logger: serilogLogger));
                 }
                 else
                 {
