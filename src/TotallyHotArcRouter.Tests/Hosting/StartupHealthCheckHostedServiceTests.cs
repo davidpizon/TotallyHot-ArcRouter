@@ -167,10 +167,6 @@ public class StartupHealthCheckHostedServiceTests
     }
 
     /// <summary>
-    /// Builds a service with every dependency minimally stubbed, for tests that only care about the
-    /// embedding warm-up step and would otherwise have to repeat every other constructor argument.
-    /// </summary>
-    /// <summary>
     /// A price source that never answers must not hold startup (and so the proxy's port) hostage past
     /// <see cref="PriceCatalogOptions.StartupFetchBudgetSeconds"/>.
     /// </summary>
@@ -222,6 +218,10 @@ public class StartupHealthCheckHostedServiceTests
             $"StartAsync took {stopwatch.Elapsed}, expected to return near the 1 s budget.");
     }
 
+    /// <summary>
+    /// Builds a service with every dependency minimally stubbed, for tests that only care about the
+    /// embedding warm-up step and would otherwise have to repeat every other constructor argument.
+    /// </summary>
     private static StartupHealthCheckHostedService CreateMinimalService(
         TempDatabase temp,
         IEmbeddingClient? embeddingClient,

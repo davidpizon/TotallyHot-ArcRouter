@@ -38,6 +38,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly PriceCatalogIngestionService _ingestionService;
     private readonly IHostApplicationLifetime _hostLifetime;
     private readonly TimeSpan _startupFetchBudget;
+    private CancellationTokenSource? _cycleCts;
+    private Task? _lateCycleTask;
 
     private readonly ILogger<StartupHealthCheckHostedService> _logger;
     private readonly ProbingPriorMatrixCache? _matrixCache;
@@ -185,19 +187,36 @@ public sealed class StartupHealthCheckHostedService : IHostedService
             // Bounded: the host starts hosted services in order and the proxy binds its port only after
             // this one returns, so an unreachable price feed must not hold the port closed. On timeout the
             // pull is left running (not cancelled) and its result is logged when it lands.
-            var cycleTask = _ingestionService.RunCycleAsync(cancellationToken);
+            // The cycle runs on a service-owned token linked to the host's shutdown, not on StartAsync's
+            // startup-only token, so a cycle that outlives the budget is still cancelled at shutdown and
+            // awaited by StopAsync. The startup token is bridged in so an aborted startup still cancels it.
+            _cycleCts = CancellationTokenSource.CreateLinkedTokenSource(_hostLifetime.ApplicationStopping);
+            using var startupAbortRegistration = cancellationToken.Register(static state =>
+                ((CancellationTokenSource)state!).Cancel(), _cycleCts);
+            var cycleTask = _ingestionService.RunCycleAsync(_cycleCts.Token);
             var budgetTask = Task.Delay(delay: _startupFetchBudget, cancellationToken: cancellationToken);
             if (await Task.WhenAny(cycleTask, budgetTask).ConfigureAwait(false) == cycleTask)
             {
-                await cycleTask.ConfigureAwait(false);
+                try
+                {
+                    await cycleTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested &&
+                                                         _hostLifetime.ApplicationStopping.IsCancellationRequested)
+                {
+                    // The host began shutting down mid-startup: skip the rest of the pull rather than fail.
+                    _logger.LogInformation("The startup price pull was cancelled because the host is stopping.");
+                }
             }
             else
             {
+                // A cancelled startup also completes budgetTask; that is an abort, not a budget expiry.
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger.LogWarning(
                     message:
                     "The startup price pull did not finish within {BudgetSeconds} s; continuing startup while it completes in the background.",
                     _startupFetchBudget.TotalSeconds);
-                _ = ObserveLateCycleAsync(cycleTask);
+                _lateCycleTask = ObserveLateCycleAsync(cycleTask);
             }
 
             ranCycle = true;
@@ -365,9 +384,15 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     }
 
     /// <inheritdoc/>
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
-        return Task.CompletedTask;
+        if (_cycleCts is null) return;
+
+        await _cycleCts.CancelAsync().ConfigureAwait(false);
+
+        // Let the observer log the cancellation outcome, but never hold shutdown past its own deadline.
+        if (_lateCycleTask is not null)
+            await _lateCycleTask.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

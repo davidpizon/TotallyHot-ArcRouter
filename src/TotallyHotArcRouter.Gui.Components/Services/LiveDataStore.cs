@@ -36,15 +36,15 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 public sealed class LiveDataStore : IAsyncDisposable
 {
     /// <summary>
-    /// Fixed delay between reconnect attempts. See "Known gap: no built-in reconnect" in
-    /// docs/router/grpc-migration.md.
-    /// </summary>
-    /// <summary>
     /// The most sessions the live view retains. Sessions beyond this (least recently active first) are
     /// dropped from memory; they are still served from the persisted session store.
     /// </summary>
     internal const int MaxRetainedSessions = 500;
 
+    /// <summary>
+    /// Fixed delay between reconnect attempts. See "Known gap: no built-in reconnect" in
+    /// docs/router/grpc-migration.md.
+    /// </summary>
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(2);
 
     private readonly Contract.TelemetryService.TelemetryServiceClient _client;
