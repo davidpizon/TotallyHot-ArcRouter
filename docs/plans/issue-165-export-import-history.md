@@ -15,7 +15,7 @@ It does change the proxy hot path (ADR-0019), so ADR-0008's hub safety rules and
 - §1 Export and §2 Import;
 - §3's redaction rules and §4's comparison;
 - §5 Phasing and §6 Test strategy;
-- §7 decisions 1–8 and 10–12 (11 and 12 are new).
+- §7 decisions 1–8 and 10–12, which are decided (11 and 12 are new), and decision 9, which is deferred.
 
 §2 also now records David's import rules: timestamps, skipping or filling in existing sessions, keeping the local copy on conflict, and the session checksum.
 
@@ -205,7 +205,11 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
 - **They feed learning like captured turns (decision 3).**
   - They are embedded and added to `memory_entries`.
   - They keep the scores they arrive with. Only turns without a score are graded, so an import doesn't pay to re-grade what was already graded.
-- **They are never billed.** They don't enter `usage_ledger`, provider spend or budgets, because the router didn't serve them.
+- **They never affect spend, savings or ROI metrics** (David, 2026-09-30).
+  - They don't enter `usage_ledger`, provider spend or budgets, because the router didn't serve them.
+  - They never produce `taxonomy_comparisons` rows, so the Routing ROI chart and estimated savings ignore them.
+  - Every spend or savings total skips rows marked `origin = imported`.
+  - An imported session can still show its own recorded cost in its details.
 - **They appear in the Sessions tab**, marked as imported (decision 3).
 - **They never feed the CodeRouterBench benchmark tables** (decision 8). Those stay published data.
 - **The Export / Import modal lists imports** and can delete one.
@@ -345,7 +349,7 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
 - Imported sessions:
   - appear in the Sessions tab, marked as imported;
   - feed embedding backfill and memory, and only unscored turns are graded;
-  - never enter `usage_ledger`, provider spend, budgets, or the benchmark tables;
+  - never enter `usage_ledger`, provider spend, budgets, `taxonomy_comparisons` or the benchmark tables, so an import leaves spend, savings and ROI totals unchanged;
   - disappear with their session.
 - Census isolation: with both flags on in a test host, the census sink receives no prompt text and the archive sink receives no census line. Until #8's writer exists, the test stubs the census sink.
 
@@ -357,7 +361,7 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
    - capture follows only the Transcription Capture toggle, default on;
    - retention keeps the newest Sample Size turns, deleting whole sessions;
    - no per-body cap.
-3. **Does import restore Sessions-tab history and learning rows?** **Decided (David, 2026-09-30): yes.** Imported sessions appear in the Sessions tab, marked as imported, and feed learning. They are never billed (§2).
+3. **Does import restore Sessions-tab history and learning rows?** **Decided (David, 2026-09-30): yes.** Imported sessions appear in the Sessions tab, marked as imported, and feed learning. They never affect spend, savings or ROI metrics (§2).
 4. **Conflict policy default.** **Decided (David, 2026-09-30):**
    - A differing turn keeps the local copy. This is a future import option, "keep the local copy on conflict", on by default; turned off, `overwrite` or `keep-both` applies.
    - By default, identical sessions are skipped, and partly present ones, matched on `archive_session_id`, are filled in (§2).
@@ -368,7 +372,18 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
    - The CLI flags and one gRPC service stay.
    - Not a new `ManagementFacade` method, and not an extension of `ExportUsageRollup`.
 8. **May the archive feed CodeRouterBench or the regret harness?** **Decided (David, 2026-09-30): no.** Imported data never feeds the benchmark tables. A test helper reads the zip, and the published benchmark tables stay published data.
-9. **Share any code with #8?** Recommended default: a pure harness-token allowlist only. Separate flags, stores, and writers. #8 remains content-free. A handful of scrubbed #165 bodies may be picked by hand for translator fixtures; the census does not store them.
+   - **Why.** Feeding the benchmark tables wouldn't train the router on imported data anyway:
+     - `LogRegTrainer` reads only the out-of-distribution tables, which every benchmark sync wipes and reloads;
+     - `DimensionModelScoreMatrix` reads only one published batch of results.
+
+     The benchmark is also the yardstick routing is measured against, so mixing in your own data would grade the router on data it learned from.
+   - **Training on imported data** comes through decision 3 instead: learned memory and the cluster model read imported sessions.
+   - **Follow-up.** Teaching the LogReg voter to learn from sessions is a separate item, [#182](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/182).
+9. **Share any code with #8?** **Deferred (David, 2026-09-30).** This only matters once #8's census is built, and nothing in #165 depends on it. If #8 starts before it is revisited, this default applies:
+   - a pure harness-token allowlist only;
+   - separate flags, stores, and writers;
+   - #8 remains content-free;
+   - a handful of scrubbed #165 bodies may be picked by hand for translator fixtures, and the census does not store them.
 10. **Per-body cap.** **Decided (David, 2026-09-30):** none. A body is complete or absent, never a prefix.
 11. **Imported sessions and retention.** **Decided (David, 2026-09-30):**
     - An import keeps its original timestamps by default, so retention treats imported sessions like captured sessions of the same age.

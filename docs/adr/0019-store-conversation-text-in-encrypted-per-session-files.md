@@ -129,7 +129,7 @@ What this ADR commits to:
   - its 8 MiB per-body truncation and its separate off-by-default flag go away;
   - its redaction happens at write time.
 - Neutral, because turning Adaptive Routing off no longer stops capture. Only the Transcription Capture toggle does. Anyone who relied on Adaptive Routing to stop transcripts must use that toggle instead.
-- Neutral, because imported sessions appear in the Sessions tab and feed learning (#165 decision 3), so they follow the same storage, deletion and retention rules as captured sessions. They never feed the benchmark tables (#165 decision 8).
+- Neutral, because imported sessions appear in the Sessions tab and feed learning (#165 decision 3), so they follow the same storage, deletion and retention rules as captured sessions. They never count toward spend, savings or ROI, and never feed the benchmark tables (#165 decisions 3 and 8).
 - Neutral, because #176 reads its on-demand text from session files.
 - Neutral, because the `ListPersistedSessions` size fix ([#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179)) stays an interim fix until the list carries metadata only.
 
