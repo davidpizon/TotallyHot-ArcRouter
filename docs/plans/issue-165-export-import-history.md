@@ -3,11 +3,31 @@
 **Status:** Proposed. Awaiting David's approval. No implementation in this change.
 **Issue:** [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165) — "Feature: Export/import full agent conversation history as a zip file".
 **Related:** [`tracked-todos.md` #8](../router/tracked-todos.md#8-capture-and-analyze-real-claude-code-and-codex-traffic-before-deciding-adr-0017s-pin-policy) (live, content-free traffic census).
-**ADR-0008 Amendment 1:** Binding. This plan adds a feature. It does not schedule a smell audit and it does not change `ProxyMiddleware`, `RequestInterceptor`, or `ManagementFacade` except to call a new best-effort writer from the existing post-response telemetry path.
+**ADR-0008 Amendment 1:** Binding. This plan adds a feature and does not schedule a smell audit. It does not change `ManagementFacade`.
+
+It does change the proxy hot path (ADR-0019), so ADR-0008's hub safety rules and the golden-path smoke test apply:
+- `RequestInterceptor` keeps the raw request bytes before decoding them;
+- the response copy loops keep an uncapped copy;
+- both feed the existing post-response writer.
+
+**Amended 2026-09-30:** to match [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md), which records David's storage and privacy decisions of that day. Sections changed:
+- Prerequisite;
+- §1 Export and §2 Import;
+- §3's redaction rules and §4's comparison;
+- §5 Phasing and §6 Test strategy;
+- §7 decisions 1, 2, 5 and 10, plus a new decision 11.
 
 David's request, exact words:
 
 > I would like to have a mechanism where the entire conversation history of agent requests and responses is exportable as a zip file, and importable as a zip file, so that I can export the conversations and build a larger dataset for, so that I can write better tests.
+
+David's requirement, 2026-09-30, exact words:
+
+> Important: I want the application to store the full session text. When the application imports or exports transaction history (https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165), it must always import and export the full, unadulterated, transaction text. However, the application does not need to display the conversation in the "Sessions" tab, a truncated or load-on-demand version of the task text is permissible and actually preferred to remain performant.
+
+Later the same day:
+
+> Allow secrets and key-shaped strings to be obscured when written to the file storage. This will mean that session data will not have secrets when imported or exported.
 
 ## What is stored today
 
@@ -28,6 +48,9 @@ How the transcript text is produced:
 
 - `RequestTextExtractor.ExtractNewestUserMessage` walks `messages` from the end and returns the latest `role: "user"` text. `MessageContentTextExtractor` keeps `type: "text"` parts and drops images, `tool_use`, and other blocks. A Responses-API body (`input` items, no `messages` array) yields **null** `prompt_text`.
 - `ResponseTextExtractor` pulls assistant text out of the capped buffer (OpenAI or Anthropic shape, streaming or not). Tool-only replies yield **null** `response_text`. The stored string is the extracted text, not the 2,000-character live-summary truncation.
+- The request the router forwards is not the client's bytes. `RequestInterceptor.ResolveModelRouteAsync` decodes the body as UTF-8 text, and `RequestBodyIntrospection` forwards `jsonObject.ToJsonString()`.
+  - That strips whitespace and escapes non-ASCII and `<>&'+` characters, so a 117-byte sample became 162 bytes.
+  - Decoding also replaces invalid UTF-8.
 - Writes happen in `RequestTelemetryPublisher.PersistTranscriptAsync` only when `Transcript:Enabled` is true (default **on**) **and** `Routing:EnableAdaptiveRouting` is true (default **on**). Retention then deletes rows older than 30 days or past 50,000 rows (`TranscriptOptions`). "Entire history" today means whatever that purge has not removed.
 - `taxonomy_comparisons` is a derived routing-evaluation table. It is not conversation content.
 
@@ -45,21 +68,38 @@ The host binary already has one-shot flags (`--sync-benchmark-data`, `--run-regr
 
 Export can only package what was kept. Shipping a zip of `prompt_text` / `response_text` would not let David replay an agent turn (missing system prompt, history, tools, tool results, and the response envelope). **Capturing full bodies is a prerequisite**, not a follow-up.
 
-Add an opt-in archive, off by default, written from the same post-response path that already calls `PersistTranscriptAsync` (response bytes are already in hand; the rewritten request bytes are already in hand). Do not fold raw JSON into `request_transcripts.prompt_text` — embedding backfill, quality rescan, and cluster naming all treat that column as plain task text.
+[ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) decides how the bodies are stored. This section applies it.
 
-Each captured turn is one row (or one blob plus one metadata row) with:
+**Store.**
+- Each session is one encrypted, compressed file, indexed by `transcripts.db`. The database keeps no conversation text.
+- There is no separate archive store. The session files are the conversation record for the Sessions tab, the learning jobs, and this export.
+- Do not fold raw JSON into `request_transcripts.prompt_text`, which embedding backfill, quality rescan and cluster naming treat as plain task text. The per-turn text extracts live in the session file instead.
+
+**What each turn stores:**
 
 - `archive_turn_id` — UUID minted at capture. This is the stable identity. SQLite `rowid` and `correlation_id` are not: row ids differ per install, and session ids can collide across machines.
-- The request bytes and the response bytes **as the client exchanged them** after model rewrite (OpenAI-shaped when a translator ran, native otherwise — the same bytes `RequestTelemetryPublisher` already parses). Record `content_encoding` (`json` or `sse`) and `truncated` when a cap is hit.
+- **The client's exchange.**
+  - The request bytes exactly as the client sent them, taken before `RequestInterceptor` decodes them.
+  - The response bytes exactly as relayed to the client, with no size cap. Today's 4 MiB telemetry capture stays as it is, and the full copy is taken alongside it.
+  - Record `content_encoding` (`json` or `sse`).
+- **The provider-side request and response**, only when a translator ran (Gemini always; Anthropic when translated), because only then do they differ from the client's exchange.
+- **The per-turn text extracts** that the learning jobs and the Sessions tab read: the newest user message and the reply text.
 - A metadata snapshot taken at that moment, so export does not join `usage_ledger` later (the ledger has its own retention and can drop the row): provider, requested model, routed model, resolved provider model id, substitution reason, fallback, exploratory, propensity, classification labels, token counts including cache tokens, estimated cost, cost confidence, HTTP status, latency, duration, streaming flag, session synthesized flag, `session_id`, turn number, `correlation_id`, `created_at_utc`.
 - Normalized harness only: allowlisted product token plus version (the same rule #8 specifies for `User-Agent`). Any other agent is `other` plus the header's length. The raw `User-Agent` is not stored.
 - `origin` = `captured`. Imported rows use `imported` (see Import).
 
-Own retention, separate from the 30-day / 50,000-row transcript cap. Agent clients resend the growing history on every turn, so byte size, not row count, is the bound. Recommended default: **14 days or 2 GiB**, whichever trips first, oldest turns deleted first, both configurable. A turn over the per-body cap is stored truncated and flagged, not dropped silently. Recommended per-body cap: **8 MiB** (today's telemetry cap is 4 MiB and then discarded).
+**Rules from ADR-0019:**
 
-When the flag is off, the archive file is not created and the hot path does not allocate a second copy of the body. Failures are logged with a static Serilog template and never fail the proxy response, matching transcript insert.
+- **Secrets.** Secrets and key-shaped strings are obscured before any byte is written, on capture and on import. Nothing else about the text changes.
+- **No truncation.** A body is complete or absent, never a prefix. A capture that can't complete is recorded as missing.
+- **Capture control.** On by default, controlled only by the Transcription Capture toggle. It no longer also requires Adaptive Routing. When capture is off, no session file is created and the hot path makes no second copy of the body.
+- **Retention.** Keep the newest N turns, where N is the Sample Size setting (default 20,000). The oldest whole sessions are deleted first. There is no age or size limit.
+- **Deletion.** Deleting a session destroys its key, then deletes its file, its index rows and its learned embeddings.
+- **Writes.** Writes go through ADR-0018's background writer, off the request path. Failures are logged with a static Serilog template and never fail the proxy response.
 
-`request_transcripts` and `usage_ledger` stay as they are. They still feed learning, the Sessions tab, and cost analytics. The archive is the replay corpus.
+**Existing data.**
+- `request_transcripts` keeps its metadata rows but loses its text. The upgrade deletes the text without migrating it, and the learning jobs read extracts from session files from then on.
+- `usage_ledger` is unchanged and still feeds cost analytics.
 
 ## 1. Export
 
@@ -72,24 +112,38 @@ manifest.json
 turns.jsonl
 conversations/{session_id}/turns/{turn:D4}.request.json
 conversations/{session_id}/turns/{turn:D4}.response.json
+conversations/{session_id}/turns/{turn:D4}.provider-request.json    (translated turns only)
+conversations/{session_id}/turns/{turn:D4}.provider-response.json   (translated turns only)
 ```
 
-- `manifest.json`: `schema_version` (integer `1`), `exported_at_utc`, router version, the filter that produced the file, counts (conversations, turns, truncated turns, bytes), and a SHA-256 for `turns.jsonl` and for every body entry. Zip CRC32 is incidental; import trusts the manifest hashes.
-- `turns.jsonl`: one JSON object per turn, in `(session_id, turn_number)` order. Holds `archive_turn_id`, the metadata snapshot above, relative paths of the two body files, each body's SHA-256 and uncompressed length, `truncated`, `origin`, and `content_fidelity: "full-body"`. This is the index a test harness reads without opening every body.
+- `manifest.json`: `schema_version` (integer `1`), `exported_at_utc`, router version, the filter that produced the file, counts (conversations, turns, missing bodies, bytes), and a SHA-256 for `turns.jsonl` and for every body entry. Zip CRC32 is incidental; import trusts the manifest hashes.
+- `turns.jsonl`: one JSON object per turn, in `(session_id, turn_number)` order.
+  - It holds `archive_turn_id`, the metadata snapshot above, the relative paths of the body files, and each body's SHA-256 and length.
+  - It also holds `secrets_obscured`, `origin`, and `content_fidelity: "full-body"`.
+  - Hashes are computed over the stored bytes, after secrets were obscured at write.
+  - This is the index a test harness reads without opening every body.
 - Body files: the raw bytes, UTF-8 JSON or SSE, not pretty-printed (pretty-printing would change the hash). A missing body (capture failed, or a pre-archive transcript export if one is ever allowed) is an absent file plus `content_fidelity` set to the real level, never an empty file pretending to be the body.
 - Session directory names are the sanitized session id. Characters outside `[A-Za-z0-9._-]` become `_`. The unsanitized id stays in `turns.jsonl`.
 
 **Compression:** Deflate (the `ZipArchive` default). Bodies are already JSON text, so Deflate is where the size win is. Do not gzip the bodies a second time inside the entry.
 
-**Filtering:** optional `from` / `to` (UTC, inclusive), session id, normalized harness, provider, requested model. Default is every archive row still inside retention. Filters are recorded in the manifest so a later import knows the zip is not "the whole router."
+**Filtering:** optional `from` / `to` (UTC, inclusive), session id, normalized harness, provider, requested model. Default is every session still inside retention. Filters are recorded in the manifest so a later import knows the zip is not "the whole router."
 
-**Size and streaming:** write the zip in `ZipArchiveMode.Create` to a file stream, one entry at a time, reading each body from SQLite as a stream. Do not load the corpus into a `byte[]`. `ZipArchive` create-mode is forward-only, which matches export. For a multi-gigabyte archive the operator gets a path, not an in-memory gRPC message. The gRPC API streams progress (turns written, bytes written) and then a final path or chunked file, following the existing server-stream pattern of `ExportUsageRollup` and `RunRegretHarness`. Cap a single export at the archive's own size quota so a bug cannot fill the disk.
+**Size and streaming:**
+- Write the zip in `ZipArchiveMode.Create` to a file stream, one entry at a time. Each body is read from its session file, decrypted, and rebuilt from the last snapshot. Do not load the corpus into a `byte[]`.
+- `ZipArchive` create-mode is forward-only, which matches export.
+- For a multi-gigabyte export the operator gets a path, not an in-memory gRPC message. The GUI's 4 MiB receive cap rules out a single message anyway.
+- The gRPC API streams progress (turns written, bytes written) and then a final path or chunked file, following the existing server-stream pattern of `ExportUsageRollup` and `RunRegretHarness`.
+- ADR-0019 sets no store size quota. Check free disk space before writing, so a bug cannot fill the disk.
 
 **Where it is exposed:**
 
 - **CLI:** `--export-conversations <path>` on the existing host, stripped in `Program.Main` the way `--export-ca` is, plus optional `--from`, `--to`, `--session`, `--harness`, `--provider`, `--model`. The process writes the zip and exits.
 - **gRPC admin:** a new loopback service (admin token, same as the other admin services). Not a new method on `ManagementFacade`, and not a new field on `ExportUsageRollup` — that RPC is cost buckets. Suggested RPCs: `ExportConversations` (server stream of progress, zip written to a caller-supplied path on the router machine) and `ImportConversations` (below). A path on the router machine matches how this process already runs headless jobs; pulling the zip through gRPC chunk-by-chunk is a later option if a remote GUI must download it.
-- **Governance UI:** one sub-view, "Conversation archive", next to Benchmark Data. It shows the flag, row count, bytes, retention, a filter row, Export, and Import. The button calls the gRPC service. System Settings keeps the existing transcription toggle; this view is the archive, because it is a different store.
+- **Governance UI:** one sub-view, "Conversation archive", next to Benchmark Data.
+  - It shows whether capture is on, session and turn counts, bytes on disk, the Sample Size retention, a filter row, Export, and Import.
+  - The button calls the gRPC service.
+  - System Settings keeps the Transcription Capture toggle, which controls capture. This view only exports and imports.
 
 ## 2. Import
 
@@ -100,8 +154,10 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
 1. Reject entry names that are absolute, contain `..`, or start with a slash (zip-slip).
 2. `manifest.json` exists, parses, and `schema_version` is `1`. Any other version is rejected with a message that names the version. Do not best-effort a newer file.
 3. Recompute SHA-256 for `turns.jsonl` and every body the index names. Mismatch rejects that turn.
-4. Each JSONL line parses, has `archive_turn_id`, `session_id`, `turn_number`, `created_at_utc`, and paths that stay under `conversations/`. A body larger than the per-body cap is rejected even if the hash matches.
+4. Each JSONL line parses, has `archive_turn_id`, `session_id`, `turn_number`, `created_at_utc`, and paths that stay under `conversations/`. There is no body size limit (ADR-0019). Bodies are streamed, never loaded whole.
 5. Unknown extra JSON fields are ignored so a later additive field does not break an older importer. Missing required fields reject the turn.
+
+**Obscuring on write.** Import writes session files, so secrets are obscured exactly as on capture (ADR-0019). A zip made by another machine or an older version may still contain some. If obscuring changes a body, the stored SHA-256 is the new one, and the zip's hash is kept as `source_sha256`.
 
 **Conflicts**, keyed by `archive_turn_id`:
 
@@ -111,7 +167,12 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
 | `overwrite` | Replace bodies and metadata for that id. Keep the original `archive_turn_id` | Flag |
 | `keep-both` | Insert a second row with a new local id and the same `archive_turn_id` recorded as `source_archive_turn_id`. A later `skip` import still matches the original id and does not insert a third copy | Flag |
 
-**Storage:** rows go into the archive store with `origin = imported` and `imported_at_utc`. They are not inserted into `request_transcripts`, `usage_ledger`, or `memory_entries`. Those tables drive live learning, cost totals, and the Sessions tab; a restored dataset would otherwise be graded, embedded, and billed as if the router had served it. The Governance view can list imported sessions. The Sessions tab stays on live and transcript data until a later, separate decision.
+**Storage:**
+- Imported turns become session files and index rows marked `origin = imported`, with `imported_at_utc`.
+- They are never embedded, graded, billed, or added to `memory_entries`. Otherwise a restored dataset would be graded, embedded and billed as if the router had served it.
+- They are not shown in the Sessions tab (decision 3).
+- The Governance view lists imported sessions and can delete them.
+- How imports count toward retention is decision 11.
 
 **Idempotency:** importing the same zip twice under `skip` is a no-op after the first success. The unique key is `archive_turn_id`. A crash mid-import leaves a partial set; re-running `skip` fills the gap without duplicating. Import runs in one SQLite transaction per batch (for example 100 turns) so a process kill loses a batch, not the whole file, and does not hold a multi-gigabyte transaction.
 
@@ -127,8 +188,13 @@ The zip is the hand-off. It is not itself a test project, and it does not sync i
 **Privacy and redaction**
 
 - The archive exists to keep user content. That content includes source code, paths, and anything the operator pasted. The zip is an operator artifact. It is not committed, not attached to a PR, and not uploaded by the app.
-- Credentials are stripped at capture and again at export, even when content is kept: `Authorization`, `x-api-key`, `api-key`, and any header whose name contains `key`, `token`, or `secret`. Body strings matching common key shapes (`sk-`, `sk-ant-`, `ghp_`, `github_pat_`, `AKIA`, `xoxb-`, `xoxp-`, PEM blocks) are replaced with `[redacted]` and the turn is flagged `secrets_redacted`. A unit test plants each shape in a header, in a message string, and in a tool-argument string and asserts the zip does not contain it.
-- `--redact-content` is a second, explicit mode for a zip that will be shared: message text, tool arguments, and file paths become lengths and block types, using the same key-path rule as #8. The default export keeps content, because a content-free zip cannot feed the tests David described.
+- **Headers are never stored**, apart from the normalized harness token. `Authorization`, `x-api-key`, `api-key`, and any header whose name contains `key`, `token`, or `secret` never reach a session file or a zip.
+- **Secrets are obscured once, when written.** This covers secrets and key-shaped strings in bodies and text extracts, on capture and on import (ADR-0019). Export writes the stored bytes unchanged.
+  - Starting shapes: `sk-`, `sk-ant-`, `ghp_`, `github_pat_`, `AKIA`, `xoxb-`, `xoxp-`, and PEM blocks. The full list and the marker format belong to the implementation.
+  - Non-secrets that match, such as fake keys in code and test fixtures, are obscured too.
+  - The turn records `secrets_obscured`.
+- **A unit test plants each shape** in a message string, a tool-argument string, a streamed reply split across SSE events, and an imported zip. It asserts that none of them reaches a session file or an exported zip.
+- **There is no content-free export mode.** David requires every export to carry the full text (2026-09-30), so the former `--redact-content` mode is dropped.
 - Imported rows never enter `EmbeddingBackfillService`, `QualityRescanService`, or the logreg / cluster trainers.
 
 ## 4. How this relates to tracked-todos #8
@@ -143,8 +209,8 @@ flowchart LR
     subgraph census["#8 census, opt-in, default off"]
         Shape["JSONL of shape only: key paths, types, lengths, allowlisted enums, salted session hash"]
     end
-    subgraph archive["#165 archive, opt-in, default off"]
-        Bodies["Full bodies plus routing metadata"]
+    subgraph archive["#165 session files, Transcription Capture toggle, default on"]
+        Bodies["Full bodies, secrets obscured, plus routing metadata"]
         Zip[Zip export / import]
     end
     Req --> Shape
@@ -157,15 +223,15 @@ flowchart LR
 | | #8 census | #165 archive |
 |---|---|---|
 | Question | How often do harness requests carry pin-worthy fields? | What did this conversation actually contain, so a test can replay it? |
-| Content | None. Strings become lengths. Keys inside tool arguments and `metadata` become `*` | Full bodies, with credentials stripped |
-| When | Live, one line per request, during the capture window #8 specifies | Live capture into the archive, then offline zip whenever the operator asks |
-| Opt-in | Its own flag, default off, left off after the study | A different flag, default off |
+| Content | None. Strings become lengths. Keys inside tool arguments and `metadata` become `*` | Full bodies, with secrets obscured at write |
+| When | Live, one line per request, during the capture window #8 specifies | Live capture into session files, then an offline zip whenever the operator asks |
+| Opt-in | Its own flag, default off, left off after the study | The Transcription Capture toggle, default on |
 | Output | `docs/router/harness-traffic-census.md` and a local JSONL that is not a zip of prompts | A zip on disk. Nothing in the repo until a human scrubs a fixture |
 | Identity | Salted hash of the session id, salt not written out | Stable `archive_turn_id` plus the real session id, because the operator is exporting their own machine |
 
 Rules so they do not collide:
 
-- Enabling the archive does not write census lines. Enabling the census does not write bodies.
+- Capture does not write census lines. Enabling the census does not write bodies.
 - The census stays content-free after #165 exists. #165 does not relax #8's acceptance test (a planted secret must not appear in census output).
 - #8's optional "≤ 20 raw bodies, outside the repo, scrubbed by hand" can be **chosen out of a #165 zip** and then scrubbed. That is a manual step. The census writer still does not store those bodies, and a #165 zip is not committed to satisfy #8.
 - Normalized harness names use the same allowlist in both, implemented as a pure function each writer calls. Do not route archive bytes through the census serializer to "reuse" it.
@@ -173,35 +239,69 @@ Rules so they do not collide:
 
 ## 5. Phasing
 
-1. **ADR, then capture.** A short ADR for the privacy boundary (persisting full prompts and responses, exporting them, redaction, default off). Then the archive store and the post-response writer. No zip yet. Exit: flag off writes nothing; flag on round-trips a body; planted secrets are redacted; learning jobs ignore the archive.
-2. **Export.** Zip writer, CLI flag, gRPC stream, Governance view with Export only. Exit: a fixture corpus exports to the layout above and the manifest hashes match.
-3. **Import.** Validation, `skip` / `overwrite` / `keep-both`, `origin=imported`, idempotent re-import. Exit: round-trip into an empty archive equals the source; a second import under `skip` adds zero rows; a tampered byte fails that turn.
-4. **Test helper.** Reader plus one scrubbed-fixture test on an existing parser or translator. No change to CodeRouterBench sync or the regret harness.
+1. **Session store and capture (ADR-0019).**
+   - The session file format and per-session keys held the ADR-0015 way.
+   - The admin-only folder, checked at startup.
+   - Compression, obscuring, and the ADR-0018 writer.
+   - On the hot path: raw request bytes taken before decoding, and uncapped response copies. ADR-0008's hub rules and the golden-path smoke test apply.
+   - No zip yet.
+   - Exit:
+     - capture off writes nothing;
+     - capture on round-trips request and response bytes exactly, including a response over 4 MiB and a translated turn's provider-side bodies;
+     - planted secrets are obscured;
+     - deleting a session leaves nothing decryptable.
+2. **Text moves off `transcripts.db`.**
+   - The learning jobs and `ITranscriptStore`'s text reads switch to session files.
+   - The Sessions tab reads text from session files on demand.
+   - The upgrade deletes the old text.
+   - Retention switches to Sample Size, deleting whole sessions.
+   - Learned embeddings are deleted with their session.
+   - Exit: `transcripts.db` holds no conversation text, and neither do its freed pages.
+3. **Export.** Zip writer, CLI flag, gRPC stream, Governance view with Export only. Exit: a fixture corpus exports to the layout above and the manifest hashes match.
+4. **Import.**
+   - Validation, obscuring on write, `skip` / `overwrite` / `keep-both`, `origin=imported`, idempotent re-import.
+   - Exit:
+     - importing a secret-free corpus into an empty store reproduces the source;
+     - a second import under `skip` adds zero rows;
+     - a tampered byte fails that turn.
+5. **Test helper.** Reader plus one scrubbed-fixture test on an existing parser or translator. No change to CodeRouterBench sync or the regret harness.
 
-Phase 2 can ship before phase 3. Phase 4 is what makes the zip useful for tests; it does not block export.
+Phase 3 can ship before phase 4. Phase 5 is what makes the zip useful for tests; it does not block export.
 
 ## 6. Test strategy
 
 Unit tests, each well under the 5-second ceiling. No live provider, no GUI browser pass until the Governance view exists (phase 2), and then a bUnit test of the view plus one manual click against a local router.
 
-- Capture off: a completed proxy request leaves no archive file.
-- Capture on: request bytes, response bytes, provider, models, tokens, and harness token match the fixture. A Responses-API `input` body is stored whole (today it would not even produce `prompt_text`).
-- Redaction: the shapes in section 3 are absent from the stored body and from the zip.
+- **Capture control.** With the Transcription Capture toggle off, a completed proxy request leaves no session file. With it on and Adaptive Routing off, the turn is captured.
+- **Capture on.** Request bytes, response bytes, provider, models, tokens, and harness token match the fixture.
+  - A Responses-API `input` body is stored whole (today it would not even produce `prompt_text`).
+  - The stored request equals the client's bytes exactly, including whitespace, non-ASCII, `<>&'+` and invalid UTF-8.
+  - A response over 4 MiB is stored whole.
+  - A translated turn also stores its provider-side request and response.
+- **Obscuring.** The shapes in section 3 are absent from session files, text extracts and zips.
+- **Compression.** Compression and snapshots round-trip byte-exact, including the first turn after a restart.
+- **Deletion.** After a session is deleted, a copy of its file cannot be decrypted, and its `memory_entries` are gone.
+- **Retention.** Going over Sample Size deletes the oldest whole sessions.
 - Export filter: a date window and a harness filter select the right turns and the manifest records the filter.
 - Streaming bound: exporting many small turns writes incrementally (assert the writer is invoked per turn, using a fake body store).
 - Import: bad version, bad hash, zip-slip name, and malformed JSONL line each take the path in section 2. `skip` is idempotent. `overwrite` replaces bytes. `keep-both` does not grow on a second `skip`.
-- Imported and captured archive rows are absent from embedding-backfill and quality-rescan queries.
+- Imported sessions are absent from embedding-backfill and quality-rescan inputs.
 - Census isolation: with both flags on in a test host, the census sink receives no prompt text and the archive sink receives no census line. Until #8's writer exists, the test stubs the census sink.
 
 ## 7. Decisions needed from David
 
-1. **Is a zip of today's `prompt_text` / `response_text` acceptable as a first milestone?** Recommended default: **no.** Full-body capture is a prerequisite. A partial zip would be easy to mistake for replayable history.
-2. **Archive location and defaults.** Recommended default: its own SQLite file beside `transcripts.db`, flag `ConversationArchive:Enabled` default **false**, retention **14 days or 2 GiB**, per-body cap **8 MiB** with a `truncated` flag.
+1. **Is a zip of today's `prompt_text` / `response_text` acceptable as a first milestone?** **Decided (David, 2026-09-30): no.** Export must carry the full transaction text.
+2. **Archive location and defaults.** **Decided (David, 2026-09-30; ADR-0019):**
+   - one encrypted, compressed file per session, indexed by `transcripts.db`;
+   - capture follows only the Transcription Capture toggle, default on;
+   - retention keeps the newest Sample Size turns, deleting whole sessions;
+   - no per-body cap.
 3. **Does import restore Sessions-tab history and learning rows?** Recommended default: **no.** Import fills the archive only, marked `origin=imported`, excluded from embeddings, rescan, and trainers.
 4. **Conflict policy default.** Recommended default: **`skip`** on `archive_turn_id`, with `overwrite` and `keep-both` as explicit flags.
-5. **Content in the default zip.** Recommended default: **keep user content**, always strip credentials and known key shapes. `--redact-content` exists for a shareable structural zip. Zips are never committed.
+5. **Content in the default zip.** **Decided (David, 2026-09-30):** full content, with secrets and key-shaped strings obscured at write. There is no content-free mode. Zips are never committed.
 6. **Stable identity.** Recommended default: capture-time UUID `archive_turn_id`. Do not key on SQLite row id or on `correlation_id` alone.
 7. **Where the button lives.** Recommended default: a Governance sub-view "Conversation archive", plus the CLI flags and one gRPC service. Not a new `ManagementFacade` method, and not an extension of `ExportUsageRollup`.
 8. **May the archive feed CodeRouterBench or the regret harness?** Recommended default: **no.** A test helper reads the zip. Published benchmark tables stay published data.
 9. **Share any code with #8?** Recommended default: a pure harness-token allowlist only. Separate flags, stores, and writers. #8 remains content-free. A handful of scrubbed #165 bodies may be picked by hand for translator fixtures; the census does not store them.
-10. **Per-body cap when a turn exceeds 8 MiB.** Recommended default: store the prefix, set `truncated`, and let export include it. Dropping the turn hides the largest agent turns, which are the ones tests most want.
+10. **Per-body cap.** **Decided (David, 2026-09-30):** none. A body is complete or absent, never a prefix.
+11. **Imported sessions and retention.** Recommended default: imported sessions don't count toward the Sample Size window and are never removed by it; the operator deletes them from the Governance view. Otherwise an import older than the newest N turns would be deleted as soon as it lands.
