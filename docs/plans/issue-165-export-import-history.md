@@ -15,7 +15,7 @@ It does change the proxy hot path (ADR-0019), so ADR-0008's hub safety rules and
 - §1 Export and §2 Import;
 - §3's redaction rules and §4's comparison;
 - §5 Phasing and §6 Test strategy;
-- §7 decisions 1, 2, 4, 5, 10, 11 and 12 (11 and 12 are new).
+- §7 decisions 1–8 and 10–12 (11 and 12 are new).
 
 §2 also now records David's import rules: timestamps, skipping or filling in existing sessions, keeping the local copy on conflict, and the session checksum.
 
@@ -79,7 +79,7 @@ Export can only package what was kept. Shipping a zip of `prompt_text` / `respon
 
 **What each turn stores:**
 
-- `archive_turn_id` — UUID minted at capture. This is the stable identity. SQLite `rowid` and `correlation_id` are not: row ids differ per install, and session ids can collide across machines.
+- `archive_turn_id` — ID minted when the turn is captured, unique across machines (decision 6). It is a version 7 UUID: random apart from a time prefix, so ids also sort by capture time. This is the stable identity. SQLite `rowid` and `correlation_id` are not: row ids differ per install, and session ids can collide across machines.
 - `archive_session_id` — UUID minted when the session's file is created. It identifies the session across machines, where `session_id` can collide, and import matches existing sessions on it (§2).
 - **The client's exchange.**
   - The request bytes exactly as the client sent them, taken before `RequestInterceptor` decodes them.
@@ -87,7 +87,7 @@ Export can only package what was kept. Shipping a zip of `prompt_text` / `respon
   - Record `content_encoding` (`json` or `sse`).
 - **The provider-side request and response**, only when a translator ran (Gemini always; Anthropic when translated), because only then do they differ from the client's exchange.
 - **The per-turn text extracts** that the learning jobs and the Sessions tab read: the newest user message and the reply text.
-- A metadata snapshot taken at that moment, so export does not join `usage_ledger` later (the ledger has its own retention and can drop the row): provider, requested model, routed model, resolved provider model id, substitution reason, fallback, exploratory, propensity, classification labels, token counts including cache tokens, estimated cost, cost confidence, HTTP status, latency, duration, streaming flag, session synthesized flag, `session_id`, turn number, `correlation_id`, `created_at_utc`.
+- A metadata snapshot taken at that moment, so export does not join `usage_ledger` later (the ledger has its own retention and can drop the row): provider, requested model, routed model, resolved provider model id, substitution reason, fallback, exploratory, propensity, classification labels, score, scorer version, judge-scored flag, token counts including cache tokens, estimated cost, cost confidence, HTTP status, latency, duration, streaming flag, session synthesized flag, `session_id`, turn number, `correlation_id`, `created_at_utc`.
 - Normalized harness only: allowlisted product token plus version (the same rule #8 specifies for `User-Agent`). Any other agent is `other` plus the header's length. The raw `User-Agent` is not stored.
 - `origin` = `captured`. Imported rows use `imported` (see Import).
 
@@ -106,7 +106,7 @@ Export can only package what was kept. Shipping a zip of `prompt_text` / `respon
 
 ## 1. Export
 
-One code path writes the zip. CLI and Governance call it; they do not format the zip themselves.
+One code path writes the zip. The CLI and the Sessions tab's Export / Import modal call it; they do not format the zip themselves.
 
 **Zip layout** (schema version 1):
 
@@ -143,10 +143,12 @@ conversations/{session_id}/turns/{turn:D4}.provider-response.json   (translated 
 
 - **CLI:** `--export-conversations <path>` on the existing host, stripped in `Program.Main` the way `--export-ca` is, plus optional `--from`, `--to`, `--session`, `--harness`, `--provider`, `--model`. The process writes the zip and exits.
 - **gRPC admin:** a new loopback service (admin token, same as the other admin services). Not a new method on `ManagementFacade`, and not a new field on `ExportUsageRollup` — that RPC is cost buckets. Suggested RPCs: `ExportConversations` (server stream of progress, zip written to a caller-supplied path on the router machine) and `ImportConversations` (below). A path on the router machine matches how this process already runs headless jobs; pulling the zip through gRPC chunk-by-chunk is a later option if a remote GUI must download it.
-- **Governance UI:** one sub-view, "Conversation archive", next to Benchmark Data.
-  - It shows whether capture is on, session and turn counts, bytes on disk, the Sample Size retention, a filter row, Export, and Import.
-  - The button calls the gRPC service.
-  - System Settings keeps the Transcription Capture toggle, which controls capture. This view only exports and imports.
+- **Sessions tab (decision 7):** a button at the top of the Sessions tab opens an "Export / Import" modal.
+  - The modal is built on `DialogShell`, as every GUI window must be (`AGENTS.md`; `docs/gui/DESIGN.md` §4.1).
+  - It shows whether capture is on, session and turn counts, bytes on disk, the Sample Size retention, a filter row, Export, Import with its options, and the list of past imports, each of which can be deleted.
+  - It calls the gRPC service.
+  - System Settings keeps the Transcription Capture toggle, which controls capture. The modal only exports and imports.
+  - #176 is redesigning the Sessions tab, so the button goes into that layout.
 
 ## 2. Import
 
@@ -200,20 +202,32 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
 
 **Storage:**
 - Imported turns become session files and index rows marked `origin = imported`, with `imported_at_utc`.
-- They are never embedded, graded, billed, or added to `memory_entries`. Otherwise a restored dataset would be graded, embedded and billed as if the router had served it.
-- They are not shown in the Sessions tab (decision 3).
-- The Governance view lists imported sessions and can delete them.
+- **They feed learning like captured turns (decision 3).**
+  - They are embedded and added to `memory_entries`.
+  - They keep the scores they arrive with. Only turns without a score are graded, so an import doesn't pay to re-grade what was already graded.
+- **They are never billed.** They don't enter `usage_ledger`, provider spend or budgets, because the router didn't serve them.
+- **They appear in the Sessions tab**, marked as imported (decision 3).
+- **They feed the benchmark tables** (decision 8), as described below.
+- **The Export / Import modal lists imports** and can delete one.
+
+**Benchmark tables** (decision 8).
+- **Where they go.** Imported turns go into the CodeRouterBench ID tables (`benchmark_id_tasks`, `benchmark_id_results`) under their own `split`, `imported`.
+  - The published-corpus sync deletes and reloads only the splits it publishes (`BenchmarkIdTasksJsonlImporter`, `BenchmarkIdResultsCsvImporter`), so it never touches these rows.
+  - The OOD, model and summary tables are wiped on every sync, so imported data doesn't go there.
+- **No text.** An imported task row holds the turn's `archive_turn_id` and dimension, not its prompt. ADR-0019 keeps conversation text out of SQLite; a consumer that needs the text reads it from the session file.
+- **One result per task.** An imported turn was answered by one model, so its task has one result row: the routed model, its score, cost and tokens. A consumer that compares every model on the same task, such as the regret harness, must skip or discount tasks with a single result.
+- **Deletion.** Deleting the session deletes its benchmark rows.
 - Imports count toward retention by their stored timestamps (decision 11).
 
 **Idempotency:** importing the same zip twice under `skip` is a no-op after the first success. The unique key is `archive_turn_id`. A crash mid-import leaves a partial set; re-running `skip` fills the gap without duplicating. Import runs in one SQLite transaction per batch (for example 100 turns) so a process kill loses a batch, not the whole file, and does not hold a multi-gigabyte transaction.
 
 ## 3. Purpose: larger test datasets
 
-The zip is the hand-off. It is not itself a test project, and it does not sync into CodeRouterBench.
+The zip is the hand-off. It is not itself a test project, and it does not replace the published CodeRouterBench corpus. Imported turns join the benchmark tables under their own split (§2, decision 8).
 
 - A small offline reader (a test helper, not a router hot-path type) opens `turns.jsonl` and yields `(metadata, request bytes, response bytes)`.
 - Tests that already replay a recorded envelope — tool-call translation (`RecordedModelTranscripts`), response-text and usage parsers — can take a scrubbed turn from that reader instead of a hand-pasted string.
-- New tests for harness dialects (Claude Code `messages` plus tools, Codex `input` items) load a directory of scrubbed turns checked in only after review. The regret harness and `benchmark_*` tables stay on the published corpus. Their sync deletes and replaces rows; pointing it at a conversation zip would wipe the benchmark.
+- New tests for harness dialects (Claude Code `messages` plus tools, Codex `input` items) load a directory of scrubbed turns checked in only after review. The published corpus stays as published. Its sync deletes and replaces its own rows, so imported data lives only in the separate `imported` split described in §2.
 - The converter that emits a fixture directory lives next to the test project. It copies bodies out and refuses to write under the repository root unless the operator passes an explicit fixture path outside the tree. CI does not download or import a zip.
 
 **Privacy and redaction**
@@ -226,7 +240,7 @@ The zip is the hand-off. It is not itself a test project, and it does not sync i
   - The turn records `secrets_obscured`.
 - **A unit test plants each shape** in a message string, a tool-argument string, a streamed reply split across SSE events, and an imported zip. It asserts that none of them reaches a session file or an exported zip.
 - **There is no content-free export mode.** David requires every export to carry the full text (2026-09-30), so the former `--redact-content` mode is dropped.
-- Imported rows never enter `EmbeddingBackfillService`, `QualityRescanService`, or the logreg / cluster trainers.
+- Imported rows feed the same learning jobs as captured ones: `EmbeddingBackfillService`, `QualityRescanService` (unscored turns only), and the logreg and cluster trainers (decision 3).
 
 ## 4. How this relates to tracked-todos #8
 
@@ -288,7 +302,7 @@ Rules so they do not collide:
    - Retention switches to Sample Size, deleting whole sessions.
    - Learned embeddings are deleted with their session.
    - Exit: `transcripts.db` holds no conversation text, and neither do its freed pages.
-3. **Export.** Zip writer, CLI flag, gRPC stream, Governance view with Export only. Exit: a fixture corpus exports to the layout above and the manifest hashes match.
+3. **Export.** Zip writer, CLI flag, gRPC stream, and the Sessions tab's Export / Import modal with Export only. Exit: a fixture corpus exports to the layout above and the manifest hashes match.
 4. **Import.**
    - Validation, obscuring on write, `skip` / `overwrite` / `keep-both`, `origin=imported`, idempotent re-import.
    - Both timestamp options, skipping or filling in existing sessions, and "keep the local copy on conflict".
@@ -306,7 +320,7 @@ Phase 3 can ship before phase 4. Phase 5 is what makes the zip useful for tests;
 
 ## 6. Test strategy
 
-Unit tests, each well under the 5-second ceiling. No live provider, no GUI browser pass until the Governance view exists (phase 2), and then a bUnit test of the view plus one manual click against a local router.
+Unit tests, each well under the 5-second ceiling. No live provider, no GUI browser pass until the Export / Import modal exists (phase 3). Then add a bUnit test of the modal, plus one manual click against a local router.
 
 - **Capture control.** With the Transcription Capture toggle off, a completed proxy request leaves no session file. With it on and Adaptive Routing off, the turn is captured.
 - **Capture on.** Request bytes, response bytes, provider, models, tokens, and harness token match the fixture.
@@ -336,7 +350,12 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
 - Keep the local copy on conflict:
   - on, the default: a differing turn keeps the local copy;
   - off: the turn is replaced (`overwrite`) or both copies are kept (`keep-both`), per the mode.
-- Imported sessions are absent from embedding-backfill and quality-rescan inputs.
+- Imported sessions:
+  - appear in the Sessions tab, marked as imported;
+  - feed embedding backfill and memory, and only unscored turns are graded;
+  - never enter `usage_ledger`, provider spend or budgets;
+  - land in the benchmark ID tables under split `imported`, without text;
+  - survive a benchmark sync, and disappear with their session.
 - Census isolation: with both flags on in a test host, the census sink receives no prompt text and the archive sink receives no census line. Until #8's writer exists, the test stubs the census sink.
 
 ## 7. Decisions needed from David
@@ -347,14 +366,20 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
    - capture follows only the Transcription Capture toggle, default on;
    - retention keeps the newest Sample Size turns, deleting whole sessions;
    - no per-body cap.
-3. **Does import restore Sessions-tab history and learning rows?** Recommended default: **no.** Import fills the archive only, marked `origin=imported`, excluded from embeddings, rescan, and trainers.
+3. **Does import restore Sessions-tab history and learning rows?** **Decided (David, 2026-09-30): yes.** Imported sessions appear in the Sessions tab, marked as imported, and feed learning. They are never billed (§2).
 4. **Conflict policy default.** **Decided (David, 2026-09-30):**
    - A differing turn keeps the local copy. This is a future import option, "keep the local copy on conflict", on by default; turned off, `overwrite` or `keep-both` applies.
    - By default, identical sessions are skipped, and partly present ones, matched on `archive_session_id`, are filled in (§2).
 5. **Content in the default zip.** **Decided (David, 2026-09-30):** full content, with secrets and key-shaped strings obscured at write. There is no content-free mode. Zips are never committed.
-6. **Stable identity.** Recommended default: capture-time UUID `archive_turn_id`. Do not key on SQLite row id or on `correlation_id` alone.
-7. **Where the button lives.** Recommended default: a Governance sub-view "Conversation archive", plus the CLI flags and one gRPC service. Not a new `ManagementFacade` method, and not an extension of `ExportUsageRollup`.
-8. **May the archive feed CodeRouterBench or the regret harness?** Recommended default: **no.** A test helper reads the zip. Published benchmark tables stay published data.
+6. **Stable identity.** **Decided (David, 2026-09-30):** each turn is identified by an ID created when it is captured, unique across machines. That is `archive_turn_id`, a version 7 UUID; sessions get `archive_session_id` the same way. Never key on SQLite row id or on `correlation_id` alone.
+7. **Where the button lives.** **Decided (David, 2026-09-30):**
+   - A button at the top of the Sessions tab opens an Export / Import modal built on `DialogShell`.
+   - The CLI flags and one gRPC service stay.
+   - Not a new `ManagementFacade` method, and not an extension of `ExportUsageRollup`.
+8. **May the archive feed CodeRouterBench or the regret harness?** **Decided (David, 2026-09-30): yes.**
+   - Imported data feeds the benchmark ID tables under its own `imported` split, which the published-corpus sync never deletes.
+   - Its rows carry no text and have one result per task.
+   - They are deleted with their session (§2).
 9. **Share any code with #8?** Recommended default: a pure harness-token allowlist only. Separate flags, stores, and writers. #8 remains content-free. A handful of scrubbed #165 bodies may be picked by hand for translator fixtures; the census does not store them.
 10. **Per-body cap.** **Decided (David, 2026-09-30):** none. A body is complete or absent, never a prefix.
 11. **Imported sessions and retention.** **Decided (David, 2026-09-30):**
