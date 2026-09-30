@@ -17,7 +17,7 @@ It does change the proxy hot path (ADR-0019), so ADR-0008's hub safety rules and
 - §5 Phasing and §6 Test strategy;
 - §7 decisions 1, 2, 5, 10 and 11 (11 is new).
 
-§2 also now records David's import options: timestamps, and skipping existing sessions.
+§2 also now records David's import rules: timestamps, and skipping or filling in existing sessions.
 
 David's request, exact words:
 
@@ -80,7 +80,7 @@ Export can only package what was kept. Shipping a zip of `prompt_text` / `respon
 **What each turn stores:**
 
 - `archive_turn_id` — UUID minted at capture. This is the stable identity. SQLite `rowid` and `correlation_id` are not: row ids differ per install, and session ids can collide across machines.
-- `archive_session_id` — UUID minted when the session's file is created. It identifies the session across machines, where `session_id` can collide, and it is what import's "skip existing sessions" option matches on (§2).
+- `archive_session_id` — UUID minted when the session's file is created. It identifies the session across machines, where `session_id` can collide, and import matches existing sessions on it (§2).
 - **The client's exchange.**
   - The request bytes exactly as the client sent them, taken before `RequestInterceptor` decodes them.
   - The response bytes exactly as relayed to the client, with no size cap. Today's 4 MiB telemetry capture stays as it is, and the full copy is taken alongside it.
@@ -166,9 +166,15 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
 
 - **Timestamps.**
   - `original` (default): keep each turn's original `created_at_utc`.
-  - `import-time`: adopt the moment of import while keeping the original order. Every imported timestamp shifts by the same offset, so the newest imported turn lands at the import time and the order and spacing of turns and sessions are unchanged. The original timestamp is kept as `original_created_at_utc`.
-- **Skip existing sessions.** Skip a whole session when one with the same `archive_session_id` already exists in the application's session history. Nothing from that session is imported, not even turns the local copy lacks. That differs from the turn-level `skip` below, which adds a partly present session's missing turns.
-- **Turn conflicts.** `skip` (default), `overwrite` or `keep-both`, as below.
+  - `import-time`: adopt the moment of import while keeping the original order.
+    - Every timestamp of a session new to the history shifts by the same offset. The newest imported turn lands at the import time, and the order and spacing of turns and sessions are unchanged.
+    - The original timestamp is kept as `original_created_at_utc`.
+    - Turns filled into an existing session keep their original timestamps under either option, so they slot into that session in order.
+- **Existing sessions** (default behavior, David, 2026-09-30).
+  - Sessions match on `archive_session_id`, and turns on `archive_turn_id`. The router's own `session_id` can collide across machines, so it is never used to match.
+  - A session whose turns are all already present is skipped, so importing an identical session changes nothing.
+  - A partly present session gets only its missing turns filled in.
+- **Turn conflicts.** A turn present on both sides with different bytes follows `skip` (default), `overwrite` or `keep-both`, as below.
 
 **Timestamps and retention.** Under the default `original`, retention and ordering treat imported sessions like captured sessions of the same age. So a session older than the newest Sample Size turns is deleted at the next retention pass, and the import summary reports how many turns that removed. `import-time` keeps such an import by making it the newest history.
 
@@ -273,13 +279,13 @@ Rules so they do not collide:
 3. **Export.** Zip writer, CLI flag, gRPC stream, Governance view with Export only. Exit: a fixture corpus exports to the layout above and the manifest hashes match.
 4. **Import.**
    - Validation, obscuring on write, `skip` / `overwrite` / `keep-both`, `origin=imported`, idempotent re-import.
-   - Both timestamp options, and "skip existing sessions".
+   - Both timestamp options, and skipping or filling in existing sessions.
    - Exit:
      - importing a secret-free corpus into an empty store reproduces the source;
      - a second import under `skip` adds zero rows;
      - a tampered byte fails that turn;
      - `original` keeps the source timestamps, and `import-time` keeps the source order;
-     - a session that already exists imports nothing under "skip existing sessions".
+     - an identical session imports nothing, and a partly present one gains exactly its missing turns.
 5. **Test helper.** Reader plus one scrubbed-fixture test on an existing parser or translator. No change to CodeRouterBench sync or the regret harness.
 
 Phase 3 can ship before phase 4. Phase 5 is what makes the zip useful for tests; it does not block export.
@@ -303,9 +309,12 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
 - Import: bad version, bad hash, zip-slip name, and malformed JSONL line each take the path in section 2. `skip` is idempotent. `overwrite` replaces bytes. `keep-both` does not grow on a second `skip`.
 - Import timestamps:
   - `original` keeps every turn's `created_at_utc`.
-  - `import-time` shifts every timestamp by one offset, keeps order and spacing, and records `original_created_at_utc`.
+  - `import-time` shifts every timestamp of a new session by one offset, keeps order and spacing, and records `original_created_at_utc`.
   - Under `original`, a session older than the retention window is removed at the next pass and counted in the import summary.
-- Skip existing sessions: a session whose `archive_session_id` already exists imports no turns, even ones the local copy lacks.
+- Existing sessions:
+  - an identical session imports nothing;
+  - a partly present session (same `archive_session_id`) gains exactly its missing turns, which keep their original timestamps even under `import-time`;
+  - a matching router `session_id` from another machine, with a different `archive_session_id`, is not treated as a match.
 - Imported sessions are absent from embedding-backfill and quality-rescan inputs.
 - Census isolation: with both flags on in a test host, the census sink receives no prompt text and the archive sink receives no census line. Until #8's writer exists, the test stubs the census sink.
 
@@ -318,7 +327,7 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
    - retention keeps the newest Sample Size turns, deleting whole sessions;
    - no per-body cap.
 3. **Does import restore Sessions-tab history and learning rows?** Recommended default: **no.** Import fills the archive only, marked `origin=imported`, excluded from embeddings, rescan, and trainers.
-4. **Conflict policy default.** Recommended default: **`skip`** on `archive_turn_id`, with `overwrite` and `keep-both` as explicit flags. David also requires an option that skips whole sessions that already exist (2026-09-30; §2).
+4. **Conflict policy default.** Recommended default: **`skip`** on `archive_turn_id`, with `overwrite` and `keep-both` as explicit flags. By default, identical sessions are skipped and partly present ones are filled in (David, 2026-09-30; §2).
 5. **Content in the default zip.** **Decided (David, 2026-09-30):** full content, with secrets and key-shaped strings obscured at write. There is no content-free mode. Zips are never committed.
 6. **Stable identity.** Recommended default: capture-time UUID `archive_turn_id`. Do not key on SQLite row id or on `correlation_id` alone.
 7. **Where the button lives.** Recommended default: a Governance sub-view "Conversation archive", plus the CLI flags and one gRPC service. Not a new `ManagementFacade` method, and not an extension of `ExportUsageRollup`.
