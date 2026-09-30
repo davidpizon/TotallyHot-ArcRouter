@@ -45,7 +45,7 @@ David's request, exact words:
 Traced with CodeGraph (`codegraph_explore`) on 2026-09-29.
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph Router
         Pub["RequestTelemetryPublisher"] --> Bc["TelemetryBroadcaster"]
         Tx["SqliteTranscriptStore.ListSessionsAsync (500 rows)"]
