@@ -15,9 +15,9 @@ It does change the proxy hot path (ADR-0019), so ADR-0008's hub safety rules and
 - §1 Export and §2 Import;
 - §3's redaction rules and §4's comparison;
 - §5 Phasing and §6 Test strategy;
-- §7 decisions 1, 2, 4, 5, 10 and 11 (11 is new), plus a proposed decision 12.
+- §7 decisions 1, 2, 4, 5, 10, 11 and 12 (11 and 12 are new).
 
-§2 also now records David's import rules: timestamps, skipping or filling in existing sessions, and keeping the local copy on conflict. It also proposes a session checksum.
+§2 also now records David's import rules: timestamps, skipping or filling in existing sessions, keeping the local copy on conflict, and the session checksum.
 
 David's request, exact words:
 
@@ -361,6 +361,6 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
     - An import keeps its original timestamps by default, so retention treats imported sessions like captured sessions of the same age.
     - An `import-time` option adopts the moment of import instead, keeping the original order.
     - Under the default, a session older than the newest Sample Size turns is removed at the next retention pass, and the import summary says so.
-12. **Session checksum.** Recommended default: **yes**, as described in §2.
+12. **Session checksum.** **Decided (David, 2026-09-30): yes**, as described in §2.
     - It gives one comparison per session before any per-turn work.
     - Together with verifying only the bodies being stored, it means re-importing data that is already present reads almost nothing.
