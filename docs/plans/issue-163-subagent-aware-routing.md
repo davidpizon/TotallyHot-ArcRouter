@@ -16,7 +16,7 @@ When a harness marks a request as a subagent or narrow side task, route it with 
 - `IRequestClassifier` has one caller (`RequestInterceptor.ResolveModelRouteAsync`, [`RequestInterceptor.cs:378`](../../src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs)). `RequestInterceptor` holds the `HttpContext`, so headers are available at the call site.
 - `RequestInterceptor.ResolveAgenticRouteAsync` builds `RoutingContext(Dimension, IsUtility, Candidates)` from the classification (`RequestInterceptor.cs:653`).
 - `CompositeRoutingPolicy.SelectModelAsync` sends `context.IsUtility == true` to `UtilityRoutingPolicy`. That policy ranks by `ε₁·quality + ε₂·κ` (κ from `IModelPriceCatalog`), gates on `RoutingOptions.UtilityMinQualityScore`, and only ever picks from `context.Candidates`. The interceptor rejects any selection not in the candidate set, so the allowlist already holds.
-- The routing decision is logged at `RequestInterceptor.cs:694` with `isUtility`. **Correction from review:** `IsUtility` is set only by `InferIsUtility` (token cap or short helper prompt). A grep of `src` finds no `copilot-utility*` recognition and no test for it; an unresolved model name simply enters agentic routing (`RequestInterceptor.cs:476-494`) without alias classification. `utility-model-routing.md` describes alias-driven utility routing as shipped, so Phase 1 first checks whether that is true; the issue's premise that the aliases already set `IsUtility` is unverified.
+- The routing decision is logged at `RequestInterceptor.cs:694` with `isUtility`. **Correction from review:** `IsUtility` is set only by `InferIsUtility` (token cap or short helper prompt). Searched whole repo (all file types) and git history: **no `copilot-utility*` recognition has ever existed in code** — the only code occurrence was a static `ModelList` entry in `appsettings.json`, removed in `85f3c13` (Phase I) — and the `ModelRouting.RouterAlias` / `UtilityAliases` options the docs describe do not exist; an unresolved model name simply enters agentic routing (`RequestInterceptor.cs:476-494`) without alias classification. `utility-model-routing.md` describes alias-driven utility routing as shipped, so Phase 1 first checks whether that is true; the issue's premise that the aliases already set `IsUtility` is unverified.
 - Blast radius of the changes below: `RequestClassification` (constructed by `HeuristicRequestClassifier`, `RequestInterceptor` tests, and `RequestTelemetryPublisher`), `RoutingContext` (67 references; **left unchanged**), `CompositeRoutingPolicy` (**left unchanged**).
 
 ## Design decisions (recommendations; flag any you disagree with)
@@ -47,7 +47,7 @@ Starting hypotheses to test, not facts (I have not verified any of these):
 | Cursor | Likely **no** documented subagent marker; may only distinguish by model or endpoint. |
 | Codex | A subagent or session-source header may exist in recent CLI versions. Confirm against current source and docs before relying on it. |
 | Aider | Weak-model (`--weak-model`) calls for commit messages and summaries arrive as a different **model name**. No header expected. |
-| Copilot | Issue #163 requires the `copilot-utility` / `copilot-utility-small` aliases as a signal, but no alias recognition exists in `src` today. Verify first (search code, git history, and a replayed request) whether the alias reaches the classifier. If not, the detector adds alias recognition (model name, case-insensitive, exact match) and the docs are corrected. |
+| Copilot | **Settled (code + history search):** no alias recognition exists, so today a `copilot-utility*` request is just an unresolved model name and only the payload heuristics can mark it utility. #163 requires the aliases as a signal, so Phase 2 adds it: exact, case-insensitive match on `copilot-utility` / `copilot-utility-small`, plus a `copilot-utility` prefix match for unseen VS Code tiers (as `utility-model-routing.md` R1.6 specifies, but never built). `utility-model-routing.md` claims this is "Shipped (Phase H)"; Phase 5 corrects that. Remaining Phase 1 work: confirm the alias names against VS Code's current docs/source. |
 
 **Exit criterion:** every row is verified with a source, or explicitly marked "no usable marker". Rows that end as "skip" mean the detector ships without them; the issue explicitly allows that.
 
@@ -86,13 +86,14 @@ Follow `RequestInterceptorRoutingPolicyTests` and `CompositeRoutingPolicyTests`;
 - **Explicit model pick** with a signal present → unchanged (ADR-0005).
 - **Ambiguous/malformed signal** → existing routing.
 - **Kill switch** off → signal ignored.
-- **Copilot aliases**: `copilot-utility` and `copilot-utility-small` (exact, case-insensitive) → bias applied; near-miss names such as `copilot-utility-x` → unchanged. This is new coverage: no alias test exists today.
+- **Copilot aliases**: `copilot-utility` and `copilot-utility-small` (exact, case-insensitive) and an unseen tier such as `copilot-utility-tiny` (prefix rule) → bias applied; names that do not start with `copilot-utility` (for example `copilot-utilit`, `my-copilot-utility`) → unchanged. This is new coverage: no alias test exists today.
 - **Regression**: the existing payload-heuristic tests (`HeuristicRequestClassifierTests`, `RequestInterceptorRoutingPolicyTests`) untouched and green.
 - Coverage on the new code ≥ 80%.
 
 ## Phase 5 — Docs and proof
 
 - Update `docs/router/utility-model-routing.md`: signal list (from Phase 1), detection, bias, fallback, config keys.
+- Correct the same doc's false "Shipped (Phase H): Router and utility alias recognition" status and its describe-only `RouterAlias` / `UtilityAliases` options (never implemented) so it matches the code.
 - Link from `docs/research/technical-reference.md` E.3 ("Sub-agent routing") to that section.
 - PR body proof, as hosted artifacts: `dotnet test` output, and a real or replayed request pair (signalled → cheaper model, unsignalled → unchanged) with the log lines. Use the replay path against local fixtures if a live harness capture is not available, and say which it is.
 - Update `docs/install/harnesses/*.md` only where a harness needs a setting for its signal to reach the router (for example, naming the small-fast model alias). Do not rework presets (out of scope).
