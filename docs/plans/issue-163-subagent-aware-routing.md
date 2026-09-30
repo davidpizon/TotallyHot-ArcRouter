@@ -32,7 +32,7 @@ When a harness marks a request as a subagent or narrow side task, route it with 
 
 **Deliverable:** a "Subagent and side-task signals" section in `docs/router/utility-model-routing.md`. It gets one row per harness: signal, where it appears (header, body field, model alias), source (doc link or captured request), verification status, and a detector decision (`implement` / `skip: no usable marker`).
 
-Harnesses: Claude Code, Cursor, Codex, Aider, plus the existing Copilot aliases.
+Harnesses: Claude Code, Cursor, Codex, Aider, plus the Copilot `copilot-utility*` aliases (required by #163; recognition is unverified, see the Copilot row).
 
 Method, in order of preference:
 1. Official docs (fetched and linked with access date).
@@ -86,7 +86,8 @@ Follow `RequestInterceptorRoutingPolicyTests` and `CompositeRoutingPolicyTests`;
 - **Explicit model pick** with a signal present → unchanged (ADR-0005).
 - **Ambiguous/malformed signal** → existing routing.
 - **Kill switch** off → signal ignored.
-- **Regression**: existing `copilot-utility*` alias and payload-heuristic tests untouched and green.
+- **Copilot aliases**: `copilot-utility` and `copilot-utility-small` (exact, case-insensitive) → bias applied; near-miss names such as `copilot-utility-x` → unchanged. This is new coverage: no alias test exists today.
+- **Regression**: the existing payload-heuristic tests (`HeuristicRequestClassifierTests`, `RequestInterceptorRoutingPolicyTests`) untouched and green.
 - Coverage on the new code ≥ 80%.
 
 ## Phase 5 — Docs and proof
