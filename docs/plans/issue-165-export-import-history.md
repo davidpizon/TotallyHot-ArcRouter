@@ -15,9 +15,9 @@ It does change the proxy hot path (ADR-0019), so ADR-0008's hub safety rules and
 - §1 Export and §2 Import;
 - §3's redaction rules and §4's comparison;
 - §5 Phasing and §6 Test strategy;
-- §7 decisions 1, 2, 5, 10 and 11 (11 is new).
+- §7 decisions 1, 2, 4, 5, 10 and 11 (11 is new), plus a proposed decision 12.
 
-§2 also now records David's import rules: timestamps, and skipping or filling in existing sessions.
+§2 also now records David's import rules: timestamps, skipping or filling in existing sessions, and keeping the local copy on conflict. It also proposes a session checksum.
 
 David's request, exact words:
 
@@ -119,7 +119,7 @@ conversations/{session_id}/turns/{turn:D4}.provider-request.json    (translated 
 conversations/{session_id}/turns/{turn:D4}.provider-response.json   (translated turns only)
 ```
 
-- `manifest.json`: `schema_version` (integer `1`), `exported_at_utc`, router version, the filter that produced the file, counts (conversations, turns, missing bodies, bytes), and a SHA-256 for `turns.jsonl` and for every body entry. Zip CRC32 is incidental; import trusts the manifest hashes.
+- `manifest.json`: `schema_version` (integer `1`), `exported_at_utc`, router version, the filter that produced the file, counts (conversations, turns, missing bodies, bytes), a SHA-256 for `turns.jsonl` and for every body entry, and each session's `session_sha256` (§2). Zip CRC32 is incidental; import trusts the manifest hashes.
 - `turns.jsonl`: one JSON object per turn, in `(session_id, turn_number)` order.
   - It holds `archive_turn_id`, `archive_session_id`, the metadata snapshot above, the relative paths of the body files, and each body's SHA-256 and length.
   - It also holds `secrets_obscured`, `origin`, and `content_fidelity: "full-body"`.
@@ -156,7 +156,9 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
 
 1. Reject entry names that are absolute, contain `..`, or start with a slash (zip-slip).
 2. `manifest.json` exists, parses, and `schema_version` is `1`. Any other version is rejected with a message that names the version. Do not best-effort a newer file.
-3. Recompute SHA-256 for `turns.jsonl` and every body the index names. Mismatch rejects that turn.
+3. Recompute SHA-256 for `turns.jsonl` always. Recompute a body's SHA-256 only when that body is about to be stored.
+   - Bodies of skipped sessions and turns are never read, so re-importing data that is already present costs little.
+   - A body whose hash doesn't match rejects that turn.
 4. Each JSONL line parses, has `archive_turn_id`, `archive_session_id`, `session_id`, `turn_number`, `created_at_utc`, and paths that stay under `conversations/`. There is no body size limit (ADR-0019). Bodies are streamed, never loaded whole.
 5. Unknown extra JSON fields are ignored so a later additive field does not break an older importer. Missing required fields reject the turn.
 
@@ -172,9 +174,19 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
     - Turns filled into an existing session keep their original timestamps under either option, so they slot into that session in order.
 - **Existing sessions** (default behavior, David, 2026-09-30).
   - Sessions match on `archive_session_id`, and turns on `archive_turn_id`. The router's own `session_id` can collide across machines, so it is never used to match.
-  - A session whose turns are all already present is skipped, so importing an identical session changes nothing.
-  - A partly present session gets only its missing turns filled in.
-- **Turn conflicts.** A turn present on both sides with different bytes follows `skip` (default), `overwrite` or `keep-both`, as below.
+  - A session whose turns are all already present is skipped, so importing an identical session changes nothing. `session_sha256` decides this first (below).
+  - A partly present session, one whose `archive_session_id` matches, gets only its missing turns filled in.
+- **Keep the local copy on conflict** (future option, on by default, David, 2026-09-30).
+  - When a turn is present on both sides with different contents, the local copy is kept. That is the conflict table's `skip`.
+  - Turned off, the conflict table's `overwrite` or `keep-both` applies instead.
+
+**Session checksum** (decision 12). `session_sha256` is a SHA-256 over the session's turns in turn order, each turn contributing its `archive_turn_id` and its bodies' SHA-256s.
+- **What it covers.** Content only. It excludes timestamps and other metadata, which `import-time` changes.
+- **Where it lives.** The index keeps it per session and updates it whenever turns are added. Export writes each session's value to the manifest.
+- **How import uses it.**
+  - Import compares it before anything else. If the values are equal, the session is skipped without reading any of its bodies.
+  - If they differ, import compares turn by turn using the recorded hashes, then reads and verifies only the bodies it will store (validation step 3).
+- **Previously obscured imports.** A session whose bodies were changed by obscuring during an earlier import won't match on the checksum. The per-turn comparison also accepts a turn's `source_sha256`, so re-importing the same zip still finds nothing to add.
 
 **Timestamps and retention.** Under the default `original`, retention and ordering treat imported sessions like captured sessions of the same age. So a session older than the newest Sample Size turns is deleted at the next retention pass, and the import summary reports how many turns that removed. `import-time` keeps such an import by making it the newest history.
 
@@ -279,13 +291,15 @@ Rules so they do not collide:
 3. **Export.** Zip writer, CLI flag, gRPC stream, Governance view with Export only. Exit: a fixture corpus exports to the layout above and the manifest hashes match.
 4. **Import.**
    - Validation, obscuring on write, `skip` / `overwrite` / `keep-both`, `origin=imported`, idempotent re-import.
-   - Both timestamp options, and skipping or filling in existing sessions.
+   - Both timestamp options, skipping or filling in existing sessions, and "keep the local copy on conflict".
+   - The session checksum, and body verification only for bodies being stored.
    - Exit:
      - importing a secret-free corpus into an empty store reproduces the source;
      - a second import under `skip` adds zero rows;
      - a tampered byte fails that turn;
      - `original` keeps the source timestamps, and `import-time` keeps the source order;
-     - an identical session imports nothing, and a partly present one gains exactly its missing turns.
+     - an identical session imports nothing, and a partly present one gains exactly its missing turns;
+     - re-importing a zip that is already fully present reads none of its body entries.
 5. **Test helper.** Reader plus one scrubbed-fixture test on an existing parser or translator. No change to CodeRouterBench sync or the regret harness.
 
 Phase 3 can ship before phase 4. Phase 5 is what makes the zip useful for tests; it does not block export.
@@ -315,6 +329,13 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
   - an identical session imports nothing;
   - a partly present session (same `archive_session_id`) gains exactly its missing turns, which keep their original timestamps even under `import-time`;
   - a matching router `session_id` from another machine, with a different `archive_session_id`, is not treated as a match.
+- Session checksum:
+  - an identical session is skipped without opening any of its body entries (the test counts entry reads);
+  - one changed turn makes import fall back to per-turn comparison;
+  - timestamps changed by `import-time` leave `session_sha256` unchanged.
+- Keep the local copy on conflict:
+  - on, the default: a differing turn keeps the local copy;
+  - off: the turn is replaced (`overwrite`) or both copies are kept (`keep-both`), per the mode.
 - Imported sessions are absent from embedding-backfill and quality-rescan inputs.
 - Census isolation: with both flags on in a test host, the census sink receives no prompt text and the archive sink receives no census line. Until #8's writer exists, the test stubs the census sink.
 
@@ -327,7 +348,9 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
    - retention keeps the newest Sample Size turns, deleting whole sessions;
    - no per-body cap.
 3. **Does import restore Sessions-tab history and learning rows?** Recommended default: **no.** Import fills the archive only, marked `origin=imported`, excluded from embeddings, rescan, and trainers.
-4. **Conflict policy default.** Recommended default: **`skip`** on `archive_turn_id`, with `overwrite` and `keep-both` as explicit flags. By default, identical sessions are skipped and partly present ones are filled in (David, 2026-09-30; §2).
+4. **Conflict policy default.** **Decided (David, 2026-09-30):**
+   - A differing turn keeps the local copy. This is a future import option, "keep the local copy on conflict", on by default; turned off, `overwrite` or `keep-both` applies.
+   - By default, identical sessions are skipped, and partly present ones, matched on `archive_session_id`, are filled in (§2).
 5. **Content in the default zip.** **Decided (David, 2026-09-30):** full content, with secrets and key-shaped strings obscured at write. There is no content-free mode. Zips are never committed.
 6. **Stable identity.** Recommended default: capture-time UUID `archive_turn_id`. Do not key on SQLite row id or on `correlation_id` alone.
 7. **Where the button lives.** Recommended default: a Governance sub-view "Conversation archive", plus the CLI flags and one gRPC service. Not a new `ManagementFacade` method, and not an extension of `ExportUsageRollup`.
@@ -338,3 +361,6 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
     - An import keeps its original timestamps by default, so retention treats imported sessions like captured sessions of the same age.
     - An `import-time` option adopts the moment of import instead, keeping the original order.
     - Under the default, a session older than the newest Sample Size turns is removed at the next retention pass, and the import summary says so.
+12. **Session checksum.** Recommended default: **yes**, as described in §2.
+    - It gives one comparison per session before any per-turn work.
+    - Together with verifying only the bodies being stored, it means re-importing data that is already present reads almost nothing.
