@@ -207,27 +207,19 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
   - They keep the scores they arrive with. Only turns without a score are graded, so an import doesn't pay to re-grade what was already graded.
 - **They are never billed.** They don't enter `usage_ledger`, provider spend or budgets, because the router didn't serve them.
 - **They appear in the Sessions tab**, marked as imported (decision 3).
-- **They feed the benchmark tables** (decision 8), as described below.
+- **They never feed the CodeRouterBench benchmark tables** (decision 8). Those stay published data.
 - **The Export / Import modal lists imports** and can delete one.
-
-**Benchmark tables** (decision 8).
-- **Where they go.** Imported turns go into the CodeRouterBench ID tables (`benchmark_id_tasks`, `benchmark_id_results`) under their own `split`, `imported`.
-  - The published-corpus sync deletes and reloads only the splits it publishes (`BenchmarkIdTasksJsonlImporter`, `BenchmarkIdResultsCsvImporter`), so it never touches these rows.
-  - The OOD, model and summary tables are wiped on every sync, so imported data doesn't go there.
-- **No text.** An imported task row holds the turn's `archive_turn_id` and dimension, not its prompt. ADR-0019 keeps conversation text out of SQLite; a consumer that needs the text reads it from the session file.
-- **One result per task.** An imported turn was answered by one model, so its task has one result row: the routed model, its score, cost and tokens. A consumer that compares every model on the same task, such as the regret harness, must skip or discount tasks with a single result.
-- **Deletion.** Deleting the session deletes its benchmark rows.
 - Imports count toward retention by their stored timestamps (decision 11).
 
 **Idempotency:** importing the same zip twice under `skip` is a no-op after the first success. The unique key is `archive_turn_id`. A crash mid-import leaves a partial set; re-running `skip` fills the gap without duplicating. Import runs in one SQLite transaction per batch (for example 100 turns) so a process kill loses a batch, not the whole file, and does not hold a multi-gigabyte transaction.
 
 ## 3. Purpose: larger test datasets
 
-The zip is the hand-off. It is not itself a test project, and it does not replace the published CodeRouterBench corpus. Imported turns join the benchmark tables under their own split (§2, decision 8).
+The zip is the hand-off. It is not itself a test project, and it does not sync into CodeRouterBench (decision 8).
 
 - A small offline reader (a test helper, not a router hot-path type) opens `turns.jsonl` and yields `(metadata, request bytes, response bytes)`.
 - Tests that already replay a recorded envelope — tool-call translation (`RecordedModelTranscripts`), response-text and usage parsers — can take a scrubbed turn from that reader instead of a hand-pasted string.
-- New tests for harness dialects (Claude Code `messages` plus tools, Codex `input` items) load a directory of scrubbed turns checked in only after review. The published corpus stays as published. Its sync deletes and replaces its own rows, so imported data lives only in the separate `imported` split described in §2.
+- New tests for harness dialects (Claude Code `messages` plus tools, Codex `input` items) load a directory of scrubbed turns checked in only after review. The regret harness and `benchmark_*` tables stay on the published corpus. Their sync deletes and replaces rows; pointing it at a conversation zip would wipe the benchmark.
 - The converter that emits a fixture directory lives next to the test project. It copies bodies out and refuses to write under the repository root unless the operator passes an explicit fixture path outside the tree. CI does not download or import a zip.
 
 **Privacy and redaction**
@@ -353,9 +345,8 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
 - Imported sessions:
   - appear in the Sessions tab, marked as imported;
   - feed embedding backfill and memory, and only unscored turns are graded;
-  - never enter `usage_ledger`, provider spend or budgets;
-  - land in the benchmark ID tables under split `imported`, without text;
-  - survive a benchmark sync, and disappear with their session.
+  - never enter `usage_ledger`, provider spend, budgets, or the benchmark tables;
+  - disappear with their session.
 - Census isolation: with both flags on in a test host, the census sink receives no prompt text and the archive sink receives no census line. Until #8's writer exists, the test stubs the census sink.
 
 ## 7. Decisions needed from David
@@ -376,10 +367,7 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
    - A button at the top of the Sessions tab opens an Export / Import modal built on `DialogShell`.
    - The CLI flags and one gRPC service stay.
    - Not a new `ManagementFacade` method, and not an extension of `ExportUsageRollup`.
-8. **May the archive feed CodeRouterBench or the regret harness?** **Decided (David, 2026-09-30): yes.**
-   - Imported data feeds the benchmark ID tables under its own `imported` split, which the published-corpus sync never deletes.
-   - Its rows carry no text and have one result per task.
-   - They are deleted with their session (§2).
+8. **May the archive feed CodeRouterBench or the regret harness?** **Decided (David, 2026-09-30): no.** Imported data never feeds the benchmark tables. A test helper reads the zip, and the published benchmark tables stay published data.
 9. **Share any code with #8?** Recommended default: a pure harness-token allowlist only. Separate flags, stores, and writers. #8 remains content-free. A handful of scrubbed #165 bodies may be picked by hand for translator fixtures; the census does not store them.
 10. **Per-body cap.** **Decided (David, 2026-09-30):** none. A body is complete or absent, never a prefix.
 11. **Imported sessions and retention.** **Decided (David, 2026-09-30):**

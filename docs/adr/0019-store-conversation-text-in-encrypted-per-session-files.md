@@ -76,7 +76,7 @@ What this ADR commits to:
   - each session's file id and wrapped key;
   - each turn's position in its file.
 
-  It keeps no prompt, reply, preview or extract text. Rows derived from a session elsewhere hold no conversation text either. That covers learned embeddings, and the benchmark rows that imported sessions feed (#165 decision 8).
+  It keeps no prompt, reply, preview or extract text. Rows derived from a session elsewhere, such as its learned embeddings, hold no conversation text either.
 - **What a session file holds, per turn:**
   - the client's exchange: the request bytes exactly as received, captured before any decoding, and the response bytes exactly as relayed;
   - the provider-side request and response, only when the router translated them;
@@ -87,7 +87,7 @@ What this ADR commits to:
   - Each session has its own random AES-GCM key.
   - That key is stored wrapped by a master key, held the way ADR-0015 holds the shared secret store (with ADR-0014's backend on other platforms).
   - The session folder is administrator-only, and the router checks that at startup.
-- **Deletion.** Deleting a session destroys its key, then deletes its file, its index rows, its learned embeddings (`memory_entries`) and any benchmark rows derived from it. Once the key is destroyed, any leftover copy is unreadable.
+- **Deletion.** Deleting a session destroys its key, then deletes its file, its index rows, and its learned embeddings (`memory_entries`). Once the key is destroyed, any leftover copy is unreadable.
 - **Compression.**
   - Each request is stored as its change from the previous request in the same session: the shared start and end, plus the new bytes in between.
   - Records are compressed with Brotli.
@@ -129,7 +129,7 @@ What this ADR commits to:
   - its 8 MiB per-body truncation and its separate off-by-default flag go away;
   - its redaction happens at write time.
 - Neutral, because turning Adaptive Routing off no longer stops capture. Only the Transcription Capture toggle does. Anyone who relied on Adaptive Routing to stop transcripts must use that toggle instead.
-- Neutral, because imported sessions appear in the Sessions tab, feed learning, and feed the benchmark ID tables under their own split (#165 decisions 3 and 8). The no-text and delete-with-session rules therefore reach the benchmark database too.
+- Neutral, because imported sessions appear in the Sessions tab and feed learning (#165 decision 3), so they follow the same storage, deletion and retention rules as captured sessions. They never feed the benchmark tables (#165 decision 8).
 - Neutral, because #176 reads its on-demand text from session files.
 - Neutral, because the `ListPersistedSessions` size fix ([#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179)) stays an interim fix until the list carries metadata only.
 
