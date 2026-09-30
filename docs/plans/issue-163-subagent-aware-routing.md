@@ -16,7 +16,7 @@ When a harness marks a request as a subagent or narrow side task, route it with 
 - `IRequestClassifier` has one caller (`RequestInterceptor.ResolveModelRouteAsync`, [`RequestInterceptor.cs:378`](../../src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs)). `RequestInterceptor` holds the `HttpContext`, so headers are available at the call site.
 - `RequestInterceptor.ResolveAgenticRouteAsync` builds `RoutingContext(Dimension, IsUtility, Candidates)` from the classification (`RequestInterceptor.cs:653`).
 - `CompositeRoutingPolicy.SelectModelAsync` sends `context.IsUtility == true` to `UtilityRoutingPolicy`. That policy ranks by `ε₁·quality + ε₂·κ` (κ from `IModelPriceCatalog`), gates on `RoutingOptions.UtilityMinQualityScore`, and only ever picks from `context.Candidates`. The interceptor rejects any selection not in the candidate set, so the allowlist already holds.
-- The routing decision is logged at `RequestInterceptor.cs:694` with `isUtility`. The Copilot aliases (`copilot-utility`, `copilot-utility-small`) already feed `IsUtility` through the same path.
+- The routing decision is logged at `RequestInterceptor.cs:694` with `isUtility`. **Correction from review:** `IsUtility` is set only by `InferIsUtility` (token cap or short helper prompt). A grep of `src` finds no `copilot-utility*` recognition and no test for it; an unresolved model name simply enters agentic routing (`RequestInterceptor.cs:476-494`) without alias classification. `utility-model-routing.md` describes alias-driven utility routing as shipped, so Phase 1 first checks whether that is true; the issue's premise that the aliases already set `IsUtility` is unverified.
 - Blast radius of the changes below: `RequestClassification` (constructed by `HeuristicRequestClassifier`, `RequestInterceptor` tests, and `RequestTelemetryPublisher`), `RoutingContext` (67 references; **left unchanged**), `CompositeRoutingPolicy` (**left unchanged**).
 
 ## Design decisions (recommendations; flag any you disagree with)
@@ -47,7 +47,7 @@ Starting hypotheses to test, not facts (I have not verified any of these):
 | Cursor | Likely **no** documented subagent marker; may only distinguish by model or endpoint. |
 | Codex | A subagent or session-source header may exist in recent CLI versions. Confirm against current source and docs before relying on it. |
 | Aider | Weak-model (`--weak-model`) calls for commit messages and summaries arrive as a different **model name**. No header expected. |
-| Copilot | Already covered by the `copilot-utility*` aliases. Document only. |
+| Copilot | Issue #163 requires the `copilot-utility` / `copilot-utility-small` aliases as a signal, but no alias recognition exists in `src` today. Verify first (search code, git history, and a replayed request) whether the alias reaches the classifier. If not, the detector adds alias recognition (model name, case-insensitive, exact match) and the docs are corrected. |
 
 **Exit criterion:** every row is verified with a source, or explicitly marked "no usable marker". Rows that end as "skip" mean the detector ships without them; the issue explicitly allows that.
 
@@ -57,11 +57,13 @@ Starting hypotheses to test, not facts (I have not verified any of these):
 
 - Add `Router/Classification/SubagentSignalDetector.cs` (+ `SubagentSignal` record: `Harness`, `Kind`, `Source`). Pure function, no I/O, bounded work, fully XML-documented (CS1591 is an error here).
 - Extend `RequestClassification` with the optional `Subagent` member.
-- In `RequestInterceptor.ResolveModelRouteAsync`, after `_requestClassifier.Classify`, call the detector with `context.Request.Headers` and `jsonObject`. On a hit, replace the classification with `IsUtility = true` and `Subagent = signal`. No other change to the flow.
+- In `RequestInterceptor.ResolveModelRouteAsync`, after `_requestClassifier.Classify`, call the detector with `context.Request.Headers` and `jsonObject`. Read the live `SubagentBiasOptions` first (`IOptionsMonitor<RoutingOptions>`, as `RequestTelemetryPublisher` already does): a disabled master flag or a disabled/disallowed per-signal toggle leaves the original classification untouched. Only an enabled signal replaces it with `IsUtility = true` and `Subagent = signal`. No other change to the flow. If Phase 1 shows the Copilot aliases are not recognized today, the detector also matches the alias from the request's `model` field, behind the same options.
 - Add `SubagentBiasOptions` under `RoutingOptions` (enable flag, per-signal toggles), bound from `appsettings.json`, documented.
 - **Verify with CodeGraph before editing:** callers of `RequestClassification` construction (`HeuristicRequestClassifier`, `RequestTelemetryPublisher.cs:722`, tests) and the `RequestInterceptor` hub. Do not touch `ManagementFacade`.
 
-**Exit criterion:** builds warning-free; existing tests unchanged and green.
+- **Tests land in this phase, not later** (behavior changes here, and each phase must hold ≥ 80% coverage): detector unit tests for every implemented signal and for absent/malformed signal values; interceptor tests for signal present (bias applied), signal absent (unchanged), master flag off, per-signal toggle off, and invalid request JSON (rejected at the interceptor boundary before the detector runs, `RequestInterceptor.cs:359-370`).
+
+**Exit criterion:** builds warning-free; all existing tests plus the new Phase 2 tests green; coverage ≥ 80%.
 
 ## Phase 3 — Bias, log line, telemetry event, and dashboard
 
@@ -69,15 +71,15 @@ Starting hypotheses to test, not facts (I have not verified any of these):
 - **Log line.** Extend the routing log at `RequestInterceptor.cs:694` with `{SubagentSignal}` (static template, sanitized via `SanitizeForLog`). No-signal requests log `none`.
 - **Telemetry event (David chose "diary and scoreboard").** Carry the signal from the classification to `RoutingTelemetryEvent` (`Telemetry/RoutingTelemetryEvent.cs`), published by `RequestTelemetryPublisher.PublishTelemetryEventAsync`. Add one nullable, trailing member (for example `SubagentSignal`) so existing positional constructors (32 callers, mostly tests) still compile.
 - **Wire and dashboard.** The event crosses gRPC (`ToWire`) to the GUI. Add the matching optional proto field and show it in the Live Stream view (`LiveStream` under `Dashboard`). Follow `docs/gui/DESIGN.md` for the badge and `docs/gui/MOTION.md` if it animates; add a bUnit test for the badge. Missing field (older router) renders as nothing.
-- **ADR check.** AGENTS.md says transport changes get a new ADR first. An additive, optional field on the loopback telemetry stream is small, but I will ask you in the Phase 3 gate whether it needs one before I touch the proto.
+- **ADR first (mandatory).** AGENTS.md is categorical: transport changes get a new ADR first, and an additive protobuf field still changes the gRPC contract. Phase 3 therefore starts by drafting an ADR (via the `adr-writer` skill) for the optional telemetry field, and David approves it before any proto, `RoutingTelemetryEvent`, or GUI change. The log line does not depend on the ADR and can land first.
 
 **Exit criterion:** a signalled request's log line, telemetry event, and Live Stream row all name the signal and the chosen model; an unsignalled one shows none.
 
-## Phase 4 — Tests
+## Phase 4 — Full test matrix (completes what Phases 2–3 started)
 
 Follow `RequestInterceptorRoutingPolicyTests` and `CompositeRoutingPolicyTests`; each test stays well under the 5 s ceiling.
 
-- **Detector unit tests** (`SubagentSignalDetectorTests`): one test per verified signal (present → detected), header absent, empty, oversized, wrong case, duplicate/conflicting values, non-JSON body → `null`.
+- **Detector unit tests** (`SubagentSignalDetectorTests`; most are written in Phase 2 and extended here): one test per verified signal (present → detected), header absent, empty, oversized, wrong case, duplicate/conflicting values, malformed signal values in an otherwise valid body → `null`. The detector takes a parsed `JsonObject`, so invalid request JSON is tested at the interceptor boundary, not here.
 - **Interceptor tests**: signalled request with a priced cheap and an expensive candidate → cheap model chosen; same request without the signal → identical result to a baseline captured before the change (assert the exact model and that `IsUtility` is false).
 - **Quality gate**: cheapest candidate below `UtilityMinQualityScore` is skipped even when signalled.
 - **Allowlist**: signalled request never resolves outside `ListModels()`; a circuit-open cheap model is not selected.
@@ -110,4 +112,4 @@ Follow `RequestInterceptorRoutingPolicyTests` and `CompositeRoutingPolicyTests`;
 2. A harness with no verifiable marker is **documented as unsupported**. No guessing from payload shape.
 3. Telemetry: **log line and dashboard**. The signal goes into `RoutingTelemetryEvent`, the gRPC wire, and the Live Stream view.
 
-Still open: whether the additive proto field needs its own ADR (asked at the Phase 3 gate).
+Settled by review: the additive proto field **does** need an ADR first (see Phase 3).
