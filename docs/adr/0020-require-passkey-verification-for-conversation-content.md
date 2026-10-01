@@ -77,7 +77,12 @@ sequenceDiagram
 What this ADR commits to:
 
 - **Credential.**
-  - WebAuthn with `userVerification: "required"`. The authenticator is Windows Hello, Touch ID, or a security key. Its private key never leaves it, and each use needs the operator's PIN, fingerprint, face or touch.
+  - WebAuthn with `userVerification: "required"`. The authenticator is Windows Hello, Touch ID, or a security key. Neither the router nor the calling application ever sees the private key, and each use needs the operator's PIN, fingerprint, face or touch.
+  - **Synced passkeys.** Passkeys come in two kinds:
+    - **device-bound**, such as security keys, and Windows Hello keys kept on the device;
+    - **synced**, where the provider (for example iCloud Keychain, Google Password Manager, or a password-manager extension) backs the private key up and copies it to the user's other devices. The authenticator reports this with the backup-eligible flag.
+
+    The router records that flag at enrollment and shows it in the passkey list. Whether to refuse synced passkeys is an open decision (More Information): the built-in passkeys on macOS sync through iCloud Keychain, so a device-bound-only rule there means a security key.
   - The router verifies assertions with the `Fido2` library ([fido2-net-lib](https://github.com/passwordless-lib/fido2-net-lib), MIT).
   - On Windows, the tray and CLI reach the same authenticators through `webauthn.dll`, via `DSInternals.Win32.WebAuthn` ([webauthn-interop](https://github.com/MichaelGrafnetter/webauthn-interop), MIT).
   - **What the router checks.** An assertion counts only when all of these hold:
@@ -107,7 +112,8 @@ What this ADR commits to:
     - export and import;
     - `GetManagementToken`.
 
-    The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else. Only one challenge may be pending at a time.
+    The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else.
+  - **Challenges stay available.** Each challenge expires after two minutes, and requests are rate-limited per caller. Several challenges may be pending at once, so no application can lock the operator out by holding one open.
   - **A read window.** Reading conversation text needs a content grant. That covers `ListPersistedSessions` text, `GetTurnTexts`, ADR-0019's full view, and the text fields of `StreamEvents`.
     - **What it is.** A verification issues the grant as its own `__Host-` cookie (HttpOnly, Secure, SameSite=Strict). The cookie holds a random grant id and an expiry, checked against an in-memory table.
     - **How long it lasts.** 15 minutes by default (David, 2026-09-30). It ends early at "Lock" or a router restart, and it never authorizes a one-operation action.
@@ -116,23 +122,30 @@ What this ADR commits to:
 - **Closed until enrolled** (David, 2026-09-30). Before any passkey exists, conversation text stays hidden. The gated operations are refused with `FailedPrecondition`, and the message names the enrollment command.
 - **Not gated (David, 2026-09-30).** Clear, deleting a session or an import, and lowering Sample Size stay on ADR-0012's session. They destroy history rather than disclose it.
 - **Everything else is unchanged.** ADR-0012's session still covers metadata, routing, providers, prices, and settings. The MCP endpoint exposes no conversation content and is also unchanged.
-- **Audit.** Every challenge, verification, refusal and gated operation is logged with a static Serilog template: the operation, the credential's name, and the outcome. No conversation text is logged.
+- **Audit.** Every challenge, verification, refusal and gated operation is logged with a static Serilog template: the operation, the credential's name, and the outcome. No conversation text is logged. The GUI lists recent approvals, so an approval the operator did not make is visible.
 
 ### Consequences
 
 - Good, because no application can export, import, or read conversation text without the operator's gesture. The management token can no longer be lifted through the API.
 - Good, because an approval covers one operation with its parameters. It cannot be replayed or widened.
-- Good, because nothing copyable is stored. The private key stays in the authenticator, and only an administrator can change the enrolled public keys.
+- Good, because the router stores no standing secret.
+  - It never sees a private key.
+  - Only an administrator can change the enrolled public keys.
+  - Its one bearer credential, the read grant, expires in 15 minutes and authorizes no one-operation action.
 - Bad, because a fresh install shows no conversation text until an administrator enrolls a passkey. Today's zero-setup Sessions tab ends.
 - Bad, because it adds friction: a prompt for each export, import and token copy, and one per read window.
 - Bad, because any application that can make an HTTP call can still destroy history: it can run Clear, delete a session or an import, or lower Sample Size. David chose to leave these ungated, since they destroy data rather than disclose it.
 - Bad, because the read window is a cookie. An application running as the operator that can read the browser's cookie store could reuse an unexpired grant for reads, though not for one-operation actions. The window is short for that reason.
 - Bad, because some attacks remain:
   - Malware running as the operator can still capture the screen while a session is open, or read an export after it is saved.
-  - Malware can also trigger a prompt at a moment the operator expects one. The single pending challenge, and the GUI saying what is being approved, reduce that.
+  - Malware can also trigger a prompt at a moment the operator expects one. The GUI saying what is being approved, and its list of recent approvals, reduce that.
   - Code running elevated or as `SYSTEM` is beyond any of this (ADR-0015).
   - UAC is not a hard boundary, so the elevated enrollment stops ordinary applications, not malware that bypasses UAC.
-- Bad, because a passkey held by a password-manager extension verifies the user only as strongly as that manager's unlock. Device-bound authenticators (Windows Hello, security keys) are the ones to recommend.
+- Bad, because synced passkeys are weaker:
+  - a synced passkey's private key lives with its provider, and on every device it syncs to;
+  - a passkey held by a password-manager extension verifies the user only as strongly as that manager's unlock.
+
+  Device-bound authenticators (security keys, and Windows Hello keys kept on the device) are the ones to recommend.
 - Bad, because only `https://localhost:<web port>` can use the gated features. An IP-literal URL cannot, and a remote host name cannot until a certificate path for one is decided.
 - Bad, because a headless host with no platform authenticator needs a security key to use the gated operations through the router.
 - Neutral, because it adds two dependencies, `Fido2` and `DSInternals.Win32.WebAuthn`, both MIT-licensed.
@@ -176,7 +189,7 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 
 ### Require passkey user verification (WebAuthn) for content operations
 
-- Good, because each use needs a person's gesture on an authenticator whose private key cannot be copied.
+- Good, because each use needs a person's gesture on an authenticator, and the private key is never exposed to the router or the calling application.
 - Good, because it is built into browsers, so it works in the Sessions tab on every platform. Native clients on Windows use the same credentials.
 - Good, because it binds an approval to one operation and its parameters.
 - Bad, because it adds an enrollment step and prompts.
@@ -197,5 +210,6 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
   - how the GUI shows locked text and the "Lock" control;
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;
-  - whether to require attestation, or to accept only device-bound authenticators.
+  - whether to require attestation.
+- **Open decision for David:** whether to refuse synced (backup-eligible) passkeys. Refusing them gives the strongest rule, but on macOS it means using a security key (see "Synced passkeys" under Decision Outcome).
 - **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).

@@ -57,7 +57,7 @@
 | F6 | An unelevated process of an administrator is **denied** a file granted only to `SYSTEM` and `Administrators`. The tray runs unelevated and reads `web-interface.json` from this folder (`TrayDiscoveryReader`). | Probe (`UnauthorizedAccessException`) and code |
 | F7 | Deleted rows stay recoverable. See the residue table below. | Scratchpad harness |
 | F8 | **Pragmas are per connection.** `synchronous=NORMAL`, set once in `EnsureCreated`, reads back as `2` (FULL) on a new physical connection. `secure_delete` set the same way leaves 298 of 300 cleared rows recoverable (s5). Only `journal_mode=WAL` persists in the file. | Harness, s0 and s5 |
-| F9 | The shipped `appsettings.json` sets Serilog's `MinimumLevel.Default` to `Debug`. At Debug, `RequestInterceptor` and `ProxyMiddleware` log the first 4,000 characters of every request and response body to `logs\arcrouter-*.log`, and the newest 30 files are kept (daily rolling). `LogRedaction` only strips CR/LF and truncates, so key-shaped strings are logged as they are. Clear does not touch the logs. | Code and config. Log contents were not opened. |
+| F9 | The shipped `appsettings.json` sets Serilog's `MinimumLevel.Default` to `Debug`. At Debug, four templates write conversation text to `logs\arcrouter-*.log`:<br>- `[INTERCEPTOR] Intercepted agent request message` and `... response message`, which log the first 4,000 characters of each body (`RequestInterceptor`, `ProxyMiddleware`);<br>- `[INTERCEPTOR] Newest user message` (`RequestInterceptor`);<br>- `[INTERCEPTOR] Assembled LLM response text` (`RequestTelemetryPublisher`).<br>The newest 30 files are kept, with daily rolling. `LogRedaction` only strips CR/LF and truncates, so key-shaped strings are logged as they are. Clear does not touch the logs. | Code and config. Log contents were not opened. |
 | F10 | ADR-0012's loopback fast path gives a session to "any local account", meaning any process that can make an HTTP call. Session text then leaves through these RPCs, so the file ACL does not change who can read it:<br>- `ListPersistedSessions` returns `prompt_text` and `response_text`: full text today, previews after #179.<br>- `StreamEvents` carries live `request_summary` and `response_summary`, plus `LogLineEvent` lines that contain F9's excerpts.<br>- `GetManagementToken` returns the token to any session.<br>- Planned: #176's per-turn text, and #165's export and import.<br>No MCP tool and no proxy endpoint returns session data (`/v1/models` is the proxy's only local endpoint). | ADR-0012 Consequences, `telemetry.proto`, and code |
 | F11 | `Package.wxs` deliberately never references `%ProgramData%`, so uninstall keeps the folder (comment at lines 37-55). | Code |
 | F12 | **Linux and macOS installs are open the same way.**<br>- **Linux.** `install.sh` creates `/var/lib/totallyhot-arcrouter` and `/var/log/totallyhot-arcrouter` with a plain `mkdir -p`. The unit's `StateDirectory` and `LogsDirectory` set no mode, and the unit sets no `UMask`, so systemd's defaults apply: 0755 directories, and files created under a 022 umask.<br>- **macOS.** `install.sh` creates `/Library/Application Support/TotallyHotArcRouter` (with `logs` inside) and never runs `chmod`. The tree is owned by `_arcrouter:staff`, and the plist sets no `Umask`.<br>Every local account can therefore read state and logs. On Linux, the logs also live outside the state root. | `packaging/linux/install.sh`, `totallyhot-arcrouter.service`, `packaging/macos/install.sh`, `com.totallyhot.arcrouter.plist`. Not observed on a machine. |
@@ -106,20 +106,24 @@ flowchart TB
 **3.1 Directory DACL (option A).**
 - **Rule set.** The DACL is protected, so nothing is inherited from `%ProgramData%`. `SYSTEM` and `Administrators` get full control with `(OI)(CI)`. The writing account gets an ACE under decision 4. Nothing is granted to `Users`, `Authenticated Users`, `Everyone`, or `INTERACTIVE`.
 - **Creation.** Create the folder atomically with `DirectoryInfo.Create(DirectorySecurity)`, never create-then-restrict. Today the MSI never references `%ProgramData%` (F11). Creating the folder at install time, with the same rules, is a deliberate change.
-- **Startup verification.** It runs in `AppDataPaths` before any other writer. The directory passes only if all three hold:
-  - its owner is `SYSTEM`, `Administrators`, or the current account;
+- **Pre-host bootstrap.** Verification runs inside `AppDataPaths.ResolveMachineSharedDirectory`, before its write probe (`AppDataPaths.cs:150-159`). That makes it precede every other use of the directory, including `Program.CreateHostBuilder`, which resolves the directory while it registers `appsettings.local.json` (`Program.cs:205-207`). The machine-wide root passes only if all three hold:
+  - its owner is `SYSTEM` or `Administrators`. An owner can always rewrite its own DACL, so an individual account may own only the per-user fallback;
   - it is not a reparse point;
-  - no broad group has an ACE.
+  - no broad group, and no individual account, has an ACE.
 
   On failure:
-  - if the owner is trusted, the router re-secures the directory;
-  - otherwise it renames the directory aside and re-creates it, which covers a user who created the folder first.
+  - **A process that can repair it** (the service, or an elevated run) takes ownership and re-secures the root. If the owner is untrusted, it renames the root aside and re-creates it, which covers a user who created the folder first.
+  - **Any other process** does not use the root. It falls back to the per-user directory, as an unelevated dev run already does.
 
-  Every outcome is logged with a static Serilog template. The same helper verifies ADR-0019's session folder, so #165 phase 1's startup check reuses it rather than writing its own.
+  **Config overlay.** `appsettings.local.json` is registered only after the bootstrap has accepted it or quarantined it, so a planted file is never loaded.
+
+  **Logging.** The bootstrap runs before the host has built its logger, so it buffers its outcomes. They are logged with static Serilog templates once logging is configured.
+
+  The same helper verifies ADR-0019's session folder, so #165 phase 1's startup check reuses it rather than writing its own.
 - **Migration.** The tree was writable by every local account, so migration treats each entry as untrusted until it is checked:
   - **It never follows a reparse point** (junction, symlink, or mount point). It renames the link itself into a quarantine folder inside the root, so a planted link cannot steer an ACL change into another tree.
   - **It renames aside any entry owned by an untrusted account**, rather than adopting it. A trusted owner is `SYSTEM`, `Administrators`, or the root's original owner. The rule exists because an owner can always rewrite its own DACL.
-  - **Every adopted entry** gets `Administrators` as its owner, and then its ACL is reset to inherit.
+  - **The root, and every adopted entry,** gets `Administrators` as its owner, and then its ACL is reset to inherit. On THEATRE-PC this moves the root from `david` to `Administrators`.
 
   That covers every file in F2, plus `logs\` and `models\`. Each quarantined entry is logged with its path and owner. Migration cannot tell a file planted by an app running as the root's owner from that owner's own files, so it adopts those and lists them in the log.
 - **Linux and macOS (F12).** The same rule becomes owner-only modes:
@@ -146,11 +150,11 @@ flowchart TB
 
 **3.3 Logs (F9).**
 - Ship `MinimumLevel.Default: Information`.
-- Put the body-excerpt lines behind their own opt-in switch, and write them to their own files (for example `logs\bodies-*.log`). Clear and uninstall can then remove them without touching the diagnostic logs.
-- Pass logged bodies through the same secret obscuring ADR-0019 uses for storage.
+- Put all four conversation-bearing templates (F9) behind their own opt-in switch, and write them to their own files (for example `logs\bodies-*.log`). Clear and uninstall can then remove them without touching the diagnostic logs.
+- Pass their text through the same secret obscuring ADR-0019 uses for storage.
 - **Clear** deletes the body-excerpt files.
 - **Pre-upgrade logs.** Files written before the upgrade still hold unobscured excerpts, and would otherwise linger until the newest-30 limit rolls them off.
-  - On the first start after the upgrade, the router rewrites each `arcrouter-*.log` without its `[INTERCEPTOR] Intercepted agent` lines, and replaces the original with the rewrite.
+  - On the first start after the upgrade, the router rewrites each `arcrouter-*.log` without any line from the four F9 templates, and replaces the original with the rewrite.
   - A file it cannot rewrite is deleted.
   - The old disk blocks are not overwritten. That is the same remnant ADR-0019 leaves to BitLocker.
 
@@ -235,7 +239,8 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
   - Clear retries, then reports that the deletion is not final;
   - the next startup truncates the WAL.
 - A key-shaped string in a logged body is obscured.
-- The pre-upgrade rewrite removes planted body lines from a log file. A file it cannot rewrite is deleted.
+- The pre-upgrade rewrite removes a planted line of each of the four F9 templates, and keeps every other line. A file it cannot rewrite is deleted.
+- The bootstrap quarantines a planted `appsettings.local.json` before host configuration can load it. It also rejects a machine-wide root owned by an individual account.
 - Clear deletes the body-excerpt files.
 
 ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in #165's plan.
@@ -275,7 +280,12 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
 > - **Linux and macOS too.** Their installers leave state and logs readable by every local account: 0755 directories, files created under a 022 umask, and no restrictive mode.
 > - **Per-file ACLs don't hold.** An ADR-0015-style per-file ACL cannot protect `-wal` and `-shm`, because SQLite re-creates them with the folder's ACL. ADR-0019's session folder inherits the same open ACL if it is created the way the router creates folders today.
 > - **Deleted rows persist.** Rows removed by retention or by Clear stay readable. In a disposable copy, 150 of 150 purged rows were in the WAL, and 298 of 300 were in the database file after Clear and a restart. `secure_delete=ON` on every connection, plus `wal_checkpoint(TRUNCATE)`, removed them all. `FAST`, or `ON` set only once, did not.
-> - **Logs.** At the shipped `Debug` level, the first 4,000 characters of every request and response are logged to `logs\` without obscuring, and the newest 30 files are kept.
+> - **Logs.** At the shipped `Debug` level, `logs\` receives, without obscuring:
+>   - the first 4,000 characters of every request and response;
+>   - the newest user message;
+>   - the assembled reply text.
+>
+>   The newest 30 files are kept.
 > - **Uninstall** keeps all of it.
 > - **API access.** Any process that can make an HTTP call can get a loopback session (ADR-0012) and read session text through `ListPersistedSessions` and `StreamEvents`. That is out of scope here: ADR-0020's passkey gate covers it, under its own issue.
 >
