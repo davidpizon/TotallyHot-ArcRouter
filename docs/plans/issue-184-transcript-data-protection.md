@@ -110,7 +110,8 @@ flowchart TB
 
   **Legacy or squatted.** Any other root is unprotected, and the bootstrap classifies it by owner:
   - **Owned by `SYSTEM` or `Administrators`, with the old broad DACL.** This is a pre-phase-1 root that the installed service or an elevated run created (the normal installed case). The owner authenticates it, because no standard account can make `SYSTEM` or `Administrators` an owner. It is migrated (below).
-  - **Owned by the legacy owner.** The legacy owner is the account that installed the router (the MSI passes the installing user's SID, `UserSID`). On a machine without the MSI, it is the account that runs the explicit, elevated `--migrate-data-directory` command. This root is migrated too. On THEATRE-PC that is `david`'s root.
+  - **Linux and macOS: owned by root or the configured service account** (`arcrouter`, `_arcrouter`, or the container's `arcrouter`). This is the normal installed case there, because systemd and `install.sh` make the service account the owner of the state and logs directories. No standard user can create a directory owned by either account, so the owner authenticates it. It is migrated by `install.sh`, which runs as root, and the new tree keeps the service account as its owner.
+  - **Owned by the legacy owner.** The legacy owner is the account that installed the router (the MSI passes the installing user's SID, `UserSID`). On a machine without the MSI, it is the account that runs the explicit, elevated `--migrate-data-directory` command. On Linux and macOS that command runs as root, so the legacy owner is the invoking user behind `sudo` (`SUDO_UID`), never root itself. This root is migrated too. On THEATRE-PC that is `david`'s root.
   - **Owned by any other account.** This is a squat. The whole tree is renamed aside untouched, and a fresh protected root is created. Nothing is copied out of it, because its owner may have tampered with anything in it. The log names the quarantined path, which may still hold the operator's data and which an administrator should review and delete.
 
   **Who acts.**
@@ -156,7 +157,7 @@ flowchart TB
     - Inside the container the only accounts are root and the non-root service account, which already owns every file in the volume. So for an older named volume the bootstrap removes group and other bits in place, as the owner, with no elevated step. Named volumes live under a host directory only root can read, so no other host account could have planted entries.
     - A bind mount is the operator's responsibility. The docs require it to be owned by the container's UID with mode `0700`, and the bootstrap fails closed otherwise.
 - **The public CA certificate.** `router-ca.crt` holds only a public certificate, but `docs/router/client-tls-setup.md` has users read it: Firefox and Chrome-on-Linux imports, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, and `curl --cacert`. A `0700` state directory, or an admin-only root, would hide it.
-  - The service rewrites it at each start into a public directory that every user can read and only the service and administrators can write:
+  - The service rewrites it at each start into a public directory that every user can read and only the service and administrators (root, on Linux and macOS) can write:
     - **Windows:** `%ProgramData%\TotallyHotArcRouter-Public\`;
     - **Linux:** a systemd `RuntimeDirectory` with mode `0755`, at `/run/totallyhot-arcrouter/`;
     - **macOS:** `/Library/Application Support/TotallyHotArcRouter-Public/`, owned by root with mode `0755`.
@@ -241,7 +242,7 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
     - an unclaimed stage expires after 10 minutes, and every stage is deleted at startup.
 
     #165's own free-space and compression-bomb checks run after staging, so they don't cover this.
-- **#165's CLI flag.** `--export-conversations` runs as whoever launches it. Once the store is protected, it needs an elevated prompt, and #165's docs should say so.
+- **#165's CLI flag.** `--export-conversations` talks to the running service through the same endpoints as the GUI, so ADR-0020's passkey gate applies to it too. It never reads the protected store itself, so running it elevated is no way around the gate. An administrator can still read the store directly; that is ADR-0015's boundary, not a path this plan adds.
 - **#179** sends previews instead of full text. Previews are still text, so F10 applies to them too.
 
 ## 5. Phasing
@@ -288,7 +289,8 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
   - the legacy owner's root is migrated;
   - the service fails closed on a root that is neither protected nor migrated;
   - a reparse-point root is never followed;
-  - a pre-phase-1 root owned by `SYSTEM`, with the old broad DACL, is migrated on upgrade.
+  - a pre-phase-1 root owned by `SYSTEM`, with the old broad DACL, is migrated on upgrade;
+  - on Linux and macOS, pre-phase-1 state and logs directories owned by the service account are migrated by `install.sh` running as root, not quarantined.
 - After migration on Linux and macOS, an ordinary account cannot open a migrated database or log through the quarantine path, and accepted sources are gone from it.
 - Killing migration after some files have moved, and again between the two renames, leaves a state that the next elevated run completes. Meanwhile the service fails closed, and no empty root is ever created.
 - A directory handle opened before migration, on the old root or on `logs\`, cannot create a file in the live tree afterwards.

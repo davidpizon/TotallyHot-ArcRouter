@@ -143,7 +143,7 @@ What this ADR commits to:
     - an unclaimed stage expires after 10 minutes, and every stage is deleted at startup.
 
     Any application can still occupy or churn the staging slot. Like challenge flooding, that is an accepted denial of service. It cannot exhaust the disk, or import anything without the gesture.
-  - **Challenge store.** Challenges live in one global, bounded store: at most 32 pending, each expiring after two minutes, with the oldest evicted when the store is full.
+  - **Challenge store.** Each challenge is 32 bytes from a cryptographically secure generator (WebAuthn requires at least 16). Challenges live in one global, bounded store: at most 32 pending, each expiring after two minutes, with the oldest evicted when the store is full.
     - **No per-caller limit.** The router cannot rate-limit per caller, because nothing tells one loopback caller from another: every ticket in a generation is identical, and all callers share the loopback address.
     - **Issuance is bounded too.** One global token bucket admits challenge requests, for example 10 a minute with bursts of 5.
       - Requests beyond it are refused with `ResourceExhausted`.
@@ -153,11 +153,13 @@ What this ADR commits to:
     - **Denial of service.** An application that floods challenges can evict the operator's challenge, or use up the global allowance. The ceremony then fails, and the GUI offers a retry, which may wait up to a minute for the allowance to refill. The flood still cannot produce an approval without the operator's gesture.
     - **Accepted.** Availability against a hostile local application is not a goal of this ADR; the gate protects against disclosure. Every challenge is logged, so a flood is visible.
   - **A read window.** Reading conversation text needs a content grant. That covers `ListPersistedSessions` text, `GetTurnTexts`, ADR-0019's full view, and the text fields of `StreamEvents`.
-    - **What it is.** A verification returns the grant as an opaque random token in the response body.
+    - **What it is.** A verification returns the grant as an opaque token in the response body.
+      - The token is 256 bits from a cryptographically secure generator.
+      - The router keys its table by a hash of the token, so a lookup's timing reveals nothing about a valid one.
       - The dashboard keeps it only in memory, and sends it in a request header (`x-content-grant`) on content RPCs.
       - The router checks it, and its expiry, against an in-memory table.
       - A page reload loses it, and the operator verifies again.
-      - One-operation authorizations travel the same way.
+      - One-operation authorizations are generated, stored and carried the same way. Like the grant, they are bearer credentials that any loopback caller could present, so a predictable value would bypass the passkey check.
     - **How long it lasts.** 15 minutes by default (David, 2026-09-30). It ends early at "Lock" or a router restart, and it never authorizes a one-operation action.
     - **Why not a cookie.** Cookies are scoped to a host, not a port. The browser would send a `localhost` cookie to any trusted `https://localhost:<other port>` service, where another local application could capture it and replay it. Script state is scoped to the full origin (scheme, host and port), so the token never leaves the dashboard. ADR-0012's ticket cannot carry the grant either, because every caller in a generation gets the same ticket.
   - **Without a grant**, the same RPCs return metadata only. `StreamEvents` drops its text fields, checked per event, so a grant that expires mid-stream stops the text from then on.
