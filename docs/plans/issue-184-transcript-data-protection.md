@@ -146,7 +146,15 @@ flowchart TB
      - **No open handles.** On Windows, the file is renamed through an exclusive handle that does not follow links, and its owner and ACL are reset through that same handle. If another process holds the file open, the exclusive open fails, and migration fails closed, naming the file. On Linux and macOS, the file is copied into a new `0600` file, so no earlier descriptor reaches it.
      - **Not `appsettings.local.json`.** An application running as the legacy owner could have planted it, and no check can tell. It stays behind, and the router does not load it until an administrator reviews it and copies it into the protected root. On THEATRE-PC, the existing 933-byte overlay stays behind.
   3. **Swaps the trees.** The old root is renamed aside as a quarantine, and the new root is renamed into place. If a process holds the old root open so that it cannot be renamed, migration fails closed and says so.
-  4. **Closes the quarantine.** It sets the quarantine root to `SYSTEM` and `Administrators` only, or to mode `0700` on Linux and macOS, so ordinary accounts cannot reach what was left behind.
+  4. **Closes the quarantine.** It sets the quarantine root to `SYSTEM` and `Administrators` only, or to mode `0700` on Linux and macOS.
+     - **Linux and macOS:** that is enough. Every lookup needs search permission on each directory in the path, so ordinary accounts cannot reach what was left behind.
+     - **Windows: the root's ACL is not enough.** Standard accounts hold `SeChangeNotifyPrivilege`, which skips the traverse check on parent directories; `web-interface.json` relies on that (below). A rejected file keeps its own broad ACL, so anyone who knows its path, such as `appsettings.local.json` or a log, could still open it. So migration leaves no old object in the quarantine:
+       - **A regular file with one link** is copied into a new file in a new quarantine folder, which inherits only `SYSTEM` and `Administrators`. Migration reads it through a handle opened with `FILE_FLAG_OPEN_REPARSE_POINT`, so it never follows a link, then deletes the original entry. The copy stays for an administrator to review, as with `appsettings.local.json` (above).
+       - **A hard link** (more than one link) has its name in the tree deleted. Its content lives on under its other names, so nothing is copied, and the outside file is not changed.
+       - **A junction or symlink** is deleted itself, through the same non-following handle. Its target is never opened or changed. The log records where it pointed.
+       - **Directories.** Their structure is recreated inside the new quarantine folder, and each old directory is removed once it is empty. A directory handle opened before migration then refers to a deleted directory.
+       - **If an entry cannot be deleted**, because another process holds it open without delete sharing, migration fails closed and names it, as it does for accepted files.
+     - **A squatted tree** (owned by another account) is not processed this way. Its owner can rewrite its ACLs at will, so no change by migration would keep that account out.
 
   **Unlinked sources.** On Linux and macOS, each source file is unlinked as soon as its copy is verified and flushed. Accepted files therefore leave nothing in the quarantine, and only rejected entries stay. On Windows, a file is moved rather than copied, so nothing is left behind.
 
@@ -354,6 +362,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
   - a pre-phase-1 root owned by `SYSTEM`, with the old broad DACL, is migrated on upgrade;
   - on Linux and macOS, pre-phase-1 state and logs directories owned by the service account are migrated by `install.sh` running as root, not quarantined.
 - After migration on Linux and macOS, an ordinary account cannot open a migrated database or log through the quarantine path, and accepted sources are gone from it.
+- After migration on Windows, an ordinary account cannot open a rejected file through its known quarantine path, such as `appsettings.local.json`, even with `SeChangeNotifyPrivilege`. Its protected copy stays for review. A planted junction and a planted hard link in the old tree are gone, and their targets' ACLs are unchanged. A directory handle opened before migration finds its directory deleted.
 - Killing migration after some files have moved, and again between the two renames, leaves a state that the next elevated run completes. Meanwhile the service fails closed, and no empty root is ever created.
 - A directory handle opened before migration, on the old root or on `logs\`, cannot create a file in the live tree afterwards.
 - Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
