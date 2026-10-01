@@ -43,7 +43,7 @@ The requirement surfaced in the [transcript data-protection plan](../plans/issue
 - **No silent access by other applications** (David's requirement). An application running as the operator must not export, import, or read conversation text without the operator's knowledge.
 - **No copyable standing secret.** Anything stored where the operator's applications can read it fails the first driver. That includes MCP client configs, browser storage, and a token file.
 - **Works where the buttons already are.** #165 decision 7 puts Export and Import in a Sessions-tab modal of the browser GUI.
-- **Every platform the router runs on** ([ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md)): Windows, macOS, Linux, and Docker reached from a host browser.
+- **Every platform the router runs on** ([ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md)): Windows, macOS, Linux, and Docker reached through a port published on the host's `localhost`.
 - **Usable.** Reading sessions must not prompt on every click.
 - **Keep ADR-0012 for everything else.** Metadata, routing, providers, prices and settings stay on today's session.
 
@@ -69,7 +69,7 @@ sequenceDiagram
     GUI->>Auth: navigator.credentials.get, userVerification required
     Auth-->>GUI: assertion, signed after PIN, fingerprint or face
     GUI->>R: assertion
-    R->>R: verify signature, counter, challenge and operation
+    R->>R: verify type, challenge, origin, RP ID hash, flags, signature and counter
     R-->>GUI: one-time authorization for that export
     GUI->>R: run the export with the authorization
 ```
@@ -80,9 +80,22 @@ What this ADR commits to:
   - WebAuthn with `userVerification: "required"`. The authenticator is Windows Hello, Touch ID, or a security key. Its private key never leaves it, and each use needs the operator's PIN, fingerprint, face or touch.
   - The router verifies assertions with the `Fido2` library ([fido2-net-lib](https://github.com/passwordless-lib/fido2-net-lib), MIT).
   - On Windows, the tray and CLI reach the same authenticators through `webauthn.dll`, via `DSInternals.Win32.WebAuthn` ([webauthn-interop](https://github.com/MichaelGrafnetter/webauthn-interop), MIT).
-- **Relying party.** The relying-party ID is the host name the GUI is served on. The default is `localhost`, which is the advertised dashboard address and a name on the router's leaf certificate. WebAuthn never accepts an IP literal, so:
-  - the GUI redirects `https://127.0.0.1:47104` to `https://localhost:47104`;
-  - a Docker or remote setup must reach the GUI by a host name.
+  - **What the router checks.** An assertion counts only when all of these hold:
+    - `clientDataJSON.type` is `webauthn.get` (`webauthn.create` at enrollment);
+    - its `challenge` is the one pending for that operation;
+    - its `origin` is exactly the dashboard's origin, matching scheme, host and port (`https://localhost:47104` by default). A `localhost` credential works on every port, so the router refuses a page that another local app serves on a different port;
+    - the authenticator data's `rpIdHash` is the SHA-256 of `localhost`;
+    - the user-present and user-verified flags are set;
+    - the signature verifies against an enrolled public key, and the signature counter moves forward when the authenticator keeps one.
+  - **Native callers.** An app that calls `webauthn.dll` writes its own `clientDataJSON`, so the origin check constrains browsers only. For the tray and CLI, the user-verification gesture is the boundary.
+- **Relying party and origin.** The relying-party ID is `localhost`. The only accepted origin is the router's own dashboard, `https://localhost:<web port>`, which is the advertised dashboard address. `localhost` is also a name on the router's leaf certificate.
+  - WebAuthn never accepts an IP literal, so the GUI redirects `https://127.0.0.1:47104` to `https://localhost:47104`.
+  - Docker works when its web port is published on the host's `localhost`.
+  - **A remote host name is out of scope.** Two things rule it out today:
+    - [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md)'s CA is name-constrained to `localhost`, `127.0.0.1` and `::1`, so it cannot issue a certificate for any other name;
+    - WebAuthn needs a secure context.
+
+    From any other origin, the gated operations are unavailable. Supporting one needs its own decision: an operator-supplied certificate or a TLS-terminating proxy, and the exact origin to allow.
 - **Enrollment needs an administrator.**
   - An elevated CLI command writes a single-use enrollment code, valid for 10 minutes, into the [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) secret store, and prints it. Only `SYSTEM` and Administrators can write to that store.
   - The GUI's "Add passkey" dialog takes the code, and the router accepts a registration only with it.
@@ -120,7 +133,7 @@ What this ADR commits to:
   - Code running elevated or as `SYSTEM` is beyond any of this (ADR-0015).
   - UAC is not a hard boundary, so the elevated enrollment stops ordinary applications, not malware that bypasses UAC.
 - Bad, because a passkey held by a password-manager extension verifies the user only as strongly as that manager's unlock. Device-bound authenticators (Windows Hello, security keys) are the ones to recommend.
-- Bad, because IP-literal URLs lose the gated features. Remote and Docker setups need a host name the browser accepts as a relying-party ID, and a certificate for it.
+- Bad, because only `https://localhost:<web port>` can use the gated features. An IP-literal URL cannot, and a remote host name cannot until a certificate path for one is decided.
 - Bad, because a headless host with no platform authenticator needs a security key to use the gated operations through the router.
 - Neutral, because it adds two dependencies, `Fido2` and `DSInternals.Win32.WebAuthn`, both MIT-licensed.
 - Neutral, because it sets ship order: #165's export and import, #176's `GetTurnTexts`, and ADR-0019's full view must not ship before this gate. #179's previews move behind it once it exists.
@@ -172,7 +185,7 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
   - the enrollment flow;
   - the GUI prompts;
   - two libraries.
-- Bad, because origins with an IP literal cannot use it.
+- Bad, because only the router's own `https://localhost` origin can use it. That excludes an IP literal, and a remote host name with today's CA.
 
 ## More Information
 
@@ -186,4 +199,4 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;
   - whether to require attestation, or to accept only device-bound authenticators.
-- **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).
+- **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).

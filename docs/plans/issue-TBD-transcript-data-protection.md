@@ -60,6 +60,7 @@
 | F9 | The shipped `appsettings.json` sets Serilog's `MinimumLevel.Default` to `Debug`. At Debug, `RequestInterceptor` and `ProxyMiddleware` log the first 4,000 characters of every request and response body to `logs\arcrouter-*.log`, and the newest 30 files are kept (daily rolling). `LogRedaction` only strips CR/LF and truncates, so key-shaped strings are logged as they are. Clear does not touch the logs. | Code and config. Log contents were not opened. |
 | F10 | ADR-0012's loopback fast path gives a session to "any local account", meaning any process that can make an HTTP call. Session text then leaves through these RPCs, so the file ACL does not change who can read it:<br>- `ListPersistedSessions` returns `prompt_text` and `response_text`: full text today, previews after #179.<br>- `StreamEvents` carries live `request_summary` and `response_summary`, plus `LogLineEvent` lines that contain F9's excerpts.<br>- `GetManagementToken` returns the token to any session.<br>- Planned: #176's per-turn text, and #165's export and import.<br>No MCP tool and no proxy endpoint returns session data (`/v1/models` is the proxy's only local endpoint). | ADR-0012 Consequences, `telemetry.proto`, and code |
 | F11 | `Package.wxs` deliberately never references `%ProgramData%`, so uninstall keeps the folder (comment at lines 37-55). | Code |
+| F12 | **Linux and macOS installs are open the same way.**<br>- **Linux.** `install.sh` creates `/var/lib/totallyhot-arcrouter` and `/var/log/totallyhot-arcrouter` with a plain `mkdir -p`. The unit's `StateDirectory` and `LogsDirectory` set no mode, and the unit sets no `UMask`, so systemd's defaults apply: 0755 directories, and files created under a 022 umask.<br>- **macOS.** `install.sh` creates `/Library/Application Support/TotallyHotArcRouter` (with `logs` inside) and never runs `chmod`. The tree is owned by `_arcrouter:staff`, and the plist sets no `Umask`.<br>Every local account can therefore read state and logs. On Linux, the logs also live outside the state root. | `packaging/linux/install.sh`, `totallyhot-arcrouter.service`, `packaging/macos/install.sh`, `com.totallyhot.arcrouter.plist`. Not observed on a machine. |
 
 **Residue.** The harness inserted 300 rows, one connection per insert, as `SqliteTranscriptStore` does. Every 50th row was 24 KB, so it spilled onto overflow pages. Retention then purged ids 1–150 (`DeleteOldestAsync`, then `DeleteBeforeAsync`), and Clear deleted the rest. Each cell counts the deleted rows whose text was still in the file.
 
@@ -78,7 +79,7 @@ So `FAST` does not meet the goal, `ON` also needs the WAL truncated, and `-shm` 
 
 | Option | Verdict |
 |---|---|
-| **A. One protected, inheritable DACL on the whole directory**, created atomically and verified at startup | **Recommended.** It covers `-wal` and `-shm` (F5), every future file and subfolder (ADR-0019's session folder and spools included), `logs\` (F9), and the squatting in F3 and F4. |
+| **A. One protected, inheritable DACL on the whole directory** (owner-only modes on Linux and macOS), created atomically and verified at startup | **Recommended.** It covers:<br>- `-wal` and `-shm` (F5);<br>- every future file and subfolder, including ADR-0019's session folder and spools;<br>- `logs\` (F9), and the separate Linux logs directory (F12);<br>- the squatting in F3 and F4. |
 | B. The ADR-0015 per-file ACL on `transcripts.db`, `-wal`, and `-shm` | **Rejected.** The probe shows SQLite re-creates the side files with the folder's ACL (F5). It also leaves F3 and F4 open. |
 | C. ADR-0019's scope alone: make only the session folder admin-only | **Partial.** It covers session files and spools but leaves F2–F4 and F9. `transcripts.db` stays readable to all users: its index metadata, plus wrapped keys that become harmless after rotation. A user can also create the session folder before the router does (F1). |
 | **D. `secure_delete=ON` in `OpenConnection`, plus `wal_checkpoint(TRUNCATE)` after each purge or clear** | **Recommended.** ADR-0019 already requires `secure_delete` for wrapped keys. This makes it per connection (F8), and applies it to today's `transcripts.db` in the meantime. |
@@ -115,7 +116,17 @@ flowchart TB
   - otherwise it renames the directory aside and re-creates it, which covers a user who created the folder first.
 
   Every outcome is logged with a static Serilog template. The same helper verifies ADR-0019's session folder, so #165 phase 1's startup check reuses it rather than writing its own.
-- **Migration.** Re-apply the rule set, and reset each child's ACL to inherit. That covers every file in F2, plus `logs\` and `models\`.
+- **Migration.** The tree was writable by every local account, so migration treats each entry as untrusted until it is checked:
+  - **It never follows a reparse point** (junction, symlink, or mount point). It renames the link itself into a quarantine folder inside the root, so a planted link cannot steer an ACL change into another tree.
+  - **It renames aside any entry owned by an untrusted account**, rather than adopting it. A trusted owner is `SYSTEM`, `Administrators`, or the root's original owner. The rule exists because an owner can always rewrite its own DACL.
+  - **Every adopted entry** gets `Administrators` as its owner, and then its ACL is reset to inherit.
+
+  That covers every file in F2, plus `logs\` and `models\`. Each quarantined entry is logged with its path and owner. Migration cannot tell a file planted by an app running as the root's owner from that owner's own files, so it adopts those and lists them in the log.
+- **Linux and macOS (F12).** The same rule becomes owner-only modes:
+  - **Linux:** the unit adds `StateDirectoryMode=0700`, `LogsDirectoryMode=0700` and `UMask=0077`, and `install.sh` creates both directories with mode `0700`.
+  - **macOS:** `install.sh` sets `0700` on the state tree, which includes `logs`, and the plist gets a `Umask` of `077`.
+  - **Startup verification** checks the state directory and the logs directory alike. Each must be owned by the service account (or by the current user, for a dev run's per-user fallback), must not be a symlink, and must have no group or other permission bits.
+  - **Migration** removes group and other bits from existing files once, without following symlinks.
 - **Two public files.** `web-interface.json` and `router-ca.crt` get an explicit `Users:R` ACE, because they hold only a URL, a thumbprint, and a public certificate. The tray keeps working (F6).
 - **The `.pfx` files** lose `Users` read with nothing else changing. Clients trust the CA through the certificate store (`--install-certificate`), not through the `.pfx` files.
 - **Operator effects.**
@@ -125,14 +136,23 @@ flowchart TB
 
 **3.2 Secure deletion (option D).**
 - **Every connection.** `OpenConnection` runs `PRAGMA secure_delete=ON` on every connection, not once in `EnsureCreated` (F8). This applies to `transcripts.db` now, and to the index and wrapped keys after ADR-0019. It also applies to `router_embedding_memory.db`, because ADR-0019 deletes `memory_entries` with their session. Embedding vectors can be partly inverted back to text, for example by vec2text.
-- **Truncate after each delete.** `DeleteOldestAsync`, `DeleteBeforeAsync`, and `DeleteAllAsync` end with `PRAGMA wal_checkpoint(TRUNCATE)`, and check its `busy` result. If `busy` is non-zero, the next 5-minute cycle retries and the retry is logged. ADR-0019's whole-session retention later takes the same path.
+- **Truncate after each delete.** `DeleteOldestAsync`, `DeleteBeforeAsync`, and `DeleteAllAsync` end with `PRAGMA wal_checkpoint(TRUNCATE)`, and check its `busy` result.
+  - **Purge.** If `busy` is non-zero, the next 5-minute retention cycle retries, and the retry is logged.
+  - **Clear.** Clear cannot rely on that cycle. `TranscriptRetentionService.ExecuteAsync` exits at startup when capture is disabled, while `DeleteAllAsync` deliberately runs either way. So Clear retries the checkpoint itself, a few times over a few seconds. If the checkpoint is still busy, Clear reports, in an additive response field, that the deletion is not yet final.
+  - **Startup.** The router runs `TRUNCATE` once at startup, before anything else opens the database. That finishes any deletion left pending.
+  - ADR-0019's whole-session retention later takes the same path.
 - **One-time scrub.** `secure_delete` zeroes content only when it is freed, so it cannot clean pages freed before it was turned on (s1). The scrub runs once, now on upgrade and again when ADR-0019 deletes the old text: `VACUUM` with `temp_store=MEMORY`, then `TRUNCATE`. It is the mechanism behind #165 phase 2's exit criterion, "neither do its freed pages".
 - **`synchronous=NORMAL`** has the same per-connection defect. Moving it into `OpenConnection` changes write durability and speed, so it is decision 8, not a silent fix.
 
 **3.3 Logs (F9).**
 - Ship `MinimumLevel.Default: Information`.
-- Put the body-excerpt lines behind their own opt-in switch.
+- Put the body-excerpt lines behind their own opt-in switch, and write them to their own files (for example `logs\bodies-*.log`). Clear and uninstall can then remove them without touching the diagnostic logs.
 - Pass logged bodies through the same secret obscuring ADR-0019 uses for storage.
+- **Clear** deletes the body-excerpt files.
+- **Pre-upgrade logs.** Files written before the upgrade still hold unobscured excerpts, and would otherwise linger until the newest-30 limit rolls them off.
+  - On the first start after the upgrade, the router rewrites each `arcrouter-*.log` without its `[INTERCEPTOR] Intercepted agent` lines, and replaces the original with the rewrite.
+  - A file it cannot rewrite is deleted.
+  - The old disk blocks are not overwritten. That is the same remnant ADR-0019 leaves to BitLocker.
 
 Today these logs break two of ADR-0019's privacy drivers: "no readable conversation text at rest outside a protected store", and "no secret ever written to disk".
 
@@ -146,6 +166,7 @@ The master-key rotation rewrites `secrets.dat` through `WriteAtomically`, a temp
 **3.5 Uninstall (F11).** A best-effort custom action runs on a genuine uninstall only, using `UninstallCertificate`'s condition: `REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE`. Once ADR-0019's master key exists, it:
 - deletes only that master-key entry from `secrets.dat`, which leaves every session file undecryptable;
 - removes the session folder;
+- deletes the body-excerpt log files (§3.3);
 - keeps the spend databases.
 
 Until then, it can run the one-time scrub after clearing `request_transcripts` (decision 7).
@@ -178,26 +199,44 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
    - that conversation text over the API is gated by ADR-0020.
 
    Either a new ADR or an amendment to ADR-0019 while it is still proposed (decision 2).
-1. **Directory DACL.** The verification helper, atomic creation, migration, the two exceptions, and the MSI folder creation.
-2. **Secure delete.** `secure_delete` in `OpenConnection` for `transcripts.db` and `router_embedding_memory.db`, `TRUNCATE` after purge and clear, and the one-time scrub.
-3. **Logs.** The Information default, the separate body switch, and obscuring.
+1. **Directory DACL.**
+   - the verification helper and atomic creation;
+   - the migration and its quarantine;
+   - the two `Users:R` exceptions;
+   - the MSI folder creation;
+   - the Linux and macOS mode changes.
+2. **Secure delete.**
+   - `secure_delete` in `OpenConnection` for `transcripts.db` and `router_embedding_memory.db`;
+   - `TRUNCATE` after purge and Clear, Clear's own retry, and the startup checkpoint;
+   - the one-time scrub.
+3. **Logs.**
+   - the Information default;
+   - the separate opt-in body files, with obscuring;
+   - the one-time rewrite of pre-upgrade logs.
 4. **Uninstall** custom action. Its master-key step waits for ADR-0019.
 
 Phases 1–3 do not depend on ADR-0019 and can ship first. Phase 1 should precede #165 phase 1 (decision 10).
 
 ## 6. Tests
 
-All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[SupportedOSPlatform("windows")]`, and skipped elsewhere.
+All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[SupportedOSPlatform("windows")]`. Mode tests are Unix-only. Each set is skipped elsewhere.
 
 - The directory is created with the protected rule set, and a new file inherits no `Users` ACE.
 - A SQLite `-wal` created after a close and reopen inherits the protected ACL (F5's probe, as a test).
 - A directory created first by another account is renamed aside and never adopted. So is a reparse point.
+- Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
+- On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
 - A fresh **non-pooled** connection from `OpenConnection` returns 1 for `PRAGMA secure_delete` (F8).
 - Canary rows are absent from the db and the WAL after `DeleteOldestAsync`, after `DeleteBeforeAsync`, and after `DeleteAllAsync`. This is s2 as a test, sized to stay under 5 s.
 - The one-time scrub removes canaries that were deleted before `secure_delete` was on (s1, then scrub).
 - A `busy` result from `TRUNCATE` is handled and logged.
+- With capture disabled and a reader holding the WAL:
+  - Clear retries, then reports that the deletion is not final;
+  - the next startup truncates the WAL.
 - A key-shaped string in a logged body is obscured.
+- The pre-upgrade rewrite removes planted body lines from a log file. A file it cannot rewrite is deleted.
+- Clear deletes the body-excerpt files.
 
 ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in #165's plan.
 
@@ -233,6 +272,7 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
 >
 > - **Readable by all.** Every file in `%ProgramData%\TotallyHotArcRouter` except `secrets.dat` is readable by any local account (`BUILTIN\Users:(I)(RX)`). That includes `transcripts.db` and its `-wal`, which hold prompt and response text, the `.pfx` files, and the other databases.
 > - **Writable by all.** Any local account can create files and folders there, and the `LocalSystem` service trusts them. The worst case is `appsettings.local.json`, which is optional and reloaded on change.
+> - **Linux and macOS too.** Their installers leave state and logs readable by every local account: 0755 directories, files created under a 022 umask, and no restrictive mode.
 > - **Per-file ACLs don't hold.** An ADR-0015-style per-file ACL cannot protect `-wal` and `-shm`, because SQLite re-creates them with the folder's ACL. ADR-0019's session folder inherits the same open ACL if it is created the way the router creates folders today.
 > - **Deleted rows persist.** Rows removed by retention or by Clear stay readable. In a disposable copy, 150 of 150 purged rows were in the WAL, and 298 of 300 were in the database file after Clear and a restart. `secure_delete=ON` on every connection, plus `wal_checkpoint(TRUNCATE)`, removed them all. `FAST`, or `ON` set only once, did not.
 > - **Logs.** At the shipped `Debug` level, the first 4,000 characters of every request and response are logged to `logs\` without obscuring, and the newest 30 files are kept.
