@@ -129,6 +129,11 @@ flowchart TB
   - **It renames aside any regular file with more than one hard link**, rather than adopting it. A hard link is not a reparse point, and it shares its security with the file it points to, so changing its owner or ACL would change an outside file too. The link count comes from `GetFileInformationByHandle`, or from `st_nlink` on Unix. Renaming moves only that one link, so the outside file is untouched.
   - **It renames aside any entry owned by an untrusted account**, rather than adopting it. A trusted owner is `SYSTEM`, `Administrators`, or the root's original owner. The rule exists because an owner can always rewrite its own DACL.
   - **The root, and every adopted entry,** gets `Administrators` as its owner, and then its ACL is reset to inherit. On THEATRE-PC this moves the root from `david` to `Administrators`.
+  - **Open handles are revoked, not inherited.** An ACL or mode change does not revoke a handle opened earlier, so a process that already held a file open would keep its access.
+    - **Windows.** Migration adopts a file only through an exclusive handle that does not follow links. If another process holds the file open, the exclusive open fails. The bootstrap then fails closed and logs the file's name, rather than adopting the file.
+    - **Linux and macOS.** Migration copies each adopted file into a new `0600` file and renames it over the old one. Later writes go to the new inode, which no earlier descriptor reaches.
+
+    The bootstrap runs before the router opens its databases, so the router's own handles are never in the way.
   - **`appsettings.local.json` is never adopted.**
     - An application running as the root's owner could have planted it, and an owner check cannot tell.
     - Migration renames a pre-existing overlay aside. The router does not load it until an administrator reviews it and moves it back, which only an administrator can do once the directory is protected.
@@ -205,6 +210,7 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
   - **Recommended:** stream the zip to the client, which writes it with its own rights.
   - Otherwise, accept only a router-owned `exports\` folder inside the protected root.
   - Either way, export and import also sit behind ADR-0020's passkey gate. Moving the bytes fixes the SYSTEM-privileged write and read, but not who may export.
+  - **Import binds to the bytes** (ADR-0020). #165's import stages the archive first, into a router-owned spool in the protected root, and the passkey challenge binds the staged file's SHA-256. The router then imports exactly that staged file. Approving a path instead would let an application running as the operator swap the zip between the ceremony and the read.
 - **#165's CLI flag.** `--export-conversations` runs as whoever launches it. Once the store is protected, it needs an elevated prompt, and #165's docs should say so.
 - **#179** sends previews instead of full text. Previews are still text, so F10 applies to them too.
 
@@ -244,6 +250,9 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - A directory created first by another account is renamed aside and never adopted. So is a reparse point.
 - Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
 - Migration renames aside a planted hard link to a file outside the root. The outside file's owner and ACL (on Unix, its mode) are unchanged.
+- A file that another process holds open with a writable handle from before migration:
+  - on Windows, makes the bootstrap fail closed and name the file;
+  - on Unix, does not see writes made after migration through the pre-opened descriptor.
 - On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
 - A fresh **non-pooled** connection from `OpenConnection` returns 1 for `PRAGMA secure_delete` (F8).

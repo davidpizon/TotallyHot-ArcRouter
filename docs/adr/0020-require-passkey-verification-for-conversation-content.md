@@ -113,6 +113,8 @@ What this ADR commits to:
     - `GetManagementToken`.
 
     The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else.
+
+    **Import binds to the bytes, not a path.** The archive is first staged into a router-owned spool in the protected data directory, and the challenge binds the staged file's SHA-256. The router then imports exactly the bytes the operator approved. Replacing the source file after the ceremony changes nothing, and an approval for one archive cannot import another.
   - **Challenge store.** Challenges live in one global, bounded store: at most 32 pending, each expiring after two minutes, with the oldest evicted when the store is full.
     - **No per-caller limit.** The router cannot rate-limit per caller, because nothing tells one loopback caller from another: every ticket in a generation is identical, and all callers share the loopback address.
     - **Issuance is bounded too.** One global token bucket admits challenge requests, for example 10 a minute with bursts of 5.
@@ -219,7 +221,8 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 - **WebAuthn and localhost.** WebAuthn accepts `localhost` as a relying-party ID and never an IP address. Browsers enforce this: Chrome allows WebAuthn on `https://localhost`, not on `https://127.0.0.1`.
 - **Why not ASP.NET Core Identity's passkeys.** .NET 10 Identity's passkey support is scoped to Identity sign-in, through `SignInManager` and `UserManager`. This router has no Identity users, so a standalone library fits better.
 - **Left to the implementation plan:**
-  - the challenge and grant lifetimes, the challenge store's size, and the issuance rate;
+  - the exact issuance rate (the token bucket above is illustrative);
+  - whether the fixed limits can be configured: two-minute challenges, a 32-entry store, and the 15-minute grant;
   - how the GUI shows locked text and the "Lock" control;
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;
