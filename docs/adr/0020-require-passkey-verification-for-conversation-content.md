@@ -96,7 +96,7 @@ What this ADR commits to:
     - Raising the product minimum to 1903 would remove this case. That is a separate decision; this ADR does not make it.
   - **What the router checks.** An assertion counts only when all of these hold:
     - `clientDataJSON.type` is `webauthn.get` (`webauthn.create` at enrollment);
-    - its `challenge` is the one pending for that operation, and verification consumes that challenge atomically (compare and remove) before it issues any authorization. A replayed assertion, whether concurrent or later, then finds no pending challenge. Synced passkeys often keep the signature counter at zero, so the counter alone cannot catch a replay;
+    - its `challenge` is the one pending for that operation, and verification consumes that challenge atomically (compare and remove) before it issues any authorization. It removes the challenge first, before any other check, so every attempt uses the challenge up, whether verification then passes or fails; after a failure the operator starts a new ceremony. A replayed assertion, whether concurrent or later, then finds no pending challenge. Synced passkeys often keep the signature counter at zero, so the counter alone cannot catch a replay;
     - its `origin` is exactly the dashboard's origin, matching scheme, host and port (`https://localhost:47104` by default). A `localhost` credential works on every port, so the router refuses a page that another local app serves on a different port;
     - the authenticator data's `rpIdHash` is the SHA-256 of `localhost`;
     - the user-present and user-verified flags are set;
