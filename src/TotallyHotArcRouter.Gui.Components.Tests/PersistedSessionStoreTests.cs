@@ -89,6 +89,27 @@ public sealed class PersistedSessionStoreTests
     }
 
     [Fact]
+    public async Task LoadAsync_OversizedResponseRejection_StaysReachableWithNoSessionsAndCaptureReadingOff()
+    {
+        // The exact rejection PersistedSessionsClient raises when the list exceeds the client's default 4 MiB
+        // receive cap - pinned end to end in PersistedSessionsClientTests. The router answered, so it is not
+        // an outage.
+        const string oversizedMessage =
+            "Could not read persisted sessions: Received message exceeds the maximum configured message size.";
+        var client = new FakePersistedSessionsClient { Failure = new GrpcAdminException(message: oversizedMessage) };
+        var store = new PersistedSessionStore(client);
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        store.IsLoaded.Should().BeTrue();
+        store.IsReachable.Should().BeTrue("a rejection reached the router");
+        store.LastError.Should().Be(oversizedMessage);
+        store.Sessions.Should().BeEmpty();
+        store.TranscriptCaptureEnabled.Should()
+            .BeFalse("only a successful load sets it, so a failed load reads the same as capture being off");
+    }
+
+    [Fact]
     public async Task LoadAsync_RaisesChangedExactlyOnce()
     {
         var client = new FakePersistedSessionsClient

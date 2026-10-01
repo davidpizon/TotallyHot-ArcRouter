@@ -1,5 +1,7 @@
 using Grpc.Core;
 using Grpc.Core.Testing;
+using Grpc.Net.Client;
+using System.Globalization;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
@@ -18,6 +20,17 @@ namespace TotallyHot.ArcRouter.Tests.Telemetry;
 /// </summary>
 public class TelemetryGrpcServiceTests
 {
+    /// <summary>
+    /// <c>Grpc.Net.Client</c>'s default <see cref="GrpcChannelOptions.MaxReceiveMessageSize"/>, read from the
+    /// library rather than restated. Every GUI channel runs at it: nothing in <c>src/</c> overrides it
+    /// (<c>WasmRouterChannelProvider</c>, <c>TelemetryChannelFactory</c>).
+    /// </summary>
+    private static readonly int DefaultClientMaxReceiveMessageSize =
+        new GrpcChannelOptions().MaxReceiveMessageSize!.Value;
+
+    /// <summary>The row count <c>PersistedSessionStore.RequestLimit</c> asks for on every Sessions-tab load.</summary>
+    private const int GuiRequestLimit = 500;
+
     private static TelemetryGrpcService CreateService(
         TelemetryBroadcaster? broadcaster = null,
         IReadOnlyList<SessionTranscript>? sessions = null,
@@ -229,6 +242,137 @@ public class TelemetryGrpcServiceTests
         Assert.False(mapped.HasInputTokens);
         Assert.False(mapped.HasOutputTokens);
         Assert.False(mapped.HasMemoryEntryId);
+    }
+
+    /// <summary>
+    /// Measures the serialized response at the GUI's 500-row request against the client's default receive
+    /// cap, for representative per-row text sizes. Sizes are UTF-8 bytes of ASCII text, so bytes equal
+    /// characters. This characterizes today's wire shape, which carries every row's full text: a response
+    /// over the cap fails on the client with <see cref="StatusCode.ResourceExhausted"/> (pinned in
+    /// <c>PersistedSessionsClientTests</c>), and the Sessions tab then shows no persisted history.
+    /// </summary>
+    [Theory]
+    // This machine's transcripts.db, sampled 2026-09-30: 82 rows, mean 362-byte prompt and 76-byte response.
+    [InlineData(362, 76, false)]
+    // Chat style: a short question and a medium answer.
+    [InlineData(500, 2_000, false)]
+    // Agentic, with substantial final answers.
+    [InlineData(2_000, 4_000, false)]
+    // A Copilot-style agent loop. The newest user message carries attached files and editor context, and it
+    // is captured again on every tool-call iteration, because tool results arrive as role "tool" messages
+    // that RequestTextExtractor skips.
+    [InlineData(12_000, 1_000, true)]
+    public async Task ListPersistedSessions_AtTheGuiRowLimit_ExceedsTheDefaultClientReceiveCapOnlyWithHeavyText(
+        int promptBytes, int responseBytes, bool expectedToExceedCap)
+    {
+        var size = await SerializedListSizeAsync(rowCount: GuiRequestLimit, promptText: new string('p', promptBytes),
+            responseText: new string('r', responseBytes));
+
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            FormattableString.Invariant(
+                $"{GuiRequestLimit} rows x ({promptBytes} + {responseBytes}) text bytes = {size:N0} serialized bytes ({100.0 * size / DefaultClientMaxReceiveMessageSize:F1}% of the {DefaultClientMaxReceiveMessageSize:N0}-byte cap)"));
+        Assert.Equal(expected: expectedToExceedCap, actual: size > DefaultClientMaxReceiveMessageSize);
+    }
+
+    /// <summary>
+    /// Pins where the GUI's 500-row load starts failing: just above 8 KB of combined prompt and response text
+    /// per row. Solved from one measurement, then checked on both sides of the boundary against the service
+    /// itself. Between 128 and 16,383 bytes every text length and row length is a two-byte varint, so each
+    /// extra text byte per row adds exactly <see cref="GuiRequestLimit"/> serialized bytes. The upper bound
+    /// is the cap divided by the row count, the break-even with zero per-row overhead.
+    /// </summary>
+    [Fact]
+    public async Task ListPersistedSessions_AtTheGuiRowLimit_CrossesTheDefaultClientReceiveCapJustAboveEightKilobytesOfTextPerRow()
+    {
+        const int probeTextBytes = 4_000;
+        var probeSize = await SerializedListSizeWithTextPerRowAsync(probeTextBytes);
+        var breakEvenTextBytes =
+            probeTextBytes + (DefaultClientMaxReceiveMessageSize - probeSize) / GuiRequestLimit;
+
+        var atBreakEven = await SerializedListSizeWithTextPerRowAsync(breakEvenTextBytes);
+        var oneByteMore = await SerializedListSizeWithTextPerRowAsync(breakEvenTextBytes + 1);
+
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            FormattableString.Invariant(
+                $"Break-even: {breakEvenTextBytes:N0} text bytes per row ({atBreakEven:N0} serialized bytes); {breakEvenTextBytes + 1:N0} gives {oneByteMore:N0}. Per-row overhead: {DefaultClientMaxReceiveMessageSize / GuiRequestLimit - breakEvenTextBytes} bytes."));
+        Assert.InRange(actual: atBreakEven, low: 0, high: DefaultClientMaxReceiveMessageSize);
+        Assert.InRange(actual: oneByteMore, low: DefaultClientMaxReceiveMessageSize + 1, high: int.MaxValue);
+        Assert.InRange(actual: breakEvenTextBytes, low: 8_000, high: DefaultClientMaxReceiveMessageSize / GuiRequestLimit);
+    }
+
+    /// <summary>
+    /// Shows that lowering the row limit cannot bound the message by itself. <c>prompt_text</c> is the newest
+    /// user message verbatim. Only Kestrel's default 30,000,000-byte request body limit bounds it, and nothing
+    /// in <c>src/</c> lowers that limit. A row is persisted even when the provider rejects the prompt and the
+    /// error is relayed to the client. So one pasted 4 MiB log fails the load at <c>limit = 1</c>.
+    /// </summary>
+    [Fact]
+    public async Task ListPersistedSessions_OneRowWithAFourMebibytePrompt_AloneExceedsTheDefaultClientReceiveCap()
+    {
+        var size = await SerializedListSizeAsync(rowCount: 1, promptText: new string('p', 4 * 1024 * 1024),
+            responseText: null);
+
+        Assert.InRange(actual: size, low: DefaultClientMaxReceiveMessageSize + 1, high: int.MaxValue);
+    }
+
+    /// <summary>
+    /// Serializes what <see cref="TelemetryGrpcService.ListPersistedSessions"/> returns for
+    /// <paramref name="rowCount"/> rows that carry the given texts. The result is the payload length
+    /// <c>Grpc.Net.Client</c> compares against its receive cap; the 5-byte gRPC frame header is not counted.
+    /// </summary>
+    private static async Task<int> SerializedListSizeAsync(int rowCount, string? promptText, string? responseText)
+    {
+        var service = CreateService(sessions: RealisticRows(count: rowCount, promptText: promptText,
+            responseText: responseText));
+
+        var response = await service.ListPersistedSessions(
+            request: new Contract.ListPersistedSessionsRequest { Limit = rowCount },
+            context: CreateContext(TestContext.Current.CancellationToken));
+
+        Assert.Equal(expected: rowCount, actual: response.Transcripts.Count);
+        return response.CalculateSize();
+    }
+
+    /// <summary>
+    /// <see cref="SerializedListSizeAsync"/> at the GUI's row limit, with <paramref name="textBytes"/> of ASCII
+    /// text per row split evenly between prompt and response.
+    /// </summary>
+    private static Task<int> SerializedListSizeWithTextPerRowAsync(int textBytes)
+    {
+        return SerializedListSizeAsync(rowCount: GuiRequestLimit, promptText: new string('p', textBytes / 2),
+            responseText: new string('r', textBytes - textBytes / 2));
+    }
+
+    /// <summary>
+    /// <paramref name="count"/> newest-first rows whose metadata is shaped like the sampled production
+    /// <c>transcripts.db</c>: 32-character session ids with 25 turns each, sub-second timestamps, a cost read
+    /// back from a REAL column, and an agentic client's token counts. Only the text varies between the size
+    /// tests above, and every row shares one instance of each string.
+    /// </summary>
+    private static List<SessionTranscript> RealisticRows(int count, string? promptText, string? responseText)
+    {
+        var newest = new DateTimeOffset(2026, 9, 30, 12, 0, 0, offset: TimeSpan.Zero).AddTicks(1_234_567);
+
+        return
+        [
+            .. Enumerable.Range(0, count).Select(i =>
+            {
+                var sessionId = (i / 25).ToString(format: "x32", provider: CultureInfo.InvariantCulture);
+                return new SessionTranscript(
+                    Id: count - i,
+                    SessionId: sessionId,
+                    CorrelationId: FormattableString.Invariant($"{sessionId}:{25 - i % 25}"),
+                    CreatedAtUtc: newest.AddSeconds(-7 * i),
+                    RequestedModel: "claude-sonnet-4-5",
+                    RoutedModel: "kimi-k2.5",
+                    PromptText: promptText,
+                    ResponseText: responseText,
+                    Cost: (decimal)0.0123456789,
+                    InputTokens: 41_246,
+                    OutputTokens: 255,
+                    MemoryEntryId: null);
+            })
+        ];
     }
 
     private static SessionTranscript SampleSessionTranscript()
