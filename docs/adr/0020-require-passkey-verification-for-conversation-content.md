@@ -36,7 +36,7 @@ He then chose passkeys, and extended the gate to import. He kept Clear and lower
 
 Meeting the requirement means proving that a person approved the action. That narrows ADR-0012's boundary for conversation content, and it adds a setup step that today's zero-setup flow does not have.
 
-The requirement surfaced in the [transcript data-protection plan](../plans/issue-TBD-transcript-data-protection.md), as its decision 1.
+The requirement surfaced in the [transcript data-protection plan](../plans/issue-184-transcript-data-protection.md) for [#184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184), as its decision 1. This ADR is tracked in [#185](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/185).
 
 ## Decision Drivers
 
@@ -232,7 +232,8 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 
 ## More Information
 
-- **Requirement and context:** decision 1 of the [transcript data-protection plan](../plans/issue-TBD-transcript-data-protection.md). That plan protects the data directory, where this ADR protects the API.
+- **Tracking issue:** [#185](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/185). Its implementation plan will be `docs/plans/issue-185-passkey-content-gate.md`, written once the issue is boarded.
+- **Requirement and context:** decision 1 of the [transcript data-protection plan](../plans/issue-184-transcript-data-protection.md) (#184). That plan protects the data directory, where this ADR protects the API.
 - **WebAuthn and localhost.** WebAuthn accepts `localhost` as a relying-party ID and never an IP address. Browsers enforce this: Chrome allows WebAuthn on `https://localhost`, not on `https://127.0.0.1`.
 - **Why not ASP.NET Core Identity's passkeys.** .NET 10 Identity's passkey support is scoped to Identity sign-in, through `SignInManager` and `UserManager`. This router has no Identity users, so a standalone library fits better.
 - **Left to the implementation plan:**

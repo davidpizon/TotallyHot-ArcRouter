@@ -1,15 +1,12 @@
-# Plan: Protect the router's data directory and make deletion final (#TBD)
+# Plan: Protect the router's data directory and make deletion final (#184)
 
 **Status:** Proposed. Awaiting David's approval. No production code changes in this change.
-**Issue:** Not filed yet. [Appendix A](#appendix-a-draft-issue-body) is the draft body for this plan's issue, and [Appendix B](#appendix-b-draft-issue-body-for-the-passkey-gate) is the draft for ADR-0020's issue. Once both issues exist:
-- this file is renamed to `issue-<N>-transcript-data-protection.md`;
-- both appendices are deleted;
-- ADR-0020's link to this plan is updated to the new name.
+**Issue:** [#184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184) — "Protect the router's data directory and make deletion final".
 **Related:**
 - [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (proposed) moves conversation text into encrypted per-session files. Under "Found during the investigation, tracked separately" it lists: "Transcript data sits under default permissions, and deleted rows persist." **This plan is that item.**
 - [#165 plan](issue-165-export-import-history.md) (amended 2026-09-30 to follow ADR-0019), [#179 plan](issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).
 - [ADR-0012](../adr/0012-loopback-session-auth-and-token-in-secret-store.md) (loopback sessions) and [ADR-0015](../adr/0015-machine-scoped-protection-for-the-shared-secret-store.md) (the admin-only secret store).
-- [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md) (proposed) gates conversation content behind passkey verification. It is the API-side companion to this plan, and has its own issue ([Appendix B](#appendix-b-draft-issue-body-for-the-passkey-gate)).
+- [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md) (proposed) gates conversation content behind passkey verification. It is the API-side companion to this plan, and is tracked in [#185](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/185).
 
 **ADR-0008 Amendment 1:** This is a security and privacy fix with observed evidence, not a smell refactor. It does not touch `ProxyMiddleware`, `RequestInterceptor`, or `ManagementFacade`.
 **ADR first.** It changes a security boundary (who can read and write the machine-shared directory), so AGENTS.md requires an ADR before code (§5, phase 0; decision 2).
@@ -294,7 +291,7 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
    - **Mechanism:** passkeys, meaning WebAuthn user verification.
    - **Scope:** export and import, plus every RPC that returns conversation text.
    - **Not gated:** Clear, deleting a session or an import, and lowering Sample Size. They destroy history rather than disclose it.
-   - **Recorded in** [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md) (proposed), which has its own issue ([Appendix B](#appendix-b-draft-issue-body-for-the-passkey-gate)). ADR-0020 holds the design, its limits, and the options it rejected.
+   - **Recorded in** [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md) (proposed), tracked in [#185](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/185). ADR-0020 holds the design, its limits, and the options it rejected.
    - **Also decided:**
      - conversation text stays hidden until a passkey is enrolled;
      - the read window defaults to 15 minutes;
@@ -313,62 +310,3 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
 8. **`synchronous=NORMAL` on every connection** (F8). It is a small durability trade. Recommended: yes, noted in the ADR.
 9. **Remove `secrets.dat.pre-adr0014-backup`** once David confirms it is no longer needed? It is a stale copy of the secret store that every user can read. It is sealed to `david` (CurrentUser DPAPI), so other accounts cannot decrypt it.
 10. **Order against #165 phase 1.** Recommended: this plan's phase 1 first, so the session folder inherits the protected root.
-
-## Appendix A: Draft issue body
-
-> **Title:** Protect the router's data directory and make deletion final
->
-> This is ADR-0019's "tracked separately" item: "Transcript data sits under default permissions, and deleted rows persist." It was verified on 2026-09-30. Only metadata was read from the real data folder; behavior was tested in throwaway copies.
->
-> - **Readable by all.** Every file in `%ProgramData%\TotallyHotArcRouter` except `secrets.dat` is readable by any local account (`BUILTIN\Users:(I)(RX)`). That includes `transcripts.db` and its `-wal`, which hold prompt and response text, the `.pfx` files, and the other databases.
-> - **Writable by all.** Any local account can create files and folders there, and the `LocalSystem` service trusts them. The worst case is `appsettings.local.json`, which is optional and reloaded on change.
-> - **Linux and macOS too.** Their installers leave state and logs readable by every local account: 0755 directories, files created under a 022 umask, and no restrictive mode.
-> - **Per-file ACLs don't hold.** An ADR-0015-style per-file ACL cannot protect `-wal` and `-shm`, because SQLite re-creates them with the folder's ACL. ADR-0019's session folder inherits the same open ACL if it is created the way the router creates folders today.
-> - **Deleted rows persist.** Rows removed by retention or by Clear stay readable. In a disposable copy, 150 of 150 purged rows were in the WAL, and 298 of 300 were in the database file after Clear and a restart. `secure_delete=ON` on every connection, plus `wal_checkpoint(TRUNCATE)`, removed them all. `FAST`, or `ON` set only once, did not.
-> - **Logs.** At the shipped `Debug` level, `logs\` receives, without obscuring:
->   - the first 4,000 characters of every request and response;
->   - the newest user message;
->   - the assembled reply text.
->
->   The newest 30 files are kept.
-> - **Uninstall** keeps all of it.
-> - **API access.** Any process that can make an HTTP call can get a loopback session (ADR-0012) and read session text through `ListPersistedSessions` and `StreamEvents`. That is out of scope here: ADR-0020's passkey gate covers it, under its own issue.
->
-> **Plan:** `docs/plans/issue-<N>-transcript-data-protection.md`. It proposes:
-> - an ADR;
-> - one protected DACL on the whole directory, verified at startup, which ADR-0019's session folder then inherits;
-> - secure deletion now, and as the rules for ADR-0019's key deletion;
-> - log hygiene;
-> - an uninstall option.
->
-> Related: ADR-0019, ADR-0020, #165, #176, #179, ADR-0012, ADR-0015.
-
-## Appendix B: Draft issue body for the passkey gate
-
-> **Title:** Require passkey verification before conversation content leaves the router
->
-> David's requirement, 2026-09-30: "I am concerned about who can export session data. I don't want to leave it open to any application that can make an HTTP call."
->
-> **Today.** Under ADR-0012, any process that can make an HTTP call gets a management session from `POST /auth/session`, with no credential. With that session it can:
-> - read stored text through `ListPersistedSessions`;
-> - read live text through `StreamEvents` (`request_summary`, `response_summary`, and the body excerpts in `LogLineEvent`);
-> - fetch the management token through `GetManagementToken`.
->
-> #165's export and import, and #176's `GetTurnTexts`, would extend the same access.
->
-> **Decision** (ADR-0020, proposed). David chose passkeys, meaning WebAuthn with user verification required.
-> - **One operation per verification**, every time:
->   - export and import;
->   - `GetManagementToken`.
->
->   Each approval is bound to the one operation and its parameters.
-> - **Not gated.** Clear, deleting a session or an import, and lowering Sample Size. They destroy history rather than disclose it.
-> - **A read window.** Reading conversation text needs a short-lived content grant, issued by a verification: 15 minutes by default, ended by "Lock" or a restart. Without a grant, the same RPCs return metadata only.
-> - **Enrollment needs an administrator.** An elevated CLI gets a single-use code from the service, over a channel only an elevated caller can open, and the GUI's "Add passkey" dialog takes it. Synced passkeys are allowed, and the passkey list shows which ones are synced.
-> - **Closed until enrolled.** No conversation text is shown, and the gated operations are refused, until a passkey exists.
->
-> **Ship order.** #165's export and import, #176's `GetTurnTexts`, and ADR-0019's full view must not ship before this gate.
->
-> **Plan:** to be written as `docs/plans/issue-<N>-passkey-content-gate.md` once this issue is boarded (standing rules).
->
-> Related: ADR-0020, ADR-0012, ADR-0015, ADR-0019, #165, #176, #179, and the data-protection issue.
