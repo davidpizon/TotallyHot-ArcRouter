@@ -126,6 +126,7 @@ flowchart TB
   The same helper verifies ADR-0019's session folder, so #165 phase 1's startup check reuses it rather than writing its own.
 - **Migration.** The tree was writable by every local account, so migration treats each entry as untrusted until it is checked:
   - **It never follows a reparse point** (junction, symlink, or mount point). It renames the link itself into a quarantine folder inside the root, so a planted link cannot steer an ACL change into another tree.
+  - **It renames aside any regular file with more than one hard link**, rather than adopting it. A hard link is not a reparse point, and it shares its security with the file it points to, so changing its owner or ACL would change an outside file too. The link count comes from `GetFileInformationByHandle`, or from `st_nlink` on Unix. Renaming moves only that one link, so the outside file is untouched.
   - **It renames aside any entry owned by an untrusted account**, rather than adopting it. A trusted owner is `SYSTEM`, `Administrators`, or the root's original owner. The rule exists because an owner can always rewrite its own DACL.
   - **The root, and every adopted entry,** gets `Administrators` as its owner, and then its ACL is reset to inherit. On THEATRE-PC this moves the root from `david` to `Administrators`.
   - **`appsettings.local.json` is never adopted.**
@@ -139,7 +140,7 @@ flowchart TB
   - **Linux:** the unit adds `StateDirectoryMode=0700`, `LogsDirectoryMode=0700` and `UMask=0077`, and `install.sh` creates both directories with mode `0700`.
   - **macOS:** `install.sh` sets `0700` on the state tree, which includes `logs`, and the plist gets a `Umask` of `077`.
   - **Startup verification** checks the state directory and the logs directory alike. Each must be owned by the service account (or by the current user, for a dev run's per-user fallback), must not be a symlink, and must have no group or other permission bits.
-  - **Migration** removes group and other bits from existing files once, without following symlinks.
+  - **Migration** removes group and other bits from existing files once. It never follows a symlink, and it renames aside any file with more than one hard link instead of changing its mode.
 - **Two public files.** `web-interface.json` and `router-ca.crt` get an explicit `Users:R` ACE, because they hold only a URL, a thumbprint, and a public certificate. The tray keeps working (F6).
 - **The `.pfx` files** lose `Users` read with nothing else changing. Clients trust the CA through the certificate store (`--install-certificate`), not through the `.pfx` files.
 - **Operator effects.**
@@ -154,7 +155,9 @@ flowchart TB
   - **Purge.** If `busy` is non-zero, the next 5-minute retention cycle retries, and the retry is logged.
   - **Clear.** Clear cannot rely on that cycle. `TranscriptRetentionService.ExecuteAsync` exits at startup when capture is disabled, while `DeleteAllAsync` deliberately runs either way. So Clear retries the checkpoint itself, a few times over a few seconds. If the checkpoint is still busy, Clear reports, in an additive response field, that the deletion is not yet final.
   - **Startup.** The router runs `TRUNCATE` once at startup, before anything else opens the database. That finishes any deletion left pending.
-  - **Embedding memory.** `router_embedding_memory.db` runs in WAL mode too (`RouterMemoryDatabase.cs:288`). `SqliteMemoryEntryStore.DeleteAsync` gets the same `TRUNCATE`, busy handling, and startup checkpoint. It runs for capacity eviction in `EmbeddingMemory` today, and ADR-0019 adds deleting entries with their session.
+  - **Embedding memory.** `router_embedding_memory.db` runs in WAL mode too (`RouterMemoryDatabase.cs:288`). Its deletes get the same `TRUNCATE`, busy handling, and startup checkpoint. Today they come from capacity eviction in `EmbeddingMemory`, and ADR-0019 adds deleting entries with their session.
+    - **Batched.** `TrimToCurrentCapacityAsync` calls `DeleteAsync` once per evicted row (`EmbeddingMemory.cs:211-212`). A checkpoint inside `DeleteAsync` would therefore run once per row: 19,500 times when capacity drops from 20,000 to 500.
+    - So the store gains a bulk delete. It removes one eviction batch in a single transaction, then checkpoints once.
   - ADR-0019's whole-session retention later takes the same path.
 - **One-time scrub.** `secure_delete` zeroes content only when it is freed, so it cannot clean pages freed before it was turned on (s1). The scrub runs once, now on upgrade and again when ADR-0019 deletes the old text: `VACUUM` with `temp_store=MEMORY`, then `TRUNCATE`. It is the mechanism behind #165 phase 2's exit criterion, "neither do its freed pages".
 - **`synchronous=NORMAL`** has the same per-connection defect. Moving it into `OpenConnection` changes write durability and speed, so it is decision 8, not a silent fix.
@@ -222,7 +225,7 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
    - the Linux and macOS mode changes.
 2. **Secure delete.**
    - `secure_delete` in `OpenConnection` for `transcripts.db` and `router_embedding_memory.db`;
-   - `TRUNCATE` after purge, Clear and `memory_entries` deletes, plus Clear's own retry and the startup checkpoint;
+   - `TRUNCATE` after purge, Clear, and each batch of `memory_entries` deletes (with the new bulk delete), plus Clear's own retry and the startup checkpoint;
    - the one-time scrub.
 3. **Logs.**
    - the Information default;
@@ -240,11 +243,12 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - A SQLite `-wal` created after a close and reopen inherits the protected ACL (F5's probe, as a test).
 - A directory created first by another account is renamed aside and never adopted. So is a reparse point.
 - Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
+- Migration renames aside a planted hard link to a file outside the root. The outside file's owner and ACL (on Unix, its mode) are unchanged.
 - On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
 - A fresh **non-pooled** connection from `OpenConnection` returns 1 for `PRAGMA secure_delete` (F8).
 - Canary rows are absent from the db and the WAL after `DeleteOldestAsync`, after `DeleteBeforeAsync`, and after `DeleteAllAsync`. This is s2 as a test, sized to stay under 5 s.
-- Canary vectors are absent from `router_embedding_memory.db` and its WAL after `SqliteMemoryEntryStore.DeleteAsync`.
+- Canary vectors are absent from `router_embedding_memory.db` and its WAL after a batched eviction, and the batch runs exactly one checkpoint.
 - The one-time scrub removes canaries that were deleted before `secure_delete` was on (s1, then scrub).
 - A `busy` result from `TRUNCATE` is handled and logged.
 - With capture disabled and a reader holding the WAL:

@@ -115,7 +115,12 @@ What this ADR commits to:
     The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else.
   - **Challenge store.** Challenges live in one global, bounded store: at most 32 pending, each expiring after two minutes, with the oldest evicted when the store is full.
     - **No per-caller limit.** The router cannot rate-limit per caller, because nothing tells one loopback caller from another: every ticket in a generation is identical, and all callers share the loopback address.
-    - **Denial of service.** An application that floods challenges can evict the operator's challenge. The ceremony then fails and the GUI offers a retry, but the flood still cannot produce an approval without the operator's gesture.
+    - **Issuance is bounded too.** One global token bucket admits challenge requests, for example 10 a minute with bursts of 5.
+      - Requests beyond it are refused with `ResourceExhausted`.
+      - Refusals are logged as one coalesced line per minute with a count.
+
+      So a flood cannot burn CPU without limit, fill the log, or push real audit records out of the 30-file window.
+    - **Denial of service.** An application that floods challenges can evict the operator's challenge, or use up the global allowance. The ceremony then fails, and the GUI offers a retry, which may wait up to a minute for the allowance to refill. The flood still cannot produce an approval without the operator's gesture.
     - **Accepted.** Availability against a hostile local application is not a goal of this ADR; the gate protects against disclosure. Every challenge is logged, so a flood is visible.
   - **A read window.** Reading conversation text needs a content grant. That covers `ListPersistedSessions` text, `GetTurnTexts`, ADR-0019's full view, and the text fields of `StreamEvents`.
     - **What it is.** A verification returns the grant as an opaque random token in the response body.
@@ -129,7 +134,7 @@ What this ADR commits to:
 - **Closed until enrolled** (David, 2026-09-30). Before any passkey exists, conversation text stays hidden. The gated operations are refused with `FailedPrecondition`, and the message names the enrollment command.
 - **Not gated (David, 2026-09-30).** Clear, deleting a session or an import, and lowering Sample Size stay on ADR-0012's session. They destroy history rather than disclose it.
 - **Everything else is unchanged.** ADR-0012's session still covers metadata, routing, providers, prices, and settings. The MCP endpoint exposes no conversation content and is also unchanged.
-- **Audit.** Every challenge, verification, refusal and gated operation is logged with a static Serilog template: the operation, the credential's name, and the outcome. No conversation text is logged. The GUI lists recent approvals, so an approval the operator did not make is visible.
+- **Audit.** Every issued challenge, verification and gated operation is logged with a static Serilog template: the operation, the credential's name, and the outcome. Refused challenge requests are coalesced, as described under "Challenge store". No conversation text is logged. The GUI lists recent approvals, so an approval the operator did not make is visible.
 
 ### Consequences
 
@@ -143,7 +148,7 @@ What this ADR commits to:
 - Bad, because it adds friction: a prompt for each export, import and token copy, and one per read window.
 - Bad, because any application that can make an HTTP call can still destroy history: it can run Clear, delete a session or an import, or lower Sample Size. David chose to leave these ungated, since they destroy data rather than disclose it.
 - Bad, because the read grant is a bearer token for its 15 minutes. An application that can read the dashboard's memory, for example by injecting into the browser, could reuse it for reads, though not for one-operation actions. The window is short for that reason.
-- Bad, because any local application can disrupt a verification by flooding challenges (see "Challenge store"). It cannot pass the gate, but it can make the operator retry.
+- Bad, because any local application can disrupt a verification by flooding challenges (see "Challenge store"). It cannot pass the gate, but it can make the operator retry, or wait up to a minute for the issuance allowance to refill.
 - Bad, because some attacks remain:
   - Malware running as the operator can still capture the screen while a session is open, or read an export after it is saved.
   - Malware can also trigger a prompt at a moment the operator expects one. The GUI saying what is being approved, and its list of recent approvals, reduce that.
@@ -214,7 +219,7 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 - **WebAuthn and localhost.** WebAuthn accepts `localhost` as a relying-party ID and never an IP address. Browsers enforce this: Chrome allows WebAuthn on `https://localhost`, not on `https://127.0.0.1`.
 - **Why not ASP.NET Core Identity's passkeys.** .NET 10 Identity's passkey support is scoped to Identity sign-in, through `SignInManager` and `UserManager`. This router has no Identity users, so a standalone library fits better.
 - **Left to the implementation plan:**
-  - the challenge and grant lifetimes, and the challenge store's size;
+  - the challenge and grant lifetimes, the challenge store's size, and the issuance rate;
   - how the GUI shows locked text and the "Lock" control;
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;
