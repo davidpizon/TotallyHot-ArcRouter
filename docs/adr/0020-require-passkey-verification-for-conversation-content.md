@@ -14,7 +14,7 @@ Under [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), the w
 That session can read conversation text today:
 - `ListPersistedSessions` returns stored prompt and reply text. It becomes previews once [#179](../plans/issue-179-persisted-sessions-list-size.md) lands.
 - `StreamEvents` carries live `request_summary` and `response_summary` fields. It also carries `LogLineEvent` lines, which hold request and response excerpts at the shipped Debug level.
-- `GetManagementToken` returns the management token. That token opens the token-login path and the MCP endpoint.
+- `GetManagementToken` returns the management token, and so does `RegenerateManagementToken`, which returns the new one (`ManagementTokenAdminGrpcService`). That token opens the token-login path and the MCP endpoint.
 - Planned:
   - [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176)'s `GetTurnTexts`;
   - [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md)'s full view of a session;
@@ -102,6 +102,10 @@ What this ADR commits to:
 
     From any other origin, the gated operations are unavailable. Supporting one needs its own decision: an operator-supplied certificate or a TLS-terminating proxy, and the exact origin to allow.
 - **Enrollment needs an administrator.**
+  - **The code is unguessable.** The enrollment code is the only credential the registration endpoint accepts, and every loopback application can reach that endpoint.
+    - It comes from a cryptographically secure generator, with at least 128 bits of entropy, shown as grouped base32 characters for typing.
+    - The router compares it in constant time.
+    - Five wrong codes invalidate it, and the operator mints a new one.
   - **A privileged handoff, not a direct write.** An elevated CLI command asks the running service for a single-use enrollment code, valid for 10 minutes, over a local channel that only an elevated caller can open:
     - **Windows:** a named pipe whose ACL admits only `SYSTEM` and Administrators, so only an elevated token can connect;
     - **Linux and macOS:** a Unix socket in the protected state directory, where the service accepts a peer only if its credentials are root or the service account.
@@ -122,7 +126,7 @@ What this ADR commits to:
 - **What a verification unlocks.**
   - **One operation per verification.** A fresh verification is needed every time for:
     - export and import;
-    - `GetManagementToken`.
+    - `GetManagementToken`, and `RegenerateManagementToken`, which also returns a token.
 
     The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else.
 
@@ -153,6 +157,11 @@ What this ADR commits to:
     - **How long it lasts.** 15 minutes by default (David, 2026-09-30). It ends early at "Lock" or a router restart, and it never authorizes a one-operation action.
     - **Why not a cookie.** Cookies are scoped to a host, not a port. The browser would send a `localhost` cookie to any trusted `https://localhost:<other port>` service, where another local application could capture it and replay it. Script state is scoped to the full origin (scheme, host and port), so the token never leaves the dashboard. ADR-0012's ticket cannot carry the grant either, because every caller in a generation gets the same ticket.
   - **Without a grant**, the same RPCs return metadata only. `StreamEvents` drops its text fields, checked per event, so a grant that expires mid-stream stops the text from then on.
+  - **Marked log lines.** `LogLineEvent` today carries only a rendered `message` (`TelemetryLogEventSink`), so nothing tells a conversation-bearing line from a diagnostic one.
+    - The four conversation-bearing templates (#184's F9) set a marker property at the source.
+    - `TelemetryLogEventSink` copies it into a new, additive `content_bearing` field.
+    - `StreamEvents` drops marked lines for sessions without a grant. Every other line still streams, so the Console tab keeps its diagnostics while locked.
+    - #184's opt-in body files select their lines by the same marker.
 - **Closed until enrolled** (David, 2026-09-30). Before any passkey exists, conversation text stays hidden. The gated operations are refused with `FailedPrecondition`, and the message names the enrollment command.
 - **Not gated (David, 2026-09-30).** Clear, deleting a session or an import, and lowering Sample Size stay on ADR-0012's session. They destroy history rather than disclose it.
 - **Everything else is unchanged.** ADR-0012's session still covers metadata, routing, providers, prices, and settings. The MCP endpoint exposes no conversation content and is also unchanged.
@@ -167,7 +176,7 @@ What this ADR commits to:
   - Only an administrator can change the enrolled public keys.
   - Its one bearer credential, the read grant, expires in 15 minutes and authorizes no one-operation action.
 - Bad, because a fresh install shows no conversation text until an administrator enrolls a passkey. Today's zero-setup Sessions tab ends.
-- Bad, because it adds friction: a prompt for each export, import and token copy, and one per read window.
+- Bad, because it adds friction: a prompt for each export, import, token copy and token regeneration, and one per read window.
 - Bad, because any application that can make an HTTP call can still destroy history: it can run Clear, delete a session or an import, or lower Sample Size. David chose to leave these ungated, since they destroy data rather than disclose it.
 - Bad, because the read grant is a bearer token for its 15 minutes. An application that can read the dashboard's memory, for example by injecting into the browser, could reuse it for reads, though not for one-operation actions. The window is short for that reason.
 - Bad, because any local application can disrupt a verification by flooding challenges (see "Challenge store"), or by churning the single import stage. It cannot pass the gate, but it can make the operator retry, or wait up to a minute for the issuance allowance to refill.
@@ -219,7 +228,7 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 
 - Good, because the mechanism already exists: the `x-admin-token` header and `/auth/login`.
 - Bad, because the token is a copyable bearer secret, already written into MCP client configs that any of the operator's applications can read.
-- Bad, because `GetManagementToken` hands it to any session. Closing that RPC still leaves the copies in those configs.
+- Bad, because `GetManagementToken` and `RegenerateManagementToken` hand it to any session. Closing those RPCs still leaves the copies in those configs.
 - Bad, because it proves possession of a string, not a person's approval.
 
 ### Require passkey user verification (WebAuthn) for content operations

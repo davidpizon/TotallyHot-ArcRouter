@@ -55,9 +55,9 @@
 | F7 | Deleted rows stay recoverable. See the residue table below. | Scratchpad harness |
 | F8 | **Pragmas are per connection.** `synchronous=NORMAL`, set once in `EnsureCreated`, reads back as `2` (FULL) on a new physical connection. `secure_delete` set the same way leaves 298 of 300 cleared rows recoverable (s5). Only `journal_mode=WAL` persists in the file. | Harness, s0 and s5 |
 | F9 | The shipped `appsettings.json` sets Serilog's `MinimumLevel.Default` to `Debug`. At Debug, four templates write conversation text to `logs\arcrouter-*.log`:<br>- `[INTERCEPTOR] Intercepted agent request message` and `... response message`, which log the first 4,000 characters of each body (`RequestInterceptor`, `ProxyMiddleware`);<br>- `[INTERCEPTOR] Newest user message` (`RequestInterceptor`);<br>- `[INTERCEPTOR] Assembled LLM response text` (`RequestTelemetryPublisher`).<br>The newest 30 files are kept, with daily rolling. `LogRedaction` only strips CR/LF and truncates, so key-shaped strings are logged as they are. Clear does not touch the logs. | Code and config. Log contents were not opened. |
-| F10 | ADR-0012's loopback fast path gives a session to "any local account", meaning any process that can make an HTTP call. Session text then leaves through these RPCs, so the file ACL does not change who can read it:<br>- `ListPersistedSessions` returns `prompt_text` and `response_text`: full text today, previews after #179.<br>- `StreamEvents` carries live `request_summary` and `response_summary`, plus `LogLineEvent` lines that contain F9's excerpts.<br>- `GetManagementToken` returns the token to any session.<br>- Planned: #176's per-turn text, and #165's export and import.<br>No MCP tool and no proxy endpoint returns session data (`/v1/models` is the proxy's only local endpoint). | ADR-0012 Consequences, `telemetry.proto`, and code |
+| F10 | ADR-0012's loopback fast path gives a session to "any local account", meaning any process that can make an HTTP call. Session text then leaves through these RPCs, so the file ACL does not change who can read it:<br>- `ListPersistedSessions` returns `prompt_text` and `response_text`: full text today, previews after #179.<br>- `StreamEvents` carries live `request_summary` and `response_summary`, plus `LogLineEvent` lines that contain F9's excerpts.<br>- `GetManagementToken` returns the token to any session, and `RegenerateManagementToken` returns the new one.<br>- Planned: #176's per-turn text, and #165's export and import.<br>No MCP tool and no proxy endpoint returns session data (`/v1/models` is the proxy's only local endpoint). | ADR-0012 Consequences, `telemetry.proto`, and code |
 | F11 | `Package.wxs` deliberately never references `%ProgramData%`, so uninstall keeps the folder (comment at lines 37-55). | Code |
-| F12 | **Linux and macOS installs are open the same way.**<br>- **Linux.** `install.sh` creates `/var/lib/totallyhot-arcrouter` and `/var/log/totallyhot-arcrouter` with a plain `mkdir -p`. The unit's `StateDirectory` and `LogsDirectory` set no mode, and the unit sets no `UMask`, so systemd's defaults apply: 0755 directories, and files created under a 022 umask.<br>- **macOS.** `install.sh` creates `/Library/Application Support/TotallyHotArcRouter` (with `logs` inside) and never runs `chmod`. The tree is owned by `_arcrouter:staff`, and the plist sets no `Umask`.<br>Every local account can therefore read state and logs. On Linux, the logs also live outside the state root. | `packaging/linux/install.sh`, `totallyhot-arcrouter.service`, `packaging/macos/install.sh`, `com.totallyhot.arcrouter.plist`. Not observed on a machine. |
+| F12 | **Linux, macOS and Docker installs are open the same way.**<br>- **Linux.** `install.sh` creates `/var/lib/totallyhot-arcrouter` and `/var/log/totallyhot-arcrouter` with a plain `mkdir -p`. The unit's `StateDirectory` and `LogsDirectory` set no mode, and the unit sets no `UMask`, so systemd's defaults apply: 0755 directories, and files created under a 022 umask.<br>- **macOS.** `install.sh` creates `/Library/Application Support/TotallyHotArcRouter` (with `logs` inside) and never runs `chmod`. The tree is owned by `_arcrouter:staff`, and the plist sets no `Umask`.<br>- **Docker.** The image creates `/data` with no `chmod` (`Dockerfile:72-75`), so it is `0755`.<br>Every local account can therefore read state and logs. On Linux, the logs also live outside the state root. | `packaging/linux/install.sh`, `totallyhot-arcrouter.service`, `packaging/macos/install.sh`, `com.totallyhot.arcrouter.plist`. Not observed on a machine. |
 
 **Residue.** The harness inserted 300 rows, one connection per insert, as `SqliteTranscriptStore` does. Every 50th row was 24 KB, so it spilled onto overflow pages. Retention then purged ids 1–150 (`DeleteOldestAsync`, then `DeleteBeforeAsync`), and Clear deleted the rest. Each cell counts the deleted rows whose text was still in the file.
 
@@ -93,7 +93,7 @@ flowchart TB
         Sess["ADR-0019 session files and spools (session folder inherits the root DACL)"]
         Mem["router_embedding_memory.db: secure_delete on every connection"]
         Other["other databases, .pfx files, logs\, models\, appsettings.local.json"]
-        Pub["web-interface.json and router-ca.crt: explicit Users:R"]
+        Pub["web-interface.json: explicit Users:R"]
     end
     Secret["secrets.dat (ADR-0015): CA passwords now, ADR-0019's master key later"] --> Idx
     Tray["Tray (unelevated)"] -- "reads only" --> Pub
@@ -141,7 +141,18 @@ flowchart TB
   - **macOS:** `install.sh` sets `0700` on the state tree, which includes `logs`, and the plist gets a `Umask` of `077`.
   - **Startup verification** checks the state directory and the logs directory alike. Each must be owned by the service account (or by the current user, for a dev run's per-user fallback), must not be a symlink, and must have no group or other permission bits.
   - **Migration** copies files into the new `0700` tree, as above. It changes no mode in place, so it never touches a symlink's target or a hard-linked file's inode.
-- **Two public files.** `web-interface.json` and `router-ca.crt` get an explicit `Users:R` ACE, because they hold only a URL, a thumbprint, and a public certificate. The tray keeps working (F6).
+  - **Docker.** The image creates `/data` with `mkdir -p` and `chown`, but no `chmod` (`Dockerfile:72-75`), so it is `0755`, and the documented `-v arcrouter-data:/data` deployment would fail the check above.
+    - The image creates `/data` with mode `0700`, and its entrypoint sets `umask 077`.
+    - Inside the container the only accounts are root and the non-root service account, which already owns every file in the volume. So for an older named volume the bootstrap removes group and other bits in place, as the owner, with no elevated step. Named volumes live under a host directory only root can read, so no other host account could have planted entries.
+    - A bind mount is the operator's responsibility. The docs require it to be owned by the container's UID with mode `0700`, and the bootstrap fails closed otherwise.
+- **The public CA certificate.** `router-ca.crt` holds only a public certificate, but `docs/router/client-tls-setup.md` has users read it: Firefox and Chrome-on-Linux imports, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, and `curl --cacert`. A `0700` state directory, or an admin-only root, would hide it.
+  - The service rewrites it at each start into a public directory that every user can read and only the service and administrators can write:
+    - **Windows:** `%ProgramData%\TotallyHotArcRouter-Public\`;
+    - **Linux:** a systemd `RuntimeDirectory` with mode `0755`, at `/run/totallyhot-arcrouter/`;
+    - **macOS:** `/Library/Application Support/TotallyHotArcRouter-Public/`, owned by root with mode `0755`.
+  - `client-tls-setup.md` points there.
+  - **The squat checks apply.** That directory holds a trust anchor that users import, so a copy planted by another account would make them trust the attacker's root. The bootstrap applies the same owner and reparse checks as for the root, and rejects a directory it did not create.
+- **`web-interface.json`** keeps an explicit `Users:R` ACE in the root, because it holds only a URL and a thumbprint. The tray opens it by its full path, which needs no traverse right on the root, so the tray keeps working (F6).
 - **The secret-store writer (decision 4).** `SecureFile.WriteMachineShared` grants the writing account full control (`SecureFile.cs:158-165`; ADR-0015's writing-account rule). So any administrative rewrite of `secrets.dat` would hand that account's unelevated applications read access again.
   - **Machine-wide writes** grant only `SYSTEM` and `Administrators`.
   - **The per-user fallback** keeps `WriteRestricted`'s current-user-only ACL.
@@ -172,6 +183,7 @@ flowchart TB
 **3.3 Logs (F9).**
 - Ship `MinimumLevel.Default: Information`.
 - Put all four conversation-bearing templates (F9) behind their own opt-in switch, and write them to their own files (for example `logs\bodies-*.log`). Clear and uninstall can then remove them without touching the diagnostic logs.
+- The four templates carry a marker property (ADR-0020). It selects their lines for the body files, and it lets `StreamEvents` drop them for sessions without a content grant.
 - Pass their text through the same secret obscuring ADR-0019 uses for storage.
 - **Clear** first closes the body sink, which flushes and releases its file. It then deletes every body file and reopens the sink. Deleting under an open sink would not work: Windows refuses to delete the open file, and elsewhere the sink would keep writing to the unlinked file.
 - **Pre-upgrade logs.** Files written before the upgrade still hold unobscured excerpts, and would otherwise linger until the newest-30 limit rolls them off.
@@ -225,7 +237,7 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
 ## 5. Phasing
 
 0. **ADR.** It records:
-   - the directory boundary and the two `Users:R` exceptions;
+   - the directory boundary, the `Users:R` exception for `web-interface.json`, and the public CA directory;
    - secure deletion;
    - the uninstall behavior;
    - that conversation text over the API is gated by ADR-0020;
@@ -236,10 +248,11 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
    - the verification helper and atomic creation;
    - the legacy-owner rule, and the migration into a new protected tree with its quarantine;
    - the elevated `--migrate-data-directory` command, run by the MSI and `install.sh` on install and upgrade;
-   - the two `Users:R` exceptions;
+   - the `web-interface.json` `Users:R` exception;
    - the secret-store writer change;
    - the MSI folder creation;
-   - the Linux and macOS mode changes.
+   - the Linux, macOS and Docker mode changes;
+   - the public CA certificate directory, with `client-tls-setup.md` updated to match.
 2. **Secure delete.**
    - `secure_delete` in `OpenConnection` for `transcripts.db` and `router_embedding_memory.db`;
    - `TRUNCATE` after purge, Clear, and each batch of `memory_entries` deletes (with the new bulk delete), plus Clear's own retry and the startup checkpoint;
@@ -273,6 +286,8 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
   - on Unix, does not see writes made after migration through the pre-opened descriptor.
 - On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
+- On every platform, an ordinary user can read `router-ca.crt` from the public directory. A public directory created by another account is rejected.
+- In Docker, an older named volume at mode `0755` is tightened in place by its owner. A bind mount with the wrong owner or mode makes the bootstrap fail closed.
 - A fresh **non-pooled** connection from `OpenConnection` returns 1 for `PRAGMA secure_delete` (F8).
 - Canary rows are absent from the db and the WAL after `DeleteOldestAsync`, after `DeleteBeforeAsync`, and after `DeleteAllAsync`. This is s2 as a test, sized to stay under 5 s.
 - Canary vectors are absent from `router_embedding_memory.db` and its WAL after a batched eviction, and the batch runs exactly one checkpoint.
