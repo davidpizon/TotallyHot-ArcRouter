@@ -83,7 +83,7 @@ Export can only package what was kept. Shipping a zip of `prompt_text` / `respon
 - `archive_session_id` — UUID minted when the session's file is created. It identifies the session across machines, where `session_id` can collide, and import matches existing sessions on it (§2).
 - **The client's exchange.**
   - The request bytes exactly as the client sent them, taken before `RequestInterceptor` decodes them.
-  - The response bytes exactly as relayed to the client, with no size cap. Today's 4 MiB telemetry capture stays as it is, and the full copy is taken alongside it.
+  - The response bytes exactly as relayed to the client, with no size cap. Today's 4 MiB telemetry capture stays as it is, and the full copy is taken alongside it. The copy streams through ADR-0019's bounded capture, an encrypted spool, so memory stays bounded however large the response is.
   - Record `content_encoding` (`json` or `sse`).
 - **The provider-side request and response**, only when a translator ran (Gemini always; Anthropic when translated), because only then do they differ from the client's exchange.
 - **The per-turn text extracts** that the learning jobs and the Sessions tab read: the newest user message and the reply text.
@@ -113,10 +113,10 @@ One code path writes the zip. The CLI and the Sessions tab's Export / Import mod
 ```text
 manifest.json
 turns.jsonl
-conversations/{session_id}/turns/{turn:D4}.request.json
-conversations/{session_id}/turns/{turn:D4}.response.json
-conversations/{session_id}/turns/{turn:D4}.provider-request.json    (translated turns only)
-conversations/{session_id}/turns/{turn:D4}.provider-response.json   (translated turns only)
+conversations/{archive_session_id}/turns/{turn:D4}.request.json
+conversations/{archive_session_id}/turns/{turn:D4}.response.json
+conversations/{archive_session_id}/turns/{turn:D4}.provider-request.json    (translated turns only)
+conversations/{archive_session_id}/turns/{turn:D4}.provider-response.json   (translated turns only)
 ```
 
 - `manifest.json`: `schema_version` (integer `1`), `exported_at_utc`, router version, the filter that produced the file, counts (conversations, turns, missing bodies, bytes), a SHA-256 for `turns.jsonl` and for every body entry, and each session's `session_sha256` (§2). Zip CRC32 is incidental; import trusts the manifest hashes.
@@ -126,7 +126,7 @@ conversations/{session_id}/turns/{turn:D4}.provider-response.json   (translated 
   - Hashes are computed over the stored bytes, after secrets were obscured at write.
   - This is the index a test harness reads without opening every body.
 - Body files: the raw bytes, UTF-8 JSON or SSE, not pretty-printed (pretty-printing would change the hash). A missing body (capture failed, or a pre-archive transcript export if one is ever allowed) is an absent file plus `content_fidelity` set to the real level, never an empty file pretending to be the body.
-- Session directory names are the sanitized session id. Characters outside `[A-Za-z0-9._-]` become `_`. The unsanitized id stays in `turns.jsonl`.
+- Session directory names are the `archive_session_id`, a UUID. So two sessions never share a directory, even when their client session ids collide across machines, and no sanitizing is needed. The client's `session_id` stays in `turns.jsonl` as metadata only.
 
 **Compression:** Deflate (the `ZipArchive` default). Bodies are already JSON text, so Deflate is where the size win is. Do not gzip the bodies a second time inside the entry.
 
@@ -163,6 +163,10 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
    - A body whose hash doesn't match rejects that turn.
 4. Each JSONL line parses, has `archive_turn_id`, `archive_session_id`, `session_id`, `turn_number`, `created_at_utc`, and paths that stay under `conversations/`. There is no body size limit (ADR-0019). Bodies are streamed, never loaded whole.
 5. Unknown extra JSON fields are ignored so a later additive field does not break an older importer. Missing required fields reject the turn.
+6. **Disk budget.** First decide which sessions to skip and fill (§2 below). Then sum the declared lengths of the bodies that will be stored.
+   - Refuse the import unless free space exceeds that sum plus a reserve: the larger of 1 GiB and 10% of the volume.
+   - While streaming, an entry that inflates past its declared length is rejected, as is one whose declared lengths total more than the manifest says. That stops compression bombs and lying manifests.
+   - Fidelity is unaffected: a body is still stored whole or not at all.
 
 **Obscuring on write.** Import writes session files, so secrets are obscured exactly as on capture (ADR-0019). A zip made by another machine or an older version may still contain some. If obscuring changes a body, the stored SHA-256 is the new one, and the zip's hash is kept as `source_sha256`.
 
@@ -215,7 +219,13 @@ Read the zip from a path. `ZipArchive` read mode needs a seekable file, which a 
 - **The Export / Import modal lists imports** and can delete one.
 - Imports count toward retention by their stored timestamps (decision 11).
 
-**Idempotency:** importing the same zip twice under `skip` is a no-op after the first success. The unique key is `archive_turn_id`. A crash mid-import leaves a partial set; re-running `skip` fills the gap without duplicating. Import runs in one SQLite transaction per batch (for example 100 turns) so a process kill loses a batch, not the whole file, and does not hold a multi-gigabyte transaction.
+**Idempotency and crash recovery:**
+- Importing the same zip twice under `skip` is a no-op after the first success. The unique key is `archive_turn_id`.
+- A SQLite transaction can't cover session-file writes, so import follows ADR-0019's commit order:
+  - each turn's records are appended to its session file and flushed to disk first;
+  - then the batch's index rows (for example 100 turns) commit in one transaction.
+- **Recovery after a crash.** At startup the router truncates each session file back to the end of its last committed record, and deletes spools and new session files that have no committed index row. A killed import therefore loses only the batch in flight, and re-running it under `skip` fills the gap without duplicating.
+- Batching keeps any one transaction small, rather than one multi-gigabyte transaction.
 
 ## 3. Purpose: larger test datasets
 
@@ -331,6 +341,14 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
 - Export filter: a date window and a harness filter select the right turns and the manifest records the filter.
 - Streaming bound: exporting many small turns writes incrementally (assert the writer is invoked per turn, using a fake body store).
 - Import: bad version, bad hash, zip-slip name, and malformed JSONL line each take the path in section 2. `skip` is idempotent. `overwrite` replaces bytes. `keep-both` does not grow on a second `skip`.
+- Import safety:
+  - a zip whose declared bodies exceed free space minus the reserve is refused before anything is written;
+  - an entry that inflates past its declared length is rejected;
+  - two sessions with the same client `session_id` but different `archive_session_id` stay separate, in the store and in the zip.
+- Crash recovery. A process killed between a batch's file flush and its index commit leaves, after restart:
+  - no uncommitted records;
+  - no orphan spools or files;
+  - a re-run that adds exactly the missing turns.
 - Import timestamps:
   - `original` keeps every turn's `created_at_utc`.
   - `import-time` shifts every timestamp of a new session by one offset, keeps order and spacing, and records `original_created_at_utc`.
