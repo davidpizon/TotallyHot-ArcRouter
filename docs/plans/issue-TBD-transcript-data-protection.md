@@ -147,6 +147,13 @@ flowchart TB
   - **Startup verification** checks the state directory and the logs directory alike. Each must be owned by the service account (or by the current user, for a dev run's per-user fallback), must not be a symlink, and must have no group or other permission bits.
   - **Migration** removes group and other bits from existing files once. It never follows a symlink, and it renames aside any file with more than one hard link instead of changing its mode.
 - **Two public files.** `web-interface.json` and `router-ca.crt` get an explicit `Users:R` ACE, because they hold only a URL, a thumbprint, and a public certificate. The tray keeps working (F6).
+- **The secret-store writer (decision 4).** `SecureFile.WriteMachineShared` grants the writing account full control (`SecureFile.cs:158-165`; ADR-0015's writing-account rule). So any administrative rewrite of `secrets.dat` would hand that account's unelevated applications read access again.
+  - **Machine-wide writes** grant only `SYSTEM` and `Administrators`.
+  - **The per-user fallback** keeps `WriteRestricted`'s current-user-only ACL.
+  - **No lockout.** Only `SYSTEM`, or an administrator running elevated, writes the machine-wide store, so the writer cannot lock itself out (the risk ADR-0015 noted).
+  - **Linux and macOS.** Only the service account writes the store. Tools running as root go through ADR-0020's privileged channel, since a root-owned `0600` file is unreadable to the service.
+
+  This revises an accepted ADR's rule, so the phase-0 ADR records it.
 - **The `.pfx` files** lose `Users` read with nothing else changing. Clients trust the CA through the certificate store (`--install-certificate`), not through the `.pfx` files.
 - **Operator effects.**
   - Editing `appsettings.local.json` or opening `logs\` by hand now needs elevation. The Console tab still streams the logs.
@@ -184,7 +191,7 @@ Today these logs break two of ADR-0019's privacy drivers: "no readable conversat
 - truncate the WAL afterwards (s3);
 - treat `busy` as "not yet final", and retry it.
 
-The master-key rotation rewrites `secrets.dat` through `WriteAtomically`, a temp file and a rename. That frees the old file's disk blocks without overwriting them, which is the secret-store remnant ADR-0019 already leaves to BitLocker.
+The master-key rotation rewrites `secrets.dat` through `WriteAtomically`, a temp file and a rename. It runs in the service, and with §3.1's writer change the new file grants only `SYSTEM` and `Administrators`. The rename frees the old file's disk blocks without overwriting them, which is the secret-store remnant ADR-0019 already leaves to BitLocker.
 
 **3.5 Uninstall (F11).** A best-effort custom action runs on a genuine uninstall only, using `UninstallCertificate`'s condition: `REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE`. Once ADR-0019's master key exists, it:
 - deletes only that master-key entry from `secrets.dat`, which leaves every session file undecryptable;
@@ -211,6 +218,12 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
   - Otherwise, accept only a router-owned `exports\` folder inside the protected root.
   - Either way, export and import also sit behind ADR-0020's passkey gate. Moving the bytes fixes the SYSTEM-privileged write and read, but not who may export.
   - **Import binds to the bytes** (ADR-0020). #165's import stages the archive first, into a router-owned spool in the protected root, and the passkey challenge binds the staged file's SHA-256. The router then imports exactly that staged file. Approving a path instead would let an application running as the operator swap the zip between the ceremony and the read.
+  - **Staging is bounded** (ADR-0020), because it happens before the passkey check:
+    - one stage at a time;
+    - the declared length is checked against free space minus #165's reserve before any data is written;
+    - an unclaimed stage expires after 10 minutes, and every stage is deleted at startup.
+
+    #165's own free-space and compression-bomb checks run after staging, so they don't cover this.
 - **#165's CLI flag.** `--export-conversations` runs as whoever launches it. Once the store is protected, it needs an elevated prompt, and #165's docs should say so.
 - **#179** sends previews instead of full text. Previews are still text, so F10 applies to them too.
 
@@ -220,13 +233,15 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
    - the directory boundary and the two `Users:R` exceptions;
    - secure deletion;
    - the uninstall behavior;
-   - that conversation text over the API is gated by ADR-0020.
+   - that conversation text over the API is gated by ADR-0020;
+   - that machine-wide secret writes drop ADR-0015's writing-account ACE.
 
    Either a new ADR or an amendment to ADR-0019 while it is still proposed (decision 2).
 1. **Directory DACL.**
    - the verification helper and atomic creation;
    - the migration and its quarantine;
    - the two `Users:R` exceptions;
+   - the secret-store writer change;
    - the MSI folder creation;
    - the Linux and macOS mode changes.
 2. **Secure delete.**
@@ -267,6 +282,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - The pre-upgrade rewrite removes a planted line of each of the four F9 templates, and keeps every other line. A file it cannot rewrite is deleted.
 - The bootstrap sets aside a planted `appsettings.local.json` before host configuration can load it, including one owned by the root's own owner. It also rejects a machine-wide root owned by an individual account.
 - A model file that fails its published checksum after migration is quarantined, not loaded.
+- Rewriting a machine-wide secret as an elevated administrator leaves an ACL of only `SYSTEM` and `Administrators`, with no ACE for the writer. The per-user fallback still grants only the current user.
 - Clear deletes the body-excerpt files while the body sink is open and writing, and the sink keeps working afterwards.
 
 ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in #165's plan.
@@ -348,7 +364,7 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
 >   Each approval is bound to the one operation and its parameters.
 > - **Not gated.** Clear, deleting a session or an import, and lowering Sample Size. They destroy history rather than disclose it.
 > - **A read window.** Reading conversation text needs a short-lived content grant, issued by a verification: 15 minutes by default, ended by "Lock" or a restart. Without a grant, the same RPCs return metadata only.
-> - **Enrollment needs an administrator.** An elevated CLI prints a single-use code, and the GUI's "Add passkey" dialog takes it. Synced passkeys are allowed, and the passkey list shows which ones are synced.
+> - **Enrollment needs an administrator.** An elevated CLI gets a single-use code from the service, over a channel only an elevated caller can open, and the GUI's "Add passkey" dialog takes it. Synced passkeys are allowed, and the passkey list shows which ones are synced.
 > - **Closed until enrolled.** No conversation text is shown, and the gated operations are refused, until a passkey exists.
 >
 > **Ship order.** #165's export and import, #176's `GetTurnTexts`, and ADR-0019's full view must not ship before this gate.

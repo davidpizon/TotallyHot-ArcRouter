@@ -102,10 +102,17 @@ What this ADR commits to:
 
     From any other origin, the gated operations are unavailable. Supporting one needs its own decision: an operator-supplied certificate or a TLS-terminating proxy, and the exact origin to allow.
 - **Enrollment needs an administrator.**
-  - An elevated CLI command writes a single-use enrollment code, valid for 10 minutes, into the [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) secret store, and prints it. Only `SYSTEM` and Administrators can write to that store.
+  - **A privileged handoff, not a direct write.** An elevated CLI command asks the running service for a single-use enrollment code, valid for 10 minutes, over a local channel that only an elevated caller can open:
+    - **Windows:** a named pipe whose ACL admits only `SYSTEM` and Administrators, so only an elevated token can connect;
+    - **Linux and macOS:** a Unix socket in the protected state directory, where the service accepts a peer only if its credentials are root or the service account.
+
+    The service writes the code into the [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) secret store itself, and the CLI prints it.
+  - **Why the CLI never writes the store.** `SecureFile.WriteMachineShared` would grant the invoking user full control on Windows, letting that user's unelevated applications rewrite the enrolled credentials. On Linux and macOS it would leave a root-owned `0600` file that the service cannot read.
+  - **Pipe squatting.** The service creates the pipe as its first instance, and the CLI checks that the server process is the service before it sends anything.
+  - **Not the rejected pipe option.** This channel does not gate content. It only proves that the caller is elevated, which an unelevated application cannot fake.
   - The GUI's "Add passkey" dialog takes the code, and the router accepts a registration only with it.
-  - Removing a passkey is also an elevated CLI command.
-  - **Storage.** Enrolled credentials live in the same store: credential id, public key, signature counter, name, and date. They are not secret, but only an administrator can change them, so no application can add its own.
+  - Removing a passkey goes through the same channel.
+  - **Storage.** Enrolled credentials live in the same store: credential id, public key, signature counter, name, and date. They are not secret, but only `SYSTEM` and Administrators can change them, so no application can add its own. That depends on the data-protection plan's change to `WriteMachineShared`, which stops granting the writing account an ACE on machine-wide writes.
   - Several passkeys may be enrolled, so a security key can back up Windows Hello. A lost one is replaced the same way.
 - **What a verification unlocks.**
   - **One operation per verification.** A fresh verification is needed every time for:
@@ -115,6 +122,14 @@ What this ADR commits to:
     The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else.
 
     **Import binds to the bytes, not a path.** The archive is first staged into a router-owned spool in the protected data directory, and the challenge binds the staged file's SHA-256. The router then imports exactly the bytes the operator approved. Replacing the source file after the ceremony changes nothing, and an approval for one archive cannot import another.
+
+    **Staging is bounded**, because it happens before the passkey check:
+    - only one stage exists at a time, and a new upload replaces an unclaimed one;
+    - before any data is written, an upload is refused unless its declared length fits in free space minus #165's reserve (the larger of 1 GiB and 10% of the volume);
+    - an upload that grows past its declared length is cut off;
+    - an unclaimed stage expires after 10 minutes, and every stage is deleted at startup.
+
+    Any application can still occupy or churn the staging slot. Like challenge flooding, that is an accepted denial of service. It cannot exhaust the disk, or import anything without the gesture.
   - **Challenge store.** Challenges live in one global, bounded store: at most 32 pending, each expiring after two minutes, with the oldest evicted when the store is full.
     - **No per-caller limit.** The router cannot rate-limit per caller, because nothing tells one loopback caller from another: every ticket in a generation is identical, and all callers share the loopback address.
     - **Issuance is bounded too.** One global token bucket admits challenge requests, for example 10 a minute with bursts of 5.
@@ -150,7 +165,7 @@ What this ADR commits to:
 - Bad, because it adds friction: a prompt for each export, import and token copy, and one per read window.
 - Bad, because any application that can make an HTTP call can still destroy history: it can run Clear, delete a session or an import, or lower Sample Size. David chose to leave these ungated, since they destroy data rather than disclose it.
 - Bad, because the read grant is a bearer token for its 15 minutes. An application that can read the dashboard's memory, for example by injecting into the browser, could reuse it for reads, though not for one-operation actions. The window is short for that reason.
-- Bad, because any local application can disrupt a verification by flooding challenges (see "Challenge store"). It cannot pass the gate, but it can make the operator retry, or wait up to a minute for the issuance allowance to refill.
+- Bad, because any local application can disrupt a verification by flooding challenges (see "Challenge store"), or by churning the single import stage. It cannot pass the gate, but it can make the operator retry, or wait up to a minute for the issuance allowance to refill.
 - Bad, because some attacks remain:
   - Malware running as the operator can still capture the screen while a session is open, or read an export after it is saved.
   - Malware can also trigger a prompt at a moment the operator expects one. The GUI saying what is being approved, and its list of recent approvals, reduce that.
@@ -226,5 +241,6 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
   - how the GUI shows locked text and the "Lock" control;
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;
+  - the names of the enrollment pipe and socket, and their request format;
   - whether to require attestation.
 - **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).
