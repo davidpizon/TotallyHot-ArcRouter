@@ -253,7 +253,10 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
    - **Scope:** export and import, plus every RPC that returns conversation text.
    - **Not gated:** Clear, deleting a session or an import, and lowering Sample Size. They destroy history rather than disclose it.
    - **Recorded in** [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md) (proposed), which has its own issue ([Appendix B](#appendix-b-draft-issue-body-for-the-passkey-gate)). ADR-0020 holds the design, its limits, and the options it rejected.
-   - **Also decided:** conversation text stays hidden until a passkey is enrolled, and the read window defaults to 15 minutes.
+   - **Also decided:**
+     - conversation text stays hidden until a passkey is enrolled;
+     - the read window defaults to 15 minutes;
+     - synced passkeys are allowed.
 2. **ADR form.** Recommended: a new ADR for the directory boundary, because it covers files beyond conversations: `.pfx` files, configuration, logs, and the other databases. The alternative is to amend ADR-0019 while it is still proposed.
 3. **Scope.** The whole directory (A, recommended), or ADR-0019's session folder only (C)?
 4. **The writing account's ACE on dev machines.** Recommended, under decision 1's requirement: **no ACE for any individual account.** With one, any app running as that account reads the files directly.
@@ -319,7 +322,7 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
 >   Each approval is bound to the one operation and its parameters.
 > - **Not gated.** Clear, deleting a session or an import, and lowering Sample Size. They destroy history rather than disclose it.
 > - **A read window.** Reading conversation text needs a short-lived content grant, issued by a verification: 15 minutes by default, ended by "Lock" or a restart. Without a grant, the same RPCs return metadata only.
-> - **Enrollment needs an administrator.** An elevated CLI prints a single-use code, and the GUI's "Add passkey" dialog takes it.
+> - **Enrollment needs an administrator.** An elevated CLI prints a single-use code, and the GUI's "Add passkey" dialog takes it. Synced passkeys are allowed, and the passkey list shows which ones are synced.
 > - **Closed until enrolled.** No conversation text is shown, and the gated operations are refused, until a passkey exists.
 >
 > **Ship order.** #165's export and import, #176's `GetTurnTexts`, and ADR-0019's full view must not ship before this gate.
