@@ -202,6 +202,13 @@ flowchart TB
   - On the first start after the upgrade, the router rewrites each `arcrouter-*.log` without any line from the four F9 templates, and replaces the original with the rewrite.
   - A file it cannot rewrite is deleted.
   - The old disk blocks are not overwritten. That is the same remnant ADR-0019 leaves to BitLocker.
+  - **Platform copies of the console output.** Until now the Console sink also received these lines, and some platforms kept that output:
+    - **macOS:** the plist sends stdout and stderr to `launchd-stdout.log` and `launchd-stderr.log` in `logs` (`com.totallyhot.arcrouter.plist:28-31`). The same rewrite covers both files.
+    - **Linux:** systemd sends the console output to the journal. journald cannot delete one unit's entries, so the router cannot scrub it. The upgrade notes tell an operator who ran at the `Debug` level to rotate and vacuum the journal. Otherwise those entries age out under journald's own retention.
+    - **Docker:** container stdout lives in the host's log driver, which the router cannot reach. The notes say to recreate the container, which drops its logs, or to rely on the driver's rotation.
+    - **Windows:** the service has no console, so nothing was kept.
+
+    After the upgrade, marked events never reach the Console sink (above), so no new copies appear anywhere.
 
 Today these logs break two of ADR-0019's privacy drivers: "no readable conversation text at rest outside a protected store", and "no secret ever written to disk".
 
@@ -313,7 +320,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
   - Clear retries, then reports that the deletion is not final;
   - the next startup truncates the WAL.
 - A key-shaped string in a logged body is obscured.
-- The pre-upgrade rewrite removes a planted line of each of the four F9 templates, and keeps every other line. A file it cannot rewrite is deleted.
+- The pre-upgrade rewrite removes a planted line of each of the four F9 templates, and keeps every other line. A file it cannot rewrite is deleted. On macOS, `launchd-stdout.log` and `launchd-stderr.log` get the same treatment.
 - The bootstrap sets aside a planted `appsettings.local.json` before host configuration can load it, including one owned by the root's own owner. It also rejects a machine-wide root owned by an individual account.
 - A model file that fails its published checksum after migration is quarantined, not loaded.
 - Rewriting a machine-wide secret as an elevated administrator leaves an ACL of only `SYSTEM` and `Administrators`, with no ACE for the writer. The per-user fallback still grants only the current user.

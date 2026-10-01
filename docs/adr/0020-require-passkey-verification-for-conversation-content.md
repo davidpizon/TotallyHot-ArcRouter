@@ -92,7 +92,7 @@ What this ADR commits to:
   - On Windows, the tray and CLI reach the same authenticators through `webauthn.dll`, via `DSInternals.Win32.WebAuthn` ([webauthn-interop](https://github.com/MichaelGrafnetter/webauthn-interop), MIT).
   - **What the router checks.** An assertion counts only when all of these hold:
     - `clientDataJSON.type` is `webauthn.get` (`webauthn.create` at enrollment);
-    - its `challenge` is the one pending for that operation;
+    - its `challenge` is the one pending for that operation, and verification consumes that challenge atomically (compare and remove) before it issues any authorization. A replayed assertion, whether concurrent or later, then finds no pending challenge. Synced passkeys often keep the signature counter at zero, so the counter alone cannot catch a replay;
     - its `origin` is exactly the dashboard's origin, matching scheme, host and port (`https://localhost:47104` by default). A `localhost` credential works on every port, so the router refuses a page that another local app serves on a different port;
     - the authenticator data's `rpIdHash` is the SHA-256 of `localhost`;
     - the user-present and user-verified flags are set;
