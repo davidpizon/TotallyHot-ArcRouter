@@ -38,7 +38,7 @@ David's request, exact words:
 
 - The GUI's gRPC client runs at `Grpc.Net.Client`'s default 4 MB receive cap. Nothing in `src/` raises `MaxReceiveMessageSize`.
 - A long agent session's full prompt and response text can exceed that cap.
-- Keeping the per-session RPC metadata-only bounds each page at roughly 1 MB, even at the 2,000-turn page limit.
+- Keeping the per-session RPC metadata-only, with capped fields and a 2 MiB page budget, keeps every page well under the cap.
 
 **Review round 1 (Copilot on PR #178).** Nine findings changed the plan:
 
@@ -51,6 +51,14 @@ David's request, exact words:
 7. The router's metadata query never reads text bodies (§5.3).
 8. Truncation is detected from the live marker, and capped text stays marked (§5.6).
 9. An ADR is required before Phase 2 (§5.2).
+
+**Review round 2 (Copilot re-review on PR #178).** Five more findings changed the plan:
+
+1. Live-only fields are gated on the selected turn's source, not the conversation's (§5.1).
+2. "Used for training" is trusted only when true, and Phase 2 adds a whole-session aggregate (§5.1, §5.2).
+3. Details pages have a serialized-byte budget and capped string fields, and `correlation_id` left the wire (§5.2).
+4. `chat-scroll.js` and the messages pane have an explicit teardown path (§6.2).
+5. Narrow windows scroll the tab horizontally instead of clipping it (§6.4).
 
 ## 1. What exists today
 
@@ -257,7 +265,7 @@ Every color comes from an existing token. There is no new hue.
 ### 4.5 CSS in `app.css`
 
 - **Added.** One new "Sessions tab (three-pane)" section, following the existing `ls-` naming:
-  - `.ls-sessions-layout`, `.ls-sessions-rail`, `.ls-rail-item`, `.ls-rail-item-selected`
+  - `.ls-sessions-scroll` (the horizontal-scroll wrapper, §6.4), `.ls-sessions-layout`, `.ls-sessions-rail`, `.ls-rail-item`, `.ls-rail-item-selected`
   - `.ls-status-dot` with `.ls-status-live` / `-idle` / `-history`; `.ls-rail-footer`
   - `.ls-chat-pane`, `.ls-chat-title`, `.ls-chat-list`
   - `.ls-msg` with `.ls-msg-request` / `-response` / `-selected`; `.ls-msg-sender`, `.ls-msg-body`, `.ls-msg-time`, `.ls-msg-clamp`, `.ls-msg-chip`
@@ -292,9 +300,14 @@ Every color comes from an existing token. There is no new hue.
   - Aggregates coalesce with `?? 0` only where they add up: the `Total*` sums, the Session tab sparkline, and `CostAnalytics.razor`'s chart points.
   - `CacheHitRate` keeps its type and value for Cost Analytics. The details pane computes cache-hit % from the nullable counts itself, and shows "—" when any of them is unknown.
 - **`Conversation` gains `IsLive` (`bool`) and `IsSessionSynthesized` (`bool?`).**
-  - `LiveConversationMapper` sets `IsLive = true` and copies the live flag.
+  - `LiveConversationMapper` sets `IsLive = true` and copies the live flag. `Conversation.IsLive` drives only the rail's status dot.
   - A persisted-only session gets `IsSessionSynthesized = null`. The flag is not persisted, and a synthesized id cannot be recognized after a restart (§1). The Session tab shows "Unknown (not persisted)". Persisting the flag is a follow-up, outside this plan.
-  - The Message tab uses `IsLive` to decide which live-only fields exist. Persisted turns carry `0`, not `null`, in `TimeToFirstTokenMs` and `CacheHitRate`.
+- **`ConversationTurn` gains `IsLive` (`bool`, default `false`): where that turn's metrics came from.**
+  - `LiveConversationMapper` sets it. `PersistedSessionMapper` leaves it `false`. `SessionMerger` keeps it `true` for a turn found in both sources, because the live metrics win.
+  - The Message tab gates every live-only field (TTFT, cache, HTTP status, duration, provider) on the **selected turn's** `IsLive`, never on the conversation's. After a merge, a live conversation still holds persisted turns whose `TimeToFirstTokenMs` and `CacheHitRate` are `0` placeholders.
+- **"Used for training" is only certain when it is true.** The persisted list holds only the newest 500 rows across all sessions, and the Phase 2 details are paged. So a `false` means "not seen in the loaded history", not "no".
+  - The rail shows 🎓 only on a positive, as today.
+  - The Session tab shows "Yes", or "Not in the loaded history". Phase 2's session aggregate (§5.2) replaces that with an answer for the whole session.
 
 **Per-turn merge.** A new pure function, `SessionMerger.Merge(live, persisted)` in `Gui.Components/Services`, replaces the body of `Dashboard.MergedSessionConversations()`.
 
@@ -306,7 +319,8 @@ Every color comes from an existing token. There is no new hue.
 - **Conversation-level values** are recomputed over the union:
   - totals, unpriced count, the fallback flag, and the first and last timestamps;
   - `IsLive` is true;
-  - `IsSessionSynthesized` comes from the live side, and `IsUsedForTraining` from the persisted side.
+  - `IsSessionSynthesized` comes from the live side. `IsUsedForTraining` is true when any loaded persisted turn was trained, with the limits described above.
+  - Each turn keeps its own `IsLive`.
 - **Older turns.** Turns older than both windows (the live buffer and the 500-row persisted load) come from the details RPC in Phase 2 (§6.2).
 
 ### 5.2 Two new RPCs on `TelemetryService` (Phase 2)
@@ -333,34 +347,45 @@ message GetSessionTurnDetailsResponse {
   bool transcript_capture_enabled = 1;            // false -> turns is empty because capture is off
   repeated SessionTurnDetail turns = 2;           // newest first
   optional int64 next_before_transcript_id = 3;   // set only when older rows exist; send it back for the next page
+  optional SessionAggregate aggregate = 4;        // first page only: figures over ALL of the session's rows
 }
 
+// Whole-session figures, so the Session tab can answer them without paging through every turn.
+message SessionAggregate {
+  int32 persisted_turns = 1;
+  int32 trained_turns = 2;                        // rows with memory_entry_id set
+  int32 compared_turns = 3;                       // comparisons with both savings and baseline cost present
+  optional string total_estimated_net_savings_usd = 4;    // decimal-as-string, over compared_turns
+  optional string total_baseline_estimated_cost_usd = 5;  // decimal-as-string, over compared_turns
+}
+
+// No correlation_id: it is always {session_id}:{turn_number} (ProxyMiddleware's convention), so the GUI
+// composes it instead of the wire repeating a session id of unbounded length on every row.
 message SessionTurnDetail {
   int64 transcript_id = 1;
-  string correlation_id = 2;
-  int32 turn_number = 3;                          // parsed server-side from correlation_id
-  google.protobuf.Timestamp created_at_utc = 4;
-  string requested_model = 5;
-  string routed_model = 6;
-  optional string dimension = 7;
-  optional string difficulty = 8;
-  optional string language = 9;
-  bool is_utility = 10;
-  optional double score = 11;
-  optional string cost_usd = 12;                  // decimal-as-string, like PersistedTranscript.cost_usd
-  bool is_exploratory = 13;
-  double propensity = 14;
-  optional int32 input_tokens = 15;
-  optional int32 output_tokens = 16;
-  optional int64 memory_entry_id = 17;
-  optional string dim_best_model = 18;
-  optional string scorer_version = 19;
-  bool is_judge_scored = 20;
-  optional string untrained_baseline_model = 21;
-  optional double untrained_baseline_predicted_score = 22;
-  optional int32 prompt_text_length = 23;         // stored length in characters; displayed, never compared (§5.6)
-  optional int32 response_text_length = 24;
-  optional BaselineComparison comparison = 25;
+  int32 turn_number = 2;                          // parsed server-side from correlation_id
+  google.protobuf.Timestamp created_at_utc = 3;
+  string requested_model = 4;
+  string routed_model = 5;
+  optional string dimension = 6;
+  optional string difficulty = 7;
+  optional string language = 8;
+  bool is_utility = 9;
+  optional double score = 10;
+  optional string cost_usd = 11;                  // decimal-as-string, like PersistedTranscript.cost_usd
+  bool is_exploratory = 12;
+  double propensity = 13;
+  optional int32 input_tokens = 14;
+  optional int32 output_tokens = 15;
+  optional int64 memory_entry_id = 16;
+  optional string dim_best_model = 17;
+  optional string scorer_version = 18;
+  bool is_judge_scored = 19;
+  optional string untrained_baseline_model = 20;
+  optional double untrained_baseline_predicted_score = 21;
+  optional int32 prompt_text_length = 22;         // stored length in characters; displayed, never compared (§5.6)
+  optional int32 response_text_length = 23;
+  optional BaselineComparison comparison = 24;
 }
 
 message BaselineComparison {
@@ -408,7 +433,9 @@ message TurnText {
 
 **Response sizes.**
 
-- **Details pages.** A `SessionTurnDetail` is roughly 250–500 bytes, so a 2,000-turn page stays under 1 MB.
+- **Details pages.** A typical `SessionTurnDetail` is 250–500 bytes, but that is not a bound. Session ids have no length limit (`SessionIdResolver` rejects only blanks), and `requested_model` is whatever the client sent. So the server enforces two limits:
+  - **Field cap.** Free-form strings are cut at 1,024 characters with a trailing "…". That covers the model names, `dimension`, `difficulty`, `language`, `scorer_version`, and the comparison's `baseline_model`. One row is then at most about 30 KB.
+  - **Page budget.** Rows are added while the serialized page (protobuf `CalculateSize()`) stays within 2 MiB. A page that reaches the budget ends early and returns the cursor, so the next call resumes exactly where it stopped. The first row always goes in.
 - **Per-side cap.** `GetTurnTexts` caps each side at 262,144 characters, at most 1 MiB of UTF-8. A stored `response_text` can come from a capture buffer of up to 4 MiB, so an uncapped side could be far larger.
 - **Response budget.** It adds an entry only while the running total of text stays within 2 MiB, and marks the rest `omitted`. The first entry always goes in, because one entry is at most 2 MiB. So a response never carries more than about 2 MiB, well under the 4 MB cap.
 - **Omitted comparison columns.** Three `taxonomy_comparisons` columns repeat the transcript row's own values: `session_id`, `is_exploratory`, and `routed_model`. The comparison message leaves those out and carries every other column.
@@ -431,9 +458,15 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 - **Comparisons.** A new overload, `ITaxonomyComparisonStore.LoadForSessionAsync(sessionId, minTranscriptId, maxTranscriptId)`, loads each page's comparisons. Its filter is `session_id` (index `ix_taxonomy_comparisons_session`) plus the page's id range, so a page never re-reads the whole session. It is a default interface member, like the transcript additions, and reuses `SqliteTaxonomyComparisonStore`'s own `Read` materializer.
   - `TelemetryGrpcService` joins comparisons in memory on `TranscriptId == Id`.
   - This keeps each store owning its own table, as `ITaxonomyComparisonStore`'s remarks require. There is no cross-table SQL inside `SqliteTranscriptStore`.
+- **Session aggregate (first page only).** Each store answers for its own table, through the existing `session_id` indexes. Both methods are default interface members.
+  - `ITranscriptStore.GetSessionStatsAsync(sessionId)` counts the session's rows and its trained rows: `COUNT(*)` and `COUNT(memory_entry_id)`.
+  - `ITaxonomyComparisonStore.GetSessionComparisonStatsAsync(sessionId)` counts and sums the comparisons that have both savings and a baseline cost.
 - **`TelemetryGrpcService` takes a new optional constructor parameter, `ITaxonomyComparisonStore? comparisonStore = null`.**
   - If it is absent, `comparison` is simply unset. Existing test construction and hosts without a management API keep working.
-  - Implements `GetSessionTurnDetails`: an empty `session_id` returns `InvalidArgument`, and the limit is clamped as in §5.2.
+  - Implements `GetSessionTurnDetails`:
+    - an empty `session_id` returns `InvalidArgument`;
+    - the limit is clamped, and the field cap and 2 MiB page budget apply, as in §5.2;
+    - `aggregate` is filled only when `before_transcript_id` is absent.
   - Implements `GetTurnTexts` via `ListTurnTextsAsync`, applying the 2 MiB response budget. A request with no ids, or with more than 50, gets `InvalidArgument`.
   - If capture is off, both return `transcript_capture_enabled = false` without querying, as `ListPersistedSessions` does.
 - **`ProxyServer`.** Where it already builds `ManagementReportingService` from `managementApi.TaxonomyComparisonStore`, it also runs `services.AddSingleton(comparisons)` when that store is non-null, so the web host can inject it. `ITranscriptStore` reaches `TelemetryGrpcService` today through the admin modules' registrations; this adds the matching path for the comparison store.
@@ -450,6 +483,7 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
   - **Snapshots.** It keeps one snapshot per session id, holding:
     - the loaded turns by turn number;
     - the capture flag and the paging cursor (`next_before_transcript_id`);
+    - the session aggregate from the first page;
     - the loaded-at time;
     - a state: `Loading`, `Loaded`, `CaptureOff`, `Unreachable`, or `Failed`.
   - **Paging.** `LoadEarlierAsync(sessionId)` fetches the next older page and adds it to the snapshot.
@@ -473,6 +507,7 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 
 - **Per turn:** `estimated_net_savings_usd / baseline_estimated_cost_usd × 100`, only when both are present and the baseline is above 0. Otherwise "—".
 - **Per session:** Est. savings is `Σ estimated_net_savings_usd`. Est. ROI is `Σ savings / Σ baseline cost × 100` over compared turns. That is cost-weighted rather than an average of percentages, so small turns do not dominate. Coverage is shown as "n of m turns compared".
+  - The sums and counts come from `SessionAggregate` (§5.2), so they cover the whole session, not just the loaded pages.
 - **Methodology.** The tooltip links [`score-delta-methodology.md`](../score-delta-methodology.md), as Cost Analytics' Routing ROI chart does.
 
 ### 5.6 Truncation and full text
@@ -526,7 +561,12 @@ stateDiagram-v2
   - `scrollToBottom` pins the list.
   - `scrollIntoView(id)` keeps a keyboard-selected row visible.
   - `observeOverflow(list, dotNetRef)` runs §4.3's clamp measurement, re-running on a `ResizeObserver` callback.
+  - `dispose(list)` disconnects the `ResizeObserver`, removes the scroll listener, and drops the stored .NET reference. A callback already queued checks a disposed flag and returns.
   - It is loaded from `Gui.Web/wwwroot/index.html`.
+- **Teardown.** The `@key` teardown destroys the messages pane on every tab switch, so it must leave nothing behind.
+  - `SessionMessagesPane` implements `IAsyncDisposable` the way `EChart` does: it calls `chatScroll.dispose`, catching `JSDisconnectedException` and `ObjectDisposedException`.
+  - It then disposes its `DotNetObjectReference`, as `ConsoleTab` does.
+  - No observer, listener, or .NET reference outlives the component. `split-pane.js` holds no .NET reference, and its listeners live on the divider elements, which leave the DOM with the tab.
   - `console-scroll.js` is left alone: its wheel-only disengage fits a log, not a selectable list.
 - **Large sessions.** The newest 200 turns (400 rows) render first, with a "Show earlier turns" button at the top that adds 200 more. Blazor `Virtualize` is not used: variable row heights, the clamp toggle, and sticky-bottom follow fight its fixed-size assumptions.
 - **History beyond what is loaded (Phase 2).**
@@ -549,6 +589,10 @@ stateDiagram-v2
 
 - **Right-edge math.** For the right-edge panel, the width percentage is `(rect.right - clientX) / rect.width`.
 - **Defaults and clamps.** Left defaults to 22% within 15–35%. Right defaults to 28% within 20–40%. CSS `min-width`s protect the rail (220 px), the messages pane (360 px), and the details pane (280 px).
+- **Narrow windows.** The dashboard runs in a resizable browser window, and the root and `<main>` both clip (`overflow-hidden`).
+  - The three minimums plus two 12 px dividers come to 884 px. With `<main>`'s padding, that is about 908 px of viewport.
+  - Below that, `.ls-sessions-layout` keeps `min-width: 884px` inside a wrapper with `overflow-x: auto`, so the tab scrolls horizontally. Every pane and divider stays reachable.
+  - All three panes are kept, and there is no breakpoint (`DESIGN.md` §5).
 - **Persistence.** Widths persist in `localStorage` (`arcrouter.sessions.leftPct` / `rightPct`), with every read and write in `try/catch`. They are restored on init, which runs on every remount after a tab switch.
 - **Keyboard.**
   - Each divider gets `role="separator"`, `aria-orientation="vertical"`, `aria-valuenow`/`min`/`max`, and `tabindex="0"`.
@@ -578,6 +622,8 @@ stateDiagram-v2
 | Untracked (synthesized) session | Live: the title "Untracked session (…)" as today, and "Untracked" in the Session tab. Persisted-only: "Unknown (not persisted)", because the flag is live-only (§5.1) |
 | Turn older than the loaded history (Phase 2) | A metadata row from the next details page, then its text through `GetTurnTexts` (§6.2) |
 | Token count the telemetry did not report | "—" with a reason, never `0` (§5.1) |
+| Persisted turn inside a live conversation | Live-only fields show "—", gated on the turn's own `IsLive` (§5.1) |
+| Window narrower than about 908 px | The tab scrolls horizontally; nothing is clipped (§6.4) |
 
 ## 7. What each details tab shows
 
@@ -585,7 +631,7 @@ stateDiagram-v2
 
 | Field | Live source | Persisted source (Phase 2) |
 |---|---|---|
-| Turn, correlation id (copyable) | `TurnNumber`, `{session}:{turn}` | `turn_number`, `correlation_id` |
+| Turn, correlation id (copyable) | `TurnNumber`, `{session}:{turn}` | `turn_number`; the id is composed the same way (§5.2) |
 | Timestamp (full local date and time) | `TimestampUtc` | `created_at_utc` |
 | Requested model | `RequestedModel` | `requested_model` |
 | Prompt tokens | `PromptTokens` | `input_tokens` |
@@ -620,7 +666,7 @@ stateDiagram-v2
 
 | Section | Fields |
 |---|---|
-| Identity | Title, session id (copyable), status (active / idle / history), untracked (yes, no, or unknown for persisted-only sessions), used for training, first → last turn (full dates) |
+| Identity | Title, session id (copyable), status (active / idle / history), untracked (yes, no, or unknown for persisted-only sessions), used for training ("Yes" or "Not in the loaded history"; yes or no for the whole session once the Phase 2 aggregate loads), first → last turn (full dates) |
 | Totals | Total cost (with `≥` and the unpriced count, as in today's summary), prompt and completion tokens, turns, fallback turns, Est. savings and Est. ROI with coverage (§5.5), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`) |
 | Models used | The CodePen's member list: one line per distinct routed model with its color dot, turn count, cost share, and last-used time. Most recent first |
 
@@ -701,12 +747,15 @@ Each phase is a full vertical slice and ships on its own. Every phase ends warni
    - All of §5.1: the live-field plumbing, nullable token counts, the unknown untracked state, and `SessionMerger`.
    - The Message tab with live fields, the Routing tab's decision / overhead / steps sections, and the Session tab without Est. savings or ROI.
    - The deletions in §10.
-   - Docs: `dashboard.md` Sessions section and data model; `DESIGN.md` §1, §2 (revived step tones), §4, §4.3, §5 (two dividers replace the split-pane bullet), §7; `MOTION.md` §6 (Row Enter consumers, `.row-enter-append`, the fifth tab family) and §10.
+   - Docs: `dashboard.md` Sessions section and data model; `DESIGN.md` §1, §2 (revived step tones), §4, §4.3, §5 (two dividers replace the split-pane bullet, plus the narrow-window horizontal scroll), §7; `MOTION.md` §6 (Row Enter consumers, `.row-enter-append`, the fifth tab family) and §10.
 
    **Exit criteria:**
    - Live and persisted sessions both render in three panes. Every §6.6 state renders.
    - After a GUI restart and one new live turn, a session shows its persisted turns and the new one.
    - Every row the clamp cuts has a Show more toggle.
+   - A persisted turn inside a live conversation shows "—" for live-only fields.
+   - At an 800 px window the tab scrolls horizontally, and nothing is clipped.
+   - Switching tabs repeatedly leaves no observer or .NET reference behind.
    - Both dividers drag, respond to the keyboard, and survive a tab switch.
    - Implicit selection never calls `OnSelect`.
    - A manual pass in a browser against a local router confirms follow, the pill, and Show more (§12).
@@ -720,8 +769,9 @@ Each phase is a full vertical slice and ships on its own. Every phase ends warni
    **Exit criteria:**
    - A live session shows classification, score, and comparison once persisted, without a GUI reload.
    - Capture off, unreachable, and no-row each render their §6.6 state.
-   - A 2,000-turn details page stays under 1 MB, and a `GetTurnTexts` response under 4 MB (both asserted in tests).
+   - A details page never exceeds its 2 MiB budget, even with worst-case metadata, and a `GetTurnTexts` response stays under 4 MB. Both are asserted in tests.
    - Paging walks a 2,500-turn session with no gap and no duplicate.
+   - "Used for training" and Est. ROI answer for the whole session from the aggregate.
 
 ## 12. Test strategy
 
@@ -748,12 +798,15 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - Chips for fallback and substitution.
   - The in-session filter and its count.
   - Newest response row implicitly selected.
+  - Disposing the pane calls `chatScroll.dispose` (checked through bUnit's JSInterop) and tolerates a disconnected runtime.
   - "Show earlier turns" paging.
 - **`SessionDetailsPaneTests`.**
   - Tab switching by click and arrow keys.
   - Request-side versus response-side field sets.
   - Persisted conversations show "—" with a reason for live-only fields, never `0`. So does any turn whose token counts are `null`.
   - The untracked row reads yes, no, or "Unknown (not persisted)".
+  - In a merged live conversation, a persisted turn shows "—" for TTFT and cache-hit, not `0`.
+  - "Used for training" reads "Yes" or "Not in the loaded history", never "No", without the aggregate.
   - Routing steps render.
   - Session totals, the unpriced `≥`, the sparkline, and the models-used list.
 - **Mapper tests.**
@@ -764,6 +817,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - A session in only one source passes through unchanged.
   - The restart case: persisted turns 1–5 plus live turn 6 give turns 1–6.
   - The same turn in both: live metrics win; persisted text replaces a truncated or missing live summary.
+  - Each turn keeps its own `IsLive`. A turn in both sources is live; a persisted-only turn is not.
   - Totals, unpriced count, fallback flag, timestamps, `IsSessionSynthesized`, and `IsUsedForTraining` come from the right side.
 - **`CostAnalyticsTests`.** Unknown token counts still plot as `0`, as today.
 - **`DashboardTests`.** Persisted-only sessions still render. A rail click still sets Cost Analytics' initial session.
@@ -776,8 +830,11 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - It returns the stored text lengths, and `SessionTurnMetadata` has no text property: a multi-megabyte body is never materialized.
   - Paging walks a 2,500-row session with no gap and no duplicate. The cursor is absent on the last page.
   - `ListTurnTextsAsync` cuts each side at the cap and reports `truncated` from the stored length.
+  - `GetSessionStatsAsync` counts all of the session's rows and its trained rows, beyond any page.
   - Capture off returns empty and creates no file.
-- **`SqliteTaxonomyComparisonStoreTests`.** `LoadForSessionAsync` returns only that session's rows inside the id range.
+- **`SqliteTaxonomyComparisonStoreTests`.**
+  - `LoadForSessionAsync` returns only that session's rows inside the id range.
+  - `GetSessionComparisonStatsAsync` counts and sums only comparisons with both savings and a baseline cost.
 - **`TranscriptStoreDefaultMemberTests`.** The new default members return `[]`.
 - **`TelemetryGrpcServiceTests`.**
   - Every field is mapped, including decimal strings and unset optionals.
@@ -788,7 +845,10 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - An empty session id returns `InvalidArgument`. So do zero or more than 50 transcript ids.
   - The limit is clamped, and the cursor round-trips.
   - `GetTurnTexts` covers found, not found, capture off, the per-side cap, and `omitted` past the 2 MiB budget.
-  - A 2,000-row page serializes under 1 MB, and a worst-case `GetTurnTexts` response under 4 MB.
+  - `aggregate` appears only on the first page, and it counts rows beyond that page.
+  - Worst-case metadata: 2,000 rows with 1,024-character multibyte strings in every capped field. The page ends early, within 2 MiB, and the cursor resumes with no gap or duplicate.
+  - An over-long session id or model name is capped at 1,024 characters on the wire.
+  - A worst-case `GetTurnTexts` response stays under 4 MB.
 - **`PersistedSessionsClientTests`.** DTO mapping and `Wrap`: `Unavailable` gives `IsUnavailable`; any other status gives the server detail.
 - **`SessionDetailsStoreTests`**, using a fake `TimeProvider` and a fake client.
   - The per-session cache and the 30-second staleness rule.
@@ -801,7 +861,8 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - `Changed` fires once per load.
 - **Tab tests with persisted details.**
   - Classification, score, training, and the comparison section.
-  - ROI arithmetic, which is cost-weighted, and its coverage text.
+  - ROI arithmetic, which is cost-weighted, and its coverage text, both taken from the aggregate.
+  - With the aggregate loaded, "Used for training" reads yes or no for the whole session.
   - A live text longer than 2,000 characters counts as truncated. That includes the preview of a stored text of exactly 2,001 characters, which has the same length as its source.
   - Show more on such a row calls `GetTurnTexts` once, then renders the stored text.
   - A capped result keeps its "truncated at 262,144 characters" chip after expansion.
@@ -815,6 +876,8 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 - Show more and Show less.
 - Reduced-motion OS setting.
 - Nothing renders outside the window (`DESIGN.md` §5.4).
+- Narrow the window to 800 px: the tab scrolls horizontally, and every pane and divider is reachable.
+- Switch tabs many times with DevTools open: no console errors from late scroll or resize callbacks.
 
 ## 13. Risks
 
@@ -822,6 +885,8 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 |---|---|
 | gRPC's 4 MB default receive cap | The session RPC is metadata-only and paged. Text comes from `GetTurnTexts`, which caps each side and each response (§5.2). **Pre-existing and out of scope:** `ListPersistedSessions` sends full text for up to 500 rows and could hit the same cap on a heavy history. Worth a separate tracked item |
 | Per-tab-switch teardown loses view state | §6.5 |
+| Per-tab-switch teardown leaks JS observers or .NET references | §6.2's `chatScroll.dispose` and `IAsyncDisposable` path |
+| A narrow browser window clips the panes | §6.4's horizontal scroll below an 884 px layout width |
 | Render cost of long sessions | §6.2's 200-turn window plus "Show earlier turns" |
 | Persisted fields lag the live stream | §5.4's debounced re-fetch and refresh button. The tab says "Not compared yet" instead of guessing |
 | Synthesized session ids flood the rail with one-turn sessions | Behavior unchanged from today. Grouping untracked sessions is out of scope |
@@ -848,7 +913,8 @@ Each has a default that this plan already assumes.
 3. **Thresholds.**
    - The Show more fallback, used only before measurement: more than 150 characters or more than 5 line breaks (§4.3).
    - An initial window of 200 turns.
-   - Details pages of 500 turns (at most 2,000).
+   - Details pages of 500 turns (at most 2,000), each within a 2 MiB budget, with free-form fields capped at 1,024 characters.
+   - An 884 px minimum layout width, below which the tab scrolls horizontally.
    - `GetTurnTexts` caps: 262,144 characters per side, 2 MiB per response, 50 ids per call.
 4. **Idle threshold.** 5 minutes.
 5. **ADR scope.** The ADR itself is required before Phase 2 (§5.2), so the only open question is its scope. Default: one ADR covering both RPCs and their size caps.
