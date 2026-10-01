@@ -4,7 +4,9 @@
 **Issue:** [#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179) — "Sessions tab: persisted history silently fails to load above gRPC's 4 MiB receive cap".
 **Related:**
 - [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176) (three-pane Sessions tab). Its plan's §13 names this risk as "pre-existing and out of scope … worth a separate tracked item". This plan is that item.
-- [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (the storage direction).
+- ADR-0019 (the storage direction), proposed in [PR #181](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/181) as `docs/adr/0019-store-conversation-text-in-encrypted-per-session-files.md`.
+  - **Merge dependency:** this plan's storage direction, its end state, and its #165 references assume #181 merges first.
+  - On `main`, #165's plan still describes the earlier archive design, which #181 amends.
 - [`dashboard.md`](../gui/dashboard.md) (Sessions tab data sources).
 **ADR-0008 Amendment 1:** This is a defect fix with reproducing tests, not a smell refactor. It does not touch `ProxyMiddleware`, `RequestInterceptor`, or `ManagementFacade`.
 
@@ -141,7 +143,16 @@ The length fields reuse the names and meaning of #176's `SessionTurnDetail` fiel
 - **Clamp the limit.** 0 becomes 500. Anything else is clamped to [1, 2,000], as #176 §5.2 does for its session RPC. This removes today's `StatusCode.Unknown` for an unset limit.
 - **Detect `has_more`.** Ask the store for `limit + 1` rows.
 - **Map previews.** Apply `TextTruncator.Truncate` to both texts. Send each preview's truncated flag, the SQLite character counts, and the row id. `SessionTranscript.Id` is already read (`SqliteTranscriptStore.cs:390`) but not sent today.
-- **Enforce the budget.** `MaxListResponseBytes = 3 * 1024 * 1024`, three quarters of the client's default cap. Add rows newest first, keeping a running total of 1 tag byte plus `CodedOutputStream.ComputeMessageSize(row)` per row. When the next row would exceed the budget, set `has_more` and stop, so the result is always the newest contiguous rows. A preview row is about 4.2 KB for ASCII text and about 12.2 KB for CJK text. Its metadata strings (`requested_model`, `session_id`) are client-supplied and not truncated. The budget bounds the message regardless.
+- **Where the counts come from.** They come from SQL, never from `string.Length`, whose UTF-16 count differs for emoji and other surrogate pairs.
+  - `SqliteTranscriptStore.ListSessionsAsync` also selects `length(prompt_text)` and `length(response_text)`.
+  - `SessionTranscript` gains `PromptTextLength` and `ResponseTextLength` (`int?`, null when the text is null), and `ToContract` copies them.
+  - `TokenCalibrationService`, the method's other caller, ignores the new fields.
+- **Enforce the budget.** `MaxListResponseBytes = 3 * 1024 * 1024`, three quarters of the client's default cap. Add rows newest first, keeping a running total.
+  - The total starts at the size of the response's own fields: `transcript_capture_enabled` and `has_more`, 2 bytes each when set.
+  - It then adds 1 tag byte plus `CodedOutputStream.ComputeMessageSize(row)` per row.
+  - So the serialized response never exceeds the budget.
+
+  When the next row would exceed the budget, set `has_more` and stop, so the result is always the newest contiguous rows. A preview row is about 4.2 KB for ASCII text and about 12.2 KB for CJK text. Its metadata strings (`requested_model`, `session_id`) are client-supplied and not truncated. The budget bounds the message regardless.
 - **Log the cut.** Take an optional `ILogger<TelemetryGrpcService>`. When the budget, not the limit, cuts the list, log at Information with a static template: `"ListPersistedSessions returned {Returned} of {Requested} rows: the {BudgetBytes}-byte response budget was reached."`
 - **Read cost (decision 9).** Text is truncated in C#, so the router still reads each row's full text. That is today's cost, and typically a few MB per page load. Selecting `substr(prompt_text, 1, 2001)` in SQL would bound the read, and `TextTruncator` gives the identical preview from that prefix. The catch is that SQLite's `length` counts code points while the GUI counts UTF-16 units, so truncation would then need explicit flags. Either way, this changes only what is read for display. Nothing written to `request_transcripts` changes.
 
@@ -180,7 +191,8 @@ Each phase is a full vertical slice that ships on its own: warning-free under `T
 All tests stay under the 5-second ceiling. The 4 MiB cases already run in well under a second.
 
 - **`TelemetryGrpcServiceTests`.** The investigation's characterization tests assert today's overflow. Phase 1 inverts them:
-  - For every profile in §2, including the single 4 MiB-prompt row, the serialized response is at most `MaxListResponseBytes`.
+  - For every profile in §2, including the single 4 MiB-prompt row, the serialized response, flag fields included, is at most `MaxListResponseBytes`. A case sized to land exactly on the budget proves the accounting is exact.
+  - Lengths for text with emoji equal SQLite's character counts, not `string.Length`.
   - Previews equal `TextTruncator.Truncate` of the stored text.
   - The truncated flags are set exactly when a preview was cut.
   - The lengths equal SQLite's character counts.
