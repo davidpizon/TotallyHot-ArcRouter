@@ -110,10 +110,10 @@ What this ADR commits to:
     The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else. Only one challenge may be pending at a time.
   - **A read window.** Reading conversation text needs a content grant. That covers `ListPersistedSessions` text, `GetTurnTexts`, ADR-0019's full view, and the text fields of `StreamEvents`.
     - **What it is.** A verification issues the grant as its own `__Host-` cookie (HttpOnly, Secure, SameSite=Strict). The cookie holds a random grant id and an expiry, checked against an in-memory table.
-    - **How long it lasts.** 15 minutes by default. It ends early at "Lock" or a router restart, and it never authorizes a one-operation action.
+    - **How long it lasts.** 15 minutes by default (David, 2026-09-30). It ends early at "Lock" or a router restart, and it never authorizes a one-operation action.
     - **Why a separate cookie.** ADR-0012's ticket is the same for every caller in a generation, so it cannot carry the grant.
   - **Without a grant**, the same RPCs return metadata only. `StreamEvents` drops its text fields, checked per event, so a grant that expires mid-stream stops the text from then on.
-- **Closed until enrolled.** Before any passkey exists, conversation text stays hidden. The gated operations are refused with `FailedPrecondition`, and the message names the enrollment command.
+- **Closed until enrolled** (David, 2026-09-30). Before any passkey exists, conversation text stays hidden. The gated operations are refused with `FailedPrecondition`, and the message names the enrollment command.
 - **Not gated (David, 2026-09-30).** Clear, deleting a session or an import, and lowering Sample Size stay on ADR-0012's session. They destroy history rather than disclose it.
 - **Everything else is unchanged.** ADR-0012's session still covers metadata, routing, providers, prices, and settings. The MCP endpoint exposes no conversation content and is also unchanged.
 - **Audit.** Every challenge, verification, refusal and gated operation is logged with a static Serilog template: the operation, the credential's name, and the outcome. No conversation text is logged.
@@ -193,7 +193,6 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 - **WebAuthn and localhost.** WebAuthn accepts `localhost` as a relying-party ID and never an IP address. Browsers enforce this: Chrome allows WebAuthn on `https://localhost`, not on `https://127.0.0.1`.
 - **Why not ASP.NET Core Identity's passkeys.** .NET 10 Identity's passkey support is scoped to Identity sign-in, through `SignInManager` and `UserManager`. This router has no Identity users, so a standalone library fits better.
 - **Left to the implementation plan:**
-  - the read window's default (15 minutes proposed);
   - challenge and grant lifetimes, and rate limits on challenges;
   - how the GUI shows locked text and the "Lock" control;
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);

@@ -248,7 +248,7 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
    - **Scope:** export and import, plus every RPC that returns conversation text.
    - **Not gated:** Clear, deleting a session or an import, and lowering Sample Size. They destroy history rather than disclose it.
    - **Recorded in** [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md) (proposed), which has its own issue ([Appendix B](#appendix-b-draft-issue-body-for-the-passkey-gate)). ADR-0020 holds the design, its limits, and the options it rejected.
-   - **Still open:** the default length of the read window. ADR-0020 proposes 15 minutes.
+   - **Also decided:** conversation text stays hidden until a passkey is enrolled, and the read window defaults to 15 minutes.
 2. **ADR form.** Recommended: a new ADR for the directory boundary, because it covers files beyond conversations: `.pfx` files, configuration, logs, and the other databases. The alternative is to amend ADR-0019 while it is still proposed.
 3. **Scope.** The whole directory (A, recommended), or ADR-0019's session folder only (C)?
 4. **The writing account's ACE on dev machines.** Recommended, under decision 1's requirement: **no ACE for any individual account.** With one, any app running as that account reads the files directly.
