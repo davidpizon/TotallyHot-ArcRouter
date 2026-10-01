@@ -139,6 +139,12 @@ What this ADR commits to:
 
     The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else.
 
+    **The authorization is single-use too.** Consuming the challenge stops a replayed assertion, but the authorization it returns is a bearer token of its own.
+    - **Stored with its binding.** The router stores each authorization with the operation and parameters its challenge was bound to, and an expiry two minutes after issue.
+    - **Consumed first.** A gated request removes the authorization atomically (compare and remove) before any gated work starts. Only then does the router check that the request's operation and parameters match the stored binding, and that the authorization has not expired. A mismatch or an expired authorization fails the request, and the authorization is gone either way.
+    - **So** two concurrent requests that present the same authorization get one operation between them, and a failed request needs a new verification.
+    - **No flood.** An authorization exists only after a passkey gesture, so no application can fill that table.
+
     **Import binds to the bytes, not a path.** The archive is first staged into a router-owned spool in the protected data directory, and the challenge binds the staged file's SHA-256. The router then imports exactly the bytes the operator approved. Replacing the source file after the ceremony changes nothing, and an approval for one archive cannot import another.
 
     **Staging is bounded**, because it happens before the passkey check:
@@ -185,7 +191,7 @@ What this ADR commits to:
 - Good, because the router stores no standing secret.
   - It never sees a private key.
   - Only an administrator can change the enrolled public keys.
-  - Its one bearer credential, the read grant, expires in 15 minutes and authorizes no one-operation action.
+  - Its bearer credentials are short-lived. The read grant expires in 15 minutes and authorizes no one-operation action. A one-operation authorization works once, within two minutes.
 - Bad, because a fresh install shows no conversation text until an administrator enrolls a passkey. Today's zero-setup Sessions tab ends.
 - Bad, because it adds friction: a prompt for each export, import, token copy and token regeneration, and one per read window.
 - Bad, because any application that can make an HTTP call can still destroy history: it can run Clear, delete a session or an import, or lower Sample Size. David chose to leave these ungated, since they destroy data rather than disclose it.
@@ -264,7 +270,7 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 - **Why not ASP.NET Core Identity's passkeys.** .NET 10 Identity's passkey support is scoped to Identity sign-in, through `SignInManager` and `UserManager`. This router has no Identity users, so a standalone library fits better.
 - **Left to the implementation plan:**
   - the exact issuance rate (the token bucket above is illustrative);
-  - whether the fixed limits can be configured: two-minute challenges, a 32-entry store, and the 15-minute grant;
+  - whether the fixed limits can be configured: two-minute challenges and authorizations, a 32-entry store, and the 15-minute grant;
   - how the GUI shows locked text and the "Lock" control;
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;

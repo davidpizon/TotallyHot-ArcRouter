@@ -119,6 +119,13 @@ flowchart TB
   - The service, finding a root that is neither protected nor migrated, fails closed. It does not start, and it logs the command to run. It never re-creates an empty root over a legacy one.
   - An unelevated process does not use an unprotected root. It falls back to the per-user directory, as an unelevated dev run already does.
 
+  **Migration needs a stopped router.** On Windows, the exclusive open (below) already fails closed on any file that another process holds. On Linux and macOS, migration copies each file and unlinks the original, and a copy cannot see a writer. A router still running would keep writing to the unlinked original, so those writes would be lost, and a database copied mid-write could disagree with its WAL. So:
+  - **The installers stop ignoring a failed stop.** Today both do (`packaging/linux/install.sh:46`, `packaging/macos/install.sh:58`). The stop still tolerates a service that does not exist yet. Afterwards, `install.sh` checks that the service is not running (`systemctl is-active` on Linux, `launchctl print system/<label>` on macOS). If it is, the script aborts before migration and names the service.
+  - **The command checks for itself.** However it is run, `--migrate-data-directory` aborts before copying anything if any process holds a file in the old tree open for writing. It names the process and the file. It reads each process's `/proc/<pid>/fdinfo` flags on Linux, and `lsof`'s access mode on macOS.
+    - A descriptor open only for reading does not block migration, so another account that holds a file open cannot stall it. The copy already cuts that reader off from later writes.
+  - **No restart mid-migration.** The installers copy the new binaries before they migrate. A router started in the meantime runs the new binary, which fails closed on an unmigrated root (above).
+  - **Docker.** The in-place migration (below) runs in the bootstrap, before the router opens any file, so its own container has no other writer. Another container on the same volume would be out of its view. The Docker docs therefore say one container per volume, which two routers sharing one database already need.
+
   **Config overlay.** The bootstrap registers `appsettings.local.json` only after the directory passes verification. Migration never carries an overlay across (below), and once the directory is protected, only an administrator can create one. So a planted file is never loaded.
 
   **Logging.** The bootstrap runs before the host has built its logger, so it buffers its outcomes. They are logged with static Serilog templates once logging is configured.
@@ -203,7 +210,10 @@ flowchart TB
 - Pass their text through the same secret obscuring ADR-0019 uses for storage.
 - **Clear** first closes the body sink, which flushes and releases its file. It then deletes every body file and reopens the sink. Deleting under an open sink would not work: Windows refuses to delete the open file, and elsewhere the sink would keep writing to the unlinked file.
 - **Pre-upgrade logs.** Files written before the upgrade still hold unobscured excerpts, and would otherwise linger until the newest-30 limit rolls them off.
-  - On the first start after the upgrade, the router rewrites each `arcrouter-*.log` without any line from the four F9 templates, and replaces the original with the rewrite.
+  - The rewrite replaces each `arcrouter-*.log` with a copy that has no line from the four F9 templates.
+  - **It runs while the router is stopped.** The elevated upgrade command, `--migrate-data-directory`, runs it once, and a marker in the protected root records that it ran. The MSI and `install.sh` run that command only after the router has stopped (§3.1).
+    - **Not at the router's first start.** By then launchd has opened `launchd-stdout.log` as the router's own stdout. Replacing that file would send the rest of the console output to an unlinked inode. A pre-upgrade router that failed to stop would likewise keep writing to the replaced files.
+    - **Docker.** The bootstrap runs the rewrite before the logger opens any file.
   - A file it cannot rewrite is deleted.
   - The old disk blocks are not overwritten. That is the same remnant ADR-0019 leaves to BitLocker.
   - **Platform copies of the console output.** Until now the Console sink also received these lines, and some platforms kept that output:
@@ -280,7 +290,8 @@ Decision 7 sets the default for all three. If David picks the checkbox, the scri
 1. **Directory DACL.**
    - the verification helper and atomic creation;
    - the legacy-owner rule, and the migration into a new protected tree with its quarantine;
-   - the elevated `--migrate-data-directory` command, run by the MSI and `install.sh` on install and upgrade;
+   - the elevated `--migrate-data-directory` command, run by the MSI and `install.sh` on install and upgrade, with its open-writer check;
+   - the `install.sh` check that the service has stopped;
    - the `web-interface.json` `Users:R` exception;
    - the secret-store writer change;
    - the MSI folder creation;
@@ -293,7 +304,7 @@ Decision 7 sets the default for all three. If David picks the checkbox, the scri
 3. **Logs.**
    - the Information default;
    - the separate opt-in body files, with obscuring;
-   - the one-time rewrite of pre-upgrade logs.
+   - the one-time rewrite of pre-upgrade logs, run by `--migrate-data-directory`.
 4. **Uninstall.**
    - the `--shred-conversations` command;
    - the MSI custom action that runs it;
@@ -324,9 +335,12 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - A directory handle opened before migration, on the old root or on `logs\`, cannot create a file in the live tree afterwards.
 - Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
 - Migration renames aside a planted hard link to a file outside the root. The outside file's owner and ACL (on Unix, its mode) are unchanged.
-- A file that another process holds open with a writable handle from before migration:
-  - on Windows, makes the bootstrap fail closed and name the file;
-  - on Unix, does not see writes made after migration through the pre-opened descriptor.
+- A file that another process holds open from before migration:
+  - on Windows, with any handle, makes the bootstrap fail closed and name the file;
+  - on Unix, open for writing, makes `--migrate-data-directory` abort before it copies anything. It names the process and the file, and the old tree is unchanged;
+  - on Unix, open only for reading, does not stop migration, and the reader does not see writes made after migration.
+- `install.sh` aborts before migration, naming the service, when the service is still running after the stop.
+- The pre-upgrade log rewrite runs once, in `--migrate-data-directory`, and never at the router's start. On macOS, console output written after the upgrade appears in `launchd-stdout.log`.
 - On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
 - On every platform, an ordinary user can read `router-ca.crt` from the public directory. A public directory created by another account is rejected.
