@@ -185,8 +185,11 @@ flowchart TB
 - **The public CA certificate.** `router-ca.crt` holds only a public certificate, but `docs/router/client-tls-setup.md` has users read it: Firefox and Chrome-on-Linux imports, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, and `curl --cacert`. A `0700` state directory, or an admin-only root, would hide it.
   - The service rewrites it at each start into a public directory that every user can read and only the service and administrators (root, on Linux and macOS) can write:
     - **Windows:** `%ProgramData%\TotallyHotArcRouter-Public\`;
-    - **Linux:** a systemd `RuntimeDirectory` with mode `0755`, at `/run/totallyhot-arcrouter/`. systemd makes the service account its owner, so the service can write it;
-    - **macOS:** `/Library/Application Support/TotallyHotArcRouter-Public/`, created by `install.sh`, owned by the service account `_arcrouter`, with mode `0755`. A root-owned `0755` directory would not let the service write the file.
+    - **Linux:** a systemd `RuntimeDirectory` at `/run/totallyhot-arcrouter/`, with `RuntimeDirectoryMode=0755` set explicitly. systemd makes the service account its owner, so the service can write it;
+    - **macOS:** `/Library/Application Support/TotallyHotArcRouter-Public/`, created by `install.sh`, owned by the service account `_arcrouter`, with mode `0755`. A root-owned `0755` directory would not let the service write the file;
+    - **Docker:** `/public`, which the image creates beside `/data`, owned by `arcrouter` with mode `0755`. There is no systemd in the container, and its non-root user cannot create a directory under `/run`.
+  - **The file's mode is set explicitly.** The new `UMask=0077` (Linux), `Umask` of `077` (macOS) and the entrypoint's `umask 077` (Docker) would make a newly written certificate `0600`. So the service writes it to a temporary file, sets mode `0644` on that file, and renames it into place. On Windows the file inherits the directory's `Users:R`.
+  - **Reaching it in Docker.** `/public` is inside the container. The Docker docs show `docker cp <container>:/public/router-ca.crt .`, or mounting a host directory at `/public` that the operator owns. Either way the certificate leaves the container without opening `/data`.
   - `client-tls-setup.md` points there.
   - **The squat checks apply.** That directory holds a trust anchor that users import, so a copy planted by another account would make them trust the attacker's root. The bootstrap applies the same owner and reparse checks as for the root, and rejects a directory it did not create.
 - **`web-interface.json`** keeps an explicit `Users:R` ACE in the root, because it holds only a URL and a thumbprint. The tray opens it by its full path, which needs no traverse right on the root, so the tray keeps working (F6).
@@ -366,7 +369,8 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - The pre-upgrade log rewrite runs once, in `--migrate-data-directory`, and never at the router's start. On macOS, console output written after the upgrade appears in `launchd-stdout.log`.
 - On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
-- On every platform, an ordinary user can read `router-ca.crt` from the public directory. A public directory created by another account is rejected.
+- On every platform, an ordinary user can read `router-ca.crt` from the public directory. On Linux, macOS and Docker it is mode `0644` even under the service's `077` umask. A public directory created by another account is rejected.
+- In Docker, the non-root service writes `router-ca.crt` into `/public`, and `docker cp` retrieves it.
 - In Docker, the bootstrap migrates an older named volume at mode `0755` in place, as its owner. Every file ends at `0600` and every directory at `0700`, and a descriptor opened before the migration does not see later writes. A bind mount with the wrong owner or mode makes the bootstrap fail closed.
 - A fresh **non-pooled** connection from `OpenConnection` returns 1 for `PRAGMA secure_delete` (F8).
 - Canary rows are absent from the db and the WAL after `DeleteOldestAsync`, after `DeleteBeforeAsync`, and after `DeleteAllAsync`. This is s2 as a test, sized to stay under 5 s.

@@ -77,7 +77,7 @@ sequenceDiagram
 What this ADR commits to:
 
 - **Credential.**
-  - WebAuthn with `userVerification: "required"`. The authenticator is Windows Hello, Touch ID, or a security key. Neither the router nor the calling application ever sees the private key, and each use needs the operator's PIN, fingerprint, face or touch.
+  - WebAuthn with `userVerification: "required"`. The authenticator is Windows Hello, Touch ID, or a security key. Neither the router nor the calling application ever sees the private key, and each use needs user verification: the operator's PIN, fingerprint or face. A touch alone proves only that someone is present, so a security key that offers no PIN or built-in biometric cannot satisfy `required`. It can be neither enrolled nor used.
   - **Synced passkeys.** Passkeys come in two kinds:
     - **device-bound**, such as security keys, and Windows Hello keys kept on the device;
     - **synced**, where the provider (for example iCloud Keychain, Google Password Manager, or a password-manager extension) backs the private key up and copies it to the user's other devices.
@@ -175,6 +175,13 @@ What this ADR commits to:
       - A page reload loses it, and the operator verifies again.
       - One-operation authorizations are generated, stored and carried the same way. Like the grant, they are bearer credentials that any loopback caller could present, so a predictable value would bypass the passkey check.
     - **How long it lasts.** 15 minutes by default (David, 2026-09-30). It ends early at "Lock" or a router restart, and it never authorizes a one-operation action.
+    - **Ending a grant clears the screen too.** The router's checks stop only future reads. Text already delivered stays in the dashboard's component state, caches and rendered page. So the dashboard discards the grant and every piece of conversation text it holds, and re-renders metadata only, whenever:
+      - the grant's expiry passes. The verification response states the expiry, and the dashboard sets its own timer for it;
+      - the operator presses "Lock";
+      - a content RPC fails because the grant is missing, expired or unknown. That is how a grant lost to a router restart shows up;
+      - the event stream reconnects after a router restart.
+
+      The dashboard never puts conversation text in browser storage, so clearing what it holds in memory removes all of it.
     - **Why not a cookie.** Cookies are scoped to a host, not a port. The browser would send a `localhost` cookie to any trusted `https://localhost:<other port>` service, where another local application could capture it and replay it. Script state is scoped to the full origin (scheme, host and port), so the token never leaves the dashboard. ADR-0012's ticket cannot carry the grant either, because every caller in a generation gets the same ticket.
   - **Without a grant**, the same RPCs return metadata only. `StreamEvents` drops its text fields, checked per event, so a grant that expires mid-stream stops the text from then on.
   - **Marked log lines.** `LogLineEvent` today carries only a rendered `message` (`TelemetryLogEventSink`), so nothing tells a conversation-bearing line from a diagnostic one.
