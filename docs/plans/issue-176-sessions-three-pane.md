@@ -60,6 +60,14 @@ David's request, exact words:
 4. `chat-scroll.js` and the messages pane have an explicit teardown path (§6.2).
 5. Narrow windows scroll the tab horizontally instead of clipping it (§6.4).
 
+**Review round 3 (Copilot re-review on PR #178).** Five more findings changed the plan:
+
+1. Session comparison totals count only comparisons whose transcript survived retention (§5.3).
+2. Free-form metadata is capped in the SQL projection, before it reaches .NET (§5.3).
+3. The GUI store is bounded by estimated memory, not entry counts (§5.4).
+4. In-session search is scoped to loaded messages, and the UI says so (§6.3).
+5. The rail-item and message-row mockups are Mermaid, per `AGENTS.md` (§4.2, §4.3).
+
 ## 1. What exists today
 
 Traced with CodeGraph (`codegraph_explore`) on 2026-09-29.
@@ -203,9 +211,17 @@ Every color comes from an existing token. There is no new hue.
 
 ### 4.2 Rail item
 
-```text
-● Session 1a2b3c4d                ⚠ 🎓
-  10:42 · 14 turns · $0.012345
+```mermaid
+flowchart TB
+    subgraph Item["Rail item. Selected: accent left edge"]
+        direction TB
+        subgraph TitleRow["Title row"]
+            direction LR
+            Dot(("●")) ~~~ Title["Session 1a2b3c4d"] ~~~ Badges["⚠ 🎓"]
+        end
+        Meta["Meta line: 10:42 · 14 turns · $0.012345"]
+        TitleRow ~~~ Meta
+    end
 ```
 
 - **Dot.** The dot is `.ls-status-dot` plus one state class. Only the live-and-active dot pulses. `.pulse-dot` is a sanctioned liveness loop (`MOTION.md` §7).
@@ -218,9 +234,17 @@ Every color comes from an existing token. There is no new hue.
 
 ### 4.3 Message row
 
-```text
-│   Client │ refactor the parser to use spans…         #3 · 10:01:12 │  ← tinted
-│ ● sonnet │ [⇄ substituted] Here's a refactor that…        10:01:19 │
+```mermaid
+flowchart TB
+    subgraph Request["Request row, tinted"]
+        direction LR
+        RS["Client"] ~~~ RB["refactor the parser to use spans…"] ~~~ RT["turn 3 · 10:01:12"]
+    end
+    subgraph Response["Response row"]
+        direction LR
+        PS["● sonnet"] ~~~ PB["⇄ substituted · Here's a refactor that…"] ~~~ PT["10:01:19"]
+    end
+    Request ~~~ Response
 ```
 
 - **Sender column.** 120 px, right-aligned, ellipsized, full value in a `data-tip`.
@@ -354,7 +378,7 @@ message GetSessionTurnDetailsResponse {
 message SessionAggregate {
   int32 persisted_turns = 1;
   int32 trained_turns = 2;                        // rows with memory_entry_id set
-  int32 compared_turns = 3;                       // comparisons with both savings and baseline cost present
+  int32 compared_turns = 3;                       // retained transcripts with both savings and baseline cost compared
   optional string total_estimated_net_savings_usd = 4;    // decimal-as-string, over compared_turns
   optional string total_baseline_estimated_cost_usd = 5;  // decimal-as-string, over compared_turns
 }
@@ -434,7 +458,7 @@ message TurnText {
 **Response sizes.**
 
 - **Details pages.** A typical `SessionTurnDetail` is 250–500 bytes, but that is not a bound. Session ids have no length limit (`SessionIdResolver` rejects only blanks), and `requested_model` is whatever the client sent. So the server enforces two limits:
-  - **Field cap.** Free-form strings are cut at 1,024 characters with a trailing "…". That covers the model names, `dimension`, `difficulty`, `language`, `scorer_version`, and the comparison's `baseline_model`. One row is then at most about 30 KB.
+  - **Field cap.** Free-form strings are cut at 1,024 characters with a trailing "…", inside the SQL projection (§5.3). That covers the model names, `dimension`, `difficulty`, `language`, `scorer_version`, and the comparison's `baseline_model`. One row is then at most about 30 KB.
   - **Page budget.** Rows are added while the serialized page (protobuf `CalculateSize()`) stays within 2 MiB. A page that reaches the budget ends early and returns the cursor, so the next call resumes exactly where it stopped. The first row always goes in.
 - **Per-side cap.** `GetTurnTexts` caps each side at 262,144 characters, at most 1 MiB of UTF-8. A stored `response_text` can come from a capture buffer of up to 4 MiB, so an uncapped side could be far larger.
 - **Response budget.** It adds an entry only while the running total of text stays within 2 MiB, and marks the rest `omitted`. The first entry always goes in, because one entry is at most 2 MiB. So a response never carries more than about 2 MiB, well under the 4 MB cap.
@@ -449,18 +473,27 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 - **`ITranscriptStore.ListSessionTurnMetadataAsync(string sessionId, int limit, long? beforeTranscriptId, CancellationToken)`.**
   - Returns `IReadOnlyList<SessionTurnMetadata>`. This is a new record next to `SessionTranscript`. It carries every §5.2 column **but no text**; it has `PromptTextLength` and `ResponseTextLength` instead.
   - **Its own projection.** It does not reuse `GetTranscriptAsync`'s column list or the `ReadTranscriptRecord` materializer: `TranscriptRecord` carries both text bodies. It selects `length(prompt_text)` and `length(response_text)`, so SQLite never hands a body to .NET.
+  - **Capped in SQL, not after.** The values are client-controlled and unbounded, so capping them after materialization would not bound memory.
+    - Every free-form column is selected as `substr(column, 1, 1025)`, so no longer value is ever read into .NET. The service appends "…" to any value that reaches 1,025 characters, which gives §5.2's 1,024-character cap.
+    - The turn number is cut out as `substr(correlation_id, length(session_id) + 2, 10)`. The session-id prefix of `correlation_id`, which is unbounded, is never read.
+    - A suffix that is not a number falls back to turn 1, as `PersistedSessionAggregator` does today.
   - **Paging.** `WHERE session_id = $sessionId AND ($before IS NULL OR id < $before) ORDER BY id DESC LIMIT $limit + 1`. When the extra row comes back, it is dropped, and the last returned id becomes `next_before_transcript_id`. `ix_request_transcripts_session_id` already exists.
   - **Default and gating.** The default interface implementation returns `[]`, exactly like `ListSessionsAsync`. The SQLite implementation is gated on `TranscriptOptions.Enabled` and calls `EnsureSchema()` as `ListSessionsAsync` does.
 - **`ITranscriptStore.ListTurnTextsAsync(IReadOnlyList<long> transcriptIds, int maxCharacters, CancellationToken)`.**
   - A second projection. It selects only `id`, `substr(prompt_text, 1, $max)`, `substr(response_text, 1, $max)`, and the two `length()`s, so a capped side is cut inside SQLite.
   - It looks rows up by primary key, at most 50 ids per call.
   - It is also a default interface member.
-- **Comparisons.** A new overload, `ITaxonomyComparisonStore.LoadForSessionAsync(sessionId, minTranscriptId, maxTranscriptId)`, loads each page's comparisons. Its filter is `session_id` (index `ix_taxonomy_comparisons_session`) plus the page's id range, so a page never re-reads the whole session. It is a default interface member, like the transcript additions, and reuses `SqliteTaxonomyComparisonStore`'s own `Read` materializer.
+- **Comparisons.** A new overload, `ITaxonomyComparisonStore.LoadForSessionAsync(sessionId, minTranscriptId, maxTranscriptId)`, loads each page's comparisons. Its filter is `session_id` (index `ix_taxonomy_comparisons_session`) plus the page's id range, so a page never re-reads the whole session. It is a default interface member, like the transcript additions.
+  - It selects its own column list rather than reusing `SqliteTaxonomyComparisonStore`'s `Read` materializer, which reads `session_id` on every row.
+  - It leaves out `session_id`, `routed_model`, and `is_exploratory`, because the caller already has them. `baseline_model` is selected as `substr(baseline_model, 1, 1025)`, for the same reason as the metadata query.
   - `TelemetryGrpcService` joins comparisons in memory on `TranscriptId == Id`.
   - This keeps each store owning its own table, as `ITaxonomyComparisonStore`'s remarks require. There is no cross-table SQL inside `SqliteTranscriptStore`.
 - **Session aggregate (first page only).** Each store answers for its own table, through the existing `session_id` indexes. Both methods are default interface members.
   - `ITranscriptStore.GetSessionStatsAsync(sessionId)` counts the session's rows and its trained rows: `COUNT(*)` and `COUNT(memory_entry_id)`.
-  - `ITaxonomyComparisonStore.GetSessionComparisonStatsAsync(sessionId)` counts and sums the comparisons that have both savings and a baseline cost.
+  - `ITaxonomyComparisonStore.GetSessionComparisonStatsAsync(sessionId)` counts and sums the comparisons that have both savings and a baseline cost, **and whose transcript still exists**.
+    - **Why.** Retention deletes only `request_transcripts` rows (`SqliteTranscriptStore`'s `DeleteOldestAsync`, `DeleteBeforeAsync`, and `DeleteAllAsync`), and `taxonomy_comparisons` has no foreign key or cascade, so orphaned comparisons accumulate.
+    - **How.** The query keeps only rows with a matching `request_transcripts.id`, the same cross-table join `LoadPendingComparisonsAsync` already makes. So `compared_turns` can never exceed `persisted_turns`, and the sums cover only turns the details pages can return.
+    - **Not changed: retention.** Making retention delete comparisons too would also shrink Cost Analytics' Routing ROI history, which reads `taxonomy_comparisons` directly. That is out of scope.
 - **`TelemetryGrpcService` takes a new optional constructor parameter, `ITaxonomyComparisonStore? comparisonStore = null`.**
   - If it is absent, `comparison` is simply unset. Existing test construction and hosts without a management API keep working.
   - Implements `GetSessionTurnDetails`:
@@ -487,7 +520,11 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
     - the loaded-at time;
     - a state: `Loading`, `Loaded`, `CaptureOff`, `Unreachable`, or `Failed`.
   - **Paging.** `LoadEarlierAsync(sessionId)` fetches the next older page and adds it to the snapshot.
-  - **Bounds.** Snapshots form a bounded LRU of 16 sessions. The per-transcript text cache holds 256 entries. Ids that come back `omitted` are asked for again in the next batch.
+  - **Memory budgets, not entry counts.** Counting entries does not bound memory. One cached text can hold two 262,144-character strings, about 1 MiB as .NET UTF-16. A snapshot grows as earlier pages are appended. So the store keeps an estimated size: 2 bytes per character of every string, plus a fixed per-row overhead. It evicts until both budgets hold:
+    - **Text cache: 16 MiB.** The least recently used entries go first.
+    - **Snapshots: 16 MiB, and at most 16 sessions.** Older pages of the least recently used sessions go first, then whole sessions. The selected session goes last, and its newest page never goes.
+    - **Refetching.** The store keeps each evicted page's boundary transcript id. A page is fetched again from that id, through the same keyset cursor, when the operator scrolls back to it.
+  - **Omitted ids.** Ids that come back `omitted` are asked for again in the next batch.
   - **Cancellation.** A load for a newly selected session cancels the previous session's in-flight load.
 - **Refresh policy.** Persisted rows lag the live stream:
   - the transcript is written after the response completes;
@@ -577,11 +614,14 @@ stateDiagram-v2
 ### 6.3 Search
 
 - **Rail search.** Keeps today's semantics: title, session id, agent, or model, case-insensitive.
-- **In-session search.**
-  - The title bar's magnifier toggles an input that filters rows by body text or model name.
-  - The title bar then shows "n of m messages".
+- **In-session search searches loaded messages only, and says so.**
+  - The title bar's magnifier toggles an input with the placeholder "Search loaded messages". It filters rows by body text or model name.
+  - **Scope.** It covers the rows the pane currently holds. In Phase 2 that excludes metadata rows still waiting for their text (§6.2).
+  - **Count.** The title bar shows "n matches in m loaded messages".
+  - **Older history.** When older history exists, it adds "Earlier turns aren't searched. Show earlier turns to include them." Older history exists when the render window does not start at the session's first turn, or a details cursor remains.
   - Escape clears and closes it.
   - The selection stays even when the selected row is filtered out, so the right pane never goes blank under the operator.
+  - Searching the whole session on the router is a follow-up. It needs a text query over `request_transcripts`, which this plan does not add (§14).
 
 ### 6.4 Dividers
 
@@ -796,7 +836,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - Row click selects `(turn, side)` and sets `aria-pressed`.
   - Show more renders for exactly the keys the overflow callback reports. Before any report, the 150-character / 5-line-break fallback applies. A short text never gets a toggle.
   - Chips for fallback and substitution.
-  - The in-session filter and its count.
+  - The in-session filter counts only loaded rows. It shows the "Earlier turns aren't searched" note when older history exists, and not otherwise.
   - Newest response row implicitly selected.
   - Disposing the pane calls `chatScroll.dispose` (checked through bUnit's JSInterop) and tolerates a disconnected runtime.
   - "Show earlier turns" paging.
@@ -831,10 +871,14 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - Paging walks a 2,500-row session with no gap and no duplicate. The cursor is absent on the last page.
   - `ListTurnTextsAsync` cuts each side at the cap and reports `truncated` from the stored length.
   - `GetSessionStatsAsync` counts all of the session's rows and its trained rows, beyond any page.
+  - Over-long free-form values come back cut at 1,025 characters.
+  - The turn number is read correctly for a 100,000-character session id, without that prefix being returned.
   - Capture off returns empty and creates no file.
 - **`SqliteTaxonomyComparisonStoreTests`.**
   - `LoadForSessionAsync` returns only that session's rows inside the id range.
   - `GetSessionComparisonStatsAsync` counts and sums only comparisons with both savings and a baseline cost.
+  - It excludes a comparison whose transcript was deleted by retention, so `compared_turns` never exceeds `persisted_turns`.
+  - `LoadForSessionAsync`'s rows carry no `session_id`, and `baseline_model` comes back capped.
 - **`TranscriptStoreDefaultMemberTests`.** The new default members return `[]`.
 - **`TelemetryGrpcServiceTests`.**
   - Every field is mapped, including decimal strings and unset optionals.
@@ -856,7 +900,11 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - A superseded load is cancelled.
   - `LoadEarlierAsync` appends the next page and stops when the cursor is absent.
   - `omitted` text ids are requested again.
-  - The LRU bound.
+  - **Memory budgets.**
+    - Text entries are evicted, least recently used first, until the estimate is within 16 MiB.
+    - Snapshot pages are evicted from other sessions first, then whole sessions. The selected session's newest page is never evicted.
+    - An evicted page is fetched again from its boundary id.
+    - At most 16 sessions are kept.
   - Unreachable sets flags without throwing.
   - `Changed` fires once per load.
 - **Tab tests with persisted details.**
@@ -887,6 +935,9 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 | Per-tab-switch teardown loses view state | §6.5 |
 | Per-tab-switch teardown leaks JS observers or .NET references | §6.2's `chatScroll.dispose` and `IAsyncDisposable` path |
 | A narrow browser window clips the panes | §6.4's horizontal scroll below an 884 px layout width |
+| Cached text and pages grow browser memory | §5.4's size-based budgets, not entry counts |
+| Orphaned comparisons skew session totals | §5.3 counts only comparisons whose transcript still exists |
+| Client-controlled strings inflate router memory | §5.3 caps them in the SQL projection, before they reach .NET |
 | Render cost of long sessions | §6.2's 200-turn window plus "Show earlier turns" |
 | Persisted fields lag the live stream | §5.4's debounced re-fetch and refresh button. The tab says "Not compared yet" instead of guessing |
 | Synthesized session ids flood the rail with one-turn sessions | Behavior unchanged from today. Grouping untracked sessions is out of scope |
@@ -903,6 +954,8 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 - A light theme.
 - Changing Cost Analytics' behavior. It only coalesces the now-nullable token counts (§5.1).
 - Persisting the untracked flag. It needs a transcript column, and is a follow-up (§5.1).
+- Searching a whole session's text on the router. In-session search covers loaded messages only (§6.3).
+- Making transcript retention delete orphaned comparisons (§5.3).
 
 ## 15. Decisions for David at review
 
@@ -915,6 +968,7 @@ Each has a default that this plan already assumes.
    - An initial window of 200 turns.
    - Details pages of 500 turns (at most 2,000), each within a 2 MiB budget, with free-form fields capped at 1,024 characters.
    - An 884 px minimum layout width, below which the tab scrolls horizontally.
+   - `SessionDetailsStore` budgets of 16 MiB for cached text and 16 MiB for snapshots, by estimated size.
    - `GetTurnTexts` caps: 262,144 characters per side, 2 MiB per response, 50 ids per call.
 4. **Idle threshold.** 5 minutes.
 5. **ADR scope.** The ADR itself is required before Phase 2 (§5.2), so the only open question is its scope. Default: one ADR covering both RPCs and their size caps.
