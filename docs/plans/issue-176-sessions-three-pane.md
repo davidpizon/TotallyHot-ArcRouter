@@ -543,7 +543,7 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 `ConversationSummary`'s current "Avg ROI" averages a field that is always `0`, so it shows "—". The Session tab replaces it, and every figure below is labeled an estimate in its tooltip:
 
 - **Per turn:** `estimated_net_savings_usd / baseline_estimated_cost_usd × 100`, only when both are present and the baseline is above 0. Otherwise "—".
-- **Per session:** Est. savings is `Σ estimated_net_savings_usd`. Est. ROI is `Σ savings / Σ baseline cost × 100` over compared turns. That is cost-weighted rather than an average of percentages, so small turns do not dominate. Coverage is shown as "n of m turns compared".
+- **Per session:** Est. savings is `Σ estimated_net_savings_usd`. Est. ROI is `Σ savings / Σ baseline cost × 100` over compared turns, only when that summed baseline cost is above 0. Otherwise "—". A compared turn needs only a baseline cost to be present, and a free baseline legitimately costs `0`, so the sum can be `0` and the guard is required, as it is per turn. The ROI is cost-weighted rather than an average of percentages, so small turns do not dominate. Coverage is shown as "n of m turns compared".
   - The sums and counts come from `SessionAggregate` (§5.2), so they cover the whole session, not just the loaded pages.
 - **Methodology.** The tooltip links [`score-delta-methodology.md`](../score-delta-methodology.md), as Cost Analytics' Routing ROI chart does.
 
@@ -567,8 +567,8 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 ```mermaid
 stateDiagram-v2
     [*] --> ImplicitSession: tab opens, nothing selected
-    ImplicitSession --> ExplicitSession: operator clicks a rail item
-    ExplicitSession --> ExplicitSession: operator clicks another rail item
+    ImplicitSession --> ExplicitSession: operator clicks or arrows to a rail item
+    ExplicitSession --> ExplicitSession: operator clicks or arrows to another rail item
     state ExplicitSession {
         [*] --> ImplicitMessage: newest response row, follows new turns
         ImplicitMessage --> ExplicitMessage: operator clicks a row
@@ -578,7 +578,8 @@ stateDiagram-v2
 
 - **Sessions.**
   - The tab shows `SelectedId` (Dashboard's shared selection) when it is set and still present.
-  - Otherwise it shows the most recently active session **without calling `OnSelect`**. Implicit selection must not re-scope Cost Analytics, which today defaults to All Sessions until a session is actually chosen. Only a click calls `OnSelect`.
+  - Otherwise it shows the most recently active session **without calling `OnSelect`**. Implicit selection must not re-scope Cost Analytics, which today defaults to All Sessions until a session is actually chosen.
+  - Every operator action on the rail is explicit selection and calls `OnSelect`: a pointer click, and the keyboard moves in §8 (Up, Down, Home, End), where moving is selecting. So `Dashboard._selectedConversationId` and Cost Analytics' scope update the same way whichever input the operator uses. Only the implicit fallback above skips `OnSelect`.
   - If the selected session disappears (evicted from `LiveDataStore` beyond `MaxRetainedSessions = 500` and not persisted), the view falls back to the newest session.
 - **Messages.**
   - Implicit selection is the newest response row. It moves as new live turns arrive while the list is pinned to the bottom.
@@ -707,7 +708,7 @@ stateDiagram-v2
 | Section | Fields |
 |---|---|
 | Identity | Title, session id (copyable), status (active / idle / history), untracked (yes, no, or unknown for persisted-only sessions), used for training ("Yes" or "Not in the loaded history"; yes or no for the whole session once the Phase 2 aggregate loads), first → last turn (full dates) |
-| Totals | Total cost (with `≥` and the unpriced count, as in today's summary), prompt and completion tokens, turns, fallback turns, Est. savings and Est. ROI with coverage (§5.5), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`) |
+| Totals | Total cost (with `≥` and the unpriced count, as in today's summary), prompt and completion tokens, turns, fallback turns, Est. savings and Est. ROI with coverage (§5.5; Est. ROI is "—" when the summed baseline cost is not above 0), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`) |
 | Models used | The CodePen's member list: one line per distinct routed model with its color dot, turn count, cost share, and last-used time. Most recent first |
 
 ## 8. Accessibility
@@ -825,6 +826,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - The rail is sorted most recently active first, replacing `Sorts_the_card_list_oldest_first`.
   - Implicit selection is the newest session and does not invoke `OnSelect`.
   - Clicking a rail item invokes `OnSelect`.
+  - Up, Down, Home, and End on a focused rail item invoke `OnSelect` with the newly selected session, just as a click does.
   - Rail search filters.
   - Status-dot class per state, using a fake `TimeProvider` at the 5-minute boundary.
   - Footer capture on / off.
@@ -910,6 +912,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 - **Tab tests with persisted details.**
   - Classification, score, training, and the comparison section.
   - ROI arithmetic, which is cost-weighted, and its coverage text, both taken from the aggregate.
+  - Est. ROI renders "—" when every compared turn has a free baseline, so the summed baseline cost is `0` and there is no division. The same holds per turn.
   - With the aggregate loaded, "Used for training" reads yes or no for the whole session.
   - A live text longer than 2,000 characters counts as truncated. That includes the preview of a stored text of exactly 2,001 characters, which has the same length as its source.
   - Show more on such a row calls `GetTurnTexts` once, then renders the stored text.
@@ -973,6 +976,6 @@ Each has a default that this plan already assumes.
 4. **Idle threshold.** 5 minutes.
 5. **ADR scope.** The ADR itself is required before Phase 2 (§5.2), so the only open question is its scope. Default: one ADR covering both RPCs and their size caps.
 6. **Full text** comes from the batched `GetTurnTexts` RPC (the deviation recorded above) rather than the session RPC.
-7. **Implicit selection** never calls `OnSelect`, which preserves Cost Analytics' All Sessions default.
+7. **Implicit selection** never calls `OnSelect`, which preserves Cost Analytics' All Sessions default. Explicit selection, by pointer or keyboard, always does.
 8. **History-only dot** is muted grey, not the CodePen's red.
 9. **Divider defaults.** 22% and 28%, clamped to 15–35% and 20–40%.
