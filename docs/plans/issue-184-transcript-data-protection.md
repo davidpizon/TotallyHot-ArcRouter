@@ -121,8 +121,14 @@ flowchart TB
 
   **Migration needs a stopped router.** On Windows, the exclusive open (below) already fails closed on any file that another process holds. On Linux and macOS, migration copies each file and unlinks the original, and a copy cannot see a writer. A router still running would keep writing to the unlinked original, so those writes would be lost, and a database copied mid-write could disagree with its WAL. So:
   - **The installers stop ignoring a failed stop.** Today both do (`packaging/linux/install.sh:46`, `packaging/macos/install.sh:58`). The stop still tolerates a service that does not exist yet. Afterwards, `install.sh` checks that the service is not running (`systemctl is-active` on Linux, `launchctl print system/<label>` on macOS). If it is, the script aborts before migration and names the service.
-  - **The command checks for itself.** However it is run, `--migrate-data-directory` aborts before copying anything if any process holds a file in the old tree open for writing. It names the process and the file. It reads each process's `/proc/<pid>/fdinfo` flags on Linux, and `lsof`'s access mode on macOS.
-    - A descriptor open only for reading does not block migration, so another account that holds a file open cannot stall it. The copy already cuts that reader off from later writes.
+  - **The command checks for itself, after it locks the tree.** However it is run, `--migrate-data-directory` first blocks new access, then looks for writers. A check made while the tree is still open would leave a gap: on a root owned by the legacy user, any of that user's applications could open a file for writing after the check and before its copy.
+    1. **Lock.** It makes every directory in the old tree owned by root with mode `0700`. It reaches each directory through a descriptor opened with `O_DIRECTORY | O_NOFOLLOW` from its parent, and changes only directories, so it never follows a symlink or touches a hard-linked file. A lookup checks a directory's current mode, so from then on no other account can open a file in the tree. That holds even through a directory descriptor or working directory it opened earlier.
+    2. **Look for writers.** Only a writer that already holds access remains, so the command now checks for one. It aborts before copying anything if any process holds a file in the tree open for writing, or has one mapped shared and writable, and names the process and the file.
+       - **Linux:** it reads each process's `/proc/<pid>/fdinfo` flags for descriptors, and `/proc/<pid>/maps` for shared writable mappings. A mapping keeps its file writable after its descriptor closes, so the descriptor scan alone would miss it.
+       - **macOS:** it reads descriptors' access mode from `lsof`. `lsof` shows no access mode for a mapping, so any mapping of a file in the tree blocks migration there.
+    3. **Abort leaves the tree locked.** The service fails closed on it, as on any unmigrated root, and the next elevated run starts again from step 1.
+
+    A descriptor open only for reading does not block migration, so another account that holds a file open cannot stall it. The copy already cuts that reader off from later writes.
   - **No restart mid-migration.** The installers copy the new binaries before they migrate. A router started in the meantime runs the new binary, which fails closed on an unmigrated root (above).
   - **Docker.** The in-place migration (below) runs in the bootstrap, before the router opens any file, so its own container has no other writer. Another container on the same volume would be out of its view. The Docker docs therefore say one container per volume, which two routers sharing one database already need.
 
@@ -158,7 +164,7 @@ flowchart TB
   - **Linux:** the unit adds `StateDirectoryMode=0700`, `LogsDirectoryMode=0700` and `UMask=0077`, and `install.sh` creates both directories with mode `0700`.
   - **macOS:** `install.sh` sets `0700` on the state tree, which includes `logs`, and the plist gets a `Umask` of `077`.
   - **Startup verification** checks the state directory and the logs directory alike. Each must be owned by the service account (or by the current user, for a dev run's per-user fallback), must not be a symlink, and must have no group or other permission bits.
-  - **Migration** copies files into the new `0700` tree, as above. It changes no mode in place, so it never touches a symlink's target or a hard-linked file's inode.
+  - **Migration** copies files into the new `0700` tree, as above. It changes no file's mode in place, so it never touches a symlink's target or a hard-linked file's inode. The only modes it changes in place are the old tree's directories, when it locks them before copying (above).
   - **Docker.** The image creates `/data` with `mkdir -p` and `chown`, but no `chmod` (`Dockerfile:72-75`), so it is `0755`, and the documented `-v arcrouter-data:/data` deployment would fail the check above.
     - The image creates `/data` with mode `0700`, and its entrypoint sets `umask 077`.
     - **An older named volume** is migrated in place by the bootstrap, as its owner, with no elevated step. Inside the container the only accounts are root and the non-root service account, which already owns every file in the volume. No other host account can have planted entries: nothing on the host path to the volume gives others a write bit (F12).
@@ -337,8 +343,10 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - Migration renames aside a planted hard link to a file outside the root. The outside file's owner and ACL (on Unix, its mode) are unchanged.
 - A file that another process holds open from before migration:
   - on Windows, with any handle, makes the bootstrap fail closed and name the file;
-  - on Unix, open for writing, makes `--migrate-data-directory` abort before it copies anything. It names the process and the file, and the old tree is unchanged;
+  - on Unix, open for writing, makes `--migrate-data-directory` abort before it copies anything. It names the process and the file. No file has been copied or unlinked, and the tree stays locked;
+  - on Unix, mapped shared and writable after its descriptor was closed, makes migration abort the same way;
   - on Unix, open only for reading, does not stop migration, and the reader does not see writes made after migration.
+- On Unix, once migration has locked the old tree, another account cannot open a file in it, either by path or through a directory descriptor it opened earlier. The lock changes no file's mode, and leaves a symlink's target and a hard-linked file's mode unchanged.
 - `install.sh` aborts before migration, naming the service, when the service is still running after the stop.
 - The pre-upgrade log rewrite runs once, in `--migrate-data-directory`, and never at the router's start. On macOS, console output written after the upgrade appears in `launchd-stdout.log`.
 - On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
