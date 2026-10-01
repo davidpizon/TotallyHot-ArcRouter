@@ -108,10 +108,10 @@ flowchart TB
   - it is not a reparse point;
   - no broad group, and no individual account, has an ACE.
 
-  **Legacy or squatted.** Any other root is owned by an individual account, which makes it either a legacy root or a squat. The bootstrap tells them apart by the legacy owner:
-  - **The legacy owner** is the account that installed the router (the MSI passes the installing user's SID, `UserSID`). On a machine without the MSI, it is the account that runs the explicit, elevated `--migrate-data-directory` command.
-  - **A root owned by the legacy owner** is migrated (below). On THEATRE-PC that is `david`'s root.
-  - **A root owned by any other account** is a squat. The whole tree is renamed aside untouched, and a fresh protected root is created. Nothing is copied out of it, because its owner may have tampered with anything in it. The log names the quarantined path, which may still hold the operator's data and which an administrator should review and delete.
+  **Legacy or squatted.** Any other root is unprotected, and the bootstrap classifies it by owner:
+  - **Owned by `SYSTEM` or `Administrators`, with the old broad DACL.** This is a pre-phase-1 root that the installed service or an elevated run created (the normal installed case). The owner authenticates it, because no standard account can make `SYSTEM` or `Administrators` an owner. It is migrated (below).
+  - **Owned by the legacy owner.** The legacy owner is the account that installed the router (the MSI passes the installing user's SID, `UserSID`). On a machine without the MSI, it is the account that runs the explicit, elevated `--migrate-data-directory` command. This root is migrated too. On THEATRE-PC that is `david`'s root.
+  - **Owned by any other account.** This is a squat. The whole tree is renamed aside untouched, and a fresh protected root is created. Nothing is copied out of it, because its owner may have tampered with anything in it. The log names the quarantined path, which may still hold the operator's data and which an administrator should review and delete.
 
   **Who acts.**
   - Migration runs only elevated: in the MSI's install or upgrade, before it starts the service, or through `--migrate-data-directory`. On Linux and macOS, `install.sh` runs the same command as root.
@@ -132,6 +132,16 @@ flowchart TB
      - **No open handles.** On Windows, the file is renamed through an exclusive handle that does not follow links, and its owner and ACL are reset through that same handle. If another process holds the file open, the exclusive open fails, and migration fails closed, naming the file. On Linux and macOS, the file is copied into a new `0600` file, so no earlier descriptor reaches it.
      - **Not `appsettings.local.json`.** An application running as the legacy owner could have planted it, and no check can tell. It stays behind, and the router does not load it until an administrator reviews it and copies it into the protected root. On THEATRE-PC, the existing 933-byte overlay stays behind.
   3. **Swaps the trees.** The old root is renamed aside as a quarantine, and the new root is renamed into place. If a process holds the old root open so that it cannot be renamed, migration fails closed and says so.
+  4. **Closes the quarantine.** It sets the quarantine root to `SYSTEM` and `Administrators` only, or to mode `0700` on Linux and macOS, so ordinary accounts cannot reach what was left behind.
+
+  **Unlinked sources.** On Linux and macOS, each source file is unlinked as soon as its copy is verified and flushed. Accepted files therefore leave nothing in the quarantine, and only rejected entries stay. On Windows, a file is moved rather than copied, so nothing is left behind.
+
+  **Crash safety.** Migration can stop at any step: an open file can fail it, and a crash can land between the two renames. So every step is idempotent, and startup recovers before it selects or creates any root.
+  - **Finding the new tree.** The new tree's name is random, so recovery finds it by its name prefix. It accepts the tree only if it is owned by `Administrators` with the protected DACL (on Linux and macOS, owned by the service account with mode `0700`). No standard account can create one that passes, so a planted directory cannot steer recovery.
+  - **A journal in the new tree** records each step: files moved or copied, then the two renames. It is flushed before each step, and each per-file step is a rename, or a copy, flush and rename, so it is atomic.
+  - **Old root still live, new tree found.** Migration resumes where the journal stops.
+  - **No live root, quarantine and new tree found.** The swap is completed.
+  - **Who resumes.** Elevated runs resume. The service fails closed, naming the command, as long as any of these states exists. Startup never creates an empty root while a new tree or a quarantine with a journal exists.
 
   A directory handle opened before migration still points at an old directory, now inside the quarantine, so it cannot create entries in the live tree. Model files under `models\` are re-verified against their published checksums before their first load, which `LlmRouterModelSyncService` already fetches at sync. A file that fails is quarantined and downloaded again.
 
@@ -277,7 +287,10 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
   - a root owned by an account other than the legacy owner is quarantined untouched, and a fresh root is created;
   - the legacy owner's root is migrated;
   - the service fails closed on a root that is neither protected nor migrated;
-  - a reparse-point root is never followed.
+  - a reparse-point root is never followed;
+  - a pre-phase-1 root owned by `SYSTEM`, with the old broad DACL, is migrated on upgrade.
+- After migration on Linux and macOS, an ordinary account cannot open a migrated database or log through the quarantine path, and accepted sources are gone from it.
+- Killing migration after some files have moved, and again between the two renames, leaves a state that the next elevated run completes. Meanwhile the service fails closed, and no empty root is ever created.
 - A directory handle opened before migration, on the old root or on `logs\`, cannot create a file in the live tree afterwards.
 - Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
 - Migration renames aside a planted hard link to a file outside the root. The outside file's owner and ACL (on Unix, its mode) are unchanged.

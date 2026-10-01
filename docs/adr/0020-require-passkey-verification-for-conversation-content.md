@@ -80,9 +80,13 @@ What this ADR commits to:
   - WebAuthn with `userVerification: "required"`. The authenticator is Windows Hello, Touch ID, or a security key. Neither the router nor the calling application ever sees the private key, and each use needs the operator's PIN, fingerprint, face or touch.
   - **Synced passkeys.** Passkeys come in two kinds:
     - **device-bound**, such as security keys, and Windows Hello keys kept on the device;
-    - **synced**, where the provider (for example iCloud Keychain, Google Password Manager, or a password-manager extension) backs the private key up and copies it to the user's other devices. The authenticator reports this with the backup-eligible flag.
+    - **synced**, where the provider (for example iCloud Keychain, Google Password Manager, or a password-manager extension) backs the private key up and copies it to the user's other devices.
 
-    **Synced passkeys are allowed** (David, 2026-09-30). The built-in passkeys on macOS sync through iCloud Keychain, so a device-bound-only rule would force a security key there. The router records the backup-eligible flag at enrollment and shows it in the passkey list.
+    The authenticator reports two separate flags. Backup eligible (`BE`) means the credential *can* be backed up. Backup state (`BS`) means it currently *is*, and that can change after enrollment.
+
+    **Synced passkeys are allowed** (David, 2026-09-30). The built-in passkeys on macOS sync through iCloud Keychain, so a device-bound-only rule would force a security key there.
+    - The router records both flags at enrollment, and updates `BS` from every assertion.
+    - The passkey list shows "can sync" from `BE`, and "synced" or "not synced" from the latest `BS`.
   - The router verifies assertions with the `Fido2` library ([fido2-net-lib](https://github.com/passwordless-lib/fido2-net-lib), MIT).
   - On Windows, the tray and CLI reach the same authenticators through `webauthn.dll`, via `DSInternals.Win32.WebAuthn` ([webauthn-interop](https://github.com/MichaelGrafnetter/webauthn-interop), MIT).
   - **What the router checks.** An assertion counts only when all of these hold:
