@@ -159,8 +159,8 @@ flowchart TB
 - **The public CA certificate.** `router-ca.crt` holds only a public certificate, but `docs/router/client-tls-setup.md` has users read it: Firefox and Chrome-on-Linux imports, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, and `curl --cacert`. A `0700` state directory, or an admin-only root, would hide it.
   - The service rewrites it at each start into a public directory that every user can read and only the service and administrators (root, on Linux and macOS) can write:
     - **Windows:** `%ProgramData%\TotallyHotArcRouter-Public\`;
-    - **Linux:** a systemd `RuntimeDirectory` with mode `0755`, at `/run/totallyhot-arcrouter/`;
-    - **macOS:** `/Library/Application Support/TotallyHotArcRouter-Public/`, owned by root with mode `0755`.
+    - **Linux:** a systemd `RuntimeDirectory` with mode `0755`, at `/run/totallyhot-arcrouter/`. systemd makes the service account its owner, so the service can write it;
+    - **macOS:** `/Library/Application Support/TotallyHotArcRouter-Public/`, created by `install.sh`, owned by the service account `_arcrouter`, with mode `0755`. A root-owned `0755` directory would not let the service write the file.
   - `client-tls-setup.md` points there.
   - **The squat checks apply.** That directory holds a trust anchor that users import, so a copy planted by another account would make them trust the attacker's root. The bootstrap applies the same owner and reparse checks as for the root, and rejects a directory it did not create.
 - **`web-interface.json`** keeps an explicit `Users:R` ACE in the root, because it holds only a URL and a thumbprint. The tray opens it by its full path, which needs no traverse right on the root, so the tray keeps working (F6).
@@ -195,6 +195,7 @@ flowchart TB
 - Ship `MinimumLevel.Default: Information`.
 - Put all four conversation-bearing templates (F9) behind their own opt-in switch, and write them to their own files (for example `logs\bodies-*.log`). Clear and uninstall can then remove them without touching the diagnostic logs.
 - The four templates carry a marker property (ADR-0020). It selects their lines for the body files, and it lets `StreamEvents` drop them for sessions without a content grant.
+- **Marked events go nowhere else.** Serilog sends every event to every sink (`Program.cs:208-229`): the Console sink from `appsettings.json`, the `arcrouter-*.log` file sink, and the telemetry sink. So both the diagnostic file sink and the Console sink filter marked events out. Otherwise, turning on body logging would leave a second copy that Clear and uninstall never remove, and on Linux systemd would also copy the Console output into the journal.
 - Pass their text through the same secret obscuring ADR-0019 uses for storage.
 - **Clear** first closes the body sink, which flushes and releases its file. It then deletes every body file and reopens the sink. Deleting under an open sink would not work: Windows refuses to delete the open file, and elsewhere the sink would keep writing to the unlinked file.
 - **Pre-upgrade logs.** Files written before the upgrade still hold unobscured excerpts, and would otherwise linger until the newest-30 limit rolls them off.
@@ -317,6 +318,8 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - A model file that fails its published checksum after migration is quarantined, not loaded.
 - Rewriting a machine-wide secret as an elevated administrator leaves an ACL of only `SYSTEM` and `Administrators`, with no ACE for the writer. The per-user fallback still grants only the current user.
 - Clear deletes the body-excerpt files while the body sink is open and writing, and the sink keeps working afterwards.
+- With body logging on, a marked event reaches only the body files. Neither `arcrouter-*.log` nor the console output contains it.
+- On macOS, the service can write `router-ca.crt` into the public directory, and every user can read it.
 
 ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in #165's plan.
 
