@@ -94,6 +94,9 @@ What this ADR commits to:
     - On 1809 the tray and CLI check for the API before a ceremony. They refuse the gated operation, and the message sends the operator to the dashboard.
     - The dashboard still works with a security key: without `webauthn.dll`, Chromium-based browsers fall back to their own USB support. Windows Hello is unavailable, because browsers reach it only through that API.
     - Raising the product minimum to 1903 would remove this case. That is a separate decision; this ADR does not make it.
+  - **macOS and Linux.** The CLI runs no ceremony there. It refuses the gated operation, and the message sends the operator to the dashboard, as on 1809.
+    - Neither platform offers a CLI a system WebAuthn API the way Windows offers `webauthn.dll`. macOS's passkey API (AuthenticationServices) serves only an app entitled for the relying party's domain, and Linux has no system API. A native ceremony would need a native library such as libfido2, which reaches security keys only, and has to be packaged for every distribution.
+    - Adding one later is a separate decision; this ADR does not make it.
   - **What the router checks.** An assertion counts only when all of these hold:
     - `clientDataJSON.type` is `webauthn.get` (`webauthn.create` at enrollment);
     - its `challenge` is the one pending for that operation, and verification consumes that challenge atomically (compare and remove) before it issues any authorization. It removes the challenge first, before any other check, so every attempt uses the challenge up, whether verification then passes or fails; after a failure the operator starts a new ceremony. A replayed assertion, whether concurrent or later, then finds no pending challenge. Synced passkeys often keep the signature counter at zero, so the counter alone cannot catch a replay;
@@ -210,7 +213,8 @@ What this ADR commits to:
 - Bad, because only `https://localhost:<web port>` can use the gated features. An IP-literal URL cannot, and a remote host name cannot until a certificate path for one is decided.
 - Bad, because a headless host with no platform authenticator needs a security key to use the gated operations through the router.
 - Bad, because on Windows 10 1809 the tray and CLI cannot run a ceremony, and Windows Hello is unavailable. A security key in the dashboard is the only way through the gate there.
-- Neutral, because it adds two dependencies, `Fido2` and `DSInternals.Win32.WebAuthn`, both MIT-licensed.
+- Bad, because on macOS and Linux the CLI cannot run a ceremony either, so the gated operations go through the dashboard there.
+- Neutral, because it adds two dependencies, `Fido2` and `DSInternals.Win32.WebAuthn`, both MIT-licensed. It adds no native library, because the CLI on macOS and Linux sends the operator to the dashboard.
 - Neutral, because it sets ship order: #165's export and import, #176's `GetTurnTexts`, and ADR-0019's full view must not ship before this gate. #179's previews move behind it once it exists.
 - Neutral, because ADR-0012 stays in force for everything except conversation content. When this ADR is accepted, ADR-0012 gets a forward link.
 
@@ -272,7 +276,6 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
   - the exact issuance rate (the token bucket above is illustrative);
   - whether the fixed limits can be configured: two-minute challenges and authorizations, a 32-entry store, and the 15-minute grant;
   - how the GUI shows locked text and the "Lock" control;
-  - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;
   - the names of the enrollment pipe and socket, and their request format.
 - **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).

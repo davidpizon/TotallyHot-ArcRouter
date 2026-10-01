@@ -80,7 +80,7 @@ So `FAST` does not meet the goal, `ON` also needs the WAL truncated, and `-shm` 
 | B. The ADR-0015 per-file ACL on `transcripts.db`, `-wal`, and `-shm` | **Rejected.** The probe shows SQLite re-creates the side files with the folder's ACL (F5). It also leaves F3 and F4 open. |
 | C. ADR-0019's scope alone: make only the session folder admin-only | **Partial.** It covers session files and spools but leaves F2–F4 and F9. `transcripts.db` stays readable to all users: its index metadata, plus wrapped keys that become harmless after rotation. A user can also create the session folder before the router does (F1). |
 | **D. `secure_delete=ON` in `OpenConnection`, plus `wal_checkpoint(TRUNCATE)` after each purge or clear** | **Recommended.** ADR-0019 already requires `secure_delete` for wrapped keys. This makes it per connection (F8), and applies it to today's `transcripts.db` in the meantime. |
-| E. `VACUUM` after each purge | Works (s6), but it rewrites the whole file every 5 minutes, and spills through a temp file unless `temp_store=MEMORY`. Use it for the one-time scrub only. |
+| E. `VACUUM` after each purge | Works (s6), but it rewrites the whole file every 5 minutes, and spills a full copy of the database through a temp file. Use it for the one-time scrub only, with that temp file in the protected root (§3.2). |
 | F. Per-session keys (crypto-shredding) | **Decided in ADR-0019** (proposed). Not re-decided here. |
 | G. SQLCipher for the whole database | Rejected in ADR-0019. |
 
@@ -157,7 +157,16 @@ flowchart TB
   - **No live root, quarantine and new tree found.** The swap is completed.
   - **Who resumes.** Elevated runs resume. The service fails closed, naming the command, as long as any of these states exists. Startup never creates an empty root while a new tree or a quarantine with a journal exists.
 
-  A directory handle opened before migration still points at an old directory, now inside the quarantine, so it cannot create entries in the live tree. Model files under `models\` are re-verified against their published checksums before their first load, which `LlmRouterModelSyncService` already fetches at sync. A file that fails is quarantined and downloaded again.
+  A directory handle opened before migration still points at an old directory, now inside the quarantine, so it cannot create entries in the live tree.
+
+  **Model files.** The router loads its model files, so migration must not adopt one that another application planted.
+  - **`llm_router` models.** Their files under `models\` are re-verified against their published checksums before their first load, which `LlmRouterModelSyncService` already fetches at sync. A file that fails is quarantined and downloaded again.
+  - **The BGE embedding model.** `model.onnx` and `tokenizer.json`, under `models\bge-large-en-v1.5`, have no such check today. `OnnxEmbeddingClient` loads any file that already exists (`OnnxEmbeddingClient.cs:185-200,218`).
+    - `EmbeddingOptions` gains a pinned SHA-256 for each file, set for the shipped `ModelUrl` and `TokenizerJsonUrl`.
+    - Migration adopts an embedding file only if its hash matches. Otherwise the file stays behind, and the router downloads it again.
+    - Every download is checked against the same hash before it is renamed into place, and a mismatch is deleted and logged.
+    - **A changed URL.** An operator who points either URL elsewhere sets the matching hash. With no hash configured, migration adopts no existing file, and the router downloads afresh and trusts that download as it does today.
+    - After migration only administrators can write the tree, so the router does not re-hash the files at every start.
 
   Everything left behind is logged with its path and owner. Migration cannot tell a file planted by an app running as the legacy owner from that owner's own files, so it moves those and lists them in the log.
 - **Linux and macOS (F12).** The same rule becomes owner-only modes:
@@ -205,7 +214,11 @@ flowchart TB
     - **Batched.** `TrimToCurrentCapacityAsync` calls `DeleteAsync` once per evicted row (`EmbeddingMemory.cs:211-212`). A checkpoint inside `DeleteAsync` would therefore run once per row: 19,500 times when capacity drops from 20,000 to 500.
     - So the store gains a bulk delete. It removes one eviction batch in a single transaction, then checkpoints once.
   - ADR-0019's whole-session retention later takes the same path.
-- **One-time scrub.** `secure_delete` zeroes content only when it is freed, so it cannot clean pages freed before it was turned on (s1). The scrub runs once, now on upgrade and again when ADR-0019 deletes the old text: `VACUUM` with `temp_store=MEMORY`, then `TRUNCATE`. It is the mechanism behind #165 phase 2's exit criterion, "neither do its freed pages".
+- **One-time scrub.** `secure_delete` zeroes content only when it is freed, so it cannot clean pages freed before it was turned on (s1). The scrub runs once, now on upgrade and again when ADR-0019 deletes the old text: `VACUUM`, then `TRUNCATE`. It is the mechanism behind #165 phase 2's exit criterion, "neither do its freed pages".
+  - **Bounded.** `transcripts.db` holds uncapped prompts, so it may be large. `VACUUM` builds a full copy of the database, then writes it back through the WAL, so it needs about twice the database's size on top of the file.
+    - **The copy goes to disk, in the protected root.** The scrub uses `temp_store=FILE` and points SQLite's temp directory at a folder in the protected root. The transient copy then never sits in RAM, and never in a temp directory that other accounts can read. `temp_store=MEMORY` could hold a copy as large as the database in memory.
+    - **Preflight.** Before it starts, the scrub checks free space on that volume for twice the database's size plus #165's reserve (the larger of 1 GiB and 10% of the volume). Short of that, it does not start.
+    - **Deferred, not skipped.** A scrub that cannot start is recorded as pending, logged as a warning with the space it needs, and tried again at each start. The rest of the hardening does not wait for it: the directory protection, `secure_delete` and `TRUNCATE` all apply anyway. Only pages freed before the upgrade stay uncleaned until the scrub runs.
 - **`synchronous=NORMAL`** has the same per-connection defect. Moving it into `OpenConnection` changes write durability and speed, so it is decision 8, not a silent fix.
 
 **3.3 Logs (F9).**
@@ -298,6 +311,7 @@ Decision 7 sets the default for all three. If David picks the checkbox, the scri
    - the legacy-owner rule, and the migration into a new protected tree with its quarantine;
    - the elevated `--migrate-data-directory` command, run by the MSI and `install.sh` on install and upgrade, with its open-writer check;
    - the `install.sh` check that the service has stopped;
+   - the pinned SHA-256 for the BGE embedding files, checked at migration and on download;
    - the `web-interface.json` `Users:R` exception;
    - the secret-store writer change;
    - the MSI folder creation;
@@ -306,7 +320,7 @@ Decision 7 sets the default for all three. If David picks the checkbox, the scri
 2. **Secure delete.**
    - `secure_delete` in `OpenConnection` for `transcripts.db` and `router_embedding_memory.db`;
    - `TRUNCATE` after purge, Clear, and each batch of `memory_entries` deletes (with the new bulk delete), plus Clear's own retry and the startup checkpoint;
-   - the one-time scrub.
+   - the one-time scrub, with its free-space preflight and deferral.
 3. **Logs.**
    - the Information default;
    - the separate opt-in body files, with obscuring;
@@ -341,6 +355,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - A directory handle opened before migration, on the old root or on `logs\`, cannot create a file in the live tree afterwards.
 - Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
 - Migration renames aside a planted hard link to a file outside the root. The outside file's owner and ACL (on Unix, its mode) are unchanged.
+- Migration leaves behind an embedding `model.onnx` or `tokenizer.json` whose SHA-256 does not match the pinned hash, and the router downloads it again. A download whose hash does not match is never renamed into place.
 - A file that another process holds open from before migration:
   - on Windows, with any handle, makes the bootstrap fail closed and name the file;
   - on Unix, open for writing, makes `--migrate-data-directory` abort before it copies anything. It names the process and the file. No file has been copied or unlinked, and the tree stays locked;
@@ -357,6 +372,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - Canary rows are absent from the db and the WAL after `DeleteOldestAsync`, after `DeleteBeforeAsync`, and after `DeleteAllAsync`. This is s2 as a test, sized to stay under 5 s.
 - Canary vectors are absent from `router_embedding_memory.db` and its WAL after a batched eviction, and the batch runs exactly one checkpoint.
 - The one-time scrub removes canaries that were deleted before `secure_delete` was on (s1, then scrub).
+- With free space below twice the database's size plus the reserve, the scrub does not start. It is recorded as pending and runs at a later start once the space exists. Its transient copy is written under the protected root, never to the system temp directory.
 - A `busy` result from `TRUNCATE` is handled and logged.
 - With capture disabled and a reader holding the WAL:
   - Clear retries, then reports that the deletion is not final;
