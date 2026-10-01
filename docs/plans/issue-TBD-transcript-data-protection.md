@@ -115,7 +115,11 @@ flowchart TB
   - **A process that can repair it** (the service, or an elevated run) takes ownership and re-secures the root. If the owner is untrusted, it renames the root aside and re-creates it, which covers a user who created the folder first.
   - **Any other process** does not use the root. It falls back to the per-user directory, as an unelevated dev run already does.
 
-  **Config overlay.** `appsettings.local.json` is registered only after the bootstrap has accepted it or quarantined it, so a planted file is never loaded.
+  **Config overlay.** The bootstrap registers `appsettings.local.json` only after the directory passes verification.
+  - During migration it always sets a pre-existing overlay aside (below).
+  - Once the directory is protected, only an administrator can create one.
+
+  So a planted file is never loaded.
 
   **Logging.** The bootstrap runs before the host has built its logger, so it buffers its outcomes. They are logged with static Serilog templates once logging is configured.
 
@@ -124,6 +128,11 @@ flowchart TB
   - **It never follows a reparse point** (junction, symlink, or mount point). It renames the link itself into a quarantine folder inside the root, so a planted link cannot steer an ACL change into another tree.
   - **It renames aside any entry owned by an untrusted account**, rather than adopting it. A trusted owner is `SYSTEM`, `Administrators`, or the root's original owner. The rule exists because an owner can always rewrite its own DACL.
   - **The root, and every adopted entry,** gets `Administrators` as its owner, and then its ACL is reset to inherit. On THEATRE-PC this moves the root from `david` to `Administrators`.
+  - **`appsettings.local.json` is never adopted.**
+    - An application running as the root's owner could have planted it, and an owner check cannot tell.
+    - Migration renames a pre-existing overlay aside. The router does not load it until an administrator reviews it and moves it back, which only an administrator can do once the directory is protected.
+    - On THEATRE-PC, the existing 933-byte overlay is set aside on the first protected start.
+  - **Model files get the same suspicion.** Before their first load after migration, files under `models\` are re-verified against their published checksums, which `LlmRouterModelSyncService` already fetches at sync. A file that fails is quarantined and downloaded again.
 
   That covers every file in F2, plus `logs\` and `models\`. Each quarantined entry is logged with its path and owner. Migration cannot tell a file planted by an app running as the root's owner from that owner's own files, so it adopts those and lists them in the log.
 - **Linux and macOS (F12).** The same rule becomes owner-only modes:
@@ -135,6 +144,7 @@ flowchart TB
 - **The `.pfx` files** lose `Users` read with nothing else changing. Clients trust the CA through the certificate store (`--install-certificate`), not through the `.pfx` files.
 - **Operator effects.**
   - Editing `appsettings.local.json` or opening `logs\` by hand now needs elevation. The Console tab still streams the logs.
+  - After the first protected start, the operator reviews the set-aside overlay and moves it back from an elevated prompt. Until then, its settings are not applied.
   - A service-secured folder sends an unelevated dev run to `%LocalAppData%`, as `AppDataPaths` already does.
   - Deleting the folder by hand after uninstall, as `docs/router/packaging-and-distribution.md` describes, needs elevation.
 
@@ -144,6 +154,7 @@ flowchart TB
   - **Purge.** If `busy` is non-zero, the next 5-minute retention cycle retries, and the retry is logged.
   - **Clear.** Clear cannot rely on that cycle. `TranscriptRetentionService.ExecuteAsync` exits at startup when capture is disabled, while `DeleteAllAsync` deliberately runs either way. So Clear retries the checkpoint itself, a few times over a few seconds. If the checkpoint is still busy, Clear reports, in an additive response field, that the deletion is not yet final.
   - **Startup.** The router runs `TRUNCATE` once at startup, before anything else opens the database. That finishes any deletion left pending.
+  - **Embedding memory.** `router_embedding_memory.db` runs in WAL mode too (`RouterMemoryDatabase.cs:288`). `SqliteMemoryEntryStore.DeleteAsync` gets the same `TRUNCATE`, busy handling, and startup checkpoint. It runs for capacity eviction in `EmbeddingMemory` today, and ADR-0019 adds deleting entries with their session.
   - ADR-0019's whole-session retention later takes the same path.
 - **One-time scrub.** `secure_delete` zeroes content only when it is freed, so it cannot clean pages freed before it was turned on (s1). The scrub runs once, now on upgrade and again when ADR-0019 deletes the old text: `VACUUM` with `temp_store=MEMORY`, then `TRUNCATE`. It is the mechanism behind #165 phase 2's exit criterion, "neither do its freed pages".
 - **`synchronous=NORMAL`** has the same per-connection defect. Moving it into `OpenConnection` changes write durability and speed, so it is decision 8, not a silent fix.
@@ -152,7 +163,7 @@ flowchart TB
 - Ship `MinimumLevel.Default: Information`.
 - Put all four conversation-bearing templates (F9) behind their own opt-in switch, and write them to their own files (for example `logs\bodies-*.log`). Clear and uninstall can then remove them without touching the diagnostic logs.
 - Pass their text through the same secret obscuring ADR-0019 uses for storage.
-- **Clear** deletes the body-excerpt files.
+- **Clear** first closes the body sink, which flushes and releases its file. It then deletes every body file and reopens the sink. Deleting under an open sink would not work: Windows refuses to delete the open file, and elsewhere the sink would keep writing to the unlinked file.
 - **Pre-upgrade logs.** Files written before the upgrade still hold unobscured excerpts, and would otherwise linger until the newest-30 limit rolls them off.
   - On the first start after the upgrade, the router rewrites each `arcrouter-*.log` without any line from the four F9 templates, and replaces the original with the rewrite.
   - A file it cannot rewrite is deleted.
@@ -211,7 +222,7 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
    - the Linux and macOS mode changes.
 2. **Secure delete.**
    - `secure_delete` in `OpenConnection` for `transcripts.db` and `router_embedding_memory.db`;
-   - `TRUNCATE` after purge and Clear, Clear's own retry, and the startup checkpoint;
+   - `TRUNCATE` after purge, Clear and `memory_entries` deletes, plus Clear's own retry and the startup checkpoint;
    - the one-time scrub.
 3. **Logs.**
    - the Information default;
@@ -233,6 +244,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
 - A fresh **non-pooled** connection from `OpenConnection` returns 1 for `PRAGMA secure_delete` (F8).
 - Canary rows are absent from the db and the WAL after `DeleteOldestAsync`, after `DeleteBeforeAsync`, and after `DeleteAllAsync`. This is s2 as a test, sized to stay under 5 s.
+- Canary vectors are absent from `router_embedding_memory.db` and its WAL after `SqliteMemoryEntryStore.DeleteAsync`.
 - The one-time scrub removes canaries that were deleted before `secure_delete` was on (s1, then scrub).
 - A `busy` result from `TRUNCATE` is handled and logged.
 - With capture disabled and a reader holding the WAL:
@@ -240,8 +252,9 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
   - the next startup truncates the WAL.
 - A key-shaped string in a logged body is obscured.
 - The pre-upgrade rewrite removes a planted line of each of the four F9 templates, and keeps every other line. A file it cannot rewrite is deleted.
-- The bootstrap quarantines a planted `appsettings.local.json` before host configuration can load it. It also rejects a machine-wide root owned by an individual account.
-- Clear deletes the body-excerpt files.
+- The bootstrap sets aside a planted `appsettings.local.json` before host configuration can load it, including one owned by the root's own owner. It also rejects a machine-wide root owned by an individual account.
+- A model file that fails its published checksum after migration is quarantined, not loaded.
+- Clear deletes the body-excerpt files while the body sink is open and writing, and the sink keeps working afterwards.
 
 ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in #165's plan.
 

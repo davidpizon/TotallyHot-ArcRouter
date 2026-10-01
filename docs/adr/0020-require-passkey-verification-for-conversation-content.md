@@ -113,11 +113,18 @@ What this ADR commits to:
     - `GetManagementToken`.
 
     The challenge is bound to the operation and its parameters, so an approval cannot be replayed for anything else.
-  - **Challenges stay available.** Each challenge expires after two minutes, and requests are rate-limited per caller. Several challenges may be pending at once, so no application can lock the operator out by holding one open.
+  - **Challenge store.** Challenges live in one global, bounded store: at most 32 pending, each expiring after two minutes, with the oldest evicted when the store is full.
+    - **No per-caller limit.** The router cannot rate-limit per caller, because nothing tells one loopback caller from another: every ticket in a generation is identical, and all callers share the loopback address.
+    - **Denial of service.** An application that floods challenges can evict the operator's challenge. The ceremony then fails and the GUI offers a retry, but the flood still cannot produce an approval without the operator's gesture.
+    - **Accepted.** Availability against a hostile local application is not a goal of this ADR; the gate protects against disclosure. Every challenge is logged, so a flood is visible.
   - **A read window.** Reading conversation text needs a content grant. That covers `ListPersistedSessions` text, `GetTurnTexts`, ADR-0019's full view, and the text fields of `StreamEvents`.
-    - **What it is.** A verification issues the grant as its own `__Host-` cookie (HttpOnly, Secure, SameSite=Strict). The cookie holds a random grant id and an expiry, checked against an in-memory table.
+    - **What it is.** A verification returns the grant as an opaque random token in the response body.
+      - The dashboard keeps it only in memory, and sends it in a request header (`x-content-grant`) on content RPCs.
+      - The router checks it, and its expiry, against an in-memory table.
+      - A page reload loses it, and the operator verifies again.
+      - One-operation authorizations travel the same way.
     - **How long it lasts.** 15 minutes by default (David, 2026-09-30). It ends early at "Lock" or a router restart, and it never authorizes a one-operation action.
-    - **Why a separate cookie.** ADR-0012's ticket is the same for every caller in a generation, so it cannot carry the grant.
+    - **Why not a cookie.** Cookies are scoped to a host, not a port. The browser would send a `localhost` cookie to any trusted `https://localhost:<other port>` service, where another local application could capture it and replay it. Script state is scoped to the full origin (scheme, host and port), so the token never leaves the dashboard. ADR-0012's ticket cannot carry the grant either, because every caller in a generation gets the same ticket.
   - **Without a grant**, the same RPCs return metadata only. `StreamEvents` drops its text fields, checked per event, so a grant that expires mid-stream stops the text from then on.
 - **Closed until enrolled** (David, 2026-09-30). Before any passkey exists, conversation text stays hidden. The gated operations are refused with `FailedPrecondition`, and the message names the enrollment command.
 - **Not gated (David, 2026-09-30).** Clear, deleting a session or an import, and lowering Sample Size stay on ADR-0012's session. They destroy history rather than disclose it.
@@ -135,7 +142,8 @@ What this ADR commits to:
 - Bad, because a fresh install shows no conversation text until an administrator enrolls a passkey. Today's zero-setup Sessions tab ends.
 - Bad, because it adds friction: a prompt for each export, import and token copy, and one per read window.
 - Bad, because any application that can make an HTTP call can still destroy history: it can run Clear, delete a session or an import, or lower Sample Size. David chose to leave these ungated, since they destroy data rather than disclose it.
-- Bad, because the read window is a cookie. An application running as the operator that can read the browser's cookie store could reuse an unexpired grant for reads, though not for one-operation actions. The window is short for that reason.
+- Bad, because the read grant is a bearer token for its 15 minutes. An application that can read the dashboard's memory, for example by injecting into the browser, could reuse it for reads, though not for one-operation actions. The window is short for that reason.
+- Bad, because any local application can disrupt a verification by flooding challenges (see "Challenge store"). It cannot pass the gate, but it can make the operator retry.
 - Bad, because some attacks remain:
   - Malware running as the operator can still capture the screen while a session is open, or read an export after it is saved.
   - Malware can also trigger a prompt at a moment the operator expects one. The GUI saying what is being approved, and its list of recent approvals, reduce that.
@@ -206,8 +214,9 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
 - **WebAuthn and localhost.** WebAuthn accepts `localhost` as a relying-party ID and never an IP address. Browsers enforce this: Chrome allows WebAuthn on `https://localhost`, not on `https://127.0.0.1`.
 - **Why not ASP.NET Core Identity's passkeys.** .NET 10 Identity's passkey support is scoped to Identity sign-in, through `SignInManager` and `UserManager`. This router has no Identity users, so a standalone library fits better.
 - **Left to the implementation plan:**
-  - challenge and grant lifetimes, and rate limits on challenges;
+  - the challenge and grant lifetimes, and the challenge store's size;
   - how the GUI shows locked text and the "Lock" control;
   - how the CLI runs the ceremony on macOS and Linux (security keys through libfido2);
   - the format of enrolled-credential entries in the secret store;
-  - whether to require attestation.- **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).
+  - whether to require attestation.
+- **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).
