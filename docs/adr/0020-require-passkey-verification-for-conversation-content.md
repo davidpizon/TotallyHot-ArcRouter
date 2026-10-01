@@ -113,6 +113,11 @@ What this ADR commits to:
   - The GUI's "Add passkey" dialog takes the code, and the router accepts a registration only with it.
   - Removing a passkey goes through the same channel.
   - **Storage.** Enrolled credentials live in the same store: credential id, public key, signature counter, name, and date. They are not secret, but only `SYSTEM` and Administrators can change them, so no application can add its own. That depends on the data-protection plan's change to `WriteMachineShared`, which stops granting the writing account an ACE on machine-wide writes.
+  - **Prerequisite: #184's phase 1.**
+    - **Why.** Today `secrets.dat` can still grant its last writer full control, and `WriteMachineShared` keeps adding that ACE. So an unelevated application of that user could add its own credential and skip enrollment.
+    - **Order.** #184's phase 1 therefore ships first, including migrating the existing store's ACL.
+    - **Startup check.** At startup, the gate checks the store itself. On Windows, any ACE for an individual account fails the check. On Linux and macOS, a store not owned by the service account with mode `0600` fails it.
+    - **On failure** the gate fails closed: enrollment is refused, the gated operations stay unavailable, and the log names the fix.
   - Several passkeys may be enrolled, so a security key can back up Windows Hello. A lost one is replaced the same way.
 - **What a verification unlocks.**
   - **One operation per verification.** A fresh verification is needed every time for:

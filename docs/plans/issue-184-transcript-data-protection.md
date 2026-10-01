@@ -103,46 +103,44 @@ flowchart TB
 **3.1 Directory DACL (option A).**
 - **Rule set.** The DACL is protected, so nothing is inherited from `%ProgramData%`. `SYSTEM` and `Administrators` get full control with `(OI)(CI)`. The writing account gets an ACE under decision 4. Nothing is granted to `Users`, `Authenticated Users`, `Everyone`, or `INTERACTIVE`.
 - **Creation.** Create the folder atomically with `DirectoryInfo.Create(DirectorySecurity)`, never create-then-restrict. Today the MSI never references `%ProgramData%` (F11). Creating the folder at install time, with the same rules, is a deliberate change.
-- **Pre-host bootstrap.** Verification runs inside `AppDataPaths.ResolveMachineSharedDirectory`, before its write probe (`AppDataPaths.cs:150-159`). That makes it precede every other use of the directory, including `Program.CreateHostBuilder`, which resolves the directory while it registers `appsettings.local.json` (`Program.cs:205-207`). The machine-wide root passes only if all three hold:
+- **Pre-host bootstrap.** Verification runs inside `AppDataPaths.ResolveMachineSharedDirectory`, before its write probe (`AppDataPaths.cs:150-159`). That makes it precede every other use of the directory, including `Program.CreateHostBuilder`, which resolves the directory while it registers `appsettings.local.json` (`Program.cs:205-207`). A protected root passes only if all three hold:
   - its owner is `SYSTEM` or `Administrators`. An owner can always rewrite its own DACL, so an individual account may own only the per-user fallback;
   - it is not a reparse point;
   - no broad group, and no individual account, has an ACE.
 
-  On failure:
-  - **A process that can repair it** (the service, or an elevated run) takes ownership and re-secures the root. If the owner is untrusted, it renames the root aside and re-creates it, which covers a user who created the folder first.
-  - **Any other process** does not use the root. It falls back to the per-user directory, as an unelevated dev run already does.
+  **Legacy or squatted.** Any other root is owned by an individual account, which makes it either a legacy root or a squat. The bootstrap tells them apart by the legacy owner:
+  - **The legacy owner** is the account that installed the router (the MSI passes the installing user's SID, `UserSID`). On a machine without the MSI, it is the account that runs the explicit, elevated `--migrate-data-directory` command.
+  - **A root owned by the legacy owner** is migrated (below). On THEATRE-PC that is `david`'s root.
+  - **A root owned by any other account** is a squat. The whole tree is renamed aside untouched, and a fresh protected root is created. Nothing is copied out of it, because its owner may have tampered with anything in it. The log names the quarantined path, which may still hold the operator's data and which an administrator should review and delete.
 
-  **Config overlay.** The bootstrap registers `appsettings.local.json` only after the directory passes verification.
-  - During migration it always sets a pre-existing overlay aside (below).
-  - Once the directory is protected, only an administrator can create one.
+  **Who acts.**
+  - Migration runs only elevated: in the MSI's install or upgrade, before it starts the service, or through `--migrate-data-directory`. On Linux and macOS, `install.sh` runs the same command as root.
+  - The service, finding a root that is neither protected nor migrated, fails closed. It does not start, and it logs the command to run. It never re-creates an empty root over a legacy one.
+  - An unelevated process does not use an unprotected root. It falls back to the per-user directory, as an unelevated dev run already does.
 
-  So a planted file is never loaded.
+  **Config overlay.** The bootstrap registers `appsettings.local.json` only after the directory passes verification. Migration never carries an overlay across (below), and once the directory is protected, only an administrator can create one. So a planted file is never loaded.
 
   **Logging.** The bootstrap runs before the host has built its logger, so it buffers its outcomes. They are logged with static Serilog templates once logging is configured.
 
   The same helper verifies ADR-0019's session folder, so #165 phase 1's startup check reuses it rather than writing its own.
-- **Migration.** The tree was writable by every local account, so migration treats each entry as untrusted until it is checked:
-  - **It never follows a reparse point** (junction, symlink, or mount point). It renames the link itself into a quarantine folder inside the root, so a planted link cannot steer an ACL change into another tree.
-  - **It renames aside any regular file with more than one hard link**, rather than adopting it. A hard link is not a reparse point, and it shares its security with the file it points to, so changing its owner or ACL would change an outside file too. The link count comes from `GetFileInformationByHandle`, or from `st_nlink` on Unix. Renaming moves only that one link, so the outside file is untouched.
-  - **It renames aside any entry owned by an untrusted account**, rather than adopting it. A trusted owner is `SYSTEM`, `Administrators`, or the root's original owner. The rule exists because an owner can always rewrite its own DACL.
-  - **The root, and every adopted entry,** gets `Administrators` as its owner, and then its ACL is reset to inherit. On THEATRE-PC this moves the root from `david` to `Administrators`.
-  - **Open handles are revoked, not inherited.** An ACL or mode change does not revoke a handle opened earlier, so a process that already held a file open would keep its access.
-    - **Windows.** Migration adopts a file only through an exclusive handle that does not follow links. If another process holds the file open, the exclusive open fails. The bootstrap then fails closed and logs the file's name, rather than adopting the file.
-    - **Linux and macOS.** Migration copies each adopted file into a new `0600` file and renames it over the old one. Later writes go to the new inode, which no earlier descriptor reaches.
+- **Migration builds a new protected tree.** The old tree was writable by every local account, so migration does not re-secure it in place. Changing a DACL or mode does not revoke a handle opened before the change, whether on a file or on a directory, so a process that held one could keep reading files or creating entries. Instead, migration:
+  1. **Creates a new tree.** A randomly named sibling root, and its subdirectories, are created atomically with the protected DACL and `Administrators` as owner. On Linux and macOS they are `0700` and owned by the service account.
+  2. **Moves each file that passes these checks:**
+     - **No reparse points.** It never follows a junction, symlink, or mount point. The link itself stays behind.
+     - **No hard links.** A regular file with more than one link stays behind: it shares its security with the file it points to, so adopting it would change an outside file too. The link count comes from `GetFileInformationByHandle`, or from `st_nlink` on Unix.
+     - **No untrusted owner.** A file owned by any account other than `SYSTEM`, `Administrators`, or the legacy owner stays behind.
+     - **No open handles.** On Windows, the file is renamed through an exclusive handle that does not follow links, and its owner and ACL are reset through that same handle. If another process holds the file open, the exclusive open fails, and migration fails closed, naming the file. On Linux and macOS, the file is copied into a new `0600` file, so no earlier descriptor reaches it.
+     - **Not `appsettings.local.json`.** An application running as the legacy owner could have planted it, and no check can tell. It stays behind, and the router does not load it until an administrator reviews it and copies it into the protected root. On THEATRE-PC, the existing 933-byte overlay stays behind.
+  3. **Swaps the trees.** The old root is renamed aside as a quarantine, and the new root is renamed into place. If a process holds the old root open so that it cannot be renamed, migration fails closed and says so.
 
-    The bootstrap runs before the router opens its databases, so the router's own handles are never in the way.
-  - **`appsettings.local.json` is never adopted.**
-    - An application running as the root's owner could have planted it, and an owner check cannot tell.
-    - Migration renames a pre-existing overlay aside. The router does not load it until an administrator reviews it and moves it back, which only an administrator can do once the directory is protected.
-    - On THEATRE-PC, the existing 933-byte overlay is set aside on the first protected start.
-  - **Model files get the same suspicion.** Before their first load after migration, files under `models\` are re-verified against their published checksums, which `LlmRouterModelSyncService` already fetches at sync. A file that fails is quarantined and downloaded again.
+  A directory handle opened before migration still points at an old directory, now inside the quarantine, so it cannot create entries in the live tree. Model files under `models\` are re-verified against their published checksums before their first load, which `LlmRouterModelSyncService` already fetches at sync. A file that fails is quarantined and downloaded again.
 
-  That covers every file in F2, plus `logs\` and `models\`. Each quarantined entry is logged with its path and owner. Migration cannot tell a file planted by an app running as the root's owner from that owner's own files, so it adopts those and lists them in the log.
+  Everything left behind is logged with its path and owner. Migration cannot tell a file planted by an app running as the legacy owner from that owner's own files, so it moves those and lists them in the log.
 - **Linux and macOS (F12).** The same rule becomes owner-only modes:
   - **Linux:** the unit adds `StateDirectoryMode=0700`, `LogsDirectoryMode=0700` and `UMask=0077`, and `install.sh` creates both directories with mode `0700`.
   - **macOS:** `install.sh` sets `0700` on the state tree, which includes `logs`, and the plist gets a `Umask` of `077`.
   - **Startup verification** checks the state directory and the logs directory alike. Each must be owned by the service account (or by the current user, for a dev run's per-user fallback), must not be a symlink, and must have no group or other permission bits.
-  - **Migration** removes group and other bits from existing files once. It never follows a symlink, and it renames aside any file with more than one hard link instead of changing its mode.
+  - **Migration** copies files into the new `0700` tree, as above. It changes no mode in place, so it never touches a symlink's target or a hard-linked file's inode.
 - **Two public files.** `web-interface.json` and `router-ca.crt` get an explicit `Users:R` ACE, because they hold only a URL, a thumbprint, and a public certificate. The tray keeps working (F6).
 - **The secret-store writer (decision 4).** `SecureFile.WriteMachineShared` grants the writing account full control (`SecureFile.cs:158-165`; ADR-0015's writing-account rule). So any administrative rewrite of `secrets.dat` would hand that account's unelevated applications read access again.
   - **Machine-wide writes** grant only `SYSTEM` and `Administrators`.
@@ -154,7 +152,7 @@ flowchart TB
 - **The `.pfx` files** lose `Users` read with nothing else changing. Clients trust the CA through the certificate store (`--install-certificate`), not through the `.pfx` files.
 - **Operator effects.**
   - Editing `appsettings.local.json` or opening `logs\` by hand now needs elevation. The Console tab still streams the logs.
-  - After the first protected start, the operator reviews the set-aside overlay and moves it back from an elevated prompt. Until then, its settings are not applied.
+  - After migration, the operator reviews the overlay left in the quarantine and copies it into the protected root from an elevated prompt. Until then, its settings are not applied.
   - A service-secured folder sends an unelevated dev run to `%LocalAppData%`, as `AppDataPaths` already does.
   - Deleting the folder by hand after uninstall, as `docs/router/packaging-and-distribution.md` describes, needs elevation.
 
@@ -236,7 +234,8 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
    Either a new ADR or an amendment to ADR-0019 while it is still proposed (decision 2).
 1. **Directory DACL.**
    - the verification helper and atomic creation;
-   - the migration and its quarantine;
+   - the legacy-owner rule, and the migration into a new protected tree with its quarantine;
+   - the elevated `--migrate-data-directory` command, run by the MSI and `install.sh` on install and upgrade;
    - the two `Users:R` exceptions;
    - the secret-store writer change;
    - the MSI folder creation;
@@ -253,13 +252,20 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
 
 Phases 1–3 do not depend on ADR-0019 and can ship first. Phase 1 should precede #165 phase 1 (decision 10).
 
+**Phase 1 is a hard prerequisite of ADR-0020's gate (#185).** That gate relies on only `SYSTEM` and `Administrators` being able to change the secret store. Until phase 1 migrates the existing store and changes the writer, an unelevated application of the store's last writer could add its own passkey credential.
+
 ## 6. Tests
 
 All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[SupportedOSPlatform("windows")]`. Mode tests are Unix-only. Each set is skipped elsewhere.
 
 - The directory is created with the protected rule set, and a new file inherits no `Users` ACE.
 - A SQLite `-wal` created after a close and reopen inherits the protected ACL (F5's probe, as a test).
-- A directory created first by another account is renamed aside and never adopted. So is a reparse point.
+- Each kind of root is handled as designed:
+  - a root owned by an account other than the legacy owner is quarantined untouched, and a fresh root is created;
+  - the legacy owner's root is migrated;
+  - the service fails closed on a root that is neither protected nor migrated;
+  - a reparse-point root is never followed.
+- A directory handle opened before migration, on the old root or on `logs\`, cannot create a file in the live tree afterwards.
 - Migration renames aside a planted child junction that points outside the root, and the target's ACL is unchanged. It also renames aside a child owned by another account rather than adopting it.
 - Migration renames aside a planted hard link to a file outside the root. The outside file's owner and ACL (on Unix, its mode) are unchanged.
 - A file that another process holds open with a writable handle from before migration:
