@@ -27,7 +27,7 @@
   2. **The deletion rules ADR-0019 depends on**, backed by tests: `secure_delete` must be set on every connection, `ON` is needed rather than `FAST`, the WAL must be truncated, and pages freed before the change need a `VACUUM`.
   3. **An interim fix for today's `transcripts.db`**, which holds text until ADR-0019's text move ships.
   4. **Log hygiene.**
-  5. **An uninstall option.**
+  5. **An uninstall option** on Windows, Linux and macOS.
 - **API access is gated separately, by ADR-0020.** David's requirement (2026-09-30): exporting session data must not be open to any application that can make an HTTP call. Today any local process can mint a loopback session (ADR-0012) and read text through the router's own API (F10).
   - David chose passkeys, and extended the gate to import. Clear and lowering Sample Size stay ungated (decision 1).
   - #165's export and import must not ship before it.
@@ -56,8 +56,8 @@
 | F8 | **Pragmas are per connection.** `synchronous=NORMAL`, set once in `EnsureCreated`, reads back as `2` (FULL) on a new physical connection. `secure_delete` set the same way leaves 298 of 300 cleared rows recoverable (s5). Only `journal_mode=WAL` persists in the file. | Harness, s0 and s5 |
 | F9 | The shipped `appsettings.json` sets Serilog's `MinimumLevel.Default` to `Debug`. At Debug, four templates write conversation text to `logs\arcrouter-*.log`:<br>- `[INTERCEPTOR] Intercepted agent request message` and `... response message`, which log the first 4,000 characters of each body (`RequestInterceptor`, `ProxyMiddleware`);<br>- `[INTERCEPTOR] Newest user message` (`RequestInterceptor`);<br>- `[INTERCEPTOR] Assembled LLM response text` (`RequestTelemetryPublisher`).<br>The newest 30 files are kept, with daily rolling. `LogRedaction` only strips CR/LF and truncates, so key-shaped strings are logged as they are. Clear does not touch the logs. | Code and config. Log contents were not opened. |
 | F10 | ADR-0012's loopback fast path gives a session to "any local account", meaning any process that can make an HTTP call. Session text then leaves through these RPCs, so the file ACL does not change who can read it:<br>- `ListPersistedSessions` returns `prompt_text` and `response_text`: full text today, previews after #179.<br>- `StreamEvents` carries live `request_summary` and `response_summary`, plus `LogLineEvent` lines that contain F9's excerpts.<br>- `GetManagementToken` returns the token to any session, and `RegenerateManagementToken` returns the new one.<br>- Planned: #176's per-turn text, and #165's export and import.<br>No MCP tool and no proxy endpoint returns session data (`/v1/models` is the proxy's only local endpoint). | ADR-0012 Consequences, `telemetry.proto`, and code |
-| F11 | `Package.wxs` deliberately never references `%ProgramData%`, so uninstall keeps the folder (comment at lines 37-55). | Code |
-| F12 | **Linux, macOS and Docker installs are open the same way.**<br>- **Linux.** `install.sh` creates `/var/lib/totallyhot-arcrouter` and `/var/log/totallyhot-arcrouter` with a plain `mkdir -p`. The unit's `StateDirectory` and `LogsDirectory` set no mode, and the unit sets no `UMask`, so systemd's defaults apply: 0755 directories, and files created under a 022 umask.<br>- **macOS.** `install.sh` creates `/Library/Application Support/TotallyHotArcRouter` (with `logs` inside) and never runs `chmod`. The tree is owned by `_arcrouter:staff`, and the plist sets no `Umask`.<br>- **Docker.** The image creates `/data` with no `chmod` (`Dockerfile:72-75`), so it is `0755`.<br>Every local account can therefore read state and logs. On Linux, the logs also live outside the state root. | `packaging/linux/install.sh`, `totallyhot-arcrouter.service`, `packaging/macos/install.sh`, `com.totallyhot.arcrouter.plist`. Not observed on a machine. |
+| F11 | `Package.wxs` deliberately never references `%ProgramData%`, so uninstall keeps the folder (comment at lines 37-55). The Linux and macOS `uninstall.sh` scripts also keep the state and logs on purpose, and print the commands that would delete them (header comments). | Code: `Package.wxs`, `packaging/linux/uninstall.sh`, `packaging/macos/uninstall.sh` |
+| F12 | **Linux, macOS and Docker installs are open the same way.**<br>- **Linux.** `install.sh` creates `/var/lib/totallyhot-arcrouter` and `/var/log/totallyhot-arcrouter` with a plain `mkdir -p`. The unit's `StateDirectory` and `LogsDirectory` set no mode, and the unit sets no `UMask`, so systemd's defaults apply: 0755 directories, and files created under a 022 umask.<br>- **macOS.** `install.sh` creates `/Library/Application Support/TotallyHotArcRouter` (with `logs` inside) and never runs `chmod`. The tree is owned by `_arcrouter:staff`, and the plist sets no `Umask`.<br>- **Docker on a Linux host.** The image creates `/data` with no `chmod` (`src/TotallyHotArcRouter/Dockerfile:72-75`), so it is `0755`, and Docker copies that mode and owner onto a new named volume. The documented `-v arcrouter-data:/data` volume (`src/README.md:271`) is `/var/lib/docker/volumes/arcrouter-data/_data`. Docker Engine makes `/var/lib/docker` `0711`, and both `volumes` and each volume's own directory `0701`. Other accounts cannot list those directories, but they can pass through them. The volume name and the file names are fixed, so any host account can open `transcripts.db` by its full path.<br>- **Not exposed:** Docker Desktop keeps volumes inside its VM, and rootless Docker keeps them in the user's home directory. A bind mount takes the host directory's own owner and mode.<br>So on Linux and macOS, and on a Linux host running Docker Engine, every local account can read the state and logs. Only `secrets.dat` (`0600`) and its key ring (`0700`) are already closed. On Linux, the logs also live outside the state root. | `packaging/linux/install.sh`, `totallyhot-arcrouter.service`, `packaging/macos/install.sh`, `com.totallyhot.arcrouter.plist`, `SecureFile.WriteMachineShared`. Docker's modes: moby's `daemon/daemon_unix.go` (`setupDaemonRoot`) and `daemon/volume/local/local.go`. Not observed on a machine. |
 
 **Residue.** The harness inserted 300 rows, one connection per insert, as `SqliteTranscriptStore` does. Every 50th row was 24 KB, so it spilled onto overflow pages. Retention then purged ids 1–150 (`DeleteOldestAsync`, then `DeleteBeforeAsync`), and Clear deleted the rest. Each cell counts the deleted rows whose text was still in the file.
 
@@ -154,7 +154,11 @@ flowchart TB
   - **Migration** copies files into the new `0700` tree, as above. It changes no mode in place, so it never touches a symlink's target or a hard-linked file's inode.
   - **Docker.** The image creates `/data` with `mkdir -p` and `chown`, but no `chmod` (`Dockerfile:72-75`), so it is `0755`, and the documented `-v arcrouter-data:/data` deployment would fail the check above.
     - The image creates `/data` with mode `0700`, and its entrypoint sets `umask 077`.
-    - Inside the container the only accounts are root and the non-root service account, which already owns every file in the volume. So for an older named volume the bootstrap removes group and other bits in place, as the owner, with no elevated step. Named volumes live under a host directory only root can read, so no other host account could have planted entries.
+    - **An older named volume** is migrated in place by the bootstrap, as its owner, with no elevated step. Inside the container the only accounts are root and the non-root service account, which already owns every file in the volume. No other host account can have planted entries: nothing on the host path to the volume gives others a write bit (F12).
+      - **Not just a mode change.** Other host accounts could open files by path (F12), and a descriptor opened before a mode change keeps working. So the bootstrap copies each file into a new `0600` file and renames the copy over the original, as Linux migration does, and an earlier descriptor keeps only the old, unlinked inode.
+      - Migration's link checks apply. A symlink, or a file with more than one hard link, is renamed aside into a `0700` quarantine folder instead of being copied.
+      - Last, it sets `/data` and every subdirectory to `0700`. A lookup checks a directory's current mode, so a directory descriptor opened earlier can no longer open anything through it.
+      - `/data` is the mount point, so it cannot be swapped like the other platforms' trees. Each per-file rename is atomic instead, and a partial copy left by a crash is deleted at the next start.
     - A bind mount is the operator's responsibility. The docs require it to be owned by the container's UID with mode `0700`, and the bootstrap fails closed otherwise.
 - **The public CA certificate.** `router-ca.crt` holds only a public certificate, but `docs/router/client-tls-setup.md` has users read it: Firefox and Chrome-on-Linux imports, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, and `curl --cacert`. A `0700` state directory, or an admin-only root, would hide it.
   - The service rewrites it at each start into a public directory that every user can read and only the service and administrators (root, on Linux and macOS) can write:
@@ -219,13 +223,23 @@ Today these logs break two of ADR-0019's privacy drivers: "no readable conversat
 
 The master-key rotation rewrites `secrets.dat` through `WriteAtomically`, a temp file and a rename. It runs in the service, and with §3.1's writer change the new file grants only `SYSTEM` and `Administrators`. The rename frees the old file's disk blocks without overwriting them, which is the secret-store remnant ADR-0019 already leaves to BitLocker.
 
-**3.5 Uninstall (F11).** A best-effort custom action runs on a genuine uninstall only, using `UninstallCertificate`'s condition: `REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE`. Once ADR-0019's master key exists, it:
+**3.5 Uninstall (F11).** The cleanup is one router command, `--shred-conversations`, so every platform runs the same code. Once ADR-0019's master key exists, it:
 - deletes only that master-key entry from `secrets.dat`, which leaves every session file undecryptable;
 - removes the session folder;
-- deletes the body-excerpt log files (§3.3);
+- deletes the body-excerpt log files (§3.3), wherever the logs directory is;
 - keeps the spend databases.
 
 Until then, it can run the one-time scrub after clearing `request_transcripts` (decision 7).
+
+Each platform calls it from its own uninstall path:
+- **Windows:** a best-effort MSI custom action, on a genuine uninstall only, using `UninstallCertificate`'s condition: `REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE`.
+- **Linux and macOS:** `uninstall.sh` runs it after stopping the service, and before removing the binaries that contain it.
+  - It runs as the service account (`runuser -u arcrouter` on Linux, `sudo -u _arcrouter` on macOS). Run as root, it would leave a root-owned `secrets.dat` that the service cannot read after a reinstall (§3.1, the secret-store writer).
+  - On Linux the script sets `STATE_DIRECTORY` and `LOGS_DIRECTORY` as the unit does. Without them, `AppDataPaths` would look for the logs under the state directory instead of `/var/log/totallyhot-arcrouter`.
+  - The closing message says what was removed and what was kept.
+- **Docker** has no uninstall step. Removing the container keeps the volume, and `docker volume rm` deletes everything in it. The Docker section of `src/README.md` says so.
+
+Decision 7 sets the default for all three. If David picks the checkbox, the scripts take a `--shred-conversations` flag in its place.
 
 ## 4. Coordination
 
@@ -280,7 +294,13 @@ Until then, it can run the one-time scrub after clearing `request_transcripts` (
    - the Information default;
    - the separate opt-in body files, with obscuring;
    - the one-time rewrite of pre-upgrade logs.
-4. **Uninstall** custom action. Its master-key step waits for ADR-0019.
+4. **Uninstall.**
+   - the `--shred-conversations` command;
+   - the MSI custom action that runs it;
+   - the Linux and macOS `uninstall.sh` steps that run it;
+   - the Docker note.
+
+   Its master-key step waits for ADR-0019.
 
 Phases 1–3 do not depend on ADR-0019 and can ship first. Phase 1 should precede #165 phase 1 (decision 10).
 
@@ -310,7 +330,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - On Linux and macOS, verification fails a state or logs directory that has group or other bits, or that is a symlink. A new file is created with mode `0600`.
 - `web-interface.json` keeps `Users:R`, and `TrayDiscoveryReader` still reads it.
 - On every platform, an ordinary user can read `router-ca.crt` from the public directory. A public directory created by another account is rejected.
-- In Docker, an older named volume at mode `0755` is tightened in place by its owner. A bind mount with the wrong owner or mode makes the bootstrap fail closed.
+- In Docker, the bootstrap migrates an older named volume at mode `0755` in place, as its owner. Every file ends at `0600` and every directory at `0700`, and a descriptor opened before the migration does not see later writes. A bind mount with the wrong owner or mode makes the bootstrap fail closed.
 - A fresh **non-pooled** connection from `OpenConnection` returns 1 for `PRAGMA secure_delete` (F8).
 - Canary rows are absent from the db and the WAL after `DeleteOldestAsync`, after `DeleteBeforeAsync`, and after `DeleteAllAsync`. This is s2 as a test, sized to stay under 5 s.
 - Canary vectors are absent from `router_embedding_memory.db` and its WAL after a batched eviction, and the batch runs exactly one checkpoint.
@@ -325,6 +345,7 @@ All tests stay under the 5-second ceiling. ACL tests are Windows-only, marked `[
 - A model file that fails its published checksum after migration is quarantined, not loaded.
 - Rewriting a machine-wide secret as an elevated administrator leaves an ACL of only `SYSTEM` and `Administrators`, with no ACE for the writer. The per-user fallback still grants only the current user.
 - Clear deletes the body-excerpt files while the body sink is open and writing, and the sink keeps working afterwards.
+- `--shred-conversations` removes the session folder and the body-excerpt files, and keeps the spend databases. On Linux and macOS, run as the service account, it leaves `secrets.dat` owned by that account with mode `0600`. On Linux, it finds body files in `LOGS_DIRECTORY`.
 - With body logging on, a marked event reaches only the body files. Neither `arcrouter-*.log` nor the console output contains it.
 - On macOS, the service can write `router-ca.crt` into the public directory, and every user can read it.
 
@@ -349,10 +370,10 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
    - On a service install, the writing account is `SYSTEM` anyway.
 5. **Report the `appsettings.local.json` squatting (F4) separately**, as a higher-priority security issue in case phase 1 slips? Recommended: yes.
 6. **`secure_delete` on every database, or only on stores derived from text?** Recommended: every database. It is one line in each `OpenConnection`, and the cost is a few extra writes.
-7. **Uninstall.** Three choices:
+7. **Uninstall.** Three choices, applied alike to the MSI and both `uninstall.sh` scripts (§3.5):
    - keep everything (today);
    - crypto-shred conversations only (recommended);
-   - add a checkbox.
+   - add a checkbox, which becomes a `--shred-conversations` flag in the scripts.
 8. **`synchronous=NORMAL` on every connection** (F8). It is a small durability trade. Recommended: yes, noted in the ADR.
 9. **Remove `secrets.dat.pre-adr0014-backup`** once David confirms it is no longer needed? It is a stale copy of the secret store that every user can read. It is sealed to `david` (CurrentUser DPAPI), so other accounts cannot decrypt it.
 10. **Order against #165 phase 1.** Recommended: this plan's phase 1 first, so the session folder inherits the protected root.
