@@ -62,3 +62,4 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0016](0016-remove-authheadername-and-mark-secrets-per-header.md) | Remove `AuthHeaderName`; mark secret headers per header and strip every configured header name | proposed |
 | [0017](0017-pin-auto-routed-requests-only-when-they-carry-backend-specific-features.md) | Pin auto-routed requests to capable models only when they carry backend-specific features | proposed |
 | [0018](0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md) | Persist request telemetry off the request path via a bounded channel | proposed |
+| [0019](0019-store-conversation-text-in-encrypted-per-session-files.md) | Store conversation text in encrypted per-session files, with SQLite as a text-free index | proposed |
