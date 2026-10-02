@@ -152,5 +152,8 @@ router: the benchmarks, models and score scale all differ.
 - Does the auto-mode classifier's request really carry `request-class: auxiliary`? The docs list classifiers under
   `auxiliary` but do not say which classifiers.
 - What does a fair relative floor look like on this router's score scale? It needs graded data per category.
-- Could the router check tool-calling ability, for example with the existing tool-call capability probing, before
-  sending a tool-heavy `Explore` subagent to a small local model?
+- Could the router check tool-calling ability before sending a tool-heavy `Explore` subagent to a small local
+  model? **Partly answered (2026-10-02): not with today's data.**
+  - `ToolCallCapabilityStore` records a model's tool-call dialect and never records failures. Its own docs note
+    that "chose not to call a tool" and "cannot call tools" look the same at that layer.
+  - Capability-aware routing is the subject of ADR-0017, which is blocked on tracked TODO #8.

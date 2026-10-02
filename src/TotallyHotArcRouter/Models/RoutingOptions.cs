@@ -469,6 +469,15 @@ public sealed class RoutingOptions
                     $"ClusterCountMax ({ClusterCountMax}) must be greater than or equal to ClusterCountMin ({ClusterCountMin})."
                 ]);
 
+        if (SubagentBias.LightSubagentRelativeFloor is not (> 0d and <= 1d))
+            throw new OptionsValidationException(
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages:
+                [
+                    $"SubagentBias:LightSubagentRelativeFloor ({SubagentBias.LightSubagentRelativeFloor}) must be greater than 0 and at most 1."
+                ]);
+
         if (JudgeScoredRowPolicy == JudgeRowPolicy.DownWeight && JudgeScoredRowWeight <= 0)
             throw new OptionsValidationException(
                 optionsName: nameof(RoutingOptions),

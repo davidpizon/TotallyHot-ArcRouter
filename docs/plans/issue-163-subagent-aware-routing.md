@@ -1,6 +1,6 @@
 # Plan: Subagent-aware routing (#163)
 
-**Status:** Revised 2026-10-02 after the Phase 1 research. **The revision awaits David's approval.** No code for the revised design is written until he signs off. The first version of this plan was approved by merging PR #175. Under it, Phase 1, Phase 2 and the Phase 3 log line were built on branch `feature/163-subagent-aware-routing` (commits `09fd18c`, `c41c6f0`, `533b47e`). Phase 2b below reworks that code to the revised design.
+**Status:** Revised 2026-10-02 after the Phase 1 research. **Approved by David on 2026-10-02 (in a Claude Code session), with the open points accepted at their stated defaults** (see Decisions). The first version of this plan was approved by merging PR #175. Under it, Phase 1, Phase 2 and the Phase 3 log line were built on branch `feature/163-subagent-aware-routing` (commits `09fd18c`, `c41c6f0`, `533b47e`). Phase 2b below reworks that code to the revised design.
 **Issue:** [#163](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/163) — "P1: Subagent-aware routing (cheaper-model bias for harness subagent / side-task requests)".
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request must link this plan once approved.
 **Evidence:** [`docs/research/subagent-and-helper-routing-evidence.md`](../research/subagent-and-helper-routing-evidence.md) (what vendors do, and what the router can measure). The signal table is in [`docs/router/utility-model-routing.md`](../router/utility-model-routing.md#subagent-and-side-task-signals).
@@ -121,7 +121,31 @@ Recording the signal on each transcript row, so cost-driven picks can be filtere
 
 The detector, `RequestClassification.Subagent`, `SubagentBiasOptions`, the interceptor wiring and their tests stay. Phase 2b changes how a signal is routed, not how it is detected.
 
-## Phase 2b — Route by class (after approval)
+## Phase 2b — Route by class. **Done (2026-10-02).**
+
+**Where the build differs from the text below (deliberate, recorded per the standing rule):**
+- **`RoutingContext` member.** It carries `NearBestValueFloor` (the live floor value) instead of a route class. The
+  composite needs the number, not the label. Helpers still travel as `IsUtility`, and `Normal` needs nothing.
+- **Enum name and values.** The route class enum is `SubagentRouteClass` with `Normal`, `LightSubagent` and
+  `Helper`. The class this plan calls "Subagent" is `Normal` in code.
+- **Quality gate still applies.** The near-best selection also applies the utility rule's `UtilityMinQualityScore`
+  gate. If the best known score is below 0.3, the request routes normally.
+- **Light subagents ignore the payload heuristic.** A light subagent's documented marker outranks the payload
+  heuristic. Even when `max_tokens` ≤ 64 would make it "utility", it gets the near-best rule.
+- **Hint headers off means ignored.** With `ClaudeCodeHintHeaders` off, the hint headers are ignored entirely. A
+  `main` class next to an agent id is then just an agent-id signal, not a contradiction.
+- **Agent type needs an agent id.** An agent type without an agent id is treated as contradictory (no signal),
+  because Claude Code only sends the type on a spawned agent's own turns.
+- **Route class on the log line.** It landed in this phase rather than in Phase 3.
+
+**Tool-calling investigation (the open point):** no filter is built, because the router has no data to filter on.
+- **What `ToolCallCapabilityStore` holds.** It records a model's tool-call *dialect*, learned from its chat
+  template or from matched calls. By design it never records failures: its own docs say "chose not to call a
+  tool" and "cannot call tools" produce identical evidence at that layer.
+- **Where capability-aware routing belongs.** ADR-0017 (proposed) covers pinning auto-routed requests to capable
+  models. It is blocked on tracked TODO #8's traffic capture.
+
+The risk stays recorded below.
 
 **Verify with CodeGraph before editing:** `RoutingContext` (67 references), `CompositeRoutingPolicy`, `UtilityRoutingPolicy`, and the `RequestInterceptor` hub. Do not touch `ManagementFacade`.
 
@@ -156,7 +180,11 @@ The detector, `RequestClassification.Subagent`, `SubagentBiasOptions`, the inter
 
 ## Phase 3 — Log line, telemetry event and dashboard
 
-- **Log line:** done in `533b47e`. Phase 2b adds the route class, for example `subagentSignal=claude-code/subagent route=light-subagent`. The template stays a static string, and both values come from fixed vocabularies.
+- **Log line:** done.
+  - `533b47e` added the signal, and Phase 2b added the route class.
+  - The line now ends, for example, `subagentSignal=claude-code/explore, route=light-subagent`.
+  - `route` is one of `none`, `normal`, `light-subagent` or `helper`.
+  - The template is a static string, and both values come from fixed vocabularies.
 - **Telemetry field and Live Stream badge:** [ADR-0021](../adr/0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) is proposed. Nothing on the proto, `RoutingTelemetryEvent`, the publisher or the GUI changes until David accepts it. Once accepted:
   - Add the optional `subagent_signal = 25` field and the GUI chain.
   - Add a bUnit test for the badge, following `docs/gui/DESIGN.md` (and `docs/gui/MOTION.md` if it animates).
@@ -209,7 +237,7 @@ Follow `RequestInterceptorRoutingPolicyTests`, `CompositeRoutingPolicyTests` and
 - **Tool-heavy light subagents on weak local models.**
   - `Explore` calls Read, Grep and Glob. The relative floor checks code-quality scores, not tool-calling ability.
   - Small LM Studio models have been seen echoing tool-call instructions as text (see the `lmstudio` comment in `appsettings.json`).
-  - **Open for Phase 2b:** whether to exclude candidates that the existing tool-call capability probing marks as unable to call tools. This needs a look at that store before committing to it.
+  - **Investigated in Phase 2b, not mitigated.** The tool-call capability store records dialects, never failures, so it can't exclude a model that handles tools badly. Capability-aware routing belongs to ADR-0017 (blocked on tracked TODO #8). Until then, the mitigations are the relative floor (a free model must have a known score close to the best) and the `ClaudeCodeHintHeaders` toggle, which turns the light-subagent route off.
 - **Free local models.** Helper traffic will usually land on `IsFree` providers (κ = 0). That is fine for titles. Light subagents reach them only by clearing the relative floor, which a model with no score can't do.
 - **Hint headers are opt-in.**
   - Without `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, Claude Code sends only the agent-id header. Every subagent then routes normally and no helper is detected.
@@ -231,9 +259,10 @@ David, 2026-10-02:
 4. The goal is the best quality for the money.
 5. Route by class, following the vendor evidence ([ADR-0022](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md)). Keep the research in `docs/research/subagent-and-helper-routing-evidence.md`.
 
-**Open for sign-off with this revision:**
-- The 0.9 relative floor.
-- `claude-code-guide` in the light class.
-- Codex `memory_consolidation` routing normally.
-- The `ClaudeCodeRequestClass` → `ClaudeCodeHintHeaders` rename.
-- Whether light subagents exclude models without verified tool calling.
+6. The revision is approved, and its open points are accepted at their defaults:
+   - the 0.9 relative floor;
+   - `claude-code-guide` in the light class;
+   - Codex `memory_consolidation` routing normally;
+   - the `ClaudeCodeRequestClass` → `ClaudeCodeHintHeaders` rename.
+
+   Whether light subagents exclude models without verified tool calling stays an investigation in Phase 2b, reported back before anything is built.

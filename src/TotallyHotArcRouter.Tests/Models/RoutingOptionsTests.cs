@@ -126,9 +126,35 @@ public class RoutingOptionsTests
 
         Assert.True(bias.Enabled);
         Assert.True(bias.ClaudeCodeAgentId);
-        Assert.True(bias.ClaudeCodeRequestClass);
+        Assert.True(bias.ClaudeCodeHintHeaders);
         Assert.True(bias.CodexTurnMetadata);
         Assert.True(bias.CopilotUtilityAlias);
+        Assert.Equal(0.9, actual: bias.LightSubagentRelativeFloor, 3);
+    }
+
+    /// <summary>
+    /// Verifies <see cref="RoutingOptions.EnsureValid"/> rejects a light-subagent relative floor outside (0, 1], so a
+    /// typo fails at startup instead of silently disabling or widening the light-subagent route.
+    /// </summary>
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(-0.1)]
+    [InlineData(1.01)]
+    [InlineData(double.NaN)]
+    public void EnsureValid_Throws_WhenLightSubagentRelativeFloorOutOfRange(double floor)
+    {
+        var options = new RoutingOptions { SubagentBias = new SubagentBiasOptions { LightSubagentRelativeFloor = floor } };
+
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
+    }
+
+    /// <summary>Verifies the boundary value 1 (only the best known model qualifies) is accepted.</summary>
+    [Fact]
+    public void EnsureValid_AcceptsARelativeFloorOfOne()
+    {
+        var options = new RoutingOptions { SubagentBias = new SubagentBiasOptions { LightSubagentRelativeFloor = 1d } };
+
+        options.EnsureValid();
     }
 
     /// <summary>

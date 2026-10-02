@@ -147,6 +147,98 @@ public class CompositeRoutingPolicyTests
     }
 
     [Fact]
+    public async Task CompositeRoutingPolicy_NearBestFloor_PicksTheBestValueAmongNearBestModels()
+    {
+        var composite = await BuildNearBestComposite(cheapScore: 0.85);
+
+        var selected = await composite.SelectModelAsync(context: NearBestContext(0.9),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // The Orchestrator's voter picks "pricey"; the light-subagent leg prefers the near-best cheaper model.
+        Assert.Equal(expected: "cheap", actual: selected);
+    }
+
+    [Fact]
+    public async Task CompositeRoutingPolicy_NearBestFloor_DecideOutcome_IsDeterministic()
+    {
+        var composite = await BuildNearBestComposite(cheapScore: 0.85);
+
+        var decision = await composite.DecideOutcomeAsync(context: NearBestContext(0.9), signals: null,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "cheap", actual: decision.SelectedModel);
+        Assert.False(decision.IsExploratory);
+        Assert.Equal(expected: 1.0, actual: decision.Propensity);
+    }
+
+    [Fact]
+    public async Task CompositeRoutingPolicy_NearBestFloor_NoKnownScores_FallsThroughToTheOrchestrator()
+    {
+        var composite = await BuildNearBestComposite(cheapScore: null);
+
+        var selected = await composite.SelectModelAsync(context: NearBestContext(0.9),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "pricey", actual: selected);
+    }
+
+    [Fact]
+    public async Task CompositeRoutingPolicy_NoNearBestFloor_IgnoresTheValueRule()
+    {
+        var composite = await BuildNearBestComposite(cheapScore: 0.85);
+
+        var selected = await composite.SelectModelAsync(context: NearBestContext(null),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "pricey", actual: selected);
+    }
+
+    /// <summary>
+    /// A composite whose Orchestrator always votes "pricey", over a memory where "pricey" scores 0.9 and "cheap"
+    /// scores <paramref name="cheapScore"/> (both unscored when it is <see langword="null"/>), with "cheap" at a
+    /// tenth of the price.
+    /// </summary>
+    private static async Task<CompositeRoutingPolicy> BuildNearBestComposite(double? cheapScore)
+    {
+        var memory = new RouterMemory();
+        if (cheapScore is { } score)
+        {
+            await memory.AddScoreAsync(dimension: "live:code_generation", model: "pricey", 0.9);
+            await memory.AddScoreAsync(dimension: "live:code_generation", model: "cheap", score);
+        }
+
+        var catalog = new PassthroughPriceCatalog();
+        catalog.SetPrice(modelName: "cheap", provider: "openai", 1m, 1m);
+        catalog.SetPrice(modelName: "pricey", provider: "openai", 10m, 10m);
+        var utilityPolicy = new UtilityRoutingPolicy(priceCatalog: catalog, memory: memory,
+            options: Options.Create(new RoutingOptions()), logger: NullLogger<UtilityRoutingPolicy>.Instance);
+        var generalPolicy = new AgentRouterPolicy(new AgentAsARouter(
+            logger: NullLogger<AgentAsARouter>.Instance,
+            options: Options.Create(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 }),
+            memory: memory));
+
+        return new CompositeRoutingPolicy(
+            utilityPolicy: utilityPolicy,
+            generalPolicy: generalPolicy,
+            orchestratorPolicy: CreateOrchestrator([new FakeVoter(name: VoterNames.DimBest, modelName: "pricey", 0.9)]),
+            options: Options.Create(new RoutingOptions { EnableExploration = false, ExplorationRate = 0 }));
+    }
+
+    /// <summary>A non-utility code-generation context over "cheap" and "pricey", with the given near-best floor.</summary>
+    private static RoutingContext NearBestContext(double? nearBestValueFloor)
+    {
+        return new RoutingContext(
+            Dimension: "live:code_generation",
+            false,
+            Candidates:
+            [
+                new RoutingCandidate(ModelName: "cheap", Provider: "openai", false),
+                new RoutingCandidate(ModelName: "pricey", Provider: "openai", false)
+            ],
+            NearBestValueFloor: nearBestValueFloor);
+    }
+
+    [Fact]
     public async Task CompositeRoutingPolicy_NonUtilityContext_ForwardsRoutingSignalsToOrchestrator()
     {
         var utilityPolicy = new UtilityRoutingPolicy(priceCatalog: new PassthroughPriceCatalog(),

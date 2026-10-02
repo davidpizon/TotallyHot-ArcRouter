@@ -47,7 +47,7 @@ public class SubagentSignalDetectorTests
             requestBody: Body(), options: Defaults);
 
         Assert.Equal(expected: new SubagentSignal(Harness: "claude-code", Kind: "subagent",
-            Source: "x-claude-code-agent-id"), actual: signal);
+            Source: "x-claude-code-agent-id", RouteClass: SubagentRouteClass.Normal), actual: signal);
     }
 
     [Fact]
@@ -60,10 +60,11 @@ public class SubagentSignalDetectorTests
     }
 
     [Theory]
-    [InlineData("subagent", "subagent")]
-    [InlineData("SubAgent", "subagent")]
-    [InlineData("auxiliary", "auxiliary")]
-    public void Detect_ClaudeCodeRequestClass_ReportsKind(string requestClass, string expectedKind)
+    [InlineData("subagent", "subagent", SubagentRouteClass.Normal)]
+    [InlineData("SubAgent", "subagent", SubagentRouteClass.Normal)]
+    [InlineData("auxiliary", "auxiliary", SubagentRouteClass.Helper)]
+    public void Detect_ClaudeCodeRequestClass_ReportsKind(string requestClass, string expectedKind,
+        SubagentRouteClass expectedRoute)
     {
         var signal = SubagentSignalDetector.Detect(
             headers: Headers(("x-claude-code-request-class", requestClass)), requestBody: Body(), options: Defaults);
@@ -71,6 +72,7 @@ public class SubagentSignalDetectorTests
         Assert.NotNull(signal);
         Assert.Equal(expected: expectedKind, actual: signal.Kind);
         Assert.Equal(expected: "x-claude-code-request-class", actual: signal.Source);
+        Assert.Equal(expected: expectedRoute, actual: signal.RouteClass);
     }
 
     [Theory]
@@ -129,7 +131,7 @@ public class SubagentSignalDetectorTests
     [Fact]
     public void Detect_SubagentClassWithClassToggleOff_FallsBackToAgentId()
     {
-        var options = new SubagentBiasOptions { ClaudeCodeRequestClass = false };
+        var options = new SubagentBiasOptions { ClaudeCodeHintHeaders = false };
 
         var signal = SubagentSignalDetector.Detect(
             headers: Headers(("x-claude-code-request-class", "subagent"), ("x-claude-code-agent-id", "agent-1")),
@@ -142,7 +144,7 @@ public class SubagentSignalDetectorTests
     [Fact]
     public void Detect_AuxiliaryClassWithClassToggleOff_ReportsNothing()
     {
-        var options = new SubagentBiasOptions { ClaudeCodeRequestClass = false };
+        var options = new SubagentBiasOptions { ClaudeCodeHintHeaders = false };
 
         var signal = SubagentSignalDetector.Detect(
             headers: Headers(("x-claude-code-request-class", "auxiliary")), requestBody: Body(), options: options);
@@ -194,6 +196,112 @@ public class SubagentSignalDetectorTests
         Assert.Null(signal);
     }
 
+    // ---- Claude Code agent type (route class) ----
+
+    [Theory]
+    [InlineData("Explore", "explore", SubagentRouteClass.LightSubagent)]
+    [InlineData("explore", "explore", SubagentRouteClass.LightSubagent)]
+    [InlineData("claude-code-guide", "claude-code-guide", SubagentRouteClass.LightSubagent)]
+    [InlineData("Plan", "plan", SubagentRouteClass.Normal)]
+    [InlineData("general-purpose", "general-purpose", SubagentRouteClass.Normal)]
+    [InlineData("statusline-setup", "statusline-setup", SubagentRouteClass.Normal)]
+    [InlineData("custom", "custom", SubagentRouteClass.Normal)]
+    [InlineData("teammate", "teammate", SubagentRouteClass.Normal)]
+    [InlineData("fork", "fork", SubagentRouteClass.Normal)]
+    public void Detect_SubagentWithAgentType_ReportsTypeAndRouteClass(string agentType, string expectedKind,
+        SubagentRouteClass expectedRoute)
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-request-class", "subagent"), ("x-claude-code-agent-id", "agent-1"),
+                ("x-claude-code-agent-type", agentType)),
+            requestBody: Body(), options: Defaults);
+
+        Assert.Equal(expected: new SubagentSignal(Harness: "claude-code", Kind: expectedKind,
+            Source: "x-claude-code-agent-type", RouteClass: expectedRoute), actual: signal);
+    }
+
+    [Fact]
+    public void Detect_UnknownAgentType_IsReportedAsAPlainSubagentAndNeverEchoed()
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-request-class", "subagent"), ("x-claude-code-agent-id", "agent-1"),
+                ("x-claude-code-agent-type", "my-secret-agent-name")),
+            requestBody: Body(), options: Defaults);
+
+        Assert.NotNull(signal);
+        Assert.Equal(expected: "subagent", actual: signal.Kind);
+        Assert.Equal(expected: SubagentRouteClass.Normal, actual: signal.RouteClass);
+    }
+
+    [Fact]
+    public void Detect_AgentTypeWithoutRequestClass_StillNamesTheSubagent()
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-agent-id", "agent-1"), ("x-claude-code-agent-type", "Explore")),
+            requestBody: Body(), options: Defaults);
+
+        Assert.NotNull(signal);
+        Assert.Equal(expected: SubagentRouteClass.LightSubagent, actual: signal.RouteClass);
+    }
+
+    [Fact]
+    public void Detect_AgentTypeWithoutAgentId_IsContradictoryAndReportsNothing()
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-request-class", "subagent"), ("x-claude-code-agent-type", "Explore")),
+            requestBody: Body(), options: Defaults);
+
+        Assert.Null(signal);
+    }
+
+    [Fact]
+    public void Detect_TypedAuxiliaryRequest_IsContradictoryAndReportsNothing()
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-request-class", "auxiliary"), ("x-claude-code-agent-id", "agent-1"),
+                ("x-claude-code-agent-type", "Explore")),
+            requestBody: Body(), options: Defaults);
+
+        Assert.Null(signal);
+    }
+
+    [Fact]
+    public void Detect_SubagentSideRequest_KeepsItsAgentIdAndIsAHelper()
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-request-class", "auxiliary"), ("x-claude-code-agent-id", "agent-1")),
+            requestBody: Body(), options: Defaults);
+
+        Assert.NotNull(signal);
+        Assert.Equal(expected: SubagentRouteClass.Helper, actual: signal.RouteClass);
+    }
+
+    [Fact]
+    public void Detect_ExploreWithHintHeadersOff_FallsBackToAPlainSubagent()
+    {
+        var options = new SubagentBiasOptions { ClaudeCodeHintHeaders = false };
+
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-request-class", "subagent"), ("x-claude-code-agent-id", "agent-1"),
+                ("x-claude-code-agent-type", "Explore")),
+            requestBody: Body(), options: options);
+
+        Assert.NotNull(signal);
+        Assert.Equal(expected: "x-claude-code-agent-id", actual: signal.Source);
+        Assert.Equal(expected: SubagentRouteClass.Normal, actual: signal.RouteClass);
+    }
+
+    [Fact]
+    public void Detect_DuplicateAgentType_IsAmbiguousAndReportsNothing()
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-agent-id", "agent-1"), ("x-claude-code-agent-type", "Explore"),
+                ("x-claude-code-agent-type", "Plan")),
+            requestBody: Body(), options: Defaults);
+
+        Assert.Null(signal);
+    }
+
     // ---- Codex ----
 
     [Theory]
@@ -205,8 +313,8 @@ public class SubagentSignalDetectorTests
             headers: Headers(("x-codex-turn-metadata", CodexMetadata(kind: kind))), requestBody: Body(),
             options: Defaults);
 
-        Assert.Equal(expected: new SubagentSignal(Harness: "codex", Kind: kind, Source: "x-codex-turn-metadata"),
-            actual: signal);
+        Assert.Equal(expected: new SubagentSignal(Harness: "codex", Kind: kind, Source: "x-codex-turn-metadata",
+            RouteClass: SubagentRouteClass.Normal), actual: signal);
     }
 
     [Theory]
@@ -322,8 +430,8 @@ public class SubagentSignalDetectorTests
         var signal = SubagentSignalDetector.Detect(headers: Headers(), requestBody: Body(model: model),
             options: Defaults);
 
-        Assert.Equal(expected: new SubagentSignal(Harness: "copilot", Kind: "utility-alias", Source: "model"),
-            actual: signal);
+        Assert.Equal(expected: new SubagentSignal(Harness: "copilot", Kind: "utility-alias", Source: "model",
+            RouteClass: SubagentRouteClass.Helper), actual: signal);
     }
 
     [Theory]
@@ -358,6 +466,16 @@ public class SubagentSignalDetectorTests
         var signal = SubagentSignalDetector.Detect(headers: Headers(), requestBody: body, options: Defaults);
 
         Assert.Null(signal);
+    }
+
+    [Theory]
+    [InlineData("copilot-utility", true)]
+    [InlineData(" Copilot-Utility-Small ", true)]
+    [InlineData("auto", false)]
+    [InlineData(null, false)]
+    public void IsCopilotUtilityAlias_MatchesThePrefixCaseInsensitively(string? model, bool expected)
+    {
+        Assert.Equal(expected: expected, actual: SubagentSignalDetector.IsCopilotUtilityAlias(model));
     }
 
     // ---- Cross-cutting ----
@@ -406,7 +524,8 @@ public class SubagentSignalDetectorTests
     [Fact]
     public void ToLabel_JoinsHarnessAndKind()
     {
-        var signal = new SubagentSignal(Harness: "codex", Kind: "thread_spawn", Source: "x-codex-turn-metadata");
+        var signal = new SubagentSignal(Harness: "codex", Kind: "thread_spawn", Source: "x-codex-turn-metadata",
+            RouteClass: SubagentRouteClass.Normal);
 
         Assert.Equal(expected: "codex/thread_spawn", actual: signal.ToLabel());
     }

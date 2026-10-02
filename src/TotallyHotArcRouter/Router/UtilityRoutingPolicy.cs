@@ -161,6 +161,56 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
     }
 
     /// <summary>
+    /// Picks the best value among the near-best candidates, for a light subagent (issue #163,
+    /// <c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>): the same
+    /// <c>ε₁·s + ε₂·κ</c> ranking as <see cref="SelectModelAsync(RoutingContext, CancellationToken)"/>, but
+    /// only over candidates with a <em>known</em> score of at least <paramref name="relativeFloor"/> × the best
+    /// known score in <see cref="RoutingContext.Dimension"/>, that also pass
+    /// <see cref="RoutingOptions.UtilityMinQualityScore"/> and have a price.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="SelectModelAsync(RoutingContext, CancellationToken)"/>, an unobserved candidate can never
+    /// qualify here, and there are no degradation fallbacks: when nothing qualifies this returns
+    /// <see langword="null"/> so the caller routes the request the normal way. A subagent does real work, so the
+    /// cost bias applies only when the router already knows a cheaper model is nearly as good as the best one.
+    /// The best-scoring candidate always clears its own floor, so <see langword="null"/> means either that no
+    /// candidate has a known score, or that no qualifying candidate has a price (or the best score is below
+    /// <see cref="RoutingOptions.UtilityMinQualityScore"/>).
+    /// </remarks>
+    /// <param name="context">The dimension and eligible candidates to select from.</param>
+    /// <param name="relativeFloor">The fraction of the best known score a candidate must reach, in (0, 1].</param>
+    /// <returns>The selected model name, or <see langword="null"/> when no candidate qualifies.</returns>
+    public string? SelectNearBestValue(RoutingContext context, double relativeFloor)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(relativeFloor);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: relativeFloor, other: 1d);
+
+        var observed = context.Candidates
+            .Select(candidate => new
+            {
+                Candidate = candidate,
+                Quality = _memory.GetAverageScore(dimension: context.Dimension, model: candidate.ModelName)
+            })
+            .Where(x => x.Quality.HasValue)
+            .ToList();
+
+        if (observed.Count == 0) return null;
+
+        var floor = Math.Max(val1: relativeFloor * observed.Max(x => x.Quality!.Value),
+            val2: _options.UtilityMinQualityScore);
+
+        return observed
+            .Where(x => x.Quality!.Value >= floor)
+            .Select(x => new { x.Candidate, Quality = x.Quality!.Value, Cost = ResolveCost(x.Candidate) })
+            .Where(x => x.Cost.HasValue)
+            .OrderByDescending(x => _options.Epsilon1 * x.Quality + _options.Epsilon2 * (double)x.Cost!.Value)
+            .ThenBy(keySelector: x => x.Candidate.ModelName, comparer: StringComparer.Ordinal)
+            .Select(x => x.Candidate.ModelName)
+            .FirstOrDefault();
+    }
+
+    /// <summary>
     /// Resolves candidate's blended cost in USD per 1,000,000 tokens (average of input and output rates),
     /// or <see langword="null"/> when it is unpriced — no fresh catalog row, and not flagged
     /// <see cref="RoutingCandidate.IsFree"/>.

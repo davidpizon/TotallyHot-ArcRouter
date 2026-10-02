@@ -399,15 +399,10 @@ public class RequestInterceptor
         var classification = _requestClassifier.Classify(jsonObject);
 
         // Issue #163: a verified harness marker (docs/router/utility-model-routing.md, "Subagent and
-        // side-task signals") makes the request utility traffic, so UtilityRoutingPolicy's cost-aware,
-        // quality-gated pick applies unchanged. It is kept in routedClassification and handed only to the
-        // agentic-routing calls below: a request that names a configured model keeps both that model
-        // (ADR-0005, no silent reroute) and its unmodified classification.
+        // side-task signals"). How it is routed is decided further down, once the requested model is known.
+        var subagentBias = _routingOptionsMonitor?.CurrentValue.SubagentBias ?? DefaultSubagentBias;
         var subagentSignal = SubagentSignalDetector.Detect(headers: context.Request.Headers,
-            requestBody: jsonObject, options: _routingOptionsMonitor?.CurrentValue.SubagentBias ?? DefaultSubagentBias);
-        var routedClassification = subagentSignal is null
-            ? classification
-            : classification with { IsUtility = true, Subagent = subagentSignal };
+            requestBody: jsonObject, options: subagentBias);
         var servedClassification = classification;
         var liveDimension =
             RouterDimension.ToLiveKey(liveMemoryPrefix: _liveMemoryPrefix, dimension: classification.Dimension);
@@ -472,6 +467,35 @@ public class RequestInterceptor
         // one model.
         var isAutoSelectRequest = _forcedModelName is null && IsRouterChoiceModelName(modelName);
 
+        // Issue #163 (docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md): the signal's route
+        // class applies only when the client delegated the model choice - a router-choice name or a Copilot
+        // utility alias. Claude Code's auto-mode safety classifier shares the helper request class but names
+        // its own model, so it never reaches the cheap path; any other signalled request routes normally and
+        // only records the signal. routedClassification is handed only to the agentic-routing calls below: a
+        // request that names a configured model keeps both that model (ADR-0005) and its unmodified
+        // classification. A light subagent's documented marker outranks the payload heuristic's IsUtility guess,
+        // so it gets the near-best rule rather than the plain utility rule.
+        var subagentRoute = subagentSignal is null
+            ? (SubagentRouteClass?)null
+            : IsRouterChoiceModelName(modelName) || SubagentSignalDetector.IsCopilotUtilityAlias(modelName)
+                ? subagentSignal.RouteClass
+                : SubagentRouteClass.Normal;
+        var routedClassification = subagentSignal is null
+            ? classification
+            : classification with
+            {
+                IsUtility = subagentRoute switch
+                {
+                    SubagentRouteClass.Helper => true,
+                    SubagentRouteClass.LightSubagent => false,
+                    _ => classification.IsUtility
+                },
+                Subagent = subagentSignal
+            };
+        var nearBestValueFloor = subagentRoute == SubagentRouteClass.LightSubagent
+            ? subagentBias.LightSubagentRelativeFloor
+            : (double?)null;
+
         ResolvedModelRoute? route;
         var isExploratory = false;
         var propensity = 1.0;
@@ -483,7 +507,8 @@ public class RequestInterceptor
         if (isAutoSelectRequest)
         {
             var autoSelected = await ResolveAgenticRouteAsync(classification: routedClassification,
-                liveDimension: liveDimension, signals: routingSignals, cancellationToken: cancellationToken);
+                liveDimension: liveDimension, signals: routingSignals, subagentRoute: subagentRoute,
+                nearBestValueFloor: nearBestValueFloor, cancellationToken: cancellationToken);
             if (autoSelected is null)
             {
                 // Same "everything is unavailable" condition the fallback path reports, but phrased for a
@@ -525,7 +550,8 @@ public class RequestInterceptor
             var wasResolved = route is not null;
             var agenticRoute = _forcedModelName is null
                 ? await ResolveAgenticRouteAsync(classification: routedClassification, liveDimension: liveDimension,
-                    signals: routingSignals, cancellationToken: cancellationToken)
+                    signals: routingSignals, subagentRoute: subagentRoute, nearBestValueFloor: nearBestValueFloor,
+                    cancellationToken: cancellationToken)
                 : null;
 
             if (agenticRoute is not null)
@@ -669,6 +695,15 @@ public class RequestInterceptor
     /// into voting - the interface's default implementation silently discards it, and the
     /// live-registered <c>CompositeRoutingPolicy</c> does not override it.
     /// </param>
+    /// <param name="subagentRoute">
+    /// How the request's subagent signal is being routed (issue #163), or <see langword="null"/> when it carries
+    /// none. Only reported on the routing log line; the routing itself follows <paramref name="classification"/>
+    /// and <paramref name="nearBestValueFloor"/>.
+    /// </param>
+    /// <param name="nearBestValueFloor">
+    /// The light-subagent relative floor, carried on <see cref="RoutingContext.NearBestValueFloor"/>, or
+    /// <see langword="null"/> for every other request.
+    /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>
     /// The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently
@@ -678,6 +713,8 @@ public class RequestInterceptor
         RequestClassification classification,
         string liveDimension,
         RoutingSignals? signals,
+        SubagentRouteClass? subagentRoute,
+        double? nearBestValueFloor,
         CancellationToken cancellationToken)
     {
         if (_routingPolicy is not null)
@@ -686,7 +723,7 @@ public class RequestInterceptor
             if (candidates.Count > 0)
             {
                 var context = new RoutingContext(Dimension: liveDimension, IsUtility: classification.IsUtility,
-                    Candidates: candidates);
+                    Candidates: candidates, NearBestValueFloor: nearBestValueFloor);
                 RoutingDecision? decision;
                 try
                 {
@@ -726,11 +763,12 @@ public class RequestInterceptor
                     // sink forwards every log event to connected dashboards, not just RoutingTelemetryEvent).
                     _logger.LogInformation(
                         message:
-                        "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}, subagentSignal={SubagentSignal}).",
+                        "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}, subagentSignal={SubagentSignal}, route={SubagentRoute}).",
                         SanitizeForLog(selectedName!),
                         SanitizeForLog(liveDimension),
                         classification.IsUtility,
-                        SanitizeForLog(classification.Subagent?.ToLabel() ?? "none"));
+                        SanitizeForLog(classification.Subagent?.ToLabel() ?? "none"),
+                        DescribeSubagentRoute(subagentRoute));
                     var policyPathBaseline = _untrainedBaselineSelector?.SelectWithScore(
                         dimension: classification.Dimension,
                         candidateModelIds: candidates.Select(c => c.ModelName));
@@ -805,6 +843,21 @@ public class RequestInterceptor
     private static string SanitizeForLog(string? value)
     {
         return value?.Replace(oldValue: "\r", newValue: " ").Replace(oldValue: "\n", newValue: " ") ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Renders how a subagent signal was routed as a fixed, log-safe token: <c>none</c> (no signal),
+    /// <c>normal</c>, <c>light-subagent</c> or <c>helper</c>.
+    /// </summary>
+    private static string DescribeSubagentRoute(SubagentRouteClass? route)
+    {
+        return route switch
+        {
+            null => "none",
+            SubagentRouteClass.Helper => "helper",
+            SubagentRouteClass.LightSubagent => "light-subagent",
+            _ => "normal"
+        };
     }
 
     private static string TruncateForLog(string value)
