@@ -100,6 +100,18 @@ public class RequestInterceptor
     private readonly IRoutingPolicy? _routingPolicy;
     private readonly UntrainedBaselineSelector? _untrainedBaselineSelector;
 
+    /// <summary>
+    /// Live source of <see cref="RoutingOptions.SubagentBias"/> (issue #163), read per request so a toggle
+    /// change applies to the next request. <see langword="null"/> means the defaults apply.
+    /// </summary>
+    private readonly IOptionsMonitor<RoutingOptions>? _routingOptionsMonitor;
+
+    /// <summary>
+    /// The switches applied when no <see cref="_routingOptionsMonitor"/> was supplied. One shared instance so
+    /// the per-request path allocates nothing.
+    /// </summary>
+    private static readonly SubagentBiasOptions DefaultSubagentBias = new();
+
     /// <param name="logger">The logger.</param>
     /// <param name="modelRouteResolver">The known-model allowlist/resolver.</param>
     /// <param name="singleModelServingOptions">
@@ -178,6 +190,13 @@ public class RequestInterceptor
     /// menu is only known at request time. <see langword="null"/> (the default) means no untrained-
     /// baseline pick is recorded, matching pre-this-change behavior.
     /// </param>
+    /// <param name="routingOptionsMonitor">
+    /// Optional live source of <see cref="RoutingOptions.SubagentBias"/> (issue #163): the kill switch and
+    /// per-signal toggles consulted on every request before a harness's subagent marker is allowed to
+    /// bias routing. <see langword="null"/> (the default) applies <see cref="SubagentBiasOptions"/>'s defaults.
+    /// Separate from <paramref name="routingOptions"/>, which is a startup snapshot, because these switches
+    /// must take effect without a restart.
+    /// </param>
     public RequestInterceptor(
         ILogger<RequestInterceptor> logger,
         IModelRouteResolver modelRouteResolver,
@@ -192,8 +211,10 @@ public class RequestInterceptor
         EmbeddingWarmupState? embeddingWarmupState = null,
         IOptions<RoutingOptions>? routingOptions = null,
         IProviderInteractionStatusStore? interactionStatusStore = null,
-        UntrainedBaselineSelector? untrainedBaselineSelector = null)
+        UntrainedBaselineSelector? untrainedBaselineSelector = null,
+        IOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null)
     {
+        _routingOptionsMonitor = routingOptionsMonitor;
         _logger = logger;
         _modelRouteResolver = modelRouteResolver;
         _forcedModelName = singleModelServingOptions?.ForcedModelName;
@@ -376,6 +397,18 @@ public class RequestInterceptor
         // key and for IsUtility, so the dimension key and the tier IRoutingPolicy sees can never
         // be classified differently for the same request.
         var classification = _requestClassifier.Classify(jsonObject);
+
+        // Issue #163: a verified harness marker (docs/router/utility-model-routing.md, "Subagent and
+        // side-task signals") makes the request utility traffic, so UtilityRoutingPolicy's cost-aware,
+        // quality-gated pick applies unchanged. It is kept in routedClassification and handed only to the
+        // agentic-routing calls below: a request that names a configured model keeps both that model
+        // (ADR-0005, no silent reroute) and its unmodified classification.
+        var subagentSignal = SubagentSignalDetector.Detect(headers: context.Request.Headers,
+            requestBody: jsonObject, options: _routingOptionsMonitor?.CurrentValue.SubagentBias ?? DefaultSubagentBias);
+        var routedClassification = subagentSignal is null
+            ? classification
+            : classification with { IsUtility = true, Subagent = subagentSignal };
+        var servedClassification = classification;
         var liveDimension =
             RouterDimension.ToLiveKey(liveMemoryPrefix: _liveMemoryPrefix, dimension: classification.Dimension);
 
@@ -449,7 +482,7 @@ public class RequestInterceptor
 
         if (isAutoSelectRequest)
         {
-            var autoSelected = await ResolveAgenticRouteAsync(classification: classification,
+            var autoSelected = await ResolveAgenticRouteAsync(classification: routedClassification,
                 liveDimension: liveDimension, signals: routingSignals, cancellationToken: cancellationToken);
             if (autoSelected is null)
             {
@@ -464,6 +497,7 @@ public class RequestInterceptor
             _logger.LogInformation(
                 message: "[INTERCEPTOR] Auto-select requested; routed to '{ResolvedModel}'.",
                 SanitizeForLog(autoSelected.Route.ModelName));
+            servedClassification = routedClassification;
             route = autoSelected.Route;
             isExploratory = autoSelected.IsExploratory;
             propensity = autoSelected.Propensity;
@@ -490,7 +524,7 @@ public class RequestInterceptor
             // when the name resolved (even though IsModelEnabled is what triggered this branch).
             var wasResolved = route is not null;
             var agenticRoute = _forcedModelName is null
-                ? await ResolveAgenticRouteAsync(classification: classification, liveDimension: liveDimension,
+                ? await ResolveAgenticRouteAsync(classification: routedClassification, liveDimension: liveDimension,
                     signals: routingSignals, cancellationToken: cancellationToken)
                 : null;
 
@@ -500,6 +534,7 @@ public class RequestInterceptor
                     message:
                     "[INTERCEPTOR] Unresolved model '{ModelName}' accepted and agentically routed to '{ResolvedModel}'.",
                     SanitizeForLog(modelName), SanitizeForLog(agenticRoute.Route.ModelName));
+                servedClassification = routedClassification;
                 route = agenticRoute.Route;
                 isExploratory = agenticRoute.IsExploratory;
                 propensity = agenticRoute.Propensity;
@@ -556,7 +591,7 @@ public class RequestInterceptor
             routerTokens: routerTokens,
             isExploratory: isExploratory,
             propensity: propensity,
-            classification: classification,
+            classification: servedClassification,
             taskText: taskText,
             dimBestModel: dimBestModel,
             explicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage,

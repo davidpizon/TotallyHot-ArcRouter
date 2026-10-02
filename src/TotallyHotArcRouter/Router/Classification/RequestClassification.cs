@@ -19,4 +19,15 @@ namespace TotallyHot.ArcRouter.Router.Classification;
 /// prompt, a small <c>max_tokens</c> cap) rather than a normal chat turn - the signal
 /// <c>docs/router/utility-model-routing.md</c>'s B2 payload heuristics describe.
 /// </param>
-public sealed record RequestClassification(string Dimension, string Difficulty, string Language, bool IsUtility);
+/// <param name="Subagent">
+/// The harness-sent marker that made this request utility traffic (issue #163), or <see langword="null"/>
+/// when none was detected - which is every request <see cref="HeuristicRequestClassifier"/> produces on its
+/// own. Set by <c>RequestInterceptor</c> alongside <paramref name="IsUtility"/> when a verified
+/// <see cref="SubagentSignal"/> is present and enabled, so the reason travels with the classification.
+/// </param>
+public sealed record RequestClassification(
+    string Dimension,
+    string Difficulty,
+    string Language,
+    bool IsUtility,
+    SubagentSignal? Subagent = null);

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 
@@ -113,5 +114,42 @@ public class RoutingOptionsTests
         };
 
         Assert.Throws<OptionsValidationException>(options.EnsureValid);
+    }
+
+    /// <summary>
+    /// Verifies subagent-aware routing (issue #163) is on by default, every per-signal flag included.
+    /// </summary>
+    [Fact]
+    public void SubagentBias_DefaultsToEnabledForEverySignal()
+    {
+        var bias = new RoutingOptions().SubagentBias;
+
+        Assert.True(bias.Enabled);
+        Assert.True(bias.ClaudeCodeAgentId);
+        Assert.True(bias.ClaudeCodeRequestClass);
+        Assert.True(bias.CodexTurnMetadata);
+        Assert.True(bias.CopilotUtilityAlias);
+    }
+
+    /// <summary>
+    /// Verifies <c>Routing:SubagentBias</c> binds from configuration, so an operator can flip the kill switch
+    /// or drop one marker without code changes.
+    /// </summary>
+    [Fact]
+    public void SubagentBias_BindsFromConfiguration()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Routing:SubagentBias:Enabled"] = "false",
+                ["Routing:SubagentBias:CodexTurnMetadata"] = "false"
+            })
+            .Build();
+
+        var options = configuration.GetSection(RoutingOptions.SectionName).Get<RoutingOptions>()!;
+
+        Assert.False(options.SubagentBias.Enabled);
+        Assert.False(options.SubagentBias.CodexTurnMetadata);
+        Assert.True(options.SubagentBias.ClaudeCodeAgentId);
     }
 }

@@ -136,6 +136,13 @@ public sealed class RoutingOptions
     public double UtilityMinQualityScore { get; init; } = 0.3;
 
     /// <summary>
+    /// Gets the subagent-aware routing switches (issue #163): the kill switch and the per-signal toggles for
+    /// the harness markers <see cref="Router.Classification.SubagentSignalDetector"/> recognizes. Read live
+    /// by <see cref="Proxy.RequestInterceptor"/> so an operator change applies to the next request.
+    /// </summary>
+    public SubagentBiasOptions SubagentBias { get; init; } = new();
+
+    /// <summary>
     /// Gets the <c>dim_best</c> voter's fixed weight in <see cref="Router.Orchestrator.OrchestratorRoutingPolicy"/>'s
     /// weighted vote (PLAN.md Phase L). Defaults to the value that, combined with
     /// <see cref="MemoryKnnVoterWeight"/>, reproduces research-doc §3.3's worked example (0.9 + 0.57 = 1.47) -
