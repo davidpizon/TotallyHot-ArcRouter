@@ -1,6 +1,6 @@
 # 0021. Carry the subagent routing signal on the telemetry wire as an optional field
 
-**Status:** proposed
+**Status:** proposed — accepted by David Pizon on 2026-10-02; moves to `accepted` when its PR merges (see the README)
 **Date:** 2026-10-02
 **Deciders:** David Pizon
 
