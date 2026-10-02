@@ -262,7 +262,8 @@ flowchart TB
     - whenever the list's width changes, through a `ResizeObserver` that also covers divider drags.
 
     It reports the set of overflowing row keys to .NET in one call, and only when the set changes. Blazor renders the toggle for exactly that set.
-  - **Conservative fallback.** Until a row's first measurement arrives, or if interop fails, any text over 150 characters or with more than 5 line breaks shows the toggle. 150 characters is about six lines at the narrowest body: a 360 px pane, minus the 120 px sender column and padding, leaves roughly 200 px at 12 px. The fallback can briefly show a toggle with nothing to expand. It can never hide text without one.
+  - **Fail open until measured.** A body gets `.ls-msg-clamp` only after its first measurement reports it. Until then, and for good if interop fails or the circuit disconnects, the row renders unclamped. So no text is ever hidden without a toggle, whatever its script or line breaks. A character-count guess cannot promise that: 150 CJK characters or emoji can wrap past six lines in a 200 px body.
+    - The cost is one reflow when a long row is first measured and clamped. A row arriving at the pinned bottom re-pins after that reflow, through §6.2's `scrollToBottom`.
   - Expand and collapse are instant, not animated. Line-clamp is not interpolable, and `MOTION.md` §6 forbids animating `height`.
 - **Placeholders.** An empty side renders today's muted copy: "No request captured" / "No response captured".
 - **Chips.** Chips sit before the body text, like the CodePen's `.blue-label`:
@@ -393,6 +394,24 @@ message SessionAggregate {
   int32 compared_turns = 3;                       // retained transcripts with both savings and baseline cost compared
   optional string total_estimated_net_savings_usd = 4;    // decimal-as-string, over compared_turns
   optional string total_baseline_estimated_cost_usd = 5;  // decimal-as-string, over compared_turns
+  google.protobuf.Timestamp first_turn_utc = 6;
+  google.protobuf.Timestamp last_turn_utc = 7;
+  int32 max_turn_number = 8;                      // live turns above this are not yet persisted (§7)
+  optional string total_cost_usd = 9;             // decimal-as-string, over priced rows
+  int32 unpriced_turns = 10;                      // rows with no cost
+  int64 total_input_tokens = 11;                  // over rows that report them
+  int64 total_output_tokens = 12;
+  int32 token_unknown_turns = 13;                 // rows missing either count
+  repeated SessionModelUsage models = 14;         // the 20 most recently used routed models
+  int32 other_models = 15;                        // distinct routed models beyond those 20
+}
+
+message SessionModelUsage {
+  string routed_model = 1;                        // capped at 1,024 characters, like every free-form field
+  int32 turns = 2;
+  optional string cost_usd = 3;                   // decimal-as-string, over priced rows
+  int32 unpriced_turns = 4;
+  google.protobuf.Timestamp last_used_utc = 5;
 }
 
 // No correlation_id: it is always {session_id}:{turn_number} (ProxyMiddleware's convention), so the GUI
@@ -419,9 +438,7 @@ message SessionTurnDetail {
   bool is_judge_scored = 19;
   optional string untrained_baseline_model = 20;
   optional double untrained_baseline_predicted_score = 21;
-  optional int32 prompt_text_length = 22;         // stored length in characters; displayed, never compared (§5.6)
-  optional int32 response_text_length = 23;
-  optional BaselineComparison comparison = 24;
+  optional BaselineComparison comparison = 22;   // no text lengths here: length() reads whole bodies (§5.3)
 }
 
 message BaselineComparison {
@@ -464,6 +481,8 @@ message TurnText {
   optional string response_text = 5;
   bool prompt_truncated = 6;                      // the stored text is longer than the cap
   bool response_truncated = 7;
+  optional int32 prompt_text_length = 8;          // stored length in characters; displayed, never compared (§5.6)
+  optional int32 response_text_length = 9;
 }
 ```
 
@@ -483,8 +502,8 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 ### 5.3 Router implementation (Phase 2)
 
 - **`ITranscriptStore.ListSessionTurnMetadataAsync(string sessionId, int limit, long? beforeTranscriptId, CancellationToken)`.**
-  - Returns `IReadOnlyList<SessionTurnMetadata>`. This is a new record next to `SessionTranscript`. It carries every §5.2 column **but no text**; it has `PromptTextLength` and `ResponseTextLength` instead.
-  - **Its own projection.** It does not reuse `GetTranscriptAsync`'s column list or the `ReadTranscriptRecord` materializer: `TranscriptRecord` carries both text bodies. It selects `length(prompt_text)` and `length(response_text)`, so SQLite never hands a body to .NET.
+  - Returns `IReadOnlyList<SessionTurnMetadata>`. This is a new record next to `SessionTranscript`. It carries every §5.2 column **and no text or text length**.
+  - **Its own projection.** It does not reuse `GetTranscriptAsync`'s column list or the `ReadTranscriptRecord` materializer: `TranscriptRecord` carries both text bodies. It never names `prompt_text` or `response_text`, not even inside `length()`. SQLite computes a TEXT value's character count by reading and decoding the whole value, so `length()` over a 2,001-row page could read gigabytes of bodies. Lengths come from `GetTurnTexts`, which reads those bodies anyway (§5.6).
   - **Capped in SQL, not after.** The values are client-controlled and unbounded, so capping them after materialization would not bound memory.
     - Every free-form column is selected as `substr(column, 1, 1025)`, so no longer value is ever read into .NET. The service appends "…" to any value that reaches 1,025 characters, which gives §5.2's 1,024-character cap.
     - The turn number is cut out as `substr(correlation_id, length(session_id) + 2, 10)`. The session-id prefix of `correlation_id`, which is unbounded, is never read.
@@ -492,20 +511,28 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
   - **Paging.** `WHERE session_id = $sessionId AND ($before IS NULL OR id < $before) ORDER BY id DESC LIMIT $limit + 1`. When the extra row comes back, it is dropped, and the last returned id becomes `next_before_transcript_id`. `ix_request_transcripts_session_id` already exists.
   - **Default and gating.** The default interface implementation returns `[]`, exactly like `ListSessionsAsync`. The SQLite implementation is gated on `TranscriptOptions.Enabled` and calls `EnsureSchema()` as `ListSessionsAsync` does.
 - **`ITranscriptStore.ListTurnTextsAsync(IReadOnlyList<long> transcriptIds, int maxCharacters, CancellationToken)`.**
-  - A second projection. It selects only `id`, `substr(prompt_text, 1, $max)`, `substr(response_text, 1, $max)`, and the two `length()`s, so a capped side is cut inside SQLite.
+  - A second projection. It selects only `id`, `substr(prompt_text, 1, $max)`, `substr(response_text, 1, $max)`, and the two `length()`s, so a capped side is cut inside SQLite. Here `length()` is affordable: at most 50 rows, whose bodies `substr` loads anyway.
   - It looks rows up by primary key, at most 50 ids per call.
   - It is also a default interface member.
 - **Comparisons.** A new overload, `ITaxonomyComparisonStore.LoadForSessionAsync(sessionId, minTranscriptId, maxTranscriptId)`, loads each page's comparisons. Its filter is `session_id` (index `ix_taxonomy_comparisons_session`) plus the page's id range, so a page never re-reads the whole session. It is a default interface member, like the transcript additions.
   - It selects its own column list rather than reusing `SqliteTaxonomyComparisonStore`'s `Read` materializer, which reads `session_id` on every row.
   - It leaves out `session_id`, `routed_model`, and `is_exploratory`, because the caller already has them. `baseline_model` is selected as `substr(baseline_model, 1, 1025)`, for the same reason as the metadata query.
   - `TelemetryGrpcService` joins comparisons in memory on `TranscriptId == Id`.
-  - This keeps each store owning its own table, as `ITaxonomyComparisonStore`'s remarks require. There is no cross-table SQL inside `SqliteTranscriptStore`.
-- **Session aggregate (first page only).** Each store answers for its own table, through the existing `session_id` indexes. Both methods are default interface members.
-  - `ITranscriptStore.GetSessionStatsAsync(sessionId)` counts the session's rows and its trained rows: `COUNT(*)` and `COUNT(memory_entry_id)`.
-  - `ITaxonomyComparisonStore.GetSessionComparisonStatsAsync(sessionId)` counts and sums the comparisons that have both savings and a baseline cost, **and whose transcript still exists**.
+  - This keeps each store owning its own table for page reads. The session aggregate below is the one read that spans both tables, because it needs a single snapshot.
+- **Session aggregate (first page only): one read transaction.** `ITranscriptStore.GetSessionAggregateAsync(sessionId)`, a default interface member returning `null`.
+  - **One snapshot.** It opens one connection, begins one read transaction, and runs all its statements inside it. `TranscriptDatabase` runs SQLite in WAL mode, where every statement of a read transaction sees the same snapshot. So no insert or retention pass can land between the counts and the sums.
+    - Two store calls on two connections, as an earlier draft had, could each see a different database state, and `compared_turns` could then exceed `persisted_turns`.
+  - **The one cross-table read in `SqliteTranscriptStore`.** The comparison figures must come from the same transaction, so this method also reads `taxonomy_comparisons`. That table is created by the same `TranscriptDatabase` schema, and `SqliteTaxonomyComparisonStore.LoadPendingComparisonsAsync` already reads across both tables from the other side. Writes stay with each table's own store.
+  - **Transcript figures**, through `ix_request_transcripts_session_id`. None names a text column:
+    - `COUNT(*)`, `COUNT(memory_entry_id)`, `MIN` and `MAX(created_at_utc)`, and the highest turn number (the same `substr` cut as the paging query);
+    - `SUM(cost)` over priced rows, and the unpriced count;
+    - `SUM(input_tokens)` and `SUM(output_tokens)`, and the count of rows missing either.
+  - **Models.** `GROUP BY routed_model`, giving turns, priced cost, unpriced count, and last use. The 20 most recently used come back, plus a count of the rest. `routed_model` goes through `substr(…, 1, 1025)`, as in the paging query.
+  - **Comparison figures.** The count and sums of comparisons with both savings and a baseline cost, **and whose transcript still exists**.
     - **Why.** Retention deletes only `request_transcripts` rows (`SqliteTranscriptStore`'s `DeleteOldestAsync`, `DeleteBeforeAsync`, and `DeleteAllAsync`), and `taxonomy_comparisons` has no foreign key or cascade, so orphaned comparisons accumulate.
-    - **How.** The query keeps only rows with a matching `request_transcripts.id`, the same cross-table join `LoadPendingComparisonsAsync` already makes. So `compared_turns` can never exceed `persisted_turns`, and the sums cover only turns the details pages can return.
+    - **How.** A join on `request_transcripts.id`, inside the same transaction. So `compared_turns` can never exceed `persisted_turns`, and the sums cover only turns the details pages can return.
     - **Not changed: retention.** Making retention delete comparisons too would also shrink Cost Analytics' Routing ROI history, which reads `taxonomy_comparisons` directly. That is out of scope.
+  - It does not depend on the optional comparison store, so `aggregate` is filled whenever capture is on.
 - **`TelemetryGrpcService` takes a new optional constructor parameter, `ITaxonomyComparisonStore? comparisonStore = null`.**
   - If it is absent, `comparison` is simply unset. Existing test construction and hosts without a management API keep working.
   - Implements `GetSessionTurnDetails`:
@@ -548,6 +575,9 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
   - on the details pane's refresh button.
 
   There is no timer polling. A comparison written minutes later appears on the next refresh.
+- **A head refresh never leaves a hole.** A re-fetch asks for the newest page again. New rows push that page's lower edge up, so with older pages cached, the rows between the two would silently go missing. For example, cached pages `1000..501` and `500..1` become a refreshed head `1010..511`, and turns `501..510` are lost.
+  - After a head refresh, the store keeps fetching with `before_transcript_id` set to the lowest id it has, until a page reaches the newest id of the next cached page or the cursor runs out. Rows are merged by transcript id, so the overlap is not duplicated.
+  - If the gap takes more than 2 extra pages, the store drops the older cached pages instead and resumes paging from the refreshed head's cursor. They load again on scroll, like evicted pages.
 - **Joining.** The GUI joins persisted details to a turn by `(SessionId, TurnNumber)`, not by `ConversationTurn.Id`. The live mapper's id is `{session}-t{n}`, while the persisted id is the correlation id `{session}:{n}`.
 
 ### 5.5 Estimated ROI and savings
@@ -568,7 +598,7 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 - **Phase 1.** `SessionMerger` swaps in the persisted text for truncated live summaries of turns inside the persisted window (§5.1). Any other truncated row expands the text it has and keeps its "truncated" chip.
 - **Phase 2.**
   - Show more on a truncated row that has no persisted text calls `GetTurnTexts` for that turn, then expands.
-  - `prompt_text_length` / `response_text_length` add a note such as "2,000 of 18,432 characters". They are SQLite character counts, so they are only displayed, never compared.
+  - Once `GetTurnTexts` returns, its `prompt_text_length` / `response_text_length` add a note such as "2,000 of 18,432 characters". They are SQLite character counts, so they are only displayed, never compared. Before that, the row shows only its truncated chip: the metadata page carries no lengths (§5.3).
 - **Capped text stays marked.** When `GetTurnTexts` sets `prompt_truncated` or `response_truncated`, the expanded row keeps a "truncated at 262,144 characters" chip. The row never claims to show the full text.
 - **No persisted row** (capture off, adaptive routing off, or not yet written). The chip reads "truncated at 2,000 characters; the full text was not persisted".
 
@@ -689,7 +719,7 @@ stateDiagram-v2
 | Requested model | `RequestedModel` | `requested_model` |
 | Prompt tokens | `PromptTokens` | `input_tokens` |
 | Cache read / creation tokens, cache-hit % | `CacheReadTokens`, `CacheCreationTokens`, `CacheHitRate` | — (not persisted) |
-| Text length, truncated | Summary length plus the 2,000-character marker | `prompt_text_length` |
+| Text length, truncated | Summary length plus the 2,000-character marker | `prompt_text_length`, from `GetTurnTexts` once the text is loaded |
 | Classification: dimension, difficulty, language, utility | — | `dimension`, `difficulty`, `language`, `is_utility` |
 
 **Message tab, response row selected** ("Response · Turn n of m"):
@@ -700,11 +730,11 @@ stateDiagram-v2
 | HTTP status, streaming | `StatusCode`, `IsStreaming` | — |
 | Latency to headers (TTFT), total duration | `TimeToFirstTokenMs`, `TotalDurationMs` | — |
 | Completion tokens | `CompletionTokens` | `output_tokens` |
-| Cost and confidence (≥ when unpriced) | `TotalCost`, `CostConfidence` | `cost_usd` |
+| Cost and confidence ("—" when unpriced; `≥` belongs only to a session total, §5.1) | `TotalCost`, `CostConfidence` | `cost_usd` |
 | Fallback, substitution reason | `IsFallback`, `SubstitutionReason` | — |
 | Quality: score, judge-scored, scorer version | — | `score`, `is_judge_scored`, `scorer_version` |
 | Used for live training | — | `memory_entry_id` |
-| Text length, truncated | Summary length plus marker | `response_text_length` |
+| Text length, truncated | Summary length plus marker | `response_text_length`, from `GetTurnTexts` once the text is loaded |
 
 **Routing tab** (the selected turn):
 
@@ -719,9 +749,15 @@ stateDiagram-v2
 
 | Section | Fields |
 |---|---|
-| Identity | Title, session id (copyable), status (active / idle / history), untracked (yes, no, or unknown for persisted-only sessions), used for training ("Yes" or "Not in the loaded history"; yes or no for the whole session once the Phase 2 aggregate loads), first → last turn (full dates) |
-| Totals | Total cost (with `≥` and the unpriced count, as in today's summary, recomputed from each turn's nullable cost), prompt and completion tokens, turns, fallback turns ("n of m live turns"; persisted turns do not record fallback, §5.1), Est. savings and Est. ROI with coverage (§5.5; Est. ROI is "—" when the summed baseline cost is not above 0), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`) |
-| Models used | The CodePen's member list: one line per distinct routed model with its color dot, turn count, cost share, and last-used time. Most recent first |
+| Identity | Title, session id (copyable), status (active / idle / history), untracked (yes, no, or unknown for persisted-only sessions), used for training ("Yes" or "Not in the loaded history"; yes or no for the whole session once the Phase 2 aggregate loads), first → last turn (full dates; "first loaded turn" until the aggregate gives the real first turn) |
+| Totals | Total cost (with `≥` and the unpriced count, as in today's summary, recomputed from each turn's nullable cost), prompt and completion tokens, turns (see the whole-session rule below the table), fallback turns ("n of m live turns"; persisted turns do not record fallback, §5.1), Est. savings and Est. ROI with coverage (§5.5; Est. ROI is "—" when the summed baseline cost is not above 0), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`), labeled "loaded turns" because it plots individual turns |
+| Models used | The CodePen's member list: one line per distinct routed model with its color dot, turn count, cost share, and last-used time. Most recent first. From the aggregate in Phase 2, with "and n more" past 20 |
+
+**Whole-session values.** The loaded turns are not the whole session: the persisted list is the newest 500 rows across all sessions, and details pages start at the newest. So the Session tab never presents a loaded-turns sum as a session total.
+
+- **Phase 1** has no aggregate. The first turn, totals, and models are labeled "over n loaded turns", as "Used for training" already is.
+- **Phase 2** takes them from `SessionAggregate` (§5.2), and adds the live turns above its `max_turn_number`, which are not persisted yet. The labels go away.
+- Fallback stays live-only (§5.1), and the sparkline stays "loaded turns".
 
 ## 8. Accessibility
 
@@ -848,7 +884,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - "Client" with its requested-model tooltip; routed model with its dot.
   - Placeholders.
   - Row click selects `(turn, side)` and sets `aria-pressed`.
-  - Show more renders for exactly the keys the overflow callback reports. Before any report, the 150-character / 5-line-break fallback applies. A short text never gets a toggle.
+  - Show more renders for exactly the keys the overflow callback reports. Before any report, and after an interop failure, every body is unclamped and has no toggle. A short text never gets a toggle.
   - Chips for fallback and substitution.
   - The in-session filter counts only loaded rows. It shows the "Earlier turns aren't searched" note when older history exists, and not otherwise.
   - Newest response row implicitly selected.
@@ -883,17 +919,21 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 
 - **`SqliteTranscriptStoreTests`.**
   - The metadata query filters by session, newest first, and reads `scorer_version`.
-  - It returns the stored text lengths, and `SessionTurnMetadata` has no text property: a multi-megabyte body is never materialized.
+  - `SessionTurnMetadata` has no text or text-length property, and the query names no text column: a multi-megabyte body is never decoded or materialized.
   - Paging walks a 2,500-row session with no gap and no duplicate. The cursor is absent on the last page.
-  - `ListTurnTextsAsync` cuts each side at the cap and reports `truncated` from the stored length.
-  - `GetSessionStatsAsync` counts all of the session's rows and its trained rows, beyond any page.
+  - `ListTurnTextsAsync` cuts each side at the cap, returns the stored lengths, and reports `truncated` from them.
+  - `GetSessionAggregateAsync` counts all of the session's rows and its trained rows, beyond any page.
   - Over-long free-form values come back cut at 1,025 characters.
   - The turn number is read correctly for a 100,000-character session id, without that prefix being returned.
   - Capture off returns empty and creates no file.
+- **`GetSessionAggregateAsync`** (in `SqliteTranscriptStoreTests`).
+  - Comparison figures count and sum only comparisons with both savings and a baseline cost.
+  - A comparison whose transcript was deleted by retention is excluded, so `compared_turns` never exceeds `persisted_turns`.
+  - First and last timestamps, the highest turn number, cost with the unpriced count, and tokens with the unknown count cover rows beyond the first page.
+  - Models: the 20 most recent come back with `other_models` counting the rest; a long `routed_model` comes back capped.
+  - **Concurrent change.** While a background task inserts transcripts with comparisons and runs retention deletes, repeated aggregate reads (bounded to about 1 second) always satisfy `compared_turns ≤ persisted_turns` and `Σ models' turns + the rest = persisted_turns`.
 - **`SqliteTaxonomyComparisonStoreTests`.**
   - `LoadForSessionAsync` returns only that session's rows inside the id range.
-  - `GetSessionComparisonStatsAsync` counts and sums only comparisons with both savings and a baseline cost.
-  - It excludes a comparison whose transcript was deleted by retention, so `compared_turns` never exceeds `persisted_turns`.
   - `LoadForSessionAsync`'s rows carry no `session_id`, and `baseline_model` comes back capped.
 - **`TranscriptStoreDefaultMemberTests`.** The new default members return `[]`.
 - **`TelemetryGrpcServiceTests`.**
@@ -904,7 +944,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - Capture off answers without querying.
   - An empty session id returns `InvalidArgument`. So do zero or more than 50 transcript ids.
   - The limit is clamped, and the cursor round-trips.
-  - `GetTurnTexts` covers found, not found, capture off, the per-side cap, and `omitted` past the 2 MiB budget.
+  - `GetTurnTexts` covers found, not found, capture off, the per-side cap, the stored lengths, and `omitted` past the 2 MiB budget.
   - `aggregate` appears only on the first page, and it counts rows beyond that page.
   - Worst-case metadata: 2,000 rows with 1,024-character multibyte strings in every capped field. The page ends early, within 2 MiB, and the cursor resumes with no gap or duplicate.
   - An over-long session id or model name is capped at 1,024 characters on the wire.
@@ -915,6 +955,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - The 2-second debounce on live turns.
   - A superseded load is cancelled.
   - `LoadEarlierAsync` appends the next page and stops when the cursor is absent.
+  - **Head refresh.** With pages `1000..501` and `500..1` cached and ten new rows, a refresh fills `501..510` with no gap and no duplicate. A gap wider than 2 pages drops the older pages and resumes from the new cursor.
   - `omitted` text ids are requested again.
   - **Memory budgets.**
     - Text entries are evicted, least recently used first, until the estimate is within 16 MiB.
@@ -928,6 +969,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - ROI arithmetic, which is cost-weighted, and its coverage text, both taken from the aggregate.
   - Est. ROI renders "—" when every compared turn has a free baseline, so the summed baseline cost is `0` and there is no division. The same holds per turn.
   - With the aggregate loaded, "Used for training" reads yes or no for the whole session.
+  - Without the aggregate, first turn, totals, and models carry "over n loaded turns". With it, they show whole-session values plus the live turns above `max_turn_number`, and the label goes away.
   - A live text longer than 2,000 characters counts as truncated. That includes the preview of a stored text of exactly 2,001 characters, which has the same length as its source.
   - Show more on such a row calls `GetTurnTexts` once, then renders the stored text.
   - A capped result keeps its "truncated at 262,144 characters" chip after expansion.
@@ -954,6 +996,8 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 | A narrow browser window clips the panes | §6.4's horizontal scroll below an 884 px layout width |
 | Cached text and pages grow browser memory | §5.4's size-based budgets, not entry counts |
 | Orphaned comparisons skew session totals | §5.3 counts only comparisons whose transcript still exists |
+| Session figures computed from loaded turns understate a long session | §7's whole-session rule: Phase 1 labels them, Phase 2 takes them from the aggregate |
+| Text bodies sit before `cost` and the token columns in each row | Large text overflows to a chain of overflow pages. Reading any column after it, as the paging and aggregate queries do, walks that chain: page reads, though no decode or copy into .NET. If a large session's first page or aggregate measures slow, add a covering index on `session_id` plus the columns those queries read, as a migration. Not done up front, because no measurement shows the need yet |
 | Client-controlled strings inflate router memory | §5.3 caps them in the SQL projection, before they reach .NET |
 | Render cost of long sessions | §6.2's 200-turn window plus "Show earlier turns" |
 | Persisted fields lag the live stream | §5.4's debounced re-fetch and refresh button. The tab says "Not compared yet" instead of guessing |
@@ -981,7 +1025,6 @@ Each has a default that this plan already assumes.
 1. **Host file name.** Keep `LiveStream.razor` (default) to limit churn, or rename it to `SessionsTab.razor` in Phase 1.
 2. **Details tab labels.** Icon plus short label (default), or icon-only as in the CodePen.
 3. **Thresholds.**
-   - The Show more fallback, used only before measurement: more than 150 characters or more than 5 line breaks (§4.3).
    - An initial window of 200 turns.
    - Details pages of 500 turns (at most 2,000), each within a 2 MiB budget, with free-form fields capped at 1,024 characters.
    - An 884 px minimum layout width, below which the tab scrolls horizontally.
