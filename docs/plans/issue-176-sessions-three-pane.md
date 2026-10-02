@@ -97,6 +97,8 @@ flowchart TB
 - **No agent name exists.** `ConversationTurn.Agent` holds the resolved model on both paths: `ConversationAggregator` and `PersistedSessionMapper` both copy the model into it. No harness or agent name is captured anywhere.
 - **Live wins per session, not per turn.** `Dashboard.MergedSessionConversations()` drops a persisted conversation whenever the same session id has any live turn. After a GUI restart, one new live turn therefore hides every earlier persisted turn of that session. §5.1 merges per turn instead.
 - **Unknown token counts become `0`.** `RoutingTelemetryEventDto`'s prompt, completion, and cache counts are nullable. `ConversationAggregator` coalesces all four to `0`, and `PersistedSessionMapper` does the same for `input_tokens` / `output_tokens`. §5.1 keeps them `null` per turn.
+- **Unknown costs become `0` too.** `ConversationAggregator` and `PersistedSessionMapper` both coalesce a missing per-turn cost to `0`. Only the live path counts `UnpricedTurns`, from the raw events, so a merged session cannot recount it. §5.1 keeps the cost `null` per turn.
+- **Fallback is not persisted.** `request_transcripts` has no fallback column, so a persisted turn cannot say whether fallback served it. §5.1 treats it as live-only.
 - **The untracked flag is live-only.** A synthesized session id is a plain `Guid.NewGuid().ToString("N")` (`MessageHistoryContinuityMatcher`), and `request_transcripts` has no column for the flag. So a persisted-only session cannot be told apart from one whose client supplied its id.
 
 **Data the GUI receives today and drops:**
@@ -323,6 +325,14 @@ flowchart TB
   - `ConversationAggregator` stops coalescing per turn. `PersistedSessionMapper` passes `InputTokens` / `OutputTokens` through as they are.
   - Aggregates coalesce with `?? 0` only where they add up: the `Total*` sums, the Session tab sparkline, and `CostAnalytics.razor`'s chart points.
   - `CacheHitRate` keeps its type and value for Cost Analytics. The details pane computes cache-hit % from the nullable counts itself, and shows "—" when any of them is unknown.
+- **Per-turn cost becomes nullable.** Today both sources collapse an unknown cost to `0` before a `ConversationTurn` exists: `ConversationAggregator` writes `e.EstimatedCostUsd ?? 0m`, and `PersistedSessionMapper` writes `turn.CostUsd ?? 0m`. A persisted known cost also has no `CostConfidence`. So after a merge, nothing on a turn says which zeroes were unknown, and `SessionMerger` could not recount `UnpricedTurns`.
+  - `LiveConversationTurn.EstimatedCostUsd` and `ConversationTurn.TotalCost` become `decimal?`. `ConversationAggregator` and `LiveConversationMapper` pass the cost through, and `PersistedSessionMapper` passes `CostUsd` through. `null` is the presence signal on both paths, not `CostConfidence`.
+  - Totals coalesce only where they add up: `Conversation.TotalCost` is `Σ (TotalCost ?? 0)`, and `UnpricedTurns` counts the turns whose `TotalCost` is `null`. `CostAnalytics.razor` coalesces where it builds `CostChartBuilder`'s turn points, so the charts do not change.
+  - The Message tab shows "—" ("not priced") for a `null` cost, never `$0.000000`.
+- **Fallback is live-only.** `request_transcripts` has no fallback column, and `PersistedTranscript` carries none, so a persisted turn's `IsFallback = false` means "not recorded", not "no".
+  - The Message and Routing tabs show fallback only for a turn whose `IsLive` is true, and "—" otherwise (the §7 table already marks it live-only).
+  - Session totals count fallback over live turns only: "n of m live turns", or "—" when the session has no live turn. `HasFallbackTurns` keeps its meaning for the rail's ⚠ badge, which can only ever be a positive.
+  - Persisting the fallback flag is a follow-up, outside this plan, as for the untracked flag.
 - **`Conversation` gains `IsLive` (`bool`) and `IsSessionSynthesized` (`bool?`).**
   - `LiveConversationMapper` sets `IsLive = true` and copies the live flag. `Conversation.IsLive` drives only the rail's status dot.
   - A persisted-only session gets `IsSessionSynthesized = null`. The flag is not persisted, and a synthesized id cannot be recognized after a restart (§1). The Session tab shows "Unknown (not persisted)". Persisting the flag is a follow-up, outside this plan.
@@ -341,7 +351,9 @@ flowchart TB
   - The live turn wins for every metric.
   - Its text is replaced by the persisted text when the live summary is truncated (§5.6) or missing. Turns inside the persisted window therefore already show full text in Phase 1.
 - **Conversation-level values** are recomputed over the union:
-  - totals, unpriced count, the fallback flag, and the first and last timestamps;
+  - totals and the unpriced count, from each turn's nullable cost (a turn whose cost is `null` on the winning side is unpriced);
+  - the fallback flag and fallback count, from live turns only;
+  - the first and last timestamps;
   - `IsLive` is true;
   - `IsSessionSynthesized` comes from the live side. `IsUsedForTraining` is true when any loaded persisted turn was trained, with the limits described above.
   - Each turn keeps its own `IsLive`.
@@ -543,7 +555,7 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 `ConversationSummary`'s current "Avg ROI" averages a field that is always `0`, so it shows "—". The Session tab replaces it, and every figure below is labeled an estimate in its tooltip:
 
 - **Per turn:** `estimated_net_savings_usd / baseline_estimated_cost_usd × 100`, only when both are present and the baseline is above 0. Otherwise "—".
-- **Per session:** Est. savings is `Σ estimated_net_savings_usd`. Est. ROI is `Σ savings / Σ baseline cost × 100` over compared turns, only when that summed baseline cost is above 0. Otherwise "—". A compared turn needs only a baseline cost to be present, and a free baseline legitimately costs `0`, so the sum can be `0` and the guard is required, as it is per turn. The ROI is cost-weighted rather than an average of percentages, so small turns do not dominate. Coverage is shown as "n of m turns compared".
+- **Per session:** Est. savings is `Σ estimated_net_savings_usd`. Est. ROI is `Σ savings / Σ baseline cost × 100` over compared turns, only when that summed baseline cost is above 0. Otherwise "—". A compared turn is one whose comparison has both `estimated_net_savings_usd` and `baseline_estimated_cost_usd` present, exactly the rows `SessionAggregate.compared_turns` and §5.3's query count. A free baseline legitimately costs `0`, so the summed baseline cost can be `0` and the guard is required, as it is per turn. The ROI is cost-weighted rather than an average of percentages, so small turns do not dominate. Coverage is shown as "n of m turns compared".
   - The sums and counts come from `SessionAggregate` (§5.2), so they cover the whole session, not just the loaded pages.
 - **Methodology.** The tooltip links [`score-delta-methodology.md`](../score-delta-methodology.md), as Cost Analytics' Routing ROI chart does.
 
@@ -708,7 +720,7 @@ stateDiagram-v2
 | Section | Fields |
 |---|---|
 | Identity | Title, session id (copyable), status (active / idle / history), untracked (yes, no, or unknown for persisted-only sessions), used for training ("Yes" or "Not in the loaded history"; yes or no for the whole session once the Phase 2 aggregate loads), first → last turn (full dates) |
-| Totals | Total cost (with `≥` and the unpriced count, as in today's summary), prompt and completion tokens, turns, fallback turns, Est. savings and Est. ROI with coverage (§5.5; Est. ROI is "—" when the summed baseline cost is not above 0), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`) |
+| Totals | Total cost (with `≥` and the unpriced count, as in today's summary, recomputed from each turn's nullable cost), prompt and completion tokens, turns, fallback turns ("n of m live turns"; persisted turns do not record fallback, §5.1), Est. savings and Est. ROI with coverage (§5.5; Est. ROI is "—" when the summed baseline cost is not above 0), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`) |
 | Models used | The CodePen's member list: one line per distinct routed model with its color dot, turn count, cost share, and last-used time. Most recent first |
 
 ## 8. Accessibility
@@ -766,7 +778,7 @@ Reduced motion is already handled by `app.css`'s global `prefers-reduced-motion`
 - `LiveStream.razor` becomes the three-pane host. It keeps its name and its `Conversations` / `SelectedId` / `OnSelect` parameters, and gains `TranscriptCaptureEnabled`.
 - `Dashboard.razor` passes `TranscriptCaptureEnabled`, and `MergedSessionConversations()` calls `SessionMerger`.
 - `DashboardData.cs`, `ConversationAggregator.cs`, `LiveConversationMapper.cs`, `PersistedSessionMapper.cs` (§5.1).
-- `CostAnalytics.razor` coalesces the now-nullable token counts where it builds chart points. Its behavior does not change.
+- `CostAnalytics.razor` coalesces the now-nullable token counts and per-turn cost where it builds chart points. Its behavior does not change.
 - `Icon.razor` (three glyphs), `split-pane.js`, `app.css`, `index.html`, `Gui.Web/Program.cs` (two singletons).
 - Phase 2 adds: `telemetry.proto`, `ITranscriptStore.cs`, `SqliteTranscriptStore.cs`, `ITaxonomyComparisonStore.cs`, `SqliteTaxonomyComparisonStore.cs`, `TelemetryGrpcService.cs`, `ProxyServer.cs`, `IPersistedSessionsClient` / `PersistedSessionsClient.cs`.
 
@@ -853,15 +865,17 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - Session totals, the unpriced `≥`, the sparkline, and the models-used list.
 - **Mapper tests.**
   - `ConversationAggregatorTests` and `LiveConversationMapperTests` pass through every §5.1 field.
-  - `ConversationAggregatorTests` keeps unreported token counts `null` per turn and coalesces them only in the totals.
-  - `PersistedSessionMapperTests` sets `IsLive = false` and `IsSessionSynthesized = null`, passes `null` token counts through, and leaves the live-only fields `null`.
+  - `ConversationAggregatorTests` keeps unreported token counts and an unreported cost `null` per turn and coalesces them only in the totals. `UnpricedTurns` still counts the `null` costs.
+  - `PersistedSessionMapperTests` sets `IsLive = false` and `IsSessionSynthesized = null`, passes `null` token counts and a `null` cost through, and leaves the live-only fields `null`.
 - **`SessionMergerTests`.**
   - A session in only one source passes through unchanged.
   - The restart case: persisted turns 1–5 plus live turn 6 give turns 1–6.
   - The same turn in both: live metrics win; persisted text replaces a truncated or missing live summary.
   - Each turn keeps its own `IsLive`. A turn in both sources is live; a persisted-only turn is not.
   - Totals, unpriced count, fallback flag, timestamps, `IsSessionSynthesized`, and `IsUsedForTraining` come from the right side.
-- **`CostAnalyticsTests`.** Unknown token counts still plot as `0`, as today.
+  - `UnpricedTurns` is recomputed from the merged turns: a persisted-only turn with a `null` cost counts, a persisted `0` does not, and the total gets the `≥`.
+  - The fallback count covers live turns only. A persisted-only session reports it as unknown, not `0`.
+- **`CostAnalyticsTests`.** Unknown token counts and an unknown cost still plot as `0`, as today.
 - **`DashboardTests`.** Persisted-only sessions still render. A rail click still sets Cost Analytics' initial session.
 - **`SessionsViewStateTests`.** State survives a re-render of a fresh `LiveStream`, simulating the `@key` teardown.
 
