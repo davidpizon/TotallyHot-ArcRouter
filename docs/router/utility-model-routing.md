@@ -301,6 +301,46 @@ If pulling in SQLite is unacceptable for a first cut, the fallback is to ship th
 
 - Emit the routing decision (alias in, chosen `ModelName`, `isUtility`, dimension, estimated cost) through the existing telemetry publisher so the GUI Console/analytics can see utility routing, consistent with existing routing-event logging.
 
+## Subagent and side-task signals
+
+Issue [#163](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/163), plan
+[`docs/plans/issue-163-subagent-aware-routing.md`](../plans/issue-163-subagent-aware-routing.md).
+Research done 2026-10-02 from vendor documentation and public source; **no request was captured from
+a live harness**, so every "verified" below means *documented by the vendor*, not *observed on the
+wire by this project*. Nothing here is a trust boundary: a client can send any header. The only
+effect of a signal is a cheaper pick inside the operator's own allowlist and quality gate.
+
+| Harness | Signal | Where | Source | Status | Detector decision |
+|---|---|---|---|---|---|
+| Claude Code | `x-claude-code-agent-id` present | request header | [Gateway compatibility guide, "Request headers"](https://code.claude.com/docs/en/llm-gateway-protocol#request-headers) (accessed 2026-10-02) | Documented. "Present only on requests from an agent Claude Code spawned inside the session." Sent without opt-in. | **implement** (subagent) |
+| Claude Code | `x-claude-code-parent-agent-id` present | request header | same | Documented. Nested agents only; implies the agent-id header. | **implement** (corroboration only; never the sole signal) |
+| Claude Code | `x-claude-code-request-class`: `subagent`, `auxiliary` | request header | [same guide, "Gateway hint headers"](https://code.claude.com/docs/en/llm-gateway-protocol#gateway-hint-headers) | Documented. Needs Claude Code v2.1.273+ **and** `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` on a custom base URL (off by default there). `auxiliary` = "session titles, classifiers, and summaries". | **implement** (`subagent`, `auxiliary`) |
+| Claude Code | `x-claude-code-request-class`: `main`, `workflow`, `compaction` | request header | same | Documented. `compaction` rewrites the whole conversation, so a weak model risks losing context; `workflow` is undefined for cost purposes. | **skip: not a cost-bias signal** (treated as "no signal") |
+| Claude Code | small-fast model alias (`ANTHROPIC_DEFAULT_HAIKU_MODEL`) | `model` field | [Model configuration](https://code.claude.com/docs/en/model-config), [gateway guide, "Requests and defaults by connection method"](https://code.claude.com/docs/en/llm-gateway-protocol#requests-and-defaults-by-connection-method) | Documented but not a marker: the value is whatever the operator pinned, and it is an *explicit* model pick that ADR-0005 forbids rerouting. | **skip: no usable marker** |
+| Codex | `x-codex-turn-metadata` JSON with `thread_source: "subagent"` **and** `parent_thread_id` **and** `subagent_kind` | request header (JSON) | [openai/codex#24161](https://github.com/openai/codex/pull/24161) (merged 2026-05-29); shape confirmed by [NVIDIA-NeMo/Switchyard#748](https://github.com/NVIDIA-NeMo/Switchyard/pull/748), a third-party router that parses it | Partly verified. `subagent_kind` values seen: `thread_spawn`, `compact`, `memory_consolidation`, `guardian`, `review`, `agent_job:<label>`, `other`. Exact JSON key set beyond the three above, and whether every kind sets `thread_source`, are unverified. | **implement** (`thread_spawn`, `memory_consolidation`); other kinds → no signal |
+| Codex | `x-openai-subagent: <value>` (legacy flat header; seen: `collab_spawn`, `thread_spawn`, `memory_consolidation`) | request header | Switchyard#748 regression test; [openai/codex#35781](https://github.com/openai/codex/issues/35781) | Unverified in OpenAI docs; third-party source only. The structured `x-codex-turn-metadata` kind wins when both are present. | **skip: unverified** (structured header only) |
+| Cursor | none | n/a | [Cursor subagents docs](https://cursor.com/docs/subagents) (accessed 2026-10-02) | Docs describe a `model` field (`inherit`/`fast`/model id) and background mode, with no header or metadata sent to a third-party endpoint. Cursor's base-URL override reportedly reaches only the Chat/Plan panel, not the agent/Composer backend (secondary sources: LiteLLM, OpenRouter, TrueFoundry guides). | **skip: no usable marker** |
+| Aider | none (weak/editor model is a user-chosen model name) | `model` field | [Aider options](https://aider.chat/docs/config/options.html): `--weak-model` is used "for commit messages and chat history summarization" | No header or tag is documented. A weak-model request is just an explicit model pick under whatever name the user chose, which this router does not reroute (ADR-0005). | **skip: no usable marker** |
+| GitHub Copilot (VS Code) | `model` = `copilot-utility` / `copilot-utility-small` (exact, case-insensitive) or a `copilot-utility` prefix | `model` field | [VS Code language-models docs](https://code.visualstudio.com/docs/agent-customization/language-models) describe `chat.utilityModel` / `chat.utilitySmallModel`; the literal names appear in VS Code's own error text ("No utility model is configured for 'copilot-utility-small'") | **Unverified on the wire.** VS Code docs do not state what `model` string reaches a BYOK endpoint. The names are the ones this project's R1 already treats as aliases and #163 requires. No separate header is documented. | **implement** (alias match, behind its own toggle), flagged unverified |
+
+### What this means for the detector
+
+- **Supported in v1:** Claude Code (headers), Codex (structured turn metadata), Copilot utility aliases.
+- **Documented as not supported:** Cursor and Aider have no marker this router can see. This is the
+  plan's decision for harnesses with no verifiable marker; no guessing from payload shape.
+- **Only on the routed path.** The bias applies where a routing policy already runs (the `auto`
+  alias and the unresolved-model fallback). A harness that sends an explicit, configured model name
+  keeps that model, per ADR-0005. For Claude Code that means pointing its model variables at
+  `auto` (or an unresolved name) for subagent traffic to be biased at all.
+- **Claude Code operators must opt in to the hint headers** for `x-claude-code-request-class`
+  (`CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`). `x-claude-code-agent-id` needs no opt-in and covers
+  subagents; `auxiliary` side requests (titles, classifiers) are only visible via the hint header.
+- **Conflict rule (fail-safe).** Contradictory signals (for example `request-class: main` together with
+  an agent-id header, or `thread_source` not `subagent` with a `subagent_kind`) yield *no signal*.
+  An oversized (> 2 KB) or non-ASCII value, or malformed metadata JSON, yields no signal.
+- **Open item for the maintainer:** whether `compaction` (Claude Code) and `compact` (Codex) should
+  count. The plan's default, and what is documented above, is *no*: compaction needs fidelity.
+
 ## Assumptions to verify (do these first)
 
 1. **Exact VS Code setting names & value format** for `chat.byokUtilityModelDefault`, `chat.utilityModel`, `chat.utilitySmallModel` in the installed VS Code build (web check was declined; confirm locally).
