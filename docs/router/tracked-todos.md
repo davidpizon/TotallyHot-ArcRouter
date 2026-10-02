@@ -327,7 +327,27 @@ answer "which fields and block types did this request carry".
      the model rule above. All other strings are recorded as a length, never as a value. Prompts, code,
      file paths and tool arguments must not be stored.
    - Request header *names*, body size, message/item count, and the estimated prompt token count. No
-     header value is stored beyond the normalized harness identity above.
+     header value is stored beyond the normalized harness identity above and the subagent markers below.
+   - **Subagent and helper markers (added 2026-10-02 for #163, David).** These answer the open questions in
+     [ADR-0022](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md) and
+     [`docs/research/subagent-and-helper-routing-evidence.md`](../research/subagent-and-helper-routing-evidence.md).
+     Values are stored only from a fixed vocabulary, the same rule `SubagentSignalDetector` applies:
+     - **Claude Code `x-claude-code-request-class`:** recorded as one of `main`, `subagent`, `workflow`,
+       `compaction` or `auxiliary`, otherwise `other`.
+     - **Claude Code `x-claude-code-agent-type`:** recorded as a known built-in type (`Explore`, `Plan`,
+       `general-purpose`, `statusline-setup`, `claude-code-guide`, `custom`, `teammate`, `fork`), otherwise
+       `other`.
+     - **Claude Code `x-claude-code-agent-id` and `x-claude-code-parent-agent-id`:** presence only. The ids are
+       never stored.
+     - **Codex `x-codex-turn-metadata`:** `thread_source` and `subagent_kind` from the known values, plus
+       whether `parent_thread_id` is present. No ids and no other keys' values.
+     - **The signal the router detected,** and the route class it applied (`none`, `normal`, `light-subagent`,
+       `helper`).
+
+     Questions to answer:
+     - Does `agent-type` arrive through the router with `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`?
+     - Which request class do the auto-mode classifier's own requests carry, and which model do they name?
+     - How often is each class seen per session?
    - A conversation key, so a marker's persistence across turns can be measured. Take it from
      `SessionIdResolver` (`src/TotallyHotArcRouter/Telemetry/SessionIdResolver.cs`) when the harness
      sends an explicit session id, and store only a salted hash of it (salt per capture run, never

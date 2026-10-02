@@ -317,6 +317,90 @@ public class RequestInterceptorSubagentBiasTests
         Assert.Equal(expected: "gpt-5.4", actual: result.Route!.ModelName);
     }
 
+    // ---- Native Anthropic Messages traffic (ADR-0022 option A) ----
+
+    private static (RequestInterceptor Interceptor, CapturingPolicy Policy, CapturingLogger Logger) BuildMixed(
+        bool includeAnthropic)
+    {
+        var models = new List<(string, string, string)> { ("gpt-5.4", "openai", "gpt-5.4"), ("local", "lmstudio", "local") };
+        if (includeAnthropic) models.Add(("claude-haiku", "anthropic", "claude-haiku"));
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList([.. models]);
+        var policy = new CapturingPolicy(includeAnthropic ? "claude-haiku" : "gpt-5.4");
+        var logger = new CapturingLogger();
+        var interceptor = new RequestInterceptor(logger: logger, modelRouteResolver: resolver, routingPolicy: policy);
+        return (interceptor, policy, logger);
+    }
+
+    private static Task<ModelRouteResolutionResult> ResolveAt(RequestInterceptor interceptor, string path,
+        string body, params (string Name, string Value)[] headers)
+    {
+        var context = Context(body: body, headers: headers);
+        context.Request.Path = path;
+        return interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task NativeMessagesHelper_OnlyAnthropicCandidatesAreOffered()
+    {
+        var (interceptor, policy, _) = BuildMixed(includeAnthropic: true);
+
+        var result = await ResolveAt(interceptor, "/v1/messages", """{"model":"auto"}""", AuxiliaryClass);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(policy.LastContext!.IsUtility);
+        Assert.All(policy.LastContext.Candidates, c => Assert.Equal(expected: "anthropic", actual: c.Provider));
+        Assert.Equal(expected: "claude-haiku", actual: result.Route!.ModelName);
+    }
+
+    [Fact]
+    public async Task NativeMessagesExplore_OnlyAnthropicCandidatesAreOffered()
+    {
+        var (interceptor, policy, _) = BuildMixed(includeAnthropic: true);
+
+        await ResolveAt(interceptor, "/v1/messages/", """{"model":"auto"}""", SubagentClass, AgentId, ExploreType);
+
+        Assert.NotNull(policy.LastContext!.NearBestValueFloor);
+        Assert.All(policy.LastContext.Candidates, c => Assert.Equal(expected: "anthropic", actual: c.Provider));
+    }
+
+    [Fact]
+    public async Task NativeMessagesHelper_NoAnthropicCandidate_WithdrawsTheBias()
+    {
+        var (interceptor, policy, logger) = BuildMixed(includeAnthropic: false);
+
+        var result = await ResolveAt(interceptor, "/v1/messages", """{"model":"auto"}""", AuxiliaryClass);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(policy.LastContext!.IsUtility);
+        Assert.Null(policy.LastContext.NearBestValueFloor);
+        Assert.Equal(2, actual: policy.LastContext.Candidates.Count);
+        Assert.False(result.Classification!.IsUtility);
+        Assert.Equal(expected: "claude-code/auxiliary", actual: result.Classification.Subagent!.ToLabel());
+        Assert.Contains(collection: logger.Messages, filter: m => m.Contains("route=normal"));
+    }
+
+    [Fact]
+    public async Task ChatCompletionsHelper_IsNotRestricted()
+    {
+        var (interceptor, policy, _) = BuildMixed(includeAnthropic: true);
+
+        await ResolveAt(interceptor, "/v1/chat/completions", """{"model":"copilot-utility"}""");
+
+        Assert.True(policy.LastContext!.IsUtility);
+        Assert.Equal(3, actual: policy.LastContext.Candidates.Count);
+    }
+
+    [Fact]
+    public async Task NativeMessagesNormalSubagent_IsNotRestricted()
+    {
+        var (interceptor, policy, _) = BuildMixed(includeAnthropic: true);
+
+        await ResolveAt(interceptor, "/v1/messages", """{"model":"auto"}""", SubagentClass, AgentId, GeneralPurposeType);
+
+        Assert.Equal(3, actual: policy.LastContext!.Candidates.Count);
+    }
+
     // ---- Routing log line ----
 
     [Theory]

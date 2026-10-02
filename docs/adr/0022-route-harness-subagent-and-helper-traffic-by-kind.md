@@ -104,6 +104,15 @@ the class table, the options and the tests.
   - Mitigations are a documented operator step (list the classifier's model explicitly) and a toggle.
 - Bad, because the relative floor reads code-quality scores, not tool-calling ability, while `Explore` is
   tool-heavy. Whether to exclude models that fail the existing tool-call capability probing is open in the plan.
+- Neutral, because biased Claude Code traffic is restricted to `anthropic` candidates (added 2026-10-02, David).
+  - **Why:** native `/v1/messages` traffic reaches an upstream untranslated (ADR-0017), so a cheap
+    non-Anthropic pick would fail the turn.
+  - **What it does:** helper and light-subagent requests on that path only consider `anthropic` candidates. With
+    none eligible, the bias is withdrawn and the request routes normally.
+  - **Its future:** this is a narrow precursor of ADR-0017's capability filter, which replaces it once that
+    filter lands.
+  - **Not covered:** failover after a failed pick still ranks every eligible model, as for all `auto` Claude Code
+    traffic today.
 - Neutral, because `RoutingContext` gains one optional trailing member (the route class), and
   `CompositeRoutingPolicy` gains one dispatch branch.
 - Neutral, because the 0.9 floor is a starting point, not a measurement. Codex gets visibility but no routing

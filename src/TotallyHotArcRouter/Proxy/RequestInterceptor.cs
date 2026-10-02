@@ -496,6 +496,15 @@ public class RequestInterceptor
             ? subagentBias.LightSubagentRelativeFloor
             : (double?)null;
 
+        // Issue #163, ADR-0022 option A (a narrow precursor of ADR-0017's capability filter): native Anthropic
+        // Messages traffic (Claude Code on /v1/messages) passes through untranslated, so only an "anthropic"
+        // provider can read it. A biased route would otherwise prefer cheap non-Anthropic models that fail the
+        // turn; ResolveAgenticRouteAsync restricts the biased pick to Anthropic candidates, and withdraws the
+        // bias entirely when none is eligible.
+        var biasNeedsNativeMessages =
+            subagentRoute is SubagentRouteClass.Helper or SubagentRouteClass.LightSubagent &&
+            IsNativeMessagesPath(context.Request.Path);
+
         ResolvedModelRoute? route;
         var isExploratory = false;
         var propensity = 1.0;
@@ -508,7 +517,8 @@ public class RequestInterceptor
         {
             var autoSelected = await ResolveAgenticRouteAsync(classification: routedClassification,
                 liveDimension: liveDimension, signals: routingSignals, subagentRoute: subagentRoute,
-                nearBestValueFloor: nearBestValueFloor, cancellationToken: cancellationToken);
+                nearBestValueFloor: nearBestValueFloor, biasNeedsNativeMessages: biasNeedsNativeMessages,
+                unbiasedIsUtility: classification.IsUtility, cancellationToken: cancellationToken);
             if (autoSelected is null)
             {
                 // Same "everything is unavailable" condition the fallback path reports, but phrased for a
@@ -522,7 +532,9 @@ public class RequestInterceptor
             _logger.LogInformation(
                 message: "[INTERCEPTOR] Auto-select requested; routed to '{ResolvedModel}'.",
                 SanitizeForLog(autoSelected.Route.ModelName));
-            servedClassification = routedClassification;
+            servedClassification = autoSelected.SubagentBiasWithdrawn
+                ? classification with { Subagent = subagentSignal }
+                : routedClassification;
             route = autoSelected.Route;
             isExploratory = autoSelected.IsExploratory;
             propensity = autoSelected.Propensity;
@@ -551,6 +563,7 @@ public class RequestInterceptor
             var agenticRoute = _forcedModelName is null
                 ? await ResolveAgenticRouteAsync(classification: routedClassification, liveDimension: liveDimension,
                     signals: routingSignals, subagentRoute: subagentRoute, nearBestValueFloor: nearBestValueFloor,
+                    biasNeedsNativeMessages: biasNeedsNativeMessages, unbiasedIsUtility: classification.IsUtility,
                     cancellationToken: cancellationToken)
                 : null;
 
@@ -560,7 +573,9 @@ public class RequestInterceptor
                     message:
                     "[INTERCEPTOR] Unresolved model '{ModelName}' accepted and agentically routed to '{ResolvedModel}'.",
                     SanitizeForLog(modelName), SanitizeForLog(agenticRoute.Route.ModelName));
-                servedClassification = routedClassification;
+                servedClassification = agenticRoute.SubagentBiasWithdrawn
+                    ? classification with { Subagent = subagentSignal }
+                    : routedClassification;
                 route = agenticRoute.Route;
                 isExploratory = agenticRoute.IsExploratory;
                 propensity = agenticRoute.Propensity;
@@ -704,6 +719,12 @@ public class RequestInterceptor
     /// The light-subagent relative floor, carried on <see cref="RoutingContext.NearBestValueFloor"/>, or
     /// <see langword="null"/> for every other request.
     /// </param>
+    /// <param name="biasNeedsNativeMessages">
+    /// Whether a biased (helper or light-subagent) route must be restricted to <c>anthropic</c> candidates because
+    /// the request is native Anthropic Messages traffic. When no such candidate is eligible, the bias is withdrawn:
+    /// the policy sees <paramref name="unbiasedIsUtility"/>, no near-best floor, and every candidate.
+    /// </param>
+    /// <param name="unbiasedIsUtility">The payload heuristic's own utility verdict, used when the bias is withdrawn.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>
     /// The resolved route to serve the request with, or <see langword="null"/> when no eligible model is currently
@@ -715,14 +736,34 @@ public class RequestInterceptor
         RoutingSignals? signals,
         SubagentRouteClass? subagentRoute,
         double? nearBestValueFloor,
+        bool biasNeedsNativeMessages,
+        bool unbiasedIsUtility,
         CancellationToken cancellationToken)
     {
         if (_routingPolicy is not null)
         {
             var candidates = BuildRoutingCandidates(liveDimension);
+            var isUtility = classification.IsUtility;
+            var biasWithdrawn = false;
+            if (biasNeedsNativeMessages)
+            {
+                var nativeCapable = candidates.Where(c => IsNativeMessagesProvider(c.Provider)).ToList();
+                if (nativeCapable.Count > 0)
+                {
+                    candidates = nativeCapable;
+                }
+                else
+                {
+                    biasWithdrawn = true;
+                    isUtility = unbiasedIsUtility;
+                    nearBestValueFloor = null;
+                    subagentRoute = SubagentRouteClass.Normal;
+                }
+            }
+
             if (candidates.Count > 0)
             {
-                var context = new RoutingContext(Dimension: liveDimension, IsUtility: classification.IsUtility,
+                var context = new RoutingContext(Dimension: liveDimension, IsUtility: isUtility,
                     Candidates: candidates, NearBestValueFloor: nearBestValueFloor);
                 RoutingDecision? decision;
                 try
@@ -766,7 +807,7 @@ public class RequestInterceptor
                         "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}, subagentSignal={SubagentSignal}, route={SubagentRoute}).",
                         SanitizeForLog(selectedName!),
                         SanitizeForLog(liveDimension),
-                        classification.IsUtility,
+                        isUtility,
                         SanitizeForLog(classification.Subagent?.ToLabel() ?? "none"),
                         DescribeSubagentRoute(subagentRoute));
                     var policyPathBaseline = _untrainedBaselineSelector?.SelectWithScore(
@@ -780,7 +821,8 @@ public class RequestInterceptor
                             voterName: VoterNames.DimBest),
                         UntrainedBaselineModel: policyPathBaseline?.Model,
                         UntrainedBaselinePredictedScore: policyPathBaseline?.Score,
-                        CandidateScores: decision.CandidateScores);
+                        CandidateScores: decision.CandidateScores,
+                        SubagentBiasWithdrawn: biasWithdrawn);
                 }
                 else
                 {
@@ -860,6 +902,25 @@ public class RequestInterceptor
         };
     }
 
+    /// <summary>
+    /// Whether <paramref name="path"/> is Anthropic's native Messages endpoint, which reaches an upstream untranslated
+    /// (the same path test <c>AnthropicPayloadTranslator.ShouldTranslate</c> applies).
+    /// </summary>
+    private static bool IsNativeMessagesPath(PathString path)
+    {
+        return string.Equals(a: path.Value?.TrimEnd('/'), b: "/v1/messages",
+            comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Whether a candidate's provider can serve native Anthropic Messages traffic: only the <c>anthropic</c>
+    /// provider passes it through, since no inbound translator exists yet (ADR-0017).
+    /// </summary>
+    private static bool IsNativeMessagesProvider(string provider)
+    {
+        return string.Equals(a: provider, b: "anthropic", comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string TruncateForLog(string value)
     {
         return value.Length <= MaxLoggedBodyLength
@@ -896,6 +957,10 @@ public class RequestInterceptor
     /// the model with a score from a different snapshot. <see langword="null"/> whenever
     /// <see cref="UntrainedBaselineModel"/> is.
     /// </param>
+    /// <param name="SubagentBiasWithdrawn">
+    /// Whether a subagent bias was withdrawn because no candidate could read the request's native dialect, so the
+    /// served classification must not claim the bias was applied.
+    /// </param>
     /// <param name="CandidateScores">
     /// The policy's per-model aggregates for this decision, forwarded to
     /// <see cref="RoutingCandidateBuilder.Build"/> so a same-request failover retries the next voter
@@ -908,5 +973,6 @@ public class RequestInterceptor
         string? DimBestModel = null,
         string? UntrainedBaselineModel = null,
         double? UntrainedBaselinePredictedScore = null,
-        IReadOnlyDictionary<string, double>? CandidateScores = null);
+        IReadOnlyDictionary<string, double>? CandidateScores = null,
+        bool SubagentBiasWithdrawn = false);
 }

@@ -137,6 +137,12 @@ The detector, `RequestClassification.Subagent`, `SubagentBiasOptions`, the inter
 - **Agent type needs an agent id.** An agent type without an agent id is treated as contradictory (no signal),
   because Claude Code only sends the type on a spawned agent's own turns.
 - **Route class on the log line.** It landed in this phase rather than in Phase 3.
+- **Native Messages restriction (David, 2026-10-02: option A).** Added after comparing with ADR-0017.
+  - **Rule:** a helper or light-subagent request on `/v1/messages` only considers `anthropic` candidates, because
+    native Messages traffic is untranslated. With none eligible, the bias is withdrawn and the request routes
+    normally (logged `route=normal`).
+  - **Census:** the TODO #8 census now also records the Claude Code and Codex subagent markers (fixed vocabulary
+    only), to answer ADR-0022's open questions.
 
 **Tool-calling investigation (the open point):** no filter is built, because the router has no data to filter on.
 - **What `ToolCallCapabilityStore` holds.** It records a model's tool-call *dialect*, learned from its chat
