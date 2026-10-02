@@ -10,6 +10,8 @@
 - three read-only `ITranscriptStore` queries (`ListSessionTurnMetadataAsync`, `ListTurnTextsAsync`, `GetSessionAggregateAsync`) and one `ITaxonomyComparisonStore` overload (`LoadForSessionAsync`);
 - one DI registration in `ProxyServer`.
 
+Phase 1 also carries one small router prerequisite (§5.7): `PersistentConversationTurnTracker` seeds its counter from the transcripts as well as the usage ledger, through one more read-only `ITranscriptStore` member (`GetMaxTurnNumber`). Without it, the per-turn merge cannot trust turn numbers across a restart.
+
 David's request, exact words:
 
 > Read the HTML and CSS code in this codepen example: https://codepen.io/CucuIonel/pen/yLaLGL. Create a detailed plan to use this three pane "text message" style to display the transaction history in the "Sessions" tab. The leftmost pane is to select the session, the middle pane is to show the actual messages, the right pane will show message metadata and details.
@@ -315,7 +317,7 @@ flowchart TB
 
 ## 5. Data
 
-### 5.1 Live fields, nullability, and the per-turn merge (Phase 1, GUI only)
+### 5.1 Live fields, nullability, and the per-turn merge (Phase 1, GUI)
 
 **New live fields.**
 
@@ -352,7 +354,8 @@ flowchart TB
 **Per-turn merge.** A new pure function, `SessionMerger.Merge(live, persisted)` in `Gui.Components/Services`, replaces the body of `Dashboard.MergedSessionConversations()`.
 
 - **One source.** A session found in only one source passes through unchanged.
-- **Both sources.** A session found in both becomes one conversation whose turns are the union by turn number. After a GUI restart, persisted turns 1–5 and new live turn 6 render as turns 1–6. The router's persistent turn tracker continues the numbering across the restart.
+- **Both sources.** A session found in both becomes one conversation whose turns are the union by turn number. After a GUI restart, persisted turns 1–5 and new live turn 6 render as turns 1–6. The persisted turns may have gaps (adaptive routing toggled off, a failed best-effort write), and the merge treats a missing number as simply absent.
+  - **Turn numbers are only a key if they are never reused.** The correlation id is `{session}:{turn}`, so it cannot tell two requests apart either. Today the counter can reuse a number: `PersistentConversationTurnTracker` seeds from `usage_ledger`, but the ledger row is written only when usage was extracted, while the transcript row does not depend on usage. If the last turn left a transcript and no ledger row, the next process reissues its number, and the union would collapse two distinct requests. **§5.7 closes that gap in the router**, with a restart test. The merge itself needs no second identifier.
 - **Same turn in both.**
   - The live turn wins for every metric.
   - Its text is replaced by the persisted text when the live summary is truncated (§5.6) or missing. Turns inside the persisted window therefore already show full text in Phase 1.
@@ -383,6 +386,7 @@ message GetSessionTurnDetailsRequest {
   string session_id = 1;
   int32 limit = 2;                                // 0 -> 500; clamped to [1, 2000]
   optional int64 before_transcript_id = 3;        // absent -> newest page; else only rows with id < this
+  int32 live_floor_turn_number = 4;               // first page only: the lowest turn number the GUI holds live for this session; 0 -> none (§7)
 }
 
 message GetSessionTurnDetailsResponse {
@@ -401,7 +405,7 @@ message SessionAggregate {
   optional string total_baseline_estimated_cost_usd = 5;  // decimal-as-string, over compared_turns
   google.protobuf.Timestamp first_turn_utc = 6;
   google.protobuf.Timestamp last_turn_utc = 7;
-  int32 max_turn_number = 8;                      // live turns above this are not yet persisted (§7)
+  repeated int32 persisted_turn_numbers_from_floor = 8;  // exact: every persisted turn number >= live_floor_turn_number, ascending, at most 2,000 (§7)
   optional string total_cost_usd = 9;             // decimal-as-string, over priced rows
   int32 unpriced_turns = 10;                      // rows with no cost
   int64 total_input_tokens = 11;                  // over rows that report them
@@ -409,7 +413,15 @@ message SessionAggregate {
   int32 token_unknown_turns = 13;                 // rows missing either count
   repeated SessionModelUsage models = 14;         // the 20 most recently used routed models
   int32 other_models = 15;                        // distinct routed models beyond those 20
+  int32 other_model_turns = 16;                   // turns served by those omitted models, so the models' turns add up to persisted_turns
+  bool persisted_turn_numbers_complete = 17;      // false -> more than 2,000 persisted turns sit at or above the floor, and the list above is cut
 }
+
+// Why a floor and a list, not a maximum. Persisted turn numbers have gaps: capture follows the live
+// EnableAdaptiveRouting toggle and each write is best-effort. With turns 1 and 3 persisted and turn 2 live
+// only, a "highest persisted turn" of 3 would hide live turn 2. The GUI instead sends the lowest turn
+// number it holds live for the session; the router answers, in the aggregate's one read transaction, with
+// every persisted turn number at or above it. The GUI adds exactly the live turns missing from that list.
 
 message SessionModelUsage {
   string routed_model = 1;                        // capped at 1,024 characters, like every free-form field
@@ -529,10 +541,11 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
     - Two store calls on two connections, as an earlier draft had, could each see a different database state, and `compared_turns` could then exceed `persisted_turns`.
   - **The one cross-table read in `SqliteTranscriptStore`.** The comparison figures must come from the same transaction, so this method also reads `taxonomy_comparisons`. That table is created by the same `TranscriptDatabase` schema, and `SqliteTaxonomyComparisonStore.LoadPendingComparisonsAsync` already reads across both tables from the other side. Writes stay with each table's own store.
   - **Transcript figures**, through `ix_request_transcripts_session_id`. None names a text column:
-    - `COUNT(*)`, `COUNT(memory_entry_id)`, `MIN` and `MAX(created_at_utc)`, and the highest turn number (the same `substr` cut as the paging query);
+    - `COUNT(*)`, `COUNT(memory_entry_id)`, and `MIN` and `MAX(created_at_utc)`;
+    - the **persisted turn numbers at or above `live_floor_turn_number`**: the distinct values of the same `substr` cut as the paging query, ascending, limited to 2,001 rows. If 2,001 come back, the last is dropped and `persisted_turn_numbers_complete` is `false`. It is skipped when the floor is `0`. These are small integers, bounded by the live window, so the wire cost stays negligible;
     - `SUM(cost)` over priced rows, and the unpriced count;
     - `SUM(input_tokens)` and `SUM(output_tokens)`, and the count of rows missing either.
-  - **Models.** `GROUP BY routed_model`, giving turns, priced cost, unpriced count, and last use. The 20 most recently used come back, plus a count of the rest. `routed_model` goes through `substr(…, 1, 1025)`, as in the paging query.
+  - **Models.** `GROUP BY routed_model`, giving turns, priced cost, unpriced count, and last use. The 20 most recently used come back, plus the count of the rest (`other_models`) and the turns they served (`other_model_turns`). `routed_model` goes through `substr(…, 1, 1025)`, as in the paging query.
   - **Comparison figures.** The count and sums of comparisons with both savings and a baseline cost, **and whose transcript still exists**.
     - **Why.** Retention deletes only `request_transcripts` rows (`SqliteTranscriptStore`'s `DeleteOldestAsync`, `DeleteBeforeAsync`, and `DeleteAllAsync`), and `taxonomy_comparisons` has no foreign key or cascade, so orphaned comparisons accumulate.
     - **How.** A join on `request_transcripts.id`, inside the same transaction. So `compared_turns` can never exceed `persisted_turns`, and the sums cover only turns the details pages can return.
@@ -551,7 +564,7 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
 ### 5.4 GUI client and store (Phase 2)
 
 - **Client.** `IPersistedSessionsClient` gains two methods:
-  - `GetSessionTurnDetailsAsync(string sessionId, int limit, long? beforeTranscriptId, CancellationToken)`;
+  - `GetSessionTurnDetailsAsync(string sessionId, int limit, long? beforeTranscriptId, int liveFloorTurnNumber, CancellationToken)`;
   - `GetTurnTextsAsync(IReadOnlyList<long> transcriptIds, CancellationToken)`.
 
   `PersistedSessionsClient` implements both through `GrpcAdminClientBase`'s `Wrap` rule (ADR-0010's shared seam). Decimals are parsed with `CultureInfo.InvariantCulture`, as today.
@@ -560,7 +573,7 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
   - **Snapshots.** It keeps one snapshot per session id, holding:
     - the loaded turns by turn number;
     - the capture flag and the paging cursor (`next_before_transcript_id`);
-    - the session aggregate from the first page;
+    - the session aggregate from the first page, with the live floor it was requested for;
     - the loaded-at time;
     - a state: `Loading`, `Loaded`, `CaptureOff`, `Unreachable`, or `Failed`.
   - **Paging.** `LoadEarlierAsync(sessionId)` fetches the next older page and adds it to the snapshot.
@@ -606,6 +619,22 @@ Phase 2 therefore starts with an ADR drafted with the `adr-writer` skill. It rec
   - Once `GetTurnTexts` returns, its `prompt_text_length` / `response_text_length` add a note such as "2,000 of 18,432 characters". They are SQLite character counts, so they are only displayed, never compared. Before that, the row shows only its truncated chip: the metadata page carries no lengths (§5.3).
 - **Capped text stays marked.** When `GetTurnTexts` sets `prompt_truncated` or `response_truncated`, the expanded row keeps a "truncated at 262,144 characters" chip. The row never claims to show the full text.
 - **No persisted row** (capture off, adaptive routing off, or not yet written). The chip reads "truncated at 2,000 characters; the full text was not persisted".
+
+### 5.7 Durable turn numbering (Phase 1 prerequisite, router)
+
+`SessionMerger` keys turns by `(SessionId, TurnNumber)` (§5.1, §5.4), so a number must never be issued twice for one session. Today it can be:
+
+- **The gap.** `PersistentConversationTurnTracker.NextTurn` seeds an unseen or idle-evicted session from `IUsageLedger.GetMaxTurnNumber`. `RequestTelemetryPublisher` writes a ledger row only when usage was extracted, but still writes a transcript row (`request_transcripts`, correlation id `{session}:{turn}`) when capture is on. A turn with a transcript and no ledger row is invisible to the seed, so the next process reissues its number. Two different requests then share a turn number, and a duplicate correlation id besides.
+- **The fix.**
+  - `ITranscriptStore` gains a synchronous `int GetMaxTurnNumber(string sessionId)`, a default interface member returning `0`. It is synchronous because `NextTurn` is, and because `IUsageLedger.GetMaxTurnNumber` already sets that precedent. The SQLite implementation is gated on `TranscriptOptions.Enabled` and creates no file when disabled, like `ListSessionsAsync`. It reads `MAX(CAST(substr(correlation_id, length(session_id) + 2, 10) AS INTEGER))` over `ix_request_transcripts_session_id`, with a non-numeric suffix counting as `0`.
+  - `PersistentConversationTurnTracker` takes an optional `ITranscriptStore? transcripts = null` and seeds with `Math.Max(ledger, transcripts)`. It stays on the slow path only, so the hot path is unchanged. The singleton registration in `ProxyServiceCollectionExtensions` already resolves optional constructor parameters.
+  - No schema change, no new table, no new write.
+- **What this does not cover.** A turn that left neither a ledger row nor a transcript left nothing durable, so a restart can still reuse its number. There is then no persisted turn for the merge to collapse it with. This plan does not change how the live buffer keys turns. Recorded in §13.
+- **Tests** (`PersistentConversationTurnTrackerTests`, and `SqliteTranscriptStoreTests` for the query):
+  - **The restart case.** Ledger max 4 with a transcript for turn 5 and no ledger row: the first call for a fresh tracker returns 6, not 5.
+  - The ledger ahead of the transcripts, and the transcripts ahead of the ledger: the higher wins.
+  - No transcript store, a store that returns `0`, and capture disabled: seeds from the ledger alone, with no file created.
+  - A 100,000-character session id, and a non-numeric suffix, as in the paging query's tests.
 
 ## 6. Interaction
 
@@ -763,13 +792,15 @@ stateDiagram-v2
 | Section | Fields |
 |---|---|
 | Identity | Title, session id (copyable), status (active / idle / history), untracked (yes, no, or unknown for persisted-only sessions), used for training ("Yes" or "Not in the loaded history"; yes or no for the whole session once the Phase 2 aggregate loads), first → last turn (full dates; "first loaded turn" until the aggregate gives the real first turn) |
-| Totals | Total cost (with `≥` and the unpriced count, as in today's summary, recomputed from each turn's nullable cost), prompt and completion tokens, turns (see the whole-session rule below the table), fallback turns ("n of m live turns"; persisted turns do not record fallback, §5.1), Est. savings and Est. ROI with coverage (§5.5; Est. ROI is "—" when the summed baseline cost is not above 0), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`), labeled "loaded turns" because it plots individual turns |
+| Totals | Total cost (with `≥` and the unpriced count, as in today's summary, recomputed from each turn's nullable cost), prompt and completion tokens (**`≥` plus "n turns without counts" whenever any turn lacks either count**, the same partial-total rule as cost, so an unknown count never reads as an exact sum), turns (see the whole-session rule below the table), fallback turns ("n of m live turns"; persisted turns do not record fallback, §5.1), Est. savings and Est. ROI with coverage (§5.5; Est. ROI is "—" when the summed baseline cost is not above 0), token Trend sparkline (reusing `TokenCompoundingSeries` + `SparklineLayout`), labeled "loaded turns" because it plots individual turns |
 | Models used | The CodePen's member list: one line per distinct routed model with its color dot, turn count, cost share, and last-used time. Most recent first. From the aggregate in Phase 2, with "and n more" past 20 |
 
 **Whole-session values.** The loaded turns are not the whole session: the persisted list is the newest 500 rows across all sessions, and details pages start at the newest. So the Session tab never presents a loaded-turns sum as a session total.
 
-- **Phase 1** has no aggregate. The first turn, totals, and models are labeled "over n loaded turns", as "Used for training" already is.
-- **Phase 2** takes them from `SessionAggregate` (§5.2), and adds the live turns above its `max_turn_number`, which are not persisted yet. The labels go away.
+- **Phase 1** has no aggregate. The first turn, totals, and models are labeled "over n loaded turns", as "Used for training" already is. The token totals carry the `≥` and unknown-turn count above, counted over the loaded turns.
+- **Phase 2** takes them from `SessionAggregate` (§5.2), and adds the **live turns whose number is missing from `persisted_turn_numbers_from_floor`**. Those are exactly the live turns not persisted yet, even when persisted numbers have gaps. The request's `live_floor_turn_number` is the lowest live turn number the GUI holds for the session, so every live turn is covered. The labels go away. The token `≥` and unknown count come from `token_unknown_turns` plus the added live turns with a missing count.
+  - **If `persisted_turn_numbers_complete` is `false`**, the list is cut and the added live turns cannot be told apart reliably. The tab keeps the Phase 1 "over n loaded turns" labels for that session instead of showing a whole-session total.
+  - **After a re-fetch**, the floor sent is the lowest live turn number at that moment, so a turn persisted between two fetches moves from "added live" to "in the aggregate" exactly once.
 - Fallback stays live-only (§5.1), and the sparkline stays "loaded turns".
 
 ## 8. Accessibility
@@ -829,6 +860,7 @@ Reduced motion is already handled by `app.css`'s global `prefers-reduced-motion`
 - `DashboardData.cs`, `ConversationAggregator.cs`, `LiveConversationMapper.cs`, `PersistedSessionMapper.cs` (§5.1).
 - `CostAnalytics.razor` coalesces the now-nullable token counts and per-turn cost where it builds chart points. Its behavior does not change.
 - `Icon.razor` (three glyphs), `split-pane.js`, `app.css`, `index.html`, `Gui.Web/Program.cs` (two singletons).
+- Phase 1 also changes `PersistentConversationTurnTracker.cs`, `ITranscriptStore.cs`, and `SqliteTranscriptStore.cs` (§5.7).
 - Phase 2 adds: `telemetry.proto`, `ITranscriptStore.cs`, `SqliteTranscriptStore.cs`, `ITaxonomyComparisonStore.cs`, `SqliteTaxonomyComparisonStore.cs`, `TelemetryGrpcService.cs`, `ProxyServer.cs`, `IPersistedSessionsClient` / `PersistedSessionsClient.cs`.
 
 **Deleted** (orphaned by decision 2, per the precedent `TurnCard` set):
@@ -844,9 +876,10 @@ Every new or changed type and member gets accurate XML docs. `CS1591` is an erro
 
 Each phase is a full vertical slice and ships on its own. Every phase ends warning-free under `TreatWarningsAsErrors`, with all tests passing and coverage at 80% or higher.
 
-1. **Phase 1 — Three-pane Sessions tab on today's data (GUI only).**
+1. **Phase 1 — Three-pane Sessions tab on today's data (GUI, plus one small router prerequisite, §5.7).**
    - Everything in §3, §4, §6, §8, and §9.
    - All of §5.1: the live-field plumbing, nullable token counts, the unknown untracked state, and `SessionMerger`.
+   - §5.7, the router prerequisite: durable turn numbering. It ships first within the phase, because the merge relies on it.
    - The Message tab with live fields, the Routing tab's decision / overhead / steps sections, and the Session tab without Est. savings or ROI.
    - The deletions in §10.
    - Docs: `dashboard.md` Sessions section and data model; `DESIGN.md` §1, §2 (revived step tones), §4, §4.3, §5 (two dividers replace the split-pane bullet, plus the narrow-window horizontal scroll), §7; `MOTION.md` §6 (Row Enter consumers, `.row-enter-append`, the fifth tab family) and §10.
@@ -854,6 +887,7 @@ Each phase is a full vertical slice and ships on its own. Every phase ends warni
    **Exit criteria:**
    - Live and persisted sessions both render in three panes. Every §6.6 state renders.
    - After a GUI restart and one new live turn, a session shows its persisted turns and the new one.
+   - After a router restart whose last turn had a transcript but no ledger row, the next turn gets a new number (§5.7).
    - Every row the clamp cuts has a Show more toggle.
    - A persisted turn inside a live conversation shows "—" for live-only fields.
    - At an 800 px window the tab scrolls horizontally, and nothing is clipped.
@@ -918,7 +952,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - `PersistedSessionMapperTests` sets `IsLive = false` and `IsSessionSynthesized = null`, passes `null` token counts and a `null` cost through, and leaves the live-only fields `null`.
 - **`SessionMergerTests`.**
   - A session in only one source passes through unchanged.
-  - The restart case: persisted turns 1–5 plus live turn 6 give turns 1–6.
+  - The restart case: persisted turns 1–5 plus live turn 6 give turns 1–6. Persisted turns 1 and 3 plus live turn 2 give turns 1–3, with turn 2 kept.
   - The same turn in both: live metrics win; persisted text replaces a truncated or missing live summary.
   - Each turn keeps its own `IsLive`. A turn in both sources is live; a persisted-only turn is not.
   - Totals, unpriced count, fallback flag, timestamps, `IsSessionSynthesized`, and `IsUsedForTraining` come from the right side.
@@ -942,9 +976,10 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 - **`GetSessionAggregateAsync`** (in `SqliteTranscriptStoreTests`).
   - Comparison figures count and sum only comparisons with both savings and a baseline cost.
   - A comparison whose transcript was deleted by retention is excluded, so `compared_turns` never exceeds `persisted_turns`.
-  - First and last timestamps, the highest turn number, cost with the unpriced count, and tokens with the unknown count cover rows beyond the first page.
-  - Models: the 20 most recent come back with `other_models` counting the rest; a long `routed_model` comes back capped.
-  - **Concurrent change.** While a background task inserts transcripts with comparisons and runs retention deletes, repeated aggregate reads (bounded to about 1 second) always satisfy `compared_turns ≤ persisted_turns` and `Σ models' turns + the rest = persisted_turns`.
+  - First and last timestamps, cost with the unpriced count, and tokens with the unknown count cover rows beyond the first page.
+  - **Persisted turn numbers from the floor.** With persisted turns 1 and 3, a floor of 2 returns `[3]`, and a floor of 1 returns `[1, 3]`: a gap is never filled in. A floor of `0` returns none. More than 2,000 turns at or above the floor returns 2,000 numbers and `persisted_turn_numbers_complete = false`.
+  - Models: the 20 most recent come back with `other_models` counting the rest and `other_model_turns` counting their turns; a long `routed_model` comes back capped.
+  - **Concurrent change.** While a background task inserts transcripts with comparisons and runs retention deletes, repeated aggregate reads (bounded to about 1 second) always satisfy `compared_turns ≤ persisted_turns` and `Σ models' turns + other_model_turns = persisted_turns`. The turns-add-up invariant holds with omitted models too: a test with 25 models, some serving several turns, covers it.
 - **`SqliteTaxonomyComparisonStoreTests`.**
   - `LoadForSessionAsync` returns only that session's rows inside the id range.
   - `LoadForSessionAsync`'s rows carry no `session_id`, and `baseline_model` comes back capped.
@@ -960,7 +995,8 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - `GetTurnTexts` covers found, not found, capture off, the per-side cap, the stored lengths, and `omitted` past the 2 MiB budget.
   - `aggregate` appears only on the first page, and it counts rows beyond that page.
   - Worst-case metadata: 2,000 rows with 1,024-character multibyte strings in every capped field. The page ends early, within 2 MiB, and the cursor resumes with no gap or duplicate.
-  - An over-long session id or model name is capped at 1,024 characters on the wire.
+  - An over-long model name, and every other returned free-form field, is capped at 1,024 characters on the wire.
+  - The session id is absent from the response: `SessionTurnDetail` carries neither `session_id` nor `correlation_id`, and no other message echoes it, so there is no id to cap. The test asserts that absence, for a 100,000-character session id.
   - A worst-case `GetTurnTexts` response stays under 4 MB.
 - **`PersistedSessionsClientTests`.** DTO mapping and `Wrap`: `Unavailable` gives `IsUnavailable`; any other status gives the server detail.
 - **`SessionDetailsStoreTests`**, using a fake `TimeProvider` and a fake client.
@@ -982,7 +1018,9 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - ROI arithmetic, which is cost-weighted, and its coverage text, both taken from the aggregate.
   - Est. ROI renders "—" when every compared turn has a free baseline, so the summed baseline cost is `0` and there is no division. The same holds per turn.
   - With the aggregate loaded, "Used for training" reads yes or no for the whole session.
-  - Without the aggregate, first turn, totals, and models carry "over n loaded turns". With it, they show whole-session values plus the live turns above `max_turn_number`, and the label goes away.
+  - Without the aggregate, first turn, totals, and models carry "over n loaded turns". With it, they show whole-session values plus the live turns missing from `persisted_turn_numbers_from_floor`, and the label goes away.
+  - **Persistence gap.** With persisted turns 1 and 3 and live turns 2 and 3, the totals count persisted 1 and 3 plus live 2, never live 3 twice and never skipping 2. With `persisted_turn_numbers_complete = false`, the "over n loaded turns" labels stay.
+  - **Unknown token counts.** A turn missing either count gives the prompt and completion totals a `≥` and "n turns without counts", in Phase 1 (over loaded turns) and in Phase 2 (aggregate plus added live turns). Exact totals show no `≥`.
   - A live text longer than 2,000 characters counts as truncated. That includes the preview of a stored text of exactly 2,001 characters, which has the same length as its source.
   - Show more on such a row calls `GetTurnTexts` once, then renders the stored text.
   - A capped result keeps its "truncated at 262,144 characters" chip after expansion.
@@ -1008,6 +1046,8 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 | Per-tab-switch teardown leaks JS observers or .NET references | §6.2's `chatScroll.dispose` and `IAsyncDisposable` path |
 | A narrow browser window clips the panes | §6.4's horizontal scroll below an 884 px layout width |
 | Cached text and pages grow browser memory | §5.4's size-based budgets, not entry counts |
+| A turn number is reused after a restart | §5.7 seeds the counter from the transcripts as well as the ledger. **Residual:** a turn with neither a ledger row nor a transcript left nothing durable, so its number can still be reissued. Nothing persisted exists for the merge to collapse it with |
+| Persisted turn numbers have gaps (capture toggled off, best-effort writes) | §5.2's `persisted_turn_numbers_from_floor` names exactly which live turns are persisted, instead of inferring it from a maximum |
 | Orphaned comparisons skew session totals | §5.3 counts only comparisons whose transcript still exists |
 | Session figures computed from loaded turns understate a long session | §7's whole-session rule: Phase 1 labels them, Phase 2 takes them from the aggregate |
 | Text bodies sit before `cost` and the token columns in each row | Large text overflows to a chain of overflow pages. Reading any column after it, as the paging and aggregate queries do, walks that chain: page reads, though no decode or copy into .NET. If a large session's first page or aggregate measures slow, add a covering index on `session_id` plus the columns those queries read, as a migration. Not done up front, because no measurement shows the need yet |
@@ -1049,3 +1089,4 @@ Each has a default that this plan already assumes.
 7. **Implicit selection** never calls `OnSelect`, which preserves Cost Analytics' All Sessions default. Explicit selection, by pointer or keyboard, always does.
 8. **History-only dot** is muted grey, not the CodePen's red.
 9. **Divider defaults.** 22% and 28%, clamped to 15–35% and 20–40%, and further to the effective pixel bounds that keep every pane at its minimum (§6.4).
+10. **Phase 1 reaches into the router once.** §5.7's durable turn numbering is a small router change (`PersistentConversationTurnTracker` plus one `ITranscriptStore` member), needed before the per-turn merge can trust turn numbers. Default: ship it inside Phase 1, first. The alternative is a separate PR ahead of Phase 1.
