@@ -7,8 +7,10 @@
 ## Context and Problem Statement
 
 Issue [#163](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/163) makes the router recognise
-vendor-documented markers that a request comes from a subagent or side task, and route it as utility
-traffic (see [`docs/plans/issue-163-subagent-aware-routing.md`](../plans/issue-163-subagent-aware-routing.md)).
+vendor-documented markers that a request comes from a subagent or side task, and route it by kind
+([ADR-0022](0022-route-harness-subagent-and-helper-traffic-by-kind.md);
+[`docs/plans/issue-163-subagent-aware-routing.md`](../plans/issue-163-subagent-aware-routing.md)). Some kinds get a
+cheaper pick, and the rest route as they would without a signal.
 David decided on 2026-09-29 that the detected signal must be visible in the router's log line **and** on the
 dashboard, so an operator can see which requests were biased and why.
 
@@ -68,8 +70,13 @@ a badge when it is non-empty and nothing when it is absent.
 - Bad, because it adds one more positional-adjacent member to an already wide record, which works against the
   open smell C2 (the 25-parameter publish path). It is contained to a single trailing member and a single
   new argument on the private `RequestTelemetryPublisher` method that builds the event.
-- Neutral, because the signal is not persisted: the transcript store keeps `IsUtility` but not the reason.
-  Storing it needs a schema column and is a separate decision, deliberately left out here.
+- Neutral, because the signal is not persisted: the transcript store keeps `IsUtility` but not the reason, so
+  the Live Stream badge shows on live turns only, not on turns reloaded from history.
+  - **Follow-up, with a trigger:** add one nullable `subagent_signal TEXT` column to `request_transcripts`, holding
+    the same label and never folded into `score`.
+  - **Trigger:** when the Sessions tab (#176) needs the badge on saved turns, or a learning or analytics consumer
+    needs to filter cost-driven picks.
+  - **Constraint:** coordinate it with ADR-0019, ADR-0020 and #184, which are reshaping that store.
 - Neutral, because field number 25 is now taken, and the label vocabulary is a de facto contract: a new
   harness adds a value, not a field.
 

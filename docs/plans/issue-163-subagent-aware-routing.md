@@ -1,119 +1,239 @@
 # Plan: Subagent-aware routing (#163)
 
-**Status:** Proposed. Awaiting David's approval. No implementation in this change.
+**Status:** Revised 2026-10-02 after the Phase 1 research. **The revision awaits David's approval.** No code for the revised design is written until he signs off. The first version of this plan was approved by merging PR #175. Under it, Phase 1, Phase 2 and the Phase 3 log line were built on branch `feature/163-subagent-aware-routing` (commits `09fd18c`, `c41c6f0`, `533b47e`). Phase 2b below reworks that code to the revised design.
 **Issue:** [#163](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/163) — "P1: Subagent-aware routing (cheaper-model bias for harness subagent / side-task requests)".
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request must link this plan once approved.
+**Evidence:** [`docs/research/subagent-and-helper-routing-evidence.md`](../research/subagent-and-helper-routing-evidence.md) (what vendors do, and what the router can measure). The signal table is in [`docs/router/utility-model-routing.md`](../router/utility-model-routing.md#subagent-and-side-task-signals).
+**Decision records:** [ADR-0022](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md) (route by kind, proposed); [ADR-0021](../adr/0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) (telemetry wire field, proposed).
 **ADR-0008 Amendment 1:** Binding. This plan adds a feature. It schedules no smell audit, splits no files, and refactors nothing beyond what the feature needs.
-**Out of scope:** the semantic cache (#164) and every other P1/P2 item.
+**Out of scope:**
+- The semantic cache (#164) and every other P1/P2 item.
+- A cost-aware vote on the learned path. That is [F6 in the multi-agent cost plan](../router/multi-agent-cost-plan.md) and needs its own plan and ADR.
 
 ## Goal
 
-When a harness marks a request as a subagent or narrow side task, route it with the existing cost-aware, quality-gated utility selection. When no verified signal is present, or the signal is malformed or ambiguous, routing must behave exactly as it does today.
+When a harness marks a request as a subagent or a helper task, route it for **the best quality for the money** (David, 2026-10-02), as far as the evidence supports:
 
-## What exists today (from CodeGraph)
+- Helper tasks lean cheap.
+- Read-only search subagents may go cheaper, but only to a model that is known to be nearly as good as the best one.
+- Every other subagent keeps the router's normal quality-first routing.
 
-- `HeuristicRequestClassifier.Classify(JsonObject)` computes `RequestClassification(Dimension, Difficulty, Language, IsUtility)` from the **body only**. `InferIsUtility` fires on `max_tokens` ≤ 64 or a short prompt (≤ 200 chars) naming a helper task. It has no access to headers.
-- `IRequestClassifier` has one caller (`RequestInterceptor.ResolveModelRouteAsync`, [`RequestInterceptor.cs:378`](../../src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs)). `RequestInterceptor` holds the `HttpContext`, so headers are available at the call site.
-- `RequestInterceptor.ResolveAgenticRouteAsync` builds `RoutingContext(Dimension, IsUtility, Candidates)` from the classification (`RequestInterceptor.cs:653`).
-- `CompositeRoutingPolicy.SelectModelAsync` sends `context.IsUtility == true` to `UtilityRoutingPolicy`. That policy ranks by `ε₁·quality + ε₂·κ` (κ from `IModelPriceCatalog`), gates on `RoutingOptions.UtilityMinQualityScore`, and only ever picks from `context.Candidates`. The interceptor rejects any selection not in the candidate set, so the allowlist already holds.
-- The routing decision is logged at `RequestInterceptor.cs:694` with `isUtility`. **Correction from review:** `IsUtility` is set only by `InferIsUtility` (token cap or short helper prompt). Searched whole repo (all file types) and git history: **no `copilot-utility*` recognition has ever existed in code** — the only code occurrence was a static `ModelList` entry in `appsettings.json`, removed in `85f3c13` (Phase I) — and the `ModelRouting.RouterAlias` / `UtilityAliases` options the docs describe do not exist; an unresolved model name simply enters agentic routing (`RequestInterceptor.cs:476-494`) without alias classification. `utility-model-routing.md` describes alias-driven utility routing as shipped, so Phase 1 first checks whether that is true; the issue's premise that the aliases already set `IsUtility` is unverified.
-- Blast radius of the changes below: `RequestClassification` (constructed by `HeuristicRequestClassifier`, `RequestInterceptor` tests, and `RequestTelemetryPublisher`), `RoutingContext` (67 references; **left unchanged**), `CompositeRoutingPolicy` (**left unchanged**).
+With no signal, or a malformed, ambiguous or disabled one, routing behaves exactly as it does today.
 
-## Design decisions (recommendations; flag any you disagree with)
+## Why the design changed
 
-1. **A small dedicated detector, not a classifier rewrite.** New `SubagentSignalDetector` takes the request headers plus the parsed body and returns `SubagentSignal?`. `IRequestClassifier` keeps its signature, so its test fakes and `HeuristicRequestClassifier` stay untouched.
-2. **Reuse the utility path.** A detected signal sets `IsUtility = true` on the classification, so `CompositeRoutingPolicy` → `UtilityRoutingPolicy` runs unchanged. That gives the quality gate, price freshness, and allowlist for free, and avoids a second cost policy.
-3. **Record the reason.** `RequestClassification` gains an optional trailing `SubagentSignal? Subagent = null`. Existing positional callers compile unchanged.
-4. **Scope of the bias.** It applies only where a routing policy already runs (the `auto` / agentic alias). A request with an explicit model pick keeps ADR-0005 behavior: no silent reroute. Phase 1 confirms this by reading the code path; if explicit picks can reach the policy, the detector is gated off for them.
-5. **Kill switch.** `Routing:SubagentBias:Enabled` (default **true**, decided by David; signals are verified before shipping) plus a per-signal allowlist.
-6. **Fail-safe parsing.** Any exception, oversized header, non-UTF-8 value, or conflicting signals → `null` (no signal), logged at debug with a static template.
+The first design sent every signal to `UtilityRoutingPolicy`, which ranks mostly on price. The Phase 1 research found four problems with that:
 
-## Phase 1 — Signal research (no code)
+1. **Vendors don't route subagents cheap by default.**
+   - Claude Code, Codex and VS Code Copilot all run subagents on the main model.
+   - They move a subagent to a cheaper model only for narrow, read-only or repetitive work, and only when someone opts in.
+   - Helpers, by contrast, are cheap by vendor design.
+2. **The router can't grade most of this traffic.** Only responses with a fenced code block are graded (`CodeBlockSignalExtractor`).
+   - Helper output is never graded, so a helper quality floor never fires.
+   - Subagent turns, which are mostly tool calls, are rarely graded.
+3. **One helper class hides a safety decision.**
+   - Claude Code's `auxiliary` request class includes classifiers.
+   - The auto-mode classifier, which decides whether an action may run, deliberately runs on Sonnet 5 rather than a cheap model.
+4. **The utility rule's exchange rate.** 0.1 of quality is worth $1 per million tokens, so premium models almost never win, even for hard subagent work.
 
-**Deliverable:** a "Subagent and side-task signals" section in `docs/router/utility-model-routing.md`. It gets one row per harness: signal, where it appears (header, body field, model alias), source (doc link or captured request), verification status, and a detector decision (`implement` / `skip: no usable marker`).
+The research doc has the sources for each point.
 
-Harnesses: Claude Code, Cursor, Codex, Aider, plus the Copilot `copilot-utility*` aliases (required by #163; recognition is unverified, see the Copilot row).
+## What exists today (from CodeGraph and the branch)
 
-Method, in order of preference:
-1. Official docs (fetched and linked with access date).
-2. A captured real request through the router's own debug log (`[INTERCEPTOR]` body log is capped at 4,000 chars, so header capture needs a small temporary local script or `--export-ca` MITM, not a code change to the router).
-3. Anything else is labelled **unverified** and is **not** implemented.
+- `SubagentSignalDetector` (branch): a pure function over headers and body.
+  - It returns a `SubagentSignal(Harness, Kind, Source)` for Claude Code's agent-id and request-class headers, Codex's `x-codex-turn-metadata`, and Copilot `copilot-utility*` aliases.
+  - Anything ambiguous, malformed, oversized or conflicting returns `null`.
+- `RequestClassification.Subagent` (branch): an optional trailing member that records the signal.
+- `RequestInterceptor.ResolveModelRouteAsync` (branch):
+  - Applies the signal only on the agentic-routing path, as `IsUtility = true`.
+  - Explicit configured picks keep their model and classification (ADR-0005).
+  - The switches are read live from `Routing:SubagentBias`.
+- `CompositeRoutingPolicy` sends `IsUtility` requests to `UtilityRoutingPolicy` and everything else to `OrchestratorRoutingPolicy`.
+  - `UtilityRoutingPolicy` ranks `ε₁·quality + ε₂·price` with an observed-score floor, never explores, and records propensity 1.0.
+  - `OrchestratorRoutingPolicy` is quality-only, explores 5%, and records real propensity.
+- `IsRouterChoiceModelName` recognizes `auto` and `totallyhot-arcrouter` as "the router should choose".
+- The routing log line (branch) ends with `subagentSignal=<harness/kind|none>`.
 
-Starting hypotheses to test, not facts (I have not verified any of these):
+## Design
 
-| Harness | Hypothesis to verify |
+### Route classes
+
+The detector already reports each signal's harness and kind. A small pure mapping, `SubagentRouteClass`, turns that into one of four route classes:
+
+| Class | Signals | Route |
+|---|---|---|
+| **Helper** | Claude Code `x-claude-code-request-class: auxiliary`; Copilot `copilot-utility*` model aliases | The existing utility rule, unchanged: `ε₁·s + ε₂·κ` with the `UtilityMinQualityScore` floor (0.3). In practice the floor never fires because helpers are ungraded, but it is harmless. |
+| **Light subagent** | Claude Code subagent whose `x-claude-code-agent-type` is `Explore` or `claude-code-guide` | The utility rule restricted to candidates whose **known** score in this category is at least `LightSubagentRelativeFloor` × the best known score among the candidates. The best-scoring candidate always qualifies, so the rule picks the best value among the near-best. If no candidate has a known score, or none of the qualifiers is priced, the request routes normally. |
+| **Subagent** | Claude Code subagent of any other type (`Plan`, `general-purpose`, `statusline-setup`, `custom`, `teammate`, `fork`) or with no type (agent-id or `request-class: subagent` only); Codex `thread_spawn` and `memory_consolidation` | Normal routing: the learned path, exactly as without a signal. The signal is recorded for the log line and dashboard only. |
+| **None** | Claude Code `main`, `compaction`, `workflow`; Codex `compact`, `guardian`, `review`, `agent_job:*`, `other`; anything malformed, ambiguous or conflicting | Today's routing, with no signal recorded. |
+
+Why each line sits where it does:
+
+- **`Explore` and `claude-code-guide`.** Anthropic suggests Haiku for `Explore`, and already runs `claude-code-guide` on Haiku.
+- **`Plan`, `general-purpose` and the rest.** Every vendor runs these on the main model.
+- **Codex subagents.** Codex sends no agent type, so narrow work can't be told apart from open-ended work.
+- **Codex memory consolidation.** It reportedly defaults to the full model (unverified), and its output persists into later sessions.
+
+### Delegation rule
+
+Helper and light-subagent bias applies only when the client handed the choice to the router. That means the requested `model` is a router-choice name (`auto`, `totallyhot-arcrouter`) or a Copilot `copilot-utility*` alias.
+
+- A request naming a specific model the router doesn't know still takes today's unresolved-name fallback, but without bias.
+- A request naming a configured model never reaches a policy (ADR-0005), as today.
+
+Why: the auto-mode classifier names its model (Sonnet 5 by default), while titles and summaries carry the main model, which is `auto` under this repo's Claude Code preset. This rule keeps the classifier off the cheap path even though it shares the `auxiliary` class.
+
+**Residual risk.** If the classifier falls back to the session's model, and that model is `auto`, a classifier request would be routed as a helper. The headers can't distinguish it from a title. The mitigations:
+
+- Phase 5 docs tell operators to list the classifier's model in the router so it is always an explicit pick.
+- The `ClaudeCodeHintHeaders` toggle turns off the request-class signal entirely.
+
+### Relative floor
+
+`LightSubagentRelativeFloor` defaults to **0.9**, meaning "within 10% of the best known candidate". Routing research states quality targets this way; RouteLLM, for example, measures against a fraction of the strong model's quality. **0.9 is a starting point, not a measured value.** It should be retuned once F1 (per-session savings receipts) shows graded data per category.
+
+The scores are the grader's code-quality scores from graded traffic in the same category. They are a proxy for "can this model code", not for "can it drive tools".
+
+### Learning
+
+| Class | Effect on what the router learns |
 |---|---|
-| Claude Code | Background/side calls use the configured small-fast (Haiku-tier) model name, so the **model alias** is the signal. Subagent (Task tool) requests may differ by system-prompt shape or a session/agent header. Check current docs for gateway headers and `ANTHROPIC_DEFAULT_HAIKU_MODEL` semantics. |
-| Cursor | Likely **no** documented subagent marker; may only distinguish by model or endpoint. |
-| Codex | A subagent or session-source header may exist in recent CLI versions. Confirm against current source and docs before relying on it. |
-| Aider | Weak-model (`--weak-model`) calls for commit messages and summaries arrive as a different **model name**. No header expected. |
-| Copilot | **Settled (code + history search):** no alias recognition exists, so today a `copilot-utility*` request is just an unresolved model name and only the payload heuristics can mark it utility. #163 requires the aliases as a signal, so Phase 2 adds it: exact, case-insensitive match on `copilot-utility` / `copilot-utility-small`, plus a `copilot-utility` prefix match for unseen VS Code tiers (as `utility-model-routing.md` R1.6 specifies, but never built). `utility-model-routing.md` claims this is "Shipped (Phase H)"; Phase 5 corrects that. Remaining Phase 1 work: confirm the alias names against VS Code's current docs/source. |
+| Helper | None. Helpers are ungraded and write nothing to router memory, so there is no learning bias and no point exploring. |
+| Light subagent | Small. The pick is deterministic (propensity 1.0), but these turns are rarely graded. Recorded as a residual risk. |
+| Subagent | None added. The learned path explores and records real propensity. |
 
-**Exit criterion:** every row is verified with a source, or explicitly marked "no usable marker". Rows that end as "skip" mean the detector ships without them; the issue explicitly allows that.
+Recording the signal on each transcript row, so cost-driven picks can be filtered from learning, is a follow-up in ADR-0021 with a stated trigger. It is not built here.
 
-**Gate:** send the finished signal table to David before Phase 2. If Phase 1 finds no usable signal for a harness, that harness ships as documented "not supported".
+### Options (`Routing:SubagentBias`, read live)
 
-## Phase 2 — Detector and classification plumbing
+`Enabled` (kill switch), `ClaudeCodeAgentId`, `ClaudeCodeHintHeaders`, `CodexTurnMetadata`, `CopilotUtilityAlias`, `LightSubagentRelativeFloor`.
 
-- Add `Router/Classification/SubagentSignalDetector.cs` (+ `SubagentSignal` record: `Harness`, `Kind`, `Source`). Pure function, no I/O, bounded work, fully XML-documented (CS1591 is an error here).
-- Extend `RequestClassification` with the optional `Subagent` member.
-- In `RequestInterceptor.ResolveModelRouteAsync`, after `_requestClassifier.Classify`, call the detector with `context.Request.Headers` and `jsonObject`. Read the live `SubagentBiasOptions` first (`IOptionsMonitor<RoutingOptions>`, as `RequestTelemetryPublisher` already does): a disabled master flag or a disabled/disallowed per-signal toggle leaves the original classification untouched. Only an enabled signal replaces it with `IsUtility = true` and `Subagent = signal`. No other change to the flow. If Phase 1 shows the Copilot aliases are not recognized today, the detector also matches the alias from the request's `model` field, behind the same options.
-- Add `SubagentBiasOptions` under `RoutingOptions` (enable flag, per-signal toggles), bound from `appsettings.json`, documented.
-- **Verify with CodeGraph before editing:** callers of `RequestClassification` construction (`HeuristicRequestClassifier`, `RequestTelemetryPublisher.cs:722`, tests) and the `RequestInterceptor` hub. Do not touch `ManagementFacade`.
+`ClaudeCodeHintHeaders` replaces the branch's `ClaudeCodeRequestClass` and covers both hint headers, `request-class` and `agent-type`. `LightSubagentRelativeFloor` is 0.9 by default, in the range (0, 1].
 
-- **Tests land in this phase, not later** (behavior changes here, and each phase must hold ≥ 80% coverage): detector unit tests for every implemented signal and for absent/malformed signal values; interceptor tests for signal present (bias applied), signal absent (unchanged), master flag off, per-signal toggle off, and invalid request JSON (rejected at the interceptor boundary before the detector runs, `RequestInterceptor.cs:359-370`).
+## Phase 1 — Signal research. **Done (2026-10-02).**
 
-**Exit criterion:** builds warning-free; all existing tests plus the new Phase 2 tests green; coverage ≥ 80%.
+- The signal table is in `utility-model-routing.md`. The routing evidence is in the research doc.
+- Supported: Claude Code (headers), Codex (turn metadata), Copilot (aliases; wire evidence unverified).
+- Documented as unsupported: Cursor and Aider. Neither sends a marker the router can see.
+- **Gate:** David reviewed the table on 2026-10-02 and asked for the routing evidence that produced this revision.
 
-## Phase 3 — Bias, log line, telemetry event, and dashboard
+## Phase 2 — Detector and classification plumbing. **Done under the first design** (`c41c6f0`).
 
-- The bias itself needs no new policy code: `IsUtility` already routes to `UtilityRoutingPolicy`. Phase 3 confirms that in a test rather than adding a parallel weight.
-- **Log line.** Extend the routing log at `RequestInterceptor.cs:694` with `{SubagentSignal}` (static template, sanitized via `SanitizeForLog`). No-signal requests log `none`.
-- **Telemetry event (David chose "diary and scoreboard").** Carry the signal from the classification to `RoutingTelemetryEvent` (`Telemetry/RoutingTelemetryEvent.cs`), published by `RequestTelemetryPublisher.PublishTelemetryEventAsync`. Add one nullable, trailing member (for example `SubagentSignal`) so existing positional constructors (32 callers, mostly tests) still compile.
-- **Wire and dashboard.** The event crosses gRPC (`ToWire`) to the GUI. Add the matching optional proto field and show it in the Live Stream view (`LiveStream` under `Dashboard`). Follow `docs/gui/DESIGN.md` for the badge and `docs/gui/MOTION.md` if it animates; add a bUnit test for the badge. Missing field (older router) renders as nothing.
-- **ADR first (mandatory).** AGENTS.md is categorical: transport changes get a new ADR first, and an additive protobuf field still changes the gRPC contract. Phase 3 therefore starts by drafting an ADR (via the `adr-writer` skill) for the optional telemetry field, and David approves it before any proto, `RoutingTelemetryEvent`, or GUI change. The log line does not depend on the ADR and can land first.
+The detector, `RequestClassification.Subagent`, `SubagentBiasOptions`, the interceptor wiring and their tests stay. Phase 2b changes how a signal is routed, not how it is detected.
 
-**Exit criterion:** a signalled request's log line, telemetry event, and Live Stream row all name the signal and the chosen model; an unsignalled one shows none.
+## Phase 2b — Route by class (after approval)
 
-## Phase 4 — Full test matrix (completes what Phases 2–3 started)
+**Verify with CodeGraph before editing:** `RoutingContext` (67 references), `CompositeRoutingPolicy`, `UtilityRoutingPolicy`, and the `RequestInterceptor` hub. Do not touch `ManagementFacade`.
 
-Follow `RequestInterceptorRoutingPolicyTests` and `CompositeRoutingPolicyTests`; each test stays well under the 5 s ceiling.
+- **Detector:**
+  - Read `x-claude-code-agent-type` under the same rules as the other headers: single value, printable ASCII, bounded length.
+  - Map it to a fixed vocabulary. An unknown value means "subagent" (normal routing); the detector never copies the value itself.
+  - Add `SubagentRouteClass` as a pure mapping from the signal to Helper, Light subagent, Subagent or None.
+- **Interceptor:**
+  - Apply the delegation rule.
+  - Helper: set `IsUtility = true`, as today.
+  - Light subagent: pass the class to the policy.
+  - Subagent: record the signal on the classification without changing `IsUtility`.
+- **`RoutingContext`:** one optional trailing member carrying the route class. Positional callers compile unchanged.
+- **`CompositeRoutingPolicy`:** send a light subagent to a new `UtilityRoutingPolicy` relative-floor selection. When that returns nothing, use the normal non-utility dispatch. `DecideOutcomeAsync` mirrors `SelectModelAsync`, as it does today.
+- **`UtilityRoutingPolicy`:** add the relative-floor selection. It returns `null` when no candidate has a known score or no qualifier is priced, and never applies its own degradation fallbacks to this class.
+- **Options and `appsettings.json`:** as in the options section above.
+- **Tests in this phase** (each well under 5 s):
+  - Each class routes as specified.
+  - Delegation rule: `auto` and Copilot aliases get the bias; an unresolved specific name gets today's routing; a configured name is an explicit pick.
+  - Relative floor:
+    - A cheaper candidate within the floor wins on value.
+    - A cheaper candidate below the floor is excluded, and the best-value near-best model wins.
+    - No candidate has a known score, which routes normally.
+    - The only qualifiers are unpriced, which routes normally.
+    - Free providers count as priced at 0.
+  - An unknown agent type routes normally.
+  - Each toggle works, and the kill switch works.
+  - No signal leaves routing unchanged.
+  - The existing utility-routing tests pass untouched.
 
-- **Detector unit tests** (`SubagentSignalDetectorTests`; most are written in Phase 2 and extended here): one test per verified signal (present → detected), header absent, empty, oversized, wrong case, duplicate/conflicting values, malformed signal values in an otherwise valid body → `null`. The detector takes a parsed `JsonObject`, so invalid request JSON is tested at the interceptor boundary, not here.
-- **Interceptor tests**: signalled request with a priced cheap and an expensive candidate → cheap model chosen; same request without the signal → identical result to a baseline captured before the change (assert the exact model and that `IsUtility` is false).
-- **Quality gate**: cheapest candidate below `UtilityMinQualityScore` is skipped even when signalled.
-- **Allowlist**: signalled request never resolves outside `ListModels()`; a circuit-open cheap model is not selected.
-- **Explicit model pick** with a signal present → unchanged (ADR-0005).
-- **Ambiguous/malformed signal** → existing routing.
-- **Kill switch** off → signal ignored.
-- **Copilot aliases**: `copilot-utility` and `copilot-utility-small` (exact, case-insensitive) and an unseen tier such as `copilot-utility-tiny` (prefix rule) → bias applied; names that do not start with `copilot-utility` (for example `copilot-utilit`, `my-copilot-utility`) → unchanged. This is new coverage: no alias test exists today.
-- **Regression**: the existing payload-heuristic tests (`HeuristicRequestClassifierTests`, `RequestInterceptorRoutingPolicyTests`) untouched and green.
-- Coverage on the new code ≥ 80%.
+**Exit criterion:** the build has no warnings, all tests are green, and coverage is at least 80%.
+
+## Phase 3 — Log line, telemetry event and dashboard
+
+- **Log line:** done in `533b47e`. Phase 2b adds the route class, for example `subagentSignal=claude-code/subagent route=light-subagent`. The template stays a static string, and both values come from fixed vocabularies.
+- **Telemetry field and Live Stream badge:** [ADR-0021](../adr/0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) is proposed. Nothing on the proto, `RoutingTelemetryEvent`, the publisher or the GUI changes until David accepts it. Once accepted:
+  - Add the optional `subagent_signal = 25` field and the GUI chain.
+  - Add a bUnit test for the badge, following `docs/gui/DESIGN.md` (and `docs/gui/MOTION.md` if it animates).
+  - A missing field renders nothing.
+
+**Exit criterion:** a signalled request's log line, telemetry event and Live Stream row all name the signal and the chosen model. An unsignalled one shows none.
+
+## Phase 4 — Full test matrix
+
+Follow `RequestInterceptorRoutingPolicyTests`, `CompositeRoutingPolicyTests` and `UtilityRoutingPolicyTests`, with real policies where the cost outcome matters:
+
+- **Helper:** with a priced cheap candidate and an expensive one, the cheap one is chosen.
+- **Light subagent:**
+  - With the best candidate at 0.9 and a $0 candidate at 0.85, the floor is 0.81 and the free one is chosen.
+  - With the free candidate at 0.7 instead, it is excluded and the near-best candidate is chosen.
+  - With no known scores, the request routes normally.
+- **Subagent:** the selection is identical to the same request with no signal.
+- **Allowlist:** a signalled request never resolves outside `ListModels()`, and never to a model whose circuit is open.
+- **Explicit model pick with a signal:** unchanged (ADR-0005).
+- **Copilot aliases:**
+  - These get the bias: `copilot-utility`, `copilot-utility-small`, `Copilot-Utility-Small`, and the unseen tier `copilot-utility-tiny`.
+  - These don't: `copilot-utilit`, `my-copilot-utility`.
+- **Regression:** `HeuristicRequestClassifierTests` and the existing routing-policy tests are untouched and green.
 
 ## Phase 5 — Docs and proof
 
-- Update `docs/router/utility-model-routing.md`: signal list (from Phase 1), detection, bias, fallback, config keys.
-- Correct the same doc's false "Shipped (Phase H): Router and utility alias recognition" status and its describe-only `RouterAlias` / `UtilityAliases` options (never implemented) so it matches the code.
-- Link from `docs/research/technical-reference.md` E.3 ("Sub-agent routing") to that section.
-- PR body proof, as hosted artifacts: `dotnet test` output, and a real or replayed request pair (signalled → cheaper model, unsignalled → unchanged) with the log lines. Use the replay path against local fixtures if a live harness capture is not available, and say which it is.
-- Update `docs/install/harnesses/*.md` only where a harness needs a setting for its signal to reach the router (for example, naming the small-fast model alias). Do not rework presets (out of scope).
+- **`docs/router/utility-model-routing.md`:**
+  - Add the route classes, the delegation rule, the relative floor and the config keys.
+  - Correct the false "Shipped (Phase H): Router and utility alias recognition" status and the never-implemented `RouterAlias` / `UtilityAliases` options.
+- **`docs/research/technical-reference.md` E.3:** link to that section.
+- **`docs/install/harnesses/claude-code.md`:**
+  - `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` is required for the helper and light-subagent bias.
+  - List the auto-mode classifier's model in the router so it stays an explicit pick.
+  - Don't point the model variables the classifier falls back to at `auto`.
+  - The preset itself changes only as far as these notes need. Preset rework stays out of scope.
+- **PR body proof, as hosted artifacts:**
+  - The `dotnet test` output.
+  - A request set showing a helper routed cheap, an `Explore` subagent routed cheap or normal according to the floor, a `general-purpose` subagent routed normally, and an unsignalled request unchanged, each with its log line.
+  - Say whether the requests were live or replayed.
 
-**Exit criterion:** full build and test suite green, no warnings, the checklist in the issue's "Done when" ticked with links.
+**Exit criterion:** the full build and test suite are green with no warnings, and the issue's "Done when" checklist is ticked with links.
 
 ## Risks
 
-- **Signals may not exist.** If a harness sends no marker, that harness ships as "not supported"; we do not invent one. The issue accepts this.
-- **Forged or misleading headers.** A client can send any header, but the only effect is a cheaper model within the operator's own allowlist and quality gate, so this is a cost/quality preference, not an authorization boundary. Stated in the docs.
-- **Subagents doing hard work.** A real subagent may be a difficult coding task. The quality gate only excludes models with *observed* low scores. Mitigation: per-signal toggles, and the difficulty field is left visible in the log so it can be tuned later. Not solved by this plan.
-- **Wider blast radius from the dashboard choice.** Adding a telemetry field touches `RoutingTelemetryEvent` (32 references), the proto, and the GUI. Kept additive and optional so no existing caller changes.
-- **Header volume.** The detector reads a few named headers only; no header enumeration on the hot path.
-- **Free local models become the default target (added 2026-10-02, David).** `ProviderOptions.IsFree` providers (`ollama`, `lmstudio` in `appsettings.json`) cost κ = 0 in `UtilityRoutingPolicy.ResolveCost`, so a signalled request will usually rank a local model first. Two gaps follow, neither solved by this plan: (a) a model with no observed score is not gate-dropped (unobserved ≠ bad), so a new local model can receive subagent traffic before any quality evidence exists; (b) small local models served by LM Studio have been seen echoing tool-call instructions as text (see the `lmstudio` comment in `appsettings.json`), and a real subagent usually calls tools. Mitigation: the per-signal toggles and the kill switch. The PR body states this plainly and the docs tell operators that signalled traffic prefers free local models; any tool-capability filter is a separate follow-up, not part of #163.
-- **Intermediate routers (LiteLLM, OpenRouter) may drop the headers.** A signal reaches this router only if whatever sits in front forwards the headers. No behavior change results (no header = no signal), but the bias silently never fires. Documented, not solved.
+- **Smaller savings than the first design.**
+  - Only helpers and the two light subagent types get cheaper.
+  - Helpers are a small share of spend: Claude Code puts background work under $0.04 per session.
+  - Most subagent spend routes as it does today, until F1 data justifies widening the light class, or F6 adds cost to the learned path.
+- **Classifier residual.** The fallback case is in the delegation rule above. It is documented, and it has a toggle.
+- **Tool-heavy light subagents on weak local models.**
+  - `Explore` calls Read, Grep and Glob. The relative floor checks code-quality scores, not tool-calling ability.
+  - Small LM Studio models have been seen echoing tool-call instructions as text (see the `lmstudio` comment in `appsettings.json`).
+  - **Open for Phase 2b:** whether to exclude candidates that the existing tool-call capability probing marks as unable to call tools. This needs a look at that store before committing to it.
+- **Free local models.** Helper traffic will usually land on `IsFree` providers (κ = 0). That is fine for titles. Light subagents reach them only by clearing the relative floor, which a model with no score can't do.
+- **Hint headers are opt-in.**
+  - Without `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, Claude Code sends only the agent-id header. Every subagent then routes normally and no helper is detected.
+  - This is safe but saves nothing.
+- **Signals may not exist, or may be dropped.** A harness with no marker is documented as unsupported. An intermediate router that strips headers silently disables the bias, with no other effect.
+- **Forged headers.** These are a cost preference inside the operator's allowlist and quality gate, not an authorization boundary.
+- **Wider blast radius than the first design.** `RoutingContext` and `CompositeRoutingPolicy` change. The changes are kept to one optional member and one dispatch branch.
+- **Header volume.** The detector reads a few named headers and never enumerates them all.
 
-## Decisions (David, 2026-09-29)
+## Decisions
 
-1. `Routing:SubagentBias:Enabled` defaults to **on**. Only verified signals ship, and the kill switch stays.
-2. A harness with no verifiable marker is **documented as unsupported**. No guessing from payload shape.
-3. Telemetry: **log line and dashboard**. The signal goes into `RoutingTelemetryEvent`, the gRPC wire, and the Live Stream view.
+David, 2026-09-29:
+1. `Routing:SubagentBias:Enabled` defaults to on. Only verified signals ship, and the kill switch stays.
+2. A harness with no verifiable marker is documented as unsupported.
+3. Telemetry: the log line and the dashboard. The additive proto field needs an ADR first (ADR-0021).
 
-Settled by review: the additive proto field **does** need an ADR first (see Phase 3).
+David, 2026-10-02:
+
+4. The goal is the best quality for the money.
+5. Route by class, following the vendor evidence ([ADR-0022](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md)). Keep the research in `docs/research/subagent-and-helper-routing-evidence.md`.
+
+**Open for sign-off with this revision:**
+- The 0.9 relative floor.
+- `claude-code-guide` in the light class.
+- Codex `memory_consolidation` routing normally.
+- The `ClaudeCodeRequestClass` → `ClaudeCodeHintHeaders` rename.
+- Whether light subagents exclude models without verified tool calling.
