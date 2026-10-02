@@ -726,10 +726,11 @@ public class RequestInterceptor
                     // sink forwards every log event to connected dashboards, not just RoutingTelemetryEvent).
                     _logger.LogInformation(
                         message:
-                        "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}).",
+                        "[INTERCEPTOR] Routing policy selected '{Model}' for dimension '{Dimension}' (isUtility={IsUtility}, subagentSignal={SubagentSignal}).",
                         SanitizeForLog(selectedName!),
                         SanitizeForLog(liveDimension),
-                        classification.IsUtility);
+                        classification.IsUtility,
+                        SanitizeForLog(classification.Subagent?.ToLabel() ?? "none"));
                     var policyPathBaseline = _untrainedBaselineSelector?.SelectWithScore(
                         dimension: classification.Dimension,
                         candidateModelIds: candidates.Select(c => c.ModelName));

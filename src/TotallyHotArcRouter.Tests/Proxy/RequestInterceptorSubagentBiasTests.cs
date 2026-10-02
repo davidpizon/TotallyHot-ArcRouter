@@ -20,7 +20,7 @@ public class RequestInterceptorSubagentBiasTests
     private const string ClaudeCodeAgentIdHeader = "x-claude-code-agent-id";
 
     private static (RequestInterceptor Interceptor, CapturingPolicy Policy) Build(
-        SubagentBiasOptions? options = null)
+        SubagentBiasOptions? options = null, ILogger<RequestInterceptor>? logger = null)
     {
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             ("gpt-5.4", "openai", "gpt-5.4"),
@@ -30,7 +30,7 @@ public class RequestInterceptorSubagentBiasTests
             ? null
             : new StaticOptionsMonitor<RoutingOptions>(new RoutingOptions { SubagentBias = options });
         var interceptor = new RequestInterceptor(
-            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            logger: logger ?? Mock.Of<ILogger<RequestInterceptor>>(),
             modelRouteResolver: resolver,
             routingPolicy: policy,
             routingOptionsMonitor: monitor);
@@ -214,6 +214,67 @@ public class RequestInterceptorSubagentBiasTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(expected: "gpt-5.4", actual: result.Route!.ModelName);
+    }
+
+    [Fact]
+    public async Task RoutingLogLine_NamesTheSignal_WhenOneIsDetected()
+    {
+        var logger = new CapturingLogger();
+        var (interceptor, _) = Build(logger: logger);
+
+        await interceptor.ResolveModelRouteAsync(
+            context: Context("""{"model":"auto"}""", (ClaudeCodeAgentIdHeader, "agent-1")),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var line = Assert.Single(logger.Messages, m => m.Contains("Routing policy selected 'kimi-k2.5'"));
+        Assert.Contains(expectedSubstring: "isUtility=True, subagentSignal=claude-code/subagent", actualString: line);
+    }
+
+    [Fact]
+    public async Task RoutingLogLine_SaysNone_WhenNoSignalIsDetected()
+    {
+        var logger = new CapturingLogger();
+        var (interceptor, _) = Build(logger: logger);
+
+        await interceptor.ResolveModelRouteAsync(context: Context("""{"model":"auto"}"""),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var line = Assert.Single(logger.Messages, m => m.Contains("Routing policy selected 'kimi-k2.5'"));
+        Assert.Contains(expectedSubstring: "subagentSignal=none", actualString: line);
+    }
+
+    [Fact]
+    public async Task RoutingLogLine_NeverEchoesAForgedHeaderValue()
+    {
+        var logger = new CapturingLogger();
+        var (interceptor, _) = Build(logger: logger);
+
+        await interceptor.ResolveModelRouteAsync(
+            context: Context("""{"model":"auto"}""", (ClaudeCodeAgentIdHeader, "forged-agent-id-marker")),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(collection: logger.Messages, filter: m => m.Contains("forged-agent-id-marker"));
+    }
+
+    private sealed class CapturingLogger : ILogger<RequestInterceptor>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(arg1: state, arg2: exception));
+        }
     }
 
     private sealed class CapturingPolicy(string selection) : IRoutingPolicy
