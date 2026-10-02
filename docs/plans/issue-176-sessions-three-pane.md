@@ -7,7 +7,7 @@
 **ADR-0008 Amendment 1:** Binding. This plan is a feature, not a smell refactor. It does not touch `ProxyMiddleware`, `RequestInterceptor`, or `ManagementFacade`. The router changes are small, and Phase 2 starts with an ADR for them (§5.2):
 
 - two read-only RPCs on `TelemetryService`;
-- two `ITranscriptStore` queries and one `ITaxonomyComparisonStore` overload;
+- three read-only `ITranscriptStore` queries (`ListSessionTurnMetadataAsync`, `ListTurnTextsAsync`, `GetSessionAggregateAsync`) and one `ITaxonomyComparisonStore` overload (`LoadForSessionAsync`);
 - one DI registration in `ProxyServer`.
 
 David's request, exact words:
@@ -257,13 +257,18 @@ flowchart TB
   - `text-xs leading-5`, `white-space: pre-wrap`, `word-break: break-word`.
   - Clamped to 6 lines (`.ls-msg-clamp`).
 - **Show more.** Every row the clamp actually cuts gets a toggle, and no row is left clipped without one.
-  - **Measured, not estimated.** `chat-scroll.js` checks each clamped body once (`scrollHeight > clientHeight`):
+  - **Measured against a temporary clamp.** An unclamped body always has `scrollHeight == clientHeight`, so measuring it as rendered would never find overflow. `chat-scroll.js` therefore measures under a probe class, `.ls-msg-measure`, which applies the same 6-line clamp as `.ls-msg-clamp`:
+    1. add `.ls-msg-measure` to every body being measured;
+    2. read `scrollHeight > clientHeight` for each, in one pass, so the browser lays out once;
+    3. remove the class.
+
+    All three steps run in one synchronous task, so the probe is never painted. It runs:
     - after each render that adds or changes rows;
     - whenever the list's width changes, through a `ResizeObserver` that also covers divider drags.
 
-    It reports the set of overflowing row keys to .NET in one call, and only when the set changes. Blazor renders the toggle for exactly that set.
-  - **Fail open until measured.** A body gets `.ls-msg-clamp` only after its first measurement reports it. Until then, and for good if interop fails or the circuit disconnects, the row renders unclamped. So no text is ever hidden without a toggle, whatever its script or line breaks. A character-count guess cannot promise that: 150 CJK characters or emoji can wrap past six lines in a 200 px body.
-    - The cost is one reflow when a long row is first measured and clamped. A row arriving at the pinned bottom re-pins after that reflow, through §6.2's `scrollToBottom`.
+    Every body is measured this way, clamped, unclamped, or expanded by the operator, so the answer never depends on the current render. It reports the set of overflowing row keys to .NET in one call, and only when the set changes. **Blazor then renders `.ls-msg-clamp` and the Show more toggle together, for exactly that set.** An expanded row keeps its toggle (as Show less) and stays unclamped.
+  - **Fail open until measured.** A body gets `.ls-msg-clamp` only once a measurement reports it. Until then, and for good if interop fails or the circuit disconnects, the row renders unclamped. So no text is ever hidden without a toggle, whatever its script or line breaks. A character-count guess cannot promise that: 150 CJK characters or emoji can wrap past six lines in a 200 px body.
+    - The cost is one reflow when a long row is first reported and clamped. A row arriving at the pinned bottom re-pins after that reflow, through §6.2's `scrollToBottom`.
   - Expand and collapse are instant, not animated. Line-clamp is not interpolable, and `MOTION.md` §6 forbids animating `height`.
 - **Placeholders.** An empty side renders today's muted copy: "No request captured" / "No response captured".
 - **Chips.** Chips sit before the body text, like the CodePen's `.blue-label`:
@@ -295,7 +300,7 @@ flowchart TB
   - `.ls-sessions-scroll` (the horizontal-scroll wrapper, §6.4), `.ls-sessions-layout`, `.ls-sessions-rail`, `.ls-rail-item`, `.ls-rail-item-selected`
   - `.ls-status-dot` with `.ls-status-live` / `-idle` / `-history`; `.ls-rail-footer`
   - `.ls-chat-pane`, `.ls-chat-title`, `.ls-chat-list`
-  - `.ls-msg` with `.ls-msg-request` / `-response` / `-selected`; `.ls-msg-sender`, `.ls-msg-body`, `.ls-msg-time`, `.ls-msg-clamp`, `.ls-msg-chip`
+  - `.ls-msg` with `.ls-msg-request` / `-response` / `-selected`; `.ls-msg-sender`, `.ls-msg-body`, `.ls-msg-time`, `.ls-msg-clamp`, `.ls-msg-measure` (the probe: the same clamp, applied only during measurement), `.ls-msg-chip`
   - `.ls-jump-latest`
   - `.ls-details-pane`, `.ls-details-tab` with `.active` / `.inactive`; `.ls-kv-grid`
   - `.row-enter-append` (§9)
@@ -640,7 +645,7 @@ stateDiagram-v2
   - A passive, rAF-throttled `scroll` listener reports `OnAtBottomChanged(bool)` to .NET only when the value changes.
   - `scrollToBottom` pins the list.
   - `scrollIntoView(id)` keeps a keyboard-selected row visible.
-  - `observeOverflow(list, dotNetRef)` runs §4.3's clamp measurement, re-running on a `ResizeObserver` callback.
+  - `observeOverflow(list, dotNetRef)` runs §4.3's probe-class measurement, re-running on a `ResizeObserver` callback.
   - `dispose(list)` disconnects the `ResizeObserver`, removes the scroll listener, and drops the stored .NET reference. A callback already queued checks a disposed flag and returns.
   - It is loaded from `Gui.Web/wwwroot/index.html`.
 - **Teardown.** The `@key` teardown destroys the messages pane on every tab switch, so it must leave nothing behind.
@@ -672,6 +677,13 @@ stateDiagram-v2
 
 - **Right-edge math.** For the right-edge panel, the width percentage is `(rect.right - clientX) / rect.width`.
 - **Defaults and clamps.** Left defaults to 22% within 15–35%. Right defaults to 28% within 20–40%. CSS `min-width`s protect the rail (220 px), the messages pane (360 px), and the details pane (280 px).
+  - **Effective bounds, in pixels.** The percentages alone conflict with the pixel minimums: at the 884 px layout width, 15–22% of it is below the rail's 220 px, so keyboard steps there would change `aria-valuenow` with no visible resize. And the two maxima together can squeeze the messages pane below 360 px. So `split-pane.js` derives each divider's bounds from the container's current width `W`, the 24 px of dividers, and all three minimums:
+    - rail: from `max(220, 15% of W)` to `min(35% of W, W − 24 − 360 − details width)`;
+    - details: from `max(280, 20% of W)` to `min(40% of W, W − 24 − 360 − rail width)`.
+
+    If a minimum exceeds its maximum, as at exactly 884 px, the pane sits at its minimum and the divider has nowhere to go. The layout's `min-width: 884px` keeps the three minimums satisfiable.
+  - Every drag, key press, and restore clamps to these bounds, and they are recomputed when the container resizes. So the width JS sets is always the width CSS renders. The CSS `min-width`s stay only as a backstop.
+  - The width is still stored as a fraction of `W`, so it scales with the window.
 - **Narrow windows.** The dashboard runs in a resizable browser window, and the root and `<main>` both clip (`overflow-hidden`).
   - The three minimums plus two 12 px dividers come to 884 px. With `<main>`'s padding, that is about 908 px of viewport.
   - Below that, `.ls-sessions-layout` keeps `min-width: 884px` inside a wrapper with `overflow-x: auto`, so the tab scrolls horizontally. Every pane and divider stays reachable.
@@ -679,7 +691,8 @@ stateDiagram-v2
 - **Persistence.** Widths persist in `localStorage` (`arcrouter.sessions.leftPct` / `rightPct`), with every read and write in `try/catch`. They are restored on init, which runs on every remount after a tab switch.
 - **Keyboard.**
   - Each divider gets `role="separator"`, `aria-orientation="vertical"`, `aria-valuenow`/`min`/`max`, and `tabindex="0"`.
-  - ArrowLeft and ArrowRight resize by 2%. Home and End jump to the clamps.
+  - `aria-valuenow`, `aria-valuemin`, and `aria-valuemax` report the **rendered** width and the effective bounds, as whole percentages of `W`. They are updated whenever the bounds are recomputed, so a screen reader never hears a value the layout does not show.
+  - ArrowLeft and ArrowRight resize by 2% of `W`, clamped to the effective bounds, so a key press at a bound changes nothing, `aria-valuenow` included. Home and End jump to the effective bounds.
   - Today's divider has no keyboard path at all.
 - **Motion.** The idempotent `dataset.splitInit` guard and the pointer-capture drag are unchanged. The drag stays direct manipulation: 1:1 and unanimated (`MOTION.md` §5).
 
@@ -884,7 +897,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
   - "Client" with its requested-model tooltip; routed model with its dot.
   - Placeholders.
   - Row click selects `(turn, side)` and sets `aria-pressed`.
-  - Show more renders for exactly the keys the overflow callback reports. Before any report, and after an interop failure, every body is unclamped and has no toggle. A short text never gets a toggle.
+  - `.ls-msg-clamp` and Show more render together, for exactly the keys the overflow callback reports. Before any report, and after an interop failure, every body is unclamped and has no toggle. A short text never gets a toggle. An expanded row keeps its toggle and stays unclamped.
   - Chips for fallback and substitution.
   - The in-session filter counts only loaded rows. It shows the "Earlier turns aren't searched" note when older history exists, and not otherwise.
   - Newest response row implicitly selected.
@@ -978,7 +991,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 **Manual checklist (each phase, local router, Chrome or Edge):**
 
 - Drag both dividers, switch tabs, and return: widths are kept.
-- Keyboard-resize both dividers.
+- Keyboard-resize both dividers. At a 900 px window, every key press either visibly moves the divider or changes nothing, and `aria-valuenow` matches the rendered width. With both side panes at their maxima, the messages pane keeps at least 360 px.
 - Scroll up during live traffic: the pill appears and nothing jumps. Click the pill: the list pins again.
 - Show more and Show less.
 - Reduced-motion OS setting.
@@ -1035,4 +1048,4 @@ Each has a default that this plan already assumes.
 6. **Full text** comes from the batched `GetTurnTexts` RPC (the deviation recorded above) rather than the session RPC.
 7. **Implicit selection** never calls `OnSelect`, which preserves Cost Analytics' All Sessions default. Explicit selection, by pointer or keyboard, always does.
 8. **History-only dot** is muted grey, not the CodePen's red.
-9. **Divider defaults.** 22% and 28%, clamped to 15–35% and 20–40%.
+9. **Divider defaults.** 22% and 28%, clamped to 15–35% and 20–40%, and further to the effective pixel bounds that keep every pane at its minimum (§6.4).
