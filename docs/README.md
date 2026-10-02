@@ -130,6 +130,7 @@ paths so existing links resolve.
 | [`router/backlog.md`](router/backlog.md) | Router-side known defects and not-yet-implemented work |
 | [`router/tracked-todos.md`](router/tracked-todos.md) | Open working items carried across sessions |
 | [`router/standing-rules.md`](router/standing-rules.md) | Standing rules for boarded work; approved plan before coding |
+| [`router/multi-agent-cost-plan.md`](router/multi-agent-cost-plan.md) | Proposed plan: free AGPL multi-agent cost savings first; closed on-prem enterprise sharing second |
 | [`archive/README.md`](archive/README.md) | Closed plans and the historical React kit |
 
 ## Citation
