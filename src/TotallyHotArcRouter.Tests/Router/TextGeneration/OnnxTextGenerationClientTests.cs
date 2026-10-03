@@ -15,6 +15,13 @@ namespace TotallyHot.ArcRouter.Tests.Router.TextGeneration;
 /// contributors' machines - a multi-hundred-megabyte model download has no place running unattended in
 /// a unit test suite.
 /// </summary>
+/// <remarks>
+/// The models root resolves under the machine-shared directory, which <see cref="TestAppDataDirectory"/>
+/// redirects to this run's scratch directory. The real cached model is therefore never visible here, and
+/// <see cref="GenerateAsync_OnCachedModel_ProducesNonEmptyText"/> skips in every ordinary run. Unlike the
+/// CodeRouterBench reconciliation tests, it cannot be pointed back at the installed copy: the models root
+/// is static, with no per-instance path to inject.
+/// </remarks>
 [Trait(name: "Category", value: "Integration")]
 public class OnnxTextGenerationClientTests
 {
@@ -63,9 +70,9 @@ public class OnnxTextGenerationClientTests
 
     /// <summary>
     /// The exact reproduction recipe for validating a locally-cached llm_router model: generate a
-    /// completion for a minimal routing-shaped prompt and confirm it comes back as non-empty text. Run
-    /// it locally (<c>dotnet test --filter GenerateAsync_OnCachedModel_ProducesNonEmptyText</c>) after
-    /// the application has downloaded the model once.
+    /// completion for a minimal routing-shaped prompt and confirm it comes back as non-empty text. It
+    /// only runs when the model is cached under this run's redirected models root - see the class
+    /// remarks for why the installed copy is out of reach.
     /// </summary>
     [Fact]
     public async Task GenerateAsync_OnCachedModel_ProducesNonEmptyText()

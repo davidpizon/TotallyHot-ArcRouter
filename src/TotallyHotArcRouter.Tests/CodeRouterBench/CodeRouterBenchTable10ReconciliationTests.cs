@@ -1,7 +1,5 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
-using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Quality;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
@@ -57,22 +55,23 @@ public class CodeRouterBenchTable10ReconciliationTests
     // Every dimension/model cell for these models matches Table 10 to within 0.01.
     private static readonly string[] CleanModels = ["claude-opus-4-6", "gpt-5.4", "claude-sonnet-4-6", "kimi-k2.5"];
 
-    /// <summary>The real, installed corpus database - not a temp fixture. See the class summary.</summary>
+    /// <summary>
+    /// A private copy of the real, installed corpus database - not a seeded fixture. See the class summary
+    /// and <see cref="InstalledBenchmarkCorpus"/>.
+    /// </summary>
     private static BenchmarkDatabase OpenRealDatabase()
     {
-        return new BenchmarkDatabase(Options.Create(new StorageOptions()));
+        return InstalledBenchmarkCorpus.Open();
     }
 
     /// <summary>
     /// Whether the real corpus has probing-split rows, decided without writing anything.
     /// </summary>
     /// <remarks>
-    /// Deliberately no <c>EnsureCreated</c>: this points at the user's actual <c>%LOCALAPPDATA%</c> corpus,
-    /// not a temp fixture, so creating the schema here would leave an empty <c>coderouterbench.db</c> (and
-    /// its directory) behind on every machine that runs the suite without ever having synced - a confusing
-    /// artifact produced by a test that then skips. An absent file is simply "not populated". The file is
-    /// checked before opening because SQLite creates a database on connect, which would reintroduce the
-    /// same side effect by another route.
+    /// Deliberately no <c>EnsureCreated</c>: an absent file means this machine never synced the corpus,
+    /// which is a skip, not something to paper over with an empty schema. The file is checked before
+    /// opening because SQLite creates a database on connect, which would do the same papering-over by
+    /// another route.
     /// </remarks>
     private static bool ProbingSplitIsPopulated(BenchmarkDatabase database)
     {
@@ -87,9 +86,9 @@ public class CodeRouterBenchTable10ReconciliationTests
         }
         catch (SqliteException)
         {
-            // Opening is inside the try, not just the query: this is the real user database, so on a
-            // developer machine it may be locked by a running proxy, or left corrupt or half-written by an
-            // interrupted sync. Microsoft.Data.Sqlite surfaces all of those - SQLITE_BUSY, SQLITE_NOTADB,
+            // Opening is inside the try, not just the query: this is a copy of the real user database, so
+            // on a developer machine it may have been copied mid-write by a running proxy, or left corrupt
+            // or half-written by an interrupted sync. Microsoft.Data.Sqlite surfaces all of those - SQLITE_BUSY, SQLITE_NOTADB,
             // SQLITE_CANTOPEN, and a missing table alike - as SqliteException, from Open() as readily as
             // from ExecuteScalar(). Every one of them means "no corpus to reconcile against", which is a
             // skip; none of them is a reason to fail the whole test run.

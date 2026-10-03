@@ -1,9 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
-using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router.Embeddings;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
@@ -33,7 +31,7 @@ public class N5ComparisonReportReconciliationTests
 
     private static BenchmarkDatabase OpenRealDatabase()
     {
-        return new BenchmarkDatabase(Options.Create(new StorageOptions()));
+        return InstalledBenchmarkCorpus.Open();
     }
 
     private static bool CorpusIsReadyForN5(BenchmarkDatabase database)
