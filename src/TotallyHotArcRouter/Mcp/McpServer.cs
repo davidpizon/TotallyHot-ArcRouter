@@ -128,14 +128,14 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                     // Letting this throw fails the whole McpServer construction, which McpHostedService's
                     // own try/catch logs and swallows at the top level - the same "MCP is non-essential,
                     // don't fail the process" posture, just enforced one level up.
-                    LocalCertificateAuthority.GetOrCreateLeaf();
+                    LocalCertificateAuthority.EnsureLeaves();
                     KestrelBindAddress.Listen(options: options, bindAddress: bindAddress, port: port,
                         configure: listenOptions =>
                         {
                             listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
                             listenOptions.UseHttps(httpsOptions =>
                                 httpsOptions.ServerCertificateSelector =
-                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
+                                    (_, serverName) => LocalCertificateAuthority.GetOrCreateLeaf(serverName));
                         });
                 });
 

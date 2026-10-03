@@ -7,6 +7,10 @@
 > **Accepted 2026-09-15**, on completion of the web GUI migration plan's Phases P1-P10: the local CA and
 > leaf issuance ship, every listener (proxy, web, MCP) is HTTPS by default, and `--install-certificate`/
 > `--export-ca` are real, working CLI flags with Windows/Linux/macOS trust-store implementations.
+>
+> **Amended 2026-10-02** by [Amendment 1](#amendment-1-2026-10-02-an-sni-selected-dns-only-leaf-for-boringssl-clients):
+> the CA now issues two leaves and each handshake gets one by its SNI, because BoringSSL clients reject
+> the original leaf.
 
 ## Context and Problem Statement
 
@@ -118,3 +122,81 @@ nothing in this decision precludes that. Builds on
 [ADR-0011](0011-router-served-blazor-webassembly-gui-over-grpc-web.md) (which listeners need trusted
 TLS) and [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md) (where the CA key is
 stored).
+
+## Amendment 1 (2026-10-02): an SNI-selected DNS-only leaf for BoringSSL clients
+
+**Status:** accepted 2026-10-02. David replied "Fix it" to the plan that recommends this option,
+[`issue-TBD-https-leaf-for-boringssl-clients.md`](../plans/issue-TBD-https-leaf-for-boringssl-clients.md).
+Amends the Decision Outcome and its "Neutral" consequence above. The CA, its name constraint and the
+trust steps do not change.
+
+### Why
+
+The "Neutral" consequence above assumed every TLS stack we target honours name constraints. BoringSSL
+does not implement them for IP addresses. Its matcher (`nc_match_single` in
+`crypto/x509/v3_ncons.cc`) handles DNS names, email addresses, URIs and directory names, and returns
+`X509_V_ERR_UNSUPPORTED_CONSTRAINT_TYPE` for anything else. BoringSSL is the TLS library inside Bun, so
+it is inside the native Claude Code build.
+
+The original leaf carries `IP:127.0.0.1` and `IP:::1`, and this CA constrains both. So every Bun client
+failed every HTTPS port with `UNSUPPORTED_CONSTRAINT_TYPE`, whichever host name it dialled. Reproduced
+on 2026-10-02 with Claude Code 2.1.246 and 2.1.286. Node, .NET and Schannel accepted the same chain.
+The reproduction is in the plan above.
+
+### Decision
+
+The CA issues two leaves, and each handshake gets one by the client's SNI:
+
+| Handshake | Leaf | Subject alternative names | File |
+|---|---|---|---|
+| Client sent SNI (it dialled `localhost`) | DNS-only | `DNS:localhost` | `router-leaf-dns.pfx` |
+| No SNI (it dialled an IP literal) | Loopback | `DNS:localhost`, `IP:127.0.0.1`, `IP:::1` | `router-leaf.pfx` (unchanged) |
+
+```mermaid
+flowchart LR
+    Hello["ClientHello"] --> Q{"SNI present and not an IP literal?"}
+    Q -- yes --> Dns["DNS-only leaf"]
+    Q -- no --> Ip["Loopback leaf"]
+    Dns --> Ca["Same name-constrained CA"]
+    Ip --> Ca
+```
+
+Both leaves share the renewal window, lock and persistence code, and each has its own password secret
+(`router-leaf-dns:cert-password` for the new one). The first start after upgrade mints
+`router-leaf-dns.pfx`. Nothing is re-trusted.
+
+Both leaves also name their issuer by key, not only by subject:
+
+- **Format.** Each leaf carries a non-critical Authority Key Identifier (AKI) holding only the key
+  identifier, copied from the CA's Subject Key Identifier (SKI), and a non-critical SKI of its own. The
+  AKI carries no issuer name or serial. Without an AKI, BoringSSL picks the issuer by subject alone. A
+  client that trusts two CAs named `CN=TotallyHot Arc Router Local CA` then fails with
+  `CERT_SIGNATURE_FAILURE` when it picks the other one. That happens, for example, when an old router CA
+  stays in the OS store after a reinstall mints a new one.
+- **Reuse rule.** A persisted leaf is reused only when it is outside its renewal window *and* its AKI
+  key identifier equals the current CA's SKI. Otherwise it is re-issued under the current CA. So a leaf
+  saved before this amendment, which has no AKI, is re-issued once on first use. The CA is unchanged, so
+  nothing is re-trusted. A leaf left over from an earlier CA, after the CA expired and was re-minted or
+  its file was removed, is re-issued too, instead of being served until its own renewal window.
+
+### Consequences
+
+- Good, because Bun clients, including the native Claude Code build, work on every HTTPS port through
+  `https://localhost:…`.
+- Good, because every other client keeps the leaf it gets today: an IP-literal URL still sends no SNI
+  and still gets the leaf that names its address.
+- Good, because the CA and its IP-address constraint are untouched, so the blast-radius driver above
+  still holds.
+- Bad, because Bun clients still fail on an IP-literal URL. No leaf can fix that while the CA constrains
+  IP addresses, and dropping that constraint would let a stolen CA key sign for any IP address. The
+  client docs tell those clients to use `localhost`.
+- Bad, because there are now two leaf files and two password secrets to keep consistent.
+
+### Options not taken
+
+- **One DNS-only leaf for every handshake.** Smaller, but it breaks every `https://127.0.0.1:…` and
+  `https://[::1]:…` URL for every client, including the dashboard URLs the web host allows.
+- **Drop the IP subtrees from the CA's constraint.** Fixes Bun on every name, but it needs a new CA, so
+  every machine and client bundle re-trusts. It also lets the CA key sign for any IP address.
+- **Leave Bun clients on the plain-HTTP listener.** Keeps the main harness on plaintext loopback for
+  good.

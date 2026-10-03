@@ -71,16 +71,58 @@ base URL they are given, so they need the version prefix included.
 
 | Client | How it discovers trust |
 |---|---|
-| Claude Code / any Node-based CLI | System trust store by default. If it ignores that, set `NODE_EXTRA_CA_CERTS=<path to router-ca.crt>` (or Node ≥18's `--use-system-ca`). |
+| Node-based CLIs | Node's own bundled CA set by default, which ignores the OS store, so `--install-certificate` alone is not enough. Either add the CA with `NODE_EXTRA_CA_CERTS=<path to router-ca.crt>`, or have Node also read the OS store with `--use-system-ca` (Node 22.15+ and 23.8+) once the CA is installed there. |
+| Claude Code (native build), other Bun-based CLIs | Claude Code reads its bundled CA set plus the OS store by default (`CLAUDE_CODE_CERT_STORE` narrows that), so `--install-certificate` is enough; `NODE_EXTRA_CA_CERTS=<path to router-ca.crt>` also works. Other Bun CLIs: use `NODE_EXTRA_CA_CERTS`. Always dial `localhost`, never `127.0.0.1` or `[::1]`. See [Bun and BoringSSL clients](#bun-and-boringssl-clients). |
 | OpenAI/Anthropic Python SDKs | `httpx`'s default `truststore`/`certifi` bundle; point it at the CA with `SSL_CERT_FILE=<path to router-ca.crt>` or `REQUESTS_CA_BUNDLE=<path to router-ca.crt>`. |
 | curl | System trust store by default (Windows: Schannel, reads the OS store directly). To point at the CA explicitly without installing it: `curl --cacert router-ca.crt https://localhost:47101/v1/models`. |
 | .NET clients | System trust store (`X509Store`) automatically once `--install-certificate` has run. |
 | Rust/Go CLIs | Most use the OS trust store by default; check for a `--cacert`/`SSL_CERT_FILE`-equivalent flag if the tool vendors its own root bundle instead. |
 | Ollama-API-compatible clients pointed at the router | Same as above - these are ordinary HTTPS clients once pointed at `https://localhost:47101`, with no protocol difference from talking to a real Ollama server over HTTP. |
 
+## Bun and BoringSSL clients
+
+Bun checks certificates with BoringSSL's X.509 verifier. That covers the native Claude Code build (the
+installer's `claude.exe` and the CLI bundled with the Claude desktop app) and other Bun-compiled CLIs.
+BoringSSL implements name constraints for DNS names, email addresses, URIs and directory names, but not
+for IP addresses
+([source](https://github.com/google/boringssl/blob/main/crypto/x509/v3_ncons.cc), `nc_match_single`).
+The router's CA constrains `127.0.0.1/32` and `::1/128`
+([ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md)), so BoringSSL rejects any leaf
+from it that lists an IP address, with `X509_V_ERR_UNSUPPORTED_CONSTRAINT_TYPE`.
+
+The router therefore picks the leaf for each handshake by the client's SNI
+([ADR-0013 Amendment 1](../adr/0013-name-constrained-local-ca-for-router-tls.md#amendment-1-2026-10-02-an-sni-selected-dns-only-leaf-for-boringssl-clients)):
+
+| Client dials | SNI sent | Leaf names | Bun clients | Node, .NET, Schannel |
+|---|---|---|---|---|
+| `https://localhost:…` | `localhost` | `localhost` | Work | Work |
+| `https://127.0.0.1:…` or `https://[::1]:…` | none | `localhost`, `127.0.0.1`, `::1` | Fail, `UNSUPPORTED_CONSTRAINT_TYPE` | Work |
+
+**Bun clients must dial `localhost`.** On an IP literal, Claude Code reports
+`API Error: Unable to connect to API (UNSUPPORTED_CONSTRAINT_TYPE)`. Its `--debug` log says only
+`Connection error.`, and the router logs nothing because the handshake never completes. Trust is not
+the problem, so neither `NODE_EXTRA_CA_CERTS` nor the OS store changes the result.
+
+Checked on 2026-10-02 with Claude Code 2.1.246 and 2.1.286, Node 26, .NET 10 and Schannel curl, against
+the router's own certificate code behind Kestrel with the router's listener settings.
+
+**Router builds without the two-leaf split** serve the IP-bearing leaf to every client, so Bun clients
+fail on every URL there. On those builds, point them at the plain-HTTP listener below. Do not turn
+certificate checking off (`NODE_TLS_REJECT_UNAUTHORIZED=0`) to get past it.
+
+**`CERT_SIGNATURE_FAILURE` instead** means a Bun client trusts more than one certificate named
+`CN=TotallyHot Arc Router Local CA`, and the router's leaf has no Authority Key Identifier (AKI), for
+example an old router CA still in the OS store after a reinstall. Without an AKI, BoringSSL picks an
+issuer by name alone and can pick the wrong one. Checked on 2026-10-03 with one CA in the Windows Root
+store and the other in `NODE_EXTRA_CA_CERTS`; two same-named CAs both in that bundle did not trigger it.
+Router builds with the two-leaf split issue leaves with an AKI that names the CA's key. They also
+re-issue any saved leaf without one on first use, under the same CA, so nothing needs re-trusting. On
+older builds, remove the stale CA from the trust store. Removing it is good hygiene on any build.
+
 ## When to use the opt-in plain-HTTP listener instead
 
-Some tools hard-code `http://` or otherwise cannot be configured to trust a custom CA at all. For those,
+Some tools hard-code `http://` or otherwise cannot be configured to trust a custom CA at all. Bun-based
+clients need it only on router builds without the two-leaf split above. For those,
 set `Proxy:PlainHttp:Enabled=true` (default port `47105`, always loopback-only, LLM-proxy routes only -
 never gRPC, the dashboard, auth, or MCP). The router logs a Warning at startup whenever this listener is
 enabled, since traffic to it is unencrypted on the wire to that first hop. Prefer the HTTPS port

@@ -184,15 +184,15 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                     // connection) purely to fail loudly and immediately if certificate generation is
                     // fundamentally broken (e.g. the data directory is unwritable) - the leaf itself is
                     // still re-resolved on every TLS handshake via ServerCertificateSelector below, which
-                    // is the actual hot-swap mechanism: LocalCertificateAuthority.GetOrCreateLeaf()
-                    // transparently mints and persists a replacement once the cached leaf enters its
-                    // renewal window, with no restart and no re-trust needed by an already-trusting
-                    // client. Deliberately not caught here: with the LLM proxy port now also TLS-only
-                    // by default, a certificate failure
+                    // is the actual hot-swap mechanism: LocalCertificateAuthority.GetOrCreateLeaf(serverName)
+                    // picks the leaf by the handshake's SNI (ADR-0013 Amendment 1) and transparently mints
+                    // and persists a replacement once that leaf enters its renewal window, with no restart
+                    // and no re-trust needed by an already-trusting client. Deliberately not caught here:
+                    // with the LLM proxy port now also TLS-only by default, a certificate failure
                     // means the router cannot serve its core purpose at all, not just that telemetry is
                     // unavailable - so this now fails ProxyServer construction outright rather than
                     // silently degrading.
-                    LocalCertificateAuthority.GetOrCreateLeaf();
+                    LocalCertificateAuthority.EnsureLeaves();
 
                     // The primary LLM-forwarding proxy port (Phase P7): HTTPS by default (D6), with the
                     // same shared leaf every other listener presents - ADR-0013's whole point is one
@@ -210,7 +210,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                             listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
                             listenOptions.UseHttps(httpsOptions =>
                                 httpsOptions.ServerCertificateSelector =
-                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
+                                    (_, serverName) => LocalCertificateAuthority.GetOrCreateLeaf(serverName));
                             TagAsProxyPort(listenOptions);
                         });
 
@@ -249,7 +249,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                             listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
                             listenOptions.UseHttps(httpsOptions =>
                                 httpsOptions.ServerCertificateSelector =
-                                    (_, _) => LocalCertificateAuthority.GetOrCreateLeaf());
+                                    (_, serverName) => LocalCertificateAuthority.GetOrCreateLeaf(serverName));
                         });
                 });
 
