@@ -9,7 +9,7 @@
 
 ## Goal
 
-Store and publish OpenAI-shaped replies exactly as streamed. Whitespace-only deltas are content: paragraph breaks, indentation, and the spaces between words. Prompt extraction does not change.
+Keep every whitespace-only delta in OpenAI-shaped replies, within the existing bounds. Whitespace-only deltas are content: paragraph breaks, indentation, and the spaces between words. Prompt extraction does not change. The existing limits stay: `response_text` is still head-capped by the 4 MiB response capture, and `ResponseSummary` is still truncated to 2,000 characters by `TextTruncator` (`RoutingTelemetryEvent.cs:66-69`). This plan removes neither.
 
 ## What exists today (from CodeGraph, verified against `main` on 2026-10-03)
 
@@ -95,10 +95,10 @@ Its XML doc says "non-empty", but the code rejects whitespace-only strings (`Mes
 - With D1: `AnthropicResponseTextParserTests.TryExtractFromStreamingBuffer_OnlyWhitespaceDeltas_ReturnsFalse`.
 - With D2: `AnthropicResponseTextParserTests.TryExtractFromNonStreamingBody_MultipleTextBlocks_ConcatenatesVerbatim` replaces `..._ConcatenatesWithSpace`.
 
-Run the red set and paste its output into the PR:
+Run the four affected test classes and paste the output into the PR. It must show every Step 1 test failing. Some of those tests have no "Whitespace" in their names, so a name filter would miss them; filtering by class does not.
 
 ```bash
-dotnet test --project src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj --filter-method "*Whitespace*"
+dotnet test --project src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.csproj --filter-class "*OpenAiResponseTextParserTests" --filter-class "*AnthropicResponseTextParserTests" --filter-class "*RequestTelemetryPublisherTests" --filter-class "*MessageContentTextExtractorTests"
 ```
 
 **Step 2: guard tests that pass before and after.**
@@ -106,7 +106,7 @@ dotnet test --project src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.cs
 - OpenAI stream made only of whitespace → `false`.
 - OpenAI non-streaming string with interior whitespace → unchanged.
 - OpenAI non-streaming whitespace-only string → `false`.
-- Anthropic stream with whitespace-only deltas → exact.
+- Anthropic stream that mixes text with whitespace-only deltas → exact. A stream made only of whitespace is D1's case and is covered by the Step 1 test.
 - A publisher test for translated `anthropic` with native bytes. The text comes from the native capture, which pins the correction in the issue.
 - All `RequestTextExtractorTests` and the existing `ExtractText` tests stay unchanged and green.
 
