@@ -74,8 +74,7 @@ public class ClusterRetrainHostedServiceTests
         IClusterTrainingService trainingService, IMemoryEntryStore memoryStore, int threshold, bool enabled,
         bool enableAdaptiveRouting = true)
     {
-        var modelPath = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"), path4: "cluster_model.json");
+        var modelPath = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"), path3: "cluster_model.json");
         return new ClusterRetrainHostedService(
             logger: NullLogger<ClusterRetrainHostedService>.Instance,
             trainingService: trainingService,

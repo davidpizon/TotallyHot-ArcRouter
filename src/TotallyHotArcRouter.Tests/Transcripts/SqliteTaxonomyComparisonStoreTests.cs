@@ -19,8 +19,7 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
 
     public SqliteTaxonomyComparisonStoreTests()
     {
-        _tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
         _dbPath = Path.Combine(path1: _tempDirectory, path2: "transcripts.db");
     }

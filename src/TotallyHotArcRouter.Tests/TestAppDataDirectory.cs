@@ -23,8 +23,8 @@ namespace TotallyHot.ArcRouter.Tests;
 /// every possible first resolution, including assembly fixtures and static initializers in test
 /// classes. <see cref="AppDataPaths"/> memoizes its answer and refuses to be redirected afterward, so a
 /// redirect that came too late would throw here rather than quietly let a test touch the real directory.
-/// The scratch root sits under the shared <c>arcrouter-tests</c> root, so
-/// <see cref="TestTempDirectorySweeper"/> deletes it at the end of the run.
+/// The scratch root sits inside this run's <see cref="TestScratchDirectory.RunRoot"/>, so
+/// <see cref="TestTempDirectorySweeper"/> deletes it with the rest of the run's scratch at the end.
 /// </para>
 /// <para>
 /// The one deliberate exception is <c>InstalledBenchmarkCorpus</c>, which the CodeRouterBench
@@ -34,9 +34,8 @@ namespace TotallyHot.ArcRouter.Tests;
 /// </remarks>
 internal static class TestAppDataDirectory
 {
-    /// <summary>Gets this run's scratch root, unique per test process.</summary>
-    public static string Root { get; } = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-        path3: $"appdata-{Guid.NewGuid():N}");
+    /// <summary>Gets this run's app-data scratch root, inside <see cref="TestScratchDirectory.RunRoot"/>.</summary>
+    public static string Root { get; } = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: "appdata");
 
     /// <summary>
     /// Gets the directory standing in for the machine-shared data directory. It ends in

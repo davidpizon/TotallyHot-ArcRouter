@@ -12,8 +12,7 @@ public sealed class ManagementTokenProviderTests
 {
     private static ProtectedSecretStore NewStore()
     {
-        return new ProtectedSecretStore(Path.Combine(Path.GetTempPath(), "arcrouter-tests",
-            Guid.NewGuid().ToString("N"), "secrets.dat"));
+        return new ProtectedSecretStore(Path.Combine(TestScratchDirectory.RunRoot, Guid.NewGuid().ToString("N"), "secrets.dat"));
     }
 
     [Fact]

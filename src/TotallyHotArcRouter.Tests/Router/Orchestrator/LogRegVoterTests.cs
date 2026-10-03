@@ -109,8 +109,7 @@ public class LogRegVoterTests
     {
         var storageOptions = Options.Create(new StorageOptions
         {
-            LogRegModelPath = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-                path3: Guid.NewGuid().ToString("N"), path4: "logreg_voter_model.json")
+            LogRegModelPath = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"), path3: "logreg_voter_model.json")
         });
         var voter = new LogRegVoter(logger: NullLogger<LogRegVoter>.Instance, storageOptions: storageOptions,
             embeddingClient: new StubEmbeddingClient());
@@ -127,8 +126,7 @@ public class LogRegVoterTests
     [Fact]
     public async Task VoteAsync_ArtifactWrittenAfterConstruction_IsPickedUpOnlyAfterReload()
     {
-        var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var path = Path.Combine(path1: directory, path2: "logreg_voter_model.json");
         var storageOptions = Options.Create(new StorageOptions { LogRegModelPath = path });

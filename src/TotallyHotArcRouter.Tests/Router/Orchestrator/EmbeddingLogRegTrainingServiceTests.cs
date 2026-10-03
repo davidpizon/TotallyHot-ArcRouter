@@ -219,8 +219,8 @@ public class EmbeddingLogRegTrainingServiceTests
 
     private static string TempModelPath()
     {
-        return Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
-            path4: "logreg_voter_model.json");
+        return Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"),
+            path3: "logreg_voter_model.json");
     }
 
     private static void CleanupModelPath(string modelPath)
