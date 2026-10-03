@@ -861,6 +861,18 @@ public class RequestInterceptor
         // default IRoutingPolicy.DecideOutcomeAsync's default implementation reports.
         var eligibleRoutes = _routingCandidateBuilder
             .RankEligibleModels(excludeModelNames: [], liveDimension: liveDimension);
+
+        // The same anthropic-only restriction the policy path applies: a biased native Messages request reaching
+        // this fallback (no policy, a policy that threw, or an ineligible pick) must not land on a provider that
+        // cannot take the request as sent. It is withdrawn only when no anthropic route is eligible at all.
+        var fallbackBiasWithdrawn = false;
+        if (biasNeedsNativeMessages)
+        {
+            var nativeRoutes = eligibleRoutes.Where(r => IsNativeMessagesProvider(r.Provider)).ToList();
+            if (nativeRoutes.Count > 0) eligibleRoutes = nativeRoutes;
+            else fallbackBiasWithdrawn = true;
+        }
+
         var fallbackRoute = eligibleRoutes.FirstOrDefault();
         if (fallbackRoute is null) return null;
 
@@ -868,7 +880,8 @@ public class RequestInterceptor
             candidateModelIds: eligibleRoutes.Select(r => r.ModelName));
         return new AgenticRouteResult(Route: fallbackRoute, false, 1.0,
             UntrainedBaselineModel: fallbackPathBaseline?.Model,
-            UntrainedBaselinePredictedScore: fallbackPathBaseline?.Score);
+            UntrainedBaselinePredictedScore: fallbackPathBaseline?.Score,
+            SubagentBiasWithdrawn: fallbackBiasWithdrawn);
     }
 
     /// <summary>

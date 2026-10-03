@@ -363,6 +363,48 @@ public class RequestInterceptorSubagentBiasTests
         Assert.All(policy.LastContext.Candidates, c => Assert.Equal(expected: "anthropic", actual: c.Provider));
     }
 
+    /// <summary>
+    /// The three ways a biased native Messages request reaches the memory-ranking fallback: a policy pick outside
+    /// the anthropic-only menu, a policy that throws, and no policy at all. Each must keep the restriction.
+    /// </summary>
+    public static TheoryData<string> FallbackPolicies => ["ineligible-pick", "throws", "none"];
+
+    [Theory]
+    [MemberData(nameof(FallbackPolicies))]
+    public async Task NativeMessagesHelper_MemoryFallback_StaysOnAnthropic(string policyKind)
+    {
+        // Configured non-anthropic models first, so an unrestricted fallback would pick one of them.
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"),
+            ("local", "lmstudio", "local"), ("claude-haiku", "anthropic", "claude-haiku"));
+        IRoutingPolicy? policy = policyKind switch
+        {
+            "ineligible-pick" => new CapturingPolicy("gpt-5.4"),
+            "throws" => new ThrowingPolicy(),
+            _ => null
+        };
+        var interceptor = new RequestInterceptor(logger: new CapturingLogger(), modelRouteResolver: resolver,
+            routingPolicy: policy);
+
+        var result = await ResolveAt(interceptor, "/v1/messages", """{"model":"auto"}""", AuxiliaryClass);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected: "anthropic", actual: result.Route!.Provider);
+    }
+
+    [Fact]
+    public async Task NativeMessagesHelper_MemoryFallbackWithNoAnthropicCandidate_StillServesTheRequest()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(("gpt-5.4", "openai", "gpt-5.4"),
+            ("local", "lmstudio", "local"));
+        var interceptor = new RequestInterceptor(logger: new CapturingLogger(), modelRouteResolver: resolver,
+            routingPolicy: new ThrowingPolicy());
+
+        var result = await ResolveAt(interceptor, "/v1/messages", """{"model":"auto"}""", AuxiliaryClass);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotEqual(expected: "anthropic", actual: result.Route!.Provider);
+    }
+
     [Fact]
     public async Task NativeMessagesHelper_NoAnthropicCandidate_WithdrawsTheBias()
     {
@@ -461,6 +503,15 @@ public class RequestInterceptorSubagentBiasTests
             Func<TState, Exception?, string> formatter)
         {
             Messages.Add(formatter(arg1: state, arg2: exception));
+        }
+    }
+
+    /// <summary>A policy whose selection always throws, sending the request to the memory-ranking fallback.</summary>
+    private sealed class ThrowingPolicy : IRoutingPolicy
+    {
+        public Task<string> SelectModelAsync(RoutingContext context, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("policy failure");
         }
     }
 
