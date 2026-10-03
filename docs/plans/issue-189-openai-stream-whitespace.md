@@ -1,6 +1,6 @@
 # Plan: Keep whitespace-only deltas in OpenAI-shaped streamed replies (#189)
 
-**Status:** Proposed. Awaiting David's approval. No production code changes in this change.
+**Status:** Proposed. D1–D3 decided by David on 2026-10-03 (see the end of this plan). Awaiting David's sign-off on the plan as a whole. No production code changes in this change.
 **Issue:** [#189](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/189) — "OpenAI-shaped streamed replies lose whitespace-only deltas in transcripts and telemetry".
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request must link this plan once approved.
 **Related:** [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (proposed) lists this bug under "Found during the investigation, tracked separately". This plan is that item. The fix does not depend on where text is stored: under ADR-0019 the per-session files hold the same per-turn reply extract, produced by the same parser. See also the [#165](issue-165-export-import-history.md) and [#179](issue-179-persisted-sessions-list-size.md) plans.
@@ -135,8 +135,8 @@ dotnet test --project src/TotallyHotArcRouter.Tests/TotallyHotArcRouter.Tests.cs
 - **Verbosity-skew baselines shift up for OpenAI-shaped providers.** The shift is correct: they were undercounted before.
 - **Quality scores may change for OpenAI-shaped providers.** Code blocks that used to be dropped or mis-indented now parse, so live-learning memory moves toward their true scores. Worth watching after merge; no action is planned.
 
-## Decisions needed from David
+## Decisions (David, 2026-10-03)
 
-1. **D1: blank whole reply.** Recommended: "no text" in all four paths. The alternative stores blank replies verbatim, which is the most literal reading of "full text". It would also turn tool-only turns from `NULL` into blank rows.
-2. **D2: Anthropic non-streaming block join.** Recommended: verbatim, matching the stream path and the translator. The alternative keeps the `' '` join and its pinned test.
-3. **D3: Sessions tab display.** The bubbles collapse whitespace for every provider, so this fix is not visible there yet. Recommended: leave it to #176, whose plan specifies `white-space: pre-wrap`. The alternative is to add `white-space: pre-wrap; word-break: break-word;` to `.ls-chat-bubble-user`/`-model` in `app.css` now, as `.ls-console-line` does. Use CSS, not a Tailwind class, because the Tailwind blob is tree-shaken.
+1. **D1: blank whole reply → "no text"** in all four response paths. Taken as recommended.
+2. **D2: Anthropic non-streaming joins text blocks verbatim**, with no separator, matching the stream path and the translator. Taken as recommended. `TryExtractFromNonStreamingBody_MultipleTextBlocks_ConcatenatesWithSpace` is replaced as Step 1 describes.
+3. **D3: wait for #176.** This plan makes no GUI change. The Sessions tab bubbles keep collapsing whitespace until #176 renders message bodies with `white-space: pre-wrap`.
