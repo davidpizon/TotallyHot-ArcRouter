@@ -295,6 +295,9 @@ public class UtilityRoutingPolicyTests
     [InlineData(0d)]
     [InlineData(-0.5)]
     [InlineData(1.5)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
     public void SelectNearBestValue_FloorOutsideRange_Throws(double relativeFloor)
     {
         var policy = Build(catalog: new StubPriceCatalog(), memory: new RouterMemory());

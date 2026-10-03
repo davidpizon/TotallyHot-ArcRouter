@@ -380,7 +380,9 @@ public static class ModelCapabilityBadges
     /// <summary>Classifies one group and writes its tooltip.</summary>
     private static ModelCapabilityBadge Describe(string label, CapabilityGroupAdminView group)
     {
-        const string removed = " The router removes unsupported settings from requests it routes to this model.";
+        const string removed =
+            " When the router picks this model, it removes unsupported settings from the request. A request that" +
+            " names this model itself is sent as received.";
         var supported = group.Options.Where(o => o.Supported).Select(o => o.Name).ToList();
         var unsupported = group.Options.Where(o => !o.Supported).Select(o => o.Name).ToList();
 

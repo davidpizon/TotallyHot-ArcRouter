@@ -183,8 +183,12 @@ public sealed class UtilityRoutingPolicy : IRoutingPolicy
     public string? SelectNearBestValue(RoutingContext context, double relativeFloor)
     {
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(relativeFloor);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value: relativeFloor, other: 1d);
+        // One range pattern rather than ThrowIfNegativeOrZero + ThrowIfGreaterThan: NaN passes both of those, then
+        // turns the floor into NaN, excludes every candidate, and silently routes normally. The pattern fails on
+        // NaN, as RoutingOptions' own validation of this setting does.
+        if (relativeFloor is not (> 0d and <= 1d))
+            throw new ArgumentOutOfRangeException(paramName: nameof(relativeFloor), actualValue: relativeFloor,
+                message: "The relative floor must be greater than 0 and at most 1.");
 
         var observed = context.Candidates
             .Select(candidate => new

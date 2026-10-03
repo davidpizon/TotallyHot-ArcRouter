@@ -52,7 +52,8 @@ public sealed class ModelCapabilityBadgesTests
 
         Assert.Equal(
             expected: "Thinking: supported (enabled); not supported (adaptive). " +
-                      "The router removes unsupported settings from requests it routes to this model.",
+                      "When the router picks this model, it removes unsupported settings from the request. " +
+                      "A request that names this model itself is sent as received.",
             actual: thinking.Tip);
     }
 
