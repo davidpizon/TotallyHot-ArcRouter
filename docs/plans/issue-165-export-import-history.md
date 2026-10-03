@@ -286,7 +286,7 @@ Rules so they do not collide:
 - The census stays content-free after #165 exists. #165 does not relax #8's acceptance test (a planted secret must not appear in census output).
 - #8's optional "≤ 20 raw bodies, outside the repo, scrubbed by hand" can be **chosen out of a #165 zip** and then scrubbed. That is a manual step. The census writer still does not store those bodies, and a #165 zip is not committed to satisfy #8.
 - Normalized harness names use the same allowlist in both, implemented as a pure function each writer calls. Do not route archive bytes through the census serializer to "reuse" it.
-- Neither feature changes ADR-0017's pin decision by itself. #8 still has to hit its session and request minimums before that ADR merges.
+- Neither feature changes ADR-0017's pin decision by itself. #8 still has to hit its session and request minimums before that ADR is accepted.
 
 ## 5. Phasing
 
