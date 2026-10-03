@@ -141,6 +141,36 @@ public class SubagentSignalDetectorTests
         Assert.Equal(expected: "x-claude-code-agent-id", actual: signal.Source);
     }
 
+    [Theory]
+    [InlineData("x-claude-code-request-class", "subagent", "x-claude-code-request-class", "auxiliary")]
+    [InlineData("x-claude-code-agent-type", "Explore", "x-claude-code-agent-type", "Plan")]
+    [InlineData("x-claude-code-request-class", "main", "x-claude-code-agent-type", "Explore")]
+    public void Detect_MalformedOrContradictoryHintsWithHintToggleOff_StillReportTheAgentId(string firstName,
+        string firstValue, string secondName, string secondValue)
+    {
+        // A disabled hint header is invisible: a duplicated one, or a class/type pair that would be rejected when
+        // hints are on, must not suppress the agent-id signal (Copilot review on PR #186).
+        var options = new SubagentBiasOptions { ClaudeCodeHintHeaders = false };
+
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers((firstName, firstValue), (secondName, secondValue), ("x-claude-code-agent-id", "agent-1")),
+            requestBody: Body(), options: options);
+
+        Assert.NotNull(signal);
+        Assert.Equal(expected: "x-claude-code-agent-id", actual: signal.Source);
+    }
+
+    [Fact]
+    public void Detect_DuplicatedRequestClassWithHintToggleOn_ReportsNothing()
+    {
+        var signal = SubagentSignalDetector.Detect(
+            headers: Headers(("x-claude-code-request-class", "subagent"), ("x-claude-code-request-class", "auxiliary"),
+                ("x-claude-code-agent-id", "agent-1")),
+            requestBody: Body(), options: new SubagentBiasOptions());
+
+        Assert.Null(signal);
+    }
+
     [Fact]
     public void Detect_AuxiliaryClassWithClassToggleOff_ReportsNothing()
     {

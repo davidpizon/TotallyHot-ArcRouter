@@ -152,18 +152,25 @@ public static class SubagentSignalDetector
         if (!TryReadSingle(headers: headers, name: ClaudeCodeAgentIdHeader, value: out _,
                 present: out var agentIdPresent) ||
             !TryReadSingle(headers: headers, name: ClaudeCodeParentAgentIdHeader, value: out _,
-                present: out var parentPresent) ||
-            !TryReadSingle(headers: headers, name: ClaudeCodeRequestClassHeader, value: out var requestClass,
-                present: out var classPresent) ||
-            !TryReadSingle(headers: headers, name: ClaudeCodeAgentTypeHeader, value: out var agentType,
-                present: out var typePresent))
+                present: out var parentPresent))
+            return null;
+
+        // The hint headers are read only when they are enabled. A disabled hint is invisible: a duplicated or
+        // malformed one, or a contradictory class/type pair, must not suppress the agent-id signal below.
+        string? requestClass = null, agentType = null;
+        bool classPresent = false, typePresent = false;
+        if (options.ClaudeCodeHintHeaders &&
+            (!TryReadSingle(headers: headers, name: ClaudeCodeRequestClassHeader, value: out requestClass,
+                 present: out classPresent) ||
+             !TryReadSingle(headers: headers, name: ClaudeCodeAgentTypeHeader, value: out agentType,
+                 present: out typePresent)))
             return null;
 
         // A nested-agent id, or an agent type, only ever rides on a request from a spawned agent - which always
         // carries its own agent id. Without one, the combination cannot come from a genuine request.
         if ((parentPresent || typePresent) && !agentIdPresent) return null;
 
-        if (options.ClaudeCodeHintHeaders && classPresent)
+        if (classPresent)
             return requestClass!.ToLowerInvariant() switch
             {
                 "subagent" => ClaudeCodeSubagent(agentType: agentType,
@@ -181,7 +188,7 @@ public static class SubagentSignalDetector
                 _ => null
             };
 
-        if (options.ClaudeCodeHintHeaders && typePresent)
+        if (typePresent)
             return ClaudeCodeSubagent(agentType: agentType, source: ClaudeCodeAgentTypeHeader);
 
         return options.ClaudeCodeAgentId && agentIdPresent
