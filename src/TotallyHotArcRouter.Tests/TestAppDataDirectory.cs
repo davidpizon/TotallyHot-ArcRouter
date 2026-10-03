@@ -5,10 +5,11 @@ namespace TotallyHot.ArcRouter.Tests;
 
 /// <summary>
 /// Redirects <see cref="AppDataPaths"/> into a per-run scratch directory before any code in this test
-/// assembly runs, so no test reads or writes the real machine-shared data directory
+/// assembly runs, so no test writes the real machine-shared data directory
 /// (<c>%ProgramData%\TotallyHotArcRouter</c> on Windows) or the real per-user root legacy storage is
-/// adopted from. This is the isolation <c>TempDatabase</c> gives one SQLite file, applied to every
-/// default path at once.
+/// adopted from, and none reads them through a default path. This is the isolation <c>TempDatabase</c> gives
+/// one SQLite file, applied to every default path at once. The one deliberate read of real data is
+/// <c>InstalledBenchmarkCorpus</c>'s copy of the installed corpus (see the remarks).
 /// </summary>
 /// <remarks>
 /// <para>
