@@ -41,7 +41,7 @@ public static class ServiceCollectionExtensions
         // secrets.dat) - web GUI migration plan Phase P3 added that file to LegacyStorageMigration.Run's
         // sweep, so whichever hosted service touches it first now decides whether a pre-P3 per-user copy
         // gets adopted or silently orphaned. AddManagement's McpHostedService is the earliest such
-        // toucher: since Phase P7 it calls LocalCertificateAuthority.GetOrCreateLeaf() (in turn
+        // toucher: since Phase P7 it calls LocalCertificateAuthority.EnsureLeaves() (in turn
         // GetOrCreateCa()) for its own TLS listener, which stores the CA's private-key password in
         // ProtectedSecretStore - so it must be registered, and therefore started, after
         // AddBackgroundServices, not before it. See this method's own

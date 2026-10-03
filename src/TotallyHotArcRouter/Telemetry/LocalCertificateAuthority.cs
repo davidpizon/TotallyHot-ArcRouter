@@ -8,11 +8,12 @@ using TotallyHot.ArcRouter.Proxy.Management;
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// Generates, persists, and rotates the router's own name-constrained local CA and the leaf certificate
+/// Generates, persists, and rotates the router's own name-constrained local CA and the leaf certificates
 /// every TLS listener (the web port, MCP, and - as of the web GUI migration plan's Phase P7 - the LLM
 /// proxy port) presents (ADR-0013). A leaf issued under a locally-trusted CA can be silently rotated (see
-/// <see cref="GetOrCreateLeaf()"/>'s remarks) without ever asking an already-trusting client to re-trust
-/// anything, which a self-signed leaf cannot do without repeating the OS-trust step on every renewal.
+/// <see cref="GetOrCreateLeaf(string)"/>'s remarks) without ever asking an already-trusting client to
+/// re-trust anything, which a self-signed leaf cannot do without repeating the OS-trust step on every
+/// renewal.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,7 +30,17 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// round-trips correctly through .NET's own ASN.1 parser.
 /// </para>
 /// <para>
-/// Both the CA and the leaf are persisted as a password-protected <c>.pfx</c> under the machine-shared
+/// There are two leaves, one per <see cref="LeafProfile"/>, chosen per handshake by the client's SNI
+/// (ADR-0013 Amendment 1). BoringSSL - the TLS library inside Bun, and so inside the native Claude Code
+/// build - implements no IP-address name constraints: a leaf carrying an IP-address SAN under this CA's
+/// IP-address subtrees fails there with <c>X509_V_ERR_UNSUPPORTED_CONSTRAINT_TYPE</c>, whichever host
+/// the client dialled. A client that dials <c>localhost</c> sends SNI and gets the
+/// <see cref="LeafProfile.DnsOnly"/> leaf, which BoringSSL accepts; a client that dials an IP literal
+/// sends no SNI and gets the <see cref="LeafProfile.Loopback"/> leaf, the only one whose names match an
+/// IP-literal URL. The CA itself is the same for both, so the split needs no re-trust.
+/// </para>
+/// <para>
+/// The CA and both leaves are persisted as a password-protected <c>.pfx</c> under the machine-shared
 /// data directory (<see cref="AppDataPaths"/>), with the random per-installation password held in
 /// <see cref="ProtectedSecretStore"/>. The CA's key is the higher-value secret of the two (ADR-0013) -
 /// its compromise lets an attacker mint a certificate any already-trusting client on this machine would
@@ -45,6 +56,8 @@ public static class LocalCertificateAuthority
     private const string CaPasswordSecretName = "router-ca:cert-password";
     private const string LeafCertificateFileName = "router-leaf.pfx";
     private const string LeafPasswordSecretName = "router-leaf:cert-password";
+    private const string DnsOnlyLeafCertificateFileName = "router-leaf-dns.pfx";
+    private const string DnsOnlyLeafPasswordSecretName = "router-leaf-dns:cert-password";
 
     // Guards the whole check-renew-persist sequence in both GetOrCreateCa and GetOrCreateLeaf. Real gap
     // this closes: GetOrCreateLeaf() is called from a ServerCertificateSelector on every TLS handshake,
@@ -100,9 +113,22 @@ public static class LocalCertificateAuthority
     }
 
     /// <summary>
-    /// Loads the persisted leaf if one already exists and is not within its renewal window, otherwise
-    /// issues a fresh one under <see cref="GetOrCreateCa()"/> and persists it before returning it.
+    /// Loads or issues the <see cref="LeafProfile.Loopback"/> leaf, the one a handshake without SNI gets.
+    /// Equivalent to <see cref="GetOrCreateLeaf(string)"/> with no server name.
     /// </summary>
+    public static X509Certificate2 GetOrCreateLeaf() => GetOrCreateLeaf(serverName: null);
+
+    /// <summary>
+    /// Loads the persisted leaf for <paramref name="serverName"/>'s <see cref="LeafProfile"/> (see
+    /// <see cref="SelectLeafProfile"/>) if one already exists, is not within its renewal window, and has an
+    /// Authority Key Identifier naming the current CA's key; otherwise issues a fresh one under
+    /// <see cref="GetOrCreateCa()"/> and persists it before returning it.
+    /// </summary>
+    /// <param name="serverName">
+    /// The SNI host name from the client's TLS ClientHello, exactly as Kestrel's
+    /// <c>ServerCertificateSelector</c> passes it - <see langword="null"/> or empty when the client sent
+    /// none, which is what an IP-literal URL produces.
+    /// </param>
     /// <remarks>
     /// Safe to call on every TLS handshake, concurrently, across every listener in this process (see
     /// <c>ProxyServer</c>'s <c>ServerCertificateSelector</c> wiring) - the common case is a single
@@ -114,13 +140,53 @@ public static class LocalCertificateAuthority
     /// their own cert/password pair with the writes interleaved, leaving the file on disk paired with a
     /// different renewal's password than the one that's actually there.
     /// </remarks>
-    public static X509Certificate2 GetOrCreateLeaf()
+    public static X509Certificate2 GetOrCreateLeaf(string? serverName) =>
+        GetOrCreateLeaf(profile: SelectLeafProfile(serverName),
+            directory: AppDataPaths.ResolveMachineSharedDirectory(), secretStore: new ProtectedSecretStore());
+
+    /// <summary>
+    /// Loads or issues every <see cref="LeafProfile"/>'s leaf once and disposes it, so a listener's
+    /// startup fails loudly when issuance is broken (an unwritable data directory, say), rather than the
+    /// first handshake to need a not-yet-issued profile failing later.
+    /// </summary>
+    public static void EnsureLeaves()
     {
         var directory = AppDataPaths.ResolveMachineSharedDirectory();
+        var secretStore = new ProtectedSecretStore();
+        foreach (var profile in Enum.GetValues<LeafProfile>())
+        {
+            using var leaf = GetOrCreateLeaf(profile: profile, directory: directory, secretStore: secretStore);
+        }
+    }
+
+    /// <summary>
+    /// Picks the leaf profile for a handshake from its SNI host name: <see cref="LeafProfile.DnsOnly"/>
+    /// when the client named a host, <see cref="LeafProfile.Loopback"/> when it named none.
+    /// </summary>
+    /// <remarks>
+    /// RFC 6066 forbids an IP literal in SNI, but a non-conforming client that sends one anyway still
+    /// gets <see cref="LeafProfile.Loopback"/>, the only leaf whose names include that address.
+    /// </remarks>
+    /// <param name="serverName">The SNI host name, or <see langword="null"/>/empty when the client sent none.</param>
+    internal static LeafProfile SelectLeafProfile(string? serverName) =>
+        string.IsNullOrEmpty(serverName) || IPAddress.TryParse(serverName, out _)
+            ? LeafProfile.Loopback
+            : LeafProfile.DnsOnly;
+
+    /// <summary>
+    /// Overload taking a data directory and a secret store, for tests: resolves <paramref name="profile"/>'s
+    /// leaf file inside <paramref name="directory"/>, next to the CA. See <see cref="GetOrCreateLeaf(string)"/>
+    /// for behavior.
+    /// </summary>
+    internal static X509Certificate2 GetOrCreateLeaf(LeafProfile profile, string directory,
+        ProtectedSecretStore secretStore)
+    {
+        var fileName = profile == LeafProfile.DnsOnly ? DnsOnlyLeafCertificateFileName : LeafCertificateFileName;
         return GetOrCreateLeaf(
             caCertificatePath: Path.Combine(path1: directory, path2: CaCertificateFileName),
-            leafCertificatePath: Path.Combine(path1: directory, path2: LeafCertificateFileName),
-            secretStore: new ProtectedSecretStore());
+            leafCertificatePath: Path.Combine(path1: directory, path2: fileName),
+            secretStore: secretStore,
+            profile: profile);
     }
 
     /// <summary>Overload taking explicit paths and a secret store, for tests. See <see cref="GetOrCreateCa()"/> for behavior.</summary>
@@ -164,10 +230,17 @@ public static class LocalCertificateAuthority
         }
     }
 
-    /// <summary>Overload taking explicit paths and a secret store, for tests. See <see cref="GetOrCreateLeaf()"/> for behavior.</summary>
+    /// <summary>
+    /// Overload taking explicit paths and a secret store, for tests. See <see cref="GetOrCreateLeaf(string)"/>
+    /// for behavior. <paramref name="profile"/> picks the SAN set and the password-secret name; the caller
+    /// picks the file, so two profiles must never share <paramref name="leafCertificatePath"/>.
+    /// </summary>
     internal static X509Certificate2 GetOrCreateLeaf(string caCertificatePath, string leafCertificatePath,
-        ProtectedSecretStore secretStore)
+        ProtectedSecretStore secretStore, LeafProfile profile = LeafProfile.Loopback)
     {
+        var passwordSecretName =
+            profile == LeafProfile.DnsOnly ? DnsOnlyLeafPasswordSecretName : LeafPasswordSecretName;
+
         // Reentrant: GetOrCreateCa below acquires the same RenewalLock, and System.Threading.Lock (like
         // the classic `lock` statement it replaces) allows the thread already holding it to re-enter.
         lock (RenewalLock)
@@ -178,11 +251,12 @@ public static class LocalCertificateAuthority
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
             if (File.Exists(leafCertificatePath) &&
-                secretStore.TryRead(name: LeafPasswordSecretName, value: out var existingPassword))
+                secretStore.TryRead(name: passwordSecretName, value: out var existingPassword))
             {
                 var existing = X509CertificateLoader.LoadPkcs12FromFile(path: leafCertificatePath, password: existingPassword,
                     keyStorageFlags: X509KeyStorageFlags.Exportable);
-                if (existing.NotAfter > DateTime.UtcNow.Add(LeafRenewalWindow)) return existing;
+                if (existing.NotAfter > DateTime.UtcNow.Add(LeafRenewalWindow) && IsIssuedUnder(leaf: existing, ca: ca))
+                    return existing;
 
                 existing.Dispose();
             }
@@ -193,8 +267,13 @@ public static class LocalCertificateAuthority
 
             var subjectAlternativeNames = new SubjectAlternativeNameBuilder();
             subjectAlternativeNames.AddDnsName("localhost");
-            subjectAlternativeNames.AddIpAddress(IPAddress.Loopback);
-            subjectAlternativeNames.AddIpAddress(IPAddress.IPv6Loopback);
+            if (profile == LeafProfile.Loopback)
+            {
+                // Never on the DnsOnly leaf: see the class remarks on BoringSSL and IP-address constraints.
+                subjectAlternativeNames.AddIpAddress(IPAddress.Loopback);
+                subjectAlternativeNames.AddIpAddress(IPAddress.IPv6Loopback);
+            }
+
             request.CertificateExtensions.Add(subjectAlternativeNames.Build());
 
             request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
@@ -204,6 +283,13 @@ public static class LocalCertificateAuthority
             request.CertificateExtensions.Add(
                 new X509EnhancedKeyUsageExtension(enhancedKeyUsages: [new Oid("1.3.6.1.5.5.7.3.1")],
                     false)); // Server Authentication
+
+            // The AKI names the issuing CA by key, not just by subject. Without it, a client that trusts two
+            // CAs with this CA's subject (an old router CA left in the OS store after a reinstall, say) may
+            // pick the wrong one: BoringSSL then fails the handshake with CERT_SIGNATURE_FAILURE.
+            request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, critical: false));
+            request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(
+                certificate: ca, includeKeyIdentifier: true, includeIssuerAndSerial: false));
 
             var serialNumber = new byte[16];
             RandomNumberGenerator.Fill(serialNumber);
@@ -216,8 +302,46 @@ public static class LocalCertificateAuthority
             using var leaf = signed.CopyWithPrivateKey(rsa);
 
             return PersistAndReload(certificate: leaf, certificatePath: leafCertificatePath,
-                secretStore: secretStore, passwordSecretName: LeafPasswordSecretName);
+                secretStore: secretStore, passwordSecretName: passwordSecretName);
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="leaf"/>'s Authority Key Identifier names <paramref name="ca"/>'s key, so a
+    /// persisted leaf is reused only when it was issued under the CA in use now.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see langword="false"/> for a leaf with no AKI, which is every leaf persisted before leaves
+    /// carried one. Such a leaf is re-minted once on its next load, under the same CA, so no client has to
+    /// re-trust anything. It also returns <see langword="false"/> for a leaf from an earlier CA (one that
+    /// expired and was re-minted, or whose file was deleted), which would otherwise keep being served
+    /// until its own renewal window even though no client trusts its issuer any more.
+    /// </remarks>
+    private static bool IsIssuedUnder(X509Certificate2 leaf, X509Certificate2 ca)
+    {
+        var authorityKeyId = leaf.Extensions.OfType<X509AuthorityKeyIdentifierExtension>().SingleOrDefault()?.KeyIdentifier;
+        var caKeyId = ca.Extensions.OfType<X509SubjectKeyIdentifierExtension>().SingleOrDefault()?.SubjectKeyIdentifierBytes;
+        return authorityKeyId is { } leafValue && caKeyId is { } caValue && leafValue.Span.SequenceEqual(caValue.Span);
+    }
+
+    /// <summary>
+    /// The two leaves the router issues under its one CA, chosen per TLS handshake by
+    /// <see cref="SelectLeafProfile"/> (ADR-0013 Amendment 1).
+    /// </summary>
+    internal enum LeafProfile
+    {
+        /// <summary>
+        /// <c>DNS:localhost</c>, <c>IP:127.0.0.1</c> and <c>IP:::1</c>, in <c>router-leaf.pfx</c> - the
+        /// original leaf, kept for handshakes without SNI, which is what an IP-literal URL produces.
+        /// </summary>
+        Loopback,
+
+        /// <summary>
+        /// <c>DNS:localhost</c> only, in <c>router-leaf-dns.pfx</c> - served whenever the client sends
+        /// SNI. The only profile BoringSSL-based clients (Bun, so the native Claude Code build) accept,
+        /// because it carries no IP-address name for BoringSSL to check against the CA's IP subtrees.
+        /// </summary>
+        DnsOnly,
     }
 
     /// <summary>
