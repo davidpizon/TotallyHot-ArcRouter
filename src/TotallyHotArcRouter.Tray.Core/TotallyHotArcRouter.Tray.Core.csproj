@@ -25,4 +25,8 @@
     <ProjectReference Include="..\TotallyHotArcRouter.Gui.Telemetry\TotallyHotArcRouter.Gui.Telemetry.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TotallyHotArcRouter.Tray.Core.Tests" />
+  </ItemGroup>
+
 </Project>

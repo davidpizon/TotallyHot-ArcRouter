@@ -15,13 +15,17 @@ public sealed class TrayDiscoveryReaderTests
     }
 
     [Fact]
-    public void TryRead_DefaultPath_DoesNotThrow()
+    public void DefaultPath_IsTheDiscoveryFileUnderProgramData()
     {
-        // Covers DefaultPath() (ProgramData\...\web-interface.json). CI has no discovery file; a
-        // developer machine with a running router is still a valid parse of WebUrl.
-        var result = TrayDiscoveryReader.TryRead();
-        if (result?.WebUrl is { } webUrl)
-            Uri.TryCreate(uriString: webUrl, uriKind: UriKind.Absolute, result: out _).Should().BeTrue();
+        // Checks the location without reading the file there: it is live state a running router (or, before
+        // the router's tests were redirected to a scratch directory, a test run) rewrites, so a test that read
+        // it would pass or fail depending on what else this machine happened to be doing.
+        var expected = Path.Combine(
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: "web-interface.json");
+
+        TrayDiscoveryReader.DefaultPath().Should().Be(expected);
     }
 
     [Fact]
