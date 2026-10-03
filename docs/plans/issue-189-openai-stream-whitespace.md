@@ -1,7 +1,7 @@
-# Plan: Keep whitespace-only deltas in OpenAI-shaped streamed replies (#TBD)
+# Plan: Keep whitespace-only deltas in OpenAI-shaped streamed replies (#189)
 
 **Status:** Proposed. Awaiting David's approval. No production code changes in this change.
-**Issue:** Not filed yet. The draft is `issue-draft-openai-stream-whitespace.md` at the repository root. Once the issue exists, this file is renamed to `issue-<N>-openai-stream-whitespace.md` and the draft is deleted.
+**Issue:** [#189](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/189) — "OpenAI-shaped streamed replies lose whitespace-only deltas in transcripts and telemetry".
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request must link this plan once approved.
 **Related:** [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (proposed) lists this bug under "Found during the investigation, tracked separately". This plan is that item. The fix does not depend on where text is stored: under ADR-0019 the per-session files hold the same per-turn reply extract, produced by the same parser. See also the [#165](issue-165-export-import-history.md) and [#179](issue-179-persisted-sessions-list-size.md) plans.
 **ADR-0008 Amendment 1:** This is a defect fix with reproducing tests, not a smell refactor. The observed cost is lossy stored text. It does not touch `ProxyMiddleware`, `RequestInterceptor`, `ManagementFacade`, or `RequestTelemetryPublisher` (tests only).
