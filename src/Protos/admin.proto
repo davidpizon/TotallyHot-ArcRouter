@@ -308,6 +308,30 @@ message ModelState {
   optional string confidence = 4;
   bool enabled = 5;
   bool present_upstream = 6;
+  // The capability record this model's provider list reported (docs/adr/0022-route-harness-subagent-and-helper-
+  // traffic-by-kind.md Amendment 1), absent when no scan has recorded one.
+  ModelCapabilitiesState capabilities = 7;
+}
+
+// One model's capability record, regrouped generically from the provider's own capabilities object. Mirrors
+// TotallyHot.ArcRouter.Proxy.Management.ModelCapabilitiesView.
+message ModelCapabilitiesState {
+  google.protobuf.Timestamp scanned_at_utc = 1;
+  repeated CapabilityGroupState groups = 2;
+}
+
+// One top-level capability key, e.g. "thinking", "effort" or "context_management".
+message CapabilityGroupState {
+  string name = 1;
+  // The group's own supported flag, absent when the record gives none.
+  optional bool supported = 2;
+  repeated CapabilityOptionState options = 3;
+}
+
+// One option within a group: a thinking type, effort level or strategy, as the provider named it.
+message CapabilityOptionState {
+  string name = 1;
+  bool supported = 2;
 }
 
 // Which API flavors a provider's endpoint answers, as last recorded by a capability scan. Mirrors

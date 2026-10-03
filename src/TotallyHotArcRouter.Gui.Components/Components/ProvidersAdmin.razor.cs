@@ -305,6 +305,22 @@ public partial class ProvidersAdmin
             : $"{failure.Operation} failed {FormatUtc(failure.AtUtc)}: {failure.Message}";
     }
 
+    /// <summary>
+    /// The tinted badge classes for a model capability badge: green when fully supported, amber when partly, and
+    /// muted slate when not. Slate rather than red because an unsupported capability is a fact about the model, not
+    /// a failure - the router removes it from requests it routes there. Every class here is already used elsewhere
+    /// on this page, so the tree-shaken stylesheet has it.
+    /// </summary>
+    private static string CapabilityBadgeClass(ModelCapabilityBadgeState state)
+    {
+        return state switch
+        {
+            ModelCapabilityBadgeState.Supported => "ds-badge-success",
+            ModelCapabilityBadgeState.Partial => "ds-badge-warning",
+            _ => "bg-slate-800 text-slate-500 border border-slate-600"
+        };
+    }
+
     /// <summary>The API-flavor badge labels a provider's last capability scan detected, if any.</summary>
     private static IEnumerable<string> DetectedApis(ProviderEndpointCapabilitiesView? capabilities)
     {

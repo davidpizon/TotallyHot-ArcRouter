@@ -61,12 +61,16 @@ public sealed class TestTempDirectorySweeper : IDisposable
 
     /// <summary>
     /// Runs the end-of-run sweep: releases every pooled SQLite handle, then deletes each directory under
-    /// <see cref="Root"/> created during this run that per-test teardown failed to remove.
+    /// <see cref="Root"/> created during this run that per-test teardown failed to remove, plus this run's
+    /// <see cref="TestAppDataDirectory.Root"/> - created by a module initializer before this fixture
+    /// existed, so the creation-time test alone would miss it.
     /// </summary>
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        Sweep(directory => Directory.GetCreationTimeUtc(directory) >= _runStartedUtc);
+        Sweep(directory => Directory.GetCreationTimeUtc(directory) >= _runStartedUtc ||
+                           string.Equals(a: directory, b: TestAppDataDirectory.Root,
+                               comparisonType: StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

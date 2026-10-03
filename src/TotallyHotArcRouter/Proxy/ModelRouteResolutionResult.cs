@@ -64,18 +64,47 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// one is the harmful direction, and that requires actively passing the wrong value rather than omitting it.
 /// </para>
 /// </param>
+/// <param name="LazyFeatureStrip">
+/// Produces what was removed from this candidate's copy because its model's capability record reports it
+/// unsupported (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c> Amendment 1), or
+/// <see langword="null"/> when this candidate is never stripped - an explicit pick's own first attempt, a path
+/// other than <c>/v1/messages</c>, or a model with no record. Lazy alongside <paramref name="LazyRewrittenBody"/>,
+/// from the same computation, because a failover candidate only decides what to drop when its body is first
+/// built. Read <see cref="FeatureStrip"/>, not this.
+/// </param>
+/// <param name="UnstrippedBody">
+/// The primary candidate's body before its strip, set only when that eagerly built copy was stripped, and
+/// otherwise <see langword="null"/> (the unstripped body is then <see cref="RewrittenBody"/>). Failover candidates
+/// are derived from the primary through <see cref="SourceBody"/>, so a strip for one model never leaks into the copy
+/// sent to a capable fallback (ADR-0017 Strip rule 2). A failover candidate's own strip happens lazily and leaves
+/// this <see langword="null"/>, since nothing is derived from it.
+/// </param>
 public sealed record RouteCandidate(
     ResolvedModelRoute Route,
     Lazy<byte[]> LazyRewrittenBody,
     bool CarriesTools,
     bool CarriesToolHistory = false,
-    bool CarriesResponseFormat = false)
+    bool CarriesResponseFormat = false,
+    Lazy<MessagesFeatureStrip>? LazyFeatureStrip = null,
+    byte[]? UnstrippedBody = null)
 {
     /// <summary>
     /// Gets the request body with <c>model</c> rewritten to this candidate's upstream model id, producing
     /// it on first access and caching it thereafter.
     /// </summary>
     public byte[] RewrittenBody => LazyRewrittenBody.Value;
+
+    /// <summary>
+    /// Gets what was removed from <see cref="RewrittenBody"/>, or <see cref="MessagesFeatureStrip.None"/>. Reading
+    /// it builds the body if that has not happened yet.
+    /// </summary>
+    public MessagesFeatureStrip FeatureStrip => LazyFeatureStrip?.Value ?? MessagesFeatureStrip.None;
+
+    /// <summary>
+    /// Gets the body later candidates are derived from: <see cref="UnstrippedBody"/> when this candidate was
+    /// stripped, otherwise <see cref="RewrittenBody"/>.
+    /// </summary>
+    public byte[] SourceBody => UnstrippedBody ?? RewrittenBody;
 }
 
 /// <summary>

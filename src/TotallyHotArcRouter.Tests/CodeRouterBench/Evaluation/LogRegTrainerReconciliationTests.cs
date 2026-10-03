@@ -1,8 +1,6 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
-using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench.Evaluation;
 
@@ -27,11 +25,11 @@ public class LogRegTrainerReconciliationTests
 
     private static BenchmarkDatabase OpenRealDatabase()
     {
-        return new BenchmarkDatabase(Options.Create(new StorageOptions()));
+        return InstalledBenchmarkCorpus.Open();
     }
 
     // Mirrors CodeRouterBenchTable10ReconciliationTests.ProbingSplitIsPopulated exactly - see its remarks
-    // for why this deliberately never calls EnsureCreated against the real user database. Checks the exact
+    // for why this deliberately never calls EnsureCreated on the installed corpus's copy. Checks the exact
     // condition LogRegTrainer.Train needs (at least one resolved OOD result), not merely that the OOD
     // tables are non-empty - an OOD sync with zero resolves would otherwise still throw instead of skip.
     private static bool AtLeastOneOodResultIsResolved(BenchmarkDatabase database)

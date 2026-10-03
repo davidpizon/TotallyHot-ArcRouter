@@ -271,6 +271,121 @@ public sealed class ProvidersAdminLoadedTests
         // flag false - neither contributes a badge despite openai having a (failed) scan on record.
     }
 
+    /// <summary>
+    /// One Anthropic provider with three models: Claude Haiku 4.5's capability record as Anthropic reported it on
+    /// 2026-10-02, a fully capable record, and a model with no record (ADR-0022 Amendment 1). Separate from
+    /// <see cref="DefaultProviders"/> so the API-flavor badge test's count of success badges stays exact.
+    /// </summary>
+    private static Contract.ProviderListResponse ProvidersWithCapabilityRecords()
+    {
+        static Contract.CapabilityGroupState Group(string name, bool supported, params (string Name, bool Supported)[] options)
+        {
+            var group = new Contract.CapabilityGroupState { Name = name, Supported = supported };
+            group.Options.AddRange(options.Select(o => new Contract.CapabilityOptionState { Name = o.Name, Supported = o.Supported }));
+            return group;
+        }
+
+        static Contract.ModelCapabilitiesState Record(params Contract.CapabilityGroupState[] groups)
+        {
+            var record = new Contract.ModelCapabilitiesState
+            {
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-02T12:00:00Z"))
+            };
+            record.Groups.AddRange(groups);
+            return record;
+        }
+
+        var anthropic = new Contract.ProviderState
+        {
+            Key = "anthropic", BaseUrl = "https://api.anthropic.com", ProviderType = "Anthropic", DollarSpent = "0",
+            Enabled = true, WindowKind = "Monthly"
+        };
+        anthropic.Models.Add(new Contract.ModelState
+        {
+            ModelName = "claude-haiku", ProviderModelId = "claude-haiku-4-5-20251001", Enabled = true,
+            PresentUpstream = true,
+            Capabilities = Record(
+                Group("context_management", true, ("clear_thinking_20251015", true), ("compact_20260112", false)),
+                Group("effort", false, ("high", false)),
+                Group("thinking", true, ("enabled", true), ("adaptive", false)))
+        });
+        anthropic.Models.Add(new Contract.ModelState
+        {
+            ModelName = "claude-sonnet", ProviderModelId = "claude-sonnet-5", Enabled = true, PresentUpstream = true,
+            Capabilities = Record(
+                Group("context_management", true, ("clear_thinking_20251015", true)),
+                Group("effort", true, ("high", true)),
+                Group("thinking", true, ("adaptive", true)))
+        });
+        anthropic.Models.Add(new Contract.ModelState
+        {
+            ModelName = "claude-unscanned", ProviderModelId = "claude-unscanned", Enabled = true, PresentUpstream = true
+        });
+
+        var response = new Contract.ProviderListResponse();
+        response.Providers.Add(anthropic);
+        return response;
+    }
+
+    /// <summary>The capability badges rendered in one model's row, as (label, class list, tooltip).</summary>
+    private static List<(string Label, string Classes, string Tip)> CapabilityBadgesFor(
+        IRenderedComponent<ProvidersAdmin> cut, string modelName)
+    {
+        // The model's own dialect picker shares a parent with its badges, which pins the lookup to one row.
+        var controls = cut.Find($"select[aria-label='Tool-call dialect for {modelName}']").ParentElement!;
+        return controls.QuerySelectorAll("span[data-tip]")
+            .Select(s => (s.TextContent.Trim(), s.ClassName ?? string.Empty, s.GetAttribute("data-tip") ?? string.Empty))
+            .ToList();
+    }
+
+    [Fact]
+    public void Shows_a_models_capability_record_as_three_badges_tinted_by_how_much_is_supported()
+    {
+        var client = new StubClient { Response = ProvidersWithCapabilityRecords() };
+        using var ctx = NewContext(client);
+
+        var cut = RenderLoaded(ctx);
+
+        var haiku = CapabilityBadgesFor(cut, "claude-haiku");
+        haiku.Select(b => b.Label).Should().Equal("Thinking", "Effort", "Context mgmt");
+        haiku[0].Classes.Should().Contain("ds-badge-warning");
+        haiku[0].Tip.Should().Contain("not supported (adaptive)");
+        haiku[1].Classes.Should().Contain("text-slate-500").And.NotContain("ds-badge");
+        haiku[1].Tip.Should().StartWith("Effort: not supported.");
+        haiku[2].Classes.Should().Contain("ds-badge-warning");
+
+        var sonnet = CapabilityBadgesFor(cut, "claude-sonnet");
+        sonnet.Should().HaveCount(3).And.OnlyContain(b => b.Classes.Contains("ds-badge-success"));
+    }
+
+    [Fact]
+    public void A_model_with_no_capability_record_shows_no_capability_badges()
+    {
+        var client = new StubClient { Response = ProvidersWithCapabilityRecords() };
+        using var ctx = NewContext(client);
+
+        var cut = RenderLoaded(ctx);
+
+        CapabilityBadgesFor(cut, "claude-unscanned").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_capability_badge_is_labelled_for_assistive_technology()
+    {
+        var client = new StubClient { Response = ProvidersWithCapabilityRecords() };
+        using var ctx = NewContext(client);
+
+        var cut = RenderLoaded(ctx);
+
+        var badge = cut.FindAll("span[data-tip^='Thinking:']").First();
+        badge.GetAttribute("aria-label").Should().Be(badge.GetAttribute("data-tip"));
+        badge.GetAttribute("aria-describedby").Should().Be("ls-tooltip");
+        // The shared tooltip convention (app.css): a non-interactive element must take keyboard focus,
+        // or its data-tip is reachable by pointer only.
+        badge.GetAttribute("tabindex").Should().Be("0");
+        badge.ClassList.Should().Contain("ls-tip");
+    }
+
     [Fact]
     public void Marks_a_model_the_last_scan_did_not_report_as_not_detected()
     {

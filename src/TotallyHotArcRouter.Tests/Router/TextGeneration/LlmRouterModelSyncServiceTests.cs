@@ -471,8 +471,9 @@ public sealed class LlmRouterModelSyncServiceTests
 
     /// <summary>
     /// Wraps a <see cref="FakeLlmRouterModelOverrideStore"/> pointed at a uniquely-slugged (and therefore
-    /// collision-free) cache directory under the real <c>%LOCALAPPDATA%</c> models root, and deletes that
-    /// directory on dispose so these tests leave nothing behind.
+    /// collision-free) cache directory under the models root - this run's scratch directory, per
+    /// <see cref="TestAppDataDirectory"/> - and deletes that directory on dispose so these tests leave
+    /// nothing behind.
     /// </summary>
     private sealed class TempOverrideScope : IDisposable
     {

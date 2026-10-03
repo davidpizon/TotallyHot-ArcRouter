@@ -401,13 +401,18 @@ public sealed class ManagementFacade
                         // scan has run, and no live response has been observed yet).
                         var capability =
                             _capabilityStore?.GetModelCapability(providerKey: kvp.Key, modelName: m.ModelName);
+                        // Keyed by the upstream id, like the request path's lookup (ADR-0022 Amendment 1), so the
+                        // badges show exactly the record a router-chosen request to this model is stripped by.
+                        var featureSupport =
+                            _capabilityStore?.GetModelFeatureSupport(providerKey: kvp.Key, modelId: m.ProviderModelId);
                         return new ModelView(
                             ModelName: m.ModelName,
                             ProviderModelId: m.ProviderModelId,
                             Dialect: capability?.Dialect,
                             Confidence: capability?.Confidence.ToString(),
                             Enabled: m.Enabled,
-                            PresentUpstream: m.PresentUpstream);
+                            PresentUpstream: m.PresentUpstream,
+                            Capabilities: featureSupport is null ? null : ModelCapabilitiesView.From(featureSupport));
                     })
                     .ToList();
 

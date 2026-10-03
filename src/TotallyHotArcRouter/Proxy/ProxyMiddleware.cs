@@ -67,6 +67,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     internal const string SubstitutionReasonHeaderName = "X-ArcRouter-Substitution-Reason";
 
     /// <summary>
+    /// Response header naming the request features removed from the copy sent to the candidate that answered,
+    /// because its model's capability record reports them unsupported
+    /// (docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md Amendment 1). Absent when nothing was
+    /// removed. ADR-0017's header, shipped early with the same name and meaning.
+    /// </summary>
+    internal const string StrippedFeaturesHeaderName = "X-ArcRouter-Stripped-Features";
+
+    /// <summary>
     /// The per-candidate pre-flight gate sequence <see cref="InvokeCoreAsync"/> walks, in this exact
     /// order, for every candidate before attempting it. The order is load-bearing, not incidental: gate
     /// (4), the read-only circuit-breaker pre-check, MUST run before gates (5) and (6) - each of which
@@ -440,6 +448,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             if (candidateGateBlocked) continue;
 
             var rewrittenBody = candidates[i].RewrittenBody;
+            var featureStrip = candidates[i].FeatureStrip;
             var isFallback = i > 0;
             var hasNextCandidate = i + 1 < candidates.Count;
 
@@ -523,7 +532,17 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // A fresh message per candidate is mandatory, not incidental: an HttpRequestMessage cannot be
             // sent twice, so the failover path below must rebuild rather than retry this instance.
             var requestMessage = UpstreamRequestBuilder.Build(context: context, route: route, translator: translator,
-                rewrittenBody: rewrittenBody);
+                rewrittenBody: rewrittenBody, droppedBetaPrefixes: featureStrip.BetaPrefixes);
+
+            // ADR-0017 Strip rule 4, as adopted by ADR-0022 Amendment 1: every strip is recorded. Once per attempt
+            // that actually sends a stripped copy, so a failover that strips differently logs its own line.
+            if (!featureStrip.IsEmpty)
+                _logger.LogInformation(
+                    message:
+                    "[INTERCEPTOR] Stripped {StrippedFeatures} from the request to {Provider}/{Model}: its capability record reports them unsupported.",
+                    featureStrip.HeaderValue,
+                    LogRedaction.Sanitize(route.Provider),
+                    LogRedaction.Sanitize(route.ModelName));
 
             var stopwatch = Stopwatch.StartNew();
             using var factoryClient = _httpClientFactory?.CreateClient(HttpClientName);
@@ -669,7 +688,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         requestedModel: requestedModelName,
                         routedModel: route.ModelName,
                         substitutionReason: RequestTelemetryPublisher.ResolveSubstitutionReason(isFallback: isFallback,
-                            resolutionReason: resolution.SubstitutionReason)),
+                            resolutionReason: resolution.SubstitutionReason),
+                        strippedFeatures: featureStrip.HeaderValue),
                     configuredHeaderNames: route.ConfiguredHeaderNames,
                     preReadErrorBody: preReadErrorBody,
                     embeddedErrorMessage: embeddedErrorMessage,
