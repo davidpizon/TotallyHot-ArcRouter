@@ -17,7 +17,7 @@ public sealed class LocalCertificateAuthorityTests
 {
     private static string TempDirectory()
     {
-        var path = Path.Combine(Path.GetTempPath(), "arcrouter-tests", Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(TestScratchDirectory.RunRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
     }

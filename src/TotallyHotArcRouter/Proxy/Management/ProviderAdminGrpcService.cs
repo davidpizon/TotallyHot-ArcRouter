@@ -394,6 +394,26 @@ public sealed class ProviderAdminGrpcService : Contract.ProviderAdminService.Pro
         };
         if (model.Dialect is not null) wire.Dialect = model.Dialect;
         if (model.Confidence is not null) wire.Confidence = model.Confidence;
+        if (model.Capabilities is { } capabilities) wire.Capabilities = ToWire(capabilities);
+        return wire;
+    }
+
+    /// <summary>Projects a model's capability record into its wire shape.</summary>
+    private static Contract.ModelCapabilitiesState ToWire(ModelCapabilitiesView capabilities)
+    {
+        var wire = new Contract.ModelCapabilitiesState
+        {
+            ScannedAtUtc = Timestamp.FromDateTimeOffset(capabilities.ScannedAtUtc)
+        };
+        foreach (var group in capabilities.Groups)
+        {
+            var wireGroup = new Contract.CapabilityGroupState { Name = group.Name };
+            if (group.Supported is { } supported) wireGroup.Supported = supported;
+            wireGroup.Options.AddRange(group.Options.Select(option =>
+                new Contract.CapabilityOptionState { Name = option.Name, Supported = option.Supported }));
+            wire.Groups.Add(wireGroup);
+        }
+
         return wire;
     }
 

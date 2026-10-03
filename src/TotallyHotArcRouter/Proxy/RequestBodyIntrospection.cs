@@ -1,12 +1,14 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 namespace TotallyHot.ArcRouter.Proxy;
 
 /// <summary>
 /// Pure, stateless reads over an already-parsed request body's <see cref="JsonObject"/> - whether it
-/// carries tools, a <c>response_format</c>, or tool-calling history - plus the one write this class
-/// performs: rewriting <c>model</c> to a candidate's upstream id. Every member here is a
+/// carries tools, a <c>response_format</c>, or tool-calling history - plus the writes this class performs:
+/// rewriting <c>model</c> to a candidate's upstream id, and removing from a candidate's own copy the features its
+/// model's capability record reports unsupported (<see cref="MessagesFeatureStripper"/>). Every member here is a
 /// <see langword="static"/> function of its arguments with no field/collaborator dependency, split out
 /// of <see cref="RequestInterceptor"/> so that class's constructor-injected routing logic isn't mixed
 /// with body-shape inspection that needs none of it.
@@ -19,19 +21,38 @@ internal static class RequestBodyIntrospection
     /// in place - callers invoke this sequentially per candidate, and only the serialized snapshot each
     /// call returns is retained, so the shared node's transient state between calls is never observed.
     /// </summary>
-    /// <param name="jsonObject">The already-parsed request body, mutated in place.</param>
+    /// <remarks>
+    /// With <paramref name="featureSupport"/>, the strip is first planned read-only against
+    /// <paramref name="jsonObject"/>; only when it removes something is a separate copy parsed and changed, so the
+    /// common case costs no extra parse. <paramref name="jsonObject"/> itself never loses a feature, and the
+    /// unstripped serialization is kept on the candidate for failover candidates to start from.
+    /// </remarks>
+    /// <param name="jsonObject">The already-parsed request body; its <c>model</c> is rewritten in place.</param>
     /// <param name="route">The resolved route whose upstream model id replaces <c>model</c>.</param>
+    /// <param name="featureSupport">
+    /// The route's model capability record when this candidate may be stripped, or <see langword="null"/> when it
+    /// may not (an explicit pick's own first attempt, a path other than <c>/v1/messages</c>, or no record).
+    /// </param>
     /// <returns>The rewritten failover candidate.</returns>
-    public static RouteCandidate BuildCandidate(JsonObject jsonObject, ResolvedModelRoute route)
+    public static RouteCandidate BuildCandidate(JsonObject jsonObject, ResolvedModelRoute route,
+        ModelFeatureSupport? featureSupport = null)
     {
         jsonObject["model"] = route.ProviderModelId;
         var rewrittenBody = Encoding.UTF8.GetBytes(jsonObject.ToJsonString());
+
+        var strip = featureSupport is null
+            ? MessagesFeatureStrip.None
+            : MessagesFeatureStripper.Plan(body: jsonObject, support: featureSupport);
+        var strippedBody = strip.IsEmpty ? null : ApplyStrip(source: rewrittenBody, strip: strip);
+
         return new RouteCandidate(
             Route: route,
-            LazyRewrittenBody: new Lazy<byte[]>(rewrittenBody),
+            LazyRewrittenBody: new Lazy<byte[]>(strippedBody ?? rewrittenBody),
             CarriesTools: CarriesTools(jsonObject),
             CarriesToolHistory: CarriesToolHistory(jsonObject),
-            CarriesResponseFormat: CarriesResponseFormat(jsonObject));
+            CarriesResponseFormat: CarriesResponseFormat(jsonObject),
+            LazyFeatureStrip: strip.IsEmpty ? null : new Lazy<MessagesFeatureStrip>(strip),
+            UnstrippedBody: strippedBody is null ? null : rewrittenBody);
     }
 
     /// <summary>
@@ -41,23 +62,52 @@ internal static class RequestBodyIntrospection
     /// body, a snapshot that later mutation of the parsed request cannot disturb, and changes only
     /// <c>model</c>.
     /// </summary>
+    /// <remarks>
+    /// Starts from the primary's <see cref="RouteCandidate.SourceBody"/> - its body before any strip - so a
+    /// feature removed for the primary's model still reaches a fallback model that supports it. The fallback's own
+    /// strip, when <paramref name="featureSupport"/> is given, is planned and applied inside the same lazy step.
+    /// </remarks>
     /// <param name="primary">The already-built primary candidate whose body and flags are reused.</param>
     /// <param name="route">The fallback route whose upstream model id replaces <c>model</c>.</param>
+    /// <param name="featureSupport">
+    /// The fallback model's capability record when it may be stripped, or <see langword="null"/>.
+    /// </param>
     /// <returns>The failover candidate with a lazily produced body.</returns>
-    public static RouteCandidate BuildFallbackCandidate(RouteCandidate primary, ResolvedModelRoute route)
+    public static RouteCandidate BuildFallbackCandidate(RouteCandidate primary, ResolvedModelRoute route,
+        ModelFeatureSupport? featureSupport = null)
     {
-        var primaryBody = primary.RewrittenBody;
+        var sourceBody = primary.SourceBody;
+        var built = new Lazy<(byte[] Body, MessagesFeatureStrip Strip)>(() =>
+        {
+            var body = (JsonObject)JsonNode.Parse(sourceBody)!;
+            body["model"] = route.ProviderModelId;
+
+            var strip = featureSupport is null
+                ? MessagesFeatureStrip.None
+                : MessagesFeatureStripper.Plan(body: body, support: featureSupport);
+            if (!strip.IsEmpty) MessagesFeatureStripper.Apply(body: body, strip: strip);
+
+            return (Encoding.UTF8.GetBytes(body.ToJsonString()), strip);
+        });
+
         return new RouteCandidate(
             Route: route,
-            LazyRewrittenBody: new Lazy<byte[]>(() =>
-            {
-                var body = (JsonObject)JsonNode.Parse(primaryBody)!;
-                body["model"] = route.ProviderModelId;
-                return Encoding.UTF8.GetBytes(body.ToJsonString());
-            }),
+            LazyRewrittenBody: new Lazy<byte[]>(() => built.Value.Body),
             CarriesTools: primary.CarriesTools,
             CarriesToolHistory: primary.CarriesToolHistory,
-            CarriesResponseFormat: primary.CarriesResponseFormat);
+            CarriesResponseFormat: primary.CarriesResponseFormat,
+            LazyFeatureStrip: featureSupport is null ? null : new Lazy<MessagesFeatureStrip>(() => built.Value.Strip));
+    }
+
+    /// <summary>
+    /// Parses a fresh copy of <paramref name="source"/>, removes what <paramref name="strip"/> names, and
+    /// serializes it - the candidate's own copy, so the shared parsed body is never changed.
+    /// </summary>
+    private static byte[] ApplyStrip(byte[] source, MessagesFeatureStrip strip)
+    {
+        var copy = (JsonObject)JsonNode.Parse(source)!;
+        MessagesFeatureStripper.Apply(body: copy, strip: strip);
+        return Encoding.UTF8.GetBytes(copy.ToJsonString());
     }
 
     /// <summary>

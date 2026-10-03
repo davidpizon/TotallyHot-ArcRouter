@@ -11,7 +11,10 @@ namespace TotallyHot.ArcRouter.Router;
 /// split), and otherwise to <see cref="Orchestrator.OrchestratorRoutingPolicy"/> - the PLAN.md Phase M
 /// default - or <see cref="AgentRouterPolicy"/>'s memory-only ranking when
 /// <see cref="RoutingOptions.EnableOrchestratorPolicy"/> is <see langword="false"/>
-/// (docs/router/orchestrator-live-path-plan.md M1.1/M1.3).
+/// (docs/router/orchestrator-live-path-plan.md M1.1/M1.3). A non-utility request whose
+/// <see cref="RoutingContext.NearBestValueFloor"/> is set (a light subagent, issue #163) first tries
+/// <see cref="UtilityRoutingPolicy.SelectNearBestValue"/> and falls through to that general dispatch when nothing
+/// qualifies.
 /// </summary>
 /// <remarks>
 /// An explicitly-named, servable model never reaches this class: <see cref="Proxy.RequestInterceptor"/>
@@ -77,6 +80,8 @@ public sealed class CompositeRoutingPolicy : IRoutingPolicy
         if (context.IsUtility)
             return _utilityPolicy.SelectModelAsync(context: context, cancellationToken: cancellationToken);
 
+        if (TrySelectNearBestValue(context) is { } nearBest) return Task.FromResult(nearBest);
+
         return _options.EnableOrchestratorPolicy
             ? _orchestratorPolicy.SelectModelAsync(context: context, signals: signals,
                 cancellationToken: cancellationToken)
@@ -101,10 +106,32 @@ public sealed class CompositeRoutingPolicy : IRoutingPolicy
             return ((IRoutingPolicy)_utilityPolicy).DecideOutcomeAsync(context: context, signals: signals,
                 cancellationToken: cancellationToken);
 
+        if (TrySelectNearBestValue(context) is { } nearBest)
+            return Task.FromResult(new RoutingDecision(
+                selectedModel: nearBest,
+                0,
+                rationale: "Near-best value pick for a light subagent (issue #163).",
+                timestampUtc: DateTimeOffset.UtcNow));
+
         return _options.EnableOrchestratorPolicy
             ? _orchestratorPolicy.DecideOutcomeAsync(context: context, signals: signals,
                 cancellationToken: cancellationToken)
             : ((IRoutingPolicy)_generalPolicy).DecideOutcomeAsync(context: context, signals: signals,
                 cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// The light-subagent leg (issue #163, <c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>):
+    /// when <see cref="RoutingContext.NearBestValueFloor"/> is set, asks <see cref="UtilityRoutingPolicy"/> for the
+    /// best value among the near-best candidates. <see langword="null"/> - no floor, or nothing qualified - means the
+    /// caller continues with the normal general-leg dispatch, so a light subagent the router knows too little about
+    /// is routed exactly as it would be without a signal. Deterministic, like the utility leg: it reports
+    /// <see cref="RoutingDecision.Propensity"/> 1.0 and never explores.
+    /// </summary>
+    private string? TrySelectNearBestValue(RoutingContext context)
+    {
+        return context.NearBestValueFloor is { } floor
+            ? _utilityPolicy.SelectNearBestValue(context: context, relativeFloor: floor)
+            : null;
     }
 }

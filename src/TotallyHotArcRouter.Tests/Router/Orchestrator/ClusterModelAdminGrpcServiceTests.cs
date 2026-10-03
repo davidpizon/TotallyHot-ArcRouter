@@ -156,8 +156,8 @@ public class ClusterModelAdminGrpcServiceTests
 
     private static string TempModelPath()
     {
-        return Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
-            path4: "cluster_model.json");
+        return Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"),
+            path3: "cluster_model.json");
     }
 
     private static void WriteArtifact(string path, int chosenK, int memoryEntryCount, int bootstrapTaskCount)

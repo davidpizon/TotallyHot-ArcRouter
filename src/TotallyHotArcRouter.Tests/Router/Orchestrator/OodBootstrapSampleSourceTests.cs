@@ -76,8 +76,7 @@ public class OodBootstrapSampleSourceTests
     [Fact]
     public async Task LoadAsync_DatabaseNotSynced_Throws()
     {
-        var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         var database = new BenchmarkDatabase(
             Options.Create(
                 new StorageOptions

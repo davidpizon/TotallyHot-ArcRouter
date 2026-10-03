@@ -129,9 +129,8 @@ public sealed class VoterEmbeddingModelGuardTests
             0,
             EmbeddingModel: embeddingModel);
 
-        var path = Path.Combine(
-            path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
-            path4: "cluster_model.json");
+        var path = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"),
+            path3: "cluster_model.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path: path, contents: ClusterModelArtifactSerializer.Serialize(artifact));
         return path;

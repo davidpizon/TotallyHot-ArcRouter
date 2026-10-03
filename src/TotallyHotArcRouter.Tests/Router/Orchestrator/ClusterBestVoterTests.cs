@@ -44,8 +44,7 @@ public class ClusterBestVoterTests
     [Fact]
     public async Task VoteAsync_NoArtifactOnDisk_AbstainsCleanlyWithoutThrowing()
     {
-        var missingPath = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"), path4: "cluster_model.json");
+        var missingPath = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"), path3: "cluster_model.json");
         var voter = CreateVoter(modelPath: missingPath, store: new FakeMemoryEntryStore());
         var context = new VotingContext(
             Dimension: "live:bug_fixing",
@@ -155,8 +154,7 @@ public class ClusterBestVoterTests
     [Fact]
     public async Task VoteAsync_ArtifactWrittenAfterConstruction_IsPickedUpOnlyAfterReload()
     {
-        var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var path = Path.Combine(path1: directory, path2: "cluster_model.json");
         var store = new FakeMemoryEntryStore();
@@ -211,8 +209,7 @@ public class ClusterBestVoterTests
 
     private static string WriteArtifact(ClusterModelArtifact artifact)
     {
-        var path = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"), path4: "cluster_model.json");
+        var path = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"), path3: "cluster_model.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path: path, contents: ClusterModelArtifactSerializer.Serialize(artifact));
         return path;

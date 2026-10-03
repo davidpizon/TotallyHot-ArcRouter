@@ -183,6 +183,129 @@ public class UtilityRoutingPolicyTests
             policy.SelectModelAsync(context: Context("only"), cancellationToken: cts.Token));
     }
 
+    // ---- SelectNearBestValue (issue #163 light subagents, ADR-0022) ----
+
+    [Fact]
+    public async Task SelectNearBestValue_CheaperCandidateWithinFloor_WinsOnValue()
+    {
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice(modelName: "pricey", provider: "openai", 10m, 10m);
+        catalog.SetPrice(modelName: "cheap", provider: "openai", 1m, 1m);
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: Dimension, model: "pricey", 0.9);
+        await memory.AddScoreAsync(dimension: Dimension, model: "cheap", 0.85); // floor is 0.81
+        var policy = Build(catalog: catalog, memory: memory);
+
+        var selected = policy.SelectNearBestValue(context: Context("pricey", "cheap"), relativeFloor: 0.9);
+
+        Assert.Equal(expected: "cheap", actual: selected);
+    }
+
+    [Fact]
+    public async Task SelectNearBestValue_CheaperCandidateBelowFloor_IsExcluded()
+    {
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice(modelName: "pricey", provider: "openai", 10m, 10m);
+        catalog.SetPrice(modelName: "cheap", provider: "openai", 1m, 1m);
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: Dimension, model: "pricey", 0.9);
+        await memory.AddScoreAsync(dimension: Dimension, model: "cheap", 0.7); // below 0.81
+        var policy = Build(catalog: catalog, memory: memory);
+
+        var selected = policy.SelectNearBestValue(context: Context("pricey", "cheap"), relativeFloor: 0.9);
+
+        Assert.Equal(expected: "pricey", actual: selected);
+    }
+
+    [Fact]
+    public async Task SelectNearBestValue_FreeProviderWithinFloor_IsCostRankedAtZero()
+    {
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice(modelName: "paid", provider: "openai", 3m, 3m);
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: Dimension, model: "paid", 0.9);
+        await memory.AddScoreAsync(dimension: Dimension, model: "local", 0.82);
+        var context = new RoutingContext(
+            Dimension: Dimension,
+            false,
+            Candidates:
+            [
+                new RoutingCandidate(ModelName: "paid", Provider: "openai", false),
+                new RoutingCandidate(ModelName: "local", Provider: "lmstudio", true)
+            ]);
+        var policy = Build(catalog: catalog, memory: memory);
+
+        var selected = policy.SelectNearBestValue(context: context, relativeFloor: 0.9);
+
+        Assert.Equal(expected: "local", actual: selected);
+    }
+
+    [Fact]
+    public async Task SelectNearBestValue_UnobservedCandidate_NeverQualifies()
+    {
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice(modelName: "known", provider: "openai", 20m, 20m);
+        catalog.SetPrice(modelName: "unobserved", provider: "openai", 0.1m, 0.1m);
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: Dimension, model: "known", 0.9);
+        var policy = Build(catalog: catalog, memory: memory);
+
+        var selected = policy.SelectNearBestValue(context: Context("known", "unobserved"), relativeFloor: 0.9);
+
+        Assert.Equal(expected: "known", actual: selected);
+    }
+
+    [Fact]
+    public void SelectNearBestValue_NoKnownScores_ReturnsNull()
+    {
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice(modelName: "a", provider: "openai", 1m, 1m);
+        catalog.SetPrice(modelName: "b", provider: "openai", 2m, 2m);
+        var policy = Build(catalog: catalog, memory: new RouterMemory());
+
+        Assert.Null(policy.SelectNearBestValue(context: Context("a", "b"), relativeFloor: 0.9));
+    }
+
+    [Fact]
+    public async Task SelectNearBestValue_OnlyQualifierUnpriced_ReturnsNull()
+    {
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice(modelName: "weak", provider: "openai", 0.5m, 0.5m);
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: Dimension, model: "best-unpriced", 0.9);
+        await memory.AddScoreAsync(dimension: Dimension, model: "weak", 0.4);
+        var policy = Build(catalog: catalog, memory: memory);
+
+        Assert.Null(policy.SelectNearBestValue(context: Context("best-unpriced", "weak"), relativeFloor: 0.9));
+    }
+
+    [Fact]
+    public async Task SelectNearBestValue_BestScoreBelowTheUtilityQualityFloor_ReturnsNull()
+    {
+        var catalog = new StubPriceCatalog();
+        catalog.SetPrice(modelName: "poor", provider: "openai", 1m, 1m);
+        var memory = new RouterMemory();
+        await memory.AddScoreAsync(dimension: Dimension, model: "poor", 0.2); // UtilityMinQualityScore is 0.3
+        var policy = Build(catalog: catalog, memory: memory);
+
+        Assert.Null(policy.SelectNearBestValue(context: Context("poor"), relativeFloor: 0.9));
+    }
+
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(-0.5)]
+    [InlineData(1.5)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    public void SelectNearBestValue_FloorOutsideRange_Throws(double relativeFloor)
+    {
+        var policy = Build(catalog: new StubPriceCatalog(), memory: new RouterMemory());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            policy.SelectNearBestValue(context: Context("only"), relativeFloor: relativeFloor));
+    }
+
     private static UtilityRoutingPolicy Build(IModelPriceCatalog catalog, RouterMemory memory)
     {
         return new UtilityRoutingPolicy(priceCatalog: catalog, memory: memory,

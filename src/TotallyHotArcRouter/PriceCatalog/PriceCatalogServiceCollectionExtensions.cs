@@ -192,6 +192,11 @@ internal static class PriceCatalogServiceCollectionExtensions
         // see IModelContextWindowStore - but backed by the one store so both read the same snapshot and
         // one Reload refreshes both.
         services.AddSingleton<IModelContextWindowStore>(sp => sp.GetRequiredService<ToolCallCapabilityStore>());
+
+        // And its third read interface, for RequestInterceptor's candidate builder: the per-model capability
+        // records that decide which request features a router-chosen candidate's copy drops (ADR-0022
+        // Amendment 1). Same singleton, so one Reload refreshes it with the rest.
+        services.AddSingleton<IModelFeatureSupportStore>(sp => sp.GetRequiredService<ToolCallCapabilityStore>());
         services.AddHttpClient(PriceSourceRegistry.HttpClientName, client =>
         {
             // Explicit rather than the 100 s default: a price feed that has not answered in 30 s is not

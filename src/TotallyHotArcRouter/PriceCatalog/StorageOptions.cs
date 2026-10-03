@@ -231,8 +231,8 @@ public sealed class StorageOptions
         // Same substitution for the pre-move token, which no default uses any more but a pinned
         // appsettings.json value (and every path LegacyStorageMigration probes) still can.
         if (withTokensExpanded.Contains(value: LocalAppDataToken, comparisonType: StringComparison.OrdinalIgnoreCase))
-            withTokensExpanded = withTokensExpanded.Replace(oldValue: LocalAppDataToken, newValue: PerUserRoot(),
-                comparisonType: StringComparison.OrdinalIgnoreCase);
+            withTokensExpanded = withTokensExpanded.Replace(oldValue: LocalAppDataToken,
+                newValue: AppDataPaths.ResolvePerUserRoot(), comparisonType: StringComparison.OrdinalIgnoreCase);
 
         // Still run the real expander afterward, for any other environment-variable token an operator's
         // own override might embed (our two tokens above are already gone by this point, so this cannot
@@ -246,19 +246,6 @@ public sealed class StorageOptions
         return Path.IsPathRooted(expanded)
             ? expanded
             : Path.Combine(path1: AppContext.BaseDirectory, path2: expanded);
-    }
-
-    /// <summary>
-    /// Resolves the per-user application-data root a <c>%LOCALAPPDATA%</c> token stands for, with an
-    /// empty-folder fallback and a trailing-separator trim.
-    /// </summary>
-    private static string PerUserRoot()
-    {
-        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        if (string.IsNullOrEmpty(root)) root = AppContext.BaseDirectory;
-
-        return root.TrimEnd('/', '\\');
     }
 
     /// <summary>
@@ -278,6 +265,7 @@ public sealed class StorageOptions
     /// </summary>
     public static IReadOnlyList<string> ResolveLegacyDirectories()
     {
-        return [.. LegacyDirectoryNames.Select(name => Path.Combine(path1: PerUserRoot(), path2: name))];
+        var perUserRoot = AppDataPaths.ResolvePerUserRoot();
+        return [.. LegacyDirectoryNames.Select(name => Path.Combine(path1: perUserRoot, path2: name))];
     }
 }

@@ -61,9 +61,10 @@ public static class TrayDiscoveryReader
     /// Gets the default discovery file path: <c>%ProgramData%\TotallyHotArcRouter\web-interface.json</c>.
     /// Machine-wide, not per-user, matching where the router (running as <c>LocalSystem</c>) writes it -
     /// see <see cref="TrayDiscoveryReader"/>'s remarks for why this is a duplicated constant rather than a
-    /// shared resolver call.
+    /// shared resolver call. Internal rather than private so tests can check the location without
+    /// reading the live file.
     /// </summary>
-    private static string DefaultPath()
+    internal static string DefaultPath()
     {
         return Path.Combine(
             path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
