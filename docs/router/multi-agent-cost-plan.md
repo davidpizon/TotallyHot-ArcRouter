@@ -70,12 +70,12 @@
 - Success: ≥ X% estimated spend saved per session against the frozen baseline with Δs inside tolerance. David sets X after F1 produces a baseline; no target is invented here.
 
 **F7. Cache-aware stickiness.** Effort M.
-- What: set `PriceContext.RepeatsCachedContext` from session continuity, and charge a mid-session switch for the cached prefix it forfeits (ADR-0017 Option 5).
+- What: set `PriceContext.RepeatsCachedContext` from session continuity, and charge a mid-session switch for the cached prefix it forfeits (ADR-0017's soft affinity and switch test).
 - Saves money by: avoiding the cache re-reads described in G5.
 - Success: cache-read token share per session rises and cost per session falls. It waits on #8's persistence analysis.
 
 **F8. Inbound translators (Messages, then Responses).** Effort L.
-- What: build a translator only where the #8 census gives P < 90%, per ADR-0017's rule. Each translator gets its own ADR.
+- What: build a translator only where ADR-0017's census rule allows it: P_conv < 90%, a wanted model no native endpoint serves, and a saving net of switch penalties. Each translator gets its own ADR.
 - Saves money by: widening Claude Code and Codex routing beyond one vendor (G2).
 - Success: share of harness turns routed off-dialect without failures.
 

@@ -1,12 +1,13 @@
 using System.Globalization;
+using System.Text.Json;
 using TotallyHot.ArcRouter.PriceCatalog;
 
 namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 
 /// <summary>
-/// SQL access to the two tool-call capability tables (<c>provider_endpoint_capabilities</c> and
-/// <c>model_tool_capabilities</c>), which live in the same <c>agent_telemetry.db</c> the price catalog
-/// created (<c>docs/router/tool-call-normalization.md</c> Phase 1).
+/// SQL access to the capability tables (<c>provider_endpoint_capabilities</c>, <c>model_tool_capabilities</c>,
+/// <c>model_context_windows</c> and <c>model_feature_support</c>), which live in the same
+/// <c>agent_telemetry.db</c> the price catalog created (<c>docs/router/tool-call-normalization.md</c> Phase 1).
 /// <para>
 /// Depends on <see cref="PriceCatalogDatabase"/> purely as the owner of the connection string and schema
 /// bootstrap - the naming is a historical artifact of that type being the repository's first database, and
@@ -295,6 +296,106 @@ public sealed class ToolCallCapabilityRepository
         command.Parameters.AddWithValue(parameterName: "$detected", value: FormatTimestamp(window.DetectedAtUtc));
 
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Reads every per-model capability record (<c>model_feature_support</c>). Used to build the store's cache.
+    /// </summary>
+    /// <remarks>
+    /// A row whose stored JSON is not an object is skipped rather than surfaced: it can only come from a hand edit
+    /// or corruption, and an absent record already means "unknown", which is the honest reading - the request path
+    /// then sends fields as received.
+    /// </remarks>
+    public IReadOnlyList<ModelFeatureSupport> GetModelFeatureSupport()
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT provider_key, model_id, capabilities_json, scanned_at_utc
+                              FROM model_feature_support;
+                              """;
+
+        var results = new List<ModelFeatureSupport>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var capabilities = ParseCapabilities(reader.GetString(2));
+            if (capabilities is null) continue;
+
+            results.Add(new ModelFeatureSupport(
+                ProviderKey: reader.GetString(0),
+                ModelId: reader.GetString(1),
+                Capabilities: capabilities.Value,
+                ScannedAtUtc: ParseTimestamp(reader.GetString(3))));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Replaces every capability record for <paramref name="providerKey"/> with <paramref name="records"/>, in one
+    /// transaction.
+    /// </summary>
+    /// <remarks>
+    /// Replaced as a set rather than upserted row by row, so a model the provider no longer lists stops carrying a
+    /// stale record. The invariant that keeps this safe lives in the scanner: a scan that could not read the whole
+    /// list returns no set at all and never reaches this method, so a failed or partial re-scan cannot clear
+    /// records that were previously known.
+    /// </remarks>
+    /// <param name="providerKey">The provider whose records are replaced.</param>
+    /// <param name="records">The complete new set; empty clears the provider's records.</param>
+    public void ReplaceModelFeatureSupport(string providerKey, IReadOnlyList<ModelFeatureSupport> records)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        ArgumentNullException.ThrowIfNull(records);
+
+        using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM model_feature_support WHERE provider_key = $provider;";
+            delete.Parameters.AddWithValue(parameterName: "$provider", value: providerKey);
+            delete.ExecuteNonQuery();
+        }
+
+        foreach (var record in records)
+        {
+            using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                                 INSERT INTO model_feature_support (provider_key, model_id, capabilities_json, scanned_at_utc)
+                                 VALUES ($provider, $model, $json, $scanned)
+                                 ON CONFLICT(provider_key, model_id) DO UPDATE SET
+                                     capabilities_json = excluded.capabilities_json,
+                                     scanned_at_utc    = excluded.scanned_at_utc;
+                                 """;
+            insert.Parameters.AddWithValue(parameterName: "$provider", value: providerKey);
+            insert.Parameters.AddWithValue(parameterName: "$model", value: record.ModelId);
+            insert.Parameters.AddWithValue(parameterName: "$json", value: record.Capabilities.GetRawText());
+            insert.Parameters.AddWithValue(parameterName: "$scanned", value: FormatTimestamp(record.ScannedAtUtc));
+            insert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Parses a stored <c>capabilities_json</c> value into a detached object element, or <see langword="null"/>
+    /// when it is not a JSON object. See <see cref="GetModelFeatureSupport"/> for why a bad row is skipped.
+    /// </summary>
+    private static JsonElement? ParseCapabilities(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object ? document.RootElement.Clone() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

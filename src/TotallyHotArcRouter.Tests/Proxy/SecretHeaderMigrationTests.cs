@@ -18,8 +18,7 @@ namespace TotallyHot.ArcRouter.Tests.Proxy;
 /// </summary>
 public sealed class SecretHeaderMigrationTests : IDisposable
 {
-    private readonly string _secretStorePath = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-        path3: Guid.NewGuid().ToString("N"), path4: "secrets.dat");
+    private readonly string _secretStorePath = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"), path3: "secrets.dat");
 
     private readonly string _tempPath =
         Path.Combine(path1: Path.GetTempPath(), path2: $"model-routing-{Guid.NewGuid():N}.json");

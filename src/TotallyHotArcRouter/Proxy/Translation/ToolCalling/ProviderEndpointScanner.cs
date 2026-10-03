@@ -39,6 +39,18 @@ public sealed class ProviderEndpointScanner
     private const string AnthropicMessagesProbeBody =
         $$"""{"model":"{{AnthropicProbeModel}}","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}""";
 
+    /// <summary>
+    /// The page size <see cref="ScanModelFeaturesAsync"/> asks for: Anthropic's documented maximum for
+    /// <c>GET /v1/models</c>, whose default page is only 20 models.
+    /// </summary>
+    private const int ModelListPageSize = 1000;
+
+    /// <summary>
+    /// How many pages <see cref="ScanModelFeaturesAsync"/> reads before giving up on a list as incomplete - a
+    /// bound against an endpoint that keeps answering <c>has_more: true</c>.
+    /// </summary>
+    private const int MaxModelListPages = 10;
+
     private readonly IEnvironmentVariableProvider _environment;
 
     private readonly HttpClient? _httpClient;
@@ -150,6 +162,126 @@ public sealed class ProviderEndpointScanner
             ScanError: anyAnswered
                 ? null
                 : SummarizeFailure(openAiFailure, lmStudioProbe.Error, ollamaProbe.Error, messagesProbeError));
+    }
+
+    /// <summary>
+    /// Reads the per-model <c>capabilities</c> records from an Anthropic-shaped model list
+    /// (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c> Amendment 1), following its
+    /// pagination to the end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A separate step from <see cref="ScanAsync"/>, called only once that scan says the endpoint is
+    /// Anthropic-compatible, for the same reason per-model metadata resolution is separate: endpoint flavors and
+    /// per-model facts have different consumers and different failure handling. It costs one extra
+    /// <c>GET</c> per scan of such a provider, never one per request.
+    /// </para>
+    /// <para>
+    /// All or nothing. Any page that fails, is not JSON, or is not Anthropic-shaped makes the whole result
+    /// <see langword="null"/>, and so does a list longer than <see cref="MaxModelListPages"/> pages. The caller then
+    /// keeps whatever it recorded before: replacing a provider's records with a partial list would drop the models
+    /// on the unread pages, turning a transient failure into lost knowledge. A model whose entry has no
+    /// <c>capabilities</c> object (absent or <c>null</c>) gets no record, which reads as unknown.
+    /// </para>
+    /// </remarks>
+    /// <param name="providerKey">The <c>ModelRouting:Providers</c> key the records are stored under.</param>
+    /// <param name="provider">The provider to read, with its credentials and custom headers.</param>
+    /// <param name="cancellationToken">Cancels the requests.</param>
+    /// <returns>Every record the complete list reported, or <see langword="null"/> when the list could not be read.</returns>
+    public async Task<IReadOnlyList<ModelFeatureSupport>?> ScanModelFeaturesAsync(
+        string providerKey,
+        ProviderOptions provider,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        ArgumentNullException.ThrowIfNull(provider);
+
+        if (!Uri.TryCreate(uriString: provider.BaseUrl, uriKind: UriKind.Absolute, result: out _)) return null;
+
+        var modelsUrl = ProviderUrlBuilder.BuildModelsUrl(provider.BaseUrl);
+        var scannedAtUtc = DateTimeOffset.UtcNow;
+        var records = new List<ModelFeatureSupport>();
+        string? afterId = null;
+
+        for (var page = 0; page < MaxModelListPages; page++)
+        {
+            var url = afterId is null
+                ? $"{modelsUrl}?limit={ModelListPageSize}"
+                : $"{modelsUrl}?limit={ModelListPageSize}&after_id={Uri.EscapeDataString(afterId)}";
+
+            var probe = await ProbeAsync(url: url, provider: provider, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (!probe.Succeeded || probe.Body is null) return null;
+
+            var next = ReadModelFeaturePage(body: probe.Body, providerKey: providerKey, scannedAtUtc: scannedAtUtc,
+                records: records);
+            if (next is null) return null;
+            if (!next.Value.HasMore) return records;
+
+            afterId = next.Value.LastId;
+            if (afterId is null) return null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Parses one page of an Anthropic-shaped model list, appending a record for every entry that carries a
+    /// <c>capabilities</c> object. An entry with no capabilities (absent or null) is skipped; any malformed entry
+    /// voids the page.
+    /// </summary>
+    /// <returns>
+    /// Whether more pages follow and the id to continue after, or <see langword="null"/> when the body is not an
+    /// Anthropic-shaped model list - see <see cref="ScanModelFeaturesAsync"/> for why that voids the whole scan.
+    /// </returns>
+    private static (bool HasMore, string? LastId)? ReadModelFeaturePage(
+        string body, string providerKey, DateTimeOffset scannedAtUtc, List<ModelFeatureSupport> records)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty(propertyName: "data", value: out var data) ||
+                data.ValueKind != JsonValueKind.Array ||
+                !root.TryGetProperty(propertyName: "has_more", value: out var hasMore) ||
+                hasMore.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                return null;
+
+            // The caller replaces the provider's whole stored set with what the scan returns, so a page is
+            // all-or-nothing: an entry that is not an object, lacks a usable id, or carries a capabilities value
+            // that is neither an object nor null voids the page (and so the scan, keeping the previous records)
+            // rather than being skipped. Only a model that publishes no capabilities - the key absent or null -
+            // is skipped, because that is a valid answer meaning "no record".
+            foreach (var entry in data.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.Object ||
+                    !entry.TryGetProperty(propertyName: "id", value: out var id) ||
+                    id.ValueKind != JsonValueKind.String ||
+                    string.IsNullOrWhiteSpace(id.GetString()))
+                    return null;
+
+                if (!entry.TryGetProperty(propertyName: "capabilities", value: out var capabilities) ||
+                    capabilities.ValueKind == JsonValueKind.Null)
+                    continue;
+
+                if (capabilities.ValueKind != JsonValueKind.Object) return null;
+
+                records.Add(new ModelFeatureSupport(ProviderKey: providerKey, ModelId: id.GetString()!,
+                    Capabilities: capabilities.Clone(), ScannedAtUtc: scannedAtUtc));
+            }
+
+            var lastId = root.TryGetProperty(propertyName: "last_id", value: out var last) &&
+                         last.ValueKind == JsonValueKind.String
+                ? last.GetString()
+                : null;
+
+            return (hasMore.GetBoolean(), lastId);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

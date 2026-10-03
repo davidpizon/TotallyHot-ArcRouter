@@ -26,7 +26,7 @@ namespace TotallyHot.ArcRouter.Tests.Integration;
 public class RouterCompositionTests : IAsyncDisposable
 {
     private readonly string _databaseDirectory =
-        Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"));
+        Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
 
     private readonly List<ServiceProvider> _providers = [];
 

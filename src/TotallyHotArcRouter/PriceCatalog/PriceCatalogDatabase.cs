@@ -262,6 +262,21 @@ public sealed class PriceCatalogDatabase
                                          PRIMARY KEY(provider_key, model_name)
                                      );
 
+                                     -- Per-model capability records a provider's own model list reported - Anthropic's Models API
+                                     -- `capabilities` object (docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md
+                                     -- Amendment 1). Its own table for the same reason as model_context_windows: a different write
+                                     -- lifecycle (replaced as a set per provider on each scan). Keyed on the upstream model id the list
+                                     -- named, not the client-facing model name. capabilities_json is the vendor's object verbatim and is
+                                     -- read by key name, so a capability Anthropic adds later needs no column and no migration. A new
+                                     -- table, so no Migrate* helper is needed (see model_context_windows above).
+                                     CREATE TABLE IF NOT EXISTS model_feature_support (
+                                         provider_key      TEXT NOT NULL COLLATE NOCASE,
+                                         model_id          TEXT NOT NULL COLLATE NOCASE,
+                                         capabilities_json TEXT NOT NULL,
+                                         scanned_at_utc    TEXT NOT NULL,
+                                         PRIMARY KEY(provider_key, model_id)
+                                     );
+
                                      -- The durable usage ledger (docs/router/token-tracking-implementation-plan.md Phase 2, §5.2):
                                      -- every priced/unpriced request's usage, surviving process restarts (unlike the in-memory-only
                                      -- telemetry stream). dedup_key is either the upstream provider's own request id (preferred) or a

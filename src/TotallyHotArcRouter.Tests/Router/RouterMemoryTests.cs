@@ -115,8 +115,7 @@ public class RouterMemoryTests
     [Fact]
     public async Task Persistence_WithSharedStore_SurvivesMemoryRecreation()
     {
-        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        var tempDirectory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         try
         {
             var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions

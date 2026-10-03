@@ -75,8 +75,7 @@ public sealed class RouterSettingsStoreTests
     [Fact]
     public void SecondStore_OverSameDatabaseFile_SeesTheFirstStoresWrites()
     {
-        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        var tempDirectory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         var dbPath = Path.Combine(path1: tempDirectory, path2: "router_embedding_memory.db");
 
         var first = new RouterSettingsStore(
@@ -97,8 +96,7 @@ public sealed class RouterSettingsStoreTests
 
     private static RouterSettingsStore CreateStore()
     {
-        var tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        var tempDirectory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         var dbPath = Path.Combine(path1: tempDirectory, path2: "router_embedding_memory.db");
         var database =
             new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));

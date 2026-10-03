@@ -19,4 +19,15 @@ namespace TotallyHot.ArcRouter.Router;
 /// Every currently-eligible model (not circuit-open, not disabled) a policy may select from - never
 /// empty when a caller has at least one live route.
 /// </param>
-public sealed record RoutingContext(string Dimension, bool IsUtility, IReadOnlyList<RoutingCandidate> Candidates);
+/// <param name="NearBestValueFloor">
+/// When set, asks <see cref="CompositeRoutingPolicy"/> to try <see cref="UtilityRoutingPolicy.SelectNearBestValue"/>
+/// with this relative floor before its normal dispatch - set only for a light subagent (issue #163,
+/// <c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>), carrying the live
+/// <see cref="Models.SubagentBiasOptions.LightSubagentRelativeFloor"/>. <see langword="null"/> (the default, and
+/// every request without such a signal) leaves dispatch exactly as it was.
+/// </param>
+public sealed record RoutingContext(
+    string Dimension,
+    bool IsUtility,
+    IReadOnlyList<RoutingCandidate> Candidates,
+    double? NearBestValueFloor = null);

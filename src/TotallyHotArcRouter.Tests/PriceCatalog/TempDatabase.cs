@@ -15,8 +15,7 @@ internal sealed class TempDatabase : IDisposable
 {
     public TempDatabase()
     {
-        var directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         DatabasePath = Path.Combine(path1: directory, path2: "agent_telemetry.db");
         Database = new PriceCatalogDatabase(Options.Create(new StorageOptions { DatabasePath = DatabasePath }));
     }

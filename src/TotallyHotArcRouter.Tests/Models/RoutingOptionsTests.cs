@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 
@@ -113,5 +114,68 @@ public class RoutingOptionsTests
         };
 
         Assert.Throws<OptionsValidationException>(options.EnsureValid);
+    }
+
+    /// <summary>
+    /// Verifies subagent-aware routing (issue #163) is on by default, every per-signal flag included.
+    /// </summary>
+    [Fact]
+    public void SubagentBias_DefaultsToEnabledForEverySignal()
+    {
+        var bias = new RoutingOptions().SubagentBias;
+
+        Assert.True(bias.Enabled);
+        Assert.True(bias.ClaudeCodeAgentId);
+        Assert.True(bias.ClaudeCodeHintHeaders);
+        Assert.True(bias.CodexTurnMetadata);
+        Assert.True(bias.CopilotUtilityAlias);
+        Assert.Equal(0.9, actual: bias.LightSubagentRelativeFloor, 3);
+    }
+
+    /// <summary>
+    /// Verifies <see cref="RoutingOptions.EnsureValid"/> rejects a light-subagent relative floor outside (0, 1], so a
+    /// typo fails at startup instead of silently disabling or widening the light-subagent route.
+    /// </summary>
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(-0.1)]
+    [InlineData(1.01)]
+    [InlineData(double.NaN)]
+    public void EnsureValid_Throws_WhenLightSubagentRelativeFloorOutOfRange(double floor)
+    {
+        var options = new RoutingOptions { SubagentBias = new SubagentBiasOptions { LightSubagentRelativeFloor = floor } };
+
+        Assert.Throws<OptionsValidationException>(options.EnsureValid);
+    }
+
+    /// <summary>Verifies the boundary value 1 (only the best known model qualifies) is accepted.</summary>
+    [Fact]
+    public void EnsureValid_AcceptsARelativeFloorOfOne()
+    {
+        var options = new RoutingOptions { SubagentBias = new SubagentBiasOptions { LightSubagentRelativeFloor = 1d } };
+
+        options.EnsureValid();
+    }
+
+    /// <summary>
+    /// Verifies <c>Routing:SubagentBias</c> binds from configuration, so an operator can flip the kill switch
+    /// or drop one marker without code changes.
+    /// </summary>
+    [Fact]
+    public void SubagentBias_BindsFromConfiguration()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Routing:SubagentBias:Enabled"] = "false",
+                ["Routing:SubagentBias:CodexTurnMetadata"] = "false"
+            })
+            .Build();
+
+        var options = configuration.GetSection(RoutingOptions.SectionName).Get<RoutingOptions>()!;
+
+        Assert.False(options.SubagentBias.Enabled);
+        Assert.False(options.SubagentBias.CodexTurnMetadata);
+        Assert.True(options.SubagentBias.ClaudeCodeAgentId);
     }
 }

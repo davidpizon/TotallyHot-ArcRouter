@@ -55,8 +55,7 @@ public class LogRegRetrainHostedServiceTests
     private static LogRegRetrainHostedService CreateService(
         IEmbeddingLogRegTrainingService trainingService, IMemoryEntryStore memoryStore, int threshold, bool enabled)
     {
-        var modelPath = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"), path4: "logreg_voter_model.json");
+        var modelPath = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"), path3: "logreg_voter_model.json");
         return new LogRegRetrainHostedService(
             logger: NullLogger<LogRegRetrainHostedService>.Instance,
             trainingService: trainingService,

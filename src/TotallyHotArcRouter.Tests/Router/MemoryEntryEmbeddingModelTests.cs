@@ -118,8 +118,7 @@ public sealed class MemoryEntryEmbeddingModelTests
 
         public TempRouterMemoryDatabase()
         {
-            _directory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-                path3: Guid.NewGuid().ToString("N"));
+            _directory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_directory);
             Database = new RouterMemoryDatabase(Options.Create(new RoutingOptions
             {

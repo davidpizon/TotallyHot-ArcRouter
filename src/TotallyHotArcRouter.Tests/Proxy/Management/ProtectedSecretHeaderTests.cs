@@ -20,8 +20,8 @@ public sealed class ProtectedSecretHeaderTests
 
     private static string TempStorePath()
     {
-        return Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests", path3: Guid.NewGuid().ToString("N"),
-            path4: "secrets.dat");
+        return Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"),
+            path3: "secrets.dat");
     }
 
     private static void CleanUp(string path)

@@ -17,8 +17,7 @@ public class SqliteJudgeShadowScoreStoreTests : IDisposable
 
     public SqliteJudgeShadowScoreStoreTests()
     {
-        _tempDirectory = Path.Combine(path1: Path.GetTempPath(), path2: "arcrouter-tests",
-            path3: Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
         var dbPath = Path.Combine(path1: _tempDirectory, path2: "router_embedding_memory.db");
         _database = new RouterMemoryDatabase(
             Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = dbPath }));

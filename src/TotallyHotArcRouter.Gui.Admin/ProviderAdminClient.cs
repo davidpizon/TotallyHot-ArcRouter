@@ -503,7 +503,21 @@ public sealed class ProviderAdminClient
             Dialect: model.HasDialect ? model.Dialect : null,
             Confidence: model.HasConfidence ? model.Confidence : null,
             Enabled: model.Enabled,
-            PresentUpstream: model.PresentUpstream);
+            PresentUpstream: model.PresentUpstream,
+            Capabilities: model.Capabilities is { } capabilities ? ToView(capabilities) : null);
+    }
+
+    private static ModelCapabilitiesAdminView ToView(Contract.ModelCapabilitiesState capabilities)
+    {
+        return new ModelCapabilitiesAdminView(
+            ScannedAtUtc: capabilities.ScannedAtUtc?.ToDateTimeOffset() ?? default,
+            Groups:
+            [
+                .. capabilities.Groups.Select(group => new CapabilityGroupAdminView(
+                    Name: group.Name,
+                    Supported: group.HasSupported ? group.Supported : null,
+                    Options: [.. group.Options.Select(o => new CapabilityOptionAdminView(Name: o.Name, Supported: o.Supported))]))
+            ]);
     }
 
     private static ProviderHeaderView ToView(Contract.HeaderState header)
