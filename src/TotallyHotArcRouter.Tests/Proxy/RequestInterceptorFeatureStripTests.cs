@@ -159,4 +159,47 @@ public sealed class RequestInterceptorFeatureStripTests
             return Task.FromResult(selection);
         }
     }
+
+    /// <summary>Builds an interceptor in Local Proxy CLI single-model serving mode, forcing <paramref name="forcedModel"/>.</summary>
+    private static RequestInterceptor BuildForced(string forcedModel)
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            (Haiku, "anthropic", "claude-haiku-4-5-20251001"),
+            (Sonnet, "anthropic", "claude-sonnet-5"));
+        return new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(), modelRouteResolver: resolver,
+            singleModelServingOptions: new SingleModelServingOptions { ForcedModelName = forcedModel },
+            routingPolicy: new FixedPolicy(Sonnet),
+            modelFeatureSupportStore: new FakeModelFeatureSupportStore().With(Haiku45(), Capable()));
+    }
+
+    [Fact]
+    public async Task ForcedHaiku_ForAnAutoRequest_StripsTheOneCandidate()
+    {
+        var result = await Resolve(BuildForced(Haiku), "/v1/messages", ExploreBody);
+
+        var only = Assert.Single(result.Candidates);
+        Assert.Equal(expected: Haiku, actual: only.Route.ModelName);
+        Assert.Contains(expected: "thinking.adaptive", collection: only.FeatureStrip.Features);
+        Assert.Null(BodyOf(only)["thinking"]);
+    }
+
+    [Theory]
+    [InlineData(Haiku)]
+    [InlineData("claude-haiku-4-5-20251001")]
+    public async Task ForcedHaiku_WhenTheClientNamedItToo_IsSentAsReceived(string clientModel)
+    {
+        var result = await Resolve(BuildForced(Haiku), "/v1/messages", WithModel(ExploreBody, clientModel));
+
+        var only = Assert.Single(result.Candidates);
+        Assert.True(only.FeatureStrip.IsEmpty);
+        Assert.Equal(expected: "adaptive", actual: BodyOf(only)["thinking"]!["type"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ForcedHaiku_OnAnotherPath_IsNeverStripped()
+    {
+        var result = await Resolve(BuildForced(Haiku), "/v1/chat/completions", ExploreBody);
+
+        Assert.True(Assert.Single(result.Candidates).FeatureStrip.IsEmpty);
+    }
 }

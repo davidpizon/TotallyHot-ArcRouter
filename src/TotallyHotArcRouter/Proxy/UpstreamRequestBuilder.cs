@@ -89,10 +89,20 @@ internal static class UpstreamRequestBuilder
         // configures (route.ConfiguredHeaderNames), so the operator's value is the only one of that name
         // that can reach the upstream and a client cannot override it. The Contains guard is then only a
         // duplicate-name safety net for ExtraHeaders itself. A header the provider does not configure is
-        // relayed from the client untouched, and nothing here touches it.
+        // relayed from the client untouched, and nothing here touches it. An operator-configured
+        // anthropic-beta goes through the same filter as the client's: a beta value paired with a body field
+        // this candidate dropped must not reach the upstream from either source (ADR-0017 Strip rule 1).
         foreach (var (headerName, headerValue) in route.ExtraHeaders)
-            if (!requestMessage.Headers.Contains(headerName))
-                requestMessage.Headers.TryAddWithoutValidation(name: headerName, value: headerValue);
+        {
+            if (requestMessage.Headers.Contains(headerName)) continue;
+
+            var value = droppedBetaPrefixes is { Count: > 0 } &&
+                        string.Equals(a: headerName, b: AnthropicBetaHeaderName,
+                            comparisonType: StringComparison.OrdinalIgnoreCase)
+                ? MessagesFeatureStripper.FilterBetaHeader(headerValue: headerValue, prefixes: droppedBetaPrefixes)
+                : headerValue;
+            if (value is not null) requestMessage.Headers.TryAddWithoutValidation(name: headerName, value: value);
+        }
 
         return requestMessage;
     }

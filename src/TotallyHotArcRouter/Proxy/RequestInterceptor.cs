@@ -612,8 +612,19 @@ public class RequestInterceptor
             // filtered by circuit-breaker state (there is nothing to substitute it with), but
             // ProxyMiddleware still applies its real-time ShouldBypass/ShouldBypassProvider checks to
             // this forced candidate like any other, so a request still fails fast with a 502 if the
-            // forced model's target or provider is currently OPEN.
-            candidates = [RequestBodyIntrospection.BuildCandidate(jsonObject: jsonObject, route: route)];
+            // forced model's target or provider is currently OPEN. The operator chose this model, so on
+            // native Messages traffic it is stripped like any router choice, unless the client named it too.
+            var clientNamedForcedModel =
+                string.Equals(a: clientRequestedModelName, b: route.ModelName,
+                    comparisonType: StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(a: clientRequestedModelName, b: route.ProviderModelId,
+                    comparisonType: StringComparison.OrdinalIgnoreCase);
+            candidates =
+            [
+                _routingCandidateBuilder.BuildForcedCandidate(jsonObject: jsonObject, route: route,
+                    stripUnsupportedFeatures: IsNativeMessagesPath(context.Request.Path),
+                    clientNamedForcedModel: clientNamedForcedModel)
+            ];
         }
         else
         {

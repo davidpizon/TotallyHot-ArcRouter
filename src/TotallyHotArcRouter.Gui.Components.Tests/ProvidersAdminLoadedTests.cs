@@ -380,6 +380,10 @@ public sealed class ProvidersAdminLoadedTests
         var badge = cut.FindAll("span[data-tip^='Thinking:']").First();
         badge.GetAttribute("aria-label").Should().Be(badge.GetAttribute("data-tip"));
         badge.GetAttribute("aria-describedby").Should().Be("ls-tooltip");
+        // The shared tooltip convention (app.css): a non-interactive element must take keyboard focus,
+        // or its data-tip is reachable by pointer only.
+        badge.GetAttribute("tabindex").Should().Be("0");
+        badge.ClassList.Should().Contain("ls-tip");
     }
 
     [Fact]

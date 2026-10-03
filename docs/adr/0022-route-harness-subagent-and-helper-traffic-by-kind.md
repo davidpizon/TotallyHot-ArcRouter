@@ -202,6 +202,11 @@ body the request features its model's capability record marks as unsupported:
   `thinking` has been removed. `context_management` itself goes once no edit is left, together with beta
   values that start with `context-management-`.
 
+The Local Proxy CLI's single-model serving (`--model`) counts as a router choice: the operator, not the client,
+picked that model, so its one candidate is stripped too, unless the client's own `model` named that same model.
+Beta values are removed from the forwarded `anthropic-beta` whether the client sent them or the provider
+configures that header, so no source can pair a beta value with a body field that was removed.
+
 The records come from the `capabilities` object in Anthropic's Models API list. The endpoint scan reads them and
 persists each one as raw JSON in its own table, one row per provider and upstream model id. Keys are read by name,
 so a new strategy or effort level needs no migration. With no record, a null `capabilities` object or a missing

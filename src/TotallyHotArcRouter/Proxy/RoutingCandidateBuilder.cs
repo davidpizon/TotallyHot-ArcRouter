@@ -201,6 +201,25 @@ internal sealed class RoutingCandidateBuilder(
     }
 
     /// <summary>
+    /// Builds the one candidate the Local Proxy CLI's single-model serving (<c>--model</c>) sends: no
+    /// substitution and no failover chain. The forced model is the operator's choice, not the client's, so on
+    /// native Messages traffic it drops what its capability record reports unsupported (ADR-0022 Amendment 1),
+    /// exactly as a router-chosen candidate does. The exception is a client that named the forced model itself:
+    /// that is an explicit pick, left as sent (ADR-0005).
+    /// </summary>
+    /// <param name="jsonObject">The parsed request body; its <c>model</c> is rewritten in place.</param>
+    /// <param name="route">The forced model's route.</param>
+    /// <param name="stripUnsupportedFeatures">Whether this is native Anthropic Messages traffic (<c>/v1/messages</c>).</param>
+    /// <param name="clientNamedForcedModel">Whether the client's own <c>model</c> named the forced model.</param>
+    /// <returns>The forced model's candidate.</returns>
+    public RouteCandidate BuildForcedCandidate(JsonObject jsonObject, ResolvedModelRoute route,
+        bool stripUnsupportedFeatures, bool clientNamedForcedModel)
+    {
+        return RequestBodyIntrospection.BuildCandidate(jsonObject: jsonObject, route: route,
+            featureSupport: stripUnsupportedFeatures && !clientNamedForcedModel ? FeatureSupportFor(route) : null);
+    }
+
+    /// <summary>
     /// Looks up <paramref name="route"/>'s model capability record by its upstream model id, or returns
     /// <see langword="null"/> when no store is wired up or the model has no record.
     /// </summary>
