@@ -206,6 +206,8 @@ The records come from the `capabilities` object in Anthropic's Models API list. 
 persists each one as raw JSON in its own table, one row per provider and upstream model id. Keys are read by name,
 so a new strategy or effort level needs no migration. With no record, a null `capabilities` object or a missing
 key, the field is sent as received. Records refresh only when a provider is saved or on "Refresh from endpoint".
+A scan that cannot read the whole list keeps the previous records. A scan whose model list answers in OpenAI shape
+clears them, because that list proves the endpoint publishes none.
 
 Two surfaces show the result (David, 2026-10-02):
 

@@ -253,7 +253,9 @@ internal sealed class ProviderManagementService
     /// When the endpoint answered Anthropic-shaped, also reads each listed model's capability record and replaces
     /// the provider's stored set (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>
     /// Amendment 1), inside the same budget. A list that could not be read completely changes nothing, so a failed
-    /// re-scan keeps the records from the last good one.
+    /// re-scan keeps the records from the last good one. When the model list answered in OpenAI shape instead, the
+    /// endpoint has positively proved it publishes no such records, so any the provider key still carries - from an
+    /// Anthropic endpoint it was pointed at before - are cleared rather than left to strip requests by.
     /// </para>
     /// </summary>
     /// <exception cref="OperationCanceledException">
@@ -279,7 +281,13 @@ internal sealed class ProviderManagementService
 
         _capabilityStore!.SetProviderCapabilities(capabilities);
 
-        if (capabilities.AnthropicCompatible)
+        if (capabilities.OpenAiCompatible)
+        {
+            // Proof, not absence: the model list itself answered, in a shape that carries no capability records.
+            // A scan where the list failed to answer sets neither flag and so keeps what was recorded.
+            _capabilityStore.SetModelFeatureSupport(providerKey: key, records: []);
+        }
+        else if (capabilities.AnthropicCompatible)
         {
             var records = await _endpointScanner
                 .ScanModelFeaturesAsync(providerKey: key, provider: provider, cancellationToken: budget.Token)

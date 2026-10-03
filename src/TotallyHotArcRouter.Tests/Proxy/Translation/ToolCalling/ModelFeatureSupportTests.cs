@@ -74,7 +74,7 @@ public sealed class ModelFeatureSupportTests
         store.SetModelFeatureSupport(providerKey: "gateway",
             records: [Record(capabilitiesJson: FullCapabilities, modelId: "claude-old", providerKey: "gateway")]);
 
-        store.SetModelFeatureSupport(providerKey: "anthropic", records: [Capable("claude-sonnet-5")]);
+        store.SetModelFeatureSupport(providerKey: "anthropic", records: [Capable()]);
 
         Assert.Null(store.GetModelFeatureSupport(providerKey: "anthropic", modelId: "claude-haiku-4-5-20251001"));
         Assert.Null(store.GetModelFeatureSupport(providerKey: "anthropic", modelId: "claude-old"));
@@ -95,15 +95,34 @@ public sealed class ModelFeatureSupportTests
     }
 
     [Fact]
-    public void SetModelFeatureSupport_RaisesChanged()
+    public void SetModelFeatureSupport_RaisesChanged_ForAWriteAndForClearingRealRecords()
     {
         using var temp = new TempDatabase();
         var store = temp.CreateToolCallCapabilityStore();
         var raised = 0;
         store.Changed += () => raised++;
 
+        store.SetModelFeatureSupport(providerKey: "anthropic", records: [Haiku45()]);
         store.SetModelFeatureSupport(providerKey: "anthropic", records: []);
 
-        Assert.Equal(1, actual: raised);
+        Assert.Equal(2, actual: raised);
+        Assert.Null(store.GetModelFeatureSupport(providerKey: "anthropic", modelId: "claude-haiku-4-5-20251001"));
+    }
+
+    [Fact]
+    public void ClearingAProviderWithNoRecords_IsANoOp()
+    {
+        // Every scan of an OpenAI-shaped provider asks for this, so it must not write, log or notify.
+        using var temp = new TempDatabase();
+        var store = temp.CreateToolCallCapabilityStore();
+        store.SetModelFeatureSupport(providerKey: "gateway",
+            records: [Record(capabilitiesJson: FullCapabilities, modelId: "claude-x", providerKey: "gateway")]);
+        var raised = 0;
+        store.Changed += () => raised++;
+
+        store.SetModelFeatureSupport(providerKey: "openai", records: []);
+
+        Assert.Equal(0, actual: raised);
+        Assert.NotNull(store.GetModelFeatureSupport(providerKey: "gateway", modelId: "claude-x"));
     }
 }

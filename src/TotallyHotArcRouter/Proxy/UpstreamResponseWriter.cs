@@ -51,7 +51,9 @@ internal readonly record struct RoutingResponseHeaders(
     /// Writes the <c>X-ArcRouter-*</c> headers onto <paramref name="context"/> before any body
     /// byte is committed, matching <see cref="UpstreamResponseWriter"/>'s success-path placement so a
     /// circuit-open 503 or exhausted-cascade 502 still reports requested vs routed and the reason.
-    /// <c>X-ArcRouter-Stripped-Features</c> is written only when <see cref="StrippedFeatures"/> is set.
+    /// <c>X-ArcRouter-Stripped-Features</c> is written only when <see cref="StrippedFeatures"/> is set, and is
+    /// otherwise removed: the upstream's own headers are copied before this runs, and an upstream that is itself an
+    /// ArcRouter (or anything else) could have sent one, which must not reach the client as a false strip report.
     /// </summary>
     /// <param name="context">The client response being written.</param>
     public void WriteTo(HttpContext context)
@@ -59,7 +61,9 @@ internal readonly record struct RoutingResponseHeaders(
         context.Response.Headers[ProxyMiddleware.RequestedModelHeaderName] = RequestedModel;
         context.Response.Headers[ProxyMiddleware.RoutedModelHeaderName] = RoutedModel;
         context.Response.Headers[ProxyMiddleware.SubstitutionReasonHeaderName] = SubstitutionReason;
-        if (!string.IsNullOrEmpty(StrippedFeatures))
+        if (string.IsNullOrEmpty(StrippedFeatures))
+            context.Response.Headers.Remove(ProxyMiddleware.StrippedFeaturesHeaderName);
+        else
             context.Response.Headers[ProxyMiddleware.StrippedFeaturesHeaderName] = StrippedFeatures;
     }
 }

@@ -144,7 +144,7 @@ public sealed class ProviderAdminGrpcServiceTests
         using var temp = new TempDatabase();
         var capabilities = temp.CreateToolCallCapabilityStore();
         capabilities.SetModelFeatureSupport(providerKey: "anthropic",
-            records: [TotallyHot.ArcRouter.Tests.Proxy.ModelFeatureSupportFixtures.Haiku45()]);
+            records: [ModelFeatureSupportFixtures.Haiku45()]);
         var service = CreateService(
             options: new ModelRoutingOptions
             {

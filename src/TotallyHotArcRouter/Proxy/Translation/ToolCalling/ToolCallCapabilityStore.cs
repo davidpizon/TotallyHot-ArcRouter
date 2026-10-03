@@ -195,12 +195,20 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
     /// and the request path - which reads one per router-chosen candidate - must not be able to. Same split as
     /// <see cref="SetModelContextWindow"/>.
     /// </remarks>
+    /// <para>
+    /// Clearing a provider that has no records is a no-op - no write, no log line, no <see cref="Changed"/> - because
+    /// every scan of an OpenAI-shaped provider asks for exactly that.
+    /// </para>
     /// <param name="providerKey">The provider whose records are replaced.</param>
     /// <param name="records">The complete set the scan read; empty clears the provider's records.</param>
     public void SetModelFeatureSupport(string providerKey, IReadOnlyList<ModelFeatureSupport> records)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         ArgumentNullException.ThrowIfNull(records);
+
+        if (records.Count == 0 && !_cache.Current.FeatureSupport.Values.Any(f =>
+                string.Equals(a: f.ProviderKey, b: providerKey, comparisonType: StringComparison.OrdinalIgnoreCase)))
+            return;
 
         _repository.ReplaceModelFeatureSupport(providerKey: providerKey, records: records);
         Reload();

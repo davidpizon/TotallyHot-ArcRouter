@@ -39,37 +39,37 @@ namespace TotallyHot.ArcRouter.Router.Classification;
 public static class SubagentSignalDetector
 {
     /// <summary>Claude Code: the id of the subagent that issued the request; present only on subagent requests.</summary>
-    internal const string ClaudeCodeAgentIdHeader = "x-claude-code-agent-id";
+    private const string ClaudeCodeAgentIdHeader = "x-claude-code-agent-id";
 
     /// <summary>Claude Code: the id of the agent that spawned the requesting agent; present only for nested agents.</summary>
-    internal const string ClaudeCodeParentAgentIdHeader = "x-claude-code-parent-agent-id";
+    private const string ClaudeCodeParentAgentIdHeader = "x-claude-code-parent-agent-id";
 
     /// <summary>Claude Code: the request class hint header (<c>main</c>, <c>subagent</c>, <c>workflow</c>, <c>compaction</c>, <c>auxiliary</c>).</summary>
-    internal const string ClaudeCodeRequestClassHeader = "x-claude-code-request-class";
+    private const string ClaudeCodeRequestClassHeader = "x-claude-code-request-class";
 
     /// <summary>
     /// Claude Code: the agent type hint header, sent only on a subagent's own turns (a built-in type name such as
     /// <c>Explore</c>, or <c>custom</c>, <c>teammate</c>, <c>fork</c>; never a user-chosen agent name).
     /// </summary>
-    internal const string ClaudeCodeAgentTypeHeader = "x-claude-code-agent-type";
+    private const string ClaudeCodeAgentTypeHeader = "x-claude-code-agent-type";
 
     /// <summary>Codex: the JSON turn-metadata header carrying subagent lineage.</summary>
-    internal const string CodexTurnMetadataHeader = "x-codex-turn-metadata";
+    private const string CodexTurnMetadataHeader = "x-codex-turn-metadata";
 
     /// <summary>The <c>model</c> prefix of the VS Code Copilot background-work aliases.</summary>
-    internal const string CopilotUtilityAliasPrefix = "copilot-utility";
+    private const string CopilotUtilityAliasPrefix = "copilot-utility";
 
     /// <summary>
     /// The longest header value, in characters, the Claude Code checks accept. Agent ids are UUID-like; the
     /// cap only bounds the work a hostile value can cause.
     /// </summary>
-    internal const int MaxIdentifierLength = 256;
+    private const int MaxIdentifierLength = 256;
 
     /// <summary>
     /// The longest <c>x-codex-turn-metadata</c> value, in characters, that is parsed. Larger values are
     /// treated as no signal rather than parsed.
     /// </summary>
-    internal const int MaxTurnMetadataLength = 8 * 1024;
+    private const int MaxTurnMetadataLength = 8 * 1024;
 
     private const string ClaudeCodeHarness = "claude-code";
     private const string CodexHarness = "codex";
@@ -147,7 +147,7 @@ public static class SubagentSignalDetector
     /// </summary>
     private static SubagentSignal? DetectClaudeCode(IHeaderDictionary headers, SubagentBiasOptions options)
     {
-        if (!options.ClaudeCodeAgentId && !options.ClaudeCodeHintHeaders) return null;
+        if (options is { ClaudeCodeAgentId: false, ClaudeCodeHintHeaders: false }) return null;
 
         if (!TryReadSingle(headers: headers, name: ClaudeCodeAgentIdHeader, value: out _,
                 present: out var agentIdPresent) ||

@@ -26,7 +26,7 @@ public sealed class RequestInterceptorFeatureStripTests
         var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
             (Haiku, "anthropic", "claude-haiku-4-5-20251001"),
             (Sonnet, "anthropic", "claude-sonnet-5"));
-        var store = new FakeModelFeatureSupportStore().With(Haiku45(), Capable("claude-sonnet-5"));
+        var store = new FakeModelFeatureSupportStore().With(Haiku45(), Capable());
         var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
             modelRouteResolver: resolver, routingPolicy: new FixedPolicy(policyPick),
             modelFeatureSupportStore: withStore ? store : null);

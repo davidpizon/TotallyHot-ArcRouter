@@ -32,7 +32,7 @@ public sealed class ProxyMiddlewareFeatureStripTests
     private sealed record Forwarded(string Model, JsonObject Body, string? Beta);
 
     private static (ProxyMiddleware Middleware, List<Forwarded> Forwards) Build(string policyPick,
-        HttpStatusCode haikuStatus = HttpStatusCode.OK)
+        HttpStatusCode haikuStatus = HttpStatusCode.OK, bool upstreamSendsStripHeader = false)
     {
         var forwards = new List<Forwarded>();
         var handler = new DelegatingHandlerStub(async request =>
@@ -45,11 +45,15 @@ public sealed class ProxyMiddlewareFeatureStripTests
             forwards.Add(new Forwarded(Model: model, Body: body, Beta: beta));
 
             var status = model == HaikuId ? haikuStatus : HttpStatusCode.OK;
-            return new HttpResponseMessage(status)
+            var response = new HttpResponseMessage(status)
             {
                 Content = new StringContent(content: status == HttpStatusCode.OK ? MessageResponse : "{}",
                     encoding: Encoding.UTF8, mediaType: "application/json")
             };
+            if (upstreamSendsStripHeader)
+                response.Headers.TryAddWithoutValidation(name: ProxyMiddleware.StrippedFeaturesHeaderName,
+                    value: "thinking.adaptive");
+            return response;
         });
 
         var resolver = ModelRouteResolverTestFactory.CreateWithModels(
@@ -57,7 +61,7 @@ public sealed class ProxyMiddlewareFeatureStripTests
             ("claude-sonnet", "anthropic", SonnetId, "https://api.anthropic.test"));
         var interceptor = new RequestInterceptor(logger: Mock.Of<ILogger<RequestInterceptor>>(),
             modelRouteResolver: resolver, routingPolicy: new FixedPolicy(policyPick),
-            modelFeatureSupportStore: new FakeModelFeatureSupportStore().With(Haiku45(), Capable(SonnetId)));
+            modelFeatureSupportStore: new FakeModelFeatureSupportStore().With(Haiku45(), Capable()));
 
         var middleware = new ProxyMiddleware(
             logger: Mock.Of<ILogger<ProxyMiddleware>>(),
@@ -155,6 +159,28 @@ public sealed class ProxyMiddlewareFeatureStripTests
 
         // The header describes the candidate that answered, which stripped nothing.
         Assert.False(context.Response.Headers.ContainsKey(ProxyMiddleware.StrippedFeaturesHeaderName));
+    }
+
+    [Fact]
+    public async Task AStripHeaderSentByTheUpstream_NeverReachesTheClient_WhenThisCandidateStrippedNothing()
+    {
+        // An upstream that is itself an ArcRouter (or anything else) may send the header; it must not read as ours.
+        var (middleware, _) = Build(policyPick: "claude-sonnet", upstreamSendsStripHeader: true);
+
+        var context = await Send(middleware, ExploreBody);
+
+        Assert.False(context.Response.Headers.ContainsKey(ProxyMiddleware.StrippedFeaturesHeaderName));
+    }
+
+    [Fact]
+    public async Task AStripHeaderSentByTheUpstream_IsReplacedByWhatThisCandidateStripped()
+    {
+        var (middleware, _) = Build(policyPick: "claude-haiku", upstreamSendsStripHeader: true);
+
+        var context = await Send(middleware, HelperBody);
+
+        Assert.Equal(expected: "output_config.effort",
+            actual: context.Response.Headers[ProxyMiddleware.StrippedFeaturesHeaderName].ToString());
     }
 
     [Fact]

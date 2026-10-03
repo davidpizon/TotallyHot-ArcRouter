@@ -305,10 +305,13 @@ If pulling in SQLite is unacceptable for a first cut, the fallback is to ship th
 
 Issue [#163](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/163), plan
 [`docs/plans/issue-163-subagent-aware-routing.md`](../plans/issue-163-subagent-aware-routing.md).
-Research done 2026-10-02 from vendor documentation and public source; **no request was captured from
-a live harness**, so every "verified" below means *documented by the vendor*, not *observed on the
-wire by this project*. Nothing here is a trust boundary: a client can send any header. The only
-effect of a signal is a cheaper pick inside the operator's own allowlist and quality gate.
+Research done 2026-10-02 from vendor documentation and public source, so every "verified" below means
+*documented by the vendor*. Later the same day the Claude Code rows were also observed on the wire: Claude
+Code 2.1.286 sent `x-claude-code-request-class` (`main`, `subagent`, `auxiliary`, `compaction`),
+`x-claude-code-agent-type: Explore`, `x-claude-code-agent-id` and `x-claude-code-compaction` to a localhost
+stand-in and then through the router (the #163 plan's Phase 2c smoke run). The Codex and Copilot rows remain
+documented-only. Nothing here is a trust boundary: a client can send any header. The only effect of a signal
+is a cheaper pick inside the operator's own allowlist and quality gate.
 
 | Harness | Signal | Where | Source | Status | Detector decision |
 |---|---|---|---|---|---|

@@ -1,5 +1,6 @@
 using Moq;
 using System.Net;
+using System.Runtime.CompilerServices;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -12,8 +13,9 @@ namespace TotallyHot.ArcRouter.Tests.Proxy.Management;
 /// <summary>
 /// Covers how a provider scan records per-model capability records
 /// (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c> Amendment 1): an Anthropic-shaped
-/// endpoint's records are persisted, a later scan that cannot read the list keeps the previous records, and an
-/// endpoint that is not Anthropic-shaped is never asked for them.
+/// endpoint's records are persisted, a later scan that cannot read the list keeps the previous records, an
+/// endpoint that is not Anthropic-shaped is never asked for them, and one whose list proves it OpenAI-shaped has
+/// any earlier records cleared.
 /// </summary>
 public sealed class ScanModelFeatureSupportTests : IDisposable
 {
@@ -84,24 +86,63 @@ public sealed class ScanModelFeatureSupportTests : IDisposable
     public async Task ARescanThatCannotReadTheList_KeepsThePreviousRecords()
     {
         var capabilities = _temp.CreateToolCallCapabilityStore();
-        var listReadable = true;
+        var listReadable = new StrongBox<bool>(true);
         var facade = Facade(store: StoreWithProvider(), capabilities: capabilities, respond: request =>
         {
             if (!IsModelList(request)) return new HttpResponseMessage(HttpStatusCode.NotFound);
 
             // The flavor probe (no query string) keeps answering, so the endpoint still reads as Anthropic-shaped;
             // only the paged capability read fails.
-            return listReadable || string.IsNullOrEmpty(request.RequestUri!.Query)
+            return listReadable.Value || string.IsNullOrEmpty(request.RequestUri!.Query)
                 ? Ok(AnthropicListPage)
                 : new HttpResponseMessage(HttpStatusCode.InternalServerError);
         });
 
         await facade.ScanCapabilitiesAsync(key: "anthropic", cancellationToken: TestContext.Current.CancellationToken);
-        listReadable = false;
+        listReadable.Value = false;
         await facade.ScanCapabilitiesAsync(key: "anthropic", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.NotNull(capabilities.GetModelFeatureSupport(providerKey: "anthropic",
             modelId: "claude-haiku-4-5-20251001"));
+    }
+
+    [Fact]
+    public async Task ARescanThatReachesNothing_KeepsThePreviousRecords()
+    {
+        var capabilities = _temp.CreateToolCallCapabilityStore();
+        var reachable = new StrongBox<bool>(true);
+        var facade = Facade(store: StoreWithProvider(), capabilities: capabilities, respond: request =>
+            reachable.Value && IsModelList(request)
+                ? Ok(AnthropicListPage)
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        await facade.ScanCapabilitiesAsync(key: "anthropic", cancellationToken: TestContext.Current.CancellationToken);
+        reachable.Value = false;
+        var rescan = await facade.ScanCapabilitiesAsync(key: "anthropic",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(rescan.Value!.ScanError);
+        Assert.NotNull(capabilities.GetModelFeatureSupport(providerKey: "anthropic",
+            modelId: "claude-haiku-4-5-20251001"));
+    }
+
+    [Fact]
+    public async Task AProviderWhoseListTurnsOpenAiShaped_HasItsRecordsCleared()
+    {
+        // The same provider key re-pointed at an OpenAI-compatible endpoint: its list now proves there are no
+        // capability records, so the old Anthropic ones must stop deciding what gets stripped.
+        var capabilities = _temp.CreateToolCallCapabilityStore();
+        var anthropicShaped = new StrongBox<bool>(true);
+        var facade = Facade(store: StoreWithProvider(), capabilities: capabilities, respond: request =>
+            IsModelList(request)
+                ? Ok(anthropicShaped.Value ? AnthropicListPage : OpenAiBody)
+                : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        await facade.ScanCapabilitiesAsync(key: "anthropic", cancellationToken: TestContext.Current.CancellationToken);
+        anthropicShaped.Value = false;
+        await facade.ScanCapabilitiesAsync(key: "anthropic", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(capabilities.GetModelFeatureSupport(providerKey: "anthropic", modelId: "claude-haiku-4-5-20251001"));
     }
 
     [Fact]

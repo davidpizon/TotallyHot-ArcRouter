@@ -206,6 +206,11 @@ The risk stays recorded below.
   each with options), not raw JSON and not one field per feature, so a new capability needs no contract change.
   The badges show only the three strippable families. "Not supported" uses muted slate rather than red, because it
   is a fact about the model, not a failure.
+- **Review follow-ups (PR #186).**
+  - A scan whose model list answers in OpenAI shape now clears the provider's records, so a key re-pointed away
+    from Anthropic stops stripping by stale data. A scan whose list failed still keeps them.
+  - An `X-ArcRouter-Stripped-Features` header copied from the upstream response is removed when the answering
+    candidate stripped nothing.
 - **Docs.** The `README.md` header table gains `X-ArcRouter-Stripped-Features`, and
   `docs/install/harnesses/claude-code.md` gains "Models that reject what Claude Code sends", which is work step 6.
 - **Smoke run, 2026-10-02 (the pull-request proof and the golden-path smoke).** The router built from this branch ran
