@@ -138,6 +138,8 @@ The local test run in §8.2 excluded the four `ProxyServer`/`ProxyHostedService`
 
 Nothing else in the directory changed. The installed router ignores both, and the fixed router would create the same pair on its first start. The underlying test-isolation gap predates this branch: on `main` the same tests already load the CA and leaf from the real directory, but they only read. Making them write is new.
 
+**Closed 2026-10-03 (Copilot review on PR #187).** With the AKI change, `EnsureLeaves()` would also re-issue the real AKI-less leaves from those test classes, not just add the DNS leaf. This branch now carries `744655f` ("Redirect test app data to temp roots", cherry-picked from `feature/163-subagent-aware-routing`, PR #186). A module initializer in the router's test assembly calls `AppDataPaths.RedirectForTesting` before any test code runs, so `ResolveMachineSharedDirectory()`, and with it the CA, both leaves, `secrets.dat` and the key ring, point at a per-run temp root. A local run (every project, the five listener classes still excluded) left `%ProgramData%\TotallyHotArcRouter` byte-for-byte unchanged by size and timestamp. When #186 merges, the identical commit should apply as a no-op.
+
 ### 8.4 Found during validation: no Authority Key Identifier on the leaves
 
 David's real router CA is trusted in `LocalMachine\Root` and `CurrentUser\Root`. The scratch CA in §8.2 has the same subject, `CN=TotallyHot Arc Router Local CA`. With Claude Code's default trust (bundled plus system store), both Claude Code builds failed on `localhost` with `CERT_SIGNATURE_FAILURE`. Restricting Claude Code to `CLAUDE_CODE_CERT_STORE=bundled` fixed it.
