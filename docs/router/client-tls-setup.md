@@ -111,12 +111,13 @@ fail on every URL there. On those builds, point them at the plain-HTTP listener 
 certificate checking off (`NODE_TLS_REJECT_UNAUTHORIZED=0`) to get past it.
 
 **`CERT_SIGNATURE_FAILURE` instead** means a Bun client trusts more than one certificate named
-`CN=TotallyHot Arc Router Local CA`, for example an old router CA still in the OS store after a
-reinstall, and the router's leaf has no Authority Key Identifier (AKI). Without one, BoringSSL picks an
-issuer by name alone and can pick the wrong one. Router builds with the two-leaf split issue leaves with
-an AKI that names the CA's key. They also re-issue any saved leaf without one on first use, under the
-same CA, so nothing needs re-trusting. On older builds, remove the stale CA from the trust store.
-Removing it is good hygiene on any build.
+`CN=TotallyHot Arc Router Local CA`, and the router's leaf has no Authority Key Identifier (AKI), for
+example an old router CA still in the OS store after a reinstall. Without an AKI, BoringSSL picks an
+issuer by name alone and can pick the wrong one. Checked on 2026-10-03 with one CA in the Windows Root
+store and the other in `NODE_EXTRA_CA_CERTS`; two same-named CAs both in that bundle did not trigger it.
+Router builds with the two-leaf split issue leaves with an AKI that names the CA's key. They also
+re-issue any saved leaf without one on first use, under the same CA, so nothing needs re-trusting. On
+older builds, remove the stale CA from the trust store. Removing it is good hygiene on any build.
 
 ## When to use the opt-in plain-HTTP listener instead
 
