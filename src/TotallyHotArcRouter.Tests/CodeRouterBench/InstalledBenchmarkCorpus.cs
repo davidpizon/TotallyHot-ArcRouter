@@ -32,6 +32,13 @@ internal static class InstalledBenchmarkCorpus
     // Committed rows the router hasn't checkpointed into the main file yet live only in this sidecar.
     private const string WriteAheadLogSuffix = "-wal";
 
+    // The WAL header: magic, format version, page size, checkpoint sequence, two salts, two checksums.
+    private const int WriteAheadLogHeaderLength = 32;
+
+    // A router rarely resets its WAL at all, so one retry almost always suffices; after that the corpus
+    // reads as absent rather than the tests spinning.
+    private const int MaxCopyAttempts = 3;
+
     /// <summary>
     /// Copies the first installed corpus found - machine-wide before per-user, the order the router
     /// itself resolves them in - into a fresh directory under <see cref="TestAppDataDirectory.Root"/> and
@@ -59,17 +66,39 @@ internal static class InstalledBenchmarkCorpus
     /// <paramref name="destination"/>. On any failure it removes whatever it copied, so a half-copied
     /// corpus reads as absent instead of as data missing its newest rows.
     /// </summary>
+    /// <remarks>
+    /// The two files are copied at different instants while a running router may still write them, so the
+    /// pair is only kept when the WAL's header is the same just before the database copy and just after
+    /// the WAL copy. The header holds the checkpoint sequence and the salts that tag every valid frame, and
+    /// SQLite rewrites it whenever the WAL is created, reset or truncated. Those are the only changes that
+    /// can pair a database image with frames it doesn't match: a checkpoint that leaves the WAL in place
+    /// keeps its frames there, and a frame half-written at the end of the copied WAL fails its checksum and
+    /// is ignored. Reading the header uses the same shared read as the copy, so this still touches nothing
+    /// in the real directory, which is why it is used instead of SQLite's online backup API: that would
+    /// open the real file and create its <c>-shm</c> sidecar.
+    /// </remarks>
     private static void TryCopy(string source, string destination)
     {
         var directory = Path.GetDirectoryName(destination)!;
+        var writeAheadLog = source + WriteAheadLogSuffix;
         try
         {
-            Directory.CreateDirectory(directory);
-            CopyShared(source: source, destination: destination);
+            for (var attempt = 1; attempt <= MaxCopyAttempts; attempt++)
+            {
+                if (Directory.Exists(directory)) Directory.Delete(path: directory, recursive: true);
+                Directory.CreateDirectory(directory);
 
-            var writeAheadLog = source + WriteAheadLogSuffix;
-            if (File.Exists(writeAheadLog))
-                CopyShared(source: writeAheadLog, destination: destination + WriteAheadLogSuffix);
+                var headerBefore = ReadWriteAheadLogHeader(writeAheadLog);
+                CopyShared(source: source, destination: destination);
+                if (headerBefore is not null)
+                    CopyShared(source: writeAheadLog, destination: destination + WriteAheadLogSuffix);
+                var headerAfter = ReadWriteAheadLogHeader(writeAheadLog);
+
+                if (headerBefore is null ? headerAfter is null : headerAfter is not null && headerBefore.SequenceEqual(headerAfter))
+                    return;
+            }
+
+            throw new IOException($"'{source}' kept changing while it was copied.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -81,6 +110,26 @@ internal static class InstalledBenchmarkCorpus
             {
                 // Best-effort; the end-of-run sweep gets another chance at it.
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads the first <see cref="WriteAheadLogHeaderLength"/> bytes of <paramref name="path"/> with a
+    /// shared read, fewer when the file is shorter, or returns <see langword="null"/> when it does not exist.
+    /// </summary>
+    private static byte[]? ReadWriteAheadLogHeader(string path)
+    {
+        try
+        {
+            using var input = new FileStream(path: path, mode: FileMode.Open, access: FileAccess.Read,
+                share: FileShare.ReadWrite | FileShare.Delete);
+            var header = new byte[WriteAheadLogHeaderLength];
+            var read = input.ReadAtLeast(buffer: header, minimumBytes: header.Length, throwOnEndOfStream: false);
+            return header[..read];
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
         }
     }
 
