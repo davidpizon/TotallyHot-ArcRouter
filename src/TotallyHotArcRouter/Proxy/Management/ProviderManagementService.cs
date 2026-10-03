@@ -249,6 +249,12 @@ internal sealed class ProviderManagementService
     /// only in budget and in what they do with cancellation/failure around it, not in the probe itself.
     /// Assumes <see cref="_endpointScanner"/>/<see cref="_capabilityStore"/> are non-null; every caller has
     /// already checked that.
+    /// <para>
+    /// When the endpoint answered Anthropic-shaped, also reads each listed model's capability record and replaces
+    /// the provider's stored set (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>
+    /// Amendment 1), inside the same budget. A list that could not be read completely changes nothing, so a failed
+    /// re-scan keeps the records from the last good one.
+    /// </para>
     /// </summary>
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> itself (not just the budget) was canceled - propagated rather
@@ -272,6 +278,19 @@ internal sealed class ProviderManagementService
         cancellationToken.ThrowIfCancellationRequested();
 
         _capabilityStore!.SetProviderCapabilities(capabilities);
+
+        if (capabilities.AnthropicCompatible)
+        {
+            var records = await _endpointScanner
+                .ScanModelFeaturesAsync(providerKey: key, provider: provider, cancellationToken: budget.Token)
+                .ConfigureAwait(false);
+
+            // Same rule as above: a canceled caller stopped asking, so nothing it half-read is persisted.
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (records is not null) _capabilityStore.SetModelFeatureSupport(providerKey: key, records: records);
+        }
+
         return capabilities;
     }
 

@@ -335,6 +335,13 @@ These are added to tracked TODO #8:
 
 1. Does Claude Code send adaptive thinking, effort and `context_management` on helper, subagent and compaction requests
    when the model is `auto`? That decides whether the 3a690a1 precursor already sends a 400-bound request to Haiku 4.5.
+   **Answered 2026-10-02: yes.** The answer comes from a capture of Claude Code 2.1.286 against a localhost stand-in
+   for the Anthropic API.
+   - Helper (`auxiliary`) requests carry `output_config.effort`.
+   - `Explore`, main and compaction requests carry adaptive thinking, effort and `context_management`.
+   - Haiku 4.5's Models API record marks adaptive thinking and effort as unsupported.
+   - The fix is [ADR-0022 Amendment 1](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md#amendment-1-2026-10-02-strip-what-the-picked-model-rejects),
+     built as Phase 2c of the [#163 plan](../plans/issue-163-subagent-aware-routing.md).
 2. What does Codex send with `model = "auto"` compared with its default model: encrypted reasoning, `store`, the
    `apply_patch` tool's type?
 3. How long are conversations (requests per conversation), and how many requests remain after request *j*? That

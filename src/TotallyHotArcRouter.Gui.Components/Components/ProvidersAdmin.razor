@@ -161,6 +161,19 @@ else
                                 {
                                     <span class="text-[10px] uppercase tracking-wider text-amber-500">not detected</span>
                                 }
+                                @* One badge per request feature the router can remove (thinking, effort, context
+                                               management), read from the capability record this model's provider
+                                               list reported (ADR-0022 Amendment 1). Absent until "Refresh from
+                                               endpoint" has read a record - and then the router strips nothing for
+                                               this model either. Same pill markup as the provider's API-flavor
+                                               badges; the tooltip says which options are unsupported. *@
+                                @foreach (var badge in ModelCapabilityBadges.For(model.Capabilities))
+                                {
+                                    <span data-tip="@badge.Tip"
+                                          aria-label="@badge.Tip"
+                                          aria-describedby="ls-tooltip"
+                                          class="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold @CapabilityBadgeClass(badge.State)">@badge.Label</span>
+                                }
                                 @* How this model expresses tool calls. Empty until "Refresh from
                                                endpoint" has run, or the model has answered a real
                                                tools-carrying request. Editable because automatic detection

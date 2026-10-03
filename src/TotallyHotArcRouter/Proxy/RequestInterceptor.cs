@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Extraction;
 using TotallyHot.ArcRouter.Router;
@@ -197,6 +198,11 @@ public class RequestInterceptor
     /// Separate from <paramref name="routingOptions"/>, which is a startup snapshot, because these switches
     /// must take effect without a restart.
     /// </param>
+    /// <param name="modelFeatureSupportStore">
+    /// Optional per-model capability records (docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md
+    /// Amendment 1). On <c>/v1/messages</c>, a router-chosen candidate's copy of the request drops the features
+    /// its model's record reports unsupported. <see langword="null"/> (the default) strips nothing.
+    /// </param>
     public RequestInterceptor(
         ILogger<RequestInterceptor> logger,
         IModelRouteResolver modelRouteResolver,
@@ -212,7 +218,8 @@ public class RequestInterceptor
         IOptions<RoutingOptions>? routingOptions = null,
         IProviderInteractionStatusStore? interactionStatusStore = null,
         UntrainedBaselineSelector? untrainedBaselineSelector = null,
-        IOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null)
+        IOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null,
+        IModelFeatureSupportStore? modelFeatureSupportStore = null)
     {
         _routingOptionsMonitor = routingOptionsMonitor;
         _logger = logger;
@@ -231,7 +238,8 @@ public class RequestInterceptor
         _untrainedBaselineSelector = untrainedBaselineSelector;
         _routingCandidateBuilder = new RoutingCandidateBuilder(
             circuitBreaker: _circuitBreaker, modelRouteResolver: _modelRouteResolver, routerMemory: _routerMemory,
-            interactionStatusStore: _interactionStatusStore, logger: _logger);
+            interactionStatusStore: _interactionStatusStore, logger: _logger,
+            featureSupportStore: modelFeatureSupportStore);
 
         if (_forcedModelName is not null &&
             !modelRouteResolver.ListModels().Any(m => string.Equals(a: m.ModelName, b: _forcedModelName,
@@ -611,10 +619,13 @@ public class RequestInterceptor
         {
             // docs/adr/0004-.../0005-...: circuit-breaker substitution and the explicit-selection
             // truthful-error carve-out both live in RoutingCandidateBuilder now - see its Build's doc
-            // comment for the full rationale, unchanged from when it lived inline here.
+            // comment for the full rationale, unchanged from when it lived inline here. Native Messages
+            // traffic also has each router-chosen candidate's copy stripped of what its model rejects
+            // (ADR-0022 Amendment 1); the builder leaves an explicit, unsubstituted pick as sent.
             var buildResult = _routingCandidateBuilder.Build(jsonObject: jsonObject, route: route,
                 substitutionReasonSoFar: substitutionReason, liveDimension: liveDimension,
-                policyCandidateScores: policyCandidateScores);
+                policyCandidateScores: policyCandidateScores,
+                stripUnsupportedFeatures: IsNativeMessagesPath(context.Request.Path));
             candidates = buildResult.Candidates;
             // buildResult.Route is deliberately not read back into `route`: the resolved route reaches
             // the caller through buildResult.Candidates, which the Success(...) return below receives,

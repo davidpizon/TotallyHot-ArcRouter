@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
@@ -258,13 +259,94 @@ public sealed record RateLimitHistoryResponse(
 /// (<see cref="ModelRouteEntry.PresentUpstream"/>). <see langword="false"/> means the provider's endpoint
 /// didn't list it last time, not that it was removed from configuration.
 /// </param>
+/// <param name="Capabilities">
+/// The capability record this model's provider list reported (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>
+/// Amendment 1), shown as badges on Governance &gt; Providers, or <see langword="null"/> when no scan has recorded
+/// one - which is also exactly when the router strips nothing from requests to this model.
+/// </param>
 public sealed record ModelView(
     string ModelName,
     string ProviderModelId,
     string? Dialect = null,
     string? Confidence = null,
     bool Enabled = true,
-    bool PresentUpstream = true);
+    bool PresentUpstream = true,
+    ModelCapabilitiesView? Capabilities = null);
+
+/// <summary>
+/// One model's capability record, as returned to a management caller: the provider's <c>capabilities</c> object
+/// regrouped into named groups and options, without naming any particular capability.
+/// </summary>
+/// <param name="ScannedAtUtc">When the scan that read the record ran.</param>
+/// <param name="Groups">
+/// One group per top-level capability key the provider reported (for example <c>thinking</c>, <c>effort</c>,
+/// <c>context_management</c>), in the provider's order.
+/// </param>
+public sealed record ModelCapabilitiesView(DateTimeOffset ScannedAtUtc, IReadOnlyList<CapabilityGroupView> Groups)
+{
+    /// <summary>
+    /// Regroups <paramref name="record"/>'s raw <c>capabilities</c> object. Generic by design: each top-level object
+    /// becomes a group carrying its own <c>supported</c> flag, and each child object with a boolean
+    /// <c>supported</c> becomes an option. A child without one (Anthropic's <c>thinking.types</c>) is a container,
+    /// so its own children are the options. Nothing here knows which capabilities exist, so a key Anthropic adds
+    /// later is shown without a change.
+    /// </summary>
+    /// <param name="record">The stored capability record.</param>
+    /// <returns>The regrouped view.</returns>
+    public static ModelCapabilitiesView From(ModelFeatureSupport record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        var groups = new List<CapabilityGroupView>();
+        if (record.Capabilities.ValueKind == JsonValueKind.Object)
+            foreach (var group in record.Capabilities.EnumerateObject())
+            {
+                if (group.Value.ValueKind != JsonValueKind.Object) continue;
+
+                var options = new List<CapabilityOptionView>();
+                foreach (var child in group.Value.EnumerateObject())
+                {
+                    if (child.Value.ValueKind != JsonValueKind.Object) continue;
+
+                    if (ReadSupported(child.Value) is { } supported)
+                    {
+                        options.Add(new CapabilityOptionView(Name: child.Name, Supported: supported));
+                        continue;
+                    }
+
+                    foreach (var grandchild in child.Value.EnumerateObject())
+                        if (grandchild.Value.ValueKind == JsonValueKind.Object &&
+                            ReadSupported(grandchild.Value) is { } nestedSupported)
+                            options.Add(new CapabilityOptionView(Name: grandchild.Name, Supported: nestedSupported));
+                }
+
+                groups.Add(new CapabilityGroupView(Name: group.Name, Supported: ReadSupported(group.Value),
+                    Options: options));
+            }
+
+        return new ModelCapabilitiesView(ScannedAtUtc: record.ScannedAtUtc, Groups: groups);
+    }
+
+    /// <summary>Reads an object's boolean <c>supported</c> member, or <see langword="null"/> when it has none.</summary>
+    private static bool? ReadSupported(JsonElement element)
+    {
+        return element.TryGetProperty(propertyName: "supported", value: out var supported) &&
+               supported.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? supported.GetBoolean()
+            : null;
+    }
+}
+
+/// <summary>One capability group within a <see cref="ModelCapabilitiesView"/>.</summary>
+/// <param name="Name">The provider's capability key, for example <c>thinking</c>.</param>
+/// <param name="Supported">The group's own <c>supported</c> flag, or <see langword="null"/> when the record gives none.</param>
+/// <param name="Options">The group's options: thinking types, effort levels, strategies, and so on.</param>
+public sealed record CapabilityGroupView(string Name, bool? Supported, IReadOnlyList<CapabilityOptionView> Options);
+
+/// <summary>One option within a <see cref="CapabilityGroupView"/>.</summary>
+/// <param name="Name">The option's key as the provider reported it, for example <c>adaptive</c> or <c>xhigh</c>.</param>
+/// <param name="Supported">Whether the provider reports it supported.</param>
+public sealed record CapabilityOptionView(string Name, bool Supported);
 
 /// <summary>
 /// A single custom header as returned to a management caller. A header carries a mix of public

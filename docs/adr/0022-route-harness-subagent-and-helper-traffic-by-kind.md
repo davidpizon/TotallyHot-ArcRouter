@@ -3,6 +3,7 @@
 **Status:** proposed
 **Date:** 2026-10-02
 **Deciders:** David Pizon
+**Amendments:** [Amendment 1 (2026-10-02) — strip what the picked model rejects](#amendment-1-2026-10-02-strip-what-the-picked-model-rejects)
 
 ## Context and Problem Statement
 
@@ -113,6 +114,9 @@ the class table, the options and the tests.
     filter lands.
   - **Not covered:** failover after a failed pick still ranks every eligible model, as for all `auto` Claude Code
     traffic today.
+  - **Amended:** an `anthropic` candidate can still reject fields Claude Code sends under `auto`.
+    [Amendment 1](#amendment-1-2026-10-02-strip-what-the-picked-model-rejects) removes those fields from that
+    candidate's copy of the request.
 - Neutral, because `RoutingContext` gains one optional trailing member (the route class), and
   `CompositeRoutingPolicy` gains one dispatch branch.
 - Neutral, because the 0.9 floor is a starting point, not a measurement. Codex gets visibility but no routing
@@ -164,11 +168,91 @@ the class table, the options and the tests.
   [how-it-learns.md](../how-it-learns.md#so-where-does-cost-actually-come-in) already calls it a change in
   behavior that needs its own ADR.
 
+## Amendment 1 (2026-10-02): strip what the picked model rejects
+
+**Status:** proposed, together with this ADR. David approved this approach on 2026-10-02 as Phase 2c of the
+[#163 plan](../plans/issue-163-subagent-aware-routing.md). It amends the native Messages restriction under
+Consequences and does not change the chosen option.
+
+### Why
+
+- Under the restriction, helper and light-subagent requests on `/v1/messages` only consider `anthropic`
+  candidates. The default configuration includes Claude Haiku 4.5. Helpers are ungraded, so the utility rule
+  ranks them on price alone, and Haiku 4.5 is the cheapest `anthropic` candidate.
+- Under `auto`, Claude Code sends `output_config.effort` on helper requests. On `Explore`, main and compaction
+  requests it also sends adaptive thinking and `context_management`. This was captured on 2026-10-02; the
+  capture is described in the plan.
+- Haiku 4.5's own record in Anthropic's Models API marks adaptive thinking and effort as unsupported (fetched
+  2026-10-02), and Anthropic returns a 400 for both.
+- The router relays that 400 unchanged. Claude Code then retries and turns the feature off for the rest of the
+  conversation. For effort, it also leaves effort out of every later `auto` request until it exits ([cc-gw]).
+- The learned path can pick Haiku 4.5 for unbiased `auto` traffic too, so the exposure is older than the
+  restriction.
+
+### Decision
+
+The rule covers every candidate the router chose on `/v1/messages`. That is every candidate except an explicitly
+named model's own first attempt (ADR-0005). For each one, the router removes from that candidate's copy of the
+body the request features its model's capability record marks as unsupported:
+
+- `thinking`, when its type is unsupported;
+- `output_config.effort`, when effort or the requested level is unsupported, together with beta values that
+  start with `effort-`;
+- each `context_management` edit whose strategy is unsupported, and each `clear_thinking_*` edit once
+  `thinking` has been removed. `context_management` itself goes once no edit is left, together with beta
+  values that start with `context-management-`.
+
+The records come from the `capabilities` object in Anthropic's Models API list. The endpoint scan reads them and
+persists each one as raw JSON in its own table, one row per provider and upstream model id. Keys are read by name,
+so a new strategy or effort level needs no migration. With no record, a null `capabilities` object or a missing
+key, the field is sent as received. Records refresh only when a provider is saved or on "Refresh from endpoint".
+
+Two surfaces show the result (David, 2026-10-02):
+
+- **`X-ArcRouter-Stripped-Features`.** This response header names the features removed from the candidate that
+  answered, and is absent when nothing was removed. It is ADR-0017's header, shipped early with the same name and
+  meaning.
+- **Governance > Providers.** Each model row shows its record as badges. The admin contract's model view gains
+  one optional field for this, and a model with no record shows no badges.
+
+This adopts three of ADR-0017's Strip rules for these fields:
+
+1. A beta value and its body field are removed together.
+2. Only the copy sent to the chosen candidate changes. A failover candidate starts from the unstripped body, and
+   earlier messages are never altered.
+4. Every strip is recorded, as one log line per request.
+
+Rule 3, never invent content that only an issuer can produce, holds trivially: nothing is added.
+
+The rule names no model id, family or generation. It also does not depend on which harness, or which harness
+version, sent the request (David, 2026-10-02).
+
+### Consequences
+
+- Good, because Haiku 4.5 stays usable as the cheap helper model, and a capable fallback still gets thinking and
+  effort.
+- Good, because a Haiku pick no longer triggers Claude Code's session-wide effort shutoff.
+- Good, because the same rule covers unbiased `auto` traffic the learned path sends to a model that lacks a
+  feature.
+- Bad, because a stripped request runs without thinking and at the model's default effort, which the harness
+  didn't ask for. The log line and the `X-ArcRouter-Stripped-Features` header show it; telemetry and the
+  transcript don't until ADR-0017.
+- Bad, because records are only as fresh as the last scan, which runs when a provider is saved or on demand.
+- Bad, because features the Models API doesn't describe aren't covered. Claude Code's own recovery stays the
+  backstop for them.
+- Neutral, because it adds a table, which needs a schema migration, and it changes the request hot path, which
+  requires the golden-path smoke test.
+- Neutral, because the admin contract gains one optional field and the public response surface gains one header.
+  Both are additive, so an older GUI or client ignores them.
+- Neutral, because ADR-0017 absorbs this once accepted. Its per-model capability records and Strip policy
+  replace this narrow version.
+
 ## More Information
 
 - Evidence: [`docs/research/subagent-and-helper-routing-evidence.md`](../research/subagent-and-helper-routing-evidence.md)
   (all sources read 2026-10-02).
-- Plan: [`docs/plans/issue-163-subagent-aware-routing.md`](../plans/issue-163-subagent-aware-routing.md), Phase 2b.
+- Plan: [`docs/plans/issue-163-subagent-aware-routing.md`](../plans/issue-163-subagent-aware-routing.md), Phase 2b
+  (route by class) and Phase 2c (Amendment 1).
 - Related:
   - [ADR-0005](0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-trip.md):
     explicit picks are never rerouted.

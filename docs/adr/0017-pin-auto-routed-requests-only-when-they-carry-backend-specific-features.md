@@ -299,15 +299,22 @@ Then:
 
 ### Relationship to ADR-0022's precursor
 
-Commit 3a690a1 restricts biased Claude Code traffic to candidates whose provider key is `anthropic`. This ADR replaces
-that check in two ways:
+Commit 3a690a1 restricts biased Claude Code traffic to candidates whose provider key is `anthropic`.
+[ADR-0022 Amendment 1](0022-route-harness-subagent-and-helper-traffic-by-kind.md#amendment-1-2026-10-02-strip-what-the-picked-model-rejects)
+(2026-10-02) adds a narrow strip on top of that restriction. This ADR replaces both:
 
 - The dialect check uses endpoint capability, so a probed `AnthropicCompatible` endpoint qualifies.
-- The adaptive-thinking and effort markers are stripped when a Claude 4.5-generation model is picked.
+- Amendment 1 strips adaptive thinking, effort and context-management edits, using the capability records in
+  Anthropic's Models API. That strip becomes part of this ADR's Strip policy over the full per-model records. Those
+  records are also a seed source for the Heuristic tier above, and they need no model-version list.
 
-The default `appsettings.json` ships Claude Haiku 4.5 (R §3). Census question 1 asks whether helper and subagent requests
-carry adaptive thinking under `auto`. If they do, the precursor can forward requests that Haiku 4.5 rejects with a 400.
-Claude Code then turns thinking off for the rest of that conversation.
+Census question 1 has been answered. A capture on 2026-10-02 (Claude Code 2.1.286, `model: auto`) found:
+
+- helper requests carry `output_config.effort`;
+- `Explore`, main and compaction requests carry adaptive thinking, effort and `context_management`.
+
+Haiku 4.5's own Models API record marks adaptive thinking and effort as unsupported. So the precursor could forward
+requests that Haiku 4.5 rejects with a 400, and Amendment 1 closes that gap.
 
 ### Consequences
 

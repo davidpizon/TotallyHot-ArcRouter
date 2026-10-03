@@ -16,6 +16,12 @@ namespace TotallyHot.ArcRouter.Proxy;
 internal static class UpstreamRequestBuilder
 {
     /// <summary>
+    /// The header whose values pair with Anthropic Messages body fields - filtered, not skipped, when a candidate's
+    /// copy was stripped (<see cref="MessagesFeatureStripper"/>).
+    /// </summary>
+    private const string AnthropicBetaHeaderName = "anthropic-beta";
+
+    /// <summary>
     /// Client request headers never forwarded upstream. <c>Host</c>, <c>Content-Type</c> and
     /// <c>Content-Length</c> are simply re-derived for the new message; the other two are load-bearing:
     /// <para>
@@ -50,12 +56,18 @@ internal static class UpstreamRequestBuilder
     /// </param>
     /// <param name="translator">The provider's translator, or <see langword="null"/> for a passthrough provider.</param>
     /// <param name="rewrittenBody">The request body after <c>RequestInterceptor</c>'s model rewrite, in OpenAI shape.</param>
+    /// <param name="droppedBetaPrefixes">
+    /// The <c>anthropic-beta</c> value prefixes whose body fields were removed from this candidate's copy
+    /// (<see cref="MessagesFeatureStrip.BetaPrefixes"/>), dropped from the forwarded header together with them
+    /// (ADR-0017 Strip rule 1). <see langword="null"/> or empty forwards the client's header unchanged.
+    /// </param>
     /// <returns>A fresh <see cref="HttpRequestMessage"/>. The caller owns it and must dispose it.</returns>
     internal static HttpRequestMessage Build(
         HttpContext context,
         ResolvedModelRoute route,
         IPayloadTranslator? translator,
-        byte[] rewrittenBody)
+        byte[] rewrittenBody,
+        IReadOnlyList<string>? droppedBetaPrefixes = null)
     {
         var (targetUri, forwardBody) = ResolveTargetAndBody(context: context, route: route, translator: translator,
             rewrittenBody: rewrittenBody);
@@ -66,7 +78,8 @@ internal static class UpstreamRequestBuilder
             Method = new HttpMethod(context.Request.Method)
         };
 
-        CopyClientHeaders(context: context, route: route, requestMessage: requestMessage);
+        CopyClientHeaders(context: context, route: route, requestMessage: requestMessage,
+            droppedBetaPrefixes: droppedBetaPrefixes);
 
         requestMessage.Content = new ByteArrayContent(forwardBody);
         requestMessage.Content.Headers.TryAddWithoutValidation(name: "Content-Type", value: "application/json");
@@ -143,10 +156,12 @@ internal static class UpstreamRequestBuilder
     /// <summary>
     /// Copies the client's own headers onto the upstream message, skipping the ones that must never be
     /// relayed (<see cref="AlwaysSkippedRequestHeaders"/>), the hop-by-hop set nominated by this request's
-    /// <c>Connection</c> header, and every header name the provider itself configures.
+    /// <c>Connection</c> header, and every header name the provider itself configures. With
+    /// <paramref name="droppedBetaPrefixes"/>, <c>anthropic-beta</c> loses the values paired with stripped body
+    /// fields and is omitted when none is left; every other value is forwarded as sent.
     /// </summary>
     private static void CopyClientHeaders(HttpContext context, ResolvedModelRoute route,
-        HttpRequestMessage requestMessage)
+        HttpRequestMessage requestMessage, IReadOnlyList<string>? droppedBetaPrefixes)
     {
         var requestHopByHopHeaders = ProxyMiddleware.GetHopByHopHeaderNames(
             context.Request.Headers.TryGetValue(key: "Connection", value: out var requestConnectionValues)
@@ -168,6 +183,19 @@ internal static class UpstreamRequestBuilder
                 requestHopByHopHeaders.Contains(header.Key) ||
                 configuredHeaderNames.Contains(header.Key))
                 continue;
+
+            if (droppedBetaPrefixes is { Count: > 0 } &&
+                string.Equals(a: header.Key, b: AnthropicBetaHeaderName, comparisonType: StringComparison.OrdinalIgnoreCase))
+            {
+                var kept = header.Value
+                    .Select(value => value is null
+                        ? null
+                        : MessagesFeatureStripper.FilterBetaHeader(headerValue: value, prefixes: droppedBetaPrefixes))
+                    .OfType<string>()
+                    .ToArray();
+                if (kept.Length > 0) requestMessage.Headers.TryAddWithoutValidation(name: header.Key, values: kept);
+                continue;
+            }
 
             requestMessage.Headers.TryAddWithoutValidation(name: header.Key, values: [.. header.Value]);
         }

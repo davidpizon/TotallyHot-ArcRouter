@@ -281,13 +281,124 @@ public sealed record RateLimitHistoryResponseAdminView(
 /// removed from configuration - and is shown as a distinct "not detected" state from a manually stopped
 /// model.
 /// </param>
+/// <param name="Capabilities">
+/// The capability record the model's provider list reported, or <see langword="null"/> when no scan has recorded
+/// one. Shown as badges via <see cref="ModelCapabilityBadges"/>; the router removes what it reports unsupported from
+/// requests it routes to this model (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>
+/// Amendment 1).
+/// </param>
 public sealed record ModelAdminView(
     string ModelName,
     string ProviderModelId,
     string? Dialect = null,
     string? Confidence = null,
     bool Enabled = true,
-    bool PresentUpstream = true);
+    bool PresentUpstream = true,
+    ModelCapabilitiesAdminView? Capabilities = null);
+
+/// <summary>A model's capability record as returned by the management API, regrouped generically.</summary>
+/// <param name="ScannedAtUtc">When the scan that read the record ran.</param>
+/// <param name="Groups">One group per top-level capability key the provider reported, in the provider's order.</param>
+public sealed record ModelCapabilitiesAdminView(
+    DateTimeOffset ScannedAtUtc,
+    IReadOnlyList<CapabilityGroupAdminView> Groups);
+
+/// <summary>One capability group within a <see cref="ModelCapabilitiesAdminView"/>.</summary>
+/// <param name="Name">The provider's capability key, for example <c>thinking</c>.</param>
+/// <param name="Supported">The group's own <c>supported</c> flag, or <see langword="null"/> when the record gives none.</param>
+/// <param name="Options">The group's options: thinking types, effort levels, strategies, and so on.</param>
+public sealed record CapabilityGroupAdminView(
+    string Name,
+    bool? Supported,
+    IReadOnlyList<CapabilityOptionAdminView> Options);
+
+/// <summary>One option within a <see cref="CapabilityGroupAdminView"/>.</summary>
+/// <param name="Name">The option's key as the provider reported it, for example <c>adaptive</c>.</param>
+/// <param name="Supported">Whether the provider reports it supported.</param>
+public sealed record CapabilityOptionAdminView(string Name, bool Supported);
+
+/// <summary>How fully a model supports one badge's capability.</summary>
+public enum ModelCapabilityBadgeState
+{
+    /// <summary>The capability and every option the record lists are supported.</summary>
+    Supported,
+
+    /// <summary>The capability is supported, but at least one listed option is not.</summary>
+    Partial,
+
+    /// <summary>The capability is not supported, or none of its listed options is.</summary>
+    Unsupported
+}
+
+/// <summary>One capability badge on a Governance &gt; Providers model row.</summary>
+/// <param name="Label">The short badge text.</param>
+/// <param name="State">How fully the model supports the capability, which picks the badge color.</param>
+/// <param name="Tip">The tooltip and accessible label: which options are and are not supported.</param>
+public sealed record ModelCapabilityBadge(string Label, ModelCapabilityBadgeState State, string Tip);
+
+/// <summary>
+/// Turns a model's capability record into the badges Governance &gt; Providers shows: one each for the capabilities
+/// the router can remove from a request (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>
+/// Amendment 1). Pure, so the decision is unit-tested apart from the markup.
+/// </summary>
+public static class ModelCapabilityBadges
+{
+    /// <summary>
+    /// The groups shown, in order, with their labels: the three request features the router strips. A display
+    /// choice only; the router's own rule never names them.
+    /// </summary>
+    private static readonly (string Group, string Label)[] Shown =
+    [
+        ("thinking", "Thinking"),
+        ("effort", "Effort"),
+        ("context_management", "Context mgmt")
+    ];
+
+    /// <summary>
+    /// Builds the badges for <paramref name="capabilities"/>: none when there is no record, and none for a group
+    /// the record does not describe.
+    /// </summary>
+    /// <param name="capabilities">The model's capability record, or <see langword="null"/>.</param>
+    /// <returns>The badges, in display order.</returns>
+    public static IReadOnlyList<ModelCapabilityBadge> For(ModelCapabilitiesAdminView? capabilities)
+    {
+        if (capabilities is null) return [];
+
+        var badges = new List<ModelCapabilityBadge>();
+        foreach (var (groupName, label) in Shown)
+        {
+            var group = capabilities.Groups.FirstOrDefault(g =>
+                string.Equals(a: g.Name, b: groupName, comparisonType: StringComparison.Ordinal));
+            if (group is null || (group.Supported is null && group.Options.Count == 0)) continue;
+
+            badges.Add(Describe(label: label, group: group));
+        }
+
+        return badges;
+    }
+
+    /// <summary>Classifies one group and writes its tooltip.</summary>
+    private static ModelCapabilityBadge Describe(string label, CapabilityGroupAdminView group)
+    {
+        const string removed = " The router removes unsupported settings from requests it routes to this model.";
+        var supported = group.Options.Where(o => o.Supported).Select(o => o.Name).ToList();
+        var unsupported = group.Options.Where(o => !o.Supported).Select(o => o.Name).ToList();
+
+        if (group.Supported == false || (supported.Count == 0 && unsupported.Count > 0))
+            return new ModelCapabilityBadge(Label: label, State: ModelCapabilityBadgeState.Unsupported,
+                Tip: $"{label}: not supported.{removed}");
+
+        if (unsupported.Count == 0)
+            return new ModelCapabilityBadge(Label: label, State: ModelCapabilityBadgeState.Supported,
+                Tip: supported.Count == 0
+                    ? $"{label}: supported."
+                    : $"{label}: supported ({string.Join(separator: ", ", values: supported)}).");
+
+        return new ModelCapabilityBadge(Label: label, State: ModelCapabilityBadgeState.Partial,
+            Tip: $"{label}: supported ({string.Join(separator: ", ", values: supported)}); " +
+                 $"not supported ({string.Join(separator: ", ", values: unsupported)}).{removed}");
+    }
+}
 
 /// <summary>
 /// Which API flavors one provider's endpoint answers, as returned by

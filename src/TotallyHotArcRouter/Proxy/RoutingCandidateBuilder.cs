@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -37,12 +38,18 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// <see langword="null"/> - behaviorally inert (falls back to a generic message) when omitted.
 /// </param>
 /// <param name="logger">The logger, shared with the owning <see cref="RequestInterceptor"/>.</param>
+/// <param name="featureSupportStore">
+/// Optional per-model capability records (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c>
+/// Amendment 1), consulted only when <see cref="Build"/> is asked to strip. <see langword="null"/> means no
+/// candidate is ever stripped - every request is forwarded as received, as before the amendment.
+/// </param>
 internal sealed class RoutingCandidateBuilder(
     ICircuitBreaker circuitBreaker,
     IModelRouteResolver modelRouteResolver,
     RouterMemory? routerMemory,
     IProviderInteractionStatusStore? interactionStatusStore,
-    ILogger logger)
+    ILogger logger,
+    IModelFeatureSupportStore? featureSupportStore = null)
 {
     /// <summary>
     /// The neutral prior assigned to a candidate with no recorded <see cref="RouterMemory"/> score yet
@@ -77,13 +84,20 @@ internal sealed class RoutingCandidateBuilder(
     /// named-model request (no vote happened). When present, failover hops retry the next voter pick
     /// rather than a separately memory-ranked model.
     /// </param>
+    /// <param name="stripUnsupportedFeatures">
+    /// Whether this is native Anthropic Messages traffic (<c>/v1/messages</c>), whose router-chosen candidates drop
+    /// the features their model's capability record reports unsupported (ADR-0022 Amendment 1). Even then, the
+    /// primary is left as sent when the client named it and it was not substituted (ADR-0005): only a model the
+    /// router chose is stripped. Every failover hop is a router choice.
+    /// </param>
     /// <returns>The ordered candidate list plus the (possibly substituted) route and updated substitution state.</returns>
     public RoutingCandidateBuildResult Build(
         JsonObject jsonObject,
         ResolvedModelRoute route,
         RoutingSubstitutionReason substitutionReasonSoFar,
         string liveDimension,
-        IReadOnlyDictionary<string, double>? policyCandidateScores = null)
+        IReadOnlyDictionary<string, double>? policyCandidateScores = null,
+        bool stripUnsupportedFeatures = false)
     {
         // docs/router/agent-resilience-strategies.md's Circuit Breaker: when the resolved primary's
         // own upstream target is presently OPEN (unhealthy, still cooling down) - or its whole
@@ -163,8 +177,12 @@ internal sealed class RoutingCandidateBuilder(
         // replacement for the old static per-model Fallbacks list. Each candidate gets its own
         // (lazily rewritten) body because a backup on a different provider needs a different upstream model
         // id substituted into the same request.
+        var primaryIsRouterChoice = substitutionReason != RoutingSubstitutionReason.None;
         var candidates = new List<RouteCandidate>
-            { RequestBodyIntrospection.BuildCandidate(jsonObject: jsonObject, route: route) };
+        {
+            RequestBodyIntrospection.BuildCandidate(jsonObject: jsonObject, route: route,
+                featureSupport: stripUnsupportedFeatures && primaryIsRouterChoice ? FeatureSupportFor(route) : null)
+        };
 
         var seenTargets = new HashSet<CircuitBreakerTargetKey> { CircuitBreakerTargetKey.FromRoute(route) };
         foreach (var fallbackRoute in RankEligibleModels(excludeModelNames: [route.ModelName],
@@ -174,10 +192,21 @@ internal sealed class RoutingCandidateBuilder(
             // failing call. Keyed on the full target, not ProviderModelId alone, so two genuinely
             // distinct providers that happen to share a model-id string are both kept as valid hops.
             if (seenTargets.Add(CircuitBreakerTargetKey.FromRoute(fallbackRoute)))
-                candidates.Add(RequestBodyIntrospection.BuildFallbackCandidate(primary: candidates[0], route: fallbackRoute));
+                candidates.Add(RequestBodyIntrospection.BuildFallbackCandidate(primary: candidates[0],
+                    route: fallbackRoute,
+                    featureSupport: stripUnsupportedFeatures ? FeatureSupportFor(fallbackRoute) : null));
 
         return new RoutingCandidateBuildResult(Candidates: candidates, Route: route,
             SubstitutionReason: substitutionReason, ExplicitCircuitTripBlockMessage: explicitCircuitTripBlockMessage);
+    }
+
+    /// <summary>
+    /// Looks up <paramref name="route"/>'s model capability record by its upstream model id, or returns
+    /// <see langword="null"/> when no store is wired up or the model has no record.
+    /// </summary>
+    private ModelFeatureSupport? FeatureSupportFor(ResolvedModelRoute route)
+    {
+        return featureSupportStore?.GetModelFeatureSupport(providerKey: route.Provider, modelId: route.ProviderModelId);
     }
 
     /// <summary>

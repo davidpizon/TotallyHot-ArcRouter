@@ -127,13 +127,14 @@ plain-language loop that produces those receipts is
 [`docs/how-it-learns.md`](docs/how-it-learns.md).
 
 Every response — streaming or buffered — carries three headers reporting what
-happened:
+happened, plus a fourth when the router removed request features:
 
 | Header | Meaning |
 |---|---|
 | `X-ArcRouter-Requested-Model` | The client's literal `model` string. |
 | `X-ArcRouter-Routed-Model` | The model that actually served the request (post-failover, post-substitution). |
 | `X-ArcRouter-Substitution-Reason` | Why they differ: `None`, `AutoSelect`, `UnresolvedName`, `ModelStopped`, `CircuitOpen`, or `Failover`. |
+| `X-ArcRouter-Stripped-Features` | Only on native `/v1/messages` traffic the router routed, and only when it removed something: the features taken out of the copy sent to the model that answered, because that model's own capability record says it rejects them (for example `thinking.adaptive, output_config.effort`). See [ADR-0022 Amendment 1](docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md#amendment-1-2026-10-02-strip-what-the-picked-model-rejects). |
 
 ## Data
 

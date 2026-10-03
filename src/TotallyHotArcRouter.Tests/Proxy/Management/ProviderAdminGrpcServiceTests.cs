@@ -139,6 +139,48 @@ public sealed class ProviderAdminGrpcServiceTests
     }
 
     [Fact]
+    public async Task ListProviders_CarriesAModelsCapabilityRecord_RegroupedGenerically()
+    {
+        using var temp = new TempDatabase();
+        var capabilities = temp.CreateToolCallCapabilityStore();
+        capabilities.SetModelFeatureSupport(providerKey: "anthropic",
+            records: [TotallyHot.ArcRouter.Tests.Proxy.ModelFeatureSupportFixtures.Haiku45()]);
+        var service = CreateService(
+            options: new ModelRoutingOptions
+            {
+                Providers = new Dictionary<string, ProviderOptions>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["anthropic"] = new() { BaseUrl = "https://api.anthropic.com" }
+                },
+                ModelList =
+                [
+                    new ModelRouteEntry
+                    {
+                        ModelName = "claude-haiku", Provider = "anthropic", ProviderModelId = "claude-haiku-4-5-20251001"
+                    },
+                    new ModelRouteEntry
+                        { ModelName = "claude-unscanned", Provider = "anthropic", ProviderModelId = "claude-unscanned" }
+                ]
+            },
+            dependencies: new ManagementFacadeDependencies { CapabilityStore = capabilities });
+
+        var response = await service.ListProviders(new Contract.ListProvidersRequest(), CreateContext());
+
+        var models = Assert.Single(response.Providers).Models;
+        var haiku = models.Single(m => m.ModelName == "claude-haiku");
+        Assert.NotNull(haiku.Capabilities);
+        var thinking = haiku.Capabilities.Groups.Single(g => g.Name == "thinking");
+        Assert.True(thinking.Supported);
+        // thinking.types is a container, so its children are the options.
+        Assert.Contains(thinking.Options, o => o is { Name: "adaptive", Supported: false });
+        Assert.Contains(thinking.Options, o => o is { Name: "enabled", Supported: true });
+        var effort = haiku.Capabilities.Groups.Single(g => g.Name == "effort");
+        Assert.False(effort.Supported);
+        Assert.Equal(5, actual: effort.Options.Count);
+        Assert.Null(models.Single(m => m.ModelName == "claude-unscanned").Capabilities);
+    }
+
+    [Fact]
     public async Task RemoveProvider_UnknownKey_ThrowsNotFound()
     {
         var service = CreateService();

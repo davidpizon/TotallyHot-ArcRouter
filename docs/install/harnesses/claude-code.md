@@ -40,7 +40,8 @@ is a Node process; if it ignores the OS store, set `NODE_EXTRA_CA_CERTS` to `rou
 
 Claude Code sends Anthropic Messages bodies to `POST /v1/messages`. Arc Router accepts that path
 and rewrites `model` to the selected backend's id. When the selected backend is Anthropic, the
-router leaves the rest of the Messages body unchanged and forwards it.
+router forwards the rest of the Messages body unchanged, except for the fields described under
+[Models that reject what Claude Code sends](#models-that-reject-what-claude-code-sends).
 
 There is no supported end-to-end translation of that native Messages turn onto another provider.
 A Gemini or Bedrock candidate still runs its request and response translator on `/v1/messages`;
@@ -51,6 +52,26 @@ body and write an OpenAI-shaped response, which is the wrong shape for Claude Co
 Two Claude Code behaviors change whenever `ANTHROPIC_BASE_URL` is not `api.anthropic.com`: Remote
 Control stays off, and MCP tool search stays off unless you set `ENABLE_TOOL_SEARCH=true`. The
 router does not implement Claude Code's `tool_reference` blocks, so leave tool search off.
+
+## Models that reject what Claude Code sends
+
+With `"model": "auto"`, Claude Code assumes a current Claude model and sends adaptive thinking,
+`output_config.effort` and `context_management`. Some Claude models reject some of these. Claude
+Haiku 4.5, for example, rejects adaptive thinking and effort with a 400, and Claude Code then turns
+the feature off for the rest of the conversation.
+
+When the router picks a model for a `/v1/messages` request, it removes those fields from the copy sent
+to a model whose own capability record says it rejects them. It keeps every other field, and a
+failover to a capable model still gets the full request. The response's
+`X-ArcRouter-Stripped-Features` header names what was removed. A model you name explicitly is sent the
+request as Claude Code wrote it.
+
+The records come from the provider's own model list, so the router needs one scan first. After
+upgrading, open **Governance > Providers** and click **Refresh** on the `anthropic` provider once.
+Each model row then shows **Thinking**, **Effort** and **Context mgmt** badges. A provider is scanned
+only when you save it or refresh it. Until then nothing is removed, and Claude Code's own retry handles
+any rejection. Decision record:
+[ADR-0022 Amendment 1](../../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md#amendment-1-2026-10-02-strip-what-the-picked-model-rejects).
 
 ## Sources
 

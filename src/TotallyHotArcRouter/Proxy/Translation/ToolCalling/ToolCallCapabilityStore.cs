@@ -7,16 +7,17 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// answers, and how each (provider, model) expresses a tool call
 /// (<c>docs/router/tool-call-normalization.md</c> Phase 1) - plus the context window probed for each
 /// (provider, model) alongside its dialect
-/// (<c>docs/router/ollama-show-capabilities-plan.md</c>).
+/// (<c>docs/router/ollama-show-capabilities-plan.md</c>), and the capability record each upstream model's
+/// provider list reported (<c>docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md</c> Amendment 1).
 /// </summary>
 /// <remarks>
 /// Shaped after <see cref="TotallyHot.ArcRouter.PriceCatalog.PriceSourceToggleStore"/>: an immutable
 /// snapshot swapped via <see cref="SnapshotCache{T}"/>, so the read path takes no lock at all. That matters
 /// here more than it does for price sources - <see cref="GetModelCapability"/> sits on the request path,
 /// consulted for every request that carries <c>tools</c>, so it must be a dictionary lookup rather than a
-/// query. The three underlying tables' snapshots are bundled into one <see cref="CapabilitySnapshots"/>
-/// record rather than swapped as three separate fields, so one <see cref="Reload"/> call is one atomic
-/// publish, not three a reader could observe mid-sequence.
+/// query. The underlying tables' snapshots are bundled into one <see cref="CapabilitySnapshots"/>
+/// record rather than swapped as separate fields, so one <see cref="Reload"/> call is one atomic
+/// publish, not several a reader could observe mid-sequence.
 /// <para>
 /// Like the toggle and budget stores, the constructor deliberately does <em>not</em> read the database.
 /// This is a singleton built while the DI graph is assembled, before
@@ -27,15 +28,16 @@ namespace TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 /// exactly what an unconfigured model should do.
 /// </para>
 /// </remarks>
-public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelContextWindowStore
+public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelContextWindowStore,
+    IModelFeatureSupportStore
 {
     // A matched tool call carries the user's own arguments, so evidence must never be raw model output.
     // ModelToolCapability.Evidence documents that contract for callers; this cap is the backstop that keeps
     // an accidental payload from being persisted whole.
     private const int MaxEvidenceLength = 200;
 
-    // The three capability tables' snapshots bundled into one record (docs/router/code-smell-refactoring-plan.md
-    // M2) so Reload's swap is a single atomic reference assignment via SnapshotCache<T>, rather than three
+    // The capability tables' snapshots bundled into one record (docs/router/code-smell-refactoring-plan.md
+    // M2) so Reload's swap is a single atomic reference assignment via SnapshotCache<T>, rather than several
     // separately-swapped volatile fields a reader could observe half-updated across.
     private readonly SnapshotCache<CapabilitySnapshots> _cache = new(CapabilitySnapshots.Empty);
     private readonly ILogger<ToolCallCapabilityStore> _logger;
@@ -71,6 +73,17 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
         return _cache.Current.Models.TryGetValue(
             key: new ModelCapabilityKey(providerKey: providerKey, modelName: modelName), value: out var capability)
             ? capability
+            : null;
+    }
+
+    /// <inheritdoc/>
+    public ModelFeatureSupport? GetModelFeatureSupport(string providerKey, string modelId)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey) || string.IsNullOrWhiteSpace(modelId)) return null;
+
+        return _cache.Current.FeatureSupport.TryGetValue(
+            key: new ModelCapabilityKey(providerKey: providerKey, modelName: modelId), value: out var support)
+            ? support
             : null;
     }
 
@@ -148,7 +161,7 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
     public event Action? Changed;
 
     /// <summary>
-    /// Re-reads all three capability tables and swaps the snapshots. Called once at startup, and after each
+    /// Re-reads all four capability tables and swaps the snapshots. Called once at startup, and after each
     /// write so the cache reflects what was actually persisted rather than what was requested - which
     /// matters here because a write can be silently rejected by the confidence gate.
     /// </summary>
@@ -165,7 +178,39 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
             ContextWindows: _repository.GetModelContextWindows()
                 .ToDictionary(
                     keySelector: w => new ModelCapabilityKey(providerKey: w.ProviderKey, modelName: w.ModelName),
-                    elementSelector: w => w)));
+                    elementSelector: w => w),
+            FeatureSupport: _repository.GetModelFeatureSupport()
+                .ToDictionary(
+                    keySelector: f => new ModelCapabilityKey(providerKey: f.ProviderKey, modelName: f.ModelId),
+                    elementSelector: f => f)));
+    }
+
+    /// <summary>
+    /// Replaces every capability record for <paramref name="providerKey"/> with what its latest scan read, then
+    /// refreshes the cache. Unconditional, like <see cref="SetProviderCapabilities"/>: the records are the
+    /// provider's own statement about its models, so there is no weaker source for a confidence gate to rank.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately absent from <see cref="IModelFeatureSupportStore"/>: only the management scan writes records,
+    /// and the request path - which reads one per router-chosen candidate - must not be able to. Same split as
+    /// <see cref="SetModelContextWindow"/>.
+    /// </remarks>
+    /// <param name="providerKey">The provider whose records are replaced.</param>
+    /// <param name="records">The complete set the scan read; empty clears the provider's records.</param>
+    public void SetModelFeatureSupport(string providerKey, IReadOnlyList<ModelFeatureSupport> records)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        ArgumentNullException.ThrowIfNull(records);
+
+        _repository.ReplaceModelFeatureSupport(providerKey: providerKey, records: records);
+        Reload();
+
+        _logger.LogInformation(
+            message: "Model capability records for provider {Provider} replaced: {Count} model(s) reported capabilities.",
+            SanitizeForLog(providerKey),
+            records.Count);
+
+        Changed?.Invoke();
     }
 
     /// <summary>
@@ -316,8 +361,8 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
 }
 
 /// <summary>
-/// The three capability tables' read snapshots, bundled into one immutable record so
-/// <see cref="ToolCallCapabilityStore.Reload"/> can swap all three together as a single atomic reference
+/// The four capability tables' read snapshots, bundled into one immutable record so
+/// <see cref="ToolCallCapabilityStore.Reload"/> can swap them together as a single atomic reference
 /// assignment via <see cref="TotallyHot.ArcRouter.Proxy.Concurrency.SnapshotCache{T}"/>. Before this
 /// bundling, the three tables were three separately-swapped <see langword="volatile"/> fields under one
 /// lock - correct, but not what <see cref="TotallyHot.ArcRouter.Proxy.Concurrency.SnapshotCache{T}"/> models,
@@ -326,20 +371,23 @@ public sealed class ToolCallCapabilityStore : IToolCallCapabilityStore, IModelCo
 /// <param name="Models">Per-(provider, model) tool-call dialect capabilities.</param>
 /// <param name="Providers">Per-provider endpoint-flavor capabilities.</param>
 /// <param name="ContextWindows">Per-(provider, model) probed context windows.</param>
+/// <param name="FeatureSupport">Per-(provider, upstream model id) capability records from the provider's model list.</param>
 internal sealed record CapabilitySnapshots(
     IReadOnlyDictionary<ModelCapabilityKey, ModelToolCapability> Models,
     IReadOnlyDictionary<string, ProviderEndpointCapabilities> Providers,
-    IReadOnlyDictionary<ModelCapabilityKey, ModelContextWindow> ContextWindows)
+    IReadOnlyDictionary<ModelCapabilityKey, ModelContextWindow> ContextWindows,
+    IReadOnlyDictionary<ModelCapabilityKey, ModelFeatureSupport> FeatureSupport)
 {
     /// <summary>The all-empty snapshot every store starts with before its first <see cref="ToolCallCapabilityStore.Reload"/>.</summary>
     public static CapabilitySnapshots Empty { get; } = new(
         Models: new Dictionary<ModelCapabilityKey, ModelToolCapability>(),
         Providers: new Dictionary<string, ProviderEndpointCapabilities>(StringComparer.OrdinalIgnoreCase),
-        ContextWindows: new Dictionary<ModelCapabilityKey, ModelContextWindow>());
+        ContextWindows: new Dictionary<ModelCapabilityKey, ModelContextWindow>(),
+        FeatureSupport: new Dictionary<ModelCapabilityKey, ModelFeatureSupport>());
 }
 
 /// <summary>
-/// The (provider, model) pair a tool-call capability is keyed on, compared case-insensitively to match the
+/// The (provider, model) pair a capability row is keyed on, compared case-insensitively to match the
 /// <see cref="StringComparer.OrdinalIgnoreCase"/> lookups <c>ModelRouteResolver</c> uses for both halves -
 /// and the <c>COLLATE NOCASE</c> on the backing table's key columns.
 /// </summary>
@@ -352,7 +400,10 @@ public readonly record struct ModelCapabilityKey
 {
     /// <summary>Initializes a new instance of the <see cref="ModelCapabilityKey"/> struct.</summary>
     /// <param name="providerKey">The <c>ModelRouting:Providers</c> key.</param>
-    /// <param name="modelName">The client-facing model name.</param>
+    /// <param name="modelName">
+    /// The model identifier as the owning table stores it: the client-facing name for dialect and context-window
+    /// rows, the upstream model id for capability records.
+    /// </param>
     public ModelCapabilityKey(string providerKey, string modelName)
     {
         ProviderKey = providerKey;
@@ -362,7 +413,7 @@ public readonly record struct ModelCapabilityKey
     /// <summary>Gets the <c>ModelRouting:Providers</c> key.</summary>
     private string ProviderKey { get; }
 
-    /// <summary>Gets the client-facing model name.</summary>
+    /// <summary>Gets the model identifier, as described on the constructor.</summary>
     private string ModelName { get; }
 
     /// <summary>

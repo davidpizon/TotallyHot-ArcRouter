@@ -111,6 +111,42 @@ public sealed class ProviderAdminClientTests
     }
 
     [Fact]
+    public async Task GetProvidersAsync_MapsAModelsCapabilityRecord_AndLeavesAMissingOneNull()
+    {
+        var withRecord = new Contract.ModelState
+        {
+            ModelName = "claude-haiku", ProviderModelId = "claude-haiku-4-5-20251001",
+            Capabilities = new Contract.ModelCapabilitiesState
+            {
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-02T12:00:00Z"))
+            }
+        };
+        var thinking = new Contract.CapabilityGroupState { Name = "thinking", Supported = true };
+        thinking.Options.Add(new Contract.CapabilityOptionState { Name = "adaptive", Supported = false });
+        withRecord.Capabilities.Groups.Add(thinking);
+        withRecord.Capabilities.Groups.Add(new Contract.CapabilityGroupState { Name = "unflagged" });
+        var withoutRecord = new Contract.ModelState { ModelName = "claude-opus", ProviderModelId = "claude-opus-5" };
+        var stub = new StubClient
+        {
+            ListProvidersResponse = ListResponse(Provider(key: "anthropic", models: [withRecord, withoutRecord]))
+        };
+        var client = new ProviderAdminClient(stub);
+
+        var models = Assert.Single(await client.GetProvidersAsync(Ct)).Models;
+
+        var capabilities = models[0].Capabilities;
+        Assert.NotNull(capabilities);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-10-02T12:00:00Z"), actual: capabilities.ScannedAtUtc);
+        var group = capabilities.Groups[0];
+        Assert.Equal(expected: "thinking", actual: group.Name);
+        Assert.True(group.Supported);
+        Assert.Equal(expected: new CapabilityOptionAdminView(Name: "adaptive", Supported: false),
+            actual: Assert.Single(group.Options));
+        Assert.Null(capabilities.Groups[1].Supported);
+        Assert.Null(models[1].Capabilities);
+    }
+
+    [Fact]
     public async Task UpsertProviderAsync_SendsEveryConfiguredField()
     {
         var stub = new StubClient { UpsertProviderResponse = ListResponse(Provider("ollama")) };
