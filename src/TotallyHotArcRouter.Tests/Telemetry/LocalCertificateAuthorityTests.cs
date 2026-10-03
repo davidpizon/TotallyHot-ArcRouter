@@ -692,7 +692,10 @@ public sealed class LocalCertificateAuthorityTests
         }
     }
 
-    [Theory]
+    // AGENTS.md's 5-second cap for heavy tests. xUnit v3 also cancels TestContext.Current.CancellationToken
+    // at the timeout, which HandshakeAsync passes to every accept, connect and authenticate call, so a
+    // stalled handshake fails here instead of hanging the run.
+    [Theory(Timeout = 5000)]
     [InlineData("localhost", false)]
     [InlineData("127.0.0.1", true)]
     public async Task Handshake_PicksTheLeafByTheClientsSni(string targetHost, bool expectIpAddresses)
