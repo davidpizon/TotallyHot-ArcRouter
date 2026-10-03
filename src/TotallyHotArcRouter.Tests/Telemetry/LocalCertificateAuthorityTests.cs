@@ -113,10 +113,13 @@ public sealed class LocalCertificateAuthorityTests
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
+        // Started here rather than inside the server task, so the task never touches the listener that
+        // this method's own `using` disposes.
+        var accepting = listener.AcceptTcpClientAsync(cancellationToken);
         var served = new List<X509Certificate2>();
         var server = Task.Run(async () =>
         {
-            using var accepted = await listener.AcceptTcpClientAsync(cancellationToken);
+            using var accepted = await accepting;
             await using var serverStream = new SslStream(accepted.GetStream());
             await serverStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
             {
@@ -441,7 +444,7 @@ public sealed class LocalCertificateAuthorityTests
     [Fact]
     public async Task GetOrCreateLeaf_ConcurrentCallsDuringRenewal_AllReturnTheSameCertificate()
     {
-        // Regression coverage for a real bug: GetOrCreateLeaf() is called from a ServerCertificateSelector
+        // Regression coverage for a real bug: GetOrCreateLeaf(serverName) is called from a ServerCertificateSelector
         // on every TLS handshake, across every listener in the process, with no cache in front of it -
         // several simultaneous handshakes can all decide "time to renew" at the same moment. Without
         // RenewalLock serializing the whole check-renew-persist sequence, each thread would mint its own
@@ -596,7 +599,7 @@ public sealed class LocalCertificateAuthorityTests
                 certificatePath: Path.Combine(directory, "router-ca.pfx"), secretStore: store);
 
             var (dnsNames, ipAddresses) = SubjectAlternativeNames(leaf);
-            Assert.Equal(expected: new[] { "localhost" }, actual: dnsNames);
+            Assert.Equal(expected: ["localhost"], actual: dnsNames);
             Assert.True(condition: ipAddresses.Length == 0,
                 userMessage: $"The DnsOnly leaf must carry no IP SAN (BoringSSL rejects it), but carries: {string.Join(", ", ipAddresses.Select(a => a.ToString()))}");
             Assert.Equal(expected: ca.Subject, actual: leaf.Issuer);
@@ -620,8 +623,8 @@ public sealed class LocalCertificateAuthorityTests
                 directory: directory, secretStore: store);
 
             var (dnsNames, ipAddresses) = SubjectAlternativeNames(leaf);
-            Assert.Equal(expected: new[] { "localhost" }, actual: dnsNames);
-            Assert.Equal(expected: new[] { IPAddress.Loopback, IPAddress.IPv6Loopback }, actual: ipAddresses);
+            Assert.Equal(expected: ["localhost"], actual: dnsNames);
+            Assert.Equal(expected: [IPAddress.Loopback, IPAddress.IPv6Loopback], actual: ipAddresses);
         }
         finally
         {

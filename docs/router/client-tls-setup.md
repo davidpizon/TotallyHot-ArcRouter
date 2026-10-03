@@ -71,8 +71,8 @@ base URL they are given, so they need the version prefix included.
 
 | Client | How it discovers trust |
 |---|---|
-| Node-based CLIs | System trust store by default. If it ignores that, set `NODE_EXTRA_CA_CERTS=<path to router-ca.crt>` (or Node ≥18's `--use-system-ca`). |
-| Claude Code (native build), other Bun-based CLIs | Same as Node-based CLIs, but always dial `localhost`, never `127.0.0.1` or `[::1]`. See [Bun and BoringSSL clients](#bun-and-boringssl-clients). |
+| Node-based CLIs | Node's own bundled CA set by default, which ignores the OS store, so `--install-certificate` alone is not enough. Either add the CA with `NODE_EXTRA_CA_CERTS=<path to router-ca.crt>`, or have Node also read the OS store with `--use-system-ca` (Node 22.15+ and 23.8+) once the CA is installed there. |
+| Claude Code (native build), other Bun-based CLIs | Claude Code reads its bundled CA set plus the OS store by default (`CLAUDE_CODE_CERT_STORE` narrows that), so `--install-certificate` is enough; `NODE_EXTRA_CA_CERTS=<path to router-ca.crt>` also works. Other Bun CLIs: use `NODE_EXTRA_CA_CERTS`. Always dial `localhost`, never `127.0.0.1` or `[::1]`. See [Bun and BoringSSL clients](#bun-and-boringssl-clients). |
 | OpenAI/Anthropic Python SDKs | `httpx`'s default `truststore`/`certifi` bundle; point it at the CA with `SSL_CERT_FILE=<path to router-ca.crt>` or `REQUESTS_CA_BUNDLE=<path to router-ca.crt>`. |
 | curl | System trust store by default (Windows: Schannel, reads the OS store directly). To point at the CA explicitly without installing it: `curl --cacert router-ca.crt https://localhost:47101/v1/models`. |
 | .NET clients | System trust store (`X509Store`) automatically once `--install-certificate` has run. |

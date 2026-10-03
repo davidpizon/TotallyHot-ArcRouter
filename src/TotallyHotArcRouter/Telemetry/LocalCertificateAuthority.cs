@@ -60,9 +60,9 @@ public static class LocalCertificateAuthority
     private const string DnsOnlyLeafPasswordSecretName = "router-leaf-dns:cert-password";
 
     // Guards the whole check-renew-persist sequence in both GetOrCreateCa and GetOrCreateLeaf. Real gap
-    // this closes: GetOrCreateLeaf() is called from a ServerCertificateSelector on every TLS handshake,
+    // this closes: GetOrCreateLeaf(serverName) is called from a ServerCertificateSelector on every TLS handshake,
     // across every listener (proxy, web, MCP - each its own Kestrel instance/process), with no cache in
-    // front of it by design (see GetOrCreateLeaf()'s own remarks on why). PersistAndReload's
+    // front of it by design (see GetOrCreateLeaf(serverName)'s own remarks on why). PersistAndReload's
     // temp-file-then-rename-then-persist-password ordering (see its own remarks) makes a SINGLE renewal
     // safe against a mid-write failure, but says nothing about TWO concurrent renewals - which is
     // exactly what happens once the cached leaf enters its renewal window and several simultaneous
@@ -86,7 +86,7 @@ public static class LocalCertificateAuthority
     private static readonly TimeSpan LeafValidity = TimeSpan.FromDays(397);
 
     /// <summary>
-    /// How long before expiry <see cref="GetOrCreateLeaf()"/> mints a replacement rather than returning
+    /// How long before expiry <see cref="GetOrCreateLeaf(string)"/> mints a replacement rather than returning
     /// the cached leaf. Wide enough that an operator who starts the router only occasionally still
     /// renews well ahead of expiry, without needing a background timer - every call re-checks.
     /// </summary>
@@ -111,12 +111,6 @@ public static class LocalCertificateAuthority
             certificatePath: Path.Combine(path1: directory, path2: CaCertificateFileName),
             secretStore: new ProtectedSecretStore());
     }
-
-    /// <summary>
-    /// Loads or issues the <see cref="LeafProfile.Loopback"/> leaf, the one a handshake without SNI gets.
-    /// Equivalent to <see cref="GetOrCreateLeaf(string)"/> with no server name.
-    /// </summary>
-    public static X509Certificate2 GetOrCreateLeaf() => GetOrCreateLeaf(serverName: null);
 
     /// <summary>
     /// Loads the persisted leaf for <paramref name="serverName"/>'s <see cref="LeafProfile"/> (see

@@ -6,7 +6,7 @@
 **Related:**
 - [ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md), the name-constrained local CA. Its consequence "name constraints … are honored by every mainstream OS/browser trust-store implementation targeted here" does not hold for BoringSSL.
 - [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md), which redirects `https://127.0.0.1:<web port>` to `https://localhost:<web port>`. That redirect needs the TLS handshake on the IP literal to succeed first.
-- [Client TLS setup, known issue](../router/client-tls-setup.md#known-issue-bun-and-boringssl-clients) and the [Claude Code harness page](../install/harnesses/claude-code.md#the-https-port-fails-with-unsupported_constraint_type), which document the current workaround.
+- [Client TLS setup, Bun and BoringSSL clients](../router/client-tls-setup.md#bun-and-boringssl-clients) and the [Claude Code harness page](../install/harnesses/claude-code.md#unsupported_constraint_type-on-the-https-port), which document the fix and the workaround for older builds.
 
 **ADR-0008 Amendment 1:** this is a defect fix with a reproduction, not a smell refactor. It does not touch `ProxyMiddleware`, `RequestInterceptor` or `ManagementFacade`. On `ProxyServer` and `McpServer` it changes only the certificate-selector lambdas.
 
@@ -109,7 +109,7 @@ There is no BoringSSL in the .NET test run. The manual smoke below covers the re
 
 ### 8.1 Where the code differs from §3 and §4
 
-- **Overloads.** `GetOrCreateLeaf(string? serverName)` is the selector entry point. `GetOrCreateLeaf()` stays as the `Loopback` profile. Tests use `GetOrCreateLeaf(LeafProfile, directory, store)`, and the path-based overload takes an optional `LeafProfile` (default `Loopback`), so the existing tests did not change. `LeafProfile` is an internal enum nested in `LocalCertificateAuthority`.
+- **Overloads.** `GetOrCreateLeaf(string? serverName)` is the selector entry point. The parameterless `GetOrCreateLeaf()` was removed once both hosts called `EnsureLeaves()` and the SNI overload instead, because nothing called it any more (Qodana flagged it on the PR). Tests use `GetOrCreateLeaf(LeafProfile, directory, store)`, and the path-based overload takes an optional `LeafProfile` (default `Loopback`), so the existing tests did not change. `LeafProfile` is an internal enum nested in `LocalCertificateAuthority`.
 - **Test 5** is a real TLS handshake over loopback with `SslStream` on both ends, not Kestrel with the production selector. The production selector resolves the real machine-shared directory, which a test must not use. The test drives the same `SelectLeafProfile` plus directory overload that the public `GetOrCreateLeaf(serverName)` composes, and the client's SNI is whatever .NET actually sends.
 - **Test 6** is folded into test 1 (`GetOrCreateLeaf_DnsOnlyProfile_CarriesNoIpAddress`). The "CA carries IP subtrees" condition is constant in this code, so the conditional form only added parsing. The test's failure message explains the BoringSSL rule instead.
 - **Tests as shipped:** `GetOrCreateLeaf_DnsOnlyProfile_CarriesNoIpAddress`, `GetOrCreateLeaf_LoopbackProfile_KeepsBothLoopbackAddresses`, `SelectLeafProfile_PicksDnsOnlyExactlyWhenTheClientNamedAHost` (null, empty, `127.0.0.1`, `::1`, `localhost`, `LOCALHOST`), `GetOrCreateLeaf_Profiles_PersistSeparatelyAndRenewIndependently` and `Handshake_PicksTheLeafByTheClientsSni` (`localhost`, `127.0.0.1`). The slowest takes 0.8 s.
@@ -117,7 +117,8 @@ There is no BoringSSL in the .NET test run. The manual smoke below covers the re
 ### 8.2 Validation run
 
 - `dotnet build src/TotallyHotArcRouter.slnx`: clean, no warnings.
-- `TotallyHotArcRouter.Tests`: 3,004 passed, 0 failed, with `ProxyServerTests`, `ProxyServerAuthTests`, `ProxyServerWebInterfaceTests` and `ProxyHostedServiceTests` excluded, because they start real listeners against the machine-shared directory. Those four classes, the other test projects and coverage have not been run locally; CI runs them.
+- Final local run, 2026-10-03, after the §8.4 AKI change: every test project in `src/TotallyHotArcRouter.slnx`, 4,123 passed, 0 failed. Five classes were excluded because they start real listeners against the machine-shared directory: `ProxyServerTests`, `ProxyServerAuthTests`, `ProxyServerWebInterfaceTests`, `ProxyHostedServiceTests` and `McpHostedServiceTests` (see §8.3 for why the last one joined the list). Those five classes and coverage have not been run locally; CI runs them.
+- An earlier run on 2026-10-02, before the AKI change, covered `TotallyHotArcRouter.Tests` only: 3,004 passed with the first four classes excluded. `McpHostedServiceTests` was not excluded then, which is the write §8.3 describes.
 - **Real clients against the branch's own code.** A scratch Kestrel host referenced this branch's router assembly and served `LocalCertificateAuthority`'s leaves through the same selector shape as `ProxyServer`. It used a scratch data directory and secret store, `ListenLocalhost` and `Http1AndHttp2`.
 
   | Client | `https://localhost:…` | `https://127.0.0.1:…` |

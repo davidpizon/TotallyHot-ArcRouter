@@ -165,6 +165,20 @@ Both leaves share the renewal window, lock and persistence code, and each has it
 (`router-leaf-dns:cert-password` for the new one). The first start after upgrade mints
 `router-leaf-dns.pfx`. Nothing is re-trusted.
 
+Both leaves also name their issuer by key, not only by subject:
+
+- **Format.** Each leaf carries a non-critical Authority Key Identifier (AKI) holding only the key
+  identifier, copied from the CA's Subject Key Identifier (SKI), and a non-critical SKI of its own. The
+  AKI carries no issuer name or serial. Without an AKI, BoringSSL picks the issuer by subject alone. A
+  client that trusts two CAs named `CN=TotallyHot Arc Router Local CA` then fails with
+  `CERT_SIGNATURE_FAILURE` when it picks the other one. That happens, for example, when an old router CA
+  stays in the OS store after a reinstall mints a new one.
+- **Reuse rule.** A persisted leaf is reused only when it is outside its renewal window *and* its AKI
+  key identifier equals the current CA's SKI. Otherwise it is re-issued under the current CA. So a leaf
+  saved before this amendment, which has no AKI, is re-issued once on first use. The CA is unchanged, so
+  nothing is re-trusted. A leaf left over from an earlier CA, after the CA expired and was re-minted or
+  its file was removed, is re-issued too, instead of being served until its own renewal window.
+
 ### Consequences
 
 - Good, because Bun clients, including the native Claude Code build, work on every HTTPS port through
