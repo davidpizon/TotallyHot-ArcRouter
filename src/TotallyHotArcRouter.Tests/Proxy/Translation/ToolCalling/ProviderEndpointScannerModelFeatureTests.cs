@@ -124,6 +124,22 @@ public sealed class ProviderEndpointScannerModelFeatureTests
     }
 
     [Theory]
+    [InlineData("""{"type":"model","capabilities":{}}""")]
+    [InlineData("""{"type":"model","id":42,"capabilities":{}}""")]
+    [InlineData("""{"type":"model","id":"  ","capabilities":{}}""")]
+    [InlineData("""{"type":"model","id":"claude-x","capabilities":"yes"}""")]
+    [InlineData("\"claude-x\"")]
+    public async Task OneMalformedEntry_VoidsTheScan_SoTheStoredRecordsAreKept(string malformed)
+    {
+        // The caller replaces the provider's whole stored set with the scan's result. Skipping a bad entry would
+        // silently delete a valid record; returning null keeps the previous set (Copilot review on PR #186).
+        var scanner = Scanner(_ => (HttpStatusCode.OK, Page(false, null,
+            Entry("claude-haiku-4-5-20251001", Haiku45Capabilities), malformed)));
+
+        Assert.Null(await Scan(scanner));
+    }
+
+    [Theory]
     [InlineData("""{"object":"list","data":[{"id":"gpt-5.4"}]}""")]
     [InlineData("not json")]
     [InlineData("""{"has_more":false}""")]

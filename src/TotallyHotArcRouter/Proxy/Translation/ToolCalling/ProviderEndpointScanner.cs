@@ -227,7 +227,8 @@ public sealed class ProviderEndpointScanner
 
     /// <summary>
     /// Parses one page of an Anthropic-shaped model list, appending a record for every entry that carries a
-    /// <c>capabilities</c> object.
+    /// <c>capabilities</c> object. An entry with no capabilities (absent or null) is skipped; any malformed entry
+    /// voids the page.
     /// </summary>
     /// <returns>
     /// Whether more pages follow and the id to continue after, or <see langword="null"/> when the body is not an
@@ -247,15 +248,28 @@ public sealed class ProviderEndpointScanner
                 hasMore.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                 return null;
 
+            // The caller replaces the provider's whole stored set with what the scan returns, so a page is
+            // all-or-nothing: an entry that is not an object, lacks a usable id, or carries a capabilities value
+            // that is neither an object nor null voids the page (and so the scan, keeping the previous records)
+            // rather than being skipped. Only a model that publishes no capabilities - the key absent or null -
+            // is skipped, because that is a valid answer meaning "no record".
             foreach (var entry in data.EnumerateArray())
-                if (entry.ValueKind == JsonValueKind.Object &&
-                    entry.TryGetProperty(propertyName: "id", value: out var id) &&
-                    id.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(id.GetString()) &&
-                    entry.TryGetProperty(propertyName: "capabilities", value: out var capabilities) &&
-                    capabilities.ValueKind == JsonValueKind.Object)
-                    records.Add(new ModelFeatureSupport(ProviderKey: providerKey, ModelId: id.GetString()!,
-                        Capabilities: capabilities.Clone(), ScannedAtUtc: scannedAtUtc));
+            {
+                if (entry.ValueKind != JsonValueKind.Object ||
+                    !entry.TryGetProperty(propertyName: "id", value: out var id) ||
+                    id.ValueKind != JsonValueKind.String ||
+                    string.IsNullOrWhiteSpace(id.GetString()))
+                    return null;
+
+                if (!entry.TryGetProperty(propertyName: "capabilities", value: out var capabilities) ||
+                    capabilities.ValueKind == JsonValueKind.Null)
+                    continue;
+
+                if (capabilities.ValueKind != JsonValueKind.Object) return null;
+
+                records.Add(new ModelFeatureSupport(ProviderKey: providerKey, ModelId: id.GetString()!,
+                    Capabilities: capabilities.Clone(), ScannedAtUtc: scannedAtUtc));
+            }
 
             var lastId = root.TryGetProperty(propertyName: "last_id", value: out var last) &&
                          last.ValueKind == JsonValueKind.String
