@@ -64,5 +64,5 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0018](0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md) | Persist request telemetry off the request path via a bounded channel | proposed |
 | [0019](0019-store-conversation-text-in-encrypted-per-session-files.md) | Store conversation text in encrypted per-session files, with SQLite as a text-free index | proposed |
 | [0020](0020-require-passkey-verification-for-conversation-content.md) | Require passkey user verification before conversation content leaves the router | proposed |
-| [0021](0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) | Carry the subagent routing signal on the telemetry wire as an optional field | proposed |
-| [0022](0022-route-harness-subagent-and-helper-traffic-by-kind.md) | Route harness subagent and helper traffic by kind | proposed |
+| [0021](0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) | Carry the subagent routing signal on the telemetry wire as an optional field | accepted |
+| [0022](0022-route-harness-subagent-and-helper-traffic-by-kind.md) | Route harness subagent and helper traffic by kind | accepted |

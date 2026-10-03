@@ -1,6 +1,6 @@
 # 0022. Route harness subagent and helper traffic by kind
 
-**Status:** proposed
+**Status:** accepted (PR #186 merged 2026-10-03)
 **Date:** 2026-10-02
 **Deciders:** David Pizon
 **Amendments:** [Amendment 1 (2026-10-02) — strip what the picked model rejects](#amendment-1-2026-10-02-strip-what-the-picked-model-rejects)
@@ -170,7 +170,7 @@ the class table, the options and the tests.
 
 ## Amendment 1 (2026-10-02): strip what the picked model rejects
 
-**Status:** proposed, together with this ADR. David approved this approach on 2026-10-02 as Phase 2c of the
+**Status:** accepted with this ADR (PR #186 merged 2026-10-03). David approved this approach on 2026-10-02 as Phase 2c of the
 [#163 plan](../plans/issue-163-subagent-aware-routing.md). It amends the native Messages restriction under
 Consequences and does not change the chosen option.
 
