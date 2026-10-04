@@ -121,7 +121,8 @@ internal static class SecureFile
     /// <summary>
     /// Breaks ACL inheritance on <paramref name="path"/> and grants full control to <c>LocalSystem</c> and the
     /// local administrators group - and to nothing else (ADR-0024 rule 5, revising ADR-0015's writing-account
-    /// rule).
+    /// rule) - and makes <c>Administrators</c> the file's owner, so the writing account keeps no implicit
+    /// right to rewrite the DACL either.
     /// </summary>
     /// <remarks>
     /// Protecting the DACL discards the inherited rules, so a writer that is neither <c>LocalSystem</c> nor an
@@ -152,7 +153,16 @@ internal static class SecureFile
         // No rule for the writing account (ADR-0024) and none for BUILTIN\Users (ADR-0012 removed the one
         // reader that needed it).
 
-        new FileInfo(path).SetAccessControl(security);
+        var file = new FileInfo(path);
+        file.SetAccessControl(security);
+
+        // Ownership too, in a second step: an owner holds implicit WRITE_DAC whatever the DACL says, so a file
+        // left owned by the elevated administrator who created it would let that account's unelevated
+        // applications grant themselves read access to this LocalMachine-DPAPI store. Only SYSTEM or an
+        // elevated administrator can assign Administrators as owner - the only callers this method has.
+        var ownership = new FileSecurity();
+        ownership.SetOwner(new SecurityIdentifier(sidType: WellKnownSidType.BuiltinAdministratorsSid, null));
+        file.SetAccessControl(ownership);
     }
 
     /// <summary>

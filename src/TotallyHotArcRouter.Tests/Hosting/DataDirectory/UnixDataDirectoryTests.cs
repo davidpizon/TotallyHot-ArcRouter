@@ -404,6 +404,38 @@ public sealed class UnixDataDirectoryTests
         }
     }
 
+    /// <summary>
+    /// A symbolic link holding the reserved <c>quarantine</c> name must not route the quarantine outside the
+    /// volume: it is parked and moved into a real quarantine folder, and its target is untouched.
+    /// </summary>
+    [Fact]
+    public void ContainerVolume_QuarantineNameHeldByASymlink_IsNotFollowed()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix only");
+        var scratch = NewScratch();
+        try
+        {
+            var volume = Path.Combine(scratch, "data");
+            var outside = Directory.CreateDirectory(Path.Combine(scratch, "outside")).FullName;
+            Directory.CreateDirectory(volume);
+            Directory.CreateSymbolicLink(Path.Combine(volume, DataDirectoryMigrationRules.QuarantineDirectoryName), outside);
+            File.CreateSymbolicLink(Path.Combine(volume, "stray-link"), "/etc/hostname");
+            File.SetUnixFileMode(volume, OpenDirectoryMode);
+
+            Decide(scratch, volume, [UnixNative.EffectiveUserId()], container: true);
+
+            Assert.Empty(Directory.EnumerateFileSystemEntries(outside));
+            var quarantine = Path.Combine(volume, DataDirectoryMigrationRules.QuarantineDirectoryName);
+            Assert.Equal(UnixFileKind.Directory, UnixNative.LStat(quarantine)!.Value.Kind);
+            Assert.Equal(2, Directory.EnumerateFileSystemEntries(quarantine, "*", SearchOption.AllDirectories)
+                .Count(entry => UnixNative.LStat(entry)?.Kind == UnixFileKind.SymbolicLink));
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
     /// <summary>A logs directory created at startup carries the marker, so the next start accepts it.</summary>
     [Fact]
     public void VerifyUnixLogsDirectory_CreatesItMarked_SoTheNextStartAcceptsIt()

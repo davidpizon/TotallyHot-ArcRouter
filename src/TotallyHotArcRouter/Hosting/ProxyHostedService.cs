@@ -121,19 +121,34 @@ public class ProxyHostedService : IHostedService
     /// </summary>
     private void WriteDiscoveryFile()
     {
+        X509Certificate2? ca = null;
         try
         {
-            var webAddress = _proxyServer.Addresses.FirstOrDefault(a => new Uri(a).Port == _webPort);
-            using var ca = LocalCertificateAuthority.GetOrCreateCa();
-
-            WebInterfaceDiscoveryFile.Write(new WebInterfaceDiscoveryInfo(WebUrl: webAddress, CaThumbprint: ca.Thumbprint));
-
-            if (DataDirectoryBootstrap.UsingProtectedMachineWideDirectory) PublishCaCertificate(ca);
+            ca = LocalCertificateAuthority.GetOrCreateCa();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         {
             _logger.LogWarning(exception: ex,
-                message: "Could not write the web interface discovery file; a companion process will not find this router.");
+                message: "Could not load the local CA; the discovery file will carry no thumbprint and the CA certificate is not republished.");
+        }
+
+        using (ca)
+        {
+            // Published first and independently: the discovery file is best-effort, and a failure writing it
+            // must not leave clients reading a stale certificate after a CA rotation.
+            if (ca is not null && DataDirectoryBootstrap.UsingProtectedMachineWideDirectory) PublishCaCertificate(ca);
+
+            try
+            {
+                var webAddress = _proxyServer.Addresses.FirstOrDefault(a => new Uri(a).Port == _webPort);
+                WebInterfaceDiscoveryFile.Write(new WebInterfaceDiscoveryInfo(WebUrl: webAddress,
+                    CaThumbprint: ca?.Thumbprint));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(exception: ex,
+                    message: "Could not write the web interface discovery file; a companion process will not find this router.");
+            }
         }
     }
 

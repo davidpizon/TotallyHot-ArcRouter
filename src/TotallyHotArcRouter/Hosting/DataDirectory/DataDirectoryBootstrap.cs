@@ -382,11 +382,6 @@ public static class DataDirectoryBootstrap
         }
     }
 
-    /// <summary>
-    /// The uids a Unix data directory may be owned by from this process's point of view: its own, and
-    /// when running as root, the service account's too (install scripts run some flags as root against
-    /// the service's directory).
-    /// </summary>
     /// <summary>The configured service account's uid, or <see langword="null"/> when it does not exist.</summary>
     [UnsupportedOSPlatform("windows")]
     private static uint? ResolveServiceAccountUid()
@@ -397,6 +392,11 @@ public static class DataDirectoryBootstrap
             : accountName)?.Uid;
     }
 
+    /// <summary>
+    /// The uids a Unix data directory may be owned by from this process's point of view: its own, and
+    /// when running as root, the service account's too (install scripts run some flags as root against
+    /// the service's directory).
+    /// </summary>
     [UnsupportedOSPlatform("windows")]
     internal static uint[] TrustedUnixOwners()
     {

@@ -162,11 +162,10 @@ public sealed class ContainerDataDirectoryMigration
 
     private void MoveToQuarantine(string path)
     {
-        if (_quarantine is null)
-        {
-            _quarantine = DataDirectoryMigrationRules.NewQuarantinePath(_root);
-            Directory.CreateDirectory(_quarantine, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
-        }
+        _quarantine ??= CreateQuarantine();
+
+        // The entry was the link holding the quarantine's own name, which CreateQuarantine already parked.
+        if (UnixNative.LStat(path) is not { Kind: not UnixFileKind.Directory }) return;
 
         // The relative path is kept, not flattened: flattening is not injective (a/b and a_b would collide),
         // and rename(2) would silently replace the entry already quarantined under that name.
@@ -176,6 +175,40 @@ public sealed class ContainerDataDirectoryMigration
         UnixNative.Rename(path, destination);
         _logger.Warning("Moved {Path}, a link or multiply-linked file, into {Quarantine} instead of copying it.", path,
             destination);
+    }
+
+    /// <summary>
+    /// Creates this run's quarantine folder under <c>/data/quarantine</c> without following a link there.
+    /// If something other than a real directory already holds the reserved name - a symbolic link would
+    /// otherwise route the quarantine, and every rename into it, outside the volume - it is parked under a
+    /// fresh sibling name, a real owner-only directory takes its place, and the parked entry is then moved
+    /// into the new quarantine like any other rejected entry.
+    /// </summary>
+    private string CreateQuarantine()
+    {
+        var reserved = Path.Combine(_root, DataDirectoryMigrationRules.QuarantineDirectoryName);
+        string? parked = null;
+        if (UnixNative.LStat(reserved) is { Kind: not UnixFileKind.Directory })
+        {
+            parked = Path.Combine(_root, ".quarantine-parked-" + Guid.NewGuid().ToString("N")[..12]);
+            UnixNative.Rename(reserved, parked);
+        }
+
+        if (UnixNative.LStat(reserved) is null)
+            Directory.CreateDirectory(reserved, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+
+        var quarantine = DataDirectoryMigrationRules.NewQuarantinePath(_root);
+        Directory.CreateDirectory(quarantine, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+
+        if (parked is not null)
+        {
+            var destination = Path.Combine(quarantine, DataDirectoryMigrationRules.QuarantineDirectoryName);
+            UnixNative.Rename(parked, destination);
+            _logger.Warning("Moved {Path}, which held the quarantine folder's name, into {Quarantine}.", reserved,
+                destination);
+        }
+
+        return quarantine;
     }
 
     private static void TightenDirectories(string directory)

@@ -365,10 +365,17 @@ public sealed class ProtectedSecretStoreTests
             {
                 SecureFile.WriteMachineShared(path: path, content: "secret"u8.ToArray());
             }
-            catch (UnauthorizedAccessException)
+            catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException)
             {
-                // Expected unelevated: the ACL no longer names the writer.
+                // Expected unelevated: the ACL no longer names the writer, and only an elevated process may
+                // make Administrators the owner.
             }
+
+            // Elevated, the owner is Administrators - the writer keeps no implicit WRITE_DAC over the store.
+            if (new System.Security.Principal.WindowsPrincipal(WindowsIdentity.GetCurrent())
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+                Assert.Equal(new SecurityIdentifier(sidType: WellKnownSidType.BuiltinAdministratorsSid, null),
+                    new FileInfo(path).GetAccessControl().GetOwner(typeof(SecurityIdentifier)));
 
             var rules = new FileInfo(path).GetAccessControl()
                 .GetAccessRules(includeExplicit: true, includeInherited: true, targetType: typeof(SecurityIdentifier))
