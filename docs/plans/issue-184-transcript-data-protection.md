@@ -1,6 +1,6 @@
 # Plan: Protect the router's data directory and make deletion final (#184)
 
-**Status:** Proposed. Awaiting David's approval. No production code changes in this change.
+**Status:** Approved by David on 2026-10-03 ([sign-off on #184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184#issuecomment-5976893257)). Every §7 decision is now settled; see §7.
 **Issue:** [#184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184) — "Protect the router's data directory and make deletion final".
 **Related:**
 - [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (proposed) moves conversation text into encrypted per-session files. Under "Found during the investigation, tracked separately" it lists: "Transcript data sits under default permissions, and deleted rows persist." **This plan is that item.**
@@ -414,17 +414,14 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
      - conversation text stays hidden until a passkey is enrolled;
      - the read window defaults to 15 minutes;
      - synced passkeys are allowed.
-2. **ADR form.** Recommended: a new ADR for the directory boundary, because it covers files beyond conversations: `.pfx` files, configuration, logs, and the other databases. The alternative is to amend ADR-0019 while it is still proposed.
-3. **Scope.** The whole directory (A, recommended), or ADR-0019's session folder only (C)?
-4. **The writing account's ACE on dev machines.** Recommended, under decision 1's requirement: **no ACE for any individual account.** With one, any app running as that account reads the files directly.
+2. **ADR form.** **Decided (David, 2026-10-03): a new ADR** for the directory boundary, because it covers files beyond conversations: `.pfx` files, configuration, logs, and the other databases.
+3. **Scope.** **Decided (David, 2026-10-03): the whole directory** (option A).
+4. **The writing account's ACE on dev machines.** **Decided (David, 2026-10-03): no ACE for any individual account.** With one, any app running as that account could read the files directly.
    - A dev run must be elevated, or it uses the existing per-user fallback, `%LocalAppData%`. That fallback cannot meet the requirement, because every app of that user can read it.
    - On a service install, the writing account is `SYSTEM` anyway.
-5. **Report the `appsettings.local.json` squatting (F4) separately**, as a higher-priority security issue in case phase 1 slips? Recommended: yes.
-6. **`secure_delete` on every database, or only on stores derived from text?** Recommended: every database. It is one line in each `OpenConnection`, and the cost is a few extra writes.
-7. **Uninstall.** Three choices, applied alike to the MSI and both `uninstall.sh` scripts (§3.5):
-   - keep everything (today);
-   - crypto-shred conversations only (recommended);
-   - add a checkbox, which becomes a `--shred-conversations` flag in the scripts.
-8. **`synchronous=NORMAL` on every connection** (F8). It is a small durability trade. Recommended: yes, noted in the ADR.
-9. **Remove `secrets.dat.pre-adr0014-backup`** once David confirms it is no longer needed? It is a stale copy of the secret store that every user can read. It is sealed to `david` (CurrentUser DPAPI), so other accounts cannot decrypt it.
-10. **Order against #165 phase 1.** Recommended: this plan's phase 1 first, so the session folder inherits the protected root.
+5. **Report the `appsettings.local.json` squatting (F4) separately.** **Decided (David, 2026-10-03): yes.** Filed as [#193](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/193).
+6. **`secure_delete` on every database, or only on stores derived from text?** **Decided (David, 2026-10-03): every database.**
+7. **Uninstall.** **Decided (David, 2026-10-03): crypto-shred conversations only**, applied alike to the MSI and both `uninstall.sh` scripts (§3.5). There is no checkbox and no `--shred-conversations` opt-in flag in the scripts.
+8. **`synchronous=NORMAL` on every connection** (F8). **Decided (David, 2026-10-03): yes**, noted in the ADR.
+9. **Remove `secrets.dat.pre-adr0014-backup`.** **Decided (David, 2026-10-03): it is no longer needed.** David removes it by hand from THEATRE-PC, so no code change is needed. Elsewhere, phase 1's migration moves any such file into the protected root like any other.
+10. **Order against #165 phase 1.** **Decided (David, 2026-10-03): this plan's phase 1 first**, so the session folder inherits the protected root.

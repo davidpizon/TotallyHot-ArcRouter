@@ -8,6 +8,9 @@
 > the file's ACL; fix verified end to end — the MSI that previously aborted now installs cleanly, and the
 > `LocalSystem` service reads the machine-scoped store. See [Verification](#verification).
 
+> **Revised by [ADR-0024](0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md)** (proposed, 2026-10-03): machine-wide writes will grant only `SYSTEM` and
+> `Administrators`, dropping this ADR's writing-account ACE. The rest of this ADR stands.
+
 ## Context and Problem Statement
 
 Installing the MSI failed with:
