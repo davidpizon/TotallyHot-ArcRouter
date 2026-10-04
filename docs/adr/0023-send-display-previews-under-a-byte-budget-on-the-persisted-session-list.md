@@ -1,6 +1,6 @@
 # 0023. Send display previews under a byte budget on the persisted-session list
 
-**Status:** proposed
+**Status:** accepted (accepted by David Pizon on 2026-10-03; lands with PR #192)
 **Date:** 2026-10-03
 **Deciders:** David Pizon
 
