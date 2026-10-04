@@ -618,6 +618,57 @@ public class SqliteTranscriptStoreTests : IDisposable
         Assert.Equal(2, actual: rows.Count);
     }
 
+    /// <summary>
+    /// The text lengths <see cref="SqliteTranscriptStore.ListSessionsAsync"/> reports come from SQLite's
+    /// <c>length()</c>, which counts characters, not from <see cref="string.Length"/>, which counts UTF-16 code
+    /// units and so counts each emoji twice (#179, ADR-0023).
+    /// </summary>
+    [Fact]
+    public async Task ListSessionsAsync_ReportsTextLengthsInSqliteCharactersNotUtf16CodeUnits()
+    {
+        const string prompt = "fix 🐛🐛";
+        const string response = "done ✅";
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(record: MakeRecord("sess-L:1") with { PromptText = prompt, ResponseText = response },
+            cancellationToken: TestContext.Current.CancellationToken);
+        await store.InsertAsync(record: MakeRecord("sess-L:2") with { PromptText = null, ResponseText = null },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var rows = await store.ListSessionsAsync(10, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(rows[0].PromptTextLength);
+        Assert.Null(rows[0].ResponseTextLength);
+        Assert.Equal(expected: 6, actual: rows[1].PromptTextLength);
+        Assert.Equal(expected: 8, actual: prompt.Length);
+        Assert.Equal(expected: response.Length, actual: rows[1].ResponseTextLength);
+    }
+
+    /// <summary>
+    /// Storage guard for #179: the Sessions tab's list is cut to previews, but nothing written to the store may
+    /// be. Text over 4 MiB on both sides round-trips exactly, through both the write and the full-row read.
+    /// </summary>
+    [Fact(Timeout = 5000)]
+    public async Task InsertAsync_TextOverFourMebibytes_RoundTripsExactly()
+    {
+        var prompt = new string('p', 4 * 1024 * 1024 + 1);
+        var response = new string('r', 4 * 1024 * 1024 + 7);
+        var (_, store) = CreateEnabledStore();
+
+        var id = await store.InsertAsync(
+            record: MakeRecord("sess-big:1") with { PromptText = prompt, ResponseText = response },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var stored = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var listed = Assert.Single(await store.ListSessionsAsync(10,
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(expected: prompt, actual: stored!.PromptText);
+        Assert.Equal(expected: response, actual: stored.ResponseText);
+        Assert.Equal(expected: prompt, actual: listed.PromptText);
+        Assert.Equal(expected: prompt.Length, actual: listed.PromptTextLength);
+        Assert.Equal(expected: response.Length, actual: listed.ResponseTextLength);
+    }
+
     [Fact]
     public void EnsureCreated_ExistingDatabaseMissingSessionIdColumn_BackfillsFromCorrelationId()
     {

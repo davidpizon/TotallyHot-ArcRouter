@@ -1,5 +1,7 @@
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Globalization;
 using System.Threading.Channels;
@@ -27,7 +29,36 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
     /// </summary>
     private const int ChannelCapacity = 1024;
 
+    /// <summary>
+    /// The row count <see cref="ListPersistedSessions"/> uses when the request leaves <c>limit</c> unset (0) -
+    /// the same 500 rows the GUI's <c>PersistedSessionStore</c> asks for.
+    /// </summary>
+    private const int DefaultListLimit = 500;
+
+    /// <summary>
+    /// The largest row count <see cref="ListPersistedSessions"/> serves in one response; larger requests are
+    /// clamped to it, as #176's plan does for its session RPC.
+    /// </summary>
+    private const int MaxListLimit = 2000;
+
+    /// <summary>
+    /// The most bytes a serialized <see cref="ListPersistedSessionsResponse"/> may take: three quarters of
+    /// <c>Grpc.Net.Client</c>'s default 4 MiB receive cap, which every GUI channel runs at. The router itself
+    /// sets no send cap, so without this budget a long history fails on the client with
+    /// <see cref="StatusCode.ResourceExhausted"/> and the Sessions tab shows no persisted history (#179,
+    /// ADR-0023). Previews keep a typical list far below it; the budget is what guarantees it.
+    /// </summary>
+    internal const int MaxListResponseBytes = 3 * 1024 * 1024;
+
+    /// <summary>
+    /// What <see cref="ListPersistedSessionsResponse.TranscriptCaptureEnabled"/> and
+    /// <see cref="ListPersistedSessionsResponse.HasMore"/> cost when set: one tag byte and one value byte each.
+    /// Reserved up front so setting <c>has_more</c> after the budget cut can't push the response past it.
+    /// </summary>
+    private const int ListResponseFlagBytes = 2 + 2;
+
     private readonly TelemetryBroadcaster _broadcaster;
+    private readonly ILogger<TelemetryGrpcService> _logger;
     private readonly IOptionsMonitor<TranscriptOptions> _transcriptOptions;
     private readonly ITranscriptStore _transcriptStore;
 
@@ -37,10 +68,15 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
     /// Supplies the live <see cref="TranscriptOptions.Enabled"/> gate for
     /// <see cref="ListPersistedSessions"/>'s response.
     /// </param>
+    /// <param name="logger">
+    /// Records when <see cref="MaxListResponseBytes"/>, rather than the row limit, cut a
+    /// <see cref="ListPersistedSessions"/> response. Optional so tests can omit it.
+    /// </param>
     public TelemetryGrpcService(
         TelemetryBroadcaster broadcaster,
         ITranscriptStore transcriptStore,
-        IOptionsMonitor<TranscriptOptions> transcriptOptions)
+        IOptionsMonitor<TranscriptOptions> transcriptOptions,
+        ILogger<TelemetryGrpcService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(broadcaster);
         ArgumentNullException.ThrowIfNull(transcriptStore);
@@ -48,6 +84,7 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         _broadcaster = broadcaster;
         _transcriptStore = transcriptStore;
         _transcriptOptions = transcriptOptions;
+        _logger = logger ?? NullLogger<TelemetryGrpcService>.Instance;
     }
 
     /// <summary>
@@ -81,12 +118,25 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
 
     /// <summary>
     /// Returns the most recent persisted <c>request_transcripts</c> rows for the GUI Sessions tab
-    /// (docs/router/sessions-tab-training-data-plan.md Phase 1). Reads
+    /// (docs/router/sessions-tab-training-data-plan.md Phase 1), shaped for display (#179, ADR-0023). Reads
     /// <see cref="TranscriptOptions.Enabled"/> itself, rather than trusting an empty transcript list to
     /// imply capture is off, so the response can tell the two states apart:
     /// <see cref="Contract.ListPersistedSessionsResponse.TranscriptCaptureEnabled"/> false means capture is
     /// off, not that no traffic has been persisted yet.
     /// </summary>
+    /// <remarks>
+    /// Three things keep the response under the GUI client's 4 MiB receive cap whatever the stored text:
+    /// <list type="bullet">
+    /// <item>The limit is clamped: 0 means <see cref="DefaultListLimit"/>, and anything else is clamped to
+    /// [1, <see cref="MaxListLimit"/>].</item>
+    /// <item>Each row carries <see cref="TextTruncator"/> previews of its texts, the same previews live
+    /// telemetry carries, with truncation flags and the stored lengths.</item>
+    /// <item>Rows are added newest first while the exact serialized size stays within
+    /// <see cref="MaxListResponseBytes"/>, so the result is always a contiguous run of the newest rows.</item>
+    /// </list>
+    /// <see cref="Contract.ListPersistedSessionsResponse.HasMore"/> is set when the limit or the budget left
+    /// older rows out. Only this display read is shortened; nothing written to the store changes.
+    /// </remarks>
     public override async Task<ListPersistedSessionsResponse> ListPersistedSessions(
         ListPersistedSessionsRequest request,
         ServerCallContext context)
@@ -96,15 +146,43 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
 
         if (!enabled) return response;
 
+        var limit = request.Limit == 0
+            ? DefaultListLimit
+            : Math.Clamp(value: request.Limit, min: 1, max: MaxListLimit);
+
+        // One row past the limit: its presence alone says older rows exist.
         var transcripts = await _transcriptStore
-            .ListSessionsAsync(limit: request.Limit, cancellationToken: context.CancellationToken)
+            .ListSessionsAsync(limit: limit + 1, cancellationToken: context.CancellationToken)
             .ConfigureAwait(false);
 
-        response.Transcripts.AddRange(transcripts.Select(ToContract));
+        var size = ListResponseFlagBytes;
+        foreach (var transcript in transcripts.Take(limit))
+        {
+            var row = ToContract(transcript);
+            // One tag byte for repeated field 2, then the length-prefixed row.
+            var rowBytes = 1 + CodedOutputStream.ComputeMessageSize(row);
+            if (size + rowBytes > MaxListResponseBytes)
+            {
+                response.HasMore = true;
+                _logger.LogInformation(
+                    "ListPersistedSessions returned {Returned} of {Requested} rows: the {BudgetBytes}-byte response budget was reached.",
+                    response.Transcripts.Count, limit, MaxListResponseBytes);
+                return response;
+            }
+
+            size += rowBytes;
+            response.Transcripts.Add(row);
+        }
+
+        if (transcripts.Count > limit) response.HasMore = true;
+
         return response;
     }
 
-    /// <summary>Maps one <see cref="SessionTranscript"/> onto its wire representation.</summary>
+    /// <summary>
+    /// Maps one <see cref="SessionTranscript"/> onto its wire representation, with display previews in place
+    /// of the stored texts (ADR-0023).
+    /// </summary>
     private static PersistedTranscript ToContract(SessionTranscript transcript)
     {
         var contract = new PersistedTranscript
@@ -113,12 +191,26 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             CorrelationId = transcript.CorrelationId,
             CreatedAtUtc = Timestamp.FromDateTimeOffset(transcript.CreatedAtUtc),
             RequestedModel = transcript.RequestedModel,
-            RoutedModel = transcript.RoutedModel
+            RoutedModel = transcript.RoutedModel,
+            TranscriptId = transcript.Id
         };
 
-        if (transcript.PromptText is { } promptText) contract.PromptText = promptText;
+        if (transcript.PromptText is { } promptText)
+        {
+            contract.PromptText = TextTruncator.Truncate(promptText)!;
+            contract.PromptTruncated = promptText.Length > TextTruncator.DefaultMaxLength;
+        }
 
-        if (transcript.ResponseText is { } responseText) contract.ResponseText = responseText;
+        if (transcript.ResponseText is { } responseText)
+        {
+            contract.ResponseText = TextTruncator.Truncate(responseText)!;
+            contract.ResponseTruncated = responseText.Length > TextTruncator.DefaultMaxLength;
+        }
+
+        if (transcript.PromptTextLength is { } promptTextLength) contract.PromptTextLength = promptTextLength;
+
+        if (transcript.ResponseTextLength is { } responseTextLength)
+            contract.ResponseTextLength = responseTextLength;
 
         if (transcript.Cost is { } cost) contract.CostUsd = cost.ToString(CultureInfo.InvariantCulture);
 

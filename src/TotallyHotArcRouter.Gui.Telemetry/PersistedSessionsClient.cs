@@ -13,9 +13,14 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// persisted yet - the Sessions tab renders these two states differently.
 /// </param>
 /// <param name="Transcripts">The most recent persisted transcript rows, as returned by the router.</param>
+/// <param name="HasMore">
+/// Whether older rows exist that the router left out, because the row limit or its response byte budget was
+/// reached (#179, ADR-0023).
+/// </param>
 public sealed record PersistedSessionsResult(
     bool TranscriptCaptureEnabled,
-    IReadOnlyList<PersistedTranscriptDto> Transcripts);
+    IReadOnlyList<PersistedTranscriptDto> Transcripts,
+    bool HasMore = false);
 
 /// <summary>Reads persisted session history from the router's <c>TelemetryService.ListPersistedSessions</c> RPC.</summary>
 public interface IPersistedSessionsClient
@@ -71,7 +76,8 @@ public sealed class PersistedSessionsClient
 
             return new PersistedSessionsResult(
                 TranscriptCaptureEnabled: response.TranscriptCaptureEnabled,
-                Transcripts: [.. response.Transcripts.Select(ToDto)]);
+                Transcripts: [.. response.Transcripts.Select(ToDto)],
+                HasMore: response.HasMore);
         }
         catch (RpcException ex)
         {
@@ -99,6 +105,11 @@ public sealed class PersistedSessionsClient
                 : null,
             InputTokens: t.HasInputTokens ? t.InputTokens : null,
             OutputTokens: t.HasOutputTokens ? t.OutputTokens : null,
-            MemoryEntryId: t.HasMemoryEntryId ? t.MemoryEntryId : null);
+            MemoryEntryId: t.HasMemoryEntryId ? t.MemoryEntryId : null,
+            TranscriptId: t.TranscriptId,
+            PromptTextLength: t.HasPromptTextLength ? t.PromptTextLength : null,
+            ResponseTextLength: t.HasResponseTextLength ? t.ResponseTextLength : null,
+            PromptTruncated: t.PromptTruncated,
+            ResponseTruncated: t.ResponseTruncated);
     }
 }

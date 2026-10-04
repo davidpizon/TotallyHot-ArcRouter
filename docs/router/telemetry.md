@@ -54,6 +54,23 @@ very long generated response) can't produce an outsized gRPC message. See
 [`signalr-hub-security.md`](signalr-hub-security.md) for the shipped `ManagementAccessToken` gating
 that makes this safe, since this is real prompt/response text flowing over the stream.
 
+`TelemetryService.ListPersistedSessions`, the Sessions tab's persisted-history read, applies the same
+`TextTruncator` previews to stored `request_transcripts` text
+([#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179),
+[ADR-0023](../adr/0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md)):
+
+- **Previews, flagged.** `prompt_text` and `response_text` are previews. `prompt_truncated` and
+  `response_truncated` say whether each was cut, `prompt_text_length` and `response_text_length` carry
+  the stored lengths as SQLite counts characters, and `transcript_id` carries the row id.
+- **Limit clamp.** An unset limit means 500, and anything else is clamped to [1, 2,000].
+- **Byte budget.** Rows are added newest first while the exact serialized response stays within
+  `TelemetryGrpcService.MaxListResponseBytes` (3 MiB), under the GUI gRPC client's default 4 MiB receive
+  cap. `has_more` is set when the limit or the budget left older rows out, and a budget cut is logged at
+  Information.
+- **Display only.** Nothing written to the store is shortened. Anything that needs the full text, such as
+  [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165)'s export and import, must never read
+  it through this RPC.
+
 ### Session/conversation identification
 
 `SessionIdResolver` mirrors the convention established by the upstream `claude-code-router`

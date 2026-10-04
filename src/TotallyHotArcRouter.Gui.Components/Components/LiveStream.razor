@@ -10,6 +10,10 @@
     <div class="h-full flex items-center justify-center p-4">
         <div class="w-full max-w-xl space-y-3">
             <p class="text-xs text-slate-500 text-center">No conversations yet.</p>
+            @if (HistoryNotice is not null)
+            {
+                <p class="text-xs text-slate-500 text-center ls-history-notice" role="status">@HistoryNotice</p>
+            }
             <ClientDropInPanel/>
         </div>
     </div>
@@ -19,6 +23,10 @@
 @{ var opened = OpenedConversation; }
 
 <div class="h-full flex flex-col min-h-0">
+    @if (HistoryNotice is not null)
+    {
+        <p class="shrink-0 mb-2 text-xs text-slate-500 ls-history-notice" role="status">@HistoryNotice</p>
+    }
     <div class="relative shrink-0 mb-2">
         <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
         <input type="text"
@@ -88,6 +96,13 @@
     /// <summary>Invoked with a conversation's id when its card is double-clicked and the split view opens.</summary>
     [Parameter]
     public EventCallback<string> OnSelect { get; set; }
+
+    /// <summary>
+    /// A one-line notice about persisted history - a failed load, or that only the newest turns are shown - or
+    /// <see langword="null"/> for none. See <see cref="PersistedSessionStore.HistoryNotice"/>.
+    /// </summary>
+    [Parameter]
+    public string? HistoryNotice { get; set; }
 
     private string _search = string.Empty;
 

@@ -42,10 +42,17 @@ message ListPersistedSessionsRequest {
   // sessions by session_id itself - a session's turns are not necessarily contiguous within this cap when
   // interleaved with other sessions' turns, so grouping happens after the fact rather than being assumed
   // from row order.
+  //
+  // Clamped by the router (#179, ADR-0023): 0 (unset) means 500, and anything else is clamped to [1, 2000].
+  // The response may still return fewer rows - see ListPersistedSessionsResponse.has_more.
   int32 limit = 1;
 }
 
-// One request_transcripts row, per SessionTranscript (TotallyHot.ArcRouter.Transcripts).
+// One request_transcripts row, per SessionTranscript (TotallyHot.ArcRouter.Transcripts), shaped for display
+// (#179, ADR-0023). prompt_text and response_text are PREVIEWS, not the stored text: at most
+// TextTruncator.DefaultMaxLength (2,000) UTF-16 code units, plus "…" when cut - the same preview the live
+// RoutingTelemetryEvent carries. Storage keeps the full text. Nothing that needs the full text - #165's
+// export and import above all - may read it through this message; they use the lossless record tier.
 message PersistedTranscript {
   string session_id = 1;
   string correlation_id = 2;
@@ -61,13 +68,28 @@ message PersistedTranscript {
   // Set only when this transcript's embedding was folded into memory_entries - the literal "used for live
   // training" signal the Sessions tab badges. Absent, not zero, when it was not.
   optional int64 memory_entry_id = 11;
+  // request_transcripts.id - the key #176's per-turn text RPC takes to load more of this row's text.
+  int64 transcript_id = 12;
+  // The stored text's length in characters, as SQLite's length() counts them. Displayed, never compared:
+  // prompt_truncated and response_truncated, not these, say whether a preview was cut. Absent when the
+  // stored text is absent.
+  optional int32 prompt_text_length = 13;
+  optional int32 response_text_length = 14;
+  // Whether prompt_text / response_text is a cut preview of a longer stored text.
+  bool prompt_truncated = 15;
+  bool response_truncated = 16;
 }
 
 message ListPersistedSessionsResponse {
   // TranscriptOptions.Enabled, read at call time. False means transcripts is empty because capture is off,
   // not because no traffic has been persisted yet - the GUI needs to render these two states differently.
   bool transcript_capture_enabled = 1;
+  // Newest first, always a contiguous run of the newest rows.
   repeated PersistedTranscript transcripts = 2;
+  // Older rows exist that this response left out: the clamped limit was reached, or adding the next row
+  // would have taken the serialized response past the router's 3 MiB budget, which keeps it under the GUI
+  // gRPC client's default 4 MiB receive cap (#179, ADR-0023).
+  bool has_more = 3;
 }
 
 // The Governance > Price Sources panel's management plane: read the price feeds' status, switch one on or

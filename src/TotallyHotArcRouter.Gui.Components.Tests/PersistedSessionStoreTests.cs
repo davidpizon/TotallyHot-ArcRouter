@@ -110,6 +110,65 @@ public sealed class PersistedSessionStoreTests
     }
 
     [Fact]
+    public void HistoryNotice_BeforeTheFirstLoad_IsNull()
+    {
+        var store = new PersistedSessionStore(new FakePersistedSessionsClient());
+
+        store.HistoryNotice.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LoadAsync_CompleteHistory_HasNoNotice()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(true, Transcripts: [CreateTranscript()], HasMore: false)
+        };
+        var store = new PersistedSessionStore(client);
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        store.HasMore.Should().BeFalse();
+        store.HistoryNotice.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LoadAsync_HasMore_SaysHowManyNewestTurnsAreShown()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(
+                true,
+                Transcripts: [CreateTranscript(turnNumber: 1), CreateTranscript(turnNumber: 2)],
+                HasMore: true)
+        };
+        var store = new PersistedSessionStore(client);
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        store.HasMore.Should().BeTrue();
+        store.LoadedTurnCount.Should().Be(2);
+        store.HistoryNotice.Should().Be("Showing the newest 2 persisted turns.");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LoadAsync_Failure_ReportsTheErrorInTheNotice(bool isUnavailable)
+    {
+        const string message = "Could not read persisted sessions: boom";
+        var client = new FakePersistedSessionsClient
+        {
+            Failure = new GrpcAdminException(message: message, isUnavailable: isUnavailable)
+        };
+        var store = new PersistedSessionStore(client);
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        store.HistoryNotice.Should().Be($"Persisted history couldn't be loaded: {message}");
+    }
+
+    [Fact]
     public async Task LoadAsync_RaisesChangedExactlyOnce()
     {
         var client = new FakePersistedSessionsClient

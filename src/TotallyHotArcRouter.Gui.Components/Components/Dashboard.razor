@@ -103,7 +103,7 @@
             @switch (_activeTab)
             {
                 case Tab.Live:
-                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id"/>
+                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" HistoryNotice="@PersistedSessionStore.HistoryNotice"/>
                     break;
                 case Tab.Analytics:
                     <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId"/>
