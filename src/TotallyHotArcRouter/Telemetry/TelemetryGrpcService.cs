@@ -33,13 +33,13 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
     /// The row count <see cref="ListPersistedSessions"/> uses when the request leaves <c>limit</c> unset (0) -
     /// the same 500 rows the GUI's <c>PersistedSessionStore</c> asks for.
     /// </summary>
-    internal const int DefaultListLimit = 500;
+    private const int DefaultListLimit = 500;
 
     /// <summary>
     /// The largest row count <see cref="ListPersistedSessions"/> serves in one response; larger requests are
     /// clamped to it, as #176's plan does for its session RPC.
     /// </summary>
-    internal const int MaxListLimit = 2000;
+    private const int MaxListLimit = 2000;
 
     /// <summary>
     /// The most bytes a serialized <see cref="ListPersistedSessionsResponse"/> may take: three quarters of
