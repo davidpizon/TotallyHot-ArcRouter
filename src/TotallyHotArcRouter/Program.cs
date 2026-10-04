@@ -365,6 +365,10 @@ public static class Program
             Log.Error(exception: ex, messageTemplate: "Could not export the local CA certificate.");
             Environment.ExitCode = 1;
         }
+        finally
+        {
+            DataDirectoryBootstrap.RestoreServiceOwnership(Log.Logger);
+        }
     }
 
     /// <summary>
@@ -392,6 +396,10 @@ public static class Program
             Log.Error(exception: ex, messageTemplate: "Could not install the local CA certificate.");
             Environment.ExitCode = 1;
         }
+        finally
+        {
+            DataDirectoryBootstrap.RestoreServiceOwnership(Log.Logger);
+        }
     }
 
     /// <summary>
@@ -416,6 +424,10 @@ public static class Program
             Log.Error(exception: ex, messageTemplate: "Could not uninstall the local CA certificate.");
             Environment.ExitCode = 1;
         }
+        finally
+        {
+            DataDirectoryBootstrap.RestoreServiceOwnership(Log.Logger);
+        }
     }
 
     /// <summary>
@@ -437,6 +449,10 @@ public static class Program
         {
             Log.Error(exception: ex, messageTemplate: "Could not print the management token.");
             Environment.ExitCode = 1;
+        }
+        finally
+        {
+            DataDirectoryBootstrap.RestoreServiceOwnership(Log.Logger);
         }
     }
 

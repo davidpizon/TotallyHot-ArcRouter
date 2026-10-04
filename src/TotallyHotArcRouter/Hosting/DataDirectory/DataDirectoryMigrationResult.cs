@@ -42,11 +42,6 @@ public sealed record DataDirectoryMigrationResult(
 /// </summary>
 public sealed class DataDirectoryMigrationBlockedException : Exception
 {
-    /// <summary>Initializes a new instance of the <see cref="DataDirectoryMigrationBlockedException"/> class.</summary>
-    public DataDirectoryMigrationBlockedException()
-    {
-    }
-
     /// <summary>Initializes a new instance of the <see cref="DataDirectoryMigrationBlockedException"/> class with a message.</summary>
     public DataDirectoryMigrationBlockedException(string message) : base(message)
     {

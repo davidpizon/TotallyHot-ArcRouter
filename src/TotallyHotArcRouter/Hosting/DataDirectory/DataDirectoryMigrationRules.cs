@@ -51,7 +51,7 @@ public static class DataDirectoryMigrationRules
     public const string PartialCopySuffix = ".migrating";
 
     /// <summary>The operator configuration overlay, which migration never adopts.</summary>
-    public const string OverlayFileName = "appsettings.local.json";
+    private const string OverlayFileName = "appsettings.local.json";
 
     /// <summary>
     /// The marker a Linux, macOS or container migration writes into a tree it has made owner-only. A

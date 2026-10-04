@@ -137,6 +137,8 @@ public sealed class UnixDataDirectoryTests
             var outside = Path.Combine(scratch, "outside.txt");
             File.WriteAllText(outside, "outside");
             File.CreateSymbolicLink(Path.Combine(volume, "logs", "link.log"), outside);
+            // Would collide with logs/link.log if quarantine flattened paths.
+            File.CreateSymbolicLink(Path.Combine(volume, "logs_link.log"), outside);
 
             // An earlier reader's descriptor must not see the rewritten file.
             using var earlyReader = new FileStream(Path.Combine(volume, "transcripts.db"), FileMode.Open,
@@ -155,6 +157,11 @@ public sealed class UnixDataDirectoryTests
             Assert.Equal(UnixDataDirectorySecurity.OwnerOnlyDirectoryMode,
                 File.GetUnixFileMode(Path.Combine(volume, "logs")));
             Assert.False(Path.Exists(Path.Combine(volume, "logs", "link.log")));
+            var quarantined = Directory.EnumerateFileSystemEntries(
+                    Path.Combine(volume, DataDirectoryMigrationRules.QuarantineDirectoryName), "*",
+                    SearchOption.AllDirectories)
+                .Where(entry => UnixNative.LStat(entry)?.Kind == UnixFileKind.SymbolicLink);
+            Assert.Equal(2, quarantined.Count());
             Assert.Equal("outside", File.ReadAllText(outside));
         }
         finally
@@ -239,7 +246,7 @@ public sealed class UnixDataDirectoryTests
                 new StubScanner(["process 99 (arcrouter) has 'transcripts.db' open for writing"]),
                 Serilog.Core.Logger.None);
 
-            var ex = Assert.Throws<DataDirectoryMigrationBlockedException>(() => migration.Run());
+            var ex = Assert.Throws<DataDirectoryMigrationBlockedException>(migration.Run);
 
             Assert.Contains("process 99", ex.Message);
             var status = UnixNative.LStat(root)!.Value;
@@ -328,6 +335,62 @@ public sealed class UnixDataDirectoryTests
             {
                 holder.Kill(entireProcessTree: true);
             }
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    /// <summary>A logs directory created at startup carries the marker, so the next start accepts it.</summary>
+    [Fact]
+    public void VerifyUnixLogsDirectory_CreatesItMarked_SoTheNextStartAcceptsIt()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix only");
+        var scratch = NewScratch();
+        try
+        {
+            var logs = Path.Combine(scratch, "logs");
+
+            DataDirectoryBootstrap.VerifyUnixLogsDirectory(logs);
+            DataDirectoryBootstrap.VerifyUnixLogsDirectory(logs);
+
+            Assert.True(UnixDataDirectoryMigration.HasMarker(logs));
+            Assert.Equal(UnixDataDirectorySecurity.OwnerOnlyDirectoryMode, File.GetUnixFileMode(logs));
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A root-run command that created a secret in the service's tree hands it back to the service account,
+    /// without following a link out of the tree.
+    /// </summary>
+    [Fact]
+    public void RestoreServiceOwnership_AsRoot_HandsRootCreatedEntriesToTheTreeOwner()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix only");
+        Assert.SkipUnless(UnixNative.EffectiveUserId() == 0, "lchown to another account needs root");
+        var scratch = NewScratch();
+        try
+        {
+            var root = Path.Combine(scratch, "state");
+            Directory.CreateDirectory(Path.Combine(root, "keys"));
+            File.WriteAllText(Path.Combine(root, "keys", "key.xml"), "k");
+            File.WriteAllText(Path.Combine(root, "secrets.dat"), "s");
+            var outside = Path.Combine(scratch, "outside.txt");
+            File.WriteAllText(outside, "o");
+            File.CreateSymbolicLink(Path.Combine(root, "link"), outside);
+            UnixNative.LChown(root, 54321, 54321);
+
+            DataDirectoryBootstrap.RestoreServiceOwnership(root);
+
+            Assert.Equal(54321u, UnixNative.LStat(Path.Combine(root, "secrets.dat"))!.Value.Uid);
+            Assert.Equal(54321u, UnixNative.LStat(Path.Combine(root, "keys"))!.Value.Uid);
+            Assert.Equal(54321u, UnixNative.LStat(Path.Combine(root, "keys", "key.xml"))!.Value.Uid);
+            Assert.Equal(0u, UnixNative.LStat(outside)!.Value.Uid);
         }
         finally
         {

@@ -31,10 +31,10 @@ namespace TotallyHot.ArcRouter.Telemetry;
 public static class PublicCaCertificate
 {
     /// <summary>The published certificate's file name.</summary>
-    public const string FileName = "router-ca.crt";
+    private const string FileName = "router-ca.crt";
 
     /// <summary>The Windows and macOS directory name, beside the data directory.</summary>
-    public const string DirectoryName = AppDataPaths.ApplicationDirectoryName + "-Public";
+    private const string DirectoryName = AppDataPaths.ApplicationDirectoryName + "-Public";
 
     private const UnixFileMode PublicDirectoryMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
                                                      UnixFileMode.UserExecute | UnixFileMode.GroupRead |
@@ -152,8 +152,9 @@ public static class PublicCaCertificate
 
         if (status.Value.Kind != UnixFileKind.Directory) return "it is a link or a file, so it was not created for this router";
 
-        var euid = UnixNative.EffectiveUserId();
-        if (status.Value.Uid != euid && status.Value.Uid != 0)
+        // Root acting for the service (sudo ... --export-ca) also trusts the service account, which owns the
+        // directory systemd or install.sh created.
+        if (status.Value.Uid != 0 && !DataDirectoryBootstrap.TrustedUnixOwners().Contains(status.Value.Uid))
             return "it is owned by another account, so it was not created for this router";
 
         // Group or other write bits would let another account replace the certificate.

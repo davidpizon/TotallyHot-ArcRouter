@@ -148,6 +148,17 @@ public static class DataDirectoryBootstrap
             case DataDirectoryState.Unprotected when elevated:
                 throw new DataDirectoryNotProtectedException(machineWide, inspection.Reason ?? "it failed inspection");
 
+            // An elevated process is the service or an administrator acting for it. Falling back here would
+            // start it against SYSTEM's own per-user profile directory - split state - rather than refusing a
+            // service directory it should be able to use but cannot.
+            case DataDirectoryState.Protected when elevated:
+                throw new DataDirectoryNotProtectedException(machineWide,
+                    "it is protected, but this elevated process cannot write to it");
+
+            case DataDirectoryState.Inaccessible when elevated:
+                throw new DataDirectoryNotProtectedException(machineWide,
+                    "this elevated process cannot read its permissions");
+
             default:
                 return FallBack(machineWide, perUser, lastResort, unavailable: true, events);
         }
@@ -230,7 +241,13 @@ public static class DataDirectoryBootstrap
         switch (inspection.State)
         {
             case DataDirectoryState.Missing:
+                // With the marker, as DecideUnix does for a new state directory; without it the next start
+                // would see a 0700 directory that was never marked and refuse it.
                 UnixDataDirectorySecurity.CreateProtected(logsDirectory);
+                using (File.Create(Path.Combine(logsDirectory, DataDirectoryMigrationRules.ProtectedMarkerFileName)))
+                {
+                }
+
                 return;
             case DataDirectoryState.Protected when UnixDataDirectoryMigration.HasMarker(logsDirectory):
                 return;
@@ -240,6 +257,53 @@ public static class DataDirectoryBootstrap
                 throw new DataDirectoryNotProtectedException(logsDirectory,
                     inspection.Reason ?? "it could not be inspected");
         }
+    }
+
+    /// <summary>
+    /// After a root-run command against the service's directory, hands every entry root created there back to
+    /// the directory's owner, the service account. Without this, a manual <c>sudo ... --print-management-token</c>
+    /// or <c>--export-ca</c> that had to create a missing secret or certificate would leave a root-owned
+    /// <c>0600</c> file the service cannot read. A no-op on Windows, for any other user, and when this process
+    /// is not using the protected machine-wide directory.
+    /// </summary>
+    public static void RestoreServiceOwnership(ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (OperatingSystem.IsWindows() || !UsingProtectedMachineWideDirectory ||
+            UnixNative.EffectiveUserId() != 0)
+            return;
+
+        var restored = RestoreServiceOwnership(AppDataPaths.ResolveMachineSharedDirectory());
+        if (restored > 0)
+            logger.Information("Handed {Count} root-created entr(ies) back to the service account.", restored);
+    }
+
+    /// <summary>
+    /// Changes every root-owned entry under <paramref name="root"/> to <paramref name="root"/>'s own owner,
+    /// without following links, and returns how many it changed. Safe to walk by path: the tree is
+    /// <c>0700</c>, so only root and the service account can change its entries.
+    /// </summary>
+    [UnsupportedOSPlatform("windows")]
+    internal static int RestoreServiceOwnership(string root)
+    {
+        if (UnixNative.LStat(root) is not { Kind: UnixFileKind.Directory, Uid: not 0 } owner) return 0;
+
+        var restored = 0;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(root).ToList())
+        {
+            if (UnixNative.LStat(entry) is not { } status) continue;
+
+            if (status.Uid == 0)
+            {
+                UnixNative.LChown(entry, owner.Uid, owner.Gid);
+                restored++;
+            }
+
+            if (status.Kind == UnixFileKind.Directory) restored += RestoreServiceOwnership(entry);
+        }
+
+        return restored;
     }
 
     /// <summary>
@@ -315,7 +379,7 @@ public static class DataDirectoryBootstrap
     /// the service's directory).
     /// </summary>
     [UnsupportedOSPlatform("windows")]
-    private static uint[] TrustedUnixOwners()
+    internal static uint[] TrustedUnixOwners()
     {
         var euid = UnixNative.EffectiveUserId();
         if (euid != 0) return [euid];
@@ -343,18 +407,6 @@ public sealed class DataDirectoryNotProtectedException : InvalidOperationExcepti
             $"The data directory '{path}' is not protected ({reason}), so the router will not use it. Run 'TotallyHotArcRouter --migrate-data-directory' as an administrator (as root on Linux and macOS), then start the router again.")
     {
         Path = path;
-    }
-
-    /// <summary>Initializes a new instance of the <see cref="DataDirectoryNotProtectedException"/> class.</summary>
-    public DataDirectoryNotProtectedException()
-    {
-        Path = string.Empty;
-    }
-
-    /// <summary>Initializes a new instance of the <see cref="DataDirectoryNotProtectedException"/> class with a message.</summary>
-    public DataDirectoryNotProtectedException(string message, Exception innerException) : base(message, innerException)
-    {
-        Path = string.Empty;
     }
 
     /// <summary>The directory that failed verification.</summary>

@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Security.AccessControl;
 using TotallyHot.ArcRouter.Hosting.DataDirectory;
 using static TotallyHot.ArcRouter.Tests.Hosting.DataDirectory.WindowsDataDirectoryTestSupport;
 
@@ -117,6 +118,36 @@ public sealed class DataDirectoryBootstrapTests
             Assert.Equal(Path.Combine(scratch, "user"), resolution.Directory);
             Assert.False(resolution.UsingProtectedMachineWide);
             Assert.True(resolution.MachineWideUnavailable);
+        }
+        finally
+        {
+            DeleteScratch(scratch);
+        }
+    }
+
+    /// <summary>
+    /// An elevated process (the service) that finds a protected root it cannot write must refuse it, not
+    /// fall back to its own per-user profile directory and start with split state.
+    /// </summary>
+    [Fact]
+    public void ProtectedButUnwritableMachineWide_Elevated_FailsClosed()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows ACLs");
+        var scratch = NewScratch();
+        try
+        {
+            var machineWide = Path.Combine(scratch, "machine");
+            WindowsDataDirectorySecurity.CreateProtected(machineWide, TestPolicy);
+            var security = new DirectoryInfo(machineWide).GetAccessControl();
+            security.AddAccessRule(new FileSystemAccessRule(CurrentUser,
+                FileSystemRights.CreateFiles | FileSystemRights.WriteData, AccessControlType.Deny));
+            new DirectoryInfo(machineWide).SetAccessControl(security);
+
+            var ex = Assert.Throws<DataDirectoryNotProtectedException>(() => Decide(scratch, machineWide, elevated: true));
+            Assert.Contains("cannot write", ex.Message);
+
+            var unelevated = Decide(scratch, machineWide, elevated: false);
+            Assert.True(unelevated.MachineWideUnavailable);
         }
         finally
         {

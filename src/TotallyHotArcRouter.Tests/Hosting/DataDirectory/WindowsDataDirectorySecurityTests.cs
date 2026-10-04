@@ -175,17 +175,16 @@ public sealed class WindowsDataDirectorySecurityTests
             WindowsDataDirectorySecurity.CreateProtected(root, TestPolicy);
             var databasePath = Path.Combine(root, "transcripts.db");
 
-            using (var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
-            {
-                connection.Open();
-                using var command = connection.CreateCommand();
-                command.CommandText = "PRAGMA journal_mode=WAL; CREATE TABLE t (x TEXT); INSERT INTO t VALUES ('secret');";
-                command.ExecuteNonQuery();
+            using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA journal_mode=WAL; CREATE TABLE t (x TEXT); INSERT INTO t VALUES ('secret');";
+            command.ExecuteNonQuery();
 
-                var walRules = RulesOf(databasePath + "-wal");
-                Assert.NotEmpty(walRules);
-                Assert.All(walRules, rule => Assert.Contains(rule.IdentityReference, TestPolicy.FullControl));
-            }
+            var walRules = RulesOf(databasePath + "-wal");
+            Assert.NotEmpty(walRules);
+            Assert.All(walRules, rule => Assert.Contains(rule.IdentityReference, TestPolicy.FullControl));
+            connection.Close();
         }
         finally
         {

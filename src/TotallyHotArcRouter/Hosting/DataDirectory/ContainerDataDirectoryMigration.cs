@@ -125,7 +125,11 @@ public sealed class ContainerDataDirectoryMigration
             Directory.CreateDirectory(_quarantine, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
         }
 
-        var destination = Path.Combine(_quarantine, Path.GetRelativePath(_root, path).Replace('/', '_'));
+        // The relative path is kept, not flattened: flattening is not injective (a/b and a_b would collide),
+        // and rename(2) would silently replace the entry already quarantined under that name.
+        var destination = Path.Combine(_quarantine, Path.GetRelativePath(_root, path));
+        var parent = Path.GetDirectoryName(destination)!;
+        if (!Directory.Exists(parent)) Directory.CreateDirectory(parent, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
         UnixNative.Rename(path, destination);
         _logger.Warning("Moved {Path}, a link or multiply-linked file, into {Quarantine} instead of copying it.", path,
             destination);

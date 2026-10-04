@@ -73,8 +73,7 @@ public sealed class LinuxOpenWriterScanner : IOpenWriterScanner
     {
         foreach (var descriptor in Directory.EnumerateFileSystemEntries(Path.Combine(processDirectory, "fd")))
         {
-            var target = new FileInfo(descriptor).LinkTarget;
-            if (target is null || !IsUnder(target, root)) continue;
+            if (new FileInfo(descriptor).LinkTarget is not { } target || !IsUnder(target, root)) continue;
 
             var flagsLine = File.ReadLines(Path.Combine(processDirectory, "fdinfo", Path.GetFileName(descriptor)))
                 .FirstOrDefault(line => line.StartsWith("flags:", StringComparison.Ordinal));
@@ -141,10 +140,23 @@ public sealed class MacOpenWriterScanner : IOpenWriterScanner
 
         using var process = Process.Start(startInfo)
                             ?? throw new InvalidOperationException("Could not start lsof to look for open writers.");
+        var errorTask = process.StandardError.ReadToEndAsync();
         var output = process.StandardOutput.ReadToEnd();
+        var errors = errorTask.GetAwaiter().GetResult();
         process.WaitForExit();
 
-        return Parse(output, Environment.ProcessId);
+        List<string> writers = [.. Parse(output, Environment.ProcessId)];
+
+        // Fail closed on an incomplete scan, as the Linux scanner does: lsof exits 1 both for "nothing open"
+        // and for errors, and reports what it could not inspect only on stderr. Only exit 0, or exit 1 with
+        // nothing on stderr, is a complete answer.
+        var firstError = errors.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+        if (process.ExitCode > 1 || firstError is not null)
+            writers.Add(
+                $"lsof could not inspect everything under '{root}' (exit {process.ExitCode}: {firstError ?? "no detail"}), so a writer may have been missed");
+
+        return writers;
     }
 
     /// <summary>
