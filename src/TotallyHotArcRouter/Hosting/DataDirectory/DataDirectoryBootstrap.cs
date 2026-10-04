@@ -102,7 +102,8 @@ public static class DataDirectoryBootstrap
             ? DecideWindows(machineWide, perUser, lastResort, WindowsDirectoryPolicy.Machine,
                 WindowsDataDirectorySecurity.IsElevated())
             : DecideUnix(machineWide, perUser, lastResort, TrustedUnixOwners(),
-                Environment.GetEnvironmentVariable(ContainerEnvironmentVariable) == "1");
+                Environment.GetEnvironmentVariable(ContainerEnvironmentVariable) == "1",
+                ResolveServiceAccountUid());
 
         UsingProtectedMachineWideDirectory = resolution.UsingProtectedMachineWide;
         MachineWideDirectoryUnavailable = resolution.MachineWideUnavailable;
@@ -171,7 +172,7 @@ public static class DataDirectoryBootstrap
     /// </summary>
     [UnsupportedOSPlatform("windows")]
     internal static DataDirectoryResolution DecideUnix(string machineWide, string perUser, string lastResort,
-        IReadOnlyCollection<uint> trustedOwners, bool container)
+        IReadOnlyCollection<uint> trustedOwners, bool container, uint? serviceAccountUid = null)
     {
         List<Action<ILogger>> events = [];
         var inspection = UnixDataDirectorySecurity.Inspect(machineWide, trustedOwners);
@@ -225,6 +226,14 @@ public static class DataDirectoryBootstrap
         if (container)
             throw new DataDirectoryNotProtectedException(machineWide,
                 inspection.Reason ?? "the router cannot use it; a bind mount must be owned by the container's account with mode 0700");
+
+        // A blocked migration leaves the old tree root-owned and 0700. The service account does not own it,
+        // so without this it would fall back to its per-user directory and start with split state - on macOS
+        // nothing else stops it. Only the service account refuses; anyone else still falls back.
+        if (serviceAccountUid is { } serviceUid && UnixNative.EffectiveUserId() == serviceUid &&
+            UnixNative.LStat(machineWide) is { Kind: UnixFileKind.Directory, Uid: 0 })
+            throw new DataDirectoryNotProtectedException(machineWide,
+                "an interrupted or blocked migration left it locked to root");
 
         return FallBack(machineWide, perUser, lastResort, unavailable: true, events);
     }
@@ -378,6 +387,16 @@ public static class DataDirectoryBootstrap
     /// when running as root, the service account's too (install scripts run some flags as root against
     /// the service's directory).
     /// </summary>
+    /// <summary>The configured service account's uid, or <see langword="null"/> when it does not exist.</summary>
+    [UnsupportedOSPlatform("windows")]
+    private static uint? ResolveServiceAccountUid()
+    {
+        var accountName = Environment.GetEnvironmentVariable(ServiceAccountEnvironmentVariable);
+        return UnixNative.TryResolveAccount(string.IsNullOrWhiteSpace(accountName)
+            ? DefaultServiceAccountName
+            : accountName)?.Uid;
+    }
+
     [UnsupportedOSPlatform("windows")]
     internal static uint[] TrustedUnixOwners()
     {

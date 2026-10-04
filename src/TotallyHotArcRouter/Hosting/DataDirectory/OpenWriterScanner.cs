@@ -60,9 +60,15 @@ public sealed class LinuxOpenWriterScanner : IOpenWriterScanner
                 writers.Add(
                     $"process {pid} ({ProcessName(processDirectory)}) could not be inspected (permission denied), so it may be writing");
             }
-            catch (IOException)
+            catch (IOException) when (!Directory.Exists(processDirectory))
             {
                 // The process exited mid-scan, so it holds nothing open in the tree any more.
+            }
+            catch (IOException)
+            {
+                // Still alive, so an I/O error is not proof it holds nothing: fail closed.
+                writers.Add(
+                    $"process {pid} ({ProcessName(processDirectory)}) could not be inspected (I/O error), so it may be writing");
             }
         }
 
@@ -73,10 +79,22 @@ public sealed class LinuxOpenWriterScanner : IOpenWriterScanner
     {
         foreach (var descriptor in Directory.EnumerateFileSystemEntries(Path.Combine(processDirectory, "fd")))
         {
-            if (new FileInfo(descriptor).LinkTarget is not { } target || !IsUnder(target, root)) continue;
+            string? flagsLine;
+            string? target;
+            try
+            {
+                target = new FileInfo(descriptor).LinkTarget;
+                if (target is null || !IsUnder(target, root)) continue;
 
-            var flagsLine = File.ReadLines(Path.Combine(processDirectory, "fdinfo", Path.GetFileName(descriptor)))
-                .FirstOrDefault(line => line.StartsWith("flags:", StringComparison.Ordinal));
+                flagsLine = File.ReadLines(Path.Combine(processDirectory, "fdinfo", Path.GetFileName(descriptor)))
+                    .FirstOrDefault(line => line.StartsWith("flags:", StringComparison.Ordinal));
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // This one descriptor closed between the listing and the read; keep checking the rest.
+                continue;
+            }
+
             if (flagsLine is null) continue;
 
             var flags = Convert.ToInt64(flagsLine["flags:".Length..].Trim(), 8);

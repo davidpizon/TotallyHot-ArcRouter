@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using ILogger = Serilog.ILogger;
 
 namespace TotallyHot.ArcRouter.Hosting.DataDirectory;
@@ -23,6 +24,10 @@ namespace TotallyHot.ArcRouter.Hosting.DataDirectory;
 /// <item><description>
 /// a symbolic link, special file, or file with more than one hard link is renamed into a <c>0700</c>
 /// quarantine folder instead of being copied;
+/// </description></item>
+/// <item><description>
+/// model files follow <see cref="DataDirectoryMigrationRules"/>: a pinned embedding file is kept only if
+/// its SHA-256 matches, and other model files are deleted for the router to download again;
 /// </description></item>
 /// <item><description>
 /// last, every directory and then <c>/data</c> itself becomes <c>0700</c>, and the migration marker is
@@ -99,18 +104,56 @@ public sealed class ContainerDataDirectoryMigration
                 continue;
             }
 
-            var partial = path + DataDirectoryMigrationRules.PartialCopySuffix;
-            using (var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var destination = new FileStream(partial, new FileStreamOptions
-                   {
-                       Mode = FileMode.CreateNew,
-                       Access = FileAccess.Write,
-                       Share = FileShare.None,
-                       UnixCreateMode = UnixDataDirectorySecurity.OwnerOnlyFileMode
-                   }))
+            // The shared rules decide what happens to model files: a pinned embedding file is kept only if its
+            // hash matches (OnnxEmbeddingClient never re-hashes a cached file), and every other model file is
+            // re-downloadable, so it is dropped. Quarantine decisions - only appsettings.local.json - are kept
+            // in place: inside a container only the service account could have written it (see the remarks),
+            // and it is how a container operator configures the router.
+            var (decision, pinnedSha256) =
+                DataDirectoryMigrationRules.Decide(Path.GetRelativePath(_root, path).Replace('\\', '/'));
+            if (decision == MigrationFileDecision.Discard)
             {
-                source.CopyTo(destination);
-                destination.Flush(flushToDisk: true);
+                File.Delete(path);
+                _logger.Information("Discarded {Path}; the router downloads it again when it needs it.", path);
+                continue;
+            }
+
+            var partial = path + DataDirectoryMigrationRules.PartialCopySuffix;
+            string actualSha256;
+            using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
+            {
+                using (var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var destination = new FileStream(partial, new FileStreamOptions
+                       {
+                           Mode = FileMode.CreateNew,
+                           Access = FileAccess.Write,
+                           Share = FileShare.None,
+                           UnixCreateMode = UnixDataDirectorySecurity.OwnerOnlyFileMode
+                       }))
+                {
+                    var buffer = new byte[81920];
+                    int read;
+                    while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        hash.AppendData(buffer, 0, read);
+                        destination.Write(buffer, 0, read);
+                    }
+
+                    destination.Flush(flushToDisk: true);
+                }
+
+                actualSha256 = Convert.ToHexStringLower(hash.GetHashAndReset());
+            }
+
+            if (decision == MigrationFileDecision.AdoptIfHashMatches &&
+                !string.Equals(actualSha256, pinnedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(partial);
+                File.Delete(path);
+                _logger.Warning(
+                    "Discarded {Path}: its SHA-256 does not match the pinned value. It is downloaded again on first use.",
+                    path);
+                continue;
             }
 
             UnixNative.Rename(partial, path);

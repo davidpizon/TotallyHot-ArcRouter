@@ -342,6 +342,68 @@ public sealed class UnixDataDirectoryTests
         }
     }
 
+    /// <summary>
+    /// The container migration applies the shared model rules: an embedding file that does not match its
+    /// pinned hash, and any other model file, are dropped for the router to download again. The operator's
+    /// overlay is kept, since only the container's own account could have written it.
+    /// </summary>
+    [Fact]
+    public void ContainerVolume_AppliesTheModelRules_AndKeepsTheOverlay()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix only");
+        var scratch = NewScratch();
+        try
+        {
+            var volume = Path.Combine(scratch, "data");
+            Directory.CreateDirectory(Path.Combine(volume, "models", "bge-large-en-v1.5"));
+            Directory.CreateDirectory(Path.Combine(volume, "models", "llm_router"));
+            File.WriteAllText(Path.Combine(volume, "models", "bge-large-en-v1.5", "tokenizer.json"), "planted");
+            File.WriteAllText(Path.Combine(volume, "models", "llm_router", "model.onnx"), "weights");
+            File.WriteAllText(Path.Combine(volume, "appsettings.local.json"), "{}");
+            File.SetUnixFileMode(volume, OpenDirectoryMode);
+
+            Decide(scratch, volume, [UnixNative.EffectiveUserId()], container: true);
+
+            Assert.False(File.Exists(Path.Combine(volume, "models", "bge-large-en-v1.5", "tokenizer.json")));
+            Assert.False(File.Exists(Path.Combine(volume, "models", "llm_router", "model.onnx")));
+            Assert.Equal("{}", File.ReadAllText(Path.Combine(volume, "appsettings.local.json")));
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A root-owned directory - what a blocked migration leaves behind - makes the service account refuse to
+    /// start rather than fall back to split state, while any other account still falls back.
+    /// </summary>
+    [Fact]
+    public void DecideUnix_RootOwnedRoot_RefusesTheServiceAccount_ButNotOthers()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix only");
+        Assert.SkipWhen(UnixNative.EffectiveUserId() == 0, "needs a non-root account looking at a root-owned directory");
+        var scratch = NewScratch();
+        try
+        {
+            // /usr stands in for the locked tree: a root-owned directory every system has.
+            const string rootOwned = "/usr";
+            var euid = UnixNative.EffectiveUserId();
+
+            Assert.Throws<DataDirectoryNotProtectedException>(() => DataDirectoryBootstrap.DecideUnix(rootOwned,
+                Path.Combine(scratch, "user"), Path.Combine(scratch, "last"), [euid], container: false,
+                serviceAccountUid: euid));
+
+            var other = DataDirectoryBootstrap.DecideUnix(rootOwned, Path.Combine(scratch, "user"),
+                Path.Combine(scratch, "last"), [euid], container: false, serviceAccountUid: euid + 1);
+            Assert.Equal(Path.Combine(scratch, "user"), other.Directory);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
     /// <summary>A logs directory created at startup carries the marker, so the next start accepts it.</summary>
     [Fact]
     public void VerifyUnixLogsDirectory_CreatesItMarked_SoTheNextStartAcceptsIt()

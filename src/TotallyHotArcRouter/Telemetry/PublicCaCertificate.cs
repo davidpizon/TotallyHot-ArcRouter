@@ -115,8 +115,13 @@ public static class PublicCaCertificate
             return "it is not owned by SYSTEM or Administrators, so it was not created by this router";
 
         var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+        var usersCanRead = false;
         foreach (FileSystemAccessRule rule in existing.GetAccessRules(true, true, typeof(SecurityIdentifier)))
         {
+            if (rule.AccessControlType == AccessControlType.Allow && users.Equals(rule.IdentityReference) &&
+                (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute)
+                usersCanRead = true;
+
             if (rule.AccessControlType != AccessControlType.Allow) continue;
             if (rule.IdentityReference is SecurityIdentifier sid && policy.FullControl.Contains(sid)) continue;
 
@@ -128,7 +133,8 @@ public static class PublicCaCertificate
             return $"it grants {WindowsDataDirectorySecurity.Describe(rule.IdentityReference)} more than read access";
         }
 
-        return null;
+        // Publishing into a directory unelevated clients cannot read would succeed and help nobody.
+        return usersCanRead ? null : "it does not grant BUILTIN\\Users read access, so clients could not read the certificate";
     }
 
     [UnsupportedOSPlatform("windows")]
@@ -159,6 +165,9 @@ public static class PublicCaCertificate
 
         // Group or other write bits would let another account replace the certificate.
         if ((status.Value.Mode & 0x12) != 0) return "it is writable by other accounts";
+
+        // And without other read and search bits, clients could not reach the certificate at all.
+        if ((status.Value.Mode & 0x5) != 0x5) return "it is not readable by other accounts";
 
         return null;
     }
