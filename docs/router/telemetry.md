@@ -45,7 +45,7 @@ request, after the response has already been fully forwarded to the client:
 | `TotalDurationMs` | Time from sending the upstream request to finishing forwarding the full body |
 | `StatusCode`, `TimestampUtc` | The forwarded response's status code; capture time |
 | `RequestSummary` | `RequestTextExtractor`, the newest user message's text from the request body's `messages` array (not the whole resent history); `null` if there's no user message or its content isn't text |
-| `ResponseSummary` | `ResponseTextExtractor` (see below), the assistant's reply text; `null` if the provider is unsupported or no text was extractable (e.g. a tool-only response) |
+| `ResponseSummary` | `ResponseTextExtractor` (see below), the assistant's reply text; `null` if the provider is unsupported or no non-blank text was extractable (e.g. a tool-only response, or one that streamed only whitespace) |
 | `RouterTokens`, `RouterCostUsd` | The router's *own* consumption for this request: the embedding model's tokenized sequence length (`EmbeddingResult.TokenCount`, threaded through `ModelRouteResolutionResult.RouterTokens`), priced at `Routing:SelfHostedRouterPricePerMillionTokens`. Never `null` — `0` means the router genuinely spent nothing (no embedding client, still warming up, budget exceeded, or no extractable task text), which is a measurement rather than a gap. See [Router overhead](#router-overhead) |
 
 Both `RequestSummary` and `ResponseSummary` are truncated via `TextTruncator` (2,000 characters, with a
@@ -225,9 +225,18 @@ extraction):
   streaming, are skipped) when streaming.
 
 Both request and response `content` can be a plain string or an array of parts/blocks (OpenAI
-multimodal parts, Anthropic content blocks); `MessageContentTextExtractor` (shared by the request
-extractor and both response parsers) concatenates only `type: "text"` parts, skipping images,
-`tool_use`, etc., rather than failing.
+multimodal parts, Anthropic content blocks). `MessageContentTextExtractor` reads only `type: "text"`
+parts, skipping images, `tool_use`, etc., rather than failing. It has two contracts, because prompts
+and replies need different things ([#189](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/189)):
+
+- **Prompts** (`ExtractText`, used by the request extractor): a blank prompt is `null`, meaning "no
+  task text", and separate text parts are joined with a single space so adjacent words don't fuse in
+  classifier and embedding input. Whitespace-only parts are dropped.
+- **Replies** (`ExtractVerbatimText`, used by both response parsers): text is kept exactly as sent. A
+  streamed delta or a content block is a fragment of one reply, so whitespace-only fragments
+  (paragraph breaks, indentation, the space between two words) are kept and fragments are joined with
+  nothing in between. A reply whose assembled text is empty or whitespace-only counts as no text
+  (`HasReplyText`), so a tool-only turn still records `null`.
 
 ### Pricing
 

@@ -10,7 +10,11 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </summary>
 public static class OpenAiResponseTextParser
 {
-    /// <summary>Extracts text from a non-streaming <c>chat.completion</c> body's <c>choices[0].message.content</c>.</summary>
+    /// <summary>
+    /// Extracts text from a non-streaming <c>chat.completion</c> body's <c>choices[0].message.content</c>,
+    /// verbatim: a string as sent, or an array's text parts joined with no separator (some OpenAI-compatible
+    /// servers return parts). Returns <see langword="false"/> when the reply has no non-blank text.
+    /// </summary>
     public static bool TryExtractFromNonStreamingBody(string json, out string text)
     {
         text = string.Empty;
@@ -32,8 +36,8 @@ public static class OpenAiResponseTextParser
             firstChoice["message"] is not JsonObject message)
             return false;
 
-        var extracted = MessageContentTextExtractor.ExtractText(message["content"]);
-        if (extracted is null) return false;
+        var extracted = MessageContentTextExtractor.ExtractVerbatimText(message["content"]);
+        if (!MessageContentTextExtractor.HasReplyText(extracted)) return false;
 
         text = extracted;
         return true;
@@ -41,7 +45,9 @@ public static class OpenAiResponseTextParser
 
     /// <summary>
     /// Extracts text from a buffered SSE stream by concatenating every event's
-    /// <c>choices[0].delta.content</c>, in stream order.
+    /// <c>choices[0].delta.content</c>, in stream order and verbatim: a whitespace-only delta is part of the
+    /// reply (a paragraph break, indentation, the space between two words), so it is kept (#189). Returns
+    /// <see langword="false"/> when the assembled reply has no non-blank text.
     /// </summary>
     public static bool TryExtractFromStreamingBuffer(string sseText, out string text)
     {
@@ -56,13 +62,14 @@ public static class OpenAiResponseTextParser
                 firstChoice["delta"] is not JsonObject delta)
                 continue;
 
-            var deltaText = MessageContentTextExtractor.ExtractText(delta["content"]);
+            var deltaText = MessageContentTextExtractor.ExtractVerbatimText(delta["content"]);
             if (deltaText is not null) builder.Append(deltaText);
         }
 
-        if (builder.Length == 0) return false;
+        var assembled = builder.ToString();
+        if (!MessageContentTextExtractor.HasReplyText(assembled)) return false;
 
-        text = builder.ToString();
+        text = assembled;
         return true;
     }
 }

@@ -66,7 +66,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="ResponseSummary">
 /// The assistant's reply text (see <see cref="IResponseTextExtractor"/>), truncated to
 /// <see cref="TextTruncator.DefaultMaxLength"/> characters, or <see langword="null"/> if the provider
-/// is unsupported or the response body/stream had no extractable text (e.g. a tool-only response).
+/// is unsupported or the response body/stream had no non-blank text (e.g. a tool-only response).
 /// </param>
 /// <param name="CorrelationId">
 /// A stable id for this routed request (currently <c>{SessionId}:{TurnNumber}</c>). Links this event to a

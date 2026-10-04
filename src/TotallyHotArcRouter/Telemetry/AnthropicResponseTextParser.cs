@@ -10,7 +10,12 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </summary>
 public static class AnthropicResponseTextParser
 {
-    /// <summary>Extracts text from a non-streaming Messages API body's top-level <c>content</c> block array.</summary>
+    /// <summary>
+    /// Extracts text from a non-streaming Messages API body's top-level <c>content</c> block array: every text
+    /// block joined with no separator, exactly as the streaming path and <c>AnthropicPayloadTranslator</c> join
+    /// them, so the same reply is stored identically however it arrived (#189 decision D2). Returns
+    /// <see langword="false"/> when the reply has no non-blank text (for example, a tool-only response).
+    /// </summary>
     public static bool TryExtractFromNonStreamingBody(string json, out string text)
     {
         text = string.Empty;
@@ -27,8 +32,8 @@ public static class AnthropicResponseTextParser
 
         if (node is not JsonObject obj) return false;
 
-        var extracted = MessageContentTextExtractor.ExtractText(obj["content"]);
-        if (extracted is null) return false;
+        var extracted = MessageContentTextExtractor.ExtractVerbatimText(obj["content"]);
+        if (!MessageContentTextExtractor.HasReplyText(extracted)) return false;
 
         text = extracted;
         return true;
@@ -38,7 +43,8 @@ public static class AnthropicResponseTextParser
     /// Extracts text from a buffered Anthropic SSE stream by concatenating every
     /// <c>content_block_delta</c> event's <c>delta.text</c> (only when <c>delta.type</c> is
     /// <c>"text_delta"</c> - other delta types, e.g. <c>input_json_delta</c> for tool use, are
-    /// skipped), in stream order.
+    /// skipped), in stream order. Returns <see langword="false"/> when the assembled reply has no non-blank text
+    /// (#189 decision D1).
     /// </summary>
     public static bool TryExtractFromStreamingBuffer(string sseText, out string text)
     {
@@ -66,9 +72,10 @@ public static class AnthropicResponseTextParser
                 builder.Append(deltaText);
         }
 
-        if (builder.Length == 0) return false;
+        var assembled = builder.ToString();
+        if (!MessageContentTextExtractor.HasReplyText(assembled)) return false;
 
-        text = builder.ToString();
+        text = assembled;
         return true;
     }
 }
