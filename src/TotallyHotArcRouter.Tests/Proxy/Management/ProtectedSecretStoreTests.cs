@@ -372,8 +372,8 @@ public sealed class ProtectedSecretStoreTests
             }
 
             // Elevated, the owner is Administrators - the writer keeps no implicit WRITE_DAC over the store.
-            if (new System.Security.Principal.WindowsPrincipal(WindowsIdentity.GetCurrent())
-                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+            if (new WindowsPrincipal(WindowsIdentity.GetCurrent())
+                .IsInRole(WindowsBuiltInRole.Administrator))
                 Assert.Equal(new SecurityIdentifier(sidType: WellKnownSidType.BuiltinAdministratorsSid, null),
                     new FileInfo(path).GetAccessControl().GetOwner(typeof(SecurityIdentifier)));
 
