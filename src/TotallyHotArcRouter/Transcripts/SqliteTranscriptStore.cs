@@ -376,7 +376,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.CommandText = """
                               SELECT
                                   id, session_id, correlation_id, created_at_utc, requested_model, routed_model,
-                                  prompt_text, response_text, cost, input_tokens, output_tokens, memory_entry_id
+                                  prompt_text, response_text, cost, input_tokens, output_tokens, memory_entry_id,
+                                  length(prompt_text), length(response_text)
                               FROM request_transcripts
                               ORDER BY id DESC
                               LIMIT $limit;
@@ -398,7 +399,9 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                 Cost: reader.IsDBNull(8) ? null : (decimal)reader.GetDouble(8),
                 InputTokens: reader.IsDBNull(9) ? null : reader.GetInt32(9),
                 OutputTokens: reader.IsDBNull(10) ? null : reader.GetInt32(10),
-                MemoryEntryId: reader.IsDBNull(11) ? null : reader.GetInt64(11)));
+                MemoryEntryId: reader.IsDBNull(11) ? null : reader.GetInt64(11),
+                PromptTextLength: reader.IsDBNull(12) ? null : reader.GetInt32(12),
+                ResponseTextLength: reader.IsDBNull(13) ? null : reader.GetInt32(13)));
 
         return Task.FromResult<IReadOnlyList<SessionTranscript>>(rows);
     }

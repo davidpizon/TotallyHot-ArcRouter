@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 
@@ -64,6 +65,37 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
     public bool TranscriptCaptureEnabled { get; private set; }
 
     /// <summary>
+    /// Whether the last successful load left older persisted turns out - the router stops at its row limit
+    /// and at a response byte budget that keeps the list under the gRPC client's receive cap (#179,
+    /// ADR-0023). The Sessions tab says so rather than implying it shows the whole history.
+    /// </summary>
+    public bool HasMore { get; private set; }
+
+    /// <summary>The number of persisted turns the last successful load returned, for the "newest N" notice.</summary>
+    public int LoadedTurnCount { get; private set; }
+
+    /// <summary>
+    /// The one-line notice the Sessions tab shows about persisted history, or <see langword="null"/> when there
+    /// is nothing to say. A failed load - an unreachable router or a rejected read - reports its error, since
+    /// the tab would otherwise silently show live sessions only (#179). A successful load that left older turns
+    /// out says how many it shows. Before the first load completes there is no notice.
+    /// </summary>
+    public string? HistoryNotice
+    {
+        get
+        {
+            if (!IsLoaded) return null;
+
+            if (LastError is { } error) return $"Persisted history couldn't be loaded: {error}";
+
+            return HasMore
+                ? string.Create(provider: CultureInfo.InvariantCulture,
+                    $"Showing the newest {LoadedTurnCount} persisted turns.")
+                : null;
+        }
+    }
+
+    /// <summary>
     /// Loads the most recent persisted sessions. Connection failures are swallowed and surfaced via
     /// <see cref="AdminStoreBase{TClient}.IsReachable"/> rather than thrown, so the Sessions tab
     /// renders whatever it already had (or an empty list, on first load) instead of crashing when the proxy
@@ -78,6 +110,8 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
                 var result = await Client.ListAsync(limit: RequestLimit, cancellationToken: ct)
                     .ConfigureAwait(false);
                 TranscriptCaptureEnabled = result.TranscriptCaptureEnabled;
+                HasMore = result.HasMore;
+                LoadedTurnCount = result.Transcripts.Count;
                 Sessions =
                 [
                     .. PersistedSessionAggregator.Aggregate(result.Transcripts).Select(PersistedSessionMapper.ToModel)

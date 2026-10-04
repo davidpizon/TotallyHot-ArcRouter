@@ -224,6 +224,15 @@ public interface ITranscriptStore
 /// The linked <c>memory_entries</c> row id, or <see langword="null"/> if this transcript was never folded
 /// into the live-learning corpus - the literal "used for live training" signal the Sessions tab surfaces.
 /// </param>
+/// <param name="PromptTextLength">
+/// <paramref name="PromptText"/>'s length in characters as SQLite's <c>length()</c> counts them, or
+/// <see langword="null"/> when the text is absent or the store doesn't report it. Sent to the GUI alongside a
+/// display preview (#179, ADR-0023). Deliberately not <see cref="string.Length"/>, whose UTF-16 count differs
+/// for emoji and other surrogate pairs.
+/// </param>
+/// <param name="ResponseTextLength">
+/// <paramref name="ResponseText"/>'s length, counted the same way as <paramref name="PromptTextLength"/>.
+/// </param>
 public sealed record SessionTranscript(
     long Id,
     string SessionId,
@@ -236,7 +245,9 @@ public sealed record SessionTranscript(
     decimal? Cost,
     int? InputTokens,
     int? OutputTokens,
-    long? MemoryEntryId);
+    long? MemoryEntryId,
+    int? PromptTextLength = null,
+    int? ResponseTextLength = null);
 
 /// <summary>
 /// One model's observed mean token usage across captured transcripts - the per-model estimator behind

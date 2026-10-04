@@ -61,6 +61,50 @@ public sealed class LiveStreamTests
     }
 
     [Fact]
+    public void Shows_the_history_notice_in_the_empty_state()
+    {
+        using var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(parameterSelector: c => c.Conversations, value: [])
+            .Add(parameterSelector: c => c.SelectedId, value: string.Empty)
+            .Add(parameterSelector: c => c.HistoryNotice, value: "Persisted history couldn't be loaded: boom"));
+
+        cut.Find(".ls-history-notice").TextContent.Should().Be("Persisted history couldn't be loaded: boom");
+    }
+
+    [Fact]
+    public void Shows_the_history_notice_above_the_card_list()
+    {
+        using var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(parameterSelector: c => c.Conversations, value: [MakeConversation(id: "s1", title: "First")])
+            .Add(parameterSelector: c => c.SelectedId, value: string.Empty)
+            .Add(parameterSelector: c => c.HistoryNotice, value: "Showing the newest 312 persisted turns."));
+
+        var notice = cut.Find(".ls-history-notice");
+        notice.TextContent.Should().Be("Showing the newest 312 persisted turns.");
+        notice.GetAttribute("role").Should().Be("status");
+    }
+
+    [Fact]
+    public void Shows_no_history_notice_when_there_is_none()
+    {
+        using var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(parameterSelector: c => c.Conversations, value: [MakeConversation(id: "s1", title: "First")])
+            .Add(parameterSelector: c => c.SelectedId, value: string.Empty));
+
+        cut.FindAll(".ls-history-notice").Should().BeEmpty();
+    }
+
+    [Fact]
     public void Shows_the_full_width_card_list_with_no_session_opened_by_default()
     {
         using var ctx = new BunitContext();

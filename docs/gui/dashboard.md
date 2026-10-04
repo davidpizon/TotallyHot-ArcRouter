@@ -123,6 +123,16 @@ flowchart TD
      data wins for any session id present in both. Persisted history requires transcript capture to be on
      (`TranscriptOptions.Enabled`, the System Settings window's Transcription Capture toggle); with it off,
      the Sessions tab shows only the live stream, same as before this merge existed.
+     - **Persisted history is previews under a byte budget** ([#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179),
+       [ADR-0023](../adr/0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md)).
+       Each persisted turn's prompt and response arrive as the same 2,000-character previews live turns
+       carry, with truncation flags, stored lengths, and the row id. The router stops adding rows before the
+       response would pass 3 MiB, under the GUI gRPC client's default 4 MiB receive cap, and sets `has_more`.
+       Storage keeps the full text; only this display read is shortened.
+     - **Notice line** (`PersistedSessionStore.HistoryNotice`, rendered by `LiveStream.razor` as
+       `.ls-history-notice`): a failed load, whether the router is unreachable or the read was rejected,
+       shows "Persisted history couldn't be loaded: …" instead of silently showing live sessions only. A load
+       that left older turns out shows "Showing the newest N persisted turns."
    - Card list (`ConversationCard.razor`): a searchable, full-width list of session cards. Each card shows the
      conversation title, first → last turn timestamps,
      total session cost, total tokens (K/M notation), turn count, and color-dotted names of the first

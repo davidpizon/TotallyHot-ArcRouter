@@ -27,7 +27,7 @@ public class PersistedSessionsClientTests
     public async Task ListAsync_MapsEveryFieldOffTheWire()
     {
         var createdAt = new DateTimeOffset(2026, 7, 8, 12, 0, 0, offset: TimeSpan.Zero);
-        var response = new Contract.ListPersistedSessionsResponse { TranscriptCaptureEnabled = true };
+        var response = new Contract.ListPersistedSessionsResponse { TranscriptCaptureEnabled = true, HasMore = true };
         response.Transcripts.Add(new Contract.PersistedTranscript
         {
             SessionId = "sess-1",
@@ -40,7 +40,12 @@ public class PersistedSessionsClientTests
             CostUsd = "0.0042",
             InputTokens = 100,
             OutputTokens = 50,
-            MemoryEntryId = 7
+            MemoryEntryId = 7,
+            TranscriptId = 42,
+            PromptTextLength = 5_000,
+            ResponseTextLength = 15,
+            PromptTruncated = true,
+            ResponseTruncated = false
         });
         var stub = new StubClient { Response = response };
         var client = new PersistedSessionsClient(stub);
@@ -60,6 +65,12 @@ public class PersistedSessionsClientTests
         transcript.InputTokens.Should().Be(100);
         transcript.OutputTokens.Should().Be(50);
         transcript.MemoryEntryId.Should().Be(7);
+        transcript.TranscriptId.Should().Be(42);
+        transcript.PromptTextLength.Should().Be(5_000);
+        transcript.ResponseTextLength.Should().Be(15);
+        transcript.PromptTruncated.Should().BeTrue();
+        transcript.ResponseTruncated.Should().BeFalse();
+        result.HasMore.Should().BeTrue();
     }
 
     [Fact]
@@ -86,6 +97,11 @@ public class PersistedSessionsClientTests
         transcript.InputTokens.Should().BeNull();
         transcript.OutputTokens.Should().BeNull();
         transcript.MemoryEntryId.Should().BeNull();
+        transcript.PromptTextLength.Should().BeNull();
+        transcript.ResponseTextLength.Should().BeNull();
+        transcript.PromptTruncated.Should().BeFalse();
+        transcript.ResponseTruncated.Should().BeFalse();
+        result.HasMore.Should().BeFalse();
     }
 
     [Fact]

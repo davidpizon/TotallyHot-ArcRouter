@@ -50,6 +50,14 @@ public sealed class ProxyServerWebInterfaceTests
         requestMarshaller: CreateMarshaller(Contract.StreamEventsRequest.Parser),
         responseMarshaller: CreateMarshaller(Contract.TelemetryEvent.Parser));
 
+    private static readonly Method<Contract.ListPersistedSessionsRequest, Contract.ListPersistedSessionsResponse>
+        ListPersistedSessionsMethod = new(
+            type: MethodType.Unary,
+            serviceName: "TotallyHot.ArcRouter.telemetry.v1.TelemetryService",
+            name: "ListPersistedSessions",
+            requestMarshaller: CreateMarshaller(Contract.ListPersistedSessionsRequest.Parser),
+            responseMarshaller: CreateMarshaller(Contract.ListPersistedSessionsResponse.Parser));
+
     private static Marshaller<T> CreateMarshaller<T>(MessageParser<T> parser) where T : IMessage<T>
     {
         return Marshallers.Create(serializer: m => m.ToByteArray(), deserializer: parser.ParseFrom);
@@ -83,7 +91,7 @@ public sealed class ProxyServerWebInterfaceTests
     }
 
     private static (ProxyServer Server, TelemetryBroadcaster Broadcaster, int ProxyPort, int WebPort,
-        int PlainHttpPort) BuildServer(bool plainHttpEnabled = false)
+        int PlainHttpPort) BuildServer(bool plainHttpEnabled = false, ITranscriptStore? transcriptStore = null)
     {
         var ports = GetFreePorts(plainHttpEnabled ? 3 : 2);
         var proxyPort = ports[0];
@@ -117,7 +125,7 @@ public sealed class ProxyServerWebInterfaceTests
                 ClusterModelAdmin = new ClusterModelAdminDependencies(
                     TrainingService: Mock.Of<IClusterTrainingService>(),
                     MemoryEntryStore: Mock.Of<IMemoryEntryStore>(),
-                    TranscriptStore: Mock.Of<ITranscriptStore>(),
+                    TranscriptStore: transcriptStore ?? Mock.Of<ITranscriptStore>(),
                     TranscriptOptions: Options.Create(new TranscriptOptions()),
                     StorageOptions: Options.Create(new StorageOptions()))
             });
@@ -130,6 +138,62 @@ public sealed class ProxyServerWebInterfaceTests
     {
         var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
         return new HttpClient(new GrpcWebHandler(mode: mode, innerHandler: handler));
+    }
+
+    /// <summary>
+    /// End-to-end regression test for #179. A real router serves a history that used to fail the Sessions tab's
+    /// load, to a gRPC-Web channel built like the GUI's, with no <see cref="GrpcChannelOptions.MaxReceiveMessageSize"/>
+    /// override. The history is 500 rows at 13 KB of text each, about 6.6 MB in full, plus one row with a 4 MiB
+    /// prompt. The call succeeds, and every row arrives as a preview.
+    /// </summary>
+    [Fact]
+    public async Task WebPort_ListPersistedSessions_HeavyHistory_LoadsUnderTheDefaultClientReceiveCap()
+    {
+        var hugePrompt = new string('p', 4 * 1024 * 1024);
+        var heavyText = new string('t', 6_500);
+        var rows = Enumerable.Range(0, 501)
+            .Select(i => new SessionTranscript(
+                Id: 501 - i,
+                SessionId: "sess",
+                CorrelationId: FormattableString.Invariant($"sess:{501 - i}"),
+                CreatedAtUtc: DateTimeOffset.UtcNow.AddSeconds(-i),
+                RequestedModel: "claude-sonnet-4-5",
+                RoutedModel: "kimi-k2.5",
+                PromptText: i == 0 ? hugePrompt : heavyText,
+                ResponseText: heavyText,
+                Cost: null,
+                InputTokens: null,
+                OutputTokens: null,
+                MemoryEntryId: null))
+            .ToList();
+        var store = new Mock<ITranscriptStore>();
+        store.Setup(s => s.ListSessionsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int limit, CancellationToken _) => [.. rows.Take(limit)]);
+        var (server, _, _, webPort, _) = BuildServer(transcriptStore: store.Object);
+        await using var _ = server;
+        await server.StartAsync(Ct);
+        try
+        {
+            using var httpClient = TrustingHttpClient();
+            using var channel = GrpcChannel.ForAddress($"https://localhost:{webPort}",
+                new GrpcChannelOptions { HttpClient = httpClient });
+            var invoker = channel.CreateCallInvoker();
+
+            var response = await invoker.AsyncUnaryCall(method: ListPersistedSessionsMethod, host: null,
+                options: new CallOptions(cancellationToken: Ct), new Contract.ListPersistedSessionsRequest { Limit = 500 });
+
+            Assert.Equal(expected: 500, actual: response.Transcripts.Count);
+            Assert.True(response.HasMore);
+            Assert.InRange(actual: response.CalculateSize(), low: 0, high: TelemetryGrpcService.MaxListResponseBytes);
+            Assert.True(response.Transcripts[0].PromptTruncated);
+            Assert.Equal(expected: TextTruncator.Truncate(hugePrompt), actual: response.Transcripts[0].PromptText);
+            Assert.All(response.Transcripts, t => Assert.True(t.ResponseTruncated));
+        }
+        finally
+        {
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await server.StopAsync(stopCts.Token);
+        }
     }
 
     [Fact]

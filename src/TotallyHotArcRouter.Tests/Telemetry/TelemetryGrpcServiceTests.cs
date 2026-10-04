@@ -1,6 +1,7 @@
 using Grpc.Core;
 using Grpc.Core.Testing;
 using Grpc.Net.Client;
+using Microsoft.Extensions.Logging;
 using System.Globalization;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
@@ -34,13 +35,16 @@ public class TelemetryGrpcServiceTests
     private static TelemetryGrpcService CreateService(
         TelemetryBroadcaster? broadcaster = null,
         IReadOnlyList<SessionTranscript>? sessions = null,
-        bool transcriptCaptureEnabled = true)
+        bool transcriptCaptureEnabled = true,
+        FakeTranscriptStore? store = null,
+        ILogger<TelemetryGrpcService>? logger = null)
     {
         return new TelemetryGrpcService(
             broadcaster: broadcaster ?? new TelemetryBroadcaster(),
-            transcriptStore: new FakeTranscriptStore(sessions ?? []),
+            transcriptStore: store ?? new FakeTranscriptStore(sessions ?? []),
             transcriptOptions: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions
-            { Enabled = transcriptCaptureEnabled }));
+            { Enabled = transcriptCaptureEnabled }),
+            logger: logger);
     }
 
     private static ServerCallContext CreateContext(CancellationToken cancellationToken)
@@ -211,6 +215,12 @@ public class TelemetryGrpcServiceTests
         Assert.Equal(expected: transcript.InputTokens, actual: mapped.InputTokens);
         Assert.Equal(expected: transcript.OutputTokens, actual: mapped.OutputTokens);
         Assert.Equal(expected: transcript.MemoryEntryId, actual: mapped.MemoryEntryId);
+        Assert.Equal(expected: transcript.Id, actual: mapped.TranscriptId);
+        Assert.Equal(expected: transcript.PromptTextLength, actual: mapped.PromptTextLength);
+        Assert.Equal(expected: transcript.ResponseTextLength, actual: mapped.ResponseTextLength);
+        Assert.False(mapped.PromptTruncated);
+        Assert.False(mapped.ResponseTruncated);
+        Assert.False(response.HasMore);
     }
 
     [Fact]
@@ -242,105 +252,208 @@ public class TelemetryGrpcServiceTests
         Assert.False(mapped.HasInputTokens);
         Assert.False(mapped.HasOutputTokens);
         Assert.False(mapped.HasMemoryEntryId);
+        Assert.False(mapped.HasPromptTextLength);
+        Assert.False(mapped.HasResponseTextLength);
+        Assert.False(mapped.PromptTruncated);
+        Assert.False(mapped.ResponseTruncated);
     }
 
     /// <summary>
-    /// Measures the serialized response at the GUI's 500-row request against the client's default receive
-    /// cap, for representative per-row text sizes. Sizes are UTF-8 bytes of ASCII text, so bytes equal
-    /// characters. This characterizes today's wire shape, which carries every row's full text: a response
-    /// over the cap fails on the client with <see cref="StatusCode.ResourceExhausted"/> (pinned in
-    /// <c>PersistedSessionsClientTests</c>), and the Sessions tab then shows no persisted history.
+    /// The response stays within <see cref="TelemetryGrpcService.MaxListResponseBytes"/>, and so under the GUI
+    /// client's default receive cap, for every text profile the #179 investigation measured. Before the fix the
+    /// last three profiles failed to load. Sizes are UTF-8 bytes of ASCII text, so bytes equal characters.
     /// </summary>
     [Theory]
     // This machine's transcripts.db, sampled 2026-09-30: 82 rows, mean 362-byte prompt and 76-byte response.
-    [InlineData(362, 76, false)]
+    [InlineData(362, 76)]
     // Chat style: a short question and a medium answer.
-    [InlineData(500, 2_000, false)]
+    [InlineData(500, 2_000)]
     // Agentic, with substantial final answers.
-    [InlineData(2_000, 4_000, false)]
+    [InlineData(2_000, 4_000)]
+    // Just past the old 8,244-byte break-even.
+    [InlineData(4_123, 4_122)]
     // A Copilot-style agent loop. The newest user message carries attached files and editor context, and it
     // is captured again on every tool-call iteration, because tool results arrive as role "tool" messages
     // that RequestTextExtractor skips.
-    [InlineData(12_000, 1_000, true)]
-    public async Task ListPersistedSessions_AtTheGuiRowLimit_ExceedsTheDefaultClientReceiveCapOnlyWithHeavyText(
-        int promptBytes, int responseBytes, bool expectedToExceedCap)
+    [InlineData(12_000, 1_000)]
+    // 13 KB per row, the plan's Phase 1 exit criterion.
+    [InlineData(6_500, 6_500)]
+    public async Task ListPersistedSessions_AtTheGuiRowLimit_StaysWithinTheBudgetAndReturnsEveryAsciiRow(
+        int promptBytes, int responseBytes)
     {
-        var size = await SerializedListSizeAsync(rowCount: GuiRequestLimit, promptText: new string('p', promptBytes),
-            responseText: new string('r', responseBytes));
+        var response = await ListAsync(rows: RealisticRows(count: GuiRequestLimit,
+                promptText: new string('p', promptBytes), responseText: new string('r', responseBytes)),
+            limit: GuiRequestLimit);
+        var size = response.CalculateSize();
 
         TestContext.Current.TestOutputHelper?.WriteLine(
             FormattableString.Invariant(
                 $"{GuiRequestLimit} rows x ({promptBytes} + {responseBytes}) text bytes = {size:N0} serialized bytes ({100.0 * size / DefaultClientMaxReceiveMessageSize:F1}% of the {DefaultClientMaxReceiveMessageSize:N0}-byte cap)"));
-        Assert.Equal(expected: expectedToExceedCap, actual: size > DefaultClientMaxReceiveMessageSize);
+        Assert.InRange(actual: size, low: 0, high: TelemetryGrpcService.MaxListResponseBytes);
+        // ASCII previews are at most about 4.2 KB a row, so 500 of them fit with room to spare.
+        Assert.Equal(expected: GuiRequestLimit, actual: response.Transcripts.Count);
+        Assert.False(response.HasMore);
     }
 
     /// <summary>
-    /// Pins where the GUI's 500-row load starts failing: just above 8 KB of combined prompt and response text
-    /// per row. Solved from one measurement, then checked on both sides of the boundary against the service
-    /// itself. Between 128 and 16,383 bytes every text length and row length is a two-byte varint, so each
-    /// extra text byte per row adds exactly <see cref="GuiRequestLimit"/> serialized bytes. The upper bound
-    /// is the cap divided by the row count, the break-even with zero per-row overhead.
+    /// The character cap alone is not a byte guarantee: 2,000 CJK characters are 6,000 UTF-8 bytes, so 500 rows
+    /// of CJK previews come to about 6 MB. The byte budget cuts the list, reports <c>has_more</c>, and keeps the
+    /// newest rows, each one whole.
     /// </summary>
     [Fact]
-    public async Task ListPersistedSessions_AtTheGuiRowLimit_CrossesTheDefaultClientReceiveCapJustAboveEightKilobytesOfTextPerRow()
+    public async Task ListPersistedSessions_CjkTextAtTheGuiRowLimit_IsCutByTheBudgetToTheNewestWholeRows()
     {
-        const int probeTextBytes = 4_000;
-        var probeSize = await SerializedListSizeWithTextPerRowAsync(probeTextBytes);
-        var breakEvenTextBytes =
-            probeTextBytes + (DefaultClientMaxReceiveMessageSize - probeSize) / GuiRequestLimit;
+        var cjk = new string('漢', 5_000);
+        var rows = RealisticRows(count: GuiRequestLimit, promptText: cjk, responseText: cjk);
+        var logger = new CapturingLogger();
 
-        var atBreakEven = await SerializedListSizeWithTextPerRowAsync(breakEvenTextBytes);
-        var oneByteMore = await SerializedListSizeWithTextPerRowAsync(breakEvenTextBytes + 1);
+        var response = await ListAsync(rows: rows, limit: GuiRequestLimit, logger: logger);
 
-        TestContext.Current.TestOutputHelper?.WriteLine(
-            FormattableString.Invariant(
-                $"Break-even: {breakEvenTextBytes:N0} text bytes per row ({atBreakEven:N0} serialized bytes); {breakEvenTextBytes + 1:N0} gives {oneByteMore:N0}. Per-row overhead: {DefaultClientMaxReceiveMessageSize / GuiRequestLimit - breakEvenTextBytes} bytes."));
-        Assert.InRange(actual: atBreakEven, low: 0, high: DefaultClientMaxReceiveMessageSize);
-        Assert.InRange(actual: oneByteMore, low: DefaultClientMaxReceiveMessageSize + 1, high: int.MaxValue);
-        Assert.InRange(actual: breakEvenTextBytes, low: 8_000, high: DefaultClientMaxReceiveMessageSize / GuiRequestLimit);
+        Assert.InRange(actual: response.CalculateSize(), low: 0, high: TelemetryGrpcService.MaxListResponseBytes);
+        Assert.True(response.HasMore);
+        Assert.InRange(actual: response.Transcripts.Count, low: 200, high: GuiRequestLimit - 1);
+        var expectedPreview = TextTruncator.Truncate(cjk);
+        for (var i = 0; i < response.Transcripts.Count; i++)
+        {
+            Assert.Equal(expected: rows[i].Id, actual: response.Transcripts[i].TranscriptId);
+            Assert.Equal(expected: expectedPreview, actual: response.Transcripts[i].PromptText);
+            Assert.Equal(expected: expectedPreview, actual: response.Transcripts[i].ResponseText);
+        }
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(expected: LogLevel.Information, actual: entry.Level);
+        Assert.Contains(expectedSubstring: FormattableString.Invariant($"returned {response.Transcripts.Count} of {GuiRequestLimit} rows"),
+            actualString: entry.Message);
     }
 
     /// <summary>
-    /// Shows that lowering the row limit cannot bound the message by itself. <c>prompt_text</c> is the newest
-    /// user message verbatim. Only Kestrel's default 30,000,000-byte request body limit bounds it, and nothing
-    /// in <c>src/</c> lowers that limit. A row is persisted even when the provider rejects the prompt and the
-    /// error is relayed to the client. So one pasted 4 MiB log fails the load at <c>limit = 1</c>.
+    /// Proves the budget accounting is exact, not merely conservative. One row is sized, through its
+    /// client-supplied <c>requested_model</c>, which is not truncated, so the counted response lands exactly on
+    /// <see cref="TelemetryGrpcService.MaxListResponseBytes"/>: it is returned. One byte more and it is not,
+    /// with <c>has_more</c> set. Every length prefix is 4 bytes throughout, so a row's size grows one byte per
+    /// filler byte.
     /// </summary>
     [Fact]
-    public async Task ListPersistedSessions_OneRowWithAFourMebibytePrompt_AloneExceedsTheDefaultClientReceiveCap()
+    public async Task ListPersistedSessions_RowLandingExactlyOnTheBudget_IsReturnedAndOneByteMoreIsNot()
     {
-        var size = await SerializedListSizeAsync(rowCount: 1, promptText: new string('p', 4 * 1024 * 1024),
-            responseText: null);
+        const int probeLength = 3_000_000;
+        var probe = await ListAsync(rows: [RowWithRequestedModelLength(probeLength)], limit: 1);
+        // The response as counted: what was serialized, plus the 2 bytes reserved for has_more.
+        var countedAtProbe = probe.CalculateSize() + 2;
+        var exactLength = probeLength + (TelemetryGrpcService.MaxListResponseBytes - countedAtProbe);
 
-        Assert.InRange(actual: size, low: DefaultClientMaxReceiveMessageSize + 1, high: int.MaxValue);
+        var atBudget = await ListAsync(rows: [RowWithRequestedModelLength(exactLength)], limit: 1);
+        var overBudget = await ListAsync(rows: [RowWithRequestedModelLength(exactLength + 1)], limit: 1);
+
+        Assert.Single(atBudget.Transcripts);
+        Assert.False(atBudget.HasMore);
+        Assert.Equal(expected: TelemetryGrpcService.MaxListResponseBytes - 2, actual: atBudget.CalculateSize());
+        Assert.Empty(overBudget.Transcripts);
+        Assert.True(overBudget.HasMore);
     }
 
     /// <summary>
-    /// Serializes what <see cref="TelemetryGrpcService.ListPersistedSessions"/> returns for
-    /// <paramref name="rowCount"/> rows that carry the given texts. The result is the payload length
-    /// <c>Grpc.Net.Client</c> compares against its receive cap; the 5-byte gRPC frame header is not counted.
+    /// One pasted 4 MiB prompt failed the load at any row limit before the fix: <c>prompt_text</c> is bounded
+    /// only by Kestrel's default 30,000,000-byte request body limit, and a row is persisted even when the
+    /// provider rejects the prompt. Now the row loads as a preview that says it was cut, with its stored length.
     /// </summary>
-    private static async Task<int> SerializedListSizeAsync(int rowCount, string? promptText, string? responseText)
+    [Fact]
+    public async Task ListPersistedSessions_OneRowWithAFourMebibytePrompt_LoadsAsAFlaggedPreview()
     {
-        var service = CreateService(sessions: RealisticRows(count: rowCount, promptText: promptText,
-            responseText: responseText));
+        var prompt = new string('p', 4 * 1024 * 1024);
+        var row = RealisticRows(count: 1, promptText: prompt, responseText: "ok")[0] with
+        {
+            PromptTextLength = prompt.Length,
+            ResponseTextLength = 2
+        };
 
-        var response = await service.ListPersistedSessions(
-            request: new Contract.ListPersistedSessionsRequest { Limit = rowCount },
+        var response = await ListAsync(rows: [row], limit: 1);
+
+        Assert.InRange(actual: response.CalculateSize(), low: 0, high: TelemetryGrpcService.MaxListResponseBytes);
+        var mapped = Assert.Single(response.Transcripts);
+        Assert.Equal(expected: TextTruncator.Truncate(prompt), actual: mapped.PromptText);
+        Assert.True(mapped.PromptTruncated);
+        Assert.Equal(expected: prompt.Length, actual: mapped.PromptTextLength);
+        Assert.Equal(expected: "ok", actual: mapped.ResponseText);
+        Assert.False(mapped.ResponseTruncated);
+        Assert.Equal(expected: 2, actual: mapped.ResponseTextLength);
+    }
+
+    /// <summary>
+    /// Previews equal <see cref="TextTruncator.Truncate"/> of the stored text, the live telemetry preview, and
+    /// the truncation flags are set exactly when a preview was cut: at the cap a text is sent whole, one
+    /// character over it is cut.
+    /// </summary>
+    [Theory]
+    [InlineData(TextTruncator.DefaultMaxLength, false)]
+    [InlineData(TextTruncator.DefaultMaxLength + 1, true)]
+    public async Task ListPersistedSessions_Previews_MatchLiveTelemetryAndFlagExactlyWhenCut(int length,
+        bool expectedTruncated)
+    {
+        var text = new string('x', length);
+        var response = await ListAsync(rows: RealisticRows(count: 1, promptText: text, responseText: text),
+            limit: 1);
+
+        var mapped = Assert.Single(response.Transcripts);
+        Assert.Equal(expected: TextTruncator.Truncate(text), actual: mapped.PromptText);
+        Assert.Equal(expected: TextTruncator.Truncate(text), actual: mapped.ResponseText);
+        Assert.Equal(expected: expectedTruncated, actual: mapped.PromptTruncated);
+        Assert.Equal(expected: expectedTruncated, actual: mapped.ResponseTruncated);
+    }
+
+    /// <summary>
+    /// The limit is clamped: unset (0) means 500, anything else is clamped to [1, 2,000]. The store is asked for
+    /// one row more than the clamped limit, which is how <c>has_more</c> is detected. An unset limit used to
+    /// reach the store as 0 and fail the call with <see cref="StatusCode.Unknown"/>.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 500)]
+    [InlineData(-5, 1)]
+    [InlineData(1, 1)]
+    [InlineData(2_000, 2_000)]
+    [InlineData(5_000, 2_000)]
+    public async Task ListPersistedSessions_ClampsTheLimitAndAsksTheStoreForOneMore(int requested, int clamped)
+    {
+        var store = new FakeTranscriptStore([]);
+
+        await ListAsync(store: store, limit: requested);
+
+        Assert.Equal(expected: clamped + 1, actual: store.RequestedLimit);
+    }
+
+    /// <summary><c>has_more</c> is set when the store holds more rows than the limit, and only then.</summary>
+    [Theory]
+    [InlineData(3, 2, true)]
+    [InlineData(3, 3, false)]
+    public async Task ListPersistedSessions_MoreRowsThanTheLimit_SetsHasMore(int stored, int limit, bool expected)
+    {
+        var rows = RealisticRows(count: stored, promptText: "p", responseText: "r");
+
+        var response = await ListAsync(rows: rows, limit: limit);
+
+        Assert.Equal(expected: Math.Min(val1: stored, val2: limit), actual: response.Transcripts.Count);
+        Assert.Equal(expected: expected, actual: response.HasMore);
+    }
+
+    /// <summary>Calls <see cref="TelemetryGrpcService.ListPersistedSessions"/> over a fake store.</summary>
+    private static Task<Contract.ListPersistedSessionsResponse> ListAsync(int limit,
+        IReadOnlyList<SessionTranscript>? rows = null, FakeTranscriptStore? store = null,
+        ILogger<TelemetryGrpcService>? logger = null)
+    {
+        var service = CreateService(sessions: rows, store: store, logger: logger);
+
+        return service.ListPersistedSessions(
+            request: new Contract.ListPersistedSessionsRequest { Limit = limit },
             context: CreateContext(TestContext.Current.CancellationToken));
-
-        Assert.Equal(expected: rowCount, actual: response.Transcripts.Count);
-        return response.CalculateSize();
     }
 
-    /// <summary>
-    /// <see cref="SerializedListSizeAsync"/> at the GUI's row limit, with <paramref name="textBytes"/> of ASCII
-    /// text per row split evenly between prompt and response.
-    /// </summary>
-    private static Task<int> SerializedListSizeWithTextPerRowAsync(int textBytes)
+    /// <summary>One row whose only large field is a <c>requested_model</c> of <paramref name="length"/> characters.</summary>
+    private static SessionTranscript RowWithRequestedModelLength(int length)
     {
-        return SerializedListSizeAsync(rowCount: GuiRequestLimit, promptText: new string('p', textBytes / 2),
-            responseText: new string('r', textBytes - textBytes / 2));
+        return RealisticRows(count: 1, promptText: "p", responseText: "r")[0] with
+        {
+            RequestedModel = new string('m', length)
+        };
     }
 
     /// <summary>
@@ -389,7 +502,9 @@ public class TelemetryGrpcServiceTests
             0.0042m,
             100,
             50,
-            7);
+            7,
+            PromptTextLength: 12,
+            ResponseTextLength: 15);
     }
 
     private sealed class FakeServerStreamWriter<T> : IServerStreamWriter<T>
@@ -405,9 +520,38 @@ public class TelemetryGrpcServiceTests
         }
     }
 
-    /// <summary>Minimal <see cref="ITranscriptStore"/> fake returning a fixed, pre-seeded session list.</summary>
+    /// <summary>Records each entry's level and rendered message.</summary>
+    private sealed class CapturingLogger : ILogger<TelemetryGrpcService>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, formatter(arg1: state, arg2: exception)));
+        }
+    }
+
+    /// <summary>
+    /// Minimal <see cref="ITranscriptStore"/> fake over a fixed, pre-seeded, newest-first session list. Honours
+    /// the requested limit, as <see cref="SqliteTranscriptStore"/> does, and records it.
+    /// </summary>
     private sealed class FakeTranscriptStore(IReadOnlyList<SessionTranscript> sessions) : ITranscriptStore
     {
+        /// <summary>The limit of the most recent <see cref="ListSessionsAsync"/> call.</summary>
+        public int? RequestedLimit { get; private set; }
+
         public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
@@ -483,7 +627,8 @@ public class TelemetryGrpcServiceTests
         public Task<IReadOnlyList<SessionTranscript>> ListSessionsAsync(int limit,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(sessions);
+            RequestedLimit = limit;
+            return Task.FromResult<IReadOnlyList<SessionTranscript>>([.. sessions.Take(limit)]);
         }
     }
 }
