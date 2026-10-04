@@ -118,8 +118,11 @@ public static class PublicCaCertificate
         var usersCanRead = false;
         foreach (FileSystemAccessRule rule in existing.GetAccessRules(true, true, typeof(SecurityIdentifier)))
         {
+            // ObjectInherit too: the certificate is written as a new file and renamed into place, so only an
+            // inheritable rule reaches it.
             if (rule.AccessControlType == AccessControlType.Allow && users.Equals(rule.IdentityReference) &&
-                (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute)
+                (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute &&
+                rule.InheritanceFlags.HasFlag(InheritanceFlags.ObjectInherit))
                 usersCanRead = true;
 
             if (rule.AccessControlType != AccessControlType.Allow) continue;

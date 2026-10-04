@@ -24,7 +24,8 @@ public static class UnixDataDirectorySecurity
     public const UnixFileMode OwnerOnlyFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
     /// <summary>
-    /// Inspects <paramref name="path"/> without following it if it is a symbolic link.
+    /// Inspects <paramref name="path"/> without following it if it is a symbolic link. A protected
+    /// directory has exactly the owner's read, write and search bits among its permission bits.
     /// </summary>
     /// <param name="path">The directory to inspect.</param>
     /// <param name="trustedOwners">The uids allowed to own the directory.</param>
@@ -63,6 +64,11 @@ public static class UnixDataDirectorySecurity
         if (found.GrantsGroupOrOther)
             return new DataDirectoryInspection(DataDirectoryState.Unprotected, owner, true,
                 $"its mode {Convert.ToString(found.Mode, 8)} grants group or other access");
+
+        // The owner needs all three bits: 0300, say, passes the write probe but cannot list the directory.
+        if ((found.Mode & 0x1C0) != 0x1C0)
+            return new DataDirectoryInspection(DataDirectoryState.Unprotected, owner, true,
+                $"its mode {Convert.ToString(found.Mode, 8)} does not give its owner read, write and search access");
 
         return new DataDirectoryInspection(DataDirectoryState.Protected, owner, true);
     }

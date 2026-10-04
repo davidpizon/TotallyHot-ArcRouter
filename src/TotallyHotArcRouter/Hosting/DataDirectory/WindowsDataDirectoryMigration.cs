@@ -136,14 +136,31 @@ public sealed class WindowsDataDirectoryMigration
 
     /// <summary>
     /// Finishes a swap a crash interrupted: the old root was already renamed away, so the protected
-    /// staging tree just needs renaming into place. Startup never creates an empty root in this state.
+    /// staging tree just needs renaming into place. Startup never creates an empty root in this state, but
+    /// in <c>%ProgramData%</c> any account can create one; if something stands at the root while a retired
+    /// tree with a trusted owner shows the old root was already renamed away, that entry was created after
+    /// the crash. It is set aside untouched, rather than mistaken for a squat that would leave the migrated
+    /// data stranded in the staging tree.
     /// </summary>
     private void CompleteInterruptedSwap()
     {
-        if (Path.Exists(_root)) return;
-
         var staging = FindResumableStaging();
         if (staging is null) return;
+
+        if (Path.Exists(_root))
+        {
+            // Without a trusted retired tree this is the ordinary resume case: the old root is still live.
+            if (!DataDirectoryMigrationRules.FindRetired(_root).Any(IsTrustedLegacyOwner)) return;
+
+            var aside = DataDirectoryMigrationRules.NewSquattedPath(_root);
+            if (File.Exists(_root))
+                File.Move(_root, aside);
+            else
+                MoveDirectoryOrBlock(_root, aside);
+            _logger.Warning(
+                "{Root} was recreated after an interrupted migration had already moved the old tree away; it was renamed to {SetAside} untouched so the migrated tree could take its place.",
+                _root, aside);
+        }
 
         MoveDirectoryOrBlock(staging, _root);
         _logger.Information("Completed an interrupted migration: moved {Staging} into place at {Root}.", staging,

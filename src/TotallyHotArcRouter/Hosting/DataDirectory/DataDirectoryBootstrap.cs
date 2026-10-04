@@ -177,10 +177,17 @@ public static class DataDirectoryBootstrap
         List<Action<ILogger>> events = [];
         var inspection = UnixDataDirectorySecurity.Inspect(machineWide, trustedOwners);
 
+        // The service account, like a container, never falls back: its per-user directory would give the
+        // installed service a second, split copy of its state. Any other account still may.
+        var mustNotFallBack = container ||
+                              (serviceAccountUid is { } serviceUid && UnixNative.EffectiveUserId() == serviceUid);
+
         if (inspection.State == DataDirectoryState.Protected && UnixDataDirectoryMigration.HasMarker(machineWide))
         {
             if (AppDataPaths.TryEnsureDirectory(machineWide)) return UseMachineWide(machineWide, events);
-            if (container) throw new DataDirectoryNotProtectedException(machineWide, "the router cannot write to it");
+            if (mustNotFallBack)
+                throw new DataDirectoryNotProtectedException(machineWide,
+                    "it is protected, but the router cannot write to it (a read-only filesystem or an ACL denying writes?)");
             return FallBack(machineWide, perUser, lastResort, unavailable: true, events);
         }
 
@@ -203,7 +210,7 @@ public static class DataDirectoryBootstrap
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                if (container) throw new DataDirectoryNotProtectedException(machineWide, "the router cannot create it");
+                if (mustNotFallBack) throw new DataDirectoryNotProtectedException(machineWide, "the router cannot create it");
                 return FallBack(machineWide, perUser, lastResort, unavailable: false, events);
             }
         }
@@ -227,13 +234,13 @@ public static class DataDirectoryBootstrap
             throw new DataDirectoryNotProtectedException(machineWide,
                 inspection.Reason ?? "the router cannot use it; a bind mount must be owned by the container's account with mode 0700");
 
-        // A blocked migration leaves the old tree root-owned and 0700. The service account does not own it,
-        // so without this it would fall back to its per-user directory and start with split state - on macOS
-        // nothing else stops it. Only the service account refuses; anyone else still falls back.
-        if (serviceAccountUid is { } serviceUid && UnixNative.EffectiveUserId() == serviceUid &&
-            UnixNative.LStat(machineWide) is { Kind: UnixFileKind.Directory, Uid: 0 })
+        // The service account refuses any root it cannot use. The common case is a blocked migration, which
+        // leaves the old tree root-owned and 0700; on macOS nothing else would stop a fallback.
+        if (mustNotFallBack)
             throw new DataDirectoryNotProtectedException(machineWide,
-                "an interrupted or blocked migration left it locked to root");
+                UnixNative.LStat(machineWide) is { Kind: UnixFileKind.Directory, Uid: 0 }
+                    ? "an interrupted or blocked migration left it locked to root"
+                    : inspection.Reason ?? "the service account cannot use it");
 
         return FallBack(machineWide, perUser, lastResort, unavailable: true, events);
     }

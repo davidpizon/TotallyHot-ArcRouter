@@ -73,6 +73,11 @@ public sealed class UnixDataDirectoryTests
 
             Assert.False(UnixDataDirectorySecurity.Inspect(root, [euid + 1]).OwnerTrusted);
 
+            // 0300 has no group or other bits but cannot be listed by its owner, so it is not protected.
+            File.SetUnixFileMode(root, UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Assert.Contains("read, write and search", UnixDataDirectorySecurity.Inspect(root, [euid]).Reason);
+            File.SetUnixFileMode(root, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+
             var link = Path.Combine(scratch, "link");
             Directory.CreateSymbolicLink(link, root);
             Assert.Contains("symbolic link", UnixDataDirectorySecurity.Inspect(link, [euid]).Reason);

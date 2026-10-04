@@ -100,7 +100,11 @@ public static class WindowsDataDirectorySecurity
     /// <item><description>it is a real directory, not a junction, symlink or mount point;</description></item>
     /// <item><description>its owner is trusted by <paramref name="policy"/>;</description></item>
     /// <item><description>its DACL is protected, so it inherits nothing from its parent;</description></item>
-    /// <item><description>no allow rule names an account outside <paramref name="policy"/>.</description></item>
+    /// <item><description>no allow rule names an account outside <paramref name="policy"/>;</description></item>
+    /// <item><description>
+    /// every account in <paramref name="policy"/> holds full control inherited by every file and folder, and
+    /// none of them is denied anything.
+    /// </description></item>
     /// </list>
     /// </summary>
     public static DataDirectoryInspection Inspect(string path, WindowsDirectoryPolicy policy)
@@ -154,15 +158,42 @@ public static class WindowsDataDirectorySecurity
             return new DataDirectoryInspection(DataDirectoryState.Unprotected, Owner: ownerDisplay, OwnerTrusted: true,
                 Reason: "it inherits permissions from its parent directory");
 
+        const InheritanceFlags inheritToEverything = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+        HashSet<SecurityIdentifier> fullyGranted = [];
         foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true,
                      targetType: typeof(SecurityIdentifier)))
         {
-            if (rule.AccessControlType != AccessControlType.Allow) continue;
-            if (rule.IdentityReference is SecurityIdentifier sid && policy.FullControl.Contains(sid)) continue;
+            var sid = rule.IdentityReference as SecurityIdentifier;
+            var isPolicyAccount = sid is not null && policy.FullControl.Contains(sid);
 
-            return new DataDirectoryInspection(DataDirectoryState.Unprotected, Owner: ownerDisplay, OwnerTrusted: true,
-                Reason: $"it grants access to {Describe(rule.IdentityReference)}");
+            if (rule.AccessControlType == AccessControlType.Deny)
+            {
+                // A deny on another account narrows nothing that matters; one on SYSTEM or Administrators would
+                // lock the service or the recovering administrator out of the data.
+                if (isPolicyAccount)
+                    return new DataDirectoryInspection(DataDirectoryState.Unprotected, Owner: ownerDisplay,
+                        OwnerTrusted: true, Reason: $"it denies access to {Describe(rule.IdentityReference)}");
+                continue;
+            }
+
+            if (!isPolicyAccount)
+                return new DataDirectoryInspection(DataDirectoryState.Unprotected, Owner: ownerDisplay,
+                    OwnerTrusted: true, Reason: $"it grants access to {Describe(rule.IdentityReference)}");
+
+            if ((rule.FileSystemRights & FileSystemRights.FullControl) == FileSystemRights.FullControl &&
+                (rule.InheritanceFlags & inheritToEverything) == inheritToEverything &&
+                !rule.PropagationFlags.HasFlag(PropagationFlags.InheritOnly) &&
+                !rule.PropagationFlags.HasFlag(PropagationFlags.NoPropagateInherit))
+                fullyGranted.Add(sid!);
         }
+
+        // Every policy account must hold full control inherited by every file and folder: a protected DACL
+        // granting SYSTEM only create rights would pass the write probe yet leave the databases unreadable.
+        foreach (var required in policy.FullControl)
+            if (!fullyGranted.Contains(required))
+                return new DataDirectoryInspection(DataDirectoryState.Unprotected, Owner: ownerDisplay,
+                    OwnerTrusted: true,
+                    Reason: $"it does not grant {Describe(required)} inherited full control");
 
         return new DataDirectoryInspection(DataDirectoryState.Protected, Owner: ownerDisplay, OwnerTrusted: true);
     }

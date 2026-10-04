@@ -210,6 +210,40 @@ public sealed class WindowsDataDirectoryMigrationTests
         }
     }
 
+    /// <summary>
+    /// A crash between the two renames, after which something recreated the root (any account may, in
+    /// %ProgramData%): the recreated entry is set aside and the migrated tree takes its place, rather than
+    /// the recreated entry being treated as a squat that leaves the migrated data stranded.
+    /// </summary>
+    [Fact]
+    public void InterruptedSwap_WithARecreatedRoot_InstallsTheMigratedTree()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows ACLs");
+        var scratch = NewScratch();
+        try
+        {
+            var root = Path.Combine(scratch, "TotallyHotArcRouter");
+            var staging = DataDirectoryMigrationRules.NewStagingPath(root);
+            WindowsDataDirectorySecurity.CreateProtected(staging, TestPolicy);
+            Write(staging, "transcripts.db", "migrated rows");
+            Directory.CreateDirectory(DataDirectoryMigrationRules.NewRetiredPath(root));
+            Directory.CreateDirectory(root);
+            Write(root, "recreated.txt", "after the crash");
+
+            var result = Migrate(root);
+
+            Assert.Equal(DataDirectoryMigrationOutcome.AlreadyProtected, result.Outcome);
+            Assert.Equal("migrated rows", File.ReadAllText(Path.Combine(root, "transcripts.db")));
+            var aside = Assert.Single(Directory.EnumerateDirectories(scratch, "TotallyHotArcRouter.squatted-*"));
+            Assert.Equal("after the crash", File.ReadAllText(Path.Combine(aside, "recreated.txt")));
+            Assert.Empty(DataDirectoryMigrationRules.FindRetired(root));
+        }
+        finally
+        {
+            DeleteScratch(scratch);
+        }
+    }
+
     [Fact]
     public void UnprotectedStagingLookalike_IsNotResumed()
     {

@@ -144,7 +144,8 @@ public sealed class DataDirectoryBootstrapTests
             new DirectoryInfo(machineWide).SetAccessControl(security);
 
             var ex = Assert.Throws<DataDirectoryNotProtectedException>(() => Decide(scratch, machineWide, elevated: true));
-            Assert.Contains("cannot write", ex.Message);
+            // A deny on a policy account now fails inspection itself, before the write probe is reached.
+            Assert.Contains("denies access", ex.Message);
 
             var unelevated = Decide(scratch, machineWide, elevated: false);
             Assert.True(unelevated.MachineWideUnavailable);

@@ -117,6 +117,40 @@ public sealed class WindowsDataDirectorySecurityTests
         }
     }
 
+    /// <summary>
+    /// Granting only the right accounts is not enough: each must hold full control inherited by every file
+    /// and folder, or the service could not read its own databases.
+    /// </summary>
+    [Fact]
+    public void Inspect_ProtectedDirectoryMissingAPolicyAccountsFullControl_IsUnprotected()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows ACLs");
+        var scratch = NewScratch();
+        try
+        {
+            var root = Path.Combine(scratch, "root");
+            var security = new DirectorySecurity();
+            security.SetOwner(CurrentUser);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(CurrentUser, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None,
+                AccessControlType.Allow));
+            // SYSTEM may only create files, and Administrators get nothing.
+            security.AddAccessRule(new FileSystemAccessRule(WindowsDirectoryPolicy.LocalSystem,
+                FileSystemRights.CreateFiles, AccessControlType.Allow));
+            new DirectoryInfo(root).Create(security);
+
+            var inspection = WindowsDataDirectorySecurity.Inspect(root, TestPolicy);
+
+            Assert.Equal(DataDirectoryState.Unprotected, inspection.State);
+            Assert.Contains("inherited full control", inspection.Reason);
+        }
+        finally
+        {
+            DeleteScratch(scratch);
+        }
+    }
+
     [Fact]
     public void Inspect_UnderTheMachinePolicy_ADirectoryThisAccountOwns_IsNotTrusted()
     {

@@ -83,6 +83,30 @@ public sealed class EmbeddingOptions
     public int MaxTokens { get; init; } = 512;
 
     /// <summary>
+    /// Returns the identity stored beside every embedding and trained artifact, so vectors from different
+    /// weights are never compared: <see cref="ModelUrl"/>, followed by <c>#sha256=</c> and
+    /// <c>#tokenizer-sha256=</c> segments for any pinned hash that differs from its default. The default
+    /// configuration's identity stays exactly the URL, which is what every stored vector carried before the
+    /// hashes existed, so this introduces no spurious model change. An operator who repoints a hash without
+    /// touching the mutable <c>resolve/main</c> URL - because upstream changed - gets a new identity, and the
+    /// old vectors are no longer treated as comparable.
+    /// </summary>
+    public string ResolveModelIdentity()
+    {
+        var identity = ModelUrl;
+
+        if (!string.IsNullOrWhiteSpace(ModelSha256) &&
+            !string.Equals(ModelSha256, DefaultModelSha256, StringComparison.OrdinalIgnoreCase))
+            identity += "#sha256=" + ModelSha256.Trim().ToLowerInvariant();
+
+        if (!string.IsNullOrWhiteSpace(TokenizerJsonSha256) &&
+            !string.Equals(TokenizerJsonSha256, DefaultTokenizerJsonSha256, StringComparison.OrdinalIgnoreCase))
+            identity += "#tokenizer-sha256=" + TokenizerJsonSha256.Trim().ToLowerInvariant();
+
+        return identity;
+    }
+
+    /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.
     /// </summary>
     /// <exception cref="ArgumentException">Thrown when a required URL is not an absolute URI.</exception>

@@ -77,13 +77,13 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
 
     /// <inheritdoc/>
     /// <remarks>
-    /// The configured <see cref="EmbeddingOptions.ModelUrl"/>, which is what actually determines the
-    /// weights this session loads. Deliberately not combined with
-    /// <see cref="EmbeddingOptions.EmbeddingDimension"/>: that is a separate invariant already enforced by
-    /// its own length checks, and folding it in here would report a <em>model</em> change when only the
-    /// declared dimension was edited.
+    /// <see cref="EmbeddingOptions.ResolveModelIdentity"/>: the configured model URL, plus any non-default
+    /// pinned hash, since together they determine the weights and tokenizer this session loads. Deliberately
+    /// not combined with <see cref="EmbeddingOptions.EmbeddingDimension"/>: that is a separate invariant
+    /// already enforced by its own length checks, and folding it in here would report a <em>model</em> change
+    /// when only the declared dimension was edited.
     /// </remarks>
-    public string ModelIdentity => _options.ModelUrl;
+    public string ModelIdentity => _options.ResolveModelIdentity();
 
     /// <inheritdoc/>
     public async Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)

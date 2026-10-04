@@ -110,4 +110,25 @@ public class EmbeddingOptionsTests
             actualString: LlmRouterOptions.ResolveModelsRootDirectory(),
             comparisonType: StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void ModelIdentity_ForTheDefaults_IsExactlyTheUrl_SoStoredVectorsStayComparable()
+    {
+        var options = new EmbeddingOptions();
+
+        Assert.Equal(options.ModelUrl, options.ResolveModelIdentity());
+    }
+
+    [Fact]
+    public void ModelIdentity_ChangesWhenAPinnedHashIsRepointed_EvenWithTheSameUrl()
+    {
+        var defaults = new EmbeddingOptions();
+        var newModel = new EmbeddingOptions { ModelSha256 = new string('a', 64) };
+        var newTokenizer = new EmbeddingOptions { TokenizerJsonSha256 = new string('b', 64) };
+
+        Assert.NotEqual(defaults.ResolveModelIdentity(), newModel.ResolveModelIdentity());
+        Assert.NotEqual(defaults.ResolveModelIdentity(), newTokenizer.ResolveModelIdentity());
+        Assert.NotEqual(newModel.ResolveModelIdentity(), newTokenizer.ResolveModelIdentity());
+        Assert.StartsWith(defaults.ModelUrl, newModel.ResolveModelIdentity());
+    }
 }
