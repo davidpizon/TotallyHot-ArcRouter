@@ -146,7 +146,7 @@ public sealed class ProxyServerWebInterfaceTests
     /// override. The history is 500 rows at 13 KB of text each, about 6.6 MB in full, plus one row with a 4 MiB
     /// prompt. The call succeeds, and every row arrives as a preview.
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 5000)]
     public async Task WebPort_ListPersistedSessions_HeavyHistory_LoadsUnderTheDefaultClientReceiveCap()
     {
         var hugePrompt = new string('p', 4 * 1024 * 1024);

@@ -132,7 +132,8 @@ only, and a session's text is read from its file when the session is opened.
 ## More Information
 
 - Plan and decisions: [`docs/plans/issue-179-persisted-sessions-list-size.md`](../plans/issue-179-persisted-sessions-list-size.md),
-  approved by David on 2026-10-03 with every §10 decision at its default.
+  approved by David on 2026-10-03 with every §10 decision at its default except decision 6:
+  David chose this ADR before Phase 1 over the default of none.
 - Storage direction and end state: [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md).
 - The GUI transport this contract runs on: [ADR-0011](0011-router-served-blazor-webassembly-gui-over-grpc-web.md).
 - Related plan: [`docs/plans/issue-176-sessions-three-pane.md`](../plans/issue-176-sessions-three-pane.md),

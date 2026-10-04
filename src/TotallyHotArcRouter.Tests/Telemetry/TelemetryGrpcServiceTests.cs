@@ -300,7 +300,7 @@ public class TelemetryGrpcServiceTests
     /// of CJK previews come to about 6 MB. The byte budget cuts the list, reports <c>has_more</c>, and keeps the
     /// newest rows, each one whole.
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 5000)]
     public async Task ListPersistedSessions_CjkTextAtTheGuiRowLimit_IsCutByTheBudgetToTheNewestWholeRows()
     {
         var cjk = new string('漢', 5_000);
@@ -333,7 +333,7 @@ public class TelemetryGrpcServiceTests
     /// with <c>has_more</c> set. Every length prefix is 4 bytes throughout, so a row's size grows one byte per
     /// filler byte.
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 5000)]
     public async Task ListPersistedSessions_RowLandingExactlyOnTheBudget_IsReturnedAndOneByteMoreIsNot()
     {
         const int probeLength = 3_000_000;
@@ -357,7 +357,7 @@ public class TelemetryGrpcServiceTests
     /// only by Kestrel's default 30,000,000-byte request body limit, and a row is persisted even when the
     /// provider rejects the prompt. Now the row loads as a preview that says it was cut, with its stored length.
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 5000)]
     public async Task ListPersistedSessions_OneRowWithAFourMebibytePrompt_LoadsAsAFlaggedPreview()
     {
         var prompt = new string('p', 4 * 1024 * 1024);

@@ -647,7 +647,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     /// Storage guard for #179: the Sessions tab's list is cut to previews, but nothing written to the store may
     /// be. Text over 4 MiB on both sides round-trips exactly, through both the write and the full-row read.
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 5000)]
     public async Task InsertAsync_TextOverFourMebibytes_RoundTripsExactly()
     {
         var prompt = new string('p', 4 * 1024 * 1024 + 1);
