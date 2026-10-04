@@ -119,12 +119,20 @@ public sealed class AppDataPathsTests
         var original = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
         // systemd's LogsDirectory= can be colon-separated when a unit names more than one directory -
         // only the first is used, matching ResolveMachineSharedDirectory's own STATE_DIRECTORY handling.
-        Environment.SetEnvironmentVariable("LOGS_DIRECTORY", "/var/log/totallyhot-arcrouter:/var/log/extra");
+        // Off Windows the first directory is verified and, when missing, created owner-only (ADR-0024), so it
+        // must be a scratch path rather than the real /var/log one, which a test account cannot create.
+        var first = OperatingSystem.IsWindows()
+            ? "/var/log/totallyhot-arcrouter"
+            : Path.Combine(TestScratchDirectory.RunRoot, "logs-" + Guid.NewGuid().ToString("N")[..8]);
+        Environment.SetEnvironmentVariable("LOGS_DIRECTORY", first + ":/var/log/extra");
         try
         {
             var directory = AppDataPaths.ResolveLogsDirectory();
 
-            Assert.Equal(expected: "/var/log/totallyhot-arcrouter", actual: directory);
+            Assert.Equal(expected: first, actual: directory);
+            if (!OperatingSystem.IsWindows())
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                    File.GetUnixFileMode(first));
         }
         finally
         {

@@ -192,8 +192,8 @@ public sealed class UnixDataDirectoryMigration
         WriteMarker(_root);
 
         _logger.Warning(
-            "The data directory {Root} was owned by {Owner}, not by root, the service account or the installing account, so nothing in it can be trusted. It was renamed to {SetAside} untouched, and a fresh protected directory was created. An administrator should review {SetAside} and delete it.",
-            _root, inspection.Owner ?? "an unknown account", aside, aside);
+            "The data directory {Root} was owned by {Owner}, not by root, the service account or the installing account, so nothing in it can be trusted. It was renamed to {SetAside} untouched, and a fresh protected directory was created. An administrator should review that copy and delete it.",
+            _root, inspection.Owner ?? "an unknown account", aside);
 
         return new DataDirectoryMigrationResult(DataDirectoryMigrationOutcome.SquatSetAside, SetAsidePath: aside);
     }

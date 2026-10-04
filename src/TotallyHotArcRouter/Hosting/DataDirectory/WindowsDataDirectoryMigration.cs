@@ -197,8 +197,8 @@ public sealed class WindowsDataDirectoryMigration
         WindowsDataDirectorySecurity.CreateProtected(_root, _policy);
 
         _logger.Warning(
-            "The data directory {Root} was owned by {Owner}, not by SYSTEM, Administrators or the installing account, so nothing in it can be trusted. It was renamed to {SetAside} untouched, and a fresh protected directory was created. An administrator should review {SetAside} - it may still hold the operator's data - and delete it.",
-            _root, inspection.Owner ?? "an unknown account", aside, aside);
+            "The data directory {Root} was owned by {Owner}, not by SYSTEM, Administrators or the installing account, so nothing in it can be trusted. It was renamed to {SetAside} untouched, and a fresh protected directory was created. An administrator should review that copy - it may still hold the operator's data - and delete it.",
+            _root, inspection.Owner ?? "an unknown account", aside);
 
         return new DataDirectoryMigrationResult(DataDirectoryMigrationOutcome.SquatSetAside, SetAsidePath: aside);
     }
