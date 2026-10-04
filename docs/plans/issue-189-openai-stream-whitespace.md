@@ -1,6 +1,6 @@
 # Plan: Keep whitespace-only deltas in OpenAI-shaped streamed replies (#189)
 
-**Status:** Approved by David on 2026-10-03, in the Claude Code session that drafted it ("approved, start implementing"), with D1–D3 as recorded at the end of this plan. Implementation is on branch `fix/189-openai-stream-whitespace`.
+**Status:** Approved by David on 2026-10-03, in the Claude Code session that drafted it ("approved, start implementing"), with D1–D3 as recorded at the end of this plan. Implemented in [#191](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/191), which merged into the plan branch, so [#190](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/190) carries both the plan and the implementation.
 **Issue:** [#189](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/189) — "OpenAI-shaped streamed replies lose whitespace-only deltas in transcripts and telemetry".
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request must link this plan once approved.
 **Related:** [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (proposed) lists this bug under "Found during the investigation, tracked separately". This plan is that item. The fix does not depend on where text is stored: under ADR-0019 the per-session files hold the same per-turn reply extract, produced by the same parser. See also the [#165](issue-165-export-import-history.md) and [#179](issue-179-persisted-sessions-list-size.md) plans.
