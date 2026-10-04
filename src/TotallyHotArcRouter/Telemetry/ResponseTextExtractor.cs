@@ -25,7 +25,8 @@ public interface IResponseTextExtractor
     /// <param name="text">The extracted text, when this method returns <see langword="true"/>.</param>
     /// <returns>
     /// <see langword="true"/> if text could be determined; otherwise <see langword="false"/> (unknown provider,
-    /// malformed/truncated body, or no text content in the response).
+    /// malformed/truncated body, or no non-blank text in the response). Text is returned verbatim: whitespace
+    /// inside the reply, including whitespace-only stream deltas, is kept.
     /// </returns>
     bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out string text);
 }

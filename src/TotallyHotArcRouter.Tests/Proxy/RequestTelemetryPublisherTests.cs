@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -8,6 +9,8 @@ using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
+using AnthropicSse = TotallyHot.ArcRouter.Tests.Telemetry.AnthropicResponseTextParserTests;
+using OpenAiSse = TotallyHot.ArcRouter.Tests.Telemetry.OpenAiResponseTextParserTests;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -287,6 +290,76 @@ public class RequestTelemetryPublisherTests
         Assert.NotNull(transcriptStore.LastInserted);
         Assert.Equal(expected: "kimi-k2.5", actual: transcriptStore.LastInserted!.UntrainedBaselineModel);
         Assert.Equal(0.62, actual: transcriptStore.LastInserted.UntrainedBaselinePredictedScore);
+    }
+
+    // #189: a translated route with no native capture (Gemini here) is parsed as an OpenAI-shaped stream, and
+    // its whitespace-only deltas must reach both the persisted transcript row and the live event intact.
+    [Fact]
+    public async Task PublishAsync_TranslatedStreamWithWhitespaceOnlyDeltas_PersistsExactResponseText()
+    {
+        var telemetryPublisher = new FakeTelemetryPublisher();
+        var transcriptStore = new CapturingTranscriptStore();
+        var publisher = CreatePublisher(
+            telemetryPublisher: telemetryPublisher,
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: new StaticOptionsMonitor<RoutingOptions>(
+                new RoutingOptions { EnableAdaptiveRouting = true }));
+
+        var clientShapeBytes = Encoding.UTF8.GetBytes(
+            OpenAiSse.BuildSse("Hello", "\n\n", "World", "\n", "    ", "x = 1"));
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-whitespace"),
+            route: CreateRoute(provider: "gemini", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: clientShapeBytes,
+            nativeResponseBytes: null,
+            isStreaming: true,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        const string expected = "Hello\n\nWorld\n    x = 1";
+        Assert.Equal(expected: expected, actual: transcriptStore.LastInserted?.ResponseText);
+        Assert.Equal(expected: expected, actual: Assert.Single(telemetryPublisher.PublishedEvents).ResponseSummary);
+    }
+
+    // #189's correction: translated direct-Anthropic traffic takes its text from the native capture (parsed by
+    // AnthropicResponseTextParser) whenever that capture yields usage, not from the OpenAI-shaped client copy.
+    [Fact]
+    public async Task PublishAsync_TranslatedAnthropicWithNativeBytes_TakesTextFromNativeCapture()
+    {
+        var telemetryPublisher = new FakeTelemetryPublisher();
+        var transcriptStore = new CapturingTranscriptStore();
+        var publisher = CreatePublisher(
+            telemetryPublisher: telemetryPublisher,
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: new StaticOptionsMonitor<RoutingOptions>(
+                new RoutingOptions { EnableAdaptiveRouting = true }));
+
+        var nativeBytes = Encoding.UTF8.GetBytes(AnthropicSse.BuildSse("Native", "\n\n", "    text"));
+        var clientShapeBytes = Encoding.UTF8.GetBytes(OpenAiSse.BuildSse("client-shape copy"));
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-native-text"),
+            route: CreateRoute(provider: "anthropic", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: clientShapeBytes,
+            nativeResponseBytes: nativeBytes,
+            isStreaming: true,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "Native\n\n    text", actual: transcriptStore.LastInserted?.ResponseText);
     }
 
     [Fact]
