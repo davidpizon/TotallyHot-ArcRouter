@@ -20,6 +20,22 @@ Group=arcrouter
 StateDirectory=totallyhot-arcrouter
 LogsDirectory=totallyhot-arcrouter
 
+# ADR-0024: owner-only. Without these, systemd's defaults leave both directories 0755 and every file the
+# router creates readable by any local account (a 022 umask). 0700 on a directory keeps every other account
+# away from everything beneath it; UMask=0077 makes new files 0600 as well. The router also refuses to
+# start on a state or logs directory with group or other bits, or one install.sh never migrated.
+StateDirectoryMode=0700
+LogsDirectoryMode=0700
+UMask=0077
+
+# The public copy of the local CA certificate (PublicCaCertificate), which users import by path - the
+# state directory above is no longer readable to them. Mode set explicitly (the default would follow the
+# 0077 umask) and preserved across restarts so a client's NODE_EXTRA_CA_CERTS path does not vanish with
+# every service restart. systemd makes the service account its owner, so the router can rewrite it.
+RuntimeDirectory=totallyhot-arcrouter
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+
 # Hardening: ProtectSystem=strict makes the whole filesystem read-only except for the State/Logs
 # directories above (which systemd exempts automatically); NoNewPrivileges blocks privilege escalation
 # via setuid/setcap binaries; PrivateTmp/ProtectHome keep /tmp and other users' home directories out of

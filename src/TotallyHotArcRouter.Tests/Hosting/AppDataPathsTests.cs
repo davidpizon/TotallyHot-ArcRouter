@@ -7,9 +7,10 @@ namespace TotallyHot.ArcRouter.Tests.Hosting;
 /// <summary>
 /// Covers <see cref="AppDataPaths"/>'s contract and the test-run redirect (<see cref="TestAppDataDirectory"/>)
 /// that keeps this suite out of the real data directory. Nothing here touches the real machine-wide
-/// directory: the platform candidates are checked as pure path computations, and the fallback chain is
-/// driven through <see cref="AppDataPaths.SelectUsableDirectory"/> with temp candidates instead of
-/// write-probing <c>%ProgramData%</c> the way production resolution does. The Linux/macOS candidate
+/// directory: the platform candidates are checked as pure path computations. The fallback chain, which
+/// ADR-0024 moved into <see cref="TotallyHot.ArcRouter.Hosting.DataDirectory.DataDirectoryBootstrap"/>, is
+/// covered by <c>DataDirectoryBootstrapTests</c> with temp candidates instead of the real
+/// <c>%ProgramData%</c>. The Linux/macOS candidate
 /// selection was verified for real on a Linux container during Phase P3 - see the web GUI migration
 /// plan's P3 status section for that run's output, including a real bug (a last-resort/apphost filename
 /// collision) it caught.
@@ -92,75 +93,6 @@ public sealed class AppDataPathsTests
 
         Assert.Equal(expected: Path.Combine(path1: programData, path2: AppDataPaths.ApplicationDirectoryName),
             actual: AppDataPaths.MachineWideCandidate());
-    }
-
-    [Fact]
-    public void SelectUsableDirectory_WritableMachineWide_IsChosenAndLeftWithoutAProbeFile()
-    {
-        var scratch = Directory.CreateTempSubdirectory().FullName;
-        try
-        {
-            var machineWide = Path.Combine(path1: scratch, path2: "machine");
-            var perUser = Path.Combine(path1: scratch, path2: "user");
-
-            var chosen = AppDataPaths.SelectUsableDirectory(machineWide: machineWide, perUser: perUser,
-                lastResort: Path.Combine(path1: scratch, path2: "last"));
-
-            Assert.Equal(expected: machineWide, actual: chosen);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(machineWide));
-            Assert.False(Directory.Exists(perUser));
-        }
-        finally
-        {
-            Directory.Delete(path: scratch, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void SelectUsableDirectory_UnusableMachineWide_FallsBackToPerUser()
-    {
-        var scratch = Directory.CreateTempSubdirectory().FullName;
-        try
-        {
-            // A directory can't be created beneath a file on any platform - a deterministic stand-in for a
-            // machine-wide directory this account may not write to.
-            var blocker = Path.Combine(path1: scratch, path2: "blocker");
-            File.WriteAllText(path: blocker, contents: string.Empty);
-            var perUser = Path.Combine(path1: scratch, path2: "user");
-
-            var chosen = AppDataPaths.SelectUsableDirectory(
-                machineWide: Path.Combine(path1: blocker, path2: "machine"), perUser: perUser,
-                lastResort: Path.Combine(path1: scratch, path2: "last"));
-
-            Assert.Equal(expected: perUser, actual: chosen);
-        }
-        finally
-        {
-            Directory.Delete(path: scratch, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void SelectUsableDirectory_NeitherCandidateUsable_CreatesTheLastResort()
-    {
-        var scratch = Directory.CreateTempSubdirectory().FullName;
-        try
-        {
-            var blocker = Path.Combine(path1: scratch, path2: "blocker");
-            File.WriteAllText(path: blocker, contents: string.Empty);
-            var lastResort = Path.Combine(path1: scratch, path2: "last");
-
-            var chosen = AppDataPaths.SelectUsableDirectory(
-                machineWide: Path.Combine(path1: blocker, path2: "machine"),
-                perUser: Path.Combine(path1: blocker, path2: "user"), lastResort: lastResort);
-
-            Assert.Equal(expected: lastResort, actual: chosen);
-            Assert.True(Directory.Exists(lastResort));
-        }
-        finally
-        {
-            Directory.Delete(path: scratch, recursive: true);
-        }
     }
 
     [Fact]

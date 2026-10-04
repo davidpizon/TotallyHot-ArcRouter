@@ -43,7 +43,16 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
 fi
 
 echo "==> Stopping any existing service before the file swap"
-systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
+# A unit that does not exist yet (first install) is fine; any other failure to stop is not. ADR-0024's
+# migration below copies files out from under the old tree, so a router still writing to it would lose
+# those writes - the stop must really have happened.
+if systemctl cat "${SERVICE_NAME}.service" >/dev/null 2>&1; then
+    systemctl stop "${SERVICE_NAME}.service"
+fi
+if systemctl is-active --quiet "${SERVICE_NAME}.service"; then
+    echo "${SERVICE_NAME}.service is still running; stop it and run install.sh again." >&2
+    exit 1
+fi
 
 echo "==> Installing binaries to ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
@@ -52,8 +61,13 @@ cp -a "${RELEASE_ROOT}/." "${INSTALL_DIR}/"
 chown -R root:root "${INSTALL_DIR}"
 chmod 755 "${INSTALL_DIR}/TotallyHotArcRouter"
 
-echo "==> Preparing state and log directories"
-mkdir -p "${STATE_DIR}" "${LOGS_DIR}"
+echo "==> Protecting the state and log directories (ADR-0024)"
+# Creates both directories owner-only (0700, owned by the service account), or migrates directories an
+# older install left at 0755 into new owner-only trees. Stops - leaving the old trees locked - if a
+# process still holds a file in them open for writing. SUDO_UID, which sudo sets, names the installing
+# user, whose own files may be migrated; anything owned by another account is left behind, locked.
+STATE_DIRECTORY="${STATE_DIR}" LOGS_DIRECTORY="${LOGS_DIR}" \
+    "${INSTALL_DIR}/TotallyHotArcRouter" --migrate-data-directory --service-account="${SERVICE_USER}"
 
 echo "==> Installing the systemd unit"
 cp "${SCRIPT_DIR}/totallyhot-arcrouter.service" "/etc/systemd/system/${SERVICE_NAME}.service"
@@ -67,11 +81,16 @@ echo "==> Generating (or reusing) the router's local CA and trusting it system-w
 # account below once generation is done.
 STATE_DIRECTORY="${STATE_DIR}" "${INSTALL_DIR}/TotallyHotArcRouter" --install-certificate
 
+# The CA step above ran as root, so hand anything it created to the service account and keep it
+# owner-only. chown -R and chmod -R do not follow symbolic links met during the walk, and only root and
+# the service account can write into these 0700 trees.
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${STATE_DIR}" "${LOGS_DIR}"
+chmod -R go-rwx "${STATE_DIR}" "${LOGS_DIR}"
 
 echo "==> Enabling and starting ${SERVICE_NAME}.service"
 systemctl enable --now "${SERVICE_NAME}.service"
 
 echo "Installed. Check status with: systemctl status ${SERVICE_NAME}.service"
+echo "The local CA certificate for clients is published at /run/${SERVICE_NAME}/router-ca.crt."
 echo "Print the MCP/gRPC management token with:"
 echo "  sudo -u ${SERVICE_USER} STATE_DIRECTORY=${STATE_DIR} ${INSTALL_DIR}/TotallyHotArcRouter --print-management-token"

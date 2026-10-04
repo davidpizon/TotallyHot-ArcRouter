@@ -69,10 +69,15 @@ WORKDIR /app
 # Non-root: matches every other install path's posture (packaging/linux and packaging/macos also run
 # the router itself as a dedicated unprivileged account - only the one-time cert-trust step in each
 # runs elevated, and there is no equivalent OS trust store to touch inside a container).
+# ADR-0024: /data is owner-only (0700), and Docker copies that mode onto a new named volume. /public holds
+# the CA's public certificate, which the router republishes on every start for clients to copy out
+# (docker cp <container>:/public/router-ca.crt .) without opening /data.
 RUN groupadd --system arcrouter \
     && useradd --system --no-create-home --gid arcrouter arcrouter \
-    && mkdir -p /data \
-    && chown -R arcrouter:arcrouter /data
+    && mkdir -p /data /public \
+    && chown -R arcrouter:arcrouter /data /public \
+    && chmod 0700 /data \
+    && chmod 0755 /public
 
 COPY --from=build /app/publish .
 RUN chown -R arcrouter:arcrouter /app
@@ -84,6 +89,9 @@ USER arcrouter
 # router state (secrets, the local CA, SQLite databases, trained model artifacts, and - via
 # ResolveLogsDirectory()'s own fallback - logs under /data/logs) without any other environment variable.
 ENV STATE_DIRECTORY=/data
+# Lets the router migrate an older, 0755 named volume in place at startup (ContainerDataDirectoryMigration),
+# which is safe only inside a container, and points the public CA certificate at /public.
+ENV TOTALLYHOT_ARCROUTER_CONTAINER=1
 # Widened for the Docker case: "loopback" inside the container's own network namespace is not reachable
 # from the host at all without this. Still requires trusting the local CA and/or `docker run -p` mapping
 # only to 127.0.0.1 on the host, same as any other loopback-only-by-default service.
@@ -93,4 +101,6 @@ ENV Mcp__BindAddress=0.0.0.0
 
 EXPOSE 47101 47103 47104
 
-ENTRYPOINT ["dotnet", "TotallyHotArcRouter.dll"]
+# umask 077 so every file the router creates in /data is owner-only (ADR-0024). The shell execs dotnet, so
+# it stays PID 1 and receives docker stop's signal; "$@" passes any docker run arguments through.
+ENTRYPOINT ["/bin/sh", "-c", "umask 077 && exec dotnet TotallyHotArcRouter.dll \"$@\"", "--"]

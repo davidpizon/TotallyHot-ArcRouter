@@ -1,3 +1,6 @@
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -30,9 +33,10 @@ public sealed record WebInterfaceDiscoveryInfo(string? WebUrl, string? CaThumbpr
 /// <summary>
 /// Reads and writes <see cref="WebInterfaceDiscoveryInfo"/> at a fixed, machine-shared path. Not a
 /// secret: the URL and CA thumbprint are exactly what a legitimate client needs to find and trust the
-/// router, and both are otherwise discoverable by anyone who can already reach the machine, so this file
-/// uses the same default permissions as <see cref="StorageOptions"/>'s other machine-shared files rather
-/// than <c>SecureFile</c>'s locked-down ACL.
+/// router, and both are otherwise discoverable by anyone who can already reach the machine. So on Windows
+/// it carries an explicit <c>BUILTIN\Users</c> read rule (ADR-0024 rule 4): the data directory around it
+/// grants only <c>SYSTEM</c> and <c>Administrators</c>, and the unelevated tray reads this file by its full
+/// path, which needs no traverse right on the directory.
 /// </summary>
 public static class WebInterfaceDiscoveryFile
 {
@@ -65,6 +69,30 @@ public static class WebInterfaceDiscoveryFile
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
         File.WriteAllText(path: resolvedPath, contents: JsonSerializer.Serialize(value: info, options: SerializerOptions));
+
+        if (OperatingSystem.IsWindows()) GrantUsersRead(resolvedPath);
+    }
+
+    /// <summary>
+    /// Adds an explicit read rule for <c>BUILTIN\Users</c> to <paramref name="path"/>, keeping whatever it
+    /// inherits. The rule is added once and survives later rewrites, which keep the file's security.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void GrantUsersRead(string path)
+    {
+        var users = new SecurityIdentifier(sidType: WellKnownSidType.BuiltinUsersSid, null);
+        var file = new FileInfo(path);
+        var security = file.GetAccessControl();
+
+        var alreadyGranted = security.GetAccessRules(includeExplicit: true, includeInherited: true,
+                targetType: typeof(SecurityIdentifier)).OfType<FileSystemAccessRule>()
+            .Any(rule => rule.AccessControlType == AccessControlType.Allow && users.Equals(rule.IdentityReference) &&
+                         rule.FileSystemRights.HasFlag(FileSystemRights.Read));
+        if (alreadyGranted) return;
+
+        security.AddAccessRule(new FileSystemAccessRule(identity: users, fileSystemRights: FileSystemRights.Read,
+            type: AccessControlType.Allow));
+        file.SetAccessControl(security);
     }
 
     /// <summary>

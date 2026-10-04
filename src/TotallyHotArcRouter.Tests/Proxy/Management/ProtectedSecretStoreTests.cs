@@ -342,60 +342,106 @@ public sealed class ProtectedSecretStoreTests
     }
 
     /// <summary>
-    /// ADR-0015's regression test, and the one that would have caught the installer failure it fixes: the
-    /// store must be readable by <c>LocalSystem</c>, because that is the account the installed service runs
-    /// as. Before ADR-0015 the store was written through <c>SecureFile.WriteRestricted</c>, whose protected
-    /// DACL held exactly one rule granting the creating user - so a store created by a developer running
-    /// the router directly locked the service out, the host failed to start with
-    /// <see cref="UnauthorizedAccessException"/>, and the MSI reported only "Service ... failed to start.
-    /// Verify that you have sufficient privileges".
+    /// ADR-0024 rule 5, the machine-wide half: <see cref="SecureFile.WriteMachineShared"/> grants
+    /// <c>LocalSystem</c> and <c>Administrators</c> full control and nobody else - no <c>BUILTIN\Users</c>
+    /// (ADR-0015) and, new with ADR-0024, no rule for the writing account, which had handed every unelevated
+    /// application that account ran read access after any administrative rewrite.
     /// </summary>
     /// <remarks>
-    /// Asserts through the public <see cref="ProtectedSecretStore.Write"/> API rather than calling
-    /// <c>SecureFile</c> directly, so it also covers the part that made the ACL easy to get wrong: the store
-    /// writes a temp file and renames it over the real path, and the assertion only holds because a move
-    /// within one volume carries the explicit DACL with it.
+    /// An unelevated test process cannot finish such a write - that is the point - so the content write is
+    /// allowed to fail with <see cref="UnauthorizedAccessException"/>, and the ACL is read back as the file's
+    /// owner, which keeps the right to read and reset it.
     /// </remarks>
     [Fact]
-    public void Write_ProtectsTheStoreForLocalSystemAndAdministratorsOnly()
+    public void WriteMachineShared_GrantsOnlyLocalSystemAndAdministrators_NotTheWriter()
     {
         if (!IsWindows) return;
 
         var path = TempStorePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         try
         {
-            new ProtectedSecretStore(path).Write(name: "management:token", value: "token-value");
+            try
+            {
+                SecureFile.WriteMachineShared(path: path, content: "secret"u8.ToArray());
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Expected unelevated: the ACL no longer names the writer.
+            }
 
             var rules = new FileInfo(path).GetAccessControl()
                 .GetAccessRules(includeExplicit: true, includeInherited: true, targetType: typeof(SecurityIdentifier))
                 .Cast<FileSystemAccessRule>()
                 .ToList();
 
-            // Inheritance is broken, so these rules are the file's complete access list - had any inherited
-            // rule survived, "no Users access" below would be vacuous rather than a real boundary.
-            Assert.All(rules, rule => Assert.False(rule.IsInherited));
-
             var localSystem = new SecurityIdentifier(sidType: WellKnownSidType.LocalSystemSid, null);
             var administrators = new SecurityIdentifier(sidType: WellKnownSidType.BuiltinAdministratorsSid, null);
-            var users = new SecurityIdentifier(sidType: WellKnownSidType.BuiltinUsersSid, null);
 
+            // Inheritance is broken, so these rules are the file's complete access list.
+            Assert.All(rules, rule => Assert.False(rule.IsInherited));
+            Assert.All(rules, rule => Assert.True(rule.IdentityReference.Equals(localSystem) ||
+                                                  rule.IdentityReference.Equals(administrators)));
             Assert.Contains(rules, rule => rule.IdentityReference.Equals(localSystem)
-                                           && rule.AccessControlType == AccessControlType.Allow
                                            && rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
             Assert.Contains(rules, rule => rule.IdentityReference.Equals(administrators)
-                                           && rule.AccessControlType == AccessControlType.Allow
                                            && rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
+        }
+        finally
+        {
+            RestoreAccess(path);
+            CleanUp(path);
+        }
+    }
 
-            // The tightening half of ADR-0015: WriteMachineShared used to grant Users read so the
-            // interactive-user GUI could read the shared management token, which ADR-0012's loopback session
-            // cookie made unnecessary. Any local account is admin-adjacent for this file otherwise, since
-            // LocalMachine-scoped DPAPI lets whoever can read the bytes decrypt them.
-            Assert.DoesNotContain(rules, rule => rule.IdentityReference.Equals(users));
+    /// <summary>
+    /// ADR-0024 rule 5, the per-user half: a store outside the protected machine-wide directory - the
+    /// per-user fallback an unelevated process uses, or any explicit path - is written with a
+    /// current-user-only ACL, so an unelevated writer never locks itself out of its own store.
+    /// </summary>
+    /// <remarks>
+    /// Goes through <see cref="ProtectedSecretStore"/> rather than <c>SecureFile</c> directly, so it also
+    /// covers the temp-file-and-rename the store does: a move within one volume carries the explicit DACL.
+    /// </remarks>
+    [Fact]
+    public void Write_OutsideTheMachineWideDirectory_RestrictsTheStoreToTheWritingAccount()
+    {
+        if (!IsWindows) return;
+
+        var path = TempStorePath();
+        try
+        {
+            var store = new ProtectedSecretStore(path);
+            store.Write(name: "management:token", value: "token-value");
+
+            var rules = new FileInfo(path).GetAccessControl()
+                .GetAccessRules(includeExplicit: true, includeInherited: true, targetType: typeof(SecurityIdentifier))
+                .Cast<FileSystemAccessRule>()
+                .ToList();
+
+            var currentUser = WindowsIdentity.GetCurrent().User!;
+            Assert.All(rules, rule => Assert.False(rule.IsInherited));
+            Assert.All(rules, rule => Assert.Equal(currentUser, rule.IdentityReference));
+
+            // And the writer can still read it back.
+            Assert.True(store.TryRead(name: "management:token", value: out var value));
+            Assert.Equal("token-value", value);
         }
         finally
         {
             CleanUp(path);
         }
+    }
+
+    /// <summary>Gives the current account back control of a file the test restricted, so it can be deleted.</summary>
+    private static void RestoreAccess(string path)
+    {
+        if (!IsWindows || !File.Exists(path)) return;
+
+        var security = new FileSecurity();
+        security.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!,
+            FileSystemRights.FullControl, AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(security);
     }
 
     /// <summary>

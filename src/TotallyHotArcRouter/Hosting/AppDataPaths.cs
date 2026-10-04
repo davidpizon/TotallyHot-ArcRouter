@@ -21,6 +21,9 @@ public static class AppDataPaths
     // variables and file permissions are read once at startup in practice, not toggled mid-run.
     private static string? _cachedDirectory;
 
+    // The verified LOGS_DIRECTORY, once ResolveLogsDirectory has checked it; verification runs once per process.
+    private static string? _cachedLogsDirectory;
+
     // Set only by RedirectForTesting; null in every real process.
     private static string? _perUserRootOverride;
 
@@ -107,34 +110,36 @@ public static class AppDataPaths
         return _cachedDirectory ??= ResolveCore();
     }
 
-    /// <summary>Resolves this platform's candidates and picks the first usable one, uncached.</summary>
+    /// <summary>
+    /// Resolves this platform's candidates and picks the first usable one, uncached. The machine-wide
+    /// candidate goes through <see cref="DataDirectory.DataDirectoryBootstrap"/> first (ADR-0024), which
+    /// uses it only when it is protected, and otherwise falls back to the per-user candidate or stops the
+    /// service.
+    /// </summary>
     private static string ResolveCore()
     {
         // Nested under a "data" segment, not AppContext.BaseDirectory + ApplicationDirectoryName directly:
         // a published Linux/macOS executable's own apphost binary sits right in BaseDirectory, named
         // exactly ApplicationDirectoryName (no extension) for this project - Directory.CreateDirectory
         // would collide with that file. Found by real testing (a Linux container) rather than assumed.
-        return SelectUsableDirectory(machineWide: MachineWideCandidate(), perUser: PerUserCandidate(),
+        return DataDirectory.DataDirectoryBootstrap.Resolve(machineWide: MachineWideCandidate(),
+            perUser: PerUserCandidate(),
             lastResort: Path.Combine(AppContext.BaseDirectory, "data", ApplicationDirectoryName));
     }
 
     /// <summary>
-    /// Returns <paramref name="machineWide"/> if this process can create and write into it, otherwise
-    /// <paramref name="perUser"/> under the same test, otherwise <paramref name="lastResort"/> (created
-    /// unconditionally) - the fallback chain <see cref="ResolveMachineSharedDirectory"/>'s remarks
-    /// describe. Kept separate from candidate selection so tests can drive the chain against temp
-    /// directories instead of write-probing the real machine-wide one.
+    /// Whether <paramref name="directory"/> is the protected, machine-wide data directory this process
+    /// resolved (ADR-0024) - <see langword="false"/> for the per-user fallback, a test redirect, or any other
+    /// path. <see cref="Proxy.Management.ProtectedSecretStore"/> uses it to pick the secret file's ACL.
     /// </summary>
-    /// <param name="machineWide">The preferred, machine-wide directory.</param>
-    /// <param name="perUser">The per-user fallback.</param>
-    /// <param name="lastResort">The directory used when neither candidate is writable.</param>
-    internal static string SelectUsableDirectory(string machineWide, string perUser, string lastResort)
+    internal static bool IsProtectedMachineWideDirectory(string? directory)
     {
-        if (TryEnsureDirectory(machineWide)) return machineWide;
-        if (TryEnsureDirectory(perUser)) return perUser;
+        if (string.IsNullOrEmpty(directory) || !DataDirectory.DataDirectoryBootstrap.UsingProtectedMachineWideDirectory)
+            return false;
 
-        Directory.CreateDirectory(lastResort);
-        return lastResort;
+        return string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(ResolveMachineSharedDirectory())),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -164,14 +169,24 @@ public static class AppDataPaths
     /// absolute path before the process starts, mirroring <see cref="ResolveMachineSharedDirectory"/>'s
     /// own <c>STATE_DIRECTORY</c> handling (including the same colon-separated multi-directory rule).
     /// Falls back to a <c>logs</c> subdirectory of <see cref="ResolveMachineSharedDirectory"/> everywhere
-    /// else - Windows, macOS, and a non-systemd Linux run. Not memoized and performs no directory
-    /// creation of its own: Serilog's file sink creates its target directory on first write.
+    /// else - Windows, macOS, and a non-systemd Linux run, where the logs inherit the verified root's
+    /// protection. A <c>LOGS_DIRECTORY</c> lives outside that root, so the first call verifies it with
+    /// <see cref="DataDirectory.DataDirectoryBootstrap"/>'s rules (creating it owner-only when missing) and
+    /// throws <see cref="DataDirectory.DataDirectoryNotProtectedException"/> when it fails. The
+    /// <c>logs</c> subdirectory itself is created by Serilog's file sink on first write.
     /// </summary>
     public static string ResolveLogsDirectory()
     {
         var logsDirectory = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
         if (!string.IsNullOrWhiteSpace(logsDirectory))
-            return logsDirectory.Split(separator: ':', count: 2)[0];
+        {
+            var first = logsDirectory.Split(separator: ':', count: 2)[0];
+            // Linux keeps its logs outside the state directory, so they do not inherit its protection and
+            // get the same check on their own (ADR-0024). Elsewhere the logs sit inside the verified root.
+            if (!OperatingSystem.IsWindows() && _cachedLogsDirectory is null)
+                DataDirectory.DataDirectoryBootstrap.VerifyUnixLogsDirectory(first);
+            return _cachedLogsDirectory = first;
+        }
 
         return Path.Combine(ResolveMachineSharedDirectory(), "logs");
     }
@@ -239,7 +254,7 @@ public static class AppDataPaths
     /// exists to enable. The probe creates and deletes a uniquely-named temp file inside the directory,
     /// so it exercises the exact permission a real write needs rather than just directory metadata.
     /// </remarks>
-    private static bool TryEnsureDirectory(string directory)
+    internal static bool TryEnsureDirectory(string directory)
     {
         try
         {

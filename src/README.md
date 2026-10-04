@@ -277,7 +277,16 @@ docker run -d --name arcrouter \
 Only loopback-bound ports are published by default; see the `Dockerfile`'s
 own header comment for the full first-time trust setup
 (`--export-ca`/`--print-management-token` via `docker exec`) and
-`docs/router/client-tls-setup.md`.
+`docs/router/client-tls-setup.md`. The CA's public certificate is republished to `/public` on every start:
+`docker cp arcrouter:/public/router-ca.crt .`
+
+`/data` is owner-only (mode `0700`) inside the image
+([ADR-0024](../docs/adr/0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md)), and the
+router makes an older named volume owner-only in place on its first start. Run **one container per volume**:
+the router cannot see another container writing to the same files. A bind mount instead of a named volume
+must be owned by the container's `arcrouter` account with mode `0700`, or the router refuses to start.
+Removing the container keeps the volume, conversations included; `docker volume rm arcrouter-data` deletes
+everything in it.
 
 ## Running tests
 

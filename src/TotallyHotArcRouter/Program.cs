@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
+using TotallyHot.ArcRouter.Hosting.DataDirectory;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
@@ -32,6 +33,17 @@ public static class Program
 
         try
         {
+            // ADR-0024: creates, migrates or repairs the protected data directory. Dispatched before anything
+            // else, and before CreateHostBuilder in particular, because resolving the data directory the normal
+            // way runs the bootstrap that refuses an unprotected directory - the one this command exists to fix.
+            var (migrateDataDirectory, afterMigrateFlag) =
+                ExtractFlag(args: args, flagName: DataDirectoryMigrationCommand.FlagName);
+            if (migrateDataDirectory)
+            {
+                Environment.ExitCode = DataDirectoryMigrationCommand.Run(afterMigrateFlag, Log.Logger);
+                return;
+            }
+
             // Headless/CI replacement for scripts/fetch-coderouterbench.sh
             // (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): stripped before
             // CreateHostBuilder for the same reason --model is, so it never reaches the command-line
@@ -116,6 +128,9 @@ public static class Program
             // connections and HttpClient handlers among them - rather than leaving that to process exit.
             using var host = CreateHostBuilder(remainingArgs).Build();
 
+            // The data-directory bootstrap ran inside CreateHostBuilder, before this logger existed.
+            DataDirectoryBootstrap.FlushPendingEvents(Log.Logger);
+
             if (runBenchmarkDataSync)
             {
                 await RunBenchmarkDataSyncAsync(host.Services);
@@ -155,6 +170,15 @@ public static class Program
             Log.Information("TotallyHot.ArcRouter host created.");
             await host.RunAsync();
         }
+        catch (DataDirectoryNotProtectedException ex)
+        {
+            // ADR-0024: the service fails closed on an unprotected data directory. The file log lives in that
+            // directory, so it was never opened; the Event Log (Windows) or the journal (systemd, via the
+            // console logger) is where an operator will look.
+            Log.Fatal(exception: ex, messageTemplate: "TotallyHot.ArcRouter refused to start: {Reason}", ex.Message);
+            DataDirectoryMigrationCommand.ReportToEventLog(ex.Message);
+            Environment.ExitCode = 1;
+        }
         catch (Exception ex)
         {
             Log.Fatal(exception: ex, messageTemplate: "TotallyHot.ArcRouter host terminated unexpectedly.");
@@ -172,6 +196,8 @@ public static class Program
             // be freed against torn-down native state. Skipping the shutdown entirely is worse: the process
             // can then hang forever inside onnxruntime_genai.dll's DLL_PROCESS_DETACH. See OnnxGenAiShutdown.
             OnnxGenAiShutdown.Process.ShutdownIfUsed();
+            // The command-line paths that never build a host still owe their bootstrap outcomes a log line.
+            DataDirectoryBootstrap.FlushPendingEvents(Log.Logger);
             await Log.CloseAndFlushAsync();
         }
     }
@@ -309,23 +335,32 @@ public static class Program
     }
 
     /// <summary>
-    /// Writes the router's local CA's public certificate (PEM, no private key) to the machine-shared
-    /// data directory and prints its path - the router's <c>--export-ca</c> flag (web GUI migration plan
-    /// Phase P7). Generates the CA first if none exists yet, the same as starting the router normally
-    /// would. Sets a non-zero <see cref="Environment.ExitCode"/> on failure (e.g. an unwritable data
-    /// directory), so a script invoking this headlessly can detect it.
+    /// Writes the router's local CA's public certificate (PEM, no private key) to the public certificate
+    /// directory (<see cref="PublicCaCertificate"/>; ADR-0024 moved it out of the now admin-only data
+    /// directory) and prints its path - the router's <c>--export-ca</c> flag (web GUI migration plan Phase
+    /// P7). Generates the CA first if none exists yet, the same as starting the router normally would. Sets
+    /// a non-zero <see cref="Environment.ExitCode"/> on failure (e.g. a directory this process may not
+    /// write), so a script invoking this headlessly can detect it.
     /// </summary>
     private static void RunExportCa()
     {
         try
         {
+            EnsureServiceDataDirectory();
             using var ca = LocalCertificateAuthority.GetOrCreateCa();
-            var path = Path.Combine(AppDataPaths.ResolveMachineSharedDirectory(), "router-ca.crt");
-            File.WriteAllText(path: path, contents: ca.ExportCertificatePem());
+            var (path, problem) = PublicCaCertificate.Publish(ca);
+            if (path is null)
+            {
+                Log.Error(messageTemplate: "Could not publish the local CA certificate to {Directory}: {Problem}.",
+                    PublicCaCertificate.ResolveDirectory(), problem);
+                Environment.ExitCode = 1;
+                return;
+            }
 
             Log.Information(messageTemplate: "Exported the router's local CA certificate to {Path}.", path);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException
+                                       or InvalidOperationException)
         {
             Log.Error(exception: ex, messageTemplate: "Could not export the local CA certificate.");
             Environment.ExitCode = 1;
@@ -344,6 +379,7 @@ public static class Program
     {
         try
         {
+            EnsureServiceDataDirectory();
             using var ca = LocalCertificateAuthority.GetOrCreateCa();
             ResolveCertificateTrustStore().Install(ca);
 
@@ -367,6 +403,7 @@ public static class Program
     {
         try
         {
+            EnsureServiceDataDirectory();
             using var ca = LocalCertificateAuthority.GetOrCreateCa();
             ResolveCertificateTrustStore().Uninstall(ca);
 
@@ -392,6 +429,7 @@ public static class Program
     {
         try
         {
+            EnsureServiceDataDirectory();
             var token = Proxy.Management.ManagementAccessToken.GetOrCreate();
             Console.WriteLine(token);
         }
@@ -400,6 +438,20 @@ public static class Program
             Log.Error(exception: ex, messageTemplate: "Could not print the management token.");
             Environment.ExitCode = 1;
         }
+    }
+
+    /// <summary>
+    /// Resolves the data directory and throws if this process found the service's protected directory but
+    /// could not use it (ADR-0024). The command-line flags that read the service's state - its CA, its
+    /// management token - would otherwise quietly create and report a separate, per-user copy.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The process is not elevated enough to read the service's data directory.</exception>
+    private static void EnsureServiceDataDirectory()
+    {
+        _ = AppDataPaths.ResolveMachineSharedDirectory();
+        if (DataDirectoryBootstrap.MachineWideDirectoryUnavailable)
+            throw new InvalidOperationException(
+                "This command reads the router service's data directory, which only administrators can open. Run it from an elevated prompt (as root on Linux and macOS, or with sudo -u for the service account).");
     }
 
     /// <summary>Picks the OS-appropriate <see cref="ICertificateTrustStore"/> - see each implementation's own remarks.</summary>
