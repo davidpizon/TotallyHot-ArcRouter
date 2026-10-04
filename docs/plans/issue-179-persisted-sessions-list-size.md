@@ -1,6 +1,6 @@
 # Plan: Keep the persisted-session list under the GUI's 4 MiB gRPC receive cap (#179)
 
-**Status:** Proposed. Awaiting David's approval. No production code changes in this change.
+**Status:** Approved by David on 2026-10-03, in a Claude Code session, item by item: the plan, then decisions 1–7 and 9 of §10, each at its default except decision 6. For decision 6 he chose an ADR before Phase 1: [ADR-0023](../adr/0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md). Decision 8 was already settled. Both phases are in scope for one implementation pull request.
 **Issue:** [#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179) — "Sessions tab: persisted history silently fails to load above gRPC's 4 MiB receive cap".
 **Related:**
 - [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176) (three-pane Sessions tab). Its plan's §13 names this risk as "pre-existing and out of scope … worth a separate tracked item". This plan is that item.
