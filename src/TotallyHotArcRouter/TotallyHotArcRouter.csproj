@@ -68,7 +68,7 @@
          under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
          when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.7" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.8" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.84.0" />
     <PackageReference Include="Grpc.Tools" Version="2.84.0">
       <PrivateAssets>all</PrivateAssets>
@@ -94,7 +94,7 @@
     <!-- Autoregressive generation (KV-cache, greedy sampling, tokenization) for the llm_router voter's
          local ONNX-hosted small instruct model (PLAN.md Phase L) - owns exactly the generation-loop
          complexity the plain Microsoft.ML.OnnxRuntime session above would otherwise require hand-rolling. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.17.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.17.1" />
     <!-- Local tiktoken encodings for the counterfactual token estimator (ADR-0009). Encoding data is
          embedded in the .Data.* packages, so unlike the ONNX artifacts there is no first-run download.
          cl100k_base covers the GPT-4/3.5 family, o200k_base the GPT-4o family; Claude models are counted
