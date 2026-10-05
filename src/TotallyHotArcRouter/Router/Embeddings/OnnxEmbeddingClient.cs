@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using FastBertTokenizer;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
@@ -76,13 +77,13 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
 
     /// <inheritdoc/>
     /// <remarks>
-    /// The configured <see cref="EmbeddingOptions.ModelUrl"/>, which is what actually determines the
-    /// weights this session loads. Deliberately not combined with
-    /// <see cref="EmbeddingOptions.EmbeddingDimension"/>: that is a separate invariant already enforced by
-    /// its own length checks, and folding it in here would report a <em>model</em> change when only the
-    /// declared dimension was edited.
+    /// <see cref="EmbeddingOptions.ResolveModelIdentity"/>: the configured model URL, plus any non-default
+    /// pinned hash, since together they determine the weights and tokenizer this session loads. Deliberately
+    /// not combined with <see cref="EmbeddingOptions.EmbeddingDimension"/>: that is a separate invariant
+    /// already enforced by its own length checks, and folding it in here would report a <em>model</em> change
+    /// when only the declared dimension was edited.
     /// </remarks>
-    public string ModelIdentity => _options.ModelUrl;
+    public string ModelIdentity => _options.ResolveModelIdentity();
 
     /// <inheritdoc/>
     public async Task<EmbeddingResult> EmbedAsync(string text, CancellationToken cancellationToken = default)
@@ -189,9 +190,10 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
             var tokenizerPath = Path.Combine(path1: cacheDirectory, path2: TokenizerFileName);
 
             await EnsureArtifactCachedAsync(destinationPath: modelPath, sourceUrl: _options.ModelUrl,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                expectedSha256: _options.ModelSha256, cancellationToken: cancellationToken).ConfigureAwait(false);
             await EnsureArtifactCachedAsync(destinationPath: tokenizerPath, sourceUrl: _options.TokenizerJsonUrl,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                expectedSha256: _options.TokenizerJsonSha256, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
 
             var tokenizer = new BertTokenizer();
             await tokenizer.LoadTokenizerJsonAsync(tokenizerPath).ConfigureAwait(false);
@@ -210,9 +212,13 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
 
     /// <summary>
     /// Downloads an artifact to <paramref name="destinationPath"/> if it is not already present -
-    /// the documented cold-start path for a first run before the model has been cached locally.
+    /// the documented cold-start path for a first run before the model has been cached locally. When
+    /// <paramref name="expectedSha256"/> is set, the download is hashed before it is renamed into place,
+    /// and a mismatch is deleted and reported rather than loaded (ADR-0024 rule 6). An existing file is not
+    /// re-hashed on every start: since ADR-0024 only administrators can write the cache, and
+    /// <c>--migrate-data-directory</c> checked any file it carried over.
     /// </summary>
-    private async Task EnsureArtifactCachedAsync(string destinationPath, string sourceUrl,
+    private async Task EnsureArtifactCachedAsync(string destinationPath, string sourceUrl, string? expectedSha256,
         CancellationToken cancellationToken)
     {
         if (File.Exists(destinationPath)) return;
@@ -236,6 +242,27 @@ public sealed class OnnxEmbeddingClient : IEmbeddingClient, IAsyncDisposable
             {
                 await source.CopyToAsync(destination: destination, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
+            }
+
+            if (!string.IsNullOrWhiteSpace(expectedSha256))
+            {
+                string actualSha256;
+                await using (var downloaded = File.OpenRead(temporaryPath))
+                {
+                    actualSha256 = Convert.ToHexStringLower(await SHA256.HashDataAsync(downloaded, cancellationToken)
+                        .ConfigureAwait(false));
+                }
+
+                if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(temporaryPath);
+                    _logger.LogError(
+                        message:
+                        "Embedding artifact downloaded from {SourceUrl} has SHA-256 {ActualSha256}, not the configured {ExpectedSha256}; it was deleted, not loaded. If the URL was changed on purpose, set the matching Embeddings hash setting.",
+                        sourceUrl, actualSha256, expectedSha256);
+                    throw new InvalidDataException(
+                        $"The embedding artifact from '{sourceUrl}' failed its SHA-256 check.");
+                }
             }
 
             File.Move(sourceFileName: temporaryPath, destFileName: destinationPath, true);

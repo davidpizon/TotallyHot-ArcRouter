@@ -57,8 +57,11 @@ otherwise.
   real Windows Service on a dev machine without building the MSI.
 - **One MSI installs both the Router and the WinForms tray**, to `%ProgramFiles%\TotallyHotArcRouter\Router\` and
   `\Tray\` respectively — no `\Updater\` or `\Gui\` directory. The WASM dashboard is static files inside the
-  Router publish output, not a third install tree. Neither runtime data location is referenced by the
-  installer, so both are untouched by install, upgrade, and uninstall:
+  Router publish output, not a third install tree. Neither runtime data location is a component of the
+  installer, so Windows Installer never deletes either one. The MSI does run the router's own
+  `--migrate-data-directory` on every install and upgrade, which creates the first location with its
+  protected DACL or migrates an older one
+  ([ADR-0024](../adr/0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md)):
   `%ProgramData%\TotallyHotArcRouter\` (machine-wide operational state — see §3.1) and
   `%LOCALAPPDATA%\TotallyHot.ArcRouter\` (the per-user ONNX model caches, still per-user).
 
@@ -72,7 +75,19 @@ record and are not re-derivable from anywhere. A `RemoveFolderEx` would addition
 **major upgrade**, since `MajorUpgrade` performs an internal uninstall of the previous version — so
 "clean up on uninstall" would in practice mean "wipe the spend history on every update".
 
-Operators who want a genuinely clean removal delete both directories by hand after uninstalling.
+Operators who want a genuinely clean removal delete both directories by hand after uninstalling. Since
+ADR-0024 the machine-wide directory grants only `SYSTEM` and `Administrators`, so that deletion - like
+editing `appsettings.local.json` or opening `logs\` - needs an elevated prompt.
+
+**Protected directory (ADR-0024).** `%ProgramData%\TotallyHotArcRouter\` carries a protected DACL:
+`SYSTEM` and `Administrators` only, inherited by every file, including SQLite's `-wal` and `-shm`. The one
+exception is `web-interface.json`, which carries an explicit `Users` read rule for the unelevated tray.
+The service refuses to start on a directory that fails that check, and logs the reason to the Application
+event log. Run `TotallyHotArcRouter.exe --migrate-data-directory` from an elevated prompt to fix it. The
+upgrade that first applies this migrates the old directory into a new protected tree and keeps
+`appsettings.local.json` out of it, because any local account could have planted it. Review the copy under
+`quarantine\migration-<time>\` and copy it back from an elevated prompt to keep its settings. A dev run that
+is not elevated now uses `%LOCALAPPDATA%\TotallyHotArcRouter\` instead of the service's directory.
 
 **Migrating a developer's data into the installed service.** Before this location was machine-wide these
 files lived under `%LOCALAPPDATA%`, and `LegacyStorageMigration` adopts a pre-move copy automatically on

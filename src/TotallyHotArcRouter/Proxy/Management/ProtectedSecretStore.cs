@@ -386,8 +386,8 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
 
     /// <summary>
     /// Encrypts and persists <paramref name="map"/> via <see cref="SecureFile.WriteMachineShared"/>, so the
-    /// on-disk file is DPAPI-encrypted and ACL-restricted to <c>LocalSystem</c>, the local administrators
-    /// group, and the writing account.
+    /// on-disk file is DPAPI-encrypted and ACL-restricted to <c>LocalSystem</c> and the local administrators
+    /// group (ADR-0024; outside the protected machine-wide directory, to the writing account alone).
     /// </summary>
     /// <remarks>
     /// Unlike the per-user scheme this replaced, the ACL here is doing the real work rather than backing up
@@ -459,14 +459,21 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
 
     /// <summary>
     /// Writes <paramref name="content"/> to a temp file in the store's directory via
-    /// <see cref="SecureFile.WriteMachineShared"/>, then atomically renames it over <see cref="_path"/>. A
+    /// <see cref="SecureFile.WriteMachineShared"/> (or, outside the protected machine-wide directory,
+    /// <see cref="SecureFile.WriteRestricted"/>), then atomically renames it over <see cref="_path"/>. A
     /// crash mid-write leaves the temp file orphaned rather than truncating <c>secrets.dat</c>, which
     /// would otherwise read back as "every secret is gone".
     /// </summary>
     private void WriteAtomically(byte[] content)
     {
         var tempPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        SecureFile.WriteMachineShared(path: tempPath, content: content);
+        // Machine-wide ACL only in the protected machine-wide directory, where the writer is SYSTEM or an
+        // elevated administrator. Anywhere else - the per-user fallback, or an explicit path - the writer
+        // may be unelevated, and an ACL that does not name it would lock it out of its own store.
+        if (AppDataPaths.IsProtectedMachineWideDirectory(Path.GetDirectoryName(_path)))
+            SecureFile.WriteMachineShared(path: tempPath, content: content);
+        else
+            SecureFile.WriteRestricted(path: tempPath, content: content);
         File.Move(sourceFileName: tempPath, destFileName: _path, true);
     }
 

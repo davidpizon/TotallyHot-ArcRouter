@@ -27,6 +27,7 @@ INSTALL_DIR="/usr/local/opt/totallyhot-arcrouter"
 # only directory the router will ever resolve on this platform.
 STATE_DIR="/Library/Application Support/TotallyHotArcRouter"
 LOGS_DIR="${STATE_DIR}/logs"
+PUBLIC_DIR="/Library/Application Support/TotallyHotArcRouter-Public"
 LABEL="com.totallyhot.arcrouter"
 PLIST_DEST="/Library/LaunchDaemons/${LABEL}.plist"
 SERVICE_USER="_arcrouter"
@@ -55,7 +56,14 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
 fi
 
 echo "==> Unloading any existing LaunchDaemon before the file swap"
+# A daemon that is not loaded (first install) is fine; one that is still loaded afterwards is not. ADR-0024's
+# migration below copies files out from under the old tree, so a router still writing to it would lose
+# those writes.
 launchctl bootout system "${PLIST_DEST}" 2>/dev/null || true
+if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+    echo "${LABEL} is still loaded; unload it and run install.sh again." >&2
+    exit 1
+fi
 
 echo "==> Installing binaries to ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
@@ -63,16 +71,27 @@ cp -a "${RELEASE_ROOT}/." "${INSTALL_DIR}/"
 chown -R root:wheel "${INSTALL_DIR}"
 chmod 755 "${INSTALL_DIR}/TotallyHotArcRouter"
 
-echo "==> Preparing state and log directories"
-mkdir -p "${LOGS_DIR}"
-chown -R "${SERVICE_USER}:staff" "${STATE_DIR}"
+echo "==> Protecting the state directory (ADR-0024)"
+# Creates it owner-only (0700, owned by the service account), or migrates a tree an older install left
+# readable to every account into a new owner-only tree. Stops - leaving the old tree locked - if a process
+# still holds a file in it open. SUDO_UID, which sudo sets, names the installing user.
+"${INSTALL_DIR}/TotallyHotArcRouter" --migrate-data-directory --service-account="${SERVICE_USER}"
+# launchd writes the daemon's stdout and stderr here (see the plist), so the directory must exist.
+install -d -m 0700 -o "${SERVICE_USER}" -g staff "${LOGS_DIR}"
+
+echo "==> Preparing the public certificate directory"
+# Readable by every account, writable only by the service account: the router republishes its CA's public
+# certificate here on every start, for clients that import it by path.
+install -d -m 0755 -o "${SERVICE_USER}" -g staff "${PUBLIC_DIR}"
 
 echo "==> Trusting the router's local CA in the System keychain"
 # Run as root (not the service account): MacCertificateTrustStore.Install needs an administrator to
 # modify /Library/Keychains/System.keychain (see its own remarks). No STATE_DIRECTORY override needed
 # here, unlike Linux's install.sh - AppDataPaths resolves the same fixed path regardless of caller.
 "${INSTALL_DIR}/TotallyHotArcRouter" --install-certificate
+# The CA step ran as root; hand what it created to the service account and keep the tree owner-only.
 chown -R "${SERVICE_USER}:staff" "${STATE_DIR}"
+chmod -R go-rwx "${STATE_DIR}"
 
 echo "==> Installing the LaunchDaemon"
 cp "${SCRIPT_DIR}/com.totallyhot.arcrouter.plist" "${PLIST_DEST}"
@@ -83,5 +102,6 @@ echo "==> Loading ${LABEL}"
 launchctl bootstrap system "${PLIST_DEST}"
 
 echo "Installed. Check status with: sudo launchctl print system/${LABEL}"
+echo "The local CA certificate for clients is published at ${PUBLIC_DIR}/router-ca.crt."
 echo "Print the MCP/gRPC management token with:"
 echo "  sudo -u ${SERVICE_USER} ${INSTALL_DIR}/TotallyHotArcRouter --print-management-token"

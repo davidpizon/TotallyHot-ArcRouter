@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Connections;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using TotallyHot.ArcRouter.Hosting.DataDirectory;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -110,20 +112,65 @@ public class ProxyHostedService : IHostedService
     /// (a locked-down data directory, say) never affects the caller - a companion process that finds no
     /// discovery file degrades to "no running router found", the same as if the router simply were not
     /// running yet.
+    /// <para>
+    /// Also republishes the CA's public certificate to <see cref="PublicCaCertificate.ResolveDirectory"/>
+    /// on every start (ADR-0024 rule 4), so clients that import it by path find the current one even though
+    /// the data directory is now readable by administrators only. Only a process using the service's
+    /// protected directory publishes it; a per-user dev run's CA is not the service's.
+    /// </para>
     /// </summary>
     private void WriteDiscoveryFile()
     {
+        X509Certificate2? ca = null;
         try
         {
-            var webAddress = _proxyServer.Addresses.FirstOrDefault(a => new Uri(a).Port == _webPort);
-            var caThumbprint = LocalCertificateAuthority.GetOrCreateCa().Thumbprint;
-
-            WebInterfaceDiscoveryFile.Write(new WebInterfaceDiscoveryInfo(WebUrl: webAddress, CaThumbprint: caThumbprint));
+            ca = LocalCertificateAuthority.GetOrCreateCa();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         {
             _logger.LogWarning(exception: ex,
-                message: "Could not write the web interface discovery file; a companion process will not find this router.");
+                message: "Could not load the local CA; the discovery file will carry no thumbprint and the CA certificate is not republished.");
+        }
+
+        using (ca)
+        {
+            // Published first and independently: the discovery file is best-effort, and a failure writing it
+            // must not leave clients reading a stale certificate after a CA rotation.
+            if (ca is not null && DataDirectoryBootstrap.UsingProtectedMachineWideDirectory) PublishCaCertificate(ca);
+
+            try
+            {
+                var webAddress = _proxyServer.Addresses.FirstOrDefault(a => new Uri(a).Port == _webPort);
+                WebInterfaceDiscoveryFile.Write(new WebInterfaceDiscoveryInfo(WebUrl: webAddress,
+                    CaThumbprint: ca?.Thumbprint));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(exception: ex,
+                    message: "Could not write the web interface discovery file; a companion process will not find this router.");
+            }
+        }
+    }
+
+    /// <summary>Publishes <paramref name="ca"/>'s public certificate, logging rather than failing when the directory is unusable.</summary>
+    private void PublishCaCertificate(X509Certificate2 ca)
+    {
+        try
+        {
+            var (path, problem) = PublicCaCertificate.Publish(ca);
+            if (path is null)
+                _logger.LogWarning(
+                    message: "Did not publish the local CA certificate to {Directory}: {Problem}.",
+                    PublicCaCertificate.ResolveDirectory(), problem);
+            else
+                _logger.LogInformation(message: "Published the local CA certificate to {Path}.", path);
+        }
+        // Win32Exception too: on Linux and macOS the directory checks lstat it, which reports EACCES that way.
+        // Publication is best-effort and must never abort startup.
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            _logger.LogWarning(exception: ex, message: "Could not publish the local CA certificate to {Directory}.",
+                PublicCaCertificate.ResolveDirectory());
         }
     }
 

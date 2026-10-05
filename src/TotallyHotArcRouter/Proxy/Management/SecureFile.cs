@@ -18,20 +18,17 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 /// which name sounds stricter.
 /// <list type="bullet">
 /// <item>
-/// <see cref="WriteMachineShared"/> - for a secret in the machine-shared data directory that the
-/// <c>LocalSystem</c> service and an administrator running the router directly must both read. This is what
-/// <see cref="ProtectedSecretStore"/> uses, and the only one with callers today.
+/// <see cref="WriteMachineShared"/> - for a secret in the protected, machine-wide data directory that the
+/// <c>LocalSystem</c> service and an elevated administrator running the router directly must both read.
+/// <see cref="ProtectedSecretStore"/> uses it whenever the store lives in that directory.
 /// </item>
 /// <item>
 /// <see cref="WriteRestricted"/> - the per-user form, granting only the writing account (Windows ACL, or
-/// POSIX mode 600). <b>It currently has no callers.</b> It is retained deliberately rather than deleted as
-/// dead code: <c>docs/router/security-hardening-plan.md</c> prescribes it as the remedy for four separate
-/// findings that have not yet been implemented (the telemetry <c>.pfx</c> and its password fallback, the
-/// operational databases, and <c>model-routing.json</c>), and that plan's own header states its per-finding
-/// statuses have not been re-audited. Do not reach for it merely because a secret feels like it should be
-/// private to one account - if the installed service has to read the file, it must be
-/// <see cref="WriteMachineShared"/>, because the service runs as <c>LocalSystem</c> and a
-/// <see cref="WriteRestricted"/> file written by anyone else is unreadable to it.
+/// POSIX mode 600). <see cref="ProtectedSecretStore"/> uses it when the process fell back to the per-user
+/// directory (ADR-0024): there the writer may be unelevated, and <see cref="WriteMachineShared"/>'s ACL,
+/// which no longer names the writer, would lock it out of its own file. If the installed service has to
+/// read the file, it must be <see cref="WriteMachineShared"/>, because the service runs as
+/// <c>LocalSystem</c> and a <see cref="WriteRestricted"/> file written by anyone else is unreadable to it.
 /// </item>
 /// </list>
 /// </remarks>
@@ -43,11 +40,6 @@ internal static class SecureFile
     /// until the content is fully written - so another process trying to open the file in the meantime
     /// hits a sharing violation and fails fast instead of silently observing a partial write.
     /// </summary>
-    /// <remarks>
-    /// Has no callers - deliberately, for the reasons set out on the type. Suppressed rather than deleted so
-    /// the retention decision does not have to be re-argued on every scan.
-    /// </remarks>
-    // ReSharper disable once UnusedMember.Global
     public static void WriteRestricted(string path, byte[] content)
     {
         // Create empty and closed first: applying the ACL (SetAccessControl) needs to open its own
@@ -84,8 +76,12 @@ internal static class SecureFile
     /// you have sufficient privileges". That is why <see cref="ProtectedSecretStore"/> must write through
     /// this method rather than <see cref="WriteRestricted"/>.
     /// <para>
-    /// Grants full control to <c>LocalSystem</c>, the local administrators group, and the writing account -
-    /// and nothing else. There is deliberately <em>no</em> <c>BUILTIN\Users</c> grant: this method
+    /// Grants full control to <c>LocalSystem</c> and the local administrators group - and nothing else. Until
+    /// ADR-0024 it also granted the writing account, which handed every unelevated application that account
+    /// ran read access to the store after any administrative rewrite. Only <c>SYSTEM</c> or an elevated
+    /// administrator writes the machine-wide store now (an unelevated process falls back to the per-user
+    /// directory and <see cref="WriteRestricted"/>), and both already hold these grants, so the writer
+    /// cannot lock itself out. There is deliberately <em>no</em> <c>BUILTIN\Users</c> grant: this method
     /// originally carried a read-only one so the interactive-user GUI could read the shared management
     /// token, but ADR-0012 replaced that handoff with a loopback session cookie, so the tray now
     /// authenticates with no credential of its own (see <c>TrayApplicationContext</c>) and every remaining
@@ -123,17 +119,16 @@ internal static class SecureFile
     }
 
     /// <summary>
-    /// Breaks ACL inheritance on <paramref name="path"/> and grants full control to <c>LocalSystem</c>, the
-    /// local administrators group, and the writing account - and to nothing else.
+    /// Breaks ACL inheritance on <paramref name="path"/> and grants full control to <c>LocalSystem</c> and the
+    /// local administrators group - and to nothing else (ADR-0024 rule 5, revising ADR-0015's writing-account
+    /// rule) - and makes <c>Administrators</c> the file's owner, so the writing account keeps no implicit
+    /// right to rewrite the DACL either.
     /// </summary>
     /// <remarks>
-    /// The current-user grant is load-bearing and must not be dropped: protecting the DACL discards the
-    /// inherited rules that were the writer's only access, so without it the very next step - reopening the
-    /// file to write the secret - fails with <see cref="UnauthorizedAccessException"/> for any writer that
-    /// is not <c>LocalSystem</c> or an administrator, the ordinary case for a developer running the router
-    /// directly rather than as the installed service. This rule was previously documented as non-redundant
-    /// with a <c>BUILTIN\Users</c> read grant; that grant is gone (see <see cref="WriteMachineShared"/>'s
-    /// remarks), which makes this rule the writer's only access rather than merely its write access.
+    /// Protecting the DACL discards the inherited rules, so a writer that is neither <c>LocalSystem</c> nor an
+    /// elevated administrator would lose access to the file it is creating. That is why
+    /// <see cref="ProtectedSecretStore"/> calls <see cref="WriteMachineShared"/> only from a process using
+    /// the protected machine-wide directory, which by ADR-0024's bootstrap is always one of those two.
     /// </remarks>
     [SupportedOSPlatform("windows")]
     private static void RestrictToMachineAccountsWindows(string path)
@@ -155,16 +150,19 @@ internal static class SecureFile
             fileSystemRights: FileSystemRights.FullControl,
             type: AccessControlType.Allow));
 
-        // See the remarks: without this, a writer who is neither LocalSystem nor an administrator locks
-        // itself out of the file it is in the middle of creating. No BUILTIN\Users rule is added - ADR-0012
-        // removed the one reader that needed it.
-        if (WindowsIdentity.GetCurrent().User is { } currentUser)
-            security.AddAccessRule(new FileSystemAccessRule(
-                identity: currentUser,
-                fileSystemRights: FileSystemRights.FullControl,
-                type: AccessControlType.Allow));
+        // No rule for the writing account (ADR-0024) and none for BUILTIN\Users (ADR-0012 removed the one
+        // reader that needed it).
 
-        new FileInfo(path).SetAccessControl(security);
+        var file = new FileInfo(path);
+        file.SetAccessControl(security);
+
+        // Ownership too, in a second step: an owner holds implicit WRITE_DAC whatever the DACL says, so a file
+        // left owned by the elevated administrator who created it would let that account's unelevated
+        // applications grant themselves read access to this LocalMachine-DPAPI store. Only SYSTEM or an
+        // elevated administrator can assign Administrators as owner - the only callers this method has.
+        var ownership = new FileSecurity();
+        ownership.SetOwner(new SecurityIdentifier(sidType: WellKnownSidType.BuiltinAdministratorsSid, null));
+        file.SetAccessControl(ownership);
     }
 
     /// <summary>

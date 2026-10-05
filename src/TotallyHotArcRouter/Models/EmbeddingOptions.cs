@@ -41,6 +41,34 @@ public sealed class EmbeddingOptions
         "https://huggingface.co/Xenova/bge-large-en-v1.5/resolve/main/tokenizer.json";
 
     /// <summary>
+    /// The SHA-256 of <c>onnx/model.onnx</c> in <c>Xenova/bge-large-en-v1.5</c> at commit
+    /// <c>dfeef6070b90658e1b391a6940efdb0925c1de6f</c>, the content <see cref="ModelUrl"/>'s default serves
+    /// (its Git LFS object id, read from the Hugging Face API on 2026-10-03).
+    /// </summary>
+    public const string DefaultModelSha256 = "69ed3f810d3b6d13f70dff9ca89966f39c0a0e877fb88211be7bcc070df2a2ce";
+
+    /// <summary>
+    /// The SHA-256 of <c>tokenizer.json</c> in <c>Xenova/bge-large-en-v1.5</c> at the same commit as
+    /// <see cref="DefaultModelSha256"/>, computed from the downloaded file on 2026-10-03 (its git blob id,
+    /// <c>688882a7</c>, matched the API's).
+    /// </summary>
+    public const string DefaultTokenizerJsonSha256 = "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66";
+
+    /// <summary>
+    /// Gets the SHA-256 (hex) a downloaded <see cref="ModelUrl"/> must match before it is moved into the
+    /// cache (ADR-0024 rule 6), and the hash <c>--migrate-data-directory</c> checks before it adopts an
+    /// existing copy. An operator who points <see cref="ModelUrl"/> elsewhere sets the matching hash here,
+    /// or sets it empty to trust that download unverified, as the router did before ADR-0024.
+    /// </summary>
+    public string ModelSha256 { get; init; } = DefaultModelSha256;
+
+    /// <summary>
+    /// Gets the SHA-256 (hex) a downloaded <see cref="TokenizerJsonUrl"/> must match; see
+    /// <see cref="ModelSha256"/> for the same rules.
+    /// </summary>
+    public string TokenizerJsonSha256 { get; init; } = DefaultTokenizerJsonSha256;
+
+    /// <summary>
     /// Gets the dimensionality of the embedding vectors BGE-large produces. Used to validate model
     /// output shape rather than trusting it silently.
     /// </summary>
@@ -53,6 +81,37 @@ public sealed class EmbeddingOptions
     /// </summary>
     [Range(1, 512)]
     public int MaxTokens { get; init; } = 512;
+
+    /// <summary>
+    /// Returns the identity stored beside every embedding and trained artifact, so vectors from different
+    /// weights are never compared: <see cref="ModelUrl"/>, followed by <c>#sha256=</c> and
+    /// <c>#tokenizer-sha256=</c> segments for any pinned hash that differs from its default - including one
+    /// cleared to trust an unverified download, which is recorded as <c>unverified</c>. The default
+    /// configuration's identity stays exactly the URL, which is what every stored vector carried before the
+    /// hashes existed, so this introduces no spurious model change. An operator who repoints a hash without
+    /// touching the mutable <c>resolve/main</c> URL - because upstream changed - gets a new identity, and the
+    /// old vectors are no longer treated as comparable.
+    /// </summary>
+    public string ResolveModelIdentity()
+    {
+        return ModelUrl + IdentitySegment("sha256", ModelSha256, DefaultModelSha256) +
+               IdentitySegment("tokenizer-sha256", TokenizerJsonSha256, DefaultTokenizerJsonSha256);
+    }
+
+    /// <summary>
+    /// One identity segment for a pinned hash: nothing when it is the default, <c>#name=unverified</c> when
+    /// it was cleared to trust an unverified download, otherwise <c>#name=</c> and the hash. A cleared hash
+    /// still differs from the default, so vectors embedded with verified weights are never treated as
+    /// comparable with ones from whatever an unverified download delivered.
+    /// </summary>
+    private static string IdentitySegment(string name, string? configured, string defaultValue)
+    {
+        if (string.Equals(configured?.Trim(), defaultValue, StringComparison.OrdinalIgnoreCase)) return "";
+
+        return string.IsNullOrWhiteSpace(configured)
+            ? $"#{name}=unverified"
+            : $"#{name}={configured.Trim().ToLowerInvariant()}";
+    }
 
     /// <summary>
     /// Performs domain-level validation that is not fully expressible through data annotations.

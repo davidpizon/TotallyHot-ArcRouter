@@ -1,6 +1,6 @@
 # Plan: Protect the router's data directory and make deletion final (#184)
 
-**Status:** Proposed. Awaiting David's approval. No production code changes in this change.
+**Status:** Approved by David on 2026-10-03 ([sign-off on #184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184#issuecomment-5976893257)). Every §7 decision is now settled; see §7.
 **Issue:** [#184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184) — "Protect the router's data directory and make deletion final".
 **Related:**
 - [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (proposed) moves conversation text into encrypted per-session files. Under "Found during the investigation, tracked separately" it lists: "Transcript data sits under default permissions, and deleted rows persist." **This plan is that item.**
@@ -414,17 +414,48 @@ ADR-0019's own deletion test ("a copy of its file cannot be decrypted") stays in
      - conversation text stays hidden until a passkey is enrolled;
      - the read window defaults to 15 minutes;
      - synced passkeys are allowed.
-2. **ADR form.** Recommended: a new ADR for the directory boundary, because it covers files beyond conversations: `.pfx` files, configuration, logs, and the other databases. The alternative is to amend ADR-0019 while it is still proposed.
-3. **Scope.** The whole directory (A, recommended), or ADR-0019's session folder only (C)?
-4. **The writing account's ACE on dev machines.** Recommended, under decision 1's requirement: **no ACE for any individual account.** With one, any app running as that account reads the files directly.
+2. **ADR form.** **Decided (David, 2026-10-03): a new ADR** for the directory boundary, because it covers files beyond conversations: `.pfx` files, configuration, logs, and the other databases.
+3. **Scope.** **Decided (David, 2026-10-03): the whole directory** (option A).
+4. **The writing account's ACE on dev machines.** **Decided (David, 2026-10-03): no ACE for any individual account.** With one, any app running as that account could read the files directly.
    - A dev run must be elevated, or it uses the existing per-user fallback, `%LocalAppData%`. That fallback cannot meet the requirement, because every app of that user can read it.
    - On a service install, the writing account is `SYSTEM` anyway.
-5. **Report the `appsettings.local.json` squatting (F4) separately**, as a higher-priority security issue in case phase 1 slips? Recommended: yes.
-6. **`secure_delete` on every database, or only on stores derived from text?** Recommended: every database. It is one line in each `OpenConnection`, and the cost is a few extra writes.
-7. **Uninstall.** Three choices, applied alike to the MSI and both `uninstall.sh` scripts (§3.5):
-   - keep everything (today);
-   - crypto-shred conversations only (recommended);
-   - add a checkbox, which becomes a `--shred-conversations` flag in the scripts.
-8. **`synchronous=NORMAL` on every connection** (F8). It is a small durability trade. Recommended: yes, noted in the ADR.
-9. **Remove `secrets.dat.pre-adr0014-backup`** once David confirms it is no longer needed? It is a stale copy of the secret store that every user can read. It is sealed to `david` (CurrentUser DPAPI), so other accounts cannot decrypt it.
-10. **Order against #165 phase 1.** Recommended: this plan's phase 1 first, so the session folder inherits the protected root.
+5. **Report the `appsettings.local.json` squatting (F4) separately.** **Decided (David, 2026-10-03): yes.** Filed as [#193](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/193).
+6. **`secure_delete` on every database, or only on stores derived from text?** **Decided (David, 2026-10-03): every database.**
+7. **Uninstall.** **Decided (David, 2026-10-03): crypto-shred conversations only**, applied alike to the MSI and both `uninstall.sh` scripts (§3.5). There is no checkbox and no `--shred-conversations` opt-in flag in the scripts.
+8. **`synchronous=NORMAL` on every connection** (F8). **Decided (David, 2026-10-03): yes**, noted in the ADR.
+9. **Remove `secrets.dat.pre-adr0014-backup`.** **Decided (David, 2026-10-03): it is no longer needed.** David removes it by hand from THEATRE-PC, so no code change is needed. Elsewhere, phase 1's migration moves any such file into the protected root like any other.
+10. **Order against #165 phase 1.** **Decided (David, 2026-10-03): this plan's phase 1 first**, so the session folder inherits the protected root.
+
+## 8. Implementation notes (phases 0 and 1)
+
+Phase 0 is [ADR-0024](../adr/0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md). Phase 1 is in `src/TotallyHotArcRouter/Hosting/DataDirectory/`. It differs from §3.1 in these places:
+
+- **Windows copies rather than moves.** §3.1 renames each accepted file through its handle, then resets its owner and ACL. The implementation copies the file through the same exclusive handle into the new tree, then deletes the original through that handle. A file created inside the protected tree is born with the right owner and inherited DACL. That removes the question of whether a handle-based reset recomputes inheritance from the new parent, at the cost of transient disk space for one file at a time.
+- **Directories are pinned during the walk.** Not in §3.1. Each directory is held open, without delete sharing, while its children are processed. Without this, an account that created a subdirectory in the old tree could swap it for a junction between enumeration and recursion, and the `SYSTEM`-run migration would copy and delete files elsewhere on the machine.
+- **The filesystem is the journal.** §3.1 describes a journal file. Each step is already atomic and recognizable on disk: an adopted file exists only in the new tree once its original is gone, a partial copy carries `.migrating`, and the staging, retired and quarantine trees are found by name. Recovery accepts a staging tree only if it passes the root's own protection check, so a planted look-alike is ignored (tested).
+- **Where rejected files go.** On Windows, into `quarantine\migration-<time>\` inside the new protected root. On Linux and macOS, they stay in the old tree, which is renamed to `<root>.quarantine-<time>` and left root-owned and `0700`, as §3.1 says.
+- **Model files are discarded, not quarantined.** Any file under `models/` other than the two pinned BGE files is deleted, not copied. The router downloads model files again on first use (`OnnxTextGenerationClient` re-fetches a missing `llm_router` file; `llm_router` sync verifies against published checksums), so nothing of the operator's is lost, and multi-gigabyte copies are not duplicated into the quarantine. §3.1's "re-verified before first load" for `llm_router` files is met this way: an unverified file never reaches the new tree.
+- **BGE URLs stay on `main`.** The pinned hashes match `Xenova/bge-large-en-v1.5` at commit `dfeef607`. The default URLs still say `resolve/main`, because changing them would change `OnnxEmbeddingClient.ModelIdentity` and invalidate every stored embedding and cluster artifact. If upstream `main` ever changes, downloads fail their hash check and say which setting to update (`Embeddings:ModelSha256`, `Embeddings:TokenizerJsonSha256`).
+- **A marker on Linux, macOS and Docker.** systemd's `StateDirectoryMode=0700` sets that mode on every start, so `0700` alone cannot show that a tree was migrated. Migration writes `.protected-data-directory`, and startup requires it there. Only root and the service account can write into a `0700` directory, so the marker cannot be planted.
+- **Containers.** `TOTALLYHOT_ARCROUTER_CONTAINER=1`, set by the image, permits the in-place migration, and points the public certificate at `/public`. A container never falls back to a per-user or last-resort directory: those vanish with the container, so it fails closed instead.
+- **The per-user fallback on Linux and macOS** is tightened to `0700` when this process owns it. It still cannot meet decision 1's requirement.
+- **Command-line flags that read the service's state** (`--print-management-token`, `--export-ca`, `--install-certificate`, `--uninstall-certificate`) refuse to run when the process could not use the service's directory. Otherwise they would quietly create and print a separate per-user token or CA.
+- **Reporting a fail-closed start.** The service has no console, and its file log lives in the directory that failed verification. So the refusal, and any blocked migration, is also written to the Application event log under the source `TotallyHotArcRouter`.
+- **The MSI** runs `--migrate-data-directory --legacy-owner-sid=[UserSID]` as a deferred `SYSTEM` action on every install, upgrade and repair, with `Return="check"`. A blocked migration rolls the install back, leaving the previous version in place. That one command also creates the root on a fresh install, so the MSI declares no folder of its own.
+- **Linux runtime directory.** The unit sets `RuntimeDirectoryPreserve=yes`, so `/run/totallyhot-arcrouter/router-ca.crt` survives service restarts and a client's `NODE_EXTRA_CA_CERTS` path stays valid.
+
+**Verification.**
+- **Windows:** the full router suite, plus new tests that run the real ACL code unelevated (a test policy adds the current account). They include SQLite's `-wal` inheriting the protected DACL, junctions and hard links in the old tree, a file held open, crash recovery, a planted staging look-alike, a read-only file, and a file standing where the root should be. The squat test needs an elevated run and is skipped otherwise.
+- **Linux:** a throwaway `mcr.microsoft.com/dotnet/sdk:10.0` container.
+  - The unit tests passed as root, including the full Unix migration and the writer scanner, and as an ordinary account.
+  - An end-to-end CLI run passed. It covered:
+    - the service failing closed on an unmigrated `0755` tree;
+    - a migration blocked by another account's open writer, leaving the tree locked `root 700`;
+    - a completed migration: rejects in a root-only quarantine, `/etc/shadow` and a hard-link target untouched, the overlay not adopted;
+    - the service starting;
+    - an idempotent rerun;
+    - a root-run flag against the service's tree;
+    - an ordinary account refused;
+    - container in-place migration.
+  - **Bug the run found:** the first scanner skipped processes whose `/proc/<pid>/fd` it could not read, which fails open, and container root lacks `CAP_SYS_PTRACE`. It now reports them as possible writers.
+- **macOS:** built, not run. The `lsof` parser is unit-tested, and the rest shares the Linux code apart from `lstat`'s entry point.

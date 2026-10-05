@@ -1,3 +1,6 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
+using TotallyHot.ArcRouter.Hosting.DataDirectory;
 using TotallyHot.ArcRouter.Proxy;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -23,6 +26,44 @@ public sealed class WebInterfaceDiscoveryFileTests
         finally
         {
             if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// ADR-0024 rule 4: inside the protected data directory, which grants only <c>SYSTEM</c> and
+    /// <c>Administrators</c>, the discovery file still carries an explicit <c>BUILTIN\Users</c> read rule,
+    /// because the unelevated tray reads it by full path.
+    /// </summary>
+    [Fact]
+    public void Write_InsideAProtectedDirectory_GrantsUsersReadOnTheFileAlone()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var directory = Path.Combine(TestScratchDirectory.RunRoot, $"web-interface-acl-{Guid.NewGuid():N}");
+        var me = WindowsIdentity.GetCurrent().User!;
+        var policy = new WindowsDirectoryPolicy(me,
+            [WindowsDirectoryPolicy.LocalSystem, WindowsDirectoryPolicy.Administrators, me]);
+        Directory.CreateDirectory(TestScratchDirectory.RunRoot);
+        WindowsDataDirectorySecurity.CreateProtected(directory, policy);
+        var path = Path.Combine(directory, WebInterfaceDiscoveryFile.FileName);
+        try
+        {
+            WebInterfaceDiscoveryFile.Write(info: new WebInterfaceDiscoveryInfo("https://localhost:47104", "AB"), path: path);
+            WebInterfaceDiscoveryFile.Write(info: new WebInterfaceDiscoveryInfo("https://localhost:47104", "CD"), path: path);
+
+            var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+            var userRules = new FileInfo(path).GetAccessControl()
+                .GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+                .Where(rule => users.Equals(rule.IdentityReference)).ToList();
+
+            var rule = Assert.Single(userRules);
+            Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+            Assert.False(rule.FileSystemRights.HasFlag(FileSystemRights.WriteData));
+            Assert.Equal(DataDirectoryState.Protected, WindowsDataDirectorySecurity.Inspect(directory, policy).State);
+        }
+        finally
+        {
+            Directory.Delete(path: directory, recursive: true);
         }
     }
 

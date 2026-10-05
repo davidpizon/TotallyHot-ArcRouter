@@ -16,6 +16,11 @@
     <key>UserName</key>
     <string>_arcrouter</string>
 
+    <!-- ADR-0024: 077 (63 in decimal), so every file the router creates is owner-only, matching the
+         0700 state directory install.sh sets up. -->
+    <key>Umask</key>
+    <integer>63</integer>
+
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

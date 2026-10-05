@@ -15,9 +15,21 @@ Code, the OpenAI/Anthropic SDKs, curl, Ollama-API clients, etc.) at the HTTPS pr
 TotallyHotArcRouter.exe --export-ca
 ```
 
-Writes the CA's public certificate (PEM, no private key) to
-`<machine-shared data directory>/router-ca.crt` and prints the resolved path. On Windows that is
-`%ProgramData%\TotallyHotArcRouter\router-ca.crt`; see `AppDataPaths` for the Linux/macOS equivalents.
+Writes the CA's public certificate (PEM, no private key) to `router-ca.crt` in the public certificate
+directory and prints the resolved path. The installed service also rewrites that file on every start, so
+you normally do not need to run this at all.
+
+| Platform | Public certificate path |
+|---|---|
+| Windows | `%ProgramData%\TotallyHotArcRouter-Public\router-ca.crt` |
+| Linux (systemd package) | `/run/totallyhot-arcrouter/router-ca.crt` |
+| macOS | `/Library/Application Support/TotallyHotArcRouter-Public/router-ca.crt` |
+| Docker | `/public/router-ca.crt` inside the container: `docker cp arcrouter:/public/router-ca.crt .` |
+
+Every local account can read this directory, but only the service and administrators can write to it.
+The data directory that used to hold the certificate is now readable by administrators only
+([ADR-0024](../adr/0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md)), so point
+`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` or a browser import at the path above.
 
 ## Trusting the CA in the OS
 
