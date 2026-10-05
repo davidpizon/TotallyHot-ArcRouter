@@ -85,7 +85,8 @@ public sealed class EmbeddingOptions
     /// <summary>
     /// Returns the identity stored beside every embedding and trained artifact, so vectors from different
     /// weights are never compared: <see cref="ModelUrl"/>, followed by <c>#sha256=</c> and
-    /// <c>#tokenizer-sha256=</c> segments for any pinned hash that differs from its default. The default
+    /// <c>#tokenizer-sha256=</c> segments for any pinned hash that differs from its default - including one
+    /// cleared to trust an unverified download, which is recorded as <c>unverified</c>. The default
     /// configuration's identity stays exactly the URL, which is what every stored vector carried before the
     /// hashes existed, so this introduces no spurious model change. An operator who repoints a hash without
     /// touching the mutable <c>resolve/main</c> URL - because upstream changed - gets a new identity, and the
@@ -93,17 +94,23 @@ public sealed class EmbeddingOptions
     /// </summary>
     public string ResolveModelIdentity()
     {
-        var identity = ModelUrl;
+        return ModelUrl + IdentitySegment("sha256", ModelSha256, DefaultModelSha256) +
+               IdentitySegment("tokenizer-sha256", TokenizerJsonSha256, DefaultTokenizerJsonSha256);
+    }
 
-        if (!string.IsNullOrWhiteSpace(ModelSha256) &&
-            !string.Equals(ModelSha256, DefaultModelSha256, StringComparison.OrdinalIgnoreCase))
-            identity += "#sha256=" + ModelSha256.Trim().ToLowerInvariant();
+    /// <summary>
+    /// One identity segment for a pinned hash: nothing when it is the default, <c>#name=unverified</c> when
+    /// it was cleared to trust an unverified download, otherwise <c>#name=</c> and the hash. A cleared hash
+    /// still differs from the default, so vectors embedded with verified weights are never treated as
+    /// comparable with ones from whatever an unverified download delivered.
+    /// </summary>
+    private static string IdentitySegment(string name, string? configured, string defaultValue)
+    {
+        if (string.Equals(configured?.Trim(), defaultValue, StringComparison.OrdinalIgnoreCase)) return "";
 
-        if (!string.IsNullOrWhiteSpace(TokenizerJsonSha256) &&
-            !string.Equals(TokenizerJsonSha256, DefaultTokenizerJsonSha256, StringComparison.OrdinalIgnoreCase))
-            identity += "#tokenizer-sha256=" + TokenizerJsonSha256.Trim().ToLowerInvariant();
-
-        return identity;
+        return string.IsNullOrWhiteSpace(configured)
+            ? $"#{name}=unverified"
+            : $"#{name}={configured.Trim().ToLowerInvariant()}";
     }
 
     /// <summary>

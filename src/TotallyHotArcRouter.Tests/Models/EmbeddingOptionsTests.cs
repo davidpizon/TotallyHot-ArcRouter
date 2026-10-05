@@ -131,4 +131,15 @@ public class EmbeddingOptionsTests
         Assert.NotEqual(newModel.ResolveModelIdentity(), newTokenizer.ResolveModelIdentity());
         Assert.StartsWith(defaults.ModelUrl, newModel.ResolveModelIdentity());
     }
+
+    [Fact]
+    public void ModelIdentity_ForAClearedHash_RecordsUnverified_SoItDiffersFromTheDefault()
+    {
+        var defaults = new EmbeddingOptions();
+        var unverifiedModel = new EmbeddingOptions { ModelSha256 = "" };
+        var unverifiedTokenizer = new EmbeddingOptions { TokenizerJsonSha256 = " " };
+
+        Assert.Equal(defaults.ModelUrl + "#sha256=unverified", unverifiedModel.ResolveModelIdentity());
+        Assert.Equal(defaults.ModelUrl + "#tokenizer-sha256=unverified", unverifiedTokenizer.ResolveModelIdentity());
+    }
 }
