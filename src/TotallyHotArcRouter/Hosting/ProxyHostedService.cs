@@ -165,7 +165,9 @@ public class ProxyHostedService : IHostedService
             else
                 _logger.LogInformation(message: "Published the local CA certificate to {Path}.", path);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        // Win32Exception too: on Linux and macOS the directory checks lstat it, which reports EACCES that way.
+        // Publication is best-effort and must never abort startup.
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             _logger.LogWarning(exception: ex, message: "Could not publish the local CA certificate to {Directory}.",
                 PublicCaCertificate.ResolveDirectory());

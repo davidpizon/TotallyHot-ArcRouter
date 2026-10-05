@@ -360,7 +360,7 @@ public static class Program
             Log.Information(messageTemplate: "Exported the router's local CA certificate to {Path}.", path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException
-                                       or InvalidOperationException)
+                                       or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             Log.Error(exception: ex, messageTemplate: "Could not export the local CA certificate.");
             Environment.ExitCode = 1;
