@@ -198,15 +198,28 @@ public sealed class UnixDataDirectoryMigration
         return new DataDirectoryMigrationResult(DataDirectoryMigrationOutcome.SquatSetAside, SetAsidePath: aside);
     }
 
-    /// <summary>Makes every directory in the tree root-owned and <c>0700</c>, parents before children.</summary>
+    /// <summary>
+    /// Makes every directory in the tree root-owned and <c>0700</c>, parents before children. A directory on
+    /// a different mount from its parent stops migration before anything in it changes: a bind or FUSE mount
+    /// planted below the root would otherwise let this root-run walk chown, copy and unlink files outside the
+    /// data directory. The root itself may be a mount point.
+    /// </summary>
     private static void Lock(string directory)
     {
+        var status = UnixNative.LStat(directory)!.Value;
         UnixNative.LChown(directory, RootUid, RootUid);
         File.SetUnixFileMode(directory, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
 
         foreach (var child in Directory.EnumerateFileSystemEntries(directory))
-            if (UnixNative.LStat(child) is { Kind: UnixFileKind.Directory })
-                Lock(child);
+        {
+            if (UnixNative.LStat(child) is not { Kind: UnixFileKind.Directory } childStatus) continue;
+
+            if (!childStatus.IsOnSameMountAs(status))
+                throw new DataDirectoryMigrationBlockedException(
+                    $"'{child}' is a mount point inside the data directory, so migrating it would reach outside the tree. Unmount it and run --migrate-data-directory again.");
+
+            Lock(child);
+        }
     }
 
     private void Copy(string sourceDirectory, string destinationDirectory, string relativePrefix)
@@ -316,6 +329,9 @@ public sealed class UnixDataDirectoryMigration
             return false;
         }
 
+        // Explicitly, not just through UnixCreateMode: the umask filters that, and under a restrictive one the
+        // copy would be 0000 - readable by root, which finishes the migration, but not by the service.
+        File.SetUnixFileMode(partialPath, UnixDataDirectorySecurity.OwnerOnlyFileMode);
         UnixNative.LChown(partialPath, _serviceUid, _serviceGid);
         File.Move(partialPath, destinationPath, overwrite: true);
         return true;
@@ -341,6 +357,7 @@ public sealed class UnixDataDirectoryMigration
         {
         }
 
+        File.SetUnixFileMode(marker, UnixDataDirectorySecurity.OwnerOnlyFileMode);
         UnixNative.LChown(marker, _serviceUid, _serviceGid);
     }
 

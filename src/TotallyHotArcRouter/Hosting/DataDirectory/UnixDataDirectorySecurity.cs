@@ -75,7 +75,8 @@ public static class UnixDataDirectorySecurity
 
     /// <summary>
     /// Creates <paramref name="path"/> with mode <c>0700</c> in a single <c>mkdir</c>, so it never exists
-    /// with a wider mode. The process umask can only remove bits, never add group or other ones.
+    /// with a wider mode. The process umask can only remove bits, never add group or other ones; the mode is
+    /// then set explicitly too, so a restrictive umask cannot leave the owner without access.
     /// </summary>
     /// <exception cref="IOException">Something already exists at <paramref name="path"/>.</exception>
     public static void CreateProtected(string path)
@@ -89,5 +90,8 @@ public static class UnixDataDirectorySecurity
         if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent)) Directory.CreateDirectory(parent);
 
         Directory.CreateDirectory(path: path, unixCreateMode: OwnerOnlyDirectoryMode);
+        // Set explicitly as well: mkdir's mode is filtered by the umask, and a restrictive one (077 is fine,
+        // 777 is not) would leave a 0000 directory that root can still fill but the service cannot read.
+        File.SetUnixFileMode(path, OwnerOnlyDirectoryMode);
     }
 }

@@ -310,6 +310,9 @@ public static class DataDirectoryBootstrap
         {
             if (UnixNative.LStat(entry) is not { } status) continue;
 
+            // Never touch a nested mount, not even its root: that would chown files outside the service's tree.
+            if (status.Kind == UnixFileKind.Directory && !status.IsOnSameMountAs(owner)) continue;
+
             if (status.Uid == 0)
             {
                 UnixNative.LChown(entry, owner.Uid, owner.Gid);

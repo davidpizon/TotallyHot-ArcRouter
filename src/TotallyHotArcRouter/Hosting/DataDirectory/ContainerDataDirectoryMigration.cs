@@ -62,7 +62,7 @@ public sealed class ContainerDataDirectoryMigration
     public void Run()
     {
         Rewrite(_root);
-        TightenDirectories(_root);
+        TightenDirectories(_root, UnixNative.LStat(_root)!.Value);
 
         var marker = Path.Combine(_root, DataDirectoryMigrationRules.ProtectedMarkerFileName);
         if (!File.Exists(marker))
@@ -75,6 +75,7 @@ public sealed class ContainerDataDirectoryMigration
             {
             }
 
+        File.SetUnixFileMode(marker, UnixDataDirectorySecurity.OwnerOnlyFileMode);
         _logger.Information("Made the container data volume {Root} owner-only.", _root);
     }
 
@@ -86,6 +87,14 @@ public sealed class ContainerDataDirectoryMigration
 
             if (status.Kind == UnixFileKind.Directory)
             {
+                // A nested mount - an operator's own -v mount at /data/models, say - is a separate volume:
+                // left exactly as it is, never walked, re-moded or rewritten.
+                if (!status.IsOnSameMountAs(UnixNative.LStat(directory)!.Value))
+                {
+                    _logger.Information("Left {Path} untouched: it is a separate mount inside the data volume.", path);
+                    continue;
+                }
+
                 if (!string.Equals(path, Path.Combine(_root, DataDirectoryMigrationRules.QuarantineDirectoryName),
                         StringComparison.Ordinal))
                     Rewrite(path);
@@ -156,6 +165,7 @@ public sealed class ContainerDataDirectoryMigration
                 continue;
             }
 
+            File.SetUnixFileMode(partial, UnixDataDirectorySecurity.OwnerOnlyFileMode);
             UnixNative.Rename(partial, path);
         }
     }
@@ -171,7 +181,7 @@ public sealed class ContainerDataDirectoryMigration
         // and rename(2) would silently replace the entry already quarantined under that name.
         var destination = Path.Combine(_quarantine, Path.GetRelativePath(_root, path));
         var parent = Path.GetDirectoryName(destination)!;
-        if (!Directory.Exists(parent)) Directory.CreateDirectory(parent, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+        if (!Directory.Exists(parent)) CreateOwnerOnlyDirectory(parent);
         UnixNative.Rename(path, destination);
         _logger.Warning("Moved {Path}, a link or multiply-linked file, into {Quarantine} instead of copying it.", path,
             destination);
@@ -195,10 +205,10 @@ public sealed class ContainerDataDirectoryMigration
         }
 
         if (UnixNative.LStat(reserved) is null)
-            Directory.CreateDirectory(reserved, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+            CreateOwnerOnlyDirectory(reserved);
 
         var quarantine = DataDirectoryMigrationRules.NewQuarantinePath(_root);
-        Directory.CreateDirectory(quarantine, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+        CreateOwnerOnlyDirectory(quarantine);
 
         if (parked is not null)
         {
@@ -211,12 +221,20 @@ public sealed class ContainerDataDirectoryMigration
         return quarantine;
     }
 
-    private static void TightenDirectories(string directory)
+    private static void TightenDirectories(string directory, UnixFileStatus status)
     {
         foreach (var child in Directory.EnumerateFileSystemEntries(directory))
-            if (UnixNative.LStat(child) is { Kind: UnixFileKind.Directory })
-                TightenDirectories(child);
+            if (UnixNative.LStat(child) is { Kind: UnixFileKind.Directory } childStatus &&
+                childStatus.IsOnSameMountAs(status))
+                TightenDirectories(child, childStatus);
 
         File.SetUnixFileMode(directory, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+    }
+
+    private static void CreateOwnerOnlyDirectory(string path)
+    {
+        Directory.CreateDirectory(path, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
+        // The umask filters the create mode; set it explicitly so a restrictive one cannot leave it 0000.
+        File.SetUnixFileMode(path, UnixDataDirectorySecurity.OwnerOnlyDirectoryMode);
     }
 }

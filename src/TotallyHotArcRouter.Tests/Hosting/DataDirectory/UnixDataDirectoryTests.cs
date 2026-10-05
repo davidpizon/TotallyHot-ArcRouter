@@ -41,6 +41,7 @@ public sealed class UnixDataDirectoryTests
             Assert.True(fileStatus.GrantsGroupOrOther);
 
             Assert.Equal(UnixFileKind.SymbolicLink, UnixNative.LStat(link)!.Value.Kind);
+            Assert.True(fileStatus.IsOnSameMountAs(UnixNative.LStat(scratch)!.Value));
             Assert.Equal(UnixFileKind.Directory, UnixNative.LStat(scratch)!.Value.Kind);
             Assert.Null(UnixNative.LStat(Path.Combine(scratch, "absent")));
         }
@@ -441,6 +442,43 @@ public sealed class UnixDataDirectoryTests
         }
     }
 
+    /// <summary>
+    /// A mount planted below the old root must stop migration before it changes anything - otherwise the
+    /// root-run walk would chown, copy and unlink files outside the data directory. Needs root and the right
+    /// to mount (a rootless container has neither), so it skips where a tmpfs cannot be mounted.
+    /// </summary>
+    [Fact]
+    public void Migration_AsRoot_StopsAtANestedMountPoint()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix only");
+        Assert.SkipUnless(UnixNative.EffectiveUserId() == 0, "needs root");
+        var scratch = NewScratch();
+        var mountPoint = Path.Combine(scratch, "totallyhot-arcrouter", "models");
+        var mounted = false;
+        try
+        {
+            var root = Path.Combine(scratch, "totallyhot-arcrouter");
+            Directory.CreateDirectory(mountPoint);
+            File.SetUnixFileMode(root, OpenDirectoryMode);
+            mounted = RunExit("mount", "-t", "tmpfs", "tmpfs", mountPoint) == 0;
+            Assert.SkipUnless(mounted, "cannot mount a tmpfs here");
+            File.WriteAllText(Path.Combine(mountPoint, "outside.bin"), "outside");
+            UnixNative.LChown(root, 54321, 54321);
+
+            var ex = Assert.Throws<DataDirectoryMigrationBlockedException>(
+                new UnixDataDirectoryMigration(root, 54321, 54321, null, new StubScanner([]),
+                    Serilog.Core.Logger.None).Run);
+
+            Assert.Contains("mount point", ex.Message);
+            Assert.Equal(0u, UnixNative.LStat(Path.Combine(mountPoint, "outside.bin"))!.Value.Uid);
+        }
+        finally
+        {
+            if (mounted) RunExit("umount", mountPoint);
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
     /// <summary>A logs directory created at startup carries the marker, so the next start accepts it.</summary>
     [Fact]
     public void VerifyUnixLogsDirectory_CreatesItMarked_SoTheNextStartAcceptsIt()
@@ -513,6 +551,18 @@ public sealed class UnixDataDirectoryTests
     private static string Inode(string path)
     {
         return (OperatingSystem.IsMacOS() ? Run("stat", "-f", "%i", path) : Run("stat", "-c", "%i", path)).Trim();
+    }
+
+    private static int RunExit(string fileName, params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo(fileName)
+            { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+        using var process = Process.Start(startInfo)!;
+        process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return process.ExitCode;
     }
 
     private static string Run(string fileName, params string[] arguments)
