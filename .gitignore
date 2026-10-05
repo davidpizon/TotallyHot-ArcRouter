@@ -442,3 +442,7 @@ data/coderouterbench/
 # field for DEV builds only; releases are versioned by Directory.Build.props' <Version> and the matching
 # "v<Version>" tag, so this must never be committed.
 .build-number
+
+# Dev-only copy of the .NET 10 WASM hot-reload browser module so `dotnet run` can
+# boot the dashboard. See AGENTS.md "Cursor Cloud specific instructions".
+src/TotallyHotArcRouter.Gui.Web/wwwroot/_content/

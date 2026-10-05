@@ -128,6 +128,14 @@ New-Item -ItemType SymbolicLink -Path ".github\copilot-instructions.md" -Target 
 
 Requires Windows Developer Mode and `git config core.symlinks true`.
 
+## Cursor Cloud specific instructions
+
+- The .NET 10 SDK comes from Ubuntu's `dotnet-sdk-10.0` package (`dotnet` is on the default PATH). Do not use the Microsoft apt feed on Ubuntu 24.04.
+- On Linux, do not build `src/TotallyHotArcRouter.slnx` or `TotallyHotArcRouter.Tray` (`net10.0-windows`). Restore and build the test projects listed in `.github/workflows/dotnet-ci.yml`; that also builds the router and the Blazor dashboard.
+- `dotnet test` reports "Zero tests ran" on this SDK. Run each built test host directly, for example `src/TotallyHotArcRouter.Tests/bin/Release/net10.0/TotallyHotArcRouter.Tests`.
+- Dev server: `dotnet run --project src/TotallyHotArcRouter/TotallyHotArcRouter.csproj --launch-profile TotallyHotArcRouter`. Proxy `https://127.0.0.1:47101` (`curl -k`), dashboard `https://127.0.0.1:47104`. A first run has no providers, so `GET /v1/models` is an empty list and `"model":"auto"` returns 400.
+- .NET 10's Blazor WASM hot-reload browser module is not in the router's static-web-asset manifest, so the dashboard stays on "Loading…". Before starting the dev server, copy `Microsoft.DotNet.HotReload.WebAssembly.Browser.*.lib.module.js` from the NuGet package `microsoft.dotnet.hotreload.webassembly.browser` into `src/TotallyHotArcRouter.Gui.Web/wwwroot/_content/Microsoft.DotNet.HotReload.WebAssembly.Browser/`.
+
 ## Key References
 - `README.md`
 - `docs/HANDBOOK.md`
