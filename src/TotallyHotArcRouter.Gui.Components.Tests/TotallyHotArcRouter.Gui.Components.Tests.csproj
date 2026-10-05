@@ -25,7 +25,7 @@
     <PackageReference Include="bunit" Version="2.11.3" />
     <!-- bunit pulls in AngleSharp 1.4.0 transitively, which has a known moderate-severity mXSS
          vulnerability (GHSA-pgww-w46g-26qg). Pin directly to the patched version. -->
-    <PackageReference Include="AngleSharp" Version="1.8.2" />
+    <PackageReference Include="AngleSharp" Version="1.8.3" />
     <!-- AwesomeAssertions: the Apache-2.0 community fork of FluentAssertions. FluentAssertions 8.x moved to
          the Xceed Community License, which permits non-commercial use only and restricts *use*, not just
          redistribution - so it would constrain how this repository itself may be licensed and used. See
