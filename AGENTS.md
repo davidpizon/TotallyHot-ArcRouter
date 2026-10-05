@@ -13,6 +13,7 @@ This repository contains the TotallyHot Arc Router project.
 
 ## Working Rules
 - **Approved plan before coding.** Set by David on 2026-09-28. Do not start implementation on a boarded item (a GitHub issue signed off for work — issue #165 and every later item) until a plan at `docs/plans/issue-<N>-<slug>.md` has David's explicit sign-off (for example, a comment on the issue or on the plan pull request). The implementation pull request must link that approved plan. Full rule: [`docs/router/standing-rules.md`](docs/router/standing-rules.md).
+- **Review locally, Copilot reviews once.** Set by David on 2026-10-05. Open pull requests as drafts, iterate with a local `/code-review` (or a reviewer on a different model) until clean, then mark ready — that triggers the one Copilot review. Never re-request a Copilot review after fixing its comments; verify the fixes locally. Each Copilot review costs a premium request. Full rule: [`docs/router/standing-rules.md`](docs/router/standing-rules.md).
 - Keep changes minimal and scoped to the user request.
 - Prefer the existing repository conventions and document any deliberate deviation.
 - When editing C# code, follow .NET 10 best practices: nullable reference types, async/await where appropriate, dependency injection, options binding, and structured logging.
