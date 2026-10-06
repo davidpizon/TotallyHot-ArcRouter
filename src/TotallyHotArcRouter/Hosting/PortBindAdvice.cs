@@ -33,7 +33,9 @@ internal static partial class PortBindAdvice
 
     /// <summary>
     /// Formats the suggestions for a port that is already in use. Passed to the logger as a structured
-    /// property so the log message template stays a static literal.
+    /// property so the log message template stays a static literal. The Windows-only diagnosis (port owner
+    /// lookup, reserved ranges, the WinNAT reset) is included only when running on Windows; the change-port
+    /// and optional-disable advice applies everywhere.
     /// </summary>
     /// <param name="kestrelMessage">The bind exception's message; used to name the exact port in the commands.</param>
     /// <param name="settingHint">
@@ -44,18 +46,38 @@ internal static partial class PortBindAdvice
     /// <returns>A multi-line, numbered list of things to try, most likely first.</returns>
     public static string Suggestions(string kestrelMessage, string settingHint, string? additionalSuggestion = null)
     {
+        return Suggestions(kestrelMessage, settingHint, additionalSuggestion, OperatingSystem.IsWindows());
+    }
+
+    /// <summary>
+    /// <see cref="Suggestions(string, string, string?)"/> with the platform passed in, so tests can cover
+    /// both branches on any host.
+    /// </summary>
+    /// <param name="kestrelMessage">The bind exception's message.</param>
+    /// <param name="settingHint">The configuration key(s) that move the failing listener.</param>
+    /// <param name="additionalSuggestion">An extra, caller-specific last suggestion, or <see langword="null"/>.</param>
+    /// <param name="windows">Whether to include the Windows-only diagnosis steps.</param>
+    /// <returns>A multi-line, numbered list of things to try, most likely first.</returns>
+    internal static string Suggestions(string kestrelMessage, string settingHint, string? additionalSuggestion, bool windows)
+    {
         var port = TryGetPort(kestrelMessage)?.ToString() ?? "<port>";
+        List<string> steps = [];
 
-        List<string> lines =
-        [
-            $"  1. Another ArcRouter instance or the installed Windows service may hold it: Get-NetTCPConnection -LocalPort {port} -State Listen | Select OwningProcess",
-            "     (nothing listed? the port is probably reserved, not listened on - continue below).",
-            "  2. Windows (Hyper-V, WSL2, containers) can reserve whole TCP ranges that netstat and 'netsh interface ipv4 show excludedportrange' do not show.",
-            "     From an elevated prompt: net stop winnat; netsh int ipv4 add excludedportrange protocol=tcp startport=" + port + " numberofports=1; net start winnat",
-            $"  3. Or move the listener to a free port with {settingHint} in appsettings.local.json in the machine-shared data directory (it survives MSI upgrades), then point clients at the new port."
-        ];
-        if (additionalSuggestion is not null) lines.Add($"  4. {additionalSuggestion}");
+        if (windows)
+        {
+            steps.Add(
+                $"Another ArcRouter instance or the installed Windows service may hold it: Get-NetTCPConnection -LocalPort {port} -State Listen | Select OwningProcess" + Environment.NewLine +
+                "     (nothing listed? the port is probably reserved, not listened on - continue below).");
+            steps.Add(
+                "Windows (Hyper-V, WSL2, containers) can reserve whole TCP ranges that netstat and 'netsh interface ipv4 show excludedportrange' do not show." + Environment.NewLine +
+                "     Warning: stopping WinNAT interrupts every WSL2, Hyper-V and container connection that uses Windows NAT, machine-wide, until it restarts." + Environment.NewLine +
+                "     From an elevated PowerShell prompt (not cmd.exe): net stop winnat; netsh int ipv4 add excludedportrange protocol=tcp startport=" + port + " numberofports=1; net start winnat");
+        }
 
-        return string.Join(separator: Environment.NewLine, values: lines);
+        steps.Add($"Move the listener to a free port with {settingHint} in appsettings.local.json in the machine-shared data directory (it survives MSI upgrades), then point clients at the new port.");
+        if (additionalSuggestion is not null) steps.Add(additionalSuggestion);
+
+        return string.Join(separator: Environment.NewLine,
+            values: steps.Select((step, index) => $"  {index + 1}. {step}"));
     }
 }
