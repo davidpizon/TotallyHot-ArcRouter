@@ -166,6 +166,9 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         var result = await ResolveAsync(fixture, AutoBody, ExploreHeaders);
 
         Assert.Equal(expected: Pricey, actual: result.Route!.ModelName);
+        // The Orchestrator also ends on pricey (its voter always picks it), and so does the memory fallback. Only
+        // the Orchestrator leg records a voter pick, so a null here shows the near-best leg itself chose pricey.
+        Assert.Null(result.DimBestModel);
     }
 
     [Fact]
@@ -193,6 +196,8 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
 
         Assert.Equal(expected: unbiased.Route!.ModelName, actual: result.Route!.ModelName);
         Assert.Equal(expected: Pricey, actual: result.Route.ModelName);
+        // Detected but not acted on: without this, a detector that stopped recognising the headers would pass too.
+        Assert.Equal(expected: "claude-code/general-purpose", actual: result.Classification!.Subagent?.ToLabel());
     }
 
     // ---- Allowlist and circuit state ----
@@ -213,6 +218,9 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         Assert.True(result.IsSuccess);
         Assert.Equal(expected: Pricey, actual: result.Route!.ModelName);
         Assert.DoesNotContain(collection: result.Candidates, filter: c => c.Route.ModelName == Cheap);
+        // AutoSelect, not CircuitOpen: RoutingCandidateBuilder swaps a circuit-open pick for the next model after
+        // the policy ran, so CircuitOpen would mean the policy was offered the open model and chose it.
+        Assert.Equal(expected: RoutingSubstitutionReason.AutoSelect, actual: result.SubstitutionReason);
     }
 
     [Theory]
@@ -225,6 +233,9 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         var result = await ResolveAsync(fixture, AutoBody, kind == "helper" ? HelperHeaders : ExploreHeaders);
 
         var configured = fixture.Resolver.ListModels().Select(m => m.ModelName).ToList();
+        Assert.True(result.IsSuccess);
+        Assert.Contains(result.Route!.ModelName, configured);
+        Assert.NotEmpty(result.Candidates);
         Assert.All(result.Candidates, c => Assert.Contains(c.Route.ModelName, configured));
     }
 
