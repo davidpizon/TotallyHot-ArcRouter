@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.Options;
 using Serilog;
 using TotallyHot.ArcRouter.CodeRouterBench;
+using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Telemetry;
@@ -139,8 +140,10 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
             // more precise than the configured port (McpOptions.Port may be 0, an ephemeral port).
             _logger.LogWarning(
                 message:
-                "The MCP endpoint could not start: {Reason} The router continues without it; set Mcp:Port to a free port, or Mcp:Enabled=false to stop trying.",
-                ex.Message);
+                "The MCP endpoint could not start: {Reason} The router continues without it. Things to try:{NewLine}{Suggestions}",
+                ex.Message, Environment.NewLine,
+                PortBindAdvice.Suggestions(kestrelMessage: ex.Message, settingHint: "Mcp:Port",
+                    additionalSuggestion: "Or set Mcp:Enabled=false to stop trying."));
             await DisposeServerAsync().ConfigureAwait(false);
         }
         catch (Exception ex)

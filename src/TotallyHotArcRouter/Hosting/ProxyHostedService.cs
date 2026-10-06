@@ -94,8 +94,10 @@ public class ProxyHostedService : IHostedService
             // the gRPC port, so it is quoted rather than reconstructed from the configured values.
             _logger.LogError(
                 message:
-                "The proxy could not start: {Reason} Either another TotallyHot ArcRouter instance (or the installed Windows service) already holds that port, or the port is reserved by this machine rather than listened on - the Host Network Service used by Hyper-V, WSL2 and container networking reserves whole TCP ranges that show up in neither netstat nor 'netsh interface ipv4 show excludedportrange'. If nothing is listening on the port, set a free one via Proxy:Port in appsettings.local.json in the machine-shared data directory. Shutting down.",
-                ex.Message);
+                "The proxy could not start: {Reason} Shutting down. Things to try:{NewLine}{Suggestions}",
+                ex.Message, Environment.NewLine,
+                PortBindAdvice.Suggestions(kestrelMessage: ex.Message,
+                    settingHint: "Proxy:Port (or WebInterface:Port / Proxy:PlainHttp:Port, whichever address is named above)"));
 
             // A failed start must not report success to whatever launched the process; Program's fatal
             // handler sets this for the exceptions it catches, and this path bypasses it by design.

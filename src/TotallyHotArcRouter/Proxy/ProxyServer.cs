@@ -138,6 +138,10 @@ public class ProxyServer : IAsyncDisposable, IDisposable
             // outer host as ProxyHostedService's own start-failure log line.
             .ConfigureLogging(logging =>
             {
+                // Applied on both paths: the Serilog provider does not filter by category, so without it the
+                // host's own "Hosting failed to start" Error (with Kestrel's full stack) is logged in addition
+                // to ProxyHostedService's actionable line.
+                logging.AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None);
                 if (serilogLogger is not null)
                 {
                     logging.ClearProviders();
@@ -145,9 +149,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                 }
                 else
                 {
-                    logging
-                        .AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None)
-                        .AddFilter(category: "Microsoft", level: LogLevel.Warning);
+                    logging.AddFilter(category: "Microsoft", level: LogLevel.Warning);
                 }
             })
             .ConfigureWebHostDefaults(webBuilder =>
