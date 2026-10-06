@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
+using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -82,6 +83,43 @@ public sealed class LiveDataStoreTests
         var expected = ConversationAggregator.Aggregate(events).Select(LiveConversationMapper.ToModel).ToList();
 
         store.Conversations.Should().BeEquivalentTo(expected, options => options.WithStrictOrdering());
+    }
+
+    /// <summary>
+    /// ADR-0021: <see cref="LiveDataStore.MapToDto(Contract.RoutingTelemetryEvent)"/> must honour
+    /// optional-field presence so a live badge appears when the router sends <c>subagent_signal</c>
+    /// and stays absent when an older writer omits the field.
+    /// </summary>
+    [Theory]
+    [InlineData(true, "claude-code/explore")]
+    [InlineData(false, null)]
+    public void MapToDto_carries_subagent_signal_only_when_the_wire_field_is_present(
+        bool present, string? expected)
+    {
+        var wire = new Contract.RoutingTelemetryEvent
+        {
+            SessionId = "s1",
+            TurnNumber = 1,
+            IsSessionSynthesized = false,
+            RequestedModel = "auto",
+            ResolvedModel = "claude-sonnet-5",
+            RoutedModel = "claude-sonnet-5",
+            SubstitutionReason = "AutoSelect",
+            Provider = "anthropic",
+            IsFallback = false,
+            IsStreaming = false,
+            LatencyToHeadersMs = 10,
+            TotalDurationMs = 20,
+            StatusCode = 200,
+            TimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow),
+            RouterTokens = 0,
+            RouterCostUsd = "0"
+        };
+        if (present) wire.SubagentSignal = "claude-code/explore";
+
+        var dto = LiveDataStore.MapToDto(wire);
+
+        dto.SubagentSignal.Should().Be(expected);
     }
 
     /// <summary>The live view keeps at most <see cref="LiveDataStore.MaxRetainedSessions"/> sessions.</summary>

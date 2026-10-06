@@ -11,6 +11,12 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// stays decoupled from the wire message shape (proto3 optional-field presence, protobuf
 /// <c>Timestamp</c>, decimal-as-string) and testable without constructing real protobuf messages.
 /// </summary>
+/// <remarks>
+/// <paramref name="SubagentSignal"/> is the optional fixed-vocabulary <c>harness/kind</c> label of the
+/// verified subagent or helper marker on the request (for example <c>claude-code/explore</c>), or
+/// <see langword="null"/> when the wire field was absent (an unsignalled request, or an older router
+/// that never sends it).
+/// </remarks>
 public sealed record RoutingTelemetryEventDto(
     string SessionId,
     int TurnNumber,
@@ -35,4 +41,5 @@ public sealed record RoutingTelemetryEventDto(
     string? CostConfidence = null,
     int RouterTokens = 0,
     decimal RouterCostUsd = 0m,
-    string? SubstitutionReason = null);
+    string? SubstitutionReason = null,
+    string? SubagentSignal = null);

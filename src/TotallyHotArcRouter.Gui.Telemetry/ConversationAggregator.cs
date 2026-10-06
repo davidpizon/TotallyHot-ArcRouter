@@ -1,6 +1,11 @@
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>One turn (routed request) within a live-aggregated conversation.</summary>
+/// <remarks>
+/// <paramref name="SubagentSignal"/> is the optional fixed-vocabulary <c>harness/kind</c> label of the
+/// subagent or helper marker on the request (for example <c>claude-code/explore</c>), or
+/// <see langword="null"/> when the turn carried none (ADR-0021).
+/// </remarks>
 public sealed record LiveConversationTurn(
     string SessionId,
     int TurnNumber,
@@ -19,7 +24,8 @@ public sealed record LiveConversationTurn(
     string? CostConfidence = null,
     string? RequestedModel = null,
     string? RoutedModel = null,
-    string? SubstitutionReason = null);
+    string? SubstitutionReason = null,
+    string? SubagentSignal = null);
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
 /// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
@@ -118,7 +124,8 @@ public static class ConversationAggregator
                 CostConfidence: e.CostConfidence,
                 RequestedModel: e.RequestedModel,
                 RoutedModel: e.RoutedModel,
-                SubstitutionReason: e.SubstitutionReason))
+                SubstitutionReason: e.SubstitutionReason,
+                SubagentSignal: e.SubagentSignal))
             .ToList();
 
         return new LiveConversation(

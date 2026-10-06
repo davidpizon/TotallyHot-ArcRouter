@@ -1401,6 +1401,13 @@ input[type="number"] {
   color: var(--text-muted);
 }
 
+/* Subagent/side-task marker chip on a turn separator (ADR-0021): informational, so neutral rather than a
+   success/warning tint. */
+.ls-signal-badge {
+  border: 1px solid var(--text-muted);
+  color: var(--text-muted);
+}
+
 .ls-chat-bubble-user {
   max-width: 85%;
   background: var(--surface-elevated-a);

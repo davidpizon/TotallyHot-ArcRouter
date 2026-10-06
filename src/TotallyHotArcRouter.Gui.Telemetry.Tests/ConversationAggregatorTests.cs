@@ -27,7 +27,8 @@ public class ConversationAggregatorTests
         int? cacheReadTokens = null,
         string? costConfidence = null,
         string? routedModel = null,
-        string? substitutionReason = null)
+        string? substitutionReason = null,
+        string? subagentSignal = null)
     {
         return new RoutingTelemetryEventDto(
             SessionId: sessionId,
@@ -51,7 +52,8 @@ public class ConversationAggregatorTests
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary,
             CostConfidence: costConfidence,
-            SubstitutionReason: substitutionReason);
+            SubstitutionReason: substitutionReason,
+            SubagentSignal: subagentSignal);
     }
 
     [Fact]
@@ -255,6 +257,21 @@ public class ConversationAggregatorTests
         Assert.Equal(expected: "auto", actual: turn.RequestedModel);
         Assert.Equal(expected: "claude-sonnet-5", actual: turn.RoutedModel);
         Assert.Equal(expected: "AutoSelect", actual: turn.SubstitutionReason);
+    }
+
+    [Fact]
+    public void Aggregate_SubagentSignal_PropagatesThroughToTheTurn()
+    {
+        var events = new[]
+        {
+            CreateEvent(sessionId: "session-1", turnNumber: 1, subagentSignal: "claude-code/explore"),
+            CreateEvent(sessionId: "session-1", turnNumber: 2)
+        };
+
+        var turns = ConversationAggregator.Aggregate(events)[0].Turns;
+
+        Assert.Equal(expected: "claude-code/explore", actual: turns[0].SubagentSignal);
+        Assert.Null(turns[1].SubagentSignal);
     }
 
     [Fact]

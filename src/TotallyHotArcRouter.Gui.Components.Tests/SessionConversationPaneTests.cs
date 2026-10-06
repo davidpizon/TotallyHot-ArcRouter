@@ -12,7 +12,8 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class SessionConversationPaneTests
 {
-    private static ConversationTurn MakeTurn(int turnNumber, string? requestSummary, string? responseSummary)
+    private static ConversationTurn MakeTurn(int turnNumber, string? requestSummary, string? responseSummary,
+        string? subagentSignal = null)
     {
         return new ConversationTurn(
             Id: $"t{turnNumber}",
@@ -30,7 +31,8 @@ public sealed class SessionConversationPaneTests
             Timestamp: "10:00:00",
             RoutingSteps: [],
             RequestSummary: requestSummary,
-            ResponseSummary: responseSummary);
+            ResponseSummary: responseSummary,
+            SubagentSignal: subagentSignal);
     }
 
     private static Conversation MakeConversation(params ConversationTurn[] turns)
@@ -95,5 +97,21 @@ public sealed class SessionConversationPaneTests
 
         cut.Markup.Should().Contain("No request captured");
         cut.Markup.Should().Contain("No response captured");
+    }
+
+    [Fact]
+    public void Renders_a_signal_badge_only_on_turns_that_carry_a_subagent_signal()
+    {
+        using var ctx = new BunitContext();
+
+        var conversation = MakeConversation(
+            MakeTurn(1, requestSummary: "a", responseSummary: "b", subagentSignal: "claude-code/explore"),
+            MakeTurn(2, requestSummary: "c", responseSummary: "d"));
+
+        var cut = ctx.Render<SessionConversationPane>(p =>
+            p.Add(parameterSelector: c => c.Conversation, value: conversation));
+
+        var badges = cut.FindAll(".ls-signal-badge");
+        badges.Should().ContainSingle().Which.TextContent.Trim().Should().Be("claude-code/explore");
     }
 }
