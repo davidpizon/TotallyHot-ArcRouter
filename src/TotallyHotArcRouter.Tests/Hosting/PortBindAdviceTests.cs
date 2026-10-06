@@ -27,7 +27,7 @@ public sealed class PortBindAdviceTests
     {
         var text = PortBindAdvice.Suggestions(
             kestrelMessage: "Failed to bind to address https://127.0.0.1:47101: address already in use.",
-            settingHint: "Proxy:Port");
+            settingHint: "Proxy:Port", additionalSuggestion: null, windows: true);
 
         Assert.Contains("-LocalPort 47101", text, StringComparison.Ordinal);
         Assert.Contains("startport=47101", text, StringComparison.Ordinal);
@@ -37,8 +37,28 @@ public sealed class PortBindAdviceTests
     [Fact]
     public void Suggestions_UnrecognisedMessage_UsesPlaceholder()
     {
-        var text = PortBindAdvice.Suggestions(kestrelMessage: "odd", settingHint: "Mcp:Port");
+        var text = PortBindAdvice.Suggestions(kestrelMessage: "odd", settingHint: "Mcp:Port", additionalSuggestion: null, windows: true);
 
         Assert.Contains("<port>", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Suggestions_Windows_WarnsAboutWinNatAndNamesPowerShell()
+    {
+        var text = PortBindAdvice.Suggestions("Failed to bind to address https://127.0.0.1:47101: x", "Proxy:Port", null, windows: true);
+
+        Assert.Contains("interrupts every WSL2, Hyper-V and container", text, StringComparison.Ordinal);
+        Assert.Contains("PowerShell prompt (not cmd.exe)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Suggestions_NonWindows_OmitsWindowsCommands_AndKeepsChangePortAndExtra()
+    {
+        var text = PortBindAdvice.Suggestions("Failed to bind to address https://127.0.0.1:47101: x", "Mcp:Port", "Set Mcp:Enabled=false.", windows: false);
+
+        Assert.DoesNotContain("winnat", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Get-NetTCPConnection", text, StringComparison.Ordinal);
+        Assert.Contains("1. Move the listener to a free port with Mcp:Port", text, StringComparison.Ordinal);
+        Assert.Contains("2. Set Mcp:Enabled=false.", text, StringComparison.Ordinal);
     }
 }
