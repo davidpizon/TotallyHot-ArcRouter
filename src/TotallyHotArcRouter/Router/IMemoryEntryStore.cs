@@ -29,6 +29,22 @@ public interface IMemoryEntryStore
     Task DeleteAsync(long id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes a batch of entries at once, so an eviction of thousands of rows is one transaction and
+    /// one write-ahead-log truncation rather than one of each per row (#184).
+    /// </summary>
+    /// <param name="ids">The store-assigned ids to delete.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <remarks>
+    /// The default implementation deletes one by one - correct for the in-memory test fakes, which have
+    /// no log to truncate. Persistent stores override it.
+    /// </remarks>
+    async Task DeleteManyAsync(IReadOnlyCollection<long> ids, CancellationToken cancellationToken = default)
+    {
+        foreach (var id in ids)
+            await DeleteAsync(id: id, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Returns the highest store-assigned <see cref="MemoryEntry.Id"/>, or <c>0</c> when the store is
     /// empty - a cheap change stamp for callers that cache a full <see cref="LoadAllAsync"/> snapshot
     /// (docs/router/routing-roi-regret-plan.md's ledger cache). Every append advances it, and FIFO

@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Storage;
 
 namespace TotallyHot.ArcRouter.Transcripts;
 
@@ -14,6 +16,7 @@ namespace TotallyHot.ArcRouter.Transcripts;
 public sealed class SqliteTranscriptStore : ITranscriptStore
 {
     private readonly TranscriptDatabase _database;
+    private readonly ILogger<SqliteTranscriptStore> _logger;
     private readonly IOptionsMonitor<TranscriptOptions> _options;
     private readonly Lock _schemaLock = new();
     private volatile bool _schemaEnsured;
@@ -29,14 +32,31 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     /// Supplies the live <see cref="TranscriptOptions.Enabled"/> gate, read per call rather than
     /// captured.
     /// </param>
-    public SqliteTranscriptStore(TranscriptDatabase database, IOptionsMonitor<TranscriptOptions> options)
+    /// <param name="logger">
+    /// Reports a log truncation that could not complete after a delete. Optional so a store built by hand
+    /// in a test needs no logging setup.
+    /// </param>
+    public SqliteTranscriptStore(
+        TranscriptDatabase database,
+        IOptionsMonitor<TranscriptOptions> options,
+        ILogger<SqliteTranscriptStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(options);
 
         _database = database;
         _options = options;
+        _logger = logger ?? NullLogger<SqliteTranscriptStore>.Instance;
     }
+
+    /// <summary>
+    /// Gets or sets the pause between the attempts <see cref="FinalizeDeletionAsync"/> makes while another
+    /// connection holds the write-ahead log. Internal so a test does not wait out the real few seconds.
+    /// </summary>
+    internal TimeSpan FinalizeRetryDelay { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>How many times <see cref="FinalizeDeletionAsync"/> tries before reporting the deletion as not final.</summary>
+    private const int FinalizeAttempts = 5;
 
     /// <inheritdoc/>
     public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
@@ -298,6 +318,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.Parameters.AddWithValue(parameterName: "$count", value: count);
 
         var affectedRows = command.ExecuteNonQuery();
+        TruncateWalAfterDelete(connection);
         return Task.FromResult(affectedRows);
     }
 
@@ -315,6 +336,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.Parameters.AddWithValue(parameterName: "$cutoff", value: cutoff.ToString("O"));
 
         var affectedRows = command.ExecuteNonQuery();
+        TruncateWalAfterDelete(connection);
         return Task.FromResult(affectedRows);
     }
 
@@ -332,7 +354,42 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.CommandText = "DELETE FROM request_transcripts;";
 
         var affectedRows = command.ExecuteNonQuery();
+        TruncateWalAfterDelete(connection);
         return Task.FromResult(affectedRows);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> FinalizeDeletionAsync(CancellationToken cancellationToken = default)
+    {
+        for (var attempt = 1; attempt <= FinalizeAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using (var connection = _database.OpenConnection())
+            {
+                if (SqliteHardening.TruncateWal(connection)) return true;
+            }
+
+            if (attempt < FinalizeAttempts)
+                await Task.Delay(delay: FinalizeRetryDelay, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+        }
+
+        _logger.LogWarning("Transcript deletion is not final: another connection held the write-ahead log through every retry.");
+        return false;
+    }
+
+    /// <summary>
+    /// Truncates the write-ahead log right after a delete so the deleted text cannot survive in the
+    /// <c>-wal</c> file (<c>secure_delete</c> only zeroes the freed pages in the database itself). A busy
+    /// log is not an error: the next retention cycle, <see cref="FinalizeDeletionAsync"/>, or the startup
+    /// checkpoint finishes the job, so it is logged and the delete still succeeds.
+    /// </summary>
+    /// <param name="connection">The connection that ran the delete.</param>
+    private void TruncateWalAfterDelete(SqliteConnection connection)
+    {
+        if (!SqliteHardening.TruncateWal(connection))
+            _logger.LogWarning("Transcript deletion is not yet final: the write-ahead log was busy and will be truncated on a later attempt.");
     }
 
     /// <inheritdoc/>

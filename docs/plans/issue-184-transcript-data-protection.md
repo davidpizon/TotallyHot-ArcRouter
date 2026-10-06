@@ -459,3 +459,14 @@ Phase 0 is [ADR-0024](../adr/0024-protect-the-machine-shared-data-directory-and-
     - container in-place migration.
   - **Bug the run found:** the first scanner skipped processes whose `/proc/<pid>/fd` it could not read, which fails open, and container root lacks `CAP_SYS_PTRACE`. It now reports them as possible writers.
 - **macOS:** built, not run. The `lsof` parser is unit-tested, and the rest shares the Linux code apart from `lstat`'s entry point.
+
+## 9. Implementation notes (phase 2)
+
+Phase 2 is in `src/TotallyHotArcRouter/Storage/` (`SqliteHardening`, `SqliteScrub`). It differs from §3.2 in these places:
+
+- **One helper opens every database.** `SqliteHardening.Open` sets `secure_delete=ON` and `synchronous=NORMAL` on every connection, and `BenchmarkDatabase`, `PriceCatalogDatabase`, `RouterMemoryDatabase` and `TranscriptDatabase` all call it from `OpenConnection` (decisions 6 and 8). `EnsureCreated` now sets only `journal_mode=WAL`, the one pragma that persists.
+- **The checkpoint does not wait.** Microsoft.Data.Sqlite gives each connection a 30-second busy timeout, and `wal_checkpoint(TRUNCATE)` waits out a reader for all of it. `TruncateWal` sets `busy_timeout=0` for the call, restores it, and reports `busy` so the caller retries.
+- **Clear reports finality through `ITranscriptStore.FinalizeDeletionAsync`**, a default-implemented member (so the test fakes need no change) that retries five times, one second apart. `ClearTranscriptsResponse` gains `deletion_final`. The GUI does not read it yet: `ClearTranscriptsAsync` still returns only the row count, so surfacing it means changing the client interface and its tests.
+- **The scrub redirects temp files with `PRAGMA temp_store_directory`**, not an environment variable or `sqlite3_win32_set_directory` (the bundled build returns `SQLITE_ERROR` for it). The pragma is process-wide, so the scrub clears it again in a `finally`. A 40 MB `VACUUM` with the directory deleted afterwards fails with "unable to open database file", which shows SQLite honours it.
+- **The scrub covers `transcripts.db` only**, as §3.2 describes. It runs from `StartupHealthCheckHostedService` before any `EnsureCreated`, regardless of `Transcripts:Enabled`, and records completion in `transcripts.db.scrubbed`.
+- **Embedding memory.** `IMemoryEntryStore.DeleteManyAsync` (default: loop over `DeleteAsync`) deletes an eviction batch in one transaction and one checkpoint; `EmbeddingMemory.TrimToCurrentCapacityAsync` uses it. `RouterMemoryDatabase.EnsureCreated` truncates the log at startup.

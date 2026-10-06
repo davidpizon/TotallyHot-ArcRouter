@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using System.Globalization;
@@ -412,9 +413,7 @@ public sealed class PriceCatalogDatabase
     /// </summary>
     public SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        return connection;
+        return SqliteHardening.Open(ConnectionString);
     }
 
     /// <summary>
@@ -437,7 +436,7 @@ public sealed class PriceCatalogDatabase
 
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
             pragma.ExecuteNonQuery();
         }
 

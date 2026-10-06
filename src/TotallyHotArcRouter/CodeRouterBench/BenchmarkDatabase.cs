@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
@@ -137,9 +138,7 @@ public sealed class BenchmarkDatabase
     /// </summary>
     public SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        return connection;
+        return SqliteHardening.Open(ConnectionString);
     }
 
     /// <summary>
@@ -161,7 +160,7 @@ public sealed class BenchmarkDatabase
 
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
             pragma.ExecuteNonQuery();
         }
 

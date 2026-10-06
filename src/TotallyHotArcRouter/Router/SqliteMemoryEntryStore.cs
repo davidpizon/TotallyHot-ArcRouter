@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using System.Globalization;
+using TotallyHot.ArcRouter.Storage;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -82,7 +83,40 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.CommandText = "DELETE FROM memory_entries WHERE id = $id;";
         command.Parameters.AddWithValue(parameterName: "$id", value: id);
         command.ExecuteNonQuery();
+        SqliteHardening.TruncateWal(connection);
 
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// One transaction and one <c>wal_checkpoint(TRUNCATE)</c> for the whole batch. A busy log is left for
+    /// the startup checkpoint to finish, since the next eviction will not necessarily come soon.
+    /// </remarks>
+    public Task DeleteManyAsync(IReadOnlyCollection<long> ids, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (ids.Count == 0) return Task.CompletedTask;
+
+        using var connection = _database.OpenConnection();
+        using (var transaction = connection.BeginTransaction())
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM memory_entries WHERE id = $id;";
+            var idParameter = command.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var id in ids)
+            {
+                idParameter.Value = id;
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+
+        SqliteHardening.TruncateWal(connection);
         return Task.CompletedTask;
     }
 

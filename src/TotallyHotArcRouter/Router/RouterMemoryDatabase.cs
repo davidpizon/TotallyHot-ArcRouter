@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using System.Globalization;
@@ -265,9 +266,7 @@ public sealed class RouterMemoryDatabase
     /// </summary>
     public SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        return connection;
+        return SqliteHardening.Open(ConnectionString);
     }
 
     /// <summary>
@@ -285,9 +284,12 @@ public sealed class RouterMemoryDatabase
 
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
             pragma.ExecuteNonQuery();
         }
+
+        // Finish any eviction a previous run left pending (#184): nothing else has this database open yet.
+        SqliteHardening.TruncateWal(connection);
 
         using var schema = connection.CreateCommand();
         schema.CommandText = SchemaSql;

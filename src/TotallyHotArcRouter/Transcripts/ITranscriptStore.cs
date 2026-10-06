@@ -147,6 +147,20 @@ public interface ITranscriptStore
     Task<int> DeleteAllAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Makes earlier deletes final by truncating the database's write-ahead log, retrying a few times over
+    /// a few seconds while another connection holds it. Clear needs this because it cannot rely on the
+    /// retention cycle, which does not run when capture is disabled.
+    /// </summary>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>
+    /// <see langword="true"/> when no deleted text can remain in the write-ahead log;
+    /// <see langword="false"/> when the log stayed busy through every retry, so the deletion will only
+    /// become final at a later checkpoint or at the next start. The default suits stores that keep no
+    /// such log.
+    /// </returns>
+    Task<bool> FinalizeDeletionAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+    /// <summary>
     /// Loads the prompt text of every transcript row linked to a <c>memory_entries</c> row, keyed by
     /// <c>memory_entry_id</c> - used by the cluster trainer's top-TF-IDF-term naming
     /// (docs/router/self-organizing-classification-plan.md Phase T2e), the one piece of cluster-model

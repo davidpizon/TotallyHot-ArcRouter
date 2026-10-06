@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using System.Globalization;
@@ -99,9 +100,35 @@ public sealed class TranscriptDatabase
     /// </summary>
     public SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        return connection;
+        return SqliteHardening.Open(ConnectionString);
+    }
+
+    /// <summary>
+    /// Finishes deletions an earlier run left pending and runs the one-time scrub (#184, ADR-0024). Runs at
+    /// startup, before anything else opens the database and regardless of
+    /// <see cref="TranscriptOptions.Enabled"/>: an operator who cleared transcripts and switched capture off
+    /// still needs the deleted text gone from the file.
+    /// </summary>
+    /// <param name="logger">Receives the outcome of the log truncation and the scrub.</param>
+    /// <remarks>
+    /// Does nothing when the file does not exist, so a default install with capture off still creates no
+    /// database. A busy log is logged and left for the next retention cycle.
+    /// </remarks>
+    public void RunStartupMaintenance(ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (!File.Exists(_databasePath)) return;
+
+        if (!SqliteHardening.TruncateWal(ConnectionString))
+            logger.LogWarning("The transcript database's write-ahead log was busy at startup; pending deletions are not yet final.");
+
+        var directory = Path.GetDirectoryName(_databasePath) ?? ".";
+        SqliteScrub.Run(
+            databasePath: _databasePath,
+            markerPath: _databasePath + ".scrubbed",
+            tempDirectory: Path.Combine(path1: directory, path2: "scrub-temp"),
+            logger: logger);
     }
 
     /// <summary>
@@ -119,7 +146,7 @@ public sealed class TranscriptDatabase
 
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
             pragma.ExecuteNonQuery();
         }
 
