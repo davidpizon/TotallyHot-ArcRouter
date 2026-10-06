@@ -433,11 +433,25 @@ public sealed class DataDirectoryNotProtectedException : InvalidOperationExcepti
     /// <param name="reason">Why, in words.</param>
     public DataDirectoryNotProtectedException(string path, string reason)
         : base(
-            $"The data directory '{path}' is not protected ({reason}), so the router will not use it. Run 'TotallyHotArcRouter --migrate-data-directory' as an administrator (as root on Linux and macOS), then start the router again.")
+            $"{Describe(path, reason)} Run 'TotallyHotArcRouter --migrate-data-directory' as an administrator (as root on Linux and macOS), then start the router again.")
     {
         Path = path;
+        Reason = reason;
     }
 
     /// <summary>The directory that failed verification.</summary>
     public string Path { get; }
+
+    /// <summary>Why the directory failed verification, in words, as passed to the constructor.</summary>
+    public string Reason { get; }
+
+    /// <summary>
+    /// The sentence stating what failed, without the remedy. The remedy is added separately wherever the
+    /// exception is reported: <see cref="Exception.Message"/> appends a generic one, and
+    /// <see cref="DataDirectoryAdvice"/> supplies the exact command for the launched process.
+    /// </summary>
+    /// <param name="path">The directory that failed verification.</param>
+    /// <param name="reason">Why, in words.</param>
+    internal static string Describe(string path, string reason) =>
+        $"The data directory '{path}' is not protected ({reason}), so the router will not use it.";
 }

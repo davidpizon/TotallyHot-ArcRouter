@@ -29,6 +29,61 @@ public sealed class TrayDiscoveryReaderTests
     }
 
     [Fact]
+    public void DefaultPaths_CheckProgramDataThenThePerUserDirectory()
+    {
+        var perUser = Path.Combine(
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: "web-interface.json");
+
+        TrayDiscoveryReader.DefaultPaths().Should().Equal(TrayDiscoveryReader.DefaultPath(), perUser);
+    }
+
+    [Fact]
+    public void TryReadFirst_FirstFileHasNoWebUrl_FallsThroughToALaterFileThatDoes()
+    {
+        var stale = TempPath();
+        var live = TempPath();
+        try
+        {
+            File.WriteAllText(path: stale, contents: """{ "caThumbprint": "AB12" }""");
+            File.WriteAllText(path: live, contents: """{ "webUrl": "https://localhost:48804" }""");
+
+            TrayDiscoveryReader.TryReadFirst([stale, live])!.WebUrl.Should().Be("https://localhost:48804");
+        }
+        finally
+        {
+            File.Delete(stale);
+            File.Delete(live);
+        }
+    }
+
+    [Fact]
+    public void TryReadFirst_NoFileHasWebUrl_ReturnsTheFirstParsedFile()
+    {
+        var path = TempPath();
+        try
+        {
+            File.WriteAllText(path: path, contents: """{ "caThumbprint": "AB12" }""");
+
+            var result = TrayDiscoveryReader.TryReadFirst([TempPath(), path]);
+
+            result.Should().NotBeNull();
+            result.WebUrl.Should().BeNull();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void TryReadFirst_NoFilesExist_ReturnsNull()
+    {
+        TrayDiscoveryReader.TryReadFirst([TempPath(), TempPath()]).Should().BeNull();
+    }
+
+    [Fact]
     public void TryRead_MissingFile_ReturnsNull()
     {
         var result = TrayDiscoveryReader.TryRead(TempPath());
