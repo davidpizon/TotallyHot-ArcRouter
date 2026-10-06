@@ -41,9 +41,11 @@ IP-literal URL such as `https://127.0.0.1:47101`; see
 ## Cheaper models for helpers and light subagents
 
 With `"model": "auto"`, Arc Router can send Claude Code's helper requests (session titles, summaries) and its
-`Explore` and `claude-code-guide` subagents to a cheaper model. It does this only for models whose known quality
-is close to the best candidate's, and every other subagent routes as it would without the feature. The rules and
-options are in [Route classes and options](../../router/utility-model-routing.md#route-classes-and-options-issue-163).
+`Explore` and `claude-code-guide` subagents to a cheaper model. The two paths are not the same safeguard:
+helpers use the utility rule (cost-aware, with the absolute quality floor; an unscored candidate can win on a
+cold start), while `Explore` and `claude-code-guide` additionally require a known score close to the best
+candidate's. Every other subagent routes as it would without the feature. The rules and options are in
+[Route classes and options](../../router/utility-model-routing.md#route-classes-and-options-issue-163).
 
 - **Turn the hint headers on.** Claude Code sends `x-claude-code-request-class` and `x-claude-code-agent-type` to a
   gateway only on version 2.1.273 or later, and only when `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` is set. On an older
@@ -56,8 +58,9 @@ options are in [Route classes and options](../../router/utility-model-routing.md
   confirmed, so treat this as a precaution. The router keeps such a request off the cheap path because it names its
   model instead of `auto`. A name the
   router does not know is still auto-routed (without the cheap bias), so the verdict could be served by whichever
-  model the router picks. A configured name is an explicit pick and is served as asked, so add `claude-sonnet-5`
-  to your model list.
+  model the router picks. A configured name is an explicit pick and is served as asked while that model stays
+  enabled and present on an enabled provider; if it is disabled, missing from the latest endpoint scan, or its
+  provider is stopped, existing substitution still applies. Add `claude-sonnet-5` to your model list.
 - **Don't point the model variables the classifier falls back to at `auto`.** The classifier falls back to the
   session's model or an Opus model in some cases. If `ANTHROPIC_DEFAULT_SONNET_MODEL` or
   `ANTHROPIC_DEFAULT_OPUS_MODEL` is `auto`, a classifier request that carries the `auxiliary` class would be routed

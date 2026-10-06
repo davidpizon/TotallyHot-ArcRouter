@@ -359,7 +359,8 @@ The class table, options and tests are in the
 - **Delegation rule.** Bias applies only when the client asked the router to choose: `auto`, `totallyhot-arcrouter`
   or a `copilot-utility*` alias. Claude Code's auto-mode classifier shares the `auxiliary` class but names its own
   model (Sonnet 5 by default), so this rule keeps it off the cheap path. A configured model name is an explicit
-  pick and keeps that model, per ADR-0005.
+  pick and keeps that model while it stays enabled and present on an enabled provider (ADR-0005); existing
+  substitution still applies when it does not.
 - **Claude Code operators must opt in to the hint headers** (`CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`) for
   `x-claude-code-request-class` and `x-claude-code-agent-type`. `x-claude-code-agent-id` needs no opt-in, but on its
   own it only marks a subagent of unknown type, which routes normally.
@@ -391,9 +392,11 @@ Helper and light-subagent bias applies only when the client handed the choice to
 is `auto`, `totallyhot-arcrouter` or a `copilot-utility*` alias.
 
 - A specific model name the router does not know takes today's unresolved-name fallback, **without** bias.
-- A configured model name is an explicit pick. It never reaches a policy and keeps its model (ADR-0005), even when
-  a signal is present. The signal is still reported on the telemetry event, so the dashboard shows what the
-  harness sent.
+- A configured model name is an explicit pick while that model stays enabled and present upstream on an enabled
+  provider: it never reaches a policy and keeps its model (ADR-0005), even when a signal is present. If the model
+  is disabled or missing from the latest endpoint scan, or its provider is stopped, existing substitution still
+  applies (`ResolveAgenticRouteAsync` / `RoutingCandidateBuilder`). The signal is still reported on the telemetry
+  event, so the dashboard shows what the harness sent.
 
 ### Relative floor
 
