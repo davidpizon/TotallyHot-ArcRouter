@@ -9,6 +9,12 @@ namespace TotallyHot.ArcRouter.Hosting;
 /// and could trip a service-start timeout. A deferred or interrupted scrub is simply retried at the next
 /// start, so running late costs nothing.
 /// </summary>
+/// <remarks>
+/// The rebuild cannot be cancelled once it starts, so stopping the host mid-scrub waits for it, up to the
+/// host's shutdown timeout. SQLite rolls an interrupted rebuild back, so nothing is corrupted; that run's
+/// work is lost and the scrub is retried at the next start. Accepted over adding cancellation to
+/// <c>VACUUM</c>, which SQLite does not support.
+/// </remarks>
 public sealed class TranscriptScrubHostedService : BackgroundService
 {
     private readonly TranscriptDatabase _database;

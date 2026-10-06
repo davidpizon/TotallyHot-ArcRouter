@@ -189,6 +189,28 @@ public class SecureDeletionTests : IDisposable
     }
 
     [Fact]
+    public void Scrub_WithABusyLogAfterTheRebuild_IsStillDoneAndIsNotRepeated()
+    {
+        CreateDatabaseWithFreedCanaryPagesWithoutSecureDelete();
+        var marker = _transcriptPath + ".scrubbed";
+        var readerString = new SqliteConnectionStringBuilder { DataSource = _transcriptPath, Pooling = false }.ToString();
+        using var reader = new SqliteConnection(readerString);
+        reader.Open();
+        using (var begin = reader.CreateCommand())
+        {
+            // A read transaction pins the log, so the TRUNCATE after the rebuild reports busy.
+            begin.CommandText = "BEGIN; SELECT COUNT(*) FROM t;";
+            begin.ExecuteScalar();
+        }
+
+        var outcome = RunScrub(marker: marker, space: new SqliteScrub.VolumeSpace(Free: long.MaxValue, Total: 1));
+
+        Assert.True(outcome == SqliteScrub.Outcome.Completed, string.Join(" | ", Logged));
+        Assert.True(File.Exists(marker));
+        Assert.Contains("write-ahead log was busy", string.Join(" | ", Logged));
+    }
+
+    [Fact]
     public void Scrub_WithTooLittleFreeSpace_DefersAndLeavesTheFileAlone()
     {
         CreateDatabaseWithFreedCanaryPagesWithoutSecureDelete();

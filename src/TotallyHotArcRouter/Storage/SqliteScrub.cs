@@ -17,8 +17,9 @@ namespace TotallyHot.ArcRouter.Storage;
 /// sits in memory and never in a temp directory other accounts can read, and (b) checks free space first.
 /// </para>
 /// <para>
-/// A scrub that cannot start or finish is <see cref="Outcome.Deferred"/>, not skipped: it is logged and
-/// retried at the next start. Completion is recorded by a marker file beside the database, so the scrub
+/// A scrub that cannot start or finish the rebuild is <see cref="Outcome.Deferred"/>, not skipped: it is logged and
+/// retried at the next start. A rebuild that succeeds counts as done even if the log could not be truncated
+/// yet, because repeating the rebuild would not help. Completion is recorded by a marker file beside the database, so the scrub
 /// runs once per database.
 /// </para>
 /// </remarks>
@@ -32,7 +33,7 @@ internal static class SqliteScrub
         /// <summary>The marker already existed, or there is no database to scrub.</summary>
         NotNeeded,
 
-        /// <summary>The database was rebuilt and the marker written.</summary>
+        /// <summary>The database was rebuilt and the marker written. The log may still await a later truncation.</summary>
         Completed,
 
         /// <summary>The scrub could not start or finish and will be tried again at the next start.</summary>
@@ -125,13 +126,13 @@ internal static class SqliteScrub
                 ResetTempDirectory(connection);
             }
 
+            // The rebuilt file is already clean, so a busy log does not undo the scrub and must not make the
+            // next start repeat the whole VACUUM. Only the log's old frames are pending, and the startup
+            // checkpoint, Clear and the retention purge each truncate it again.
             if (!logTruncated)
-            {
                 logger.LogWarning(
-                    "The one-time scrub of {DatabasePath} rebuilt the file but the write-ahead log was busy; it will be retried at the next start.",
+                    "The one-time scrub of {DatabasePath} rebuilt the file but the write-ahead log was busy; the log will be truncated by a later checkpoint.",
                     databasePath);
-                return Outcome.Deferred;
-            }
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
         {
