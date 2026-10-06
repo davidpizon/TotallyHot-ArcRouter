@@ -861,7 +861,7 @@ The C-A-F loop (observe context → act → receive feedback → update context)
 - Prompt strategy selection
 - Thinking-effort allocation
 - Skill routing
-- Sub-agent routing
+- Sub-agent routing (the router's version of this, for harness subagents and helper requests, is described in [Route classes and options](../router/utility-model-routing.md#route-classes-and-options-issue-163))
 - Memory routing
 - Effort routing
 

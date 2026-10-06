@@ -402,7 +402,9 @@ Follow `RequestInterceptorRoutingPolicyTests`, `CompositeRoutingPolicyTests` and
   - These don't: `copilot-utilit`, `my-copilot-utility`.
 - **Regression:** `HeuristicRequestClassifierTests` and the existing routing-policy tests are untouched and green.
 
-## Phase 5 — Docs and proof
+## Phase 5 — Docs and proof. **Done (2026-10-06), proof replayed rather than live.**
+
+**Status:** the docs below are written. The proof is a replay: the same four request kinds were sent through the real `RequestInterceptor` with the real composite policy, utility policy, memory and price catalog (a two-model fixture), and the log lines are the interceptor's own. It was not run against a live router, because that needs the routing gate flipped on David's machine. The `docs/router/utility-model-routing.md` correction goes further than the bullet below: the spec's B1 options and per-tier weights were also never built, so B1 and the tier table now say so.
 
 - **`docs/router/utility-model-routing.md`:**
   - Add the route classes, the delegation rule, the relative floor and the config keys.
