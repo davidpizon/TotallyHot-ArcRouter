@@ -100,6 +100,9 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
             // McpHostedService's own one-line report of it.
             .ConfigureLogging(logging =>
             {
+                // Applied on both paths so the Serilog provider does not also log the host's "Hosting failed
+                // to start" Error with Kestrel's full stack next to McpHostedService's actionable line.
+                logging.AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None);
                 if (serilogLogger is not null)
                 {
                     logging.ClearProviders();
@@ -107,9 +110,7 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
                 }
                 else
                 {
-                    logging
-                        .AddFilter(category: "Microsoft.Extensions.Hosting.Internal.Host", level: LogLevel.None)
-                        .AddFilter(category: "Microsoft", level: LogLevel.Warning);
+                    logging.AddFilter(category: "Microsoft", level: LogLevel.Warning);
                 }
             })
             .ConfigureWebHostDefaults(webBuilder =>
