@@ -32,17 +32,42 @@ public static class TrayDiscoveryReader
     private const string FileName = "web-interface.json";
 
     /// <summary>
-    /// Reads the discovery file from <paramref name="path"/> (or, when <see langword="null"/>, the default
-    /// <c>%ProgramData%\TotallyHotArcRouter\web-interface.json</c>), or <see langword="null"/> when the
-    /// file doesn't exist yet, is empty, or can't be parsed - the same "no running router found" semantics
-    /// as <c>WebInterfaceDiscoveryFile.TryRead</c>. Never throws.
+    /// Reads the discovery file from <paramref name="path"/> (or, when <see langword="null"/>, from the
+    /// first of <see cref="DefaultPaths"/> that names a dashboard address - see <see cref="TryReadFirst"/>),
+    /// or <see langword="null"/> when no file exists yet, is empty, or can't be parsed - the same "no running
+    /// router found" semantics as <c>WebInterfaceDiscoveryFile.TryRead</c>. Never throws.
     /// </summary>
     /// <param name="path">The discovery file path override; only meant for tests. Production callers omit it.</param>
     public static TrayDiscoveryInfo? TryRead(string? path = null)
     {
+        return path is null ? TryReadFirst(DefaultPaths()) : ReadFile(path);
+    }
+
+    /// <summary>
+    /// Reads <paramref name="paths"/> in order and returns the first file that names a dashboard address.
+    /// A file that parses but carries no <see cref="TrayDiscoveryInfo.WebUrl"/> (a run whose web port never
+    /// bound writes one) does not shadow a later file that has one; it is returned only when no file does.
+    /// </summary>
+    /// <param name="paths">Candidate discovery file paths, most preferred first.</param>
+    /// <returns>The best parsed file, or <see langword="null"/> when none could be read.</returns>
+    public static TrayDiscoveryInfo? TryReadFirst(IEnumerable<string> paths)
+    {
+        TrayDiscoveryInfo? fallback = null;
+        foreach (var path in paths)
+        {
+            var info = ReadFile(path);
+            if (info?.WebUrl is not null) return info;
+
+            fallback ??= info;
+        }
+
+        return fallback;
+    }
+
+    private static TrayDiscoveryInfo? ReadFile(string filePath)
+    {
         try
         {
-            var filePath = path ?? DefaultPath();
             if (!File.Exists(filePath)) return null;
 
             var json = File.ReadAllText(filePath);
@@ -70,5 +95,24 @@ public static class TrayDiscoveryReader
             path1: Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             path2: "TotallyHotArcRouter",
             path3: FileName);
+    }
+
+    /// <summary>
+    /// Gets the per-user discovery file path, <c>%LocalAppData%\TotallyHotArcRouter\web-interface.json</c>.
+    /// An unelevated router (a developer's F5 or <c>dotnet run</c>) cannot use the protected machine-wide
+    /// directory and falls back to this one (ADR-0024), so the file it writes is here, not under ProgramData.
+    /// </summary>
+    internal static string PerUserPath()
+    {
+        return Path.Combine(
+            path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            path2: "TotallyHotArcRouter",
+            path3: FileName);
+    }
+
+    /// <summary>The locations <see cref="TryRead"/> checks: the service's machine-wide file, then the per-user one.</summary>
+    internal static string[] DefaultPaths()
+    {
+        return [DefaultPath(), PerUserPath()];
     }
 }

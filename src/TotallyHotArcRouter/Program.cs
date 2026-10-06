@@ -175,8 +175,16 @@ public static class Program
             // ADR-0024: the service fails closed on an unprotected data directory. The file log lives in that
             // directory, so it was never opened; the Event Log (Windows) or the journal (systemd, via the
             // console logger) is where an operator will look.
-            Log.Fatal(exception: ex, messageTemplate: "TotallyHot.ArcRouter refused to start: {Reason}", ex.Message);
-            DataDirectoryMigrationCommand.ReportToEventLog(ex.Message);
+            //
+            // The exception object is deliberately not handed to the logger: this is a setup problem the
+            // operator fixes with one command, not a defect, and the trace (HostBuilder.Build, the config
+            // callback) names nothing they can act on while burying the fix. The reason already says what
+            // failed; the guidance says how to fix it.
+            var headline = DataDirectoryNotProtectedException.Describe(path: ex.Path, reason: ex.Reason);
+            var guidance = DataDirectoryAdvice.Guidance();
+            Log.Fatal(messageTemplate: "TotallyHot.ArcRouter refused to start: {Reason}{NewLine}{Guidance}",
+                headline, Environment.NewLine, guidance);
+            DataDirectoryMigrationCommand.ReportToEventLog($"{headline}{Environment.NewLine}{guidance}");
             Environment.ExitCode = 1;
         }
         catch (Exception ex)

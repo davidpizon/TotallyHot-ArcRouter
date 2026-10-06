@@ -178,7 +178,14 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void ShowDashboard()
     {
         var discovery = TrayDiscoveryReader.TryRead();
-        if (discovery?.WebUrl is not { } webUrl) return;
+        if (discovery?.WebUrl is not { } webUrl)
+        {
+            // Silence here looked like a broken menu item; say why nothing opened.
+            _notifyIcon.ShowBalloonTip(timeout: 5_000, tipTitle: "TotallyHot Arc Router",
+                tipText: "No running router found: its discovery file has no dashboard address. Start the router and try again.",
+                tipIcon: ToolTipIcon.Warning);
+            return;
+        }
 
         Process.Start(new ProcessStartInfo(webUrl) { UseShellExecute = true });
     }
