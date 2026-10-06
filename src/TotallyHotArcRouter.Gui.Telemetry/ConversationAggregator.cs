@@ -1,6 +1,11 @@
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>One turn (routed request) within a live-aggregated conversation.</summary>
+/// <remarks>
+/// <paramref name="SubagentSignal"/> is the optional fixed-vocabulary <c>harness/kind</c> label of the
+/// subagent or helper marker on the request (for example <c>claude-code/explore</c>), or
+/// <see langword="null"/> when the turn carried none (ADR-0021).
+/// </remarks>
 public sealed record LiveConversationTurn(
     string SessionId,
     int TurnNumber,

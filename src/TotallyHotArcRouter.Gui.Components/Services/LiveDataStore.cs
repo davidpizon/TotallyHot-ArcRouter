@@ -219,9 +219,10 @@ public sealed class LiveDataStore : IAsyncDisposable
 
     /// <summary>
     /// Converts a gRPC-contract <see cref="Contract.RoutingTelemetryEvent"/> into the store's
-    /// <see cref="RoutingTelemetryEventDto"/>.
+    /// <see cref="RoutingTelemetryEventDto"/>. Internal so tests can pin optional-field presence
+    /// (for example <c>subagent_signal</c>) without standing up a live gRPC stream.
     /// </summary>
-    private static RoutingTelemetryEventDto MapToDto(Contract.RoutingTelemetryEvent e)
+    internal static RoutingTelemetryEventDto MapToDto(Contract.RoutingTelemetryEvent e)
     {
         return new RoutingTelemetryEventDto(
             SessionId: e.SessionId,

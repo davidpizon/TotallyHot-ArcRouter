@@ -23,6 +23,12 @@ public sealed record TokenBucket(string Slot, decimal Prompt, decimal Completion
 public sealed record ModelShare(string Model, decimal Value, string Color);
 
 /// <summary>A single turn (one multi-step agentic workflow) within a conversation.</summary>
+/// <remarks>
+/// <paramref name="SubagentSignal"/> is the harness/kind label of the subagent or helper marker the
+/// request carried (for example <c>claude-code/explore</c>), or <see langword="null"/> when it carried
+/// none or the source has no live-routing concept (ADR-0021). Rendered as a badge on the turn's
+/// separator in the Sessions conversation pane.
+/// </remarks>
 public sealed record ConversationTurn(
     string Id,
     string Agent,
@@ -58,9 +64,6 @@ public sealed record ConversationTurn(
     string? RequestedModel = null,
     string? RoutedModel = null,
     string? SubstitutionReason = null,
-    // The harness/kind label of the subagent or helper marker the request carried (for example
-    // "claude-code/explore"), or null when it carried none or the source has no live-routing concept
-    // (ADR-0021). Rendered as a badge on the turn's separator in the Sessions conversation pane.
     string? SubagentSignal = null);
 
 /// <summary>A conversation (session) whose turns are shown in the Live Stream tab.</summary>
