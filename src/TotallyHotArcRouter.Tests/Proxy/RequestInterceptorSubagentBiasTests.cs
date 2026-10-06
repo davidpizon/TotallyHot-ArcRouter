@@ -209,7 +209,7 @@ public class RequestInterceptorSubagentBiasTests
     }
 
     [Fact]
-    public async Task ExplicitConfiguredModel_WithMarker_KeepsItsModelAndItsClassification()
+    public async Task ExplicitConfiguredModel_WithMarker_KeepsItsModelAndReportsTheSignalWithoutActingOnIt()
     {
         var (interceptor, policy) = Build();
 
@@ -218,7 +218,8 @@ public class RequestInterceptorSubagentBiasTests
         Assert.True(result.IsSuccess);
         Assert.Equal(expected: "gpt-5.4", actual: result.Route!.ModelName);
         Assert.Null(policy.LastContext);
-        Assert.Null(result.Classification!.Subagent);
+        // Reported so telemetry names what the harness sent, but not acted on: IsUtility stays the heuristic's.
+        Assert.Equal(expected: "claude-code/auxiliary", actual: result.Classification!.Subagent?.ToLabel());
         Assert.False(result.Classification.IsUtility);
     }
 

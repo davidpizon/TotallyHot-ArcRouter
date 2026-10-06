@@ -411,7 +411,11 @@ public class RequestInterceptor
         var subagentBias = _routingOptionsMonitor?.CurrentValue.SubagentBias ?? DefaultSubagentBias;
         var subagentSignal = SubagentSignalDetector.Detect(headers: context.Request.Headers,
             requestBody: jsonObject, options: subagentBias);
-        var servedClassification = classification;
+        // Carries the detected signal even when nothing below routes on it (an explicit model pick, ADR-0005),
+        // so telemetry reports what the harness sent. Only Subagent is set here; IsUtility stays the heuristic's.
+        var servedClassification = subagentSignal is null
+            ? classification
+            : classification with { Subagent = subagentSignal };
         var liveDimension =
             RouterDimension.ToLiveKey(liveMemoryPrefix: _liveMemoryPrefix, dimension: classification.Dimension);
 
