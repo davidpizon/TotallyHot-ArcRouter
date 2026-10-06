@@ -44,8 +44,10 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
     private static readonly (string, string)[] HelperHeaders = [AuxiliaryClass];
     private static readonly (string, string)[] NoHeaders = [];
 
+    /// <summary>Request body that delegates model choice to the router.</summary>
     private static string AutoBody => BodyFor("auto");
 
+    /// <summary>Builds a chat-completions body naming <paramref name="model"/> with <see cref="CodingPrompt"/>.</summary>
     private static string BodyFor(string model)
     {
         return $$"""{"model":"{{model}}","messages":[{"role":"user","content":"{{CodingPrompt}}"}]}""";
@@ -63,6 +65,10 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
             dimension: classification.Dimension);
     }
 
+    /// <summary>The interceptor under test plus the resolver and circuit breaker it was built with.</summary>
+    /// <param name="Interceptor">The real interceptor wired to the composite policy.</param>
+    /// <param name="Resolver">The two-model allowlist the interceptor resolves against.</param>
+    /// <param name="Circuit">The shared circuit breaker, so tests can open a target before resolving.</param>
     private sealed record Fixture(RequestInterceptor Interceptor, IModelRouteResolver Resolver, CircuitBreaker Circuit);
 
     /// <summary>
@@ -109,6 +115,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         return new Fixture(Interceptor: interceptor, Resolver: resolver, Circuit: circuit);
     }
 
+    /// <summary>Resolves <paramref name="body"/> through <paramref name="fixture"/> with the given request headers.</summary>
     private static Task<ModelRouteResolutionResult> ResolveAsync(Fixture fixture, string body,
         params (string Name, string Value)[] headers)
     {
@@ -124,6 +131,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
 
     // ---- Helper ----
 
+    /// <summary>A Claude Code <c>auxiliary</c> helper with priced candidates picks the cheaper model.</summary>
     [Fact]
     public async Task Helper_WithAPricedCheapAndAnExpensiveCandidate_PicksTheCheapOne()
     {
@@ -135,6 +143,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         Assert.Equal(expected: Cheap, actual: result.Route!.ModelName);
     }
 
+    /// <summary>The same body without a helper marker keeps the unbiased (expensive) pick.</summary>
     [Fact]
     public async Task Helper_TheSameRequestWithoutTheMarker_RoutesAsBefore()
     {
@@ -147,6 +156,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
 
     // ---- Light subagent (Explore) ----
 
+    /// <summary>Explore chooses a free candidate whose known score clears the relative floor.</summary>
     [Fact]
     public async Task Explore_FreeCandidateWithinTheFloor_IsChosen()
     {
@@ -158,6 +168,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         Assert.Equal(expected: Cheap, actual: result.Route!.ModelName);
     }
 
+    /// <summary>Explore excludes a free candidate below the floor and keeps the near-best model.</summary>
     [Fact]
     public async Task Explore_FreeCandidateBelowTheFloor_IsExcludedAndTheNearBestOneChosen()
     {
@@ -171,6 +182,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         Assert.Null(result.DimBestModel);
     }
 
+    /// <summary>With no known scores, Explore resolves to the same model as an unsignalled request.</summary>
     [Fact]
     public async Task Explore_WithNoKnownScores_RoutesAsWithoutASignal()
     {
@@ -185,6 +197,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
 
     // ---- Other subagents ----
 
+    /// <summary>A general-purpose subagent is detected but selects exactly what the unsignalled request selects.</summary>
     [Fact]
     public async Task GeneralPurposeSubagent_SelectsExactlyWhatTheSameRequestWithoutASignalSelects()
     {
@@ -202,6 +215,10 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
 
     // ---- Allowlist and circuit state ----
 
+    /// <summary>
+    /// A signalled request never lands on a model whose circuit is open: eligibility filters it out before the
+    /// policy runs.
+    /// </summary>
     [Theory]
     [InlineData("helper")]
     [InlineData("explore")]
@@ -209,7 +226,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
     {
         var fixture = await BuildAsync(cheapScore: 0.85, priceyScore: 0.9, cheapPrice: 0m);
         Assert.True(fixture.Resolver.TryResolve(modelName: Cheap, route: out var cheapRoute));
-        var target = CircuitBreakerTargetKey.FromRoute(cheapRoute!);
+        var target = CircuitBreakerTargetKey.FromRoute(cheapRoute);
         for (var i = 0; i < new CircuitBreakerOptions().FailureThreshold; i++) fixture.Circuit.RecordFailure(target);
         Assert.True(fixture.Circuit.IsOpen(target));
 
@@ -218,11 +235,13 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         Assert.True(result.IsSuccess);
         Assert.Equal(expected: Pricey, actual: result.Route!.ModelName);
         Assert.DoesNotContain(collection: result.Candidates, filter: c => c.Route.ModelName == Cheap);
-        // AutoSelect, not CircuitOpen: RoutingCandidateBuilder swaps a circuit-open pick for the next model after
-        // the policy ran, so CircuitOpen would mean the policy was offered the open model and chose it.
+        // AutoSelect, not CircuitOpen: BuildRoutingCandidates calls GetEligibleRoutes before the policy runs, so
+        // the open model never enters the candidate list. CircuitOpen would mean the policy was offered the open
+        // model and chose it, after which RoutingCandidateBuilder swapped it.
         Assert.Equal(expected: RoutingSubstitutionReason.AutoSelect, actual: result.SubstitutionReason);
     }
 
+    /// <summary>A signalled request always resolves to a model from the configured allowlist.</summary>
     [Theory]
     [InlineData("helper")]
     [InlineData("explore")]
@@ -241,6 +260,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
 
     // ---- Explicit model pick (ADR-0005) ----
 
+    /// <summary>An explicit model name with a signal keeps that model (ADR-0005).</summary>
     [Theory]
     [InlineData("helper")]
     [InlineData("explore")]
@@ -256,6 +276,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
 
     // ---- Copilot aliases ----
 
+    /// <summary>Known and prefix-matched <c>copilot-utility*</c> aliases take the helper bias.</summary>
     [Theory]
     [InlineData("copilot-utility")]
     [InlineData("copilot-utility-small")]
@@ -272,6 +293,7 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
         Assert.Equal(expected: "copilot/utility-alias", actual: result.Classification!.Subagent!.ToLabel());
     }
 
+    /// <summary>Near-miss spellings of a Copilot alias get no helper bias.</summary>
     [Theory]
     [InlineData("copilot-utilit")]
     [InlineData("my-copilot-utility")]
@@ -291,20 +313,24 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
     {
         private readonly Dictionary<ModelKey, ModelPrice> _prices = [];
 
+        /// <inheritdoc/>
         public ModelPrice? GetBestPriceForModel(ModelKey key, PriceContext context)
         {
             return _prices.GetValueOrDefault(key);
         }
 
+        /// <inheritdoc/>
         public ModelPrice? GetFreshPriceForRouting(ModelKey key, PriceContext context, TimeSpan maxAge)
         {
             return _prices.GetValueOrDefault(key);
         }
 
+        /// <inheritdoc/>
         public void Invalidate()
         {
         }
 
+        /// <summary>Registers a flat input/output price for <paramref name="modelName"/> on <paramref name="provider"/>.</summary>
         public void SetPrice(string modelName, string provider, decimal input, decimal output)
         {
             _prices[new ModelKey(ModelName: modelName, Provider: provider)] =
@@ -315,8 +341,10 @@ public sealed class RequestInterceptorSubagentRoutingMatrixTests
     /// <summary>An Orchestrator voter that always picks the same model, so a request the bias skips ends there.</summary>
     private sealed class AlwaysVotesFor(string name, string modelName) : IRoutingVoter
     {
+        /// <inheritdoc/>
         public string Name { get; } = name;
 
+        /// <inheritdoc/>
         public Task<VoterVote> VoteAsync(VotingContext context, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new VoterVote(VoterName: Name, ModelName: modelName, 0.9));
