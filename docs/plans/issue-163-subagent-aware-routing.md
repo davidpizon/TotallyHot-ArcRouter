@@ -383,7 +383,9 @@ Versioned strings appear only as data:
 
 **Exit criterion:** a signalled request's log line, telemetry event and Live Stream row all name the signal and the chosen model. An unsignalled one shows none.
 
-## Phase 4 — Full test matrix
+## Phase 4 — Full test matrix. **Done (2026-10-06).**
+
+Most of the matrix already existed at the unit level when this phase started: `UtilityRoutingPolicyTests` and `CompositeRoutingPolicyTests` cover the near-best rule, `SubagentSignalDetectorTests` covers every Copilot alias spelling, and `RequestInterceptorSubagentBiasTests` covers the interceptor wiring against a stub policy. The gap was the end-to-end outcome with real policies, which `RequestInterceptorSubagentRoutingMatrixTests` now covers: a real interceptor over the real composite, utility policy, memory and circuit breaker, ending on a resolved model. It adds the circuit-open case, which had none, and the Copilot aliases through the interceptor. The strongest allowlist test (a policy returning a model that is not configured) was already `RequestInterceptorSubagentBiasTests.MarkedRequest_NeverResolvesOutsideTheConfiguredModels`; the new allowlist test only checks that real policies stay inside the list.
 
 Follow `RequestInterceptorRoutingPolicyTests`, `CompositeRoutingPolicyTests` and `UtilityRoutingPolicyTests`, with real policies where the cost outcome matters:
 
