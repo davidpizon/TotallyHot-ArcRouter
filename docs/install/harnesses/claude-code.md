@@ -38,6 +38,34 @@ Trust the router's local CA first ([client TLS setup](../../router/client-tls-se
 IP-literal URL such as `https://127.0.0.1:47101`; see
 [`UNSUPPORTED_CONSTRAINT_TYPE` on the HTTPS port](#unsupported_constraint_type-on-the-https-port).
 
+## Cheaper models for helpers and light subagents
+
+With `"model": "auto"`, Arc Router can send Claude Code's helper requests (session titles, summaries) and its
+`Explore` and `claude-code-guide` subagents to a cheaper model. It does this only for models whose known quality
+is close to the best candidate's, and every other subagent routes as it would without the feature. The rules and
+options are in [Route classes and options](../../router/utility-model-routing.md#route-classes-and-options-issue-163).
+
+- **Turn the hint headers on.** Claude Code sends `x-claude-code-request-class` and `x-claude-code-agent-type` to a
+  gateway only when `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` is set. Add it to the same `env` block as the three
+  variables above. Without it the router sees only `x-claude-code-agent-id`, which marks a subagent of unknown type:
+  every subagent then routes normally and no helper is detected. That is safe but saves nothing.
+- **List the auto-mode classifier's model in the router.** In auto mode, Claude Code decides whether an action may
+  run with a classifier that uses Claude Sonnet 5 by default. Its requests carry the same `auxiliary` class as
+  titles. The router keeps it off the cheap path because the request names its model instead of `auto`. A name the
+  router does not know is still auto-routed (without the cheap bias), so the verdict could be served by whichever
+  model the router picks. A configured name is an explicit pick and is served as asked, so add `claude-sonnet-5`
+  to your model list.
+- **Don't point the model variables the classifier falls back to at `auto`.** The classifier falls back to the
+  session's model or an Opus model in some cases. If `ANTHROPIC_DEFAULT_SONNET_MODEL` or
+  `ANTHROPIC_DEFAULT_OPUS_MODEL` is `auto`, a classifier request would be routed as a helper. The headers cannot
+  tell it apart from a title. The preset leaves both unset. Note that the preset's `ANTHROPIC_MODEL` is `auto`, so
+  a classifier that falls back to the session's model has the same exposure. If that matters to you, set
+  `Routing:SubagentBias:ClaudeCodeHintHeaders` to `false`, which turns the helper and light-subagent bias off
+  entirely.
+
+The preset itself is unchanged by this: it does not set `CLAUDE_CODE_GATEWAY_HINT_HEADERS`, so the bias stays off
+until you add it.
+
 ## `UNSUPPORTED_CONSTRAINT_TYPE` on the HTTPS port
 
 **Symptom.** Every request fails, and the router logs nothing. `claude -p` prints

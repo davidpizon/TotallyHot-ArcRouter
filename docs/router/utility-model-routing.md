@@ -1,6 +1,6 @@
 # Utility-Model Routing under BYOK
 
-Status: **Shipped — Phase H (B1, B2) and Phase I (B3–B5) both landed.** See the status blockquotes under B3–B5 for what shipped exactly as specified versus where implementation deliberately narrowed the scope (documented there, not silently).
+Status: **Shipped, narrowed — Phase H (B2, and B1 in part), Phase I (B3–B5) and subagent-aware routing (issue #163) landed.** See the status blockquotes under B1 and B3–B5 for what shipped exactly as specified versus where implementation deliberately narrowed the scope (documented there, not silently). **Not built:** the `ModelRouting.RouterAlias`, `ModelRouting.UtilityAliases`, `ModelRouting.UtilityAliasPrefix` and `Routing.UtilityTiers` options this spec describes. Alias recognition works without them; see [R1](#r1--utility-aliases-must-self-route-normative) item 6 and [Route classes and options](#route-classes-and-options-issue-163).
 Scope: **two repos** — the proxy (this repo) and the VS Code extension (`spark-vscode-extension`, published as `davidpizon.oai-compatible-copilot`).
 
 Ready-made presets for Claude Code, Cursor, Codex, and Aider are in
@@ -55,7 +55,8 @@ This is the acceptance criterion for the whole utility path. Concretely, the pro
 3. **MUST make the choice dynamically** via `UtilityRoutingPolicy` (B3) — cost-aware, quality-gated, grounded in the price catalog + `RouterMemory`, and only on prices fresher than 24h.
 4. **MUST resolve to an allowlisted route** and rewrite `model` → that route's `ProviderModelId`, so the existing forwarder and the "never route back to the proxy itself" invariant are preserved.
 5. **MUST recognize the alias case-insensitively**, matching `ModelRouteResolver`'s existing `OrdinalIgnoreCase` lookup semantics.
-6. **MUST degrade safely for unknown tiers.** VS Code owns these identities and may add more (`copilot-utility-*`). Recognition is therefore the configured `UtilityAliases` list **plus a `copilot-utility` prefix rule as a safety net**, so a tier this plan never saw routes as utility rather than 400-ing. An unknown tier is a routing decision, not an error.
+6. **MUST degrade safely for unknown tiers.** VS Code owns these identities and may add more (`copilot-utility-*`). An unknown tier is a routing decision, not an error.
+   > **What shipped:** there is no `UtilityAliases` list. Two existing rules cover the requirement. First, the generalized unresolved-name rule under item 1 means any name the router does not know is routed rather than rejected, so a tier this plan never saw never 400s. Second, `SubagentSignalDetector` recognizes the `copilot-utility` **prefix** (case-insensitive, so `copilot-utility-tiny` counts and `my-copilot-utility` or `copilot-utilit` do not) and reports it as a helper signal, which takes the utility rule. That second rule can be switched off with `Routing:SubagentBias:CopilotUtilityAlias`. Both are pinned end to end in `RequestInterceptorSubagentRoutingMatrixTests`.
 
 #### Tier distinction
 
@@ -67,6 +68,8 @@ The two known aliases are **not** equivalent, and the policy SHOULD treat them d
 | `copilot-utility-small` | `chat.utilitySmallModel` | Lightweight (intent detection, titles) | Stronger cost weight and/or lower quality bar — the cheapest tier |
 
 Implement this as a per-tier `(ε₁, ε₂)` weight pair and quality threshold rather than two separate policies; the selection logic is identical, only the weighting differs.
+
+> **Not built.** Both aliases take the same utility rule today, with the same `ε₁`, `ε₂` and `UtilityMinQualityScore`. There is no per-tier weighting, so `copilot-utility-small` is not weighted harder toward cost than `copilot-utility`. It stays a possible follow-up; nothing depends on it.
 
 > **Scope note.** R1 is conditional ("IF the extension sends…") because it covers the **fallback** extension path (explicit `chat.utilityModel`/`chat.utilitySmallModel` → distinct ids). Under the *preferred* path (`byokUtilityModelDefault: "mainAgent"`) utility traffic arrives as `agentic-router` and is classified by payload heuristics instead (B2). **Both paths must work** — R1 must hold regardless of which mechanism the installed VS Code ends up supporting, and it is the one that survives if assumption 1 or 2 turns out badly.
 
@@ -106,8 +109,9 @@ The synthesis that satisfies both decisions:
 - A lightweight **request classifier** (payload heuristics) lets the router recognize utility-shaped requests even in the mainAgent-mirrored path where the name is ambiguous.
 
 **Current implementation status:**
-- **Shipped (Phase H, B1–B2):** Router and utility alias recognition; `IRequestClassifier` producing `{ Dimension, Difficulty, Language, IsUtility }` from request payload.
+- **Shipped (Phase H, B2, and part of B1):** the reserved names `auto` and `totallyhot-arcrouter`, the generalized unresolved-name rule, and `IRequestClassifier` producing `{ Dimension, Difficulty, Language, IsUtility }` from request payload. **Not shipped:** the `RouterAlias` / `UtilityAliases` / `UtilityAliasPrefix` / `UtilityTiers` options (see B1).
 - **Shipped (Phase I, B3–B5):** Cost-aware `UtilityRoutingPolicy` with the κ term, wiring into `RequestInterceptor`, and telemetry emission (narrowed as documented under each section below).
+- **Shipped (issue #163):** harness subagent and helper signals, routed by kind. See [Route classes and options](#route-classes-and-options-issue-163).
 
 > Note: `agentic-router` is **not** in the proxy's `ModelList` today, so a default-config request (`oaicopilot.modelId = "agentic-router"`) would currently be rejected with HTTP 400. Introducing router-alias handling is therefore required for the out-of-the-box configuration to work at all — not merely a utility nicety. This is addressed by Phase H's alias recognition, now `RequestInterceptor.ResolveAgenticRouteAsync`.
 
@@ -171,6 +175,14 @@ The critical structural point: **selection is decoupled from generation.** The e
 ## Part B — Proxy changes (`TotallyHot-ArcRouter`)
 
 ### B1. Router alias + config
+
+> **Partly shipped; the option set was not built.** Nothing in this section's option list exists in `ModelRoutingOptions`: no `RouterAlias`, `UtilityAliases`, `UtilityAliasPrefix` or `Routing.UtilityTiers`, and `EnsureValid()` has no alias-collision check. The generalized unresolved-name rule (see R1 item 1) made them unnecessary for recognition. What exists instead:
+>
+> - The reserved names `auto` and `totallyhot-arcrouter`, handled by `RequestInterceptor` rather than configured. `totallyhot-arcrouter` is advertised from `ListAvailableModels`; the `copilot-utility*` aliases are not advertised.
+> - Copilot alias recognition by prefix in `SubagentSignalDetector`, behind `Routing:SubagentBias:CopilotUtilityAlias`.
+> - The `Routing:SubagentBias` options, described under [Route classes and options](#route-classes-and-options-issue-163).
+>
+> The bullets below are the original spec, kept so the decision trail stays readable. Treat them as superseded where they disagree with the list above.
 
 - Add a `ModelRouting.RouterAlias` option (default `"agentic-router"`) and an optional `ModelRouting.UtilityAliases` list (default `["copilot-utility", "copilot-utility-small"]`) to `ModelRoutingOptions` (`src/TotallyHotArcRouter/Models/ModelRoutingOptions.cs`). These names trigger dynamic selection instead of a static allowlist entry.
 - Per **R1.6**, alias recognition is *list membership OR a `copilot-utility` prefix match* (both case-insensitive), so an unseen VS Code tier still routes as utility. Expose the prefix as `ModelRouting.UtilityAliasPrefix` (default `"copilot-utility"`) so it can be disabled by clearing it.
@@ -331,7 +343,7 @@ is a cheaper pick inside the operator's own allowlist and quality gate.
 
 Detection and routing are separate. Every signal above is detected, logged and shown, but only some of them change
 which model is picked. The routing side is decided in
-[ADR-0022](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md) (proposed). The evidence behind it is
+[ADR-0022](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md) (accepted). The evidence behind it is
 in [`docs/research/subagent-and-helper-routing-evidence.md`](../research/subagent-and-helper-routing-evidence.md).
 The class table, options and tests are in the
 [#163 plan](../plans/issue-163-subagent-aware-routing.md#design).
@@ -357,6 +369,70 @@ The class table, options and tests are in the
   8 KB for Codex metadata), and malformed metadata JSON.
 - **Compaction** (Claude Code `compaction`, Codex `compact`) is not a signal: it rewrites the whole conversation
   and needs fidelity.
+
+## Route classes and options (issue #163)
+
+What the router does with a detected signal. The decision record is
+[ADR-0022](../adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md); the design and phase notes are in the
+[#163 plan](../plans/issue-163-subagent-aware-routing.md#design).
+
+### Route classes
+
+| Class | Signals | Route |
+|---|---|---|
+| **Helper** | Claude Code `x-claude-code-request-class: auxiliary`; Copilot `copilot-utility*` aliases | The utility rule: `ε₁·s + ε₂·κ` with the `UtilityMinQualityScore` floor (0.3). |
+| **Light subagent** | Claude Code subagent whose `x-claude-code-agent-type` is `Explore` or `claude-code-guide` | The utility rule restricted to candidates whose **known** score in this category is at least `LightSubagentRelativeFloor` × the best known score. The best candidate always qualifies, so the pick is the best value among the near-best. With no known scores, or no priced qualifier, the request routes normally. |
+| **Subagent** | Any other Claude Code subagent (`Plan`, `general-purpose`, `custom`, untyped, and so on); Codex `thread_spawn` and `memory_consolidation` | Normal routing, exactly as without a signal. The signal is recorded for the log line and the dashboard only. |
+| **None** | Claude Code `main`, `compaction`, `workflow`; Codex `compact`, `guardian`, `review`, `agent_job:*`, `other`; anything malformed, ambiguous or conflicting | Today's routing, with no signal recorded. |
+
+### Delegation rule
+
+Helper and light-subagent bias applies only when the client handed the choice to the router: the requested `model`
+is `auto`, `totallyhot-arcrouter` or a `copilot-utility*` alias.
+
+- A specific model name the router does not know takes today's unresolved-name fallback, **without** bias.
+- A configured model name is an explicit pick. It never reaches a policy and keeps its model (ADR-0005), even when
+  a signal is present. The signal is still reported on the telemetry event, so the dashboard shows what the
+  harness sent.
+
+### Relative floor
+
+`LightSubagentRelativeFloor` (default **0.9**, range greater than 0 and at most 1) means "within 10% of the best
+known candidate". With a best score of 0.9 the floor is 0.81: a $0 model at 0.85 qualifies and wins on value, one
+at 0.7 is excluded. The scores are the grader's code-quality scores from graded traffic in the same category, a
+proxy for "can this model code" and not for "can it drive tools". **0.9 is a starting point, not a measured
+value.** The near-best pick also applies the 0.3 quality floor, so a best score below it routes normally.
+
+### Native Messages restriction
+
+A helper or light-subagent request on `/v1/messages` only considers `anthropic` candidates, because native
+Messages traffic is not translated. With none eligible, the bias is withdrawn and the request routes normally,
+logged as `route=normal`. This restriction does not apply to `/v1/chat/completions`.
+
+### Options (`Routing:SubagentBias`, read live)
+
+| Key | Default | Effect |
+|---|---|---|
+| `Enabled` | `true` | Kill switch. Off means every marker is ignored. |
+| `ClaudeCodeAgentId` | `true` | Reads `x-claude-code-agent-id` (a subagent of unknown type, which routes normally). |
+| `ClaudeCodeHintHeaders` | `true` | Reads `x-claude-code-request-class` and `x-claude-code-agent-type`. Off turns off both the helper and the light-subagent bias. |
+| `CodexTurnMetadata` | `true` | Reads `x-codex-turn-metadata`. Visibility only: Codex signals route normally. |
+| `CopilotUtilityAlias` | `true` | Recognizes the `copilot-utility*` model aliases as helpers. |
+| `LightSubagentRelativeFloor` | `0.9` | The relative floor above. |
+
+A signal is a cost preference inside the operator's allowlist and quality gate. It is not an authorization
+boundary: a client can send any header, and the worst a forged one does is a cheaper pick the operator already
+allows.
+
+### Where it shows
+
+- **Log line:** `[INTERCEPTOR] Routing policy selected '<model>' for dimension '<dim>' (isUtility=…, subagentSignal=<harness>/<kind>|none, route=none|normal|light-subagent|helper)`.
+  Both values come from fixed vocabularies. The line is logged on the policy path only, so an explicit pick does not
+  produce it.
+- **Telemetry and dashboard:** the optional `subagent_signal` field on `RoutingTelemetryEvent`
+  ([ADR-0021](../adr/0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md)), shown as
+  a badge on the turn separator in the Sessions conversation pane. It names what the harness reported, whether or not
+  routing acted on it, and it shows on live turns only.
 
 ## Assumptions to verify (do these first)
 
