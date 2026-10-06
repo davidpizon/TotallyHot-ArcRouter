@@ -19,7 +19,8 @@ public sealed record LiveConversationTurn(
     string? CostConfidence = null,
     string? RequestedModel = null,
     string? RoutedModel = null,
-    string? SubstitutionReason = null);
+    string? SubstitutionReason = null,
+    string? SubagentSignal = null);
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
 /// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
@@ -118,7 +119,8 @@ public static class ConversationAggregator
                 CostConfidence: e.CostConfidence,
                 RequestedModel: e.RequestedModel,
                 RoutedModel: e.RoutedModel,
-                SubstitutionReason: e.SubstitutionReason))
+                SubstitutionReason: e.SubstitutionReason,
+                SubagentSignal: e.SubagentSignal))
             .ToList();
 
         return new LiveConversation(

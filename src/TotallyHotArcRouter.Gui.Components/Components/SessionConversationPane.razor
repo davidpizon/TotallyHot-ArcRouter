@@ -13,6 +13,13 @@
                     @turn.Agent
                 </span>
                 <span class="font-mono normal-case">@turn.Model</span>
+                @if (!string.IsNullOrEmpty(turn.SubagentSignal))
+                {
+                    @* ADR-0021: which harness marker the request carried (e.g. claude-code/explore). Absent
+                       for an unsignalled request, or one from an older router that never sends the field. *@
+                    <span class="ls-signal-badge shrink-0 rounded px-1.5 py-0.5 font-semibold normal-case"
+                          title="Marked by the client as a subagent or side task">@turn.SubagentSignal</span>
+                }
                 <span class="font-mono normal-case ml-auto">@turn.Timestamp</span>
             </div>
 

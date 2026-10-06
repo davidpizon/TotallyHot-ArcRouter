@@ -261,7 +261,9 @@ public sealed class LiveDataStore : IAsyncDisposable
                 : 0m,
             // Plain (not optional) proto3 field, like RoutedModel above: an older writer that predates this
             // phase sends neither, decoding as "" - degrade that to null rather than a fabricated reason.
-            SubstitutionReason: string.IsNullOrEmpty(e.SubstitutionReason) ? null : e.SubstitutionReason);
+            SubstitutionReason: string.IsNullOrEmpty(e.SubstitutionReason) ? null : e.SubstitutionReason,
+            // Optional proto field (ADR-0021): absent from an older router, which reads as "no signal".
+            SubagentSignal: e.HasSubagentSignal ? e.SubagentSignal : null);
     }
 
     /// <summary>Converts a gRPC-contract <see cref="Contract.LogLineEvent"/> into the store's <see cref="LogLineDto"/>.</summary>

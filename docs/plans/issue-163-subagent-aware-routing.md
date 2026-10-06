@@ -373,10 +373,13 @@ Versioned strings appear only as data:
   - The line now ends, for example, `subagentSignal=claude-code/explore, route=light-subagent`.
   - `route` is one of `none`, `normal`, `light-subagent` or `helper`.
   - The template is a static string, and both values come from fixed vocabularies.
-- **Telemetry field and Live Stream badge:** [ADR-0021](../adr/0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) is proposed. Nothing on the proto, `RoutingTelemetryEvent`, the publisher or the GUI changes until David accepts it. Once accepted:
-  - Add the optional `subagent_signal = 25` field and the GUI chain.
-  - Add a bUnit test for the badge, following `docs/gui/DESIGN.md` (and `docs/gui/MOTION.md` if it animates).
-  - A missing field renders nothing.
+- **Telemetry field and badge:** done (2026-10-06), as [ADR-0021](../adr/0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) decided.
+  - `optional string subagent_signal = 25` on `RoutingTelemetryEvent` in `telemetry.proto`, and a nullable trailing `SubagentSignal` on the C# event, so no existing caller changed.
+  - `RequestTelemetryPublisher` fills it from `classification.Subagent.ToLabel()`; `TelemetryBroadcaster.ToWire` sets it only when present.
+  - The GUI carries it through `RoutingTelemetryEventDto`, `LiveDataStore`, `LiveConversationTurn`, `ConversationTurn` and `LiveConversationMapper`.
+  - `SessionConversationPane` renders a neutral `.ls-signal-badge` chip on a turn's separator; a missing field renders nothing.
+  - The badge shows on live turns only. Persisted turns carry no label (the follow-up is in ADR-0021).
+  - Tests: broadcaster wire presence, publisher label, aggregator, mapper, and a bUnit badge test.
 
 **Exit criterion:** a signalled request's log line, telemetry event and Live Stream row all name the signal and the chosen model. An unsignalled one shows none.
 

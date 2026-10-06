@@ -35,4 +35,5 @@ public sealed record RoutingTelemetryEventDto(
     string? CostConfidence = null,
     int RouterTokens = 0,
     decimal RouterCostUsd = 0m,
-    string? SubstitutionReason = null);
+    string? SubstitutionReason = null,
+    string? SubagentSignal = null);

@@ -98,6 +98,13 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// Why <paramref name="RoutedModel"/> differs from <paramref name="RequestedModel"/> -
 /// <see cref="RoutingSubstitutionReason.None"/> when it doesn't.
 /// </param>
+/// <param name="SubagentSignal">
+/// The <c>harness/kind</c> label of the verified subagent or helper marker that arrived with the request
+/// (<see cref="Router.Classification.SubagentSignal.ToLabel"/>), or <see langword="null"/> when none did.
+/// The label comes from a fixed vocabulary, never from client text, so it is safe to put on the wire
+/// (ADR-0021). It names what the harness reported, not whether routing acted on it; the routing log line
+/// carries the route class.
+/// </param>
 public sealed record RoutingTelemetryEvent(
     string SessionId,
     int TurnNumber,
@@ -123,4 +130,5 @@ public sealed record RoutingTelemetryEvent(
     string? CorrelationId = null,
     int RouterTokens = 0,
     decimal RouterCostUsd = 0m,
-    RoutingSubstitutionReason SubstitutionReason = RoutingSubstitutionReason.None);
+    RoutingSubstitutionReason SubstitutionReason = RoutingSubstitutionReason.None,
+    string? SubagentSignal = null);

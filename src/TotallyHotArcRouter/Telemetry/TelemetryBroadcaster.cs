@@ -151,6 +151,8 @@ public sealed class TelemetryBroadcaster
 
         if (e.ResponseSummary is not null) wire.ResponseSummary = e.ResponseSummary;
 
+        if (e.SubagentSignal is not null) wire.SubagentSignal = e.SubagentSignal;
+
         // Always set, unlike the nullable fields above: CostConfidence is a non-nullable enum on the C#
         // side - RoutingTelemetryEvent's constructor defaults it to Unknown when the caller omits it - so
         // there is always a value to encode.

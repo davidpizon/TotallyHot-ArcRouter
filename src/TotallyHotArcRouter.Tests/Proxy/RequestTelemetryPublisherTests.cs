@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
@@ -400,6 +401,41 @@ public class RequestTelemetryPublisherTests
         Assert.Equal(0m, actual: published.EstimatedCostUsd);
         Assert.Equal(200, actual: published.StatusCode);
         Assert.Equal(expected: "session-shape:1", actual: published.CorrelationId);
+    }
+
+    [Theory]
+    [InlineData(true, "claude-code/explore")]
+    [InlineData(false, null)]
+    public async Task PublishAsync_SubagentSignalOnClassification_IsCarriedOnTheEventAsItsLabel(
+        bool signalled, string? expectedLabel)
+    {
+        var telemetryPublisher = new FakeTelemetryPublisher();
+        var publisher = CreatePublisher(telemetryPublisher: telemetryPublisher);
+        var classification = new RequestClassification(Dimension: "code_generation", Difficulty: "easy",
+            Language: "CSharp", IsUtility: false,
+            Subagent: signalled
+                ? new SubagentSignal(Harness: "claude-code", Kind: "explore", Source: "x-claude-code-agent-type",
+                    RouteClass: SubagentRouteClass.LightSubagent)
+                : null);
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-signal"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "requested-model",
+            false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: """{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"""u8.ToArray(),
+            null,
+            false,
+            42,
+            99,
+            200,
+            cancellationToken: TestContext.Current.CancellationToken,
+            classification: classification);
+
+        var published = Assert.Single(telemetryPublisher.PublishedEvents);
+        Assert.Equal(expected: expectedLabel, actual: published.SubagentSignal);
     }
 
     // -- Phase Q3: the retention gate is "any LLM grader is live", not just the judge -----------------

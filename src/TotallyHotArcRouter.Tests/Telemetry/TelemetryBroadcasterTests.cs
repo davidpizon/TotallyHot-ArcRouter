@@ -143,6 +143,25 @@ public class TelemetryBroadcasterTests
     }
 
     [Fact]
+    public async Task Publish_SubagentSignal_IsCarriedOnTheWireOnlyWhenPresent()
+    {
+        var broadcaster = new TelemetryBroadcaster();
+        var channel = Channel.CreateUnbounded<Contract.TelemetryEvent>();
+        broadcaster.Register(channel.Writer);
+
+        broadcaster.Publish(SampleEvent() with { SubagentSignal = "claude-code/explore" });
+        broadcaster.Publish(SampleEvent());
+
+        var signalled = (await ReadOneAsync(channel.Reader)).RoutingTelemetry;
+        Assert.True(signalled.HasSubagentSignal);
+        Assert.Equal(expected: "claude-code/explore", actual: signalled.SubagentSignal);
+
+        // Absence is presence-tracked, so an unsignalled request reads as "no signal" rather than "".
+        var unsignalled = (await ReadOneAsync(channel.Reader)).RoutingTelemetry;
+        Assert.False(unsignalled.HasSubagentSignal);
+    }
+
+    [Fact]
     public async Task Publish_ZeroRouterOverhead_IsStatedOnTheWireRatherThanOmitted()
     {
         // Zero router tokens is a measurement ("the router spent nothing on this request"), not an absent

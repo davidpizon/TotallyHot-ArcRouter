@@ -57,7 +57,11 @@ public sealed record ConversationTurn(
     // AutoSelect) into the Live Stream inspector's substitution warning step.
     string? RequestedModel = null,
     string? RoutedModel = null,
-    string? SubstitutionReason = null);
+    string? SubstitutionReason = null,
+    // The harness/kind label of the subagent or helper marker the request carried (for example
+    // "claude-code/explore"), or null when it carried none or the source has no live-routing concept
+    // (ADR-0021). Rendered as a badge on the turn's separator in the Sessions conversation pane.
+    string? SubagentSignal = null);
 
 /// <summary>A conversation (session) whose turns are shown in the Live Stream tab.</summary>
 /// <param name="Id">The session id.</param>

@@ -104,7 +104,8 @@ public static class LiveConversationMapper
             CostConfidence: turn.CostConfidence,
             RequestedModel: turn.RequestedModel,
             RoutedModel: turn.RoutedModel,
-            SubstitutionReason: turn.SubstitutionReason);
+            SubstitutionReason: turn.SubstitutionReason,
+            SubagentSignal: turn.SubagentSignal);
     }
 
     /// <summary>

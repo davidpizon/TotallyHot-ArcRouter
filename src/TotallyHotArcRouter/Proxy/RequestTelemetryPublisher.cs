@@ -245,7 +245,8 @@ internal sealed class RequestTelemetryPublisher
             substitutionReason: substitutionReason,
             cancellationToken: cancellationToken,
             responseText: responseText,
-            newestUserMessage: newestUserMessage).ConfigureAwait(false);
+            newestUserMessage: newestUserMessage,
+            subagentSignal: classification?.Subagent?.ToLabel()).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -772,7 +773,8 @@ internal sealed class RequestTelemetryPublisher
         RoutingSubstitutionReason substitutionReason,
         CancellationToken cancellationToken,
         string? responseText,
-        string? newestUserMessage)
+        string? newestUserMessage,
+        string? subagentSignal)
     {
         // What routing this request cost us, charged at the self-hosted rate (research-doc §5.1: TotTok is
         // router + model, so routing overhead is the router's to carry). Kept separate from
@@ -805,7 +807,8 @@ internal sealed class RequestTelemetryPublisher
             CorrelationId: correlationId,
             RouterTokens: routerTokens,
             RouterCostUsd: routerCostUsd,
-            SubstitutionReason: substitutionReason);
+            SubstitutionReason: substitutionReason,
+            SubagentSignal: subagentSignal);
 
         await _telemetryPublisher.PublishAsync(telemetryEvent: telemetryEvent, cancellationToken: cancellationToken);
 

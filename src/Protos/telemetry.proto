@@ -977,6 +977,11 @@ message RoutingTelemetryEvent {
   // each end, same convention as cost_confidence above. Plain (not optional): None is a real,
   // always-present value on every current writer, not an absent one.
   string substitution_reason = 24;
+  // The harness/kind label of a verified subagent or helper marker on the request (for example
+  // "claude-code/explore"), drawn from SubagentSignalDetector's fixed vocabulary - never copied from a
+  // client-controlled value (ADR-0021). optional so an older writer, which sends nothing, reads as "no
+  // signal" and the dashboard renders no badge.
+  optional string subagent_signal = 25;
 }
 
 message LogLineEvent {

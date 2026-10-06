@@ -273,4 +273,37 @@ public sealed class LiveConversationMapperTests
         mappedTurn.RoutingSteps.Should().ContainSingle()
             .Which.Message.Should().Be("Route Confirmed: claude-sonnet-5");
     }
+
+    [Theory]
+    [InlineData("claude-code/explore")]
+    [InlineData(null)]
+    public void ToModel_carries_the_subagent_signal_onto_the_turn(string? signal)
+    {
+        var turn = new LiveConversationTurn(
+            SessionId: "s1",
+            1,
+            Agent: "claude-sonnet-5",
+            Model: "claude-sonnet-5",
+            10,
+            5,
+            0.01m,
+            false,
+            100,
+            TimestampUtc: DateTimeOffset.UtcNow,
+            SubagentSignal: signal);
+
+        var conversation = new LiveConversation(
+            SessionId: "s1",
+            false,
+            FirstTimestampUtc: turn.TimestampUtc,
+            LastTimestampUtc: turn.TimestampUtc,
+            TotalCost: turn.EstimatedCostUsd,
+            TotalPromptTokens: turn.PromptTokens,
+            TotalCompletionTokens: turn.CompletionTokens,
+            false,
+            Turns: [turn]);
+
+        LiveConversationMapper.ToModel(conversation).Turns.Should().ContainSingle()
+            .Which.SubagentSignal.Should().Be(signal);
+    }
 }
