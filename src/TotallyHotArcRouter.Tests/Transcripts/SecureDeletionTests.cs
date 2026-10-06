@@ -214,6 +214,47 @@ public class SecureDeletionTests : IDisposable
     }
 
     [Fact]
+    public async Task ScrubHostedService_RunsTheScrubInTheBackgroundAndRecordsTheMarker()
+    {
+        CreateDatabaseWithFreedCanaryPagesWithoutSecureDelete();
+        using var service = new TotallyHot.ArcRouter.Hosting.TranscriptScrubHostedService(
+            database: CreateTranscriptDatabase(), logger: NullLogger<TotallyHot.ArcRouter.Hosting.TranscriptScrubHostedService>.Instance);
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(_transcriptPath + ".scrubbed"));
+        Assert.False(ContainsCanary());
+    }
+
+    [Fact]
+    public async Task MemoryDeleteMany_WithAReaderHoldingTheLog_LogsThatTheDeletionIsNotFinal()
+    {
+        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions
+        {
+            EmbeddingMemoryDatabasePath = Path.Combine(path1: _directory, path2: "memory.db"),
+        }));
+        database.EnsureCreated();
+        var logger = new CapturingLogger();
+        var store = new SqliteMemoryEntryStore(database: database, logger: logger);
+        var entry = await store.AppendAsync(
+            entry: new MemoryEntry(Id: 0, TaskEmbedding: new float[4], ChosenModel: "m", Score: 0.5, Cost: 0.01,
+                VerifierTrace: null, CreatedAtUtc: DateTimeOffset.UtcNow),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        using var reader = database.OpenConnection();
+        using (var begin = reader.CreateCommand())
+        {
+            begin.CommandText = "BEGIN; SELECT COUNT(*) FROM memory_entries;";
+            begin.ExecuteScalar();
+        }
+
+        await store.DeleteManyAsync(ids: [entry.Id], cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("not yet final", string.Join(" | ", logger.Lines));
+    }
+
+    [Fact]
     public void RunStartupMaintenance_WithNoDatabase_CreatesNothing()
     {
         CreateTranscriptDatabase().RunStartupMaintenance(NullLogger.Instance);
@@ -240,7 +281,7 @@ public class SecureDeletionTests : IDisposable
     private IReadOnlyList<string> Logged { get; set; } = [];
 
     /// <summary>Collects formatted log lines, including any exception, for assertion messages.</summary>
-    private sealed class CapturingLogger : ILogger
+    private sealed class CapturingLogger : ILogger, ILogger<SqliteMemoryEntryStore>
     {
         public List<string> Lines { get; } = [];
 

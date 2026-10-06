@@ -4,6 +4,16 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>
+/// The outcome of the Transcription Capture "Clear" action.
+/// </summary>
+/// <param name="RowsDeleted">The number of transcript rows deleted.</param>
+/// <param name="DeletionFinal">
+/// <see langword="false"/> when the router's write-ahead log stayed busy through every retry, so deleted
+/// text may remain on disk until the next checkpoint or restart.
+/// </param>
+public sealed record ClearTranscriptsResult(int RowsDeleted, bool DeletionFinal);
+
+/// <summary>
 /// The router settings' currently effective values (docs/router/self-organizing-classification-plan.md
 /// Phase T6; docs/router/geval-shadow-scoring-plan.md), as read or written by the System Settings window's
 /// Adaptive Routing and Shadow Judge rows.
@@ -134,7 +144,7 @@ public sealed class RouterSettingsAdminClient
     }
 
     /// <inheritdoc/>
-    public async Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
+    public async Task<ClearTranscriptsResult> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -142,7 +152,7 @@ public sealed class RouterSettingsAdminClient
                 .ClearTranscriptsAsync(request: new Contract.ClearTranscriptsRequest(),
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            return response.RowsDeleted;
+            return new ClearTranscriptsResult(RowsDeleted: response.RowsDeleted, DeletionFinal: response.DeletionFinal);
         }
         catch (RpcException ex)
         {

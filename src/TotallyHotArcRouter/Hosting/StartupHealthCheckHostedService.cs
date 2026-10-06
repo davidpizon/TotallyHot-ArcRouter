@@ -146,9 +146,11 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // and the migration deliberately refuses to overwrite a destination that already exists.
         LegacyStorageMigration.Run(options: _storageOptions, logger: _logger);
 
-        // #184: finish any deletion a previous run left pending in the transcript log, and scrub pages freed
-        // before secure_delete was on. Before anything opens the database, and not gated on capture - a
-        // cleared-then-disabled store still has to be clean. Log-only like every check here.
+        // #184: finish any deletion a previous run left pending in the transcript log. Not gated on capture -
+        // a cleared-then-disabled store still has to be clean - and safe beside the transcript services that
+        // started earlier, because the checkpoint does not wait. The slow one-time scrub of pages freed before
+        // secure_delete was on is TranscriptScrubHostedService's job, in the background. Log-only like every
+        // check here.
         try
         {
             _transcriptDatabase.RunStartupMaintenance(_logger);

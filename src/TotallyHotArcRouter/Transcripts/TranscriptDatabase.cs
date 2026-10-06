@@ -104,15 +104,16 @@ public sealed class TranscriptDatabase
     }
 
     /// <summary>
-    /// Finishes deletions an earlier run left pending and runs the one-time scrub (#184, ADR-0024). Runs at
-    /// startup, before anything else opens the database and regardless of
-    /// <see cref="TranscriptOptions.Enabled"/>: an operator who cleared transcripts and switched capture off
-    /// still needs the deleted text gone from the file.
+    /// Finishes deletions an earlier run left pending (#184, ADR-0024) by truncating the write-ahead log.
+    /// Runs at startup regardless of <see cref="TranscriptOptions.Enabled"/>: an operator who cleared
+    /// transcripts and switched capture off still needs the deleted text gone from the file.
     /// </summary>
-    /// <param name="logger">Receives the outcome of the log truncation and the scrub.</param>
+    /// <param name="logger">Receives a warning when the log is busy.</param>
     /// <remarks>
     /// Does nothing when the file does not exist, so a default install with capture off still creates no
-    /// database. A busy log is logged and left for the next retention cycle.
+    /// database. Fast and safe beside other connections: the checkpoint does not wait, and a busy log is
+    /// logged and left for the next retention cycle. The slow one-time rebuild is
+    /// <see cref="RunOneTimeScrub"/>, which runs in the background.
     /// </remarks>
     public void RunStartupMaintenance(ILogger logger)
     {
@@ -122,9 +123,26 @@ public sealed class TranscriptDatabase
 
         if (!SqliteHardening.TruncateWal(ConnectionString))
             logger.LogWarning("The transcript database's write-ahead log was busy at startup; pending deletions are not yet final.");
+    }
+
+    /// <summary>
+    /// Runs the one-time scrub that removes text deleted before <c>secure_delete</c> was on (#184,
+    /// ADR-0024). Rebuilds the file, so on a large database it takes long enough that it must not run
+    /// inside host startup; <see cref="Hosting.TranscriptScrubHostedService"/> runs it in the background.
+    /// </summary>
+    /// <param name="logger">Receives the scrub's outcome.</param>
+    /// <returns>What the scrub did.</returns>
+    /// <remarks>
+    /// The rebuild takes SQLite's write lock for its duration, and other connections wait up to their busy
+    /// timeout. The transcript insert is best-effort, so a capture that times out during the rebuild is
+    /// dropped rather than failing a request. The scrub runs once per database.
+    /// </remarks>
+    internal SqliteScrub.Outcome RunOneTimeScrub(ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
 
         var directory = Path.GetDirectoryName(_databasePath) ?? ".";
-        SqliteScrub.Run(
+        return SqliteScrub.Run(
             databasePath: _databasePath,
             markerPath: _databasePath + ".scrubbed",
             tempDirectory: Path.Combine(path1: directory, path2: "scrub-temp"),

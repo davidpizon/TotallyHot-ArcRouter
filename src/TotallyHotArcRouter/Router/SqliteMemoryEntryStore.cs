@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Globalization;
 using TotallyHot.ArcRouter.Storage;
 
@@ -11,15 +12,21 @@ namespace TotallyHot.ArcRouter.Router;
 public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
 {
     private readonly RouterMemoryDatabase _database;
+    private readonly ILogger<SqliteMemoryEntryStore> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqliteMemoryEntryStore"/> class.
     /// </summary>
     /// <param name="database">The database to persist entries in. Its schema must already be created.</param>
-    public SqliteMemoryEntryStore(RouterMemoryDatabase database)
+    /// <param name="logger">
+    /// Reports a log truncation that could not complete after a delete. Optional so a store built by hand
+    /// in a test needs no logging setup.
+    /// </param>
+    public SqliteMemoryEntryStore(RouterMemoryDatabase database, ILogger<SqliteMemoryEntryStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         _database = database;
+        _logger = logger ?? NullLogger<SqliteMemoryEntryStore>.Instance;
     }
 
     /// <inheritdoc/>
@@ -83,7 +90,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.CommandText = "DELETE FROM memory_entries WHERE id = $id;";
         command.Parameters.AddWithValue(parameterName: "$id", value: id);
         command.ExecuteNonQuery();
-        SqliteHardening.TruncateWal(connection);
+        TruncateWalAfterDelete(connection);
 
         return Task.CompletedTask;
     }
@@ -116,8 +123,20 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
             transaction.Commit();
         }
 
-        SqliteHardening.TruncateWal(connection);
+        TruncateWalAfterDelete(connection);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Truncates the write-ahead log right after a delete so evicted vectors cannot survive in the
+    /// <c>-wal</c> file. A busy log is not an error: the delete succeeded and the startup checkpoint
+    /// finishes the job, so it is logged and not retried here.
+    /// </summary>
+    /// <param name="connection">The connection that ran the delete.</param>
+    private void TruncateWalAfterDelete(SqliteConnection connection)
+    {
+        if (!SqliteHardening.TruncateWal(connection))
+            _logger.LogWarning("Embedding memory deletion is not yet final: the write-ahead log was busy and will be truncated at the next start.");
     }
 
     /// <inheritdoc/>

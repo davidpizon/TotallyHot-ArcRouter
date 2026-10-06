@@ -205,6 +205,7 @@ public static class ServiceCollectionExtensions
         // ProxyHostedService binds Kestrel below. The background poll loop is registered between them;
         // it does not run its own initial cycle.
         services.AddHostedService<StartupHealthCheckHostedService>();
+        services.AddHostedService<TranscriptScrubHostedService>();
         services.AddHostedService<PriceCatalogIngestionHostedService>();
         services.AddHostedService<CostReconciliationHostedService>();
         services.AddHostedService<LogRegRetrainHostedService>();

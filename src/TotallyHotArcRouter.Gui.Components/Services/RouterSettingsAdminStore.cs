@@ -140,9 +140,9 @@ public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdm
     /// touch <see cref="Settings"/>; the toggle's own state is unaffected by clearing the data it captured.
     /// </summary>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <returns>The number of rows deleted.</returns>
+    /// <returns>The number of rows deleted and whether the deletion is final on disk.</returns>
     /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
-    public async Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
+    public async Task<ClearTranscriptsResult> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
     {
         IsSaving = true;
         NotifyChanged();
@@ -151,12 +151,12 @@ public sealed class RouterSettingsAdminStore : AdminStoreBase<IRouterSettingsAdm
 
         try
         {
-            var rowsDeleted = await Client.ClearTranscriptsAsync(cancellationToken).ConfigureAwait(false);
+            var result = await Client.ClearTranscriptsAsync(cancellationToken).ConfigureAwait(false);
 
             // marksLoaded: false - clearing transcripts fetches nothing to render, so it must not claim a
             // load has happened when none has.
             RecordSuccess(false);
-            return rowsDeleted;
+            return result;
         }
         catch (GrpcAdminException ex)
         {

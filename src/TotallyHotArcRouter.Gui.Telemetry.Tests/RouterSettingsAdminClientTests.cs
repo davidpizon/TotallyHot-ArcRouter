@@ -88,12 +88,16 @@ public class RouterSettingsAdminClientTests
     public async Task ClearTranscriptsAsync_maps_the_deleted_row_count()
     {
         var stub = new StubClient
-        { ClearTranscriptsResponse = new Contract.ClearTranscriptsResponse { RowsDeleted = 42 } };
+        {
+            ClearTranscriptsResponse = new Contract.ClearTranscriptsResponse
+            { RowsDeleted = 42, DeletionFinal = false }
+        };
         var client = new RouterSettingsAdminClient(stub);
 
-        var rowsDeleted = await client.ClearTranscriptsAsync(TestContext.Current.CancellationToken);
+        var result = await client.ClearTranscriptsAsync(TestContext.Current.CancellationToken);
 
-        rowsDeleted.Should().Be(42);
+        result.RowsDeleted.Should().Be(42);
+        result.DeletionFinal.Should().BeFalse();
     }
 
     [Fact]
