@@ -46,19 +46,22 @@ is close to the best candidate's, and every other subagent routes as it would wi
 options are in [Route classes and options](../../router/utility-model-routing.md#route-classes-and-options-issue-163).
 
 - **Turn the hint headers on.** Claude Code sends `x-claude-code-request-class` and `x-claude-code-agent-type` to a
-  gateway only when `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` is set. Add it to the same `env` block as the three
+  gateway only on version 2.1.273 or later, and only when `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` is set. On an older
+  build the variable does nothing and every subagent routes normally. Add it to the same `env` block as the three
   variables above. Without it the router sees only `x-claude-code-agent-id`, which marks a subagent of unknown type:
   every subagent then routes normally and no helper is detected. That is safe but saves nothing.
 - **List the auto-mode classifier's model in the router.** In auto mode, Claude Code decides whether an action may
-  run with a classifier that uses Claude Sonnet 5 by default. Its requests carry the same `auxiliary` class as
-  titles. The router keeps it off the cheap path because the request names its model instead of `auto`. A name the
+  run with a classifier that uses Claude Sonnet 5 by default. Claude Code's gateway guide lists classifiers under the
+  same `auxiliary` request class as titles. Whether the auto-mode classifier's own request carries it has not been
+  confirmed, so treat this as a precaution. The router keeps such a request off the cheap path because it names its
+  model instead of `auto`. A name the
   router does not know is still auto-routed (without the cheap bias), so the verdict could be served by whichever
   model the router picks. A configured name is an explicit pick and is served as asked, so add `claude-sonnet-5`
   to your model list.
 - **Don't point the model variables the classifier falls back to at `auto`.** The classifier falls back to the
   session's model or an Opus model in some cases. If `ANTHROPIC_DEFAULT_SONNET_MODEL` or
-  `ANTHROPIC_DEFAULT_OPUS_MODEL` is `auto`, a classifier request would be routed as a helper. The headers cannot
-  tell it apart from a title. The preset leaves both unset. Note that the preset's `ANTHROPIC_MODEL` is `auto`, so
+  `ANTHROPIC_DEFAULT_OPUS_MODEL` is `auto`, a classifier request that carries the `auxiliary` class would be routed
+  as a helper, because the headers cannot tell it apart from a title. The preset leaves both unset. Note that the preset's `ANTHROPIC_MODEL` is `auto`, so
   a classifier that falls back to the session's model has the same exposure. If that matters to you, set
   `Routing:SubagentBias:ClaudeCodeHintHeaders` to `false`, which turns the helper and light-subagent bias off
   entirely.
