@@ -65,30 +65,42 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
 
             DisposeInnerUnlocked();
 
-            var allDeleted = true;
-            if (Directory.Exists(_logsDirectory))
-            {
-                foreach (var path in Directory.EnumerateFiles(_logsDirectory, FileNamePrefix + "*.log"))
-                {
-                    try
-                    {
-                        File.Delete(path);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        allDeleted = false;
-                        // Clear still finishes transcript deletion; surface the leftover via the return
-                        // value so ClearTranscripts can set deletion_final false for the UI.
-                        Log.Warning(ex,
-                            "Could not delete body log {BodyLogPath}; remove it manually if it should not remain.",
-                            path);
-                    }
-                }
-            }
+            var allDeleted = DeleteBodyFiles(_logsDirectory);
 
             if (_isEnabled()) EnsureOpenUnlocked();
             return allDeleted;
         }
+    }
+
+    /// <summary>
+    /// Deletes every <c>bodies-*.log</c> under <paramref name="logsDirectory"/> without needing a sink, so
+    /// the uninstall shred and <see cref="ClearBodyFiles"/> share one implementation. A file that cannot be
+    /// removed is logged and skipped so the rest are still deleted.
+    /// </summary>
+    /// <param name="logsDirectory">The directory that holds the body logs; a missing directory is fine.</param>
+    /// <returns><see langword="true"/> when every body file was deleted or none existed.</returns>
+    internal static bool DeleteBodyFiles(string logsDirectory)
+    {
+        var allDeleted = true;
+        if (!Directory.Exists(logsDirectory)) return true;
+
+        foreach (var path in Directory.EnumerateFiles(logsDirectory, FileNamePrefix + "*.log"))
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                allDeleted = false;
+                // Callers still finish their other deletions; the return value lets them report the leftover.
+                Log.Warning(ex,
+                    "Could not delete body log {BodyLogPath}; remove it manually if it should not remain.",
+                    path);
+            }
+        }
+
+        return allDeleted;
     }
 
     /// <inheritdoc/>

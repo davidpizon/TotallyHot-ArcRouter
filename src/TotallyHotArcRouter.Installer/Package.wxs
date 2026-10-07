@@ -267,6 +267,25 @@
                   Return="ignore" />
 
     <!--
+      #184, ADR-0024 decision 7: a genuine uninstall removes conversation text (the transcript rows and the
+      body-excerpt logs) and keeps the spend and routing databases. Best-effort like UninstallCertificate:
+      a failure must not strand the uninstall. Same condition and same Before="RemoveFiles" reason, and
+      Impersonate="no" so it runs as LocalSystem, the account the protected data directory trusts. The
+      service has already stopped by then, so no writer holds the database. There is deliberately no
+      rollback action: deleted conversation text cannot be restored, so a later failure that rolls the
+      uninstall back leaves the product installed without its old transcripts. The outcome is recorded in
+      shred-conversations.result in the data directory, because this action has no console. The command
+      reads appsettings.json, appsettings.local.json and this process's environment, not the service's
+      registry Environment values, so a database path set only there is not seen (documented in the plan).
+    -->
+    <CustomAction Id="ShredConversations"
+                  FileRef="RouterServiceExe"
+                  ExeCommand="--shred-conversations"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!--
       ADR-0024: creates %ProgramData%\TotallyHotArcRouter with a protected DACL (SYSTEM and Administrators
       only), or migrates a pre-ADR-0024 directory - which every local account could read and write - into
       a new protected tree. The service refuses to start on an unprotected directory, so this has to run on
@@ -295,6 +314,7 @@
            startup. -->
       <Custom Action="InstallCertificate" After="MigrateDataDirectory" Condition="NOT Installed" />
       <Custom Action="UninstallCertificate" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="ShredConversations" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
     <Feature Id="Main" Title="TotallyHot ArcRouter" Level="1">
