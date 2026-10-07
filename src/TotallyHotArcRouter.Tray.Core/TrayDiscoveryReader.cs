@@ -101,8 +101,9 @@ public static class TrayDiscoveryReader
     /// Gets the per-user discovery file path, <c>%LocalAppData%\TotallyHotArcRouter\web-interface.json</c>.
     /// An unelevated router (a developer's F5 or <c>dotnet run</c>) cannot use the protected machine-wide
     /// directory and falls back to this one (ADR-0024), so the file it writes is here, not under ProgramData.
+    /// Private because only <see cref="DefaultPaths"/> uses it; tests reach it through that array.
     /// </summary>
-    internal static string PerUserPath()
+    private static string PerUserPath()
     {
         return Path.Combine(
             path1: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
