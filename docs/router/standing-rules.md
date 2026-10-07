@@ -51,3 +51,20 @@ flowchart LR
   `/code-review` on the new diff. Re-request a Copilot review only after a substantive redesign of
   the change, and say why in a pull request comment.
 - **Dependabot pull requests** do not need a Copilot review.
+
+## Nightly audits file issues only
+
+**Set by David on 2026-10-07**, recorded in
+[ADR-0008 Amendment 2](../adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-2-2026-10-07-scheduled-audits-that-do-not-churn).
+
+Amendment 1 rule 2 banned every cadence audit. That blanket ban no longer holds. A scheduled
+vulnerability scan and a scheduled code-smell scan may file GitHub issues, provided they do not
+cause churn for its own sake. The smell scan files only findings that are new against the Qodana
+baseline and that do not already have an issue. Neither scan opens a pull request, pushes a commit,
+or starts coding.
+
+An issue opened by the scan is not sign-off to work, and it is not approval of a plan. A fix is
+boarded work under [Approved plan before coding](#approved-plan-before-coding): the plan at
+`docs/plans/issue-<N>-<slug>.md` needs David's explicit sign-off before implementation. A smell fix
+still needs an observed cost (Amendment 1 rule 1). A vulnerability fix's observed cost is the
+vulnerability itself.
