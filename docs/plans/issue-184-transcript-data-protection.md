@@ -3,7 +3,7 @@
 **Status:** Approved by David on 2026-10-03 ([sign-off on #184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184#issuecomment-5976893257)). Every §7 decision is now settled; see §7.
 **Issue:** [#184](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/184) — "Protect the router's data directory and make deletion final".
 **Related:**
-- [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (proposed) moves conversation text into encrypted per-session files. Under "Found during the investigation, tracked separately" it lists: "Transcript data sits under default permissions, and deleted rows persist." **This plan is that item.**
+- [ADR-0019](../adr/0019-store-conversation-text-in-encrypted-per-session-files.md) (accepted 2026-10-07) moves conversation text into encrypted per-session files. Under "Found during the investigation, tracked separately" it lists: "Transcript data sits under default permissions, and deleted rows persist." **This plan is that item.**
 - [#165 plan](issue-165-export-import-history.md) (amended 2026-09-30 to follow ADR-0019), [#179 plan](issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).
 - [ADR-0012](../adr/0012-loopback-session-auth-and-token-in-secret-store.md) (loopback sessions) and [ADR-0015](../adr/0015-machine-scoped-protection-for-the-shared-secret-store.md) (the admin-only secret store).
 - [ADR-0020](../adr/0020-require-passkey-verification-for-conversation-content.md) (proposed) gates conversation content behind passkey verification. It is the API-side companion to this plan, and is tracked in [#185](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/185).
@@ -81,7 +81,7 @@ So `FAST` does not meet the goal, `ON` also needs the WAL truncated, and `-shm` 
 | C. ADR-0019's scope alone: make only the session folder admin-only | **Partial.** It covers session files and spools but leaves F2–F4 and F9. `transcripts.db` stays readable to all users: its index metadata, plus wrapped keys that become harmless after rotation. A user can also create the session folder before the router does (F1). |
 | **D. `secure_delete=ON` in `OpenConnection`, plus `wal_checkpoint(TRUNCATE)` after each purge or clear** | **Recommended.** ADR-0019 already requires `secure_delete` for wrapped keys. This makes it per connection (F8), and applies it to today's `transcripts.db` in the meantime. |
 | E. `VACUUM` after each purge | Works (s6), but it rewrites the whole file every 5 minutes, and spills a full copy of the database through a temp file. Use it for the one-time scrub only, with that temp file in the protected root (§3.2). |
-| F. Per-session keys (crypto-shredding) | **Decided in ADR-0019** (proposed). Not re-decided here. |
+| F. Per-session keys (crypto-shredding) | **Decided in ADR-0019** (accepted 2026-10-07). Not re-decided here. |
 | G. SQLCipher for the whole database | Rejected in ADR-0019. |
 
 ## 3. Design
