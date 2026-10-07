@@ -113,7 +113,7 @@ public sealed class LinuxOpenWriterScanner : IOpenWriterScanner
 
             var permissions = fields[1];
             var path = fields[5].Trim();
-            if (permissions.Length >= 4 && permissions[1] == 'w' && permissions[3] == 's' && IsUnder(path, root))
+            if (permissions is [_, 'w', _, 's', ..] && IsUnder(path, root))
                 writers.Add($"process {pid} ({ProcessName(processDirectory)}) has '{path}' mapped shared and writable");
         }
     }
