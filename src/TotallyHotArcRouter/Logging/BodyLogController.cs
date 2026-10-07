@@ -43,9 +43,8 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
     {
         ArgumentNullException.ThrowIfNull(logEvent);
 
-        // Marker first: every log event in the process reaches this sink, and the enabled check is an
-        // options-monitor lookup through DI. _disposed is only read under the gate so Emit and Dispose
-        // agree on whether the controller is still live.
+        // Marker first (defense for direct Emit / tests; Program also ByIncludingOnly-filters). Enabled
+        // is an options-monitor lookup. _disposed is only read under the gate so Emit and Dispose agree.
         if (!logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName)) return;
         if (!_isEnabled()) return;
 
@@ -53,7 +52,7 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
         {
             if (_disposed) return;
             EnsureOpenUnlocked();
-            _inner?.Write(logEvent);
+            _inner!.Write(logEvent);
         }
     }
 

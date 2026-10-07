@@ -383,7 +383,6 @@ public class RequestInterceptor
             body = await reader.ReadToEndAsync(cancellationToken);
         }
 
-        // Opt-in body excerpt (#184 phase 3): marked ConversationBody event, bodies-*.log only.
         ConversationBodyLogging.LogExcerpt(_logger, _bodyExcerptOptions,
             ConversationBodyLogging.InterceptedRequestMessage, body);
 

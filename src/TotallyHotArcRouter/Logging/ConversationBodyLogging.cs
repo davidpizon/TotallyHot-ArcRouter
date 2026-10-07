@@ -32,16 +32,23 @@ public static class ConversationBodyLogging
 
     /// <summary>
     /// The four F9 message prefixes used by the pre-upgrade log rewrite to recognize legacy Debug lines
-    /// that still hold conversation text. Kept as substrings so both Serilog's rendered form and older
-    /// console copies match.
+    /// that still hold conversation text. Derived from the template constants so a wording change cannot
+    /// leave the migration matching a stale substring.
     /// </summary>
     public static readonly string[] LegacyMessagePrefixes =
     [
-        "[INTERCEPTOR] Intercepted agent request message:",
-        "[INTERCEPTOR] Newest user message:",
-        "[INTERCEPTOR] Intercepted agent response message:",
-        "[INTERCEPTOR] Assembled LLM response text:"
+        PrefixBeforeProperty(InterceptedRequestMessage),
+        PrefixBeforeProperty(NewestUserMessage),
+        PrefixBeforeProperty(InterceptedResponseMessage),
+        PrefixBeforeProperty(AssembledResponseText)
     ];
+
+    /// <summary>Returns the fixed text before the first Serilog property placeholder in a template.</summary>
+    private static string PrefixBeforeProperty(string template)
+    {
+        var brace = template.IndexOf('{');
+        return brace < 0 ? template : template[..brace].TrimEnd();
+    }
 
     /// <summary>
     /// Returns whether body-excerpt logging is currently on. A missing monitor is treated as off so

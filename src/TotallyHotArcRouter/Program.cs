@@ -302,11 +302,18 @@ public static class Program
                             outputTemplate: diagnosticTemplate))
                     // Streams every non-body log event to the GUI's Console tab. DeferredTelemetryPublisher
                     // avoids a circular dependency on the logging system itself being built.
+                    // TelemetryLogEventSink also drops ConversationBody as defense when this filter is absent.
                     .WriteTo.Logger(lc => lc
                         .MinimumLevel.Verbose()
                         .Filter.ByExcluding(IsConversationBody)
                         .WriteTo.Sink(new TelemetryLogEventSink(new DeferredTelemetryPublisher(services))))
-                    .WriteTo.Sink(new DeferredBodyLogSink(services));
+                    // Include-only so unmarked traffic never enters DeferredBodyLogSink / BodyLogController
+                    // when body excerpts are off (the default). Marker check inside the controller remains
+                    // for direct Emit tests and Clear-time reopen.
+                    .WriteTo.Logger(lc => lc
+                        .MinimumLevel.Verbose()
+                        .Filter.ByIncludingOnly(IsConversationBody)
+                        .WriteTo.Sink(new DeferredBodyLogSink(services)));
             })
             .ConfigureServices((_, services) =>
             {

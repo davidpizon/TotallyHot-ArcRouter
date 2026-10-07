@@ -33,9 +33,13 @@ public static class ServiceCollectionExtensions
         services.AddOptions<BodyExcerptOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(BodyExcerptOptions.SectionName).Bind(options));
-        services.AddSingleton(sp => new BodyLogController(
-            AppDataPaths.ResolveLogsDirectory(),
-            () => sp.GetRequiredService<IOptionsMonitor<BodyExcerptOptions>>().CurrentValue.Enabled));
+        services.AddSingleton(sp =>
+        {
+            var bodyExcerptOptions = sp.GetRequiredService<IOptionsMonitor<BodyExcerptOptions>>();
+            return new BodyLogController(
+                AppDataPaths.ResolveLogsDirectory(),
+                () => bodyExcerptOptions.CurrentValue.Enabled);
+        });
         services.AddSingleton<IBodyLogController>(sp => sp.GetRequiredService<BodyLogController>());
 
         services.AddRouterCore();
