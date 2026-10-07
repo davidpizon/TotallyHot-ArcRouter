@@ -75,6 +75,11 @@ record and are not re-derivable from anywhere. A `RemoveFolderEx` would addition
 **major upgrade**, since `MajorUpgrade` performs an internal uninstall of the previous version — so
 "clean up on uninstall" would in practice mean "wipe the spend history on every update".
 
+A genuine uninstall (not an upgrade) does run `--shred-conversations` first (#184, ADR-0024): it deletes the
+transcript rows, rebuilds `transcripts.db` so no freed page keeps text, and deletes the `bodies-*.log`
+files, and it keeps everything else. The MSI runs it as `SYSTEM`; the Linux and macOS `uninstall.sh` scripts
+run it as the service account. A failure never blocks the uninstall.
+
 Operators who want a genuinely clean removal delete both directories by hand after uninstalling. Since
 ADR-0024 the machine-wide directory grants only `SYSTEM` and `Administrators`, so that deletion - like
 editing `appsettings.local.json` or opening `logs\` - needs an elevated prompt.

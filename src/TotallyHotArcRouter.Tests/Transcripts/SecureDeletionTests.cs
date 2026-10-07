@@ -115,6 +115,70 @@ public class SecureDeletionTests : IDisposable
     }
 
     [Fact]
+    public async Task Shred_RemovesTranscriptTextAndBodyLogs_AndKeepsOtherFiles()
+    {
+        var (_, store) = CreateStore();
+        await InsertCanaryRowsAsync(store: store, count: 10);
+        var logs = Path.Combine(path1: _directory, path2: "logs");
+        Directory.CreateDirectory(logs);
+        var bodyLog = Path.Combine(path1: logs, path2: "bodies-20260101.log");
+        var diagnosticLog = Path.Combine(path1: logs, path2: "arcrouter-20260101.log");
+        var spendDatabase = Path.Combine(path1: _directory, path2: "agent_telemetry.db");
+        File.WriteAllText(path: bodyLog, contents: Canary);
+        File.WriteAllText(path: diagnosticLog, contents: "diagnostic");
+        File.WriteAllText(path: spendDatabase, contents: "spend");
+
+        var exitCode = ShredConversationsCommand.Shred(databasePath: _transcriptPath, logsDirectory: logs,
+            logger: NullLogger.Instance, probeVolume: PlentyOfSpace);
+
+        Assert.Equal(expected: ShredConversationsCommand.DoneExitCode, actual: exitCode);
+        AssertNoCanary();
+        Assert.False(File.Exists(bodyLog));
+        Assert.True(File.Exists(diagnosticLog));
+        Assert.True(File.Exists(spendDatabase));
+    }
+
+    [Fact]
+    public async Task Shred_RebuildsTheFileEvenWhenTheOneTimeScrubAlreadyRan()
+    {
+        var (_, store) = CreateStore();
+        await InsertCanaryRowsAsync(store: store, count: 10);
+        var marker = _transcriptPath + ".scrubbed";
+        File.WriteAllText(path: marker, contents: "done");
+        ShredConversationsCommand.Shred(databasePath: _transcriptPath, logsDirectory: Path.Combine(path1: _directory, path2: "logs"),
+            logger: NullLogger.Instance, probeVolume: PlentyOfSpace);
+
+        // The rebuild rewrites the marker, so a changed marker proves the VACUUM ran again.
+        Assert.NotEqual(expected: "done", actual: File.ReadAllText(marker));
+        AssertNoCanary();
+    }
+
+    [Fact]
+    public void Shred_WithNothingToRemove_Succeeds()
+    {
+        var exitCode = ShredConversationsCommand.Shred(databasePath: _transcriptPath,
+            logsDirectory: Path.Combine(path1: _directory, path2: "no-logs"), logger: NullLogger.Instance);
+
+        Assert.Equal(expected: ShredConversationsCommand.DoneExitCode, actual: exitCode);
+    }
+
+    [Fact]
+    public async Task Shred_WhenTheDiskIsTooFullToRebuild_ReportsIncomplete()
+    {
+        var (_, store) = CreateStore();
+        await InsertCanaryRowsAsync(store: store, count: 3);
+
+        var exitCode = ShredConversationsCommand.Shred(databasePath: _transcriptPath,
+            logsDirectory: Path.Combine(path1: _directory, path2: "logs"), logger: NullLogger.Instance,
+            probeVolume: static _ => new SqliteScrub.VolumeSpace(Free: 0, Total: 1));
+
+        Assert.Equal(expected: ShredConversationsCommand.IncompleteExitCode, actual: exitCode);
+    }
+
+    private static SqliteScrub.VolumeSpace PlentyOfSpace(string path) =>
+        new(Free: long.MaxValue / 2, Total: long.MaxValue / 2);
+
+    [Fact]
     public async Task FinalizeDeletionAsync_WithAReaderHoldingTheLog_RetriesThenReportsNotFinal()
     {
         var (database, store) = CreateStore();

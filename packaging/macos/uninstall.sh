@@ -21,6 +21,15 @@ INSTALL_DIR="/usr/local/opt/totallyhot-arcrouter"
 echo "==> Unloading ${LABEL}"
 launchctl bootout system "${PLIST_DEST}" 2>/dev/null || true
 
+echo "==> Removing conversation text (transcripts and body-excerpt logs; spend data is kept)"
+# #184 / ADR-0024: run as the service account, never root - root would leave a root-owned secrets.dat the
+# service cannot read after a reinstall.
+if [[ -x "${INSTALL_DIR}/TotallyHotArcRouter" ]] && id _arcrouter >/dev/null 2>&1; then
+    sudo -u _arcrouter "${INSTALL_DIR}/TotallyHotArcRouter" --shred-conversations         || echo "WARNING: some conversation text could not be removed; see the messages above." >&2
+else
+    echo "Skipped: the router binary or the '_arcrouter' account is already gone."
+fi
+
 echo "==> Removing the LaunchDaemon plist"
 rm -f "${PLIST_DEST}"
 
@@ -28,9 +37,10 @@ echo "==> Removing installed binaries at ${INSTALL_DIR}"
 rm -rf "${INSTALL_DIR}"
 
 cat <<'EOF'
-Uninstalled. Left in place, deliberately (see this script's header comment):
+Uninstalled. Removed: conversation text (transcript rows, body-excerpt logs).
+Left in place, deliberately (see this script's header comment):
   - "/Library/Application Support/TotallyHotArcRouter" (operational data: usage ledger, spend history,
-    trained models, secrets, and logs)
+    trained models, secrets, and diagnostic logs)
   - the '_arcrouter' service account
   - the router's local CA in the System keychain
 

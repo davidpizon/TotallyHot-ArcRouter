@@ -482,3 +482,15 @@ Phase 3 is in `src/TotallyHotArcRouter/Logging/` (`BodyExcerptOptions`, `SecretO
 - **Clear.** `RouterSettingsAdminGrpcService.ClearTranscripts` calls `IBodyLogController.ClearBodyFiles` after transcript delete/finalize: close the body sink, delete every `bodies*.log`, reopen when still enabled. Diagnostic `arcrouter-*.log` files are untouched.
 - **Pre-upgrade rewrite.** `PreUpgradeLogRewrite` runs from `--migrate-data-directory` (after a successful protect/migrate) and from the Docker bootstrap when the container uses the protected volume. Marker: `.pre-upgrade-logs-rewritten` in the data root. It never runs at a normal service start. Linux journal and Docker host log-driver copies are documented for the operator; the router cannot scrub them.
 - **ADR-0020.** Marked events are dropped from `TelemetryLogEventSink` for now. The property name is stable so the passkey gate can re-admit them later for sessions with a content grant.
+
+## 11. Implementation notes (phase 4, interim)
+
+Phase 4 is `src/TotallyHotArcRouter/Storage/ShredConversationsCommand.cs`, wired into `Package.wxs`, `packaging/linux/uninstall.sh` and `packaging/macos/uninstall.sh`. ADR-0019 was accepted on 2026-10-07, but its per-session files and master key are not built yet (they arrive with #165), so this is the interim form from §3.5. It differs from §3.5 in these places:
+
+- **Interim steps only.** It deletes every `request_transcripts` row, truncates the log, rebuilds `transcripts.db` and deletes `bodies-*.log`. The master-key deletion and the session-folder removal are not implemented; there is nothing to remove yet. Add them when #165 phase 1 creates the key and folder.
+- **It always rebuilds.** It removes `transcripts.db.scrubbed` first, so the `VACUUM` runs even if the one-time scrub already did. An uninstall can afford the time, and the outcome no longer depends on the file's history.
+- **Own process, own temp folder.** It sets `TMP`, `TEMP`, `TMPDIR` and `SQLITE_TMPDIR` to `scrub-temp` in the data directory before any SQLite call, and removes that folder afterwards.
+- **Configuration.** It binds the `Storage` section from `appsettings.json`, `appsettings.local.json` and the environment, so a moved `TranscriptDatabasePath` is honoured.
+- **Exit codes.** `0` when nothing was left behind, `1` when something may remain (busy log, full disk, undeletable body log). The MSI action is `Return="ignore"` and the scripts print a warning, so a failure never strands the uninstall.
+- **Docker** needs no change: `src/README.md` already says `docker volume rm` deletes everything.
+- **Not run for real.** The command was verified by unit tests against a scratch directory only; running it against a live data directory would delete that machine's transcripts. The MSI action and the two scripts are untested end to end (no installer or Linux/macOS host here).

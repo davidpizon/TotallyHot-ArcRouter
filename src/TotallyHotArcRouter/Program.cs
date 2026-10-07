@@ -59,6 +59,16 @@ public static class Program
                 return;
             }
 
+            // #184: uninstall's conversation shred. Dispatched here for the same reason as the scrub above:
+            // it must run before the host builds, and it sets SQLite's temp folder for its own process.
+            var (shredConversations, _) = ExtractFlag(args: args, flagName: ShredConversationsCommand.FlagName);
+            if (shredConversations)
+            {
+                using var shredLogFactory = new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger);
+                Environment.ExitCode = ShredConversationsCommand.Run(shredLogFactory.CreateLogger("ShredConversations"));
+                return;
+            }
+
             // Headless/CI replacement for scripts/fetch-coderouterbench.sh
             // (docs/router/coderouterbench-sqlite-migration-plan.md Phase 6): stripped before
             // CreateHostBuilder for the same reason --model is, so it never reaches the command-line
