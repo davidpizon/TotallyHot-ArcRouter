@@ -147,6 +147,7 @@ public static class PreUpgradeLogRewrite
             }
             catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
             {
+                // Best-effort: a leftover .rewriting file is harmless; the next run or OS cleanup removes it.
             }
 
             try

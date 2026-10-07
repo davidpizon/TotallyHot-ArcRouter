@@ -15,16 +15,16 @@ public static partial class SecretObscurer
     public const string RedactedToken = "[REDACTED]";
 
     /// <summary>
-    /// Obscures every key-shaped span in <paramref name="text"/>. Null or empty input is returned
-    /// unchanged. Safe to call on already-truncated body excerpts; the patterns do not need a look-back
-    /// window for whole-line log text (ADR-0019's streaming pipeline can reuse the same patterns with a
-    /// bounded window later).
+    /// Obscures every key-shaped span in <paramref name="text"/>. Null or empty input becomes
+    /// <see cref="string.Empty"/>. Safe to call on already-truncated body excerpts; the patterns do not
+    /// need a look-back window for whole-line log text (ADR-0019's streaming pipeline can reuse the same
+    /// patterns with a bounded window later).
     /// </summary>
     /// <param name="text">Text that may contain credentials or key-shaped strings.</param>
     /// <returns>The same text with matches replaced by <see cref="RedactedToken"/>.</returns>
     public static string Obscure(string? text)
     {
-        if (string.IsNullOrEmpty(text)) return text ?? string.Empty;
+        if (string.IsNullOrEmpty(text)) return string.Empty;
 
         return KeyShapedPattern().Replace(text, RedactedToken);
     }
