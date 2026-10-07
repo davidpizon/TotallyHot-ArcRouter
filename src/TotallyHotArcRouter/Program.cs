@@ -1,11 +1,13 @@
 using Microsoft.Extensions.Options;
 using Serilog;
+using Serilog.Events;
 using System.Security.Cryptography;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Hosting.DataDirectory;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Orchestrator;
@@ -252,28 +254,42 @@ public static class Program
             .ConfigureAppConfiguration((_, config) => config.AddJsonFile(
                 path: Path.Combine(StorageOptions.ResolveMachineSharedDirectory(), "appsettings.local.json"),
                 optional: true, reloadOnChange: true))
-            .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
-                .ReadFrom.Configuration(context.Configuration)
-                .ReadFrom.Services(services)
-                .Enrich.FromLogContext()
-                // File sink path resolved in code, not appsettings.json (web GUI migration plan Phase
-                // P10): AppDataPaths.ResolveLogsDirectory() picks the right per-platform directory
-                // (systemd's LOGS_DIRECTORY when packaged that way, otherwise a "logs" subfolder of the
-                // machine-shared data directory), which Serilog.Settings.Configuration has no token-
-                // expansion hook to express from a plain JSON string - replaces the old hardcoded
-                // Windows-only "C:\Logs\ArcRouter" default.
-                .WriteTo.File(
-                    path: Path.Combine(AppDataPaths.ResolveLogsDirectory(), "arcrouter-.log"),
-                    rollingInterval: RollingInterval.Day,
-                    retainedFileCountLimit: 30,
-                    outputTemplate:
-                    "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
-                // Streams every log event to the GUI's Console tab over the same telemetry hub as
-                // routing events - additive, doesn't replace the Console/File sinks above.
-                // DeferredTelemetryPublisher (not a direct services.GetRequiredService<ITelemetryPublisher>()
-                // here) avoids a circular dependency on the logging system itself being built - see its
-                // remarks for why that circularity silently breaks every sink, not just this one.
-                .WriteTo.Sink(new TelemetryLogEventSink(new DeferredTelemetryPublisher(services))))
+            .UseSerilog((context, services, loggerConfiguration) =>
+            {
+                // #184 phase 3: conversation-body excerpts are marked ConversationBody and must never
+                // reach the diagnostic Console/File sinks or the Console tab. They go only to bodies-*.log
+                // through BodyLogController. Console moved here from appsettings.json so the same filter
+                // applies (Serilog fans every event to every sink otherwise).
+                static bool IsConversationBody(LogEvent logEvent) =>
+                    logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName);
+
+                var logsDirectory = AppDataPaths.ResolveLogsDirectory();
+                const string diagnosticTemplate =
+                    "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}";
+
+                loggerConfiguration
+                    .ReadFrom.Configuration(context.Configuration)
+                    .ReadFrom.Services(services)
+                    .Enrich.FromLogContext()
+                    .WriteTo.Logger(lc => lc
+                        .Filter.ByExcluding(IsConversationBody)
+                        .WriteTo.Console())
+                    // File sink path resolved in code, not appsettings.json (web GUI migration plan Phase
+                    // P10): AppDataPaths.ResolveLogsDirectory() picks the right per-platform directory.
+                    .WriteTo.Logger(lc => lc
+                        .Filter.ByExcluding(IsConversationBody)
+                        .WriteTo.File(
+                            path: Path.Combine(logsDirectory, "arcrouter-.log"),
+                            rollingInterval: RollingInterval.Day,
+                            retainedFileCountLimit: 30,
+                            outputTemplate: diagnosticTemplate))
+                    // Streams every non-body log event to the GUI's Console tab. DeferredTelemetryPublisher
+                    // avoids a circular dependency on the logging system itself being built.
+                    .WriteTo.Logger(lc => lc
+                        .Filter.ByExcluding(IsConversationBody)
+                        .WriteTo.Sink(new TelemetryLogEventSink(new DeferredTelemetryPublisher(services))))
+                    .WriteTo.Sink(new DeferredBodyLogSink(services));
+            })
             .ConfigureServices((_, services) =>
             {
                 services.AddTotallyHotArcRouter();

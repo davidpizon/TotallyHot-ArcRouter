@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using Serilog;
+using TotallyHot.ArcRouter.Logging;
 using ILogger = Serilog.ILogger;
 
 namespace TotallyHot.ArcRouter.Hosting.DataDirectory;
@@ -110,6 +111,18 @@ public static class DataDirectoryBootstrap
         lock (Gate)
         {
             PendingEvents.AddRange(resolution.Events);
+        }
+
+        // #184 phase 3: Docker has no elevated --migrate-data-directory step, so the bootstrap itself
+        // rewrites pre-upgrade logs before the host File sink opens anything. Non-container starts never
+        // rewrite here - launchd may already hold launchd-stdout.log open.
+        if (resolution.UsingProtectedMachineWide &&
+            Environment.GetEnvironmentVariable(ContainerEnvironmentVariable) == "1")
+        {
+            PreUpgradeLogRewrite.Run(
+                dataDirectory: resolution.Directory,
+                logsDirectory: Path.Combine(resolution.Directory, "logs"),
+                logger: Log.Logger);
         }
 
         return resolution.Directory;

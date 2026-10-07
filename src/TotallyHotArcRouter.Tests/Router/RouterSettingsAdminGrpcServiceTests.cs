@@ -4,6 +4,7 @@ using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Tests.Proxy;
@@ -297,13 +298,15 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     public async Task ClearTranscripts_DelegatesToTheStoreAndReportsTheDeletedCount()
     {
         var transcriptStore = new FakeTranscriptStore(rowsToDelete: 7);
-        var service = CreateService(transcriptStore: transcriptStore);
+        var bodyLogs = new RecordingBodyLogController();
+        var service = CreateService(transcriptStore: transcriptStore, bodyLogController: bodyLogs);
 
         var response =
             await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
 
         response.RowsDeleted.Should().Be(7);
         transcriptStore.DeleteAllCallCount.Should().Be(1);
+        bodyLogs.ClearCallCount.Should().Be(1);
     }
 
     [Fact]
@@ -330,7 +333,8 @@ public sealed class RouterSettingsAdminGrpcServiceTests
         JudgeModelSelector? judgeModelSelector = null,
         StaticOptionsMonitor<TranscriptOptions>? transcriptMonitor = null,
         ITranscriptStore? transcriptStore = null,
-        StaticOptionsMonitor<PortfolioGraderOptions>? portfolioGraderMonitor = null)
+        StaticOptionsMonitor<PortfolioGraderOptions>? portfolioGraderMonitor = null,
+        IBodyLogController? bodyLogController = null)
     {
         return new RouterSettingsAdminGrpcService(
             store: store ?? CreateStore(),
@@ -343,7 +347,15 @@ public sealed class RouterSettingsAdminGrpcServiceTests
                                            new StaticOptionsMonitor<PortfolioGraderOptions>(new PortfolioGraderOptions()),
             transcriptOptionsMonitor: transcriptMonitor ??
                                       new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()),
-            transcriptStore: transcriptStore ?? new FakeTranscriptStore());
+            transcriptStore: transcriptStore ?? new FakeTranscriptStore(),
+            bodyLogController: bodyLogController);
+    }
+
+    private sealed class RecordingBodyLogController : IBodyLogController
+    {
+        public int ClearCallCount { get; private set; }
+
+        public void ClearBodyFiles() => ClearCallCount++;
     }
 
     /// <summary>

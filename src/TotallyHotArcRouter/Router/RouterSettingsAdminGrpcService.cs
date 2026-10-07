@@ -1,6 +1,7 @@
 using Grpc.Core;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
@@ -65,6 +66,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     private readonly RouterSettingsStore _store;
     private readonly IOptionsMonitor<TranscriptOptions> _transcriptOptionsMonitor;
     private readonly ITranscriptStore _transcriptStore;
+    private readonly IBodyLogController _bodyLogController;
 
     /// <summary>Initializes a new instance of the <see cref="RouterSettingsAdminGrpcService"/> class.</summary>
     /// <param name="store">The settings store persisted mutations are written to.</param>
@@ -98,6 +100,11 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     /// Reports Phase Q3's CodeJudge/ICE-Score/RACE portfolio's currently effective values, the same way
     /// <paramref name="judgeOptionsMonitor"/> does for the G-Eval judge.
     /// </param>
+    /// <param name="bodyLogController">
+    /// Clears opt-in <c>bodies-*.log</c> files after transcript Clear (#184 phase 3). Optional only so
+    /// tests that never wire body logging can omit it; production always supplies
+    /// <see cref="BodyLogController"/>.
+    /// </param>
     public RouterSettingsAdminGrpcService(
         RouterSettingsStore store,
         IOptionsMonitor<RoutingOptions> optionsMonitor,
@@ -108,7 +115,8 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         IOptionsMonitor<TranscriptOptions> transcriptOptionsMonitor,
         ITranscriptStore transcriptStore,
         IOptionsMonitor<PortfolioGraderOptions> portfolioGraderOptionsMonitor,
-        EmbeddingMemory? embeddingMemory = null)
+        EmbeddingMemory? embeddingMemory = null,
+        IBodyLogController? bodyLogController = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -129,6 +137,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         _transcriptOptionsMonitor = transcriptOptionsMonitor;
         _transcriptStore = transcriptStore;
         _portfolioGraderOptionsMonitor = portfolioGraderOptionsMonitor;
+        _bodyLogController = bodyLogController ?? NullBodyLogController.Instance;
         _logger = logger;
     }
 
@@ -223,6 +232,9 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         // so it makes the deletion final itself and says so when it could not.
         var deletionFinal = await _transcriptStore.FinalizeDeletionAsync(context.CancellationToken)
             .ConfigureAwait(false);
+
+        // #184 phase 3: close the body sink, delete every bodies-*.log, reopen. Diagnostic logs stay.
+        _bodyLogController.ClearBodyFiles();
 
         _logger.LogInformation(message: "Transcript data cleared: RowsDeleted={RowsDeleted} DeletionFinal={DeletionFinal}",
             rowsDeleted, deletionFinal);

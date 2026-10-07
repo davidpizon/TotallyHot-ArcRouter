@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Cache;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
@@ -291,4 +292,10 @@ public sealed record ProxyMiddlewareDependencies
     /// store are skipped and forwarding is unchanged. Distinct from provider prompt caching.
     /// </summary>
     public SemanticResponseCache? SemanticResponseCache { get; init; }
+
+    /// <summary>
+    /// Optional live switch for the four conversation-bearing body excerpts (#184 phase 3). When
+    /// <see langword="null"/> or disabled, those templates emit nothing.
+    /// </summary>
+    public IOptionsMonitor<BodyExcerptOptions>? BodyExcerptOptions { get; init; }
 }

@@ -89,6 +89,18 @@ upgrade that first applies this migrates the old directory into a new protected 
 `quarantine\migration-<time>\` and copy it back from an elevated prompt to keep its settings. A dev run that
 is not elevated now uses `%LOCALAPPDATA%\TotallyHotArcRouter\` instead of the service's directory.
 
+**Pre-upgrade log rewrite (#184 phase 3).** The same `--migrate-data-directory` pass (and the Docker
+bootstrap, before the host opens its File sink) rewrites `arcrouter-*.log` and macOS `launchd-stdout.log` /
+`launchd-stderr.log` to drop the four conversation-bearing interceptor templates that used to ship at
+Debug. A marker `.pre-upgrade-logs-rewritten` records that the pass ran. After upgrade, those templates
+are opt-in (`Logging:BodyExcerpts:Enabled`) and write only to `bodies-*.log`; Clear deletes those body
+files. Platform copies the router cannot reach:
+
+- **Linux:** if the unit previously ran at Debug, rotate and vacuum the journal for that unit
+  (`journalctl --rotate` then `journalctl --vacuum-time=1s` scoped as your policy allows), or wait for
+  journald retention.
+- **Docker:** recreate the container (drops the host log-driver buffer) or rely on the driver's rotation.
+
 **Migrating a developer's data into the installed service.** Before this location was machine-wide these
 files lived under `%LOCALAPPDATA%`, and `LegacyStorageMigration` adopts a pre-move copy automatically on
 the first startup that finds the destination missing. It can only adopt what the running account can see,

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Security.Principal;
+using TotallyHot.ArcRouter.Logging;
 using ILogger = Serilog.ILogger;
 
 namespace TotallyHot.ArcRouter.Hosting.DataDirectory;
@@ -122,6 +123,7 @@ public static class DataDirectoryMigrationCommand
         var root = AppDataPaths.MachineWideCandidate();
         var result = new WindowsDataDirectoryMigration(root, WindowsDirectoryPolicy.Machine, legacyOwner, logger).Run();
         LogResult(logger, root, result);
+        RewritePreUpgradeLogs(root, logger);
         return 0;
     }
 
@@ -167,7 +169,28 @@ public static class DataDirectoryMigrationCommand
             LogResult(logger, root, result);
         }
 
+        RewritePreUpgradeLogs(AppDataPaths.MachineWideCandidate(), logger);
         return 0;
+    }
+
+    /// <summary>
+    /// Strips legacy F9 conversation lines from diagnostic logs while the router is stopped (#184 phase 3).
+    /// Uses <see cref="AppDataPaths.MachineWideCandidate"/> rather than
+    /// <see cref="AppDataPaths.ResolveLogsDirectory"/> so it never re-enters the bootstrap that refuses an
+    /// unmigrated root.
+    /// </summary>
+    private static void RewritePreUpgradeLogs(string dataDirectory, ILogger logger)
+    {
+        PreUpgradeLogRewrite.Run(dataDirectory, ResolveLogsDirectoryForMigration(), logger);
+    }
+
+    private static string ResolveLogsDirectoryForMigration()
+    {
+        var logsDirectory = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
+        if (!string.IsNullOrWhiteSpace(logsDirectory))
+            return logsDirectory.Split(':', 2)[0];
+
+        return Path.Combine(AppDataPaths.MachineWideCandidate(), "logs");
     }
 
     private static void LogResult(ILogger logger, string root, DataDirectoryMigrationResult result)
