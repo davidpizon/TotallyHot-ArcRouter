@@ -47,7 +47,7 @@ public static class ConversationBodyLogging
     /// Returns whether body-excerpt logging is currently on. A missing monitor is treated as off so
     /// unit tests that construct the proxy without the options type stay silent.
     /// </summary>
-    public static bool IsEnabled(IOptionsMonitor<BodyExcerptOptions>? options)
+    private static bool IsEnabled(IOptionsMonitor<BodyExcerptOptions>? options)
     {
         return options?.CurrentValue.Enabled == true;
     }

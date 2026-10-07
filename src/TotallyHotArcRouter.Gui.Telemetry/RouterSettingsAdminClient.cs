@@ -8,8 +8,9 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// </summary>
 /// <param name="RowsDeleted">The number of transcript rows deleted.</param>
 /// <param name="DeletionFinal">
-/// <see langword="false"/> when the router's write-ahead log stayed busy through every retry, so deleted
-/// text may remain on disk until the next checkpoint or restart.
+/// <see langword="false"/> when the router's write-ahead log stayed busy through every retry, or when a
+/// conversation-body log file could not be deleted, so deleted text may remain on disk until the next
+/// checkpoint, Clear, or restart.
 /// </param>
 public sealed record ClearTranscriptsResult(int RowsDeleted, bool DeletionFinal);
 

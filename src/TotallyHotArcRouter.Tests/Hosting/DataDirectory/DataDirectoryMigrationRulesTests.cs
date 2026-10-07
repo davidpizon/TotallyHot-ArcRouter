@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.Hosting.DataDirectory;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Tests.Hosting.DataDirectory;
@@ -51,6 +52,16 @@ public sealed class DataDirectoryMigrationRulesTests
     public void OtherModelFiles_AreDiscarded(string relativePath)
     {
         Assert.Equal(MigrationFileDecision.Discard, DataDirectoryMigrationRules.Decide(relativePath).Decision);
+    }
+
+    [Fact]
+    public void ThePreUpgradeLogRewriteMarker_IsDiscarded()
+    {
+        // A planted marker would skip the rewrite while leaving unobscured F9 lines on disk.
+        Assert.Equal(MigrationFileDecision.Discard,
+            DataDirectoryMigrationRules.Decide(PreUpgradeLogRewrite.MarkerFileName).Decision);
+        Assert.Equal(MigrationFileDecision.Discard,
+            DataDirectoryMigrationRules.Decide(PreUpgradeLogRewrite.MarkerFileName.ToUpperInvariant()).Decision);
     }
 
     [Fact]

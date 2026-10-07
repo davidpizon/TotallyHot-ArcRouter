@@ -52,7 +52,7 @@ public sealed class BodyLogControllerTests : IDisposable
         controller.Emit(MarkedEvent("first body"));
         Assert.NotEmpty(Directory.GetFiles(_directory, "bodies*.log"));
 
-        controller.ClearBodyFiles();
+        Assert.True(controller.ClearBodyFiles());
         Assert.Empty(Directory.GetFiles(_directory, "bodies*.log"));
 
         controller.Emit(MarkedEvent("second body"));

@@ -305,7 +305,23 @@ public sealed class RouterSettingsAdminGrpcServiceTests
             await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
 
         response.RowsDeleted.Should().Be(7);
+        response.DeletionFinal.Should().BeTrue();
         transcriptStore.DeleteAllCallCount.Should().Be(1);
+        bodyLogs.ClearCallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ClearTranscripts_WhenBodyFilesRemain_ReportsDeletionNotFinal()
+    {
+        var transcriptStore = new FakeTranscriptStore(rowsToDelete: 3);
+        var bodyLogs = new RecordingBodyLogController { ClearResult = false };
+        var service = CreateService(transcriptStore: transcriptStore, bodyLogController: bodyLogs);
+
+        var response =
+            await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
+
+        response.RowsDeleted.Should().Be(3);
+        response.DeletionFinal.Should().BeFalse();
         bodyLogs.ClearCallCount.Should().Be(1);
     }
 
@@ -355,7 +371,13 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     {
         public int ClearCallCount { get; private set; }
 
-        public void ClearBodyFiles() => ClearCallCount++;
+        public bool ClearResult { get; init; } = true;
+
+        public bool ClearBodyFiles()
+        {
+            ClearCallCount++;
+            return ClearResult;
+        }
     }
 
     /// <summary>

@@ -607,9 +607,9 @@ message ClearTranscriptsRequest {}
 message ClearTranscriptsResponse {
   // The number of request_transcripts rows actually deleted.
   int32 rows_deleted = 1;
-  // False when the write-ahead log stayed busy through every retry, so deleted text may remain
-  // in it until the next checkpoint or restart. Additive: an older client reads the default false and
-  // ignores it.
+  // False when the write-ahead log stayed busy through every retry, or when a bodies-*.log file could
+  // not be deleted, so deleted text may remain on disk until the next checkpoint, Clear, or restart.
+  // Additive: an older client reads the default false and ignores it.
   bool deletion_final = 2;
 }
 

@@ -13,7 +13,5 @@ public sealed class NullBodyLogController : IBodyLogController
     }
 
     /// <inheritdoc/>
-    public void ClearBodyFiles()
-    {
-    }
+    public bool ClearBodyFiles() => true;
 }

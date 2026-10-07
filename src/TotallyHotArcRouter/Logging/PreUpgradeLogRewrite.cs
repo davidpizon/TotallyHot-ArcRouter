@@ -168,7 +168,7 @@ public static class PreUpgradeLogRewrite
     }
 
     /// <summary>Returns whether <paramref name="line"/> is one of the four F9 conversation-bearing templates.</summary>
-    internal static bool IsConversationBodyLine(string line)
+    private static bool IsConversationBodyLine(string line)
     {
         foreach (var prefix in ConversationBodyLogging.LegacyMessagePrefixes)
         {

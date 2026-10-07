@@ -15,10 +15,10 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
     private const string OutputTemplate =
         "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}";
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly string _logsDirectory;
     private readonly Func<bool> _isEnabled;
-    private Serilog.Core.Logger? _inner;
+    private Logger? _inner;
     private bool _disposed;
 
     /// <summary>
@@ -44,9 +44,10 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
         ArgumentNullException.ThrowIfNull(logEvent);
 
         // Marker first: every log event in the process reaches this sink, and the enabled check is an
-        // options-monitor lookup through DI.
+        // options-monitor lookup through DI. _disposed is only read under the gate so Emit and Dispose
+        // agree on whether the controller is still live.
         if (!logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName)) return;
-        if (_disposed || !_isEnabled()) return;
+        if (!_isEnabled()) return;
 
         lock (_gate)
         {
@@ -57,7 +58,7 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
     }
 
     /// <inheritdoc/>
-    public void ClearBodyFiles()
+    public bool ClearBodyFiles()
     {
         lock (_gate)
         {
@@ -65,6 +66,7 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
 
             DisposeInnerUnlocked();
 
+            var allDeleted = true;
             if (Directory.Exists(_logsDirectory))
             {
                 foreach (var path in Directory.EnumerateFiles(_logsDirectory, FileNamePrefix + "*.log"))
@@ -75,9 +77,10 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
-                        // Best effort: Clear must still finish transcript deletion. A locked leftover is
-                        // removed on the next Clear or by the operator, so say so rather than fail silently.
-                        Serilog.Log.Warning(ex,
+                        allDeleted = false;
+                        // Clear still finishes transcript deletion; surface the leftover via the return
+                        // value so ClearTranscripts can set deletion_final false for the UI.
+                        Log.Warning(ex,
                             "Could not delete body log {BodyLogPath}; remove it manually if it should not remain.",
                             path);
                     }
@@ -85,6 +88,7 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
             }
 
             if (_isEnabled()) EnsureOpenUnlocked();
+            return allDeleted;
         }
     }
 

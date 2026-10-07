@@ -12,5 +12,10 @@ public interface IBodyLogController
     /// the logs directory, then reopens the sink when body excerpts are currently enabled. Safe to call
     /// when the sink was never opened or when body logging is off.
     /// </summary>
-    void ClearBodyFiles();
+    /// <returns>
+    /// <see langword="true"/> when every body file was deleted (or none existed); <see langword="false"/>
+    /// when at least one file could not be removed, so ClearTranscripts must report the deletion as not
+    /// final.
+    /// </returns>
+    bool ClearBodyFiles();
 }

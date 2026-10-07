@@ -234,7 +234,10 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
             .ConfigureAwait(false);
 
         // #184 phase 3: close the body sink, delete every bodies-*.log, reopen. Diagnostic logs stay.
-        _bodyLogController.ClearBodyFiles();
+        // A locked leftover is reported through the same deletion_final flag the UI already surfaces for
+        // a busy write-ahead log — Clear is the privacy wipe, so a remaining body file is not "done".
+        if (!_bodyLogController.ClearBodyFiles())
+            deletionFinal = false;
 
         _logger.LogInformation(message: "Transcript data cleared: RowsDeleted={RowsDeleted} DeletionFinal={DeletionFinal}",
             rowsDeleted, deletionFinal);

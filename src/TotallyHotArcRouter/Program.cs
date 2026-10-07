@@ -259,7 +259,9 @@ public static class Program
                 // #184 phase 3: conversation-body excerpts are marked ConversationBody and must never
                 // reach the diagnostic Console/File sinks or the Console tab. They go only to bodies-*.log
                 // through BodyLogController. Console moved here from appsettings.json so the same filter
-                // applies (Serilog fans every event to every sink otherwise).
+                // applies (Serilog fans every event to every sink otherwise). ReadFrom.Configuration is
+                // stripped of Serilog:WriteTo so an operator overlay cannot add an unfiltered root sink
+                // that would keep body events outside the Clear-deletable bodies-*.log path.
                 static bool IsConversationBody(LogEvent logEvent) =>
                     logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName);
 
@@ -268,7 +270,7 @@ public static class Program
                     "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}";
 
                 loggerConfiguration
-                    .ReadFrom.Configuration(context.Configuration)
+                    .ReadFrom.Configuration(SerilogConfigurationWithoutWriteTo(context.Configuration))
                     .ReadFrom.Services(services)
                     .Enrich.FromLogContext()
                     // Each sub-logger is its own LoggerConfiguration, whose minimum level defaults to
@@ -736,5 +738,31 @@ public static class Program
         return correlation is { } value
             ? value.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)
             : "suppressed (N too small)";
+    }
+
+    /// <summary>
+    /// Builds a Serilog configuration that keeps <c>MinimumLevel</c>, <c>Enrich</c>, and related keys but
+    /// drops every <c>WriteTo</c> entry. Coded sinks in <see cref="CreateHostBuilder"/> own the filter
+    /// boundary for <see cref="ConversationBodyLogging.PropertyName"/>; an overlay that added a File or
+    /// Console sink here would receive marked body events and leave them outside Clear's deletable set.
+    /// </summary>
+    private static IConfiguration SerilogConfigurationWithoutWriteTo(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var data = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in configuration.GetSection("Serilog").AsEnumerable(makePathsRelative: false))
+        {
+            if (string.IsNullOrEmpty(pair.Key)
+                || pair.Key.Equals("Serilog", StringComparison.OrdinalIgnoreCase)
+                || pair.Key.StartsWith("Serilog:WriteTo", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            data[pair.Key] = pair.Value;
+        }
+
+        return new ConfigurationBuilder().AddInMemoryCollection(data).Build();
     }
 }

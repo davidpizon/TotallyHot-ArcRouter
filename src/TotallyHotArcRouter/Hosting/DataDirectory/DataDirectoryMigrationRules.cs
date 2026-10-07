@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 
 namespace TotallyHot.ArcRouter.Hosting.DataDirectory;
@@ -34,14 +35,19 @@ public enum MigrationFileDecision
 /// The BGE embedding files are adopted only when their SHA-256 matches the pinned value in
 /// <see cref="EmbeddingOptions"/>.
 /// </description></item>
-/// <item><description>
-/// Every other file under <c>models/</c> is discarded. The router downloads model files again on first
-/// use (and <c>llm_router</c> sync verifies them against published checksums), so dropping them costs
-/// bandwidth, not data.
-/// </description></item>
-/// <item><description>Everything else is adopted.</description></item>
-/// </list>
-/// </summary>
+    /// <item><description>
+    /// Every other file under <c>models/</c> is discarded. The router downloads model files again on first
+    /// use (and <c>llm_router</c> sync verifies them against published checksums), so dropping them costs
+    /// bandwidth, not data.
+    /// </description></item>
+    /// <item><description>
+    /// <see cref="PreUpgradeLogRewrite.MarkerFileName"/> is discarded. Migration must not adopt a marker
+    /// planted in the previously writable legacy root (or an old container volume); only
+    /// <see cref="PreUpgradeLogRewrite"/> writes it, and only after the rewrite succeeds (#184 phase 3).
+    /// </description></item>
+    /// <item><description>Everything else is adopted.</description></item>
+    /// </list>
+    /// </summary>
 public static class DataDirectoryMigrationRules
 {
     /// <summary>The folder, inside the protected root, that holds the files a migration kept out of the live tree.</summary>
@@ -87,6 +93,10 @@ public static class DataDirectoryMigrationRules
 
         if (string.Equals(normalized, OverlayFileName, StringComparison.OrdinalIgnoreCase))
             return (MigrationFileDecision.Quarantine, null);
+
+        // Planted markers would skip the rewrite while leaving unobscured F9 lines on disk.
+        if (string.Equals(normalized, PreUpgradeLogRewrite.MarkerFileName, StringComparison.OrdinalIgnoreCase))
+            return (MigrationFileDecision.Discard, null);
 
         if (PinnedModelHashes.TryGetValue(normalized, out var pinned))
             return (MigrationFileDecision.AdoptIfHashMatches, pinned);

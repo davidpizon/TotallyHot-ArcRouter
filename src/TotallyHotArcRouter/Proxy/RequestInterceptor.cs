@@ -438,7 +438,7 @@ public class RequestInterceptor
         // appears when body excerpts are enabled (#184 phase 3).
         ConversationBodyLogging.LogExcerpt(_logger, _bodyExcerptOptions,
             ConversationBodyLogging.NewestUserMessage,
-            taskText is null ? "(none found)" : taskText);
+            taskText ?? "(none found)");
 
         var embedding = await TryComputeEmbeddingAsync(taskText: taskText, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
