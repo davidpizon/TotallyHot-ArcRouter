@@ -113,7 +113,7 @@ public sealed class TranscriptDatabase
     /// Does nothing when the file does not exist, so a default install with capture off still creates no
     /// database. Fast and safe beside other connections: the checkpoint does not wait, and a busy log is
     /// logged and left for the next retention cycle. The slow one-time rebuild is
-    /// <see cref="RunOneTimeScrub"/>, which runs in the background.
+    /// scrub, which <see cref="Hosting.TranscriptScrubHostedService"/> runs in a child process.
     /// </remarks>
     public void RunStartupMaintenance(ILogger logger)
     {
@@ -126,27 +126,18 @@ public sealed class TranscriptDatabase
     }
 
     /// <summary>
-    /// Runs the one-time scrub that removes text deleted before <c>secure_delete</c> was on (#184,
-    /// ADR-0024). Rebuilds the file, so on a large database it takes long enough that it must not run
-    /// inside host startup; <see cref="Hosting.TranscriptScrubHostedService"/> runs it in the background.
+    /// Gets where the one-time scrub (#184, ADR-0024) works: the database, the marker that records it as
+    /// done, and a folder in the protected data directory for SQLite's temporary files. The scrub itself
+    /// runs in a child process (<see cref="Storage.ScrubProcessLauncher"/>) because rebuilding the file takes
+    /// long enough that it must not block host startup, and SQLite's temp-folder setting is process-wide.
     /// </summary>
-    /// <param name="logger">Receives the scrub's outcome.</param>
-    /// <returns>What the scrub did.</returns>
-    /// <remarks>
-    /// The rebuild takes SQLite's write lock for its duration, and other connections wait up to their busy
-    /// timeout. The transcript insert is best-effort, so a capture that times out during the rebuild is
-    /// dropped rather than failing a request. The scrub runs once per database.
-    /// </remarks>
-    internal SqliteScrub.Outcome RunOneTimeScrub(ILogger logger)
+    internal (string DatabasePath, string MarkerPath, string TempDirectory) ScrubPaths
     {
-        ArgumentNullException.ThrowIfNull(logger);
-
-        var directory = Path.GetDirectoryName(_databasePath) ?? ".";
-        return SqliteScrub.Run(
-            databasePath: _databasePath,
-            markerPath: _databasePath + ".scrubbed",
-            tempDirectory: Path.Combine(path1: directory, path2: "scrub-temp"),
-            logger: logger);
+        get
+        {
+            var directory = Path.GetDirectoryName(_databasePath) ?? ".";
+            return (_databasePath, _databasePath + ".scrubbed", Path.Combine(path1: directory, path2: "scrub-temp"));
+        }
     }
 
     /// <summary>

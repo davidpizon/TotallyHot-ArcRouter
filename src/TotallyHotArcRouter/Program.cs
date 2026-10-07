@@ -10,6 +10,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
+using TotallyHot.ArcRouter.Storage;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter;
@@ -41,6 +42,18 @@ public static class Program
             if (migrateDataDirectory)
             {
                 Environment.ExitCode = DataDirectoryMigrationCommand.Run(afterMigrateFlag, Log.Logger);
+                return;
+            }
+
+            // #184: the child half of the one-time transcript scrub. The host starts it with SQLite's temp
+            // folder pointed at the protected directory (ScrubProcessLauncher), so it must run before any
+            // host or data-directory work and touches only the two paths it is handed.
+            var (scrubDatabase, afterScrubFlag) = ExtractFlag(args: args, flagName: ScrubDatabaseCommand.FlagName);
+            if (scrubDatabase)
+            {
+                using var scrubLogFactory = new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger);
+                Environment.ExitCode = ScrubDatabaseCommand.Run(args: afterScrubFlag,
+                    logger: scrubLogFactory.CreateLogger("ScrubDatabase"));
                 return;
             }
 

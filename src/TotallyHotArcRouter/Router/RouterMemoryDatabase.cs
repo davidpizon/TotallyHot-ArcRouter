@@ -289,7 +289,12 @@ public sealed class RouterMemoryDatabase
         }
 
         // Finish any eviction a previous run left pending (#184): nothing else has this database open yet.
-        SqliteHardening.TruncateWal(connection);
+        // A reader can still hold the log (a background service that started earlier, or another connection),
+        // so a busy result is reported rather than assumed away. The next eviction (SqliteMemoryEntryStore
+        // truncates after every delete) or the next start truncates it again.
+        if (!SqliteHardening.TruncateWal(connection))
+            Log.Warning(
+                "The router memory database's write-ahead log was busy at startup; pending deletions will be finalized by the next eviction or restart.");
 
         using var schema = connection.CreateCommand();
         schema.CommandText = SchemaSql;

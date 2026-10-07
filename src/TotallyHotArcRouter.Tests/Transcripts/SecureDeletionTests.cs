@@ -2,7 +2,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 using System.Text;
+using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
@@ -236,17 +238,153 @@ public class SecureDeletionTests : IDisposable
     }
 
     [Fact]
-    public async Task ScrubHostedService_RunsTheScrubInTheBackgroundAndRecordsTheMarker()
+    public async Task ScrubHostedService_StartsAChildWithATempFolderInTheProtectedDirectory()
     {
         CreateDatabaseWithFreedCanaryPagesWithoutSecureDelete();
-        using var service = new TotallyHot.ArcRouter.Hosting.TranscriptScrubHostedService(
-            database: CreateTranscriptDatabase(), logger: NullLogger<TotallyHot.ArcRouter.Hosting.TranscriptScrubHostedService>.Instance);
+        ProcessStartInfo? started = null;
+        using var service = new TranscriptScrubHostedService(
+            database: CreateTranscriptDatabase(),
+            logger: NullLogger<TranscriptScrubHostedService>.Instance,
+            runProcess: (info, _) =>
+            {
+                started = info;
+                return Task.FromResult(ScrubDatabaseCommand.DoneExitCode);
+            });
 
         await service.StartAsync(TestContext.Current.CancellationToken);
         await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
 
+        Assert.NotNull(started);
+        var tempDirectory = Path.Combine(path1: _directory, path2: "scrub-temp");
+        Assert.Equal(expected: [ScrubDatabaseCommand.FlagName, _transcriptPath, _transcriptPath + ".scrubbed"],
+            actual: started.ArgumentList);
+        foreach (var variable in new[] { "TMP", "TEMP", "TMPDIR", "SQLITE_TMPDIR" })
+            Assert.Equal(expected: tempDirectory, actual: started.Environment[variable]);
+    }
+
+    [Fact]
+    public async Task ScrubHostedService_WithNoDatabase_StartsNoChildAndRecordsTheMarker()
+    {
+        var started = false;
+        using var service = new TranscriptScrubHostedService(
+            database: CreateTranscriptDatabase(),
+            logger: NullLogger<TranscriptScrubHostedService>.Instance,
+            runProcess: (_, _) =>
+            {
+                started = true;
+                return Task.FromResult(0);
+            });
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+
+        Assert.False(started);
         Assert.True(File.Exists(_transcriptPath + ".scrubbed"));
+        Assert.False(File.Exists(_transcriptPath));
+    }
+
+    [Fact]
+    public async Task ScrubHostedService_WithAMarker_StartsNoChild()
+    {
+        CreateDatabaseWithFreedCanaryPagesWithoutSecureDelete();
+        File.WriteAllText(path: _transcriptPath + ".scrubbed", contents: "done");
+        var started = false;
+        using var service = new TranscriptScrubHostedService(
+            database: CreateTranscriptDatabase(),
+            logger: NullLogger<TranscriptScrubHostedService>.Instance,
+            runProcess: (_, _) =>
+            {
+                started = true;
+                return Task.FromResult(0);
+            });
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+
+        Assert.False(started);
+    }
+
+    [Fact]
+    public async Task ScrubHostedService_StoppingTheHostCancelsTheChild()
+    {
+        CreateDatabaseWithFreedCanaryPagesWithoutSecureDelete();
+        var childStarted = new TaskCompletionSource();
+        var childCancelled = new TaskCompletionSource();
+        using var service = new TranscriptScrubHostedService(
+            database: CreateTranscriptDatabase(),
+            logger: NullLogger<TranscriptScrubHostedService>.Instance,
+            runProcess: async (_, token) =>
+            {
+                childStarted.SetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    childCancelled.SetResult();
+                    throw;
+                }
+
+                return 0;
+            });
+
+        await service.StartAsync(TestContext.Current.CancellationToken);
+        await childStarted.Task.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+        await service.StopAsync(TestContext.Current.CancellationToken);
+
+        await childCancelled.Task.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+        Assert.False(File.Exists(_transcriptPath + ".scrubbed"));
+    }
+
+    [Fact]
+    public void ScrubDatabaseCommand_ScrubsTheGivenDatabaseAndReportsDone()
+    {
+        CreateDatabaseWithFreedCanaryPagesWithoutSecureDelete();
+        var marker = _transcriptPath + ".scrubbed";
+
+        var exitCode = ScrubDatabaseCommand.Run(args: [_transcriptPath, marker], logger: NullLogger.Instance);
+
+        Assert.Equal(expected: ScrubDatabaseCommand.DoneExitCode, actual: exitCode);
+        Assert.True(File.Exists(marker));
         Assert.False(ContainsCanary());
+    }
+
+    [Fact]
+    public void ScrubDatabaseCommand_WithTheWrongArguments_ReportsUsage()
+    {
+        Assert.Equal(expected: ScrubDatabaseCommand.UsageExitCode,
+            actual: ScrubDatabaseCommand.Run(args: [_transcriptPath], logger: NullLogger.Instance));
+    }
+
+    [Fact]
+    public async Task MemoryDeleteMany_Cancelled_RollsTheWholeBatchBack()
+    {
+        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions
+        {
+            EmbeddingMemoryDatabasePath = Path.Combine(path1: _directory, path2: "memory.db"),
+        }));
+        database.EnsureCreated();
+        var store = new SqliteMemoryEntryStore(database);
+        var ids = new List<long>();
+        for (var i = 0; i < 5; i++)
+        {
+            var entry = await store.AppendAsync(
+                entry: new MemoryEntry(Id: 0, TaskEmbedding: new float[4], ChosenModel: "m", Score: 0.5, Cost: 0.01,
+                    VerifierTrace: null, CreatedAtUtc: DateTimeOffset.UtcNow),
+                cancellationToken: TestContext.Current.CancellationToken);
+            ids.Add(entry.Id);
+        }
+
+        // A collection whose enumeration cancels the token after the second id, so the cancellation lands
+        // inside the transaction loop rather than before it starts.
+        using var cts = new CancellationTokenSource();
+        var cancelling = new CancellingCollection(source: ids, cancelAfter: 2, cts: cts);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.DeleteManyAsync(ids: cancelling, cancellationToken: cts.Token));
+
+        Assert.Equal(expected: 5, actual: (await store.LoadAllAsync(TestContext.Current.CancellationToken)).Count);
     }
 
     [Fact]
@@ -292,11 +430,28 @@ public class SecureDeletionTests : IDisposable
         var outcome = SqliteScrub.Run(
             databasePath: _transcriptPath,
             markerPath: marker,
-            tempDirectory: Path.Combine(path1: _directory, path2: "scrub-temp"),
             logger: logger,
             probeVolume: _ => space);
         Logged = logger.Lines;
         return outcome;
+    }
+
+    /// <summary>Yields its ids in order and cancels a token once a set number have been taken.</summary>
+    private sealed class CancellingCollection(IReadOnlyList<long> source, int cancelAfter, CancellationTokenSource cts)
+        : IReadOnlyCollection<long>
+    {
+        public int Count => source.Count;
+
+        public IEnumerator<long> GetEnumerator()
+        {
+            for (var i = 0; i < source.Count; i++)
+            {
+                if (i == cancelAfter) cts.Cancel();
+                yield return source[i];
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     /// <summary>Gets what the last <see cref="RunScrub"/> logged, so a failed assertion can show why a scrub deferred.</summary>

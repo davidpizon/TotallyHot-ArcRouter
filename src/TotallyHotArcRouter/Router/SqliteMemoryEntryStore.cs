@@ -116,6 +116,9 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
             var idParameter = command.Parameters.Add("$id", SqliteType.Integer);
             foreach (var id in ids)
             {
+                // Rechecked per row, as the per-row DeleteAsync loop this replaces did: cancelling throws, the
+                // transaction is disposed without a commit, and the whole batch rolls back promptly.
+                cancellationToken.ThrowIfCancellationRequested();
                 idParameter.Value = id;
                 command.ExecuteNonQuery();
             }
