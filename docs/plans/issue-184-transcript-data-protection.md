@@ -491,6 +491,8 @@ Phase 4 is `src/TotallyHotArcRouter/Storage/ShredConversationsCommand.cs`, wired
 - **It always rebuilds.** It removes `transcripts.db.scrubbed` first, so the `VACUUM` runs even if the one-time scrub already did. An uninstall can afford the time, and the outcome no longer depends on the file's history.
 - **Own process, own temp folder.** It sets `TMP`, `TEMP`, `TMPDIR` and `SQLITE_TMPDIR` to `scrub-temp` in the data directory before any SQLite call, and removes that folder afterwards.
 - **Configuration.** It binds the `Storage` section from `appsettings.json`, `appsettings.local.json` and the environment, so a moved `TranscriptDatabasePath` is honoured.
+- **Result file.** The MSI action has no console, so every run also writes `shred-conversations.result` (timestamp, exit code, reason) next to `transcripts.db`; the scripts point to it on failure. It also truncates the log again after the rebuild, because the scrub tolerates a busy log and an uninstall has no later checkpoint.
+- **No rollback.** The MSI action has no rollback: deleted text cannot be restored, so a rolled-back uninstall leaves the product without its old transcripts.
 - **Exit codes.** `0` when nothing was left behind, `1` when something may remain (busy log, full disk, undeletable body log). The MSI action is `Return="ignore"` and the scripts print a warning, so a failure never strands the uninstall.
 - **Docker** needs no change: `src/README.md` already says `docker volume rm` deletes everything.
 - **Not run for real.** The command was verified by unit tests against a scratch directory only; running it against a live data directory would delete that machine's transcripts. The MSI action and the two scripts are untested end to end (no installer or Linux/macOS host here).

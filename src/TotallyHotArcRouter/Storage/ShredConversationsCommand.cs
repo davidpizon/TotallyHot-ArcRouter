@@ -48,30 +48,56 @@ internal static class ShredConversationsCommand
     {
         ArgumentNullException.ThrowIfNull(logger);
 
+        string? resultDirectory = null;
         try
         {
             var databasePath = ResolveStorageOptions().ResolveTranscriptDatabasePath();
             var logsDirectory = AppDataPaths.ResolveLogsDirectory();
+            resultDirectory = Path.GetDirectoryName(databasePath);
 
             // Before the first SQLite call, so the rebuild's scratch copy lands in the protected directory.
-            var tempDirectory = Path.Combine(path1: Path.GetDirectoryName(databasePath) ?? ".", path2: "scrub-temp");
+            // A fresh folder per run, so the cleanup below can never delete anything this run did not create.
+            var tempDirectory = Path.Combine(path1: resultDirectory ?? ".", path2: $"scrub-temp-{Guid.NewGuid():N}");
             Directory.CreateDirectory(tempDirectory);
             foreach (var variable in TempVariables) Environment.SetEnvironmentVariable(variable: variable, value: tempDirectory);
 
             try
             {
-                return Shred(databasePath: databasePath, logsDirectory: logsDirectory, logger: logger);
+                var exitCode = Shred(databasePath: databasePath, logsDirectory: logsDirectory, logger: logger);
+                RecordResult(directory: resultDirectory, exitCode: exitCode, detail: "see the router log for per-step messages");
+                return exitCode;
             }
             finally
             {
                 TryDeleteDirectory(tempDirectory);
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-                                       Hosting.DataDirectory.DataDirectoryNotProtectedException)
+        catch (Exception ex)
         {
+            // Top-level of a one-shot command: whatever went wrong (bad configuration, unprotected directory,
+            // I/O), the uninstall must continue and the operator must be told text may remain.
             logger.LogError(exception: ex, message: "Could not shred conversation text: {Reason}", ex.Message);
+            RecordResult(directory: resultDirectory, exitCode: IncompleteExitCode, detail: ex.Message);
             return IncompleteExitCode;
+        }
+    }
+
+    /// <summary>
+    /// Writes the outcome next to the database. An uninstall runs with no console, so the bootstrap logger's
+    /// output is lost; this file is the only place the operator can learn that text may remain.
+    /// </summary>
+    private static void RecordResult(string? directory, int exitCode, string detail)
+    {
+        if (string.IsNullOrEmpty(directory)) return;
+        try
+        {
+            File.WriteAllText(
+                path: Path.Combine(path1: directory, path2: "shred-conversations.result"),
+                contents: $"{DateTimeOffset.UtcNow:O} exit={exitCode} {(exitCode == DoneExitCode ? "complete" : "INCOMPLETE")}: {detail}{Environment.NewLine}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best effort; the exit code is still returned.
         }
     }
 
@@ -95,8 +121,7 @@ internal static class ShredConversationsCommand
 
         var complete = ShredDatabase(databasePath: databasePath, logger: logger, probeVolume: probeVolume);
 
-        // A controller that is never written to is just the Clear button's file deleter.
-        if (new BodyLogController(logsDirectory: logsDirectory, isEnabled: static () => false).ClearBodyFiles())
+        if (BodyLogController.DeleteBodyFiles(logsDirectory))
             logger.LogInformation("Removed the body-excerpt logs under {LogsDirectory}.", logsDirectory);
         else
             complete = false;
@@ -113,20 +138,19 @@ internal static class ShredConversationsCommand
     {
         if (!File.Exists(databasePath)) return true;
 
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString();
         try
         {
-            var connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString();
             using var connection = SqliteHardening.Open(connectionString);
-            using (var delete = connection.CreateCommand())
+            using (var exists = connection.CreateCommand())
             {
-                delete.CommandText = "DELETE FROM request_transcripts;";
-                try
+                exists.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'request_transcripts';";
+                // No table means capture never ran, so there are no rows to delete.
+                if (exists.ExecuteScalar() is not null)
                 {
+                    using var delete = connection.CreateCommand();
+                    delete.CommandText = "DELETE FROM request_transcripts;";
                     delete.ExecuteNonQuery();
-                }
-                catch (SqliteException ex) when (ex.Message.Contains(value: "no such table", comparisonType: StringComparison.OrdinalIgnoreCase))
-                {
-                    // Capture never ran, so there is no table and no rows.
                 }
             }
 
@@ -146,8 +170,23 @@ internal static class ShredConversationsCommand
         // of the file's history, and an uninstall can afford the time. Removing the marker forces it.
         var marker = databasePath + ".scrubbed";
         if (File.Exists(marker)) File.Delete(marker);
-        return SqliteScrub.Run(databasePath: databasePath, markerPath: marker, logger: logger, probeVolume: probeVolume)
-            != SqliteScrub.Outcome.Deferred;
+        if (SqliteScrub.Run(databasePath: databasePath, markerPath: marker, logger: logger, probeVolume: probeVolume)
+            == SqliteScrub.Outcome.Deferred)
+            return false;
+
+        // The scrub tolerates a busy log because the rebuilt file is already clean, but an uninstall has no
+        // later checkpoint to finish the job: old frames of the deleted rows could still sit in the -wal file.
+        try
+        {
+            if (SqliteHardening.TruncateWal(connectionString)) return true;
+            logger.LogWarning("The write-ahead log of {DatabasePath} was busy after the rebuild; stop the router and run the command again.", databasePath);
+        }
+        catch (SqliteException ex)
+        {
+            logger.LogError(exception: ex, message: "Could not truncate the write-ahead log of {DatabasePath}.", databasePath);
+        }
+
+        return false;
     }
 
     /// <summary>Binds the <c>Storage</c> section the way the service's configuration would.</summary>

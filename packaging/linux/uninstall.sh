@@ -25,7 +25,11 @@ echo "==> Removing conversation text (transcripts and body-excerpt logs; spend d
 # service cannot read after a reinstall. STATE_DIRECTORY and LOGS_DIRECTORY are what systemd exports to
 # the unit; without them the router would look for the logs under the state directory.
 if [[ -x "${INSTALL_DIR}/TotallyHotArcRouter" ]] && id arcrouter >/dev/null 2>&1; then
-    runuser -u arcrouter -- env         STATE_DIRECTORY=/var/lib/totallyhot-arcrouter         LOGS_DIRECTORY=/var/log/totallyhot-arcrouter         "${INSTALL_DIR}/TotallyHotArcRouter" --shred-conversations         || echo "WARNING: some conversation text could not be removed; see the messages above." >&2
+    runuser -u arcrouter -- env \
+        STATE_DIRECTORY=/var/lib/totallyhot-arcrouter \
+        LOGS_DIRECTORY=/var/log/totallyhot-arcrouter \
+        "${INSTALL_DIR}/TotallyHotArcRouter" --shred-conversations \
+        || echo "WARNING: some conversation text could not be removed; see /var/lib/totallyhot-arcrouter/shred-conversations.result." >&2
 else
     echo "Skipped: the router binary or the 'arcrouter' account is already gone."
 fi

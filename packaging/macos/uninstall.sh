@@ -25,7 +25,8 @@ echo "==> Removing conversation text (transcripts and body-excerpt logs; spend d
 # #184 / ADR-0024: run as the service account, never root - root would leave a root-owned secrets.dat the
 # service cannot read after a reinstall.
 if [[ -x "${INSTALL_DIR}/TotallyHotArcRouter" ]] && id _arcrouter >/dev/null 2>&1; then
-    sudo -u _arcrouter "${INSTALL_DIR}/TotallyHotArcRouter" --shred-conversations         || echo "WARNING: some conversation text could not be removed; see the messages above." >&2
+    sudo -H -u _arcrouter "${INSTALL_DIR}/TotallyHotArcRouter" --shred-conversations \
+        || echo "WARNING: some conversation text could not be removed; see \"/Library/Application Support/TotallyHotArcRouter/shred-conversations.result\"." >&2
 else
     echo "Skipped: the router binary or the '_arcrouter' account is already gone."
 fi
