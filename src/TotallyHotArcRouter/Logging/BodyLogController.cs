@@ -43,8 +43,10 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
     {
         ArgumentNullException.ThrowIfNull(logEvent);
 
-        if (_disposed || !_isEnabled()) return;
+        // Marker first: every log event in the process reaches this sink, and the enabled check is an
+        // options-monitor lookup through DI.
         if (!logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName)) return;
+        if (_disposed || !_isEnabled()) return;
 
         lock (_gate)
         {
@@ -74,7 +76,10 @@ public sealed class BodyLogController : IBodyLogController, ILogEventSink, IDisp
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
                         // Best effort: Clear must still finish transcript deletion. A locked leftover is
-                        // removed on the next Clear or by the operator.
+                        // removed on the next Clear or by the operator, so say so rather than fail silently.
+                        Serilog.Log.Warning(ex,
+                            "Could not delete body log {BodyLogPath}; remove it manually if it should not remain.",
+                            path);
                     }
                 }
             }

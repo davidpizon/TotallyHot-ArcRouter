@@ -157,10 +157,7 @@ public static class DataDirectoryMigrationCommand
         List<string> roots = [AppDataPaths.MachineWideCandidate()];
         if (OperatingSystem.IsLinux())
         {
-            var logsDirectory = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
-            roots.Add(string.IsNullOrWhiteSpace(logsDirectory)
-                ? DefaultLinuxLogsDirectory
-                : logsDirectory.Split(':', 2)[0]);
+            roots.Add(ResolveLogsDirectoryForMigration());
         }
 
         foreach (var root in roots)
@@ -184,13 +181,20 @@ public static class DataDirectoryMigrationCommand
         PreUpgradeLogRewrite.Run(dataDirectory, ResolveLogsDirectoryForMigration(), logger);
     }
 
+    /// <summary>
+    /// Names the logs directory the migration works on. Linux keeps its logs outside the state directory, and
+    /// a root shell running the migration has no <c>LOGS_DIRECTORY</c>, so it falls back to the packaged
+    /// location rather than a <c>logs</c> folder under the data root that does not exist there.
+    /// </summary>
     private static string ResolveLogsDirectoryForMigration()
     {
         var logsDirectory = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
         if (!string.IsNullOrWhiteSpace(logsDirectory))
             return logsDirectory.Split(':', 2)[0];
 
-        return Path.Combine(AppDataPaths.MachineWideCandidate(), "logs");
+        return OperatingSystem.IsLinux()
+            ? DefaultLinuxLogsDirectory
+            : Path.Combine(AppDataPaths.MachineWideCandidate(), "logs");
     }
 
     private static void LogResult(ILogger logger, string root, DataDirectoryMigrationResult result)

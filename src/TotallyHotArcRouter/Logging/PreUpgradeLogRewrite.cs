@@ -25,7 +25,9 @@ public static class PreUpgradeLogRewrite
 
     /// <summary>
     /// Rewrites every matching log under <paramref name="logsDirectory"/> when the marker is not yet
-    /// present in <paramref name="dataDirectory"/>, then writes the marker. Idempotent.
+    /// present in <paramref name="dataDirectory"/>, then writes the marker. Idempotent. The marker is only
+    /// written when every file was rewritten or deleted; a file that could be neither is retried on the next
+    /// run instead of being left behind for good.
     /// </summary>
     /// <param name="dataDirectory">Protected data root that holds the marker.</param>
     /// <param name="logsDirectory">Directory that holds <c>arcrouter-*.log</c> (and macOS launchd copies).</param>
@@ -41,13 +43,21 @@ public static class PreUpgradeLogRewrite
 
         Directory.CreateDirectory(dataDirectory);
 
+        var allHandled = true;
         if (Directory.Exists(logsDirectory))
         {
             foreach (var pattern in FileNamePatterns)
             {
                 foreach (var path in Directory.EnumerateFiles(logsDirectory, pattern))
-                    RewriteOrDelete(path, logger);
+                    allHandled &= RewriteOrDelete(path, logger);
             }
+        }
+
+        if (!allHandled)
+        {
+            logger.Warning(
+                "Left the pre-upgrade log rewrite marker unwritten because a log file could not be cleaned; the next run retries.");
+            return;
         }
 
         using (File.Create(markerPath))
@@ -59,7 +69,12 @@ public static class PreUpgradeLogRewrite
             markerPath);
     }
 
-    private static void RewriteOrDelete(string path, ILogger logger)
+    /// <summary>
+    /// Filters <paramref name="path"/> through a temp copy and writes the result back into the same file.
+    /// Falls back to deleting the file when it cannot be rewritten.
+    /// </summary>
+    /// <returns>Whether the file no longer holds conversation text.</returns>
+    private static bool RewriteOrDelete(string path, ILogger logger)
     {
         var tempPath = path + ".rewriting";
         try
@@ -74,8 +89,19 @@ public static class PreUpgradeLogRewrite
                 }
             }
 
-            File.Move(tempPath, path, overwrite: true);
+            // Copy back into the original file instead of moving the temp over it: the original keeps its
+            // owner, mode, and ACL, so a root-run migration cannot leave the service account unable to
+            // append to today's log.
+            using (var source = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.None))
+            using (var target = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+            {
+                target.SetLength(0);
+                source.CopyTo(target);
+            }
+
+            File.Delete(tempPath);
             logger.Information("Rewrote {LogPath} to remove pre-upgrade conversation body lines.", path);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException)
         {
@@ -93,12 +119,14 @@ public static class PreUpgradeLogRewrite
                 logger.Warning(ex,
                     "Could not rewrite {LogPath}; deleted it instead so the unobscured excerpts do not linger.",
                     path);
+                return true;
             }
             catch (Exception deleteEx) when (deleteEx is IOException or UnauthorizedAccessException)
             {
                 logger.Warning(deleteEx,
                     "Could not rewrite or delete {LogPath}; an administrator should remove it.",
                     path);
+                return false;
             }
         }
     }

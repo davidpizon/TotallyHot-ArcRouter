@@ -271,12 +271,17 @@ public static class Program
                     .ReadFrom.Configuration(context.Configuration)
                     .ReadFrom.Services(services)
                     .Enrich.FromLogContext()
+                    // Each sub-logger is its own LoggerConfiguration, whose minimum level defaults to
+                    // Information. Verbose keeps the root's level and overrides the only gate, so an
+                    // operator who raises Serilog:MinimumLevel to Debug still gets Debug lines.
                     .WriteTo.Logger(lc => lc
+                        .MinimumLevel.Verbose()
                         .Filter.ByExcluding(IsConversationBody)
                         .WriteTo.Console())
                     // File sink path resolved in code, not appsettings.json (web GUI migration plan Phase
                     // P10): AppDataPaths.ResolveLogsDirectory() picks the right per-platform directory.
                     .WriteTo.Logger(lc => lc
+                        .MinimumLevel.Verbose()
                         .Filter.ByExcluding(IsConversationBody)
                         .WriteTo.File(
                             path: Path.Combine(logsDirectory, "arcrouter-.log"),
@@ -286,6 +291,7 @@ public static class Program
                     // Streams every non-body log event to the GUI's Console tab. DeferredTelemetryPublisher
                     // avoids a circular dependency on the logging system itself being built.
                     .WriteTo.Logger(lc => lc
+                        .MinimumLevel.Verbose()
                         .Filter.ByExcluding(IsConversationBody)
                         .WriteTo.Sink(new TelemetryLogEventSink(new DeferredTelemetryPublisher(services))))
                     .WriteTo.Sink(new DeferredBodyLogSink(services));
