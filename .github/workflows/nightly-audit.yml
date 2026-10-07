@@ -1,0 +1,139 @@
+name: Nightly audit
+
+# ADR-0008 Amendment 2. Files GitHub issues. Does not open pull requests, push
+# commits, apply fixes, or request reviews.
+#
+# Schedule: 10:00 UTC every day. GitHub cron is UTC and does not follow daylight
+# saving, so this is 3:00 AM Pacific Daylight Time and 2:00 AM Pacific Standard Time.
+# workflow_dispatch can plan without writing issues when dry_run is true.
+#
+# Dependency findings come from `dotnet list package --vulnerable`, which uses the
+# NuGet advisory database and needs no extra token. Code findings come from the same
+# Qodana Community .NET linter, qodana.yaml, and .qodana/qodana.sarif.json baseline
+# as .github/workflows/code_quality.yml. QODANA_TOKEN is optional: when the secret
+# already used by that workflow is present it is passed through for Qodana Cloud;
+# issue filing does not require it. This workflow does not upload SARIF, so it does
+# not need code scanning enabled and does not take security-events permission.
+#
+# TotallyHotArcRouter.Tray (net10.0-windows) is not restored on the Linux runner.
+# The committed baseline is not updated here. Refreshing it stays a deliberate
+# commit, as code_quality.yml describes. A smell that is already in the baseline is
+# not filed. A fingerprint that already has an issue is not filed again.
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Plan issue changes and do not create, update, or comment"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-audit
+  cancel-in-progress: false
+
+jobs:
+  dependencies:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: List vulnerable NuGet packages
+        run: bash .github/scripts/collect-vulnerable-packages.sh "${RUNNER_TEMP}/nuget-audit"
+
+      - name: File dependency vulnerability issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run == true && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          args=(
+            sync-nuget
+            --input-dir "${RUNNER_TEMP}/nuget-audit"
+            --repo "${GITHUB_REPOSITORY}"
+            --run-url "${AUDIT_RUN_URL}"
+          )
+          if [ "${DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python3 .github/scripts/nightly_audit.py "${args[@]}"
+
+  qodana:
+    name: Qodana new smells and security inspections
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      # Same linter invocation as code_quality.yml so fingerprints match the
+      # committed baseline. push-fixes stays none, pull-request comments and
+      # check annotations stay off, and the checkout has no credentials, so
+      # this step cannot push or open a pull request. Caches and artifact
+      # upload stay off so the job does not need actions: write.
+      - name: Qodana scan
+        id: qodana
+        continue-on-error: true
+        uses: JetBrains/qodana-action@v2026.2
+        with:
+          args: "--within-docker true --baseline .qodana/qodana.sarif.json"
+          pr-mode: false
+          post-pr-comment: false
+          use-annotations: false
+          push-fixes: none
+          upload-result: false
+          use-caches: false
+          results-dir: ${{ runner.temp }}/qodana/results
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
+
+      - name: File new smell and code vulnerability issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run == true && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          sarif="${RUNNER_TEMP}/qodana/results/qodana.sarif.json"
+          if [ ! -f "$sarif" ]; then
+            echo "::error::Qodana did not produce a SARIF report"
+            exit 1
+          fi
+          args=(
+            sync-sarif
+            --sarif "$sarif"
+            --baseline .qodana/qodana.sarif.json
+            --repo "${GITHUB_REPOSITORY}"
+            --run-url "${AUDIT_RUN_URL}"
+          )
+          if [ "${DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python3 .github/scripts/nightly_audit.py "${args[@]}"

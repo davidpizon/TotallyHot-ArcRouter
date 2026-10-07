@@ -3,7 +3,7 @@
 **Status:** accepted <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
 **Date:** 2026-09-02
 **Deciders:** David Pizon
-**Amendments:** [Amendment 1 (2026-09-02) — stop rules](#amendment-1-2026-09-02-stop-rules)
+**Amendments:** [Amendment 1 (2026-09-02) — stop rules](#amendment-1-2026-09-02-stop-rules) · [Amendment 2 (2026-10-07) — scheduled audits that do not churn](#amendment-2-2026-10-07-scheduled-audits-that-do-not-churn)
 
 > **Accepted 2026-09-22**, as rule of record on the project board.
 
@@ -345,6 +345,13 @@ can only remove items, never add them.
    that trigger in its write-up. It does not run on a cadence, at a phase boundary, or because it
    has been a while. "Standing" in this ADR's title means *the standing method for when an audit
    happens*, not a standing obligation to audit.
+
+   > **Superseded by [Amendment 2](#amendment-2-2026-10-07-scheduled-audits-that-do-not-churn) (2026-10-07).**
+   > The blanket ban in this rule no longer holds. Scheduled audits are allowed when they do not
+   > cause churn for its own sake. The paragraph above is the historical rule. The dual-engine
+   > trigger — run when something hurts, and not at a phase boundary — still describes the
+   > CodeGraph + Serena survey. Nightly vulnerability and smell scans are governed by Amendment 2.
+
 3. **Net-lines budget.** A refactor that adds more production lines than it removes, without
    deleting a behavior, fixing a bug, or unblocking a named feature, states that justification in
    its PR description. Splitting one 900-line file into six 200-line files is a net add plus five
@@ -381,6 +388,86 @@ stay catalogued but unscheduled until one of them produces a cost.
   deliberately: this ADR's catalog still records them, so the evidence is on hand when one does.
 - Neutral, because the CodeGraph-first / Serena-second method, the safety protocols, and the locked
   ADRs are all unchanged.
+
+## Amendment 2 (2026-10-07): scheduled audits that do not churn
+
+**Status:** accepted. Replaces Amendment 1 rule 2's blanket ban on cadence audits. Does not change
+the chosen option, rules 1, 3, and 4, the classification matrix, or ADR-0006/0007.
+
+### Why
+
+David, 2026-10-07: "I'm okay with scheduled audits so long as they don't cause churn for its own sake. A scheduled audit to do vulnerability scans is acceptable."
+
+Rule 2 was written because three smell audits had no terminating condition: each run rediscovered
+the same shapes and opened more plan items. That failure mode is smell-refactor churn. It is not a
+reason to leave a known-vulnerable dependency untracked until someone happens to look. A nightly
+scan that only files issues, and that refuses to re-file a smell the baseline or an existing issue
+already records, does not reopen that failure mode.
+
+### Replacement for rule 2
+
+Rule 2 now reads:
+
+2. **Scheduled audits must not cause churn for its own sake.** A scheduled audit is allowed.
+   Manufacturing work is not.
+
+   - **Vulnerability scan.** A nightly scan of dependencies and of code may file one GitHub issue
+     per distinct finding. The next run updates the open issue when the finding's details change,
+     and skips it when they do not. It does not open a second issue for the same fingerprint.
+   - **Code-smell scan.** A nightly scan may file a GitHub issue only for a finding that is new
+     against the committed Qodana baseline (`.qodana/qodana.sarif.json`) and that has no existing
+     issue, open or closed, with the same fingerprint. It does not repeat a finding and it does not
+     re-file one.
+   - **No code from the scan.** A scheduled scan does not open a pull request, push a commit, apply
+     a fix, or start implementation. Any fix follows
+     [`standing-rules.md`](../router/standing-rules.md): a plan at `docs/plans/issue-<N>-<slug>.md`
+     that David has approved before coding. Filing the issue is not that approval, and it is not an
+     entry in [`code-smell-refactoring-plan.md`](../router/code-smell-refactoring-plan.md).
+   - **Observed cost.** Rule 1 is unchanged for smells. A smell fix still cites an observed cost
+     before it enters the mechanical plan; the issue is a record of the finding, not that citation.
+     A vulnerability fix's observed cost is the vulnerability itself.
+   - **The dual-engine survey is not the nightly job.** CodeGraph + Serena still runs when
+     something hurts — a bug cluster, a feature that proved hard to land, a regression of a
+     previously-fixed smell — and names that trigger. It does not run because a night elapsed or a
+     phase closed. "Standing" in this ADR's title still means the standing method, not a standing
+     obligation to refactor.
+
+Rules 1, 3, and 4 of Amendment 1 are unchanged. "No finding" remains a legal outcome of a
+dual-engine survey. When a filed finding disappears from a later scan, the workflow comments once
+and leaves the issue open. It does not close issues.
+
+```mermaid
+flowchart TD
+    Cron["Nightly cron or workflow_dispatch"] --> Vuln["Vulnerability scan: dependencies and code"]
+    Cron --> Smell["Code-smell scan: Qodana versus the committed baseline"]
+    Smell --> New{"New versus the baseline?"}
+    New -->|no| Skip["Skip. Do not re-file"]
+    New -->|yes| Dedup{"Issue already exists for this fingerprint?"}
+    Vuln --> Dedup
+    Dedup -->|open| Update["Update the issue, or skip when nothing changed"]
+    Dedup -->|closed| Note["Comment once. Do not reopen or re-file"]
+    Dedup -->|none| Issues["Open one GitHub issue"]
+    Issues --> Stop["No pull request and no commit"]
+    Stop --> Plan["A fix still needs a plan David has approved"]
+```
+
+### Consequences of this amendment
+
+- Good, because a vulnerable dependency or a new security inspection gets an issue without waiting
+  for a pain-triggered survey.
+- Good, because the smell scan cannot rediscover the baselined catalog: those fingerprints are not
+  new, and a fingerprint that already has an issue is not filed again.
+- Bad, because a stale baseline makes a later night treat old smells as new and open a burst of
+  issues. Mitigated by dedup on later nights, and by the scan having no authority to fix them.
+  Refreshing the baseline stays a deliberate commit, as
+  [`.github/workflows/code_quality.yml`](../../.github/workflows/code_quality.yml) already describes.
+- Bad, because "observed cost" for a smell can be confused with "an issue exists." Mitigated by
+  stating, on the issue and here, that the issue is not the cost and not plan approval.
+- Neutral, because the CodeGraph-first / Serena-second method, the safety protocols, the net-lines
+  budget, and the mechanical plan's end condition are unchanged.
+
+The workflow that implements this amendment is
+[`.github/workflows/nightly-audit.yml`](../../.github/workflows/nightly-audit.yml).
 
 ## Pros and Cons of the Options
 
@@ -423,5 +510,7 @@ CI analyzers and line-count budgets only.
 - Amendment 1 measurements: `git ls-tree` line counts over `main`'s first-parent history, production
   `src/` only. Reproduce by summing `.cs` line counts excluding `*.Tests`, `obj`, and `bin` at each
   sampled commit.
+- Amendment 2 workflow: [`.github/workflows/nightly-audit.yml`](../../.github/workflows/nightly-audit.yml).
+  Issue filing and dedup live in [`.github/scripts/nightly_audit.py`](../../.github/scripts/nightly_audit.py).
 - This pass: CodeGraph MCP only; Serena MCP tool discovery failed (`plugin-serena-serena`).
   Re-run the cognitive half when that namespace is healthy.
