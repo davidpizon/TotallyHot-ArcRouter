@@ -146,6 +146,20 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         // and the migration deliberately refuses to overwrite a destination that already exists.
         LegacyStorageMigration.Run(options: _storageOptions, logger: _logger);
 
+        // #184: finish any deletion a previous run left pending in the transcript log. Not gated on capture -
+        // a cleared-then-disabled store still has to be clean - and safe beside the transcript services that
+        // started earlier, because the checkpoint does not wait. The slow one-time scrub of pages freed before
+        // secure_delete was on is TranscriptScrubHostedService's job, in the background. Log-only like every
+        // check here.
+        try
+        {
+            _transcriptDatabase.RunStartupMaintenance(_logger);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(exception: ex, message: "Transcript database maintenance failed; continuing startup.");
+        }
+
         // Check 1: ensure the SQLite database exists, creating it (and its directory) if absent. This also
         // applies additive column migrations and seeds a row for every source that has a client, so it must
         // precede the toggle store's first read below.

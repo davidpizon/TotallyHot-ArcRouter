@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Globalization;
+using TotallyHot.ArcRouter.Storage;
 
 namespace TotallyHot.ArcRouter.Router;
 
@@ -10,15 +12,21 @@ namespace TotallyHot.ArcRouter.Router;
 public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
 {
     private readonly RouterMemoryDatabase _database;
+    private readonly ILogger<SqliteMemoryEntryStore> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqliteMemoryEntryStore"/> class.
     /// </summary>
     /// <param name="database">The database to persist entries in. Its schema must already be created.</param>
-    public SqliteMemoryEntryStore(RouterMemoryDatabase database)
+    /// <param name="logger">
+    /// Reports a log truncation that could not complete after a delete. Optional so a store built by hand
+    /// in a test needs no logging setup.
+    /// </param>
+    public SqliteMemoryEntryStore(RouterMemoryDatabase database, ILogger<SqliteMemoryEntryStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         _database = database;
+        _logger = logger ?? NullLogger<SqliteMemoryEntryStore>.Instance;
     }
 
     /// <inheritdoc/>
@@ -82,8 +90,56 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.CommandText = "DELETE FROM memory_entries WHERE id = $id;";
         command.Parameters.AddWithValue(parameterName: "$id", value: id);
         command.ExecuteNonQuery();
+        TruncateWalAfterDelete(connection);
 
         return Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// One transaction and one <c>wal_checkpoint(TRUNCATE)</c> for the whole batch. A busy log is left for
+    /// the startup checkpoint to finish, since the next eviction will not necessarily come soon.
+    /// </remarks>
+    public Task DeleteManyAsync(IReadOnlyCollection<long> ids, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (ids.Count == 0) return Task.CompletedTask;
+
+        using var connection = _database.OpenConnection();
+        using (var transaction = connection.BeginTransaction())
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM memory_entries WHERE id = $id;";
+            var idParameter = command.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var id in ids)
+            {
+                // Rechecked per row, as the per-row DeleteAsync loop this replaces did: cancelling throws, the
+                // transaction is disposed without a commit, and the whole batch rolls back promptly.
+                cancellationToken.ThrowIfCancellationRequested();
+                idParameter.Value = id;
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+
+        TruncateWalAfterDelete(connection);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Truncates the write-ahead log right after a delete so evicted vectors cannot survive in the
+    /// <c>-wal</c> file. A busy log is not an error: the delete succeeded and the startup checkpoint
+    /// finishes the job, so it is logged and not retried here.
+    /// </summary>
+    /// <param name="connection">The connection that ran the delete.</param>
+    private void TruncateWalAfterDelete(SqliteConnection connection)
+    {
+        if (!SqliteHardening.TruncateWal(connection))
+            _logger.LogWarning("Embedding memory deletion is not yet final: the write-ahead log was busy and will be truncated at the next start.");
     }
 
     /// <inheritdoc/>

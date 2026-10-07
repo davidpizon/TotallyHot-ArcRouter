@@ -210,9 +210,15 @@ public partial class SettingsModal
         _clearingTranscripts = true;
         try
         {
-            var rowsDeleted = await RouterSettingsStore.ClearTranscriptsAsync();
+            var result = await RouterSettingsStore.ClearTranscriptsAsync();
+            var rowsDeleted = result.RowsDeleted;
             _clearTranscriptsMessage = rowsDeleted == 1 ? "Cleared 1 row." : $"Cleared {rowsDeleted} rows.";
-            _clearTranscriptsFailed = false;
+
+            // A busy write-ahead log means the deleted text can still be read from disk until the next
+            // checkpoint or restart, so say so rather than claim a clean wipe.
+            if (!result.DeletionFinal)
+                _clearTranscriptsMessage += " Deleted text may remain on disk until the router restarts.";
+            _clearTranscriptsFailed = !result.DeletionFinal;
         }
         catch (GrpcAdminException)
         {

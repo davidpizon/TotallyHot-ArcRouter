@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using System.Globalization;
@@ -265,9 +266,7 @@ public sealed class RouterMemoryDatabase
     /// </summary>
     public SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        return connection;
+        return SqliteHardening.Open(ConnectionString);
     }
 
     /// <summary>
@@ -285,9 +284,17 @@ public sealed class RouterMemoryDatabase
 
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
             pragma.ExecuteNonQuery();
         }
+
+        // Finish any eviction a previous run left pending (#184): nothing else has this database open yet.
+        // A reader can still hold the log (a background service that started earlier, or another connection),
+        // so a busy result is reported rather than assumed away. The next eviction (SqliteMemoryEntryStore
+        // truncates after every delete) or the next start truncates it again.
+        if (!SqliteHardening.TruncateWal(connection))
+            Log.Warning(
+                "The router memory database's write-ahead log was busy at startup; pending deletions will be finalized by the next eviction or restart.");
 
         using var schema = connection.CreateCommand();
         schema.CommandText = SchemaSql;

@@ -445,6 +445,22 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
+    public void Clearing_while_the_deletion_is_not_final_warns_that_text_may_remain_on_disk()
+    {
+        var client = new FakeRouterSettingsAdminClient
+        { ClearTranscriptsRowsDeleted = 3, ClearTranscriptsDeletionFinal = false };
+        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
+            routerSettingsClient: client);
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("button:contains('Clear')").Click();
+
+        cut.Find("button:contains('Confirm Clear')").Click();
+
+        cut.Markup.Should().Contain("Cleared 3 rows.");
+        cut.Markup.Should().Contain("Deleted text may remain on disk until the router restarts.");
+    }
+
+    [Fact]
     public void The_judge_model_dropdown_offers_automatic_plus_every_eligible_free_model()
     {
         var client = new FakeRouterSettingsAdminClient
@@ -709,6 +725,8 @@ public sealed class SettingsModalTests
 
         public int ClearTranscriptsRowsDeleted { get; init; }
 
+        public bool ClearTranscriptsDeletionFinal { get; init; } = true;
+
         public Task<RouterSettingsInfo> GetAsync(CancellationToken cancellationToken = default)
         {
             return Failure is null ? Task.FromResult(Settings) : Task.FromException<RouterSettingsInfo>(Failure);
@@ -740,12 +758,13 @@ public sealed class SettingsModalTests
             return Task.FromResult(Settings);
         }
 
-        public Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
+        public Task<ClearTranscriptsResult> ClearTranscriptsAsync(CancellationToken cancellationToken = default)
         {
             ClearTranscriptsCallCount++;
             return Failure is null
-                ? Task.FromResult(ClearTranscriptsRowsDeleted)
-                : Task.FromException<int>(Failure);
+                ? Task.FromResult(new ClearTranscriptsResult(RowsDeleted: ClearTranscriptsRowsDeleted,
+                    DeletionFinal: ClearTranscriptsDeletionFinal))
+                : Task.FromException<ClearTranscriptsResult>(Failure);
         }
     }
 

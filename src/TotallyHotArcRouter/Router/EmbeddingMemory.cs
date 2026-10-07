@@ -208,8 +208,8 @@ public sealed class EmbeddingMemory : IDisposable
             _entries.RemoveRange(0, count: overflow);
         }
 
-        foreach (var evictedEntry in evicted)
-            await _store.DeleteAsync(id: evictedEntry.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
+        await _store.DeleteManyAsync(ids: evicted.ConvertAll(entry => entry.Id), cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
 
         _logger.LogInformation(
             message:

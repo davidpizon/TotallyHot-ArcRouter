@@ -41,7 +41,7 @@ public interface IRouterSettingsAdminClient
 
     /// <summary>Deletes every captured transcript row - the Transcription Capture row's "Clear" action.</summary>
     /// <param name="cancellationToken">A cancellation token.</param>
-    /// <returns>The number of rows deleted.</returns>
+    /// <returns>The number of rows deleted and whether the deletion is final on disk.</returns>
     /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
-    Task<int> ClearTranscriptsAsync(CancellationToken cancellationToken = default);
+    Task<ClearTranscriptsResult> ClearTranscriptsAsync(CancellationToken cancellationToken = default);
 }

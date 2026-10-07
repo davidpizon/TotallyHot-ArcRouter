@@ -607,6 +607,10 @@ message ClearTranscriptsRequest {}
 message ClearTranscriptsResponse {
   // The number of request_transcripts rows actually deleted.
   int32 rows_deleted = 1;
+  // False when the write-ahead log stayed busy through every retry, so deleted text may remain
+  // in it until the next checkpoint or restart. Additive: an older client reads the default false and
+  // ignores it.
+  bool deletion_final = 2;
 }
 
 // The Governance UI's Cluster Model panel (docs/router/self-organizing-classification-plan.md Phase T5):

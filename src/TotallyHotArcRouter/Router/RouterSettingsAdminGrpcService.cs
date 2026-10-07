@@ -219,9 +219,15 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
 
         var rowsDeleted = await _transcriptStore.DeleteAllAsync(context.CancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation(message: "Transcript data cleared: RowsDeleted={RowsDeleted}", rowsDeleted);
+        // Clear cannot lean on the retention cycle to finish the job (it does not run when capture is off),
+        // so it makes the deletion final itself and says so when it could not.
+        var deletionFinal = await _transcriptStore.FinalizeDeletionAsync(context.CancellationToken)
+            .ConfigureAwait(false);
 
-        return new Contract.ClearTranscriptsResponse { RowsDeleted = rowsDeleted };
+        _logger.LogInformation(message: "Transcript data cleared: RowsDeleted={RowsDeleted} DeletionFinal={DeletionFinal}",
+            rowsDeleted, deletionFinal);
+
+        return new Contract.ClearTranscriptsResponse { RowsDeleted = rowsDeleted, DeletionFinal = deletionFinal };
     }
 
     /// <summary>

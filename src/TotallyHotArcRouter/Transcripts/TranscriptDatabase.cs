@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using System.Globalization;
@@ -99,9 +100,44 @@ public sealed class TranscriptDatabase
     /// </summary>
     public SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        return connection;
+        return SqliteHardening.Open(ConnectionString);
+    }
+
+    /// <summary>
+    /// Finishes deletions an earlier run left pending (#184, ADR-0024) by truncating the write-ahead log.
+    /// Runs at startup regardless of <see cref="TranscriptOptions.Enabled"/>: an operator who cleared
+    /// transcripts and switched capture off still needs the deleted text gone from the file.
+    /// </summary>
+    /// <param name="logger">Receives a warning when the log is busy.</param>
+    /// <remarks>
+    /// Does nothing when the file does not exist, so a default install with capture off still creates no
+    /// database. Fast and safe beside other connections: the checkpoint does not wait, and a busy log is
+    /// logged and left for the next retention cycle. The slow one-time rebuild is
+    /// scrub, which <see cref="Hosting.TranscriptScrubHostedService"/> runs in a child process.
+    /// </remarks>
+    public void RunStartupMaintenance(ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (!File.Exists(_databasePath)) return;
+
+        if (!SqliteHardening.TruncateWal(ConnectionString))
+            logger.LogWarning("The transcript database's write-ahead log was busy at startup; pending deletions are not yet final.");
+    }
+
+    /// <summary>
+    /// Gets where the one-time scrub (#184, ADR-0024) works: the database, the marker that records it as
+    /// done, and a folder in the protected data directory for SQLite's temporary files. The scrub itself
+    /// runs in a child process (<see cref="Storage.ScrubProcessLauncher"/>) because rebuilding the file takes
+    /// long enough that it must not block host startup, and SQLite's temp-folder setting is process-wide.
+    /// </summary>
+    internal (string DatabasePath, string MarkerPath, string TempDirectory) ScrubPaths
+    {
+        get
+        {
+            var directory = Path.GetDirectoryName(_databasePath) ?? ".";
+            return (_databasePath, _databasePath + ".scrubbed", Path.Combine(path1: directory, path2: "scrub-temp"));
+        }
     }
 
     /// <summary>
@@ -119,7 +155,7 @@ public sealed class TranscriptDatabase
 
         using (var pragma = connection.CreateCommand())
         {
-            pragma.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
+            pragma.CommandText = "PRAGMA journal_mode=WAL;";
             pragma.ExecuteNonQuery();
         }
 
