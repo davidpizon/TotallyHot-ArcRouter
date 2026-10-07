@@ -4,7 +4,9 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Cache;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
@@ -170,6 +172,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly LocalEndpointResponder _localEndpointResponder;
 
     private readonly ILogger<ProxyMiddleware> _logger;
+    private readonly IOptionsMonitor<BodyExcerptOptions>? _bodyExcerptOptions;
 
     // True only when no factory was supplied and this instance built its own fallback - in that case
     // ProxyMiddleware is the sole owner of that factory's lifetime and must dispose it (it caches AWS SDK
@@ -224,6 +227,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     {
         _logger = logger;
         _interceptor = interceptor;
+        _bodyExcerptOptions = dependencies?.BodyExcerptOptions;
         _httpClientFactory = httpClientFactory;
         _ownsHttpClient = httpClient is null && httpClientFactory is null;
         _httpClient = httpClient ?? (httpClientFactory is null
@@ -268,7 +272,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             judgeOptionsMonitor: dependencies?.JudgeOptionsMonitor,
             selfHostedRouterPricePerMillionTokens: dependencies?.RoutingOptions?.Value
                 .SelfHostedRouterPricePerMillionTokens ?? new RoutingOptions().SelfHostedRouterPricePerMillionTokens,
-            portfolioGraderOptionsMonitor: dependencies?.PortfolioGraderOptionsMonitor);
+            portfolioGraderOptionsMonitor: dependencies?.PortfolioGraderOptionsMonitor,
+            bodyExcerptOptions: dependencies?.BodyExcerptOptions);
 
         if (dependencies?.BedrockClientFactory is null)
         {
@@ -711,11 +716,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                 var totalDurationMs = stopwatch.ElapsedMilliseconds;
 
-                // Guarded: the argument decodes up to 4 MB, which must not be paid when Debug is off.
-                if (_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug(
-                        message: "[INTERCEPTOR] Intercepted agent response message: {ResponseBody}",
-                        LogRedaction.DecodeTruncateSanitize(capturedResponseBytes));
+                // Opt-in body excerpt (#184 phase 3): marked ConversationBody event, bodies-*.log only.
+                ConversationBodyLogging.LogExcerpt(_logger, _bodyExcerptOptions,
+                    ConversationBodyLogging.InterceptedResponseMessage, capturedResponseBytes);
 
                 // Finish the response now, so the client sees end-of-stream (the terminating chunk for chunked
                 // and SSE bodies) without waiting on the telemetry persistence below, which is synchronous

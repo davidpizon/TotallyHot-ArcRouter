@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Quality.Ingress;
@@ -46,6 +47,7 @@ internal sealed class RequestTelemetryPublisher
     private readonly IConversationTurnTracker _turnTracker;
     private readonly IUsageExtractor _usageExtractor;
     private readonly IUsageLedger? _usageLedger;
+    private readonly IOptionsMonitor<BodyExcerptOptions>? _bodyExcerptOptions;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RequestTelemetryPublisher"/> class, taking exactly the
@@ -76,7 +78,8 @@ internal sealed class RequestTelemetryPublisher
         decimal selfHostedRouterPricePerMillionTokens,
         PendingPromptCache? pendingPromptCache = null,
         IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null,
-        PendingValueCache<int>? pendingResponseLengthCache = null)
+        PendingValueCache<int>? pendingResponseLengthCache = null,
+        IOptionsMonitor<BodyExcerptOptions>? bodyExcerptOptions = null)
     {
         _logger = logger;
         _sessionIdResolver = sessionIdResolver;
@@ -101,6 +104,7 @@ internal sealed class RequestTelemetryPublisher
         _judgeOptionsMonitor = judgeOptionsMonitor;
         _portfolioGraderOptionsMonitor = portfolioGraderOptionsMonitor;
         _selfHostedRouterPricePerMillionTokens = selfHostedRouterPricePerMillionTokens;
+        _bodyExcerptOptions = bodyExcerptOptions;
     }
 
     /// <summary>
@@ -608,15 +612,12 @@ internal sealed class RequestTelemetryPublisher
             ? TextTruncator.Truncate(responseText)
             : null;
 
-        // The raw-body log above ([INTERCEPTOR] Intercepted agent response message) dumps the response
-        // exactly as it crossed the wire - for a streamed completion that's dozens of single-token SSE
-        // "delta" chunks on one log line, so the answer text itself is never a contiguous, searchable
-        // substring (e.g. "The application's name is Totally Hot Arc Router." appears only as separate
-        // " The", " application", "'s", " name", ... tokens). Logging the assembled text extracted above
-        // for telemetry gives the actual answer as one readable, searchable line.
-        _logger.LogDebug(
-            message: "[INTERCEPTOR] Assembled LLM response text: {ResponseText}",
-            responseSummary is null ? "(none found)" : LogRedaction.Truncate(LogRedaction.Sanitize(responseText)));
+        // The raw-body excerpt dumps the response as it crossed the wire - for a streamed completion that
+        // is dozens of single-token SSE chunks, so the answer is never contiguous. Logging the assembled
+        // text extracted above gives one searchable line when body excerpts are enabled (#184 phase 3).
+        ConversationBodyLogging.LogExcerpt(_logger, _bodyExcerptOptions,
+            ConversationBodyLogging.AssembledResponseText,
+            responseSummary is null ? "(none found)" : responseText);
 
         // A stable id shared by this telemetry event and any off-path quality signal derived from the same
         // response, so a dashboard can join the two.

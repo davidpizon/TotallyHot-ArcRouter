@@ -5,6 +5,7 @@ using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Mcp;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -248,7 +249,8 @@ internal static class ProxyServiceCollectionExtensions
             CapabilityStore = sp.GetService<IToolCallCapabilityStore>(),
             ContextWindowStore = sp.GetService<IModelContextWindowStore>(),
             InteractionStatusStore = sp.GetService<IProviderInteractionStatusStore>(),
-            SemanticResponseCache = sp.GetService<SemanticResponseCache>()
+            SemanticResponseCache = sp.GetService<SemanticResponseCache>(),
+            BodyExcerptOptions = sp.GetService<IOptionsMonitor<BodyExcerptOptions>>()
         });
 
         services.AddSingleton<ProxyMiddleware>();

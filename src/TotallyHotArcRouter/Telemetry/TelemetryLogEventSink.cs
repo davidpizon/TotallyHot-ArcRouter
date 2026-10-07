@@ -1,5 +1,6 @@
 using Serilog.Core;
 using Serilog.Events;
+using TotallyHot.ArcRouter.Logging;
 
 namespace TotallyHot.ArcRouter.Telemetry;
 
@@ -7,7 +8,9 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// A Serilog <see cref="ILogEventSink"/> that forwards every log event to connected dashboards as a
 /// <see cref="LogLineEvent"/> via <see cref="ITelemetryPublisher"/> (backed by
 /// <see cref="TelemetryGrpcService"/>'s stream), powering the GUI's Console tab. Wired into the
-/// pipeline in <c>Program.cs</c> alongside (not replacing) the existing Console sink.
+/// pipeline in <c>Program.cs</c> alongside (not replacing) the existing Console sink. Conversation-body
+/// excerpts (#184 phase 3) are dropped here so the Console tab never shows opt-in body text; ADR-0020
+/// will later re-admit them for sessions with a content grant.
 /// </summary>
 public sealed class TelemetryLogEventSink : ILogEventSink
 {
@@ -24,6 +27,8 @@ public sealed class TelemetryLogEventSink : ILogEventSink
     public void Emit(LogEvent logEvent)
     {
         ArgumentNullException.ThrowIfNull(logEvent);
+
+        if (logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName)) return;
 
         var line = new LogLineEvent(
             TimestampUtc: logEvent.Timestamp.ToUniversalTime(),

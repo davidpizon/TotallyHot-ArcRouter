@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
@@ -29,6 +30,14 @@ public static class ServiceCollectionExtensions
         // methods below), so this split is a pure move: every method is called here in exactly the
         // source order the single method used to register things in, and no registration was
         // reordered relative to any other.
+        services.AddOptions<BodyExcerptOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(BodyExcerptOptions.SectionName).Bind(options));
+        services.AddSingleton(sp => new BodyLogController(
+            AppDataPaths.ResolveLogsDirectory(),
+            () => sp.GetRequiredService<IOptionsMonitor<BodyExcerptOptions>>().CurrentValue.Enabled));
+        services.AddSingleton<IBodyLogController>(sp => sp.GetRequiredService<BodyLogController>());
+
         services.AddRouterCore();
         services.AddProxyRequestPipeline();
         services.AddTelemetryAndTranslation();

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Security.Principal;
+using TotallyHot.ArcRouter.Logging;
 using ILogger = Serilog.ILogger;
 
 namespace TotallyHot.ArcRouter.Hosting.DataDirectory;
@@ -122,6 +123,7 @@ public static class DataDirectoryMigrationCommand
         var root = AppDataPaths.MachineWideCandidate();
         var result = new WindowsDataDirectoryMigration(root, WindowsDirectoryPolicy.Machine, legacyOwner, logger).Run();
         LogResult(logger, root, result);
+        RewritePreUpgradeLogs(root, logger);
         return 0;
     }
 
@@ -155,10 +157,7 @@ public static class DataDirectoryMigrationCommand
         List<string> roots = [AppDataPaths.MachineWideCandidate()];
         if (OperatingSystem.IsLinux())
         {
-            var logsDirectory = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
-            roots.Add(string.IsNullOrWhiteSpace(logsDirectory)
-                ? DefaultLinuxLogsDirectory
-                : logsDirectory.Split(':', 2)[0]);
+            roots.Add(ResolveLogsDirectoryForMigration());
         }
 
         foreach (var root in roots)
@@ -167,7 +166,49 @@ public static class DataDirectoryMigrationCommand
             LogResult(logger, root, result);
         }
 
+        RewritePreUpgradeLogs(AppDataPaths.MachineWideCandidate(), logger);
         return 0;
+    }
+
+    /// <summary>
+    /// Strips legacy F9 conversation lines from diagnostic logs while the router is stopped (#184 phase 3).
+    /// Uses <see cref="AppDataPaths.MachineWideCandidate"/> rather than
+    /// <see cref="AppDataPaths.ResolveLogsDirectory"/> so it never re-enters the bootstrap that refuses an
+    /// unmigrated root.
+    /// </summary>
+    private static void RewritePreUpgradeLogs(string dataDirectory, ILogger logger)
+    {
+        PreUpgradeLogRewrite.Run(dataDirectory, PreUpgradeLogDirectories(dataDirectory), logger);
+    }
+
+    /// <summary>
+    /// Lists every place the router may have written diagnostic logs: the migration's resolved logs directory
+    /// (honoring <c>LOGS_DIRECTORY</c>, else the packaged Linux location) and the <c>logs</c> folder under
+    /// <paramref name="dataDirectory"/>, which is where a manual or container run writes them.
+    /// </summary>
+    internal static IReadOnlyList<string> PreUpgradeLogDirectories(string dataDirectory)
+    {
+        var resolved = ResolveLogsDirectoryForMigration();
+        var underDataRoot = Path.Combine(dataDirectory, "logs");
+        return string.Equals(resolved, underDataRoot, StringComparison.Ordinal)
+            ? [resolved]
+            : [resolved, underDataRoot];
+    }
+
+    /// <summary>
+    /// Names the logs directory the migration works on. Linux keeps its logs outside the state directory, and
+    /// a root shell running the migration has no <c>LOGS_DIRECTORY</c>, so it falls back to the packaged
+    /// location rather than a <c>logs</c> folder under the data root that does not exist there.
+    /// </summary>
+    private static string ResolveLogsDirectoryForMigration()
+    {
+        var logsDirectory = Environment.GetEnvironmentVariable("LOGS_DIRECTORY");
+        if (!string.IsNullOrWhiteSpace(logsDirectory))
+            return logsDirectory.Split(':', 2)[0];
+
+        return OperatingSystem.IsLinux()
+            ? DefaultLinuxLogsDirectory
+            : Path.Combine(AppDataPaths.MachineWideCandidate(), "logs");
     }
 
     private static void LogResult(ILogger logger, string root, DataDirectoryMigrationResult result)

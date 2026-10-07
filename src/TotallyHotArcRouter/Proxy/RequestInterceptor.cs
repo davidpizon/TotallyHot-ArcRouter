@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
@@ -67,13 +68,6 @@ public class RequestInterceptor
     /// </remarks>
     internal const string RouterModelProvider = "totallyhot";
 
-    /// <summary>
-    /// Caps the length of a full request/response body before it is placed in a Debug-level log message,
-    /// so an unbounded payload never floods a text log sink. Applied on top of <see cref="SanitizeForLog"/>,
-    /// never in place of it.
-    /// </summary>
-    private const int MaxLoggedBodyLength = 4000;
-
     private readonly ICircuitBreaker _circuitBreaker;
     private readonly IDimensionInferrer _dimensionInferrer;
     private readonly int _embeddingBudgetMs;
@@ -106,6 +100,12 @@ public class RequestInterceptor
     /// change applies to the next request. <see langword="null"/> means the defaults apply.
     /// </summary>
     private readonly IOptionsMonitor<RoutingOptions>? _routingOptionsMonitor;
+
+    /// <summary>
+    /// Live source of <see cref="BodyExcerptOptions.Enabled"/> (#184 phase 3). <see langword="null"/> means
+    /// body-excerpt logging is off.
+    /// </summary>
+    private readonly IOptionsMonitor<BodyExcerptOptions>? _bodyExcerptOptions;
 
     /// <summary>
     /// The switches applied when no <see cref="_routingOptionsMonitor"/> was supplied. One shared instance so
@@ -203,6 +203,10 @@ public class RequestInterceptor
     /// Amendment 1). On <c>/v1/messages</c>, a router-chosen candidate's copy of the request drops the features
     /// its model's record reports unsupported. <see langword="null"/> (the default) strips nothing.
     /// </param>
+    /// <param name="bodyExcerptOptions">
+    /// Optional live switch for the two conversation-bearing request excerpts (#184 phase 3).
+    /// <see langword="null"/> (the default) leaves those templates silent.
+    /// </param>
     public RequestInterceptor(
         ILogger<RequestInterceptor> logger,
         IModelRouteResolver modelRouteResolver,
@@ -219,9 +223,11 @@ public class RequestInterceptor
         IProviderInteractionStatusStore? interactionStatusStore = null,
         UntrainedBaselineSelector? untrainedBaselineSelector = null,
         IOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null,
-        IModelFeatureSupportStore? modelFeatureSupportStore = null)
+        IModelFeatureSupportStore? modelFeatureSupportStore = null,
+        IOptionsMonitor<BodyExcerptOptions>? bodyExcerptOptions = null)
     {
         _routingOptionsMonitor = routingOptionsMonitor;
+        _bodyExcerptOptions = bodyExcerptOptions;
         _logger = logger;
         _modelRouteResolver = modelRouteResolver;
         _forcedModelName = singleModelServingOptions?.ForcedModelName;
@@ -377,10 +383,9 @@ public class RequestInterceptor
             body = await reader.ReadToEndAsync(cancellationToken);
         }
 
-        // Guarded: agentic bodies routinely exceed 100 KB, and the argument copies the whole body.
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(message: "[INTERCEPTOR] Intercepted agent request message: {RequestBody}",
-                LogRedaction.TruncateSanitize(body));
+        // Opt-in body excerpt (#184 phase 3): marked ConversationBody event, bodies-*.log only.
+        ConversationBodyLogging.LogExcerpt(_logger, _bodyExcerptOptions,
+            ConversationBodyLogging.InterceptedRequestMessage, body);
 
         if (string.IsNullOrWhiteSpace(body))
             return ModelRouteResolutionResult.Failure("Request body must be a JSON object containing a 'model' field.");
@@ -427,15 +432,13 @@ public class RequestInterceptor
         // regardless of which IRoutingPolicy is configured.
         var taskText = RequestTextExtractor.ExtractNewestUserMessage(jsonObject);
 
-        // The raw-body log above ([INTERCEPTOR] Intercepted agent request message) truncates at
-        // MaxLoggedBodyLength from the start of the body - for an agentic client like GitHub Copilot
-        // whose system prompt (tool descriptions, IDE context) routinely exceeds that cap on its own,
-        // the actual user question never survives the truncation. Logging the already-extracted newest
-        // user message as its own line guarantees it appears regardless of how large the surrounding
-        // request is.
-        _logger.LogDebug(
-            message: "[INTERCEPTOR] Newest user message: {UserMessage}",
-            taskText is null ? "(none found)" : TruncateForLog(SanitizeForLog(taskText)));
+        // The raw-body excerpt above truncates from the start of the body - for an agentic client like
+        // GitHub Copilot whose system prompt routinely exceeds that cap, the actual user question never
+        // survives. Logging the already-extracted newest user message as its own line guarantees it
+        // appears when body excerpts are enabled (#184 phase 3).
+        ConversationBodyLogging.LogExcerpt(_logger, _bodyExcerptOptions,
+            ConversationBodyLogging.NewestUserMessage,
+            taskText ?? "(none found)");
 
         var embedding = await TryComputeEmbeddingAsync(taskText: taskText, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -958,13 +961,6 @@ public class RequestInterceptor
     private static bool IsNativeMessagesProvider(string provider)
     {
         return string.Equals(a: provider, b: "anthropic", comparisonType: StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string TruncateForLog(string value)
-    {
-        return value.Length <= MaxLoggedBodyLength
-            ? value
-            : string.Concat(str0: value.AsSpan(0, length: MaxLoggedBodyLength), str1: "...[truncated]");
     }
 
     /// <summary>

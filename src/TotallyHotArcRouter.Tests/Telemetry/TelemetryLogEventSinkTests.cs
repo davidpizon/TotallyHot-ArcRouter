@@ -1,6 +1,7 @@
 using Moq;
 using Serilog.Events;
 using Serilog.Parsing;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
@@ -81,6 +82,28 @@ public class TelemetryLogEventSinkTests
     public void NormalizeLevel_MapsToGuiExpectedShortForm(LogEventLevel level, string expected)
     {
         Assert.Equal(expected: expected, actual: TelemetryLogEventSink.NormalizeLevel(level));
+    }
+
+    /// <summary>Conversation-body excerpts never reach the Console tab (#184 phase 3).</summary>
+    [Fact]
+    public void Emit_ConversationBodyMarkedEvent_IsDropped()
+    {
+        var publisherMock = new Mock<ITelemetryPublisher>();
+        var sink = new TelemetryLogEventSink(publisherMock.Object);
+
+        sink.Emit(new LogEvent(
+            timestamp: DateTimeOffset.UtcNow,
+            level: LogEventLevel.Information,
+            exception: null,
+            messageTemplate: new MessageTemplateParser().Parse("body"),
+            properties:
+            [
+                new LogEventProperty(ConversationBodyLogging.PropertyName, new ScalarValue(true))
+            ]));
+
+        publisherMock.Verify(
+            p => p.PublishLogLineAsync(It.IsAny<LogLineEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
