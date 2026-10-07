@@ -34,18 +34,33 @@ public static class PreUpgradeLogRewrite
     /// <param name="logger">Receives one line per rewritten or deleted file.</param>
     public static void Run(string dataDirectory, string logsDirectory, ILogger logger)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(logsDirectory);
+
+        Run(dataDirectory, [logsDirectory], logger);
+    }
+
+    /// <summary>
+    /// Same as the single-directory overload for installs whose logs may live in more than one place (Linux
+    /// keeps them outside the state directory, yet a manual run writes under it). One marker covers all of
+    /// them, written only when every directory was cleaned.
+    /// </summary>
+    /// <param name="dataDirectory">Protected data root that holds the marker.</param>
+    /// <param name="logsDirectories">Directories that may hold <c>arcrouter-*.log</c>; missing ones are skipped.</param>
+    /// <param name="logger">Receives one line per rewritten or deleted file.</param>
+    public static void Run(string dataDirectory, IEnumerable<string> logsDirectories, ILogger logger)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
+        ArgumentNullException.ThrowIfNull(logsDirectories);
         ArgumentNullException.ThrowIfNull(logger);
 
         var markerPath = Path.Combine(dataDirectory, MarkerFileName);
         if (File.Exists(markerPath)) return;
 
-        Directory.CreateDirectory(dataDirectory);
-
         var allHandled = true;
-        if (Directory.Exists(logsDirectory))
+        foreach (var logsDirectory in logsDirectories)
         {
+            if (!Directory.Exists(logsDirectory)) continue;
+
             foreach (var pattern in FileNamePatterns)
             {
                 foreach (var path in Directory.EnumerateFiles(logsDirectory, pattern))
@@ -60,8 +75,29 @@ public static class PreUpgradeLogRewrite
             return;
         }
 
-        using (File.Create(markerPath))
+        TryRecordMarker(dataDirectory, markerPath, logger);
+    }
+
+    /// <summary>
+    /// Writes the marker, or logs a one-line reason when the data root cannot be written. This is a
+    /// best-effort cleanup that runs on the startup path, so a read-only root must not stop the router or
+    /// dump a stack trace; the only cost is that the next run repeats the (idempotent) rewrite.
+    /// </summary>
+    private static void TryRecordMarker(string dataDirectory, string markerPath, ILogger logger)
+    {
+        try
         {
+            Directory.CreateDirectory(dataDirectory);
+            using (File.Create(markerPath))
+            {
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.Error(
+                "Could not record the pre-upgrade log rewrite marker at {MarkerPath}: {Reason} The old logs were cleaned, and the router will check them again at the next start.",
+                markerPath, ex.Message);
+            return;
         }
 
         logger.Information(

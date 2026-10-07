@@ -121,7 +121,7 @@ public static class DataDirectoryBootstrap
         {
             PreUpgradeLogRewrite.Run(
                 dataDirectory: resolution.Directory,
-                logsDirectory: Path.Combine(resolution.Directory, "logs"),
+                logsDirectories: DataDirectoryMigrationCommand.PreUpgradeLogDirectories(resolution.Directory),
                 logger: Log.Logger);
         }
 

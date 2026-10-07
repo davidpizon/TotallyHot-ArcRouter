@@ -178,7 +178,21 @@ public static class DataDirectoryMigrationCommand
     /// </summary>
     private static void RewritePreUpgradeLogs(string dataDirectory, ILogger logger)
     {
-        PreUpgradeLogRewrite.Run(dataDirectory, ResolveLogsDirectoryForMigration(), logger);
+        PreUpgradeLogRewrite.Run(dataDirectory, PreUpgradeLogDirectories(dataDirectory), logger);
+    }
+
+    /// <summary>
+    /// Lists every place the router may have written diagnostic logs: the migration's resolved logs directory
+    /// (honoring <c>LOGS_DIRECTORY</c>, else the packaged Linux location) and the <c>logs</c> folder under
+    /// <paramref name="dataDirectory"/>, which is where a manual or container run writes them.
+    /// </summary>
+    internal static IReadOnlyList<string> PreUpgradeLogDirectories(string dataDirectory)
+    {
+        var resolved = ResolveLogsDirectoryForMigration();
+        var underDataRoot = Path.Combine(dataDirectory, "logs");
+        return string.Equals(resolved, underDataRoot, StringComparison.Ordinal)
+            ? [resolved]
+            : [resolved, underDataRoot];
     }
 
     /// <summary>
