@@ -120,8 +120,8 @@ public class SecureDeletionTests : IDisposable
         await InsertCanaryRowsAsync(store: store, count: 3);
 
         // A read transaction pins the log's older frames, so a TRUNCATE checkpoint cannot finish.
-        using var reader = database.OpenConnection();
-        using (var begin = reader.CreateCommand())
+        await using var reader = database.OpenConnection();
+        await using (var begin = reader.CreateCommand())
         {
             begin.CommandText = "BEGIN; SELECT COUNT(*) FROM request_transcripts;";
             begin.ExecuteScalar();
@@ -131,7 +131,7 @@ public class SecureDeletionTests : IDisposable
 
         Assert.False(await store.FinalizeDeletionAsync(TestContext.Current.CancellationToken));
 
-        using (var end = reader.CreateCommand())
+        await using (var end = reader.CreateCommand())
         {
             end.CommandText = "COMMIT;";
             end.ExecuteNonQuery();
@@ -264,8 +264,8 @@ public class SecureDeletionTests : IDisposable
                 VerifierTrace: null, CreatedAtUtc: DateTimeOffset.UtcNow),
             cancellationToken: TestContext.Current.CancellationToken);
 
-        using var reader = database.OpenConnection();
-        using (var begin = reader.CreateCommand())
+        await using var reader = database.OpenConnection();
+        await using (var begin = reader.CreateCommand())
         {
             begin.CommandText = "BEGIN; SELECT COUNT(*) FROM memory_entries;";
             begin.ExecuteScalar();
@@ -303,7 +303,7 @@ public class SecureDeletionTests : IDisposable
     private IReadOnlyList<string> Logged { get; set; } = [];
 
     /// <summary>Collects formatted log lines, including any exception, for assertion messages.</summary>
-    private sealed class CapturingLogger : ILogger, ILogger<SqliteMemoryEntryStore>
+    private sealed class CapturingLogger : ILogger<SqliteMemoryEntryStore>
     {
         public List<string> Lines { get; } = [];
 

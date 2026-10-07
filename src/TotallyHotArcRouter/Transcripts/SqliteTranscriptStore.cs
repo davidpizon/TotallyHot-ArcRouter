@@ -365,7 +365,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            using (var connection = _database.OpenConnection())
+            await using (var connection = _database.OpenConnection())
             {
                 if (SqliteHardening.TruncateWal(connection)) return true;
             }
