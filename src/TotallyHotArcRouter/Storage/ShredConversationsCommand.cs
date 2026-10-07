@@ -64,7 +64,7 @@ internal static class ShredConversationsCommand
             try
             {
                 var exitCode = Shred(databasePath: databasePath, logsDirectory: logsDirectory, logger: logger);
-                RecordResult(directory: resultDirectory, exitCode: exitCode, detail: "see the router log for per-step messages");
+                RecordResult(directory: resultDirectory, exitCode: exitCode, detail: $"database={databasePath}; logs={logsDirectory}");
                 return exitCode;
             }
             finally
@@ -136,7 +136,7 @@ internal static class ShredConversationsCommand
     /// <summary>Deletes the transcript rows, truncates the log and rebuilds the file.</summary>
     private static bool ShredDatabase(string databasePath, ILogger logger, Func<string, SqliteScrub.VolumeSpace>? probeVolume)
     {
-        if (!File.Exists(databasePath)) return true;
+        if (!File.Exists(databasePath)) return DeleteSidecars(databasePath: databasePath, logger: logger);
 
         var connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString();
         try
@@ -187,6 +187,32 @@ internal static class ShredConversationsCommand
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Removes the write-ahead log, shared-memory and journal files left beside a missing database. An orphaned
+    /// <c>-wal</c> (for example after a crash followed by deletion of the main file) can still hold
+    /// conversation text, so "no database" is not by itself "nothing to remove".
+    /// </summary>
+    /// <returns><see langword="true"/> when no sidecar remains.</returns>
+    private static bool DeleteSidecars(string databasePath, ILogger logger)
+    {
+        var allDeleted = true;
+        foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
+        {
+            var sidecar = databasePath + suffix;
+            try
+            {
+                if (File.Exists(sidecar)) File.Delete(sidecar);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                allDeleted = false;
+                logger.LogError(exception: ex, message: "Could not delete the orphaned file {SidecarPath}.", sidecar);
+            }
+        }
+
+        return allDeleted;
     }
 
     /// <summary>Binds the <c>Storage</c> section the way the service's configuration would.</summary>

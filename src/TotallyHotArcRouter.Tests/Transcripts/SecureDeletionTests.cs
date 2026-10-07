@@ -175,6 +175,19 @@ public class SecureDeletionTests : IDisposable
         Assert.Equal(expected: ShredConversationsCommand.IncompleteExitCode, actual: exitCode);
     }
 
+    [Fact]
+    public void Shred_WithOnlyAnOrphanedWal_DeletesIt()
+    {
+        var wal = _transcriptPath + "-wal";
+        File.WriteAllText(path: wal, contents: Canary);
+
+        var exitCode = ShredConversationsCommand.Shred(databasePath: _transcriptPath,
+            logsDirectory: Path.Combine(path1: _directory, path2: "no-logs"), logger: NullLogger.Instance);
+
+        Assert.Equal(expected: ShredConversationsCommand.DoneExitCode, actual: exitCode);
+        Assert.False(File.Exists(wal));
+    }
+
     private static SqliteScrub.VolumeSpace PlentyOfSpace(string path) =>
         new(Free: long.MaxValue / 2, Total: long.MaxValue / 2);
 

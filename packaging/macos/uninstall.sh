@@ -24,11 +24,23 @@ launchctl bootout system "${PLIST_DEST}" 2>/dev/null || true
 echo "==> Removing conversation text (transcripts and body-excerpt logs; spend data is kept)"
 # #184 / ADR-0024: run as the service account, never root - root would leave a root-owned secrets.dat the
 # service cannot read after a reinstall.
-if [[ -x "${INSTALL_DIR}/TotallyHotArcRouter" ]] && id _arcrouter >/dev/null 2>&1; then
-    sudo -H -u _arcrouter "${INSTALL_DIR}/TotallyHotArcRouter" --shred-conversations \
-        || echo "WARNING: some conversation text could not be removed; see \"/Library/Application Support/TotallyHotArcRouter/shred-conversations.result\"." >&2
-else
+SHRED_RESULT="/Library/Application Support/TotallyHotArcRouter/shred-conversations.result"
+if ! [[ -x "${INSTALL_DIR}/TotallyHotArcRouter" ]] || ! id _arcrouter >/dev/null 2>&1; then
     echo "Skipped: the router binary or the '_arcrouter' account is already gone."
+elif launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+    # bootout failures are ignored above; a still-loaded daemon could write a new transcript or body log
+    # after the shred, so removal would be reported complete while text remains.
+    echo "WARNING: ${LABEL} is still loaded, so conversation text was NOT removed." >&2
+    echo "         Unload it, then run: sudo -H -u _arcrouter ${INSTALL_DIR}/TotallyHotArcRouter --shred-conversations" >&2
+else
+    # The shred is a separate process: it does not inherit the daemon's environment, so forward the one
+    # override that changes which database it targets (read from the plist while it still exists).
+    shred_env=()
+    override="$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:Storage__TranscriptDatabasePath" "${PLIST_DEST}" 2>/dev/null || true)"
+    [[ -n "${override}" ]] && shred_env+=("Storage__TranscriptDatabasePath=${override}")
+    sudo -H -u _arcrouter env ${shred_env[@]+"${shred_env[@]}"} \
+        "${INSTALL_DIR}/TotallyHotArcRouter" --shred-conversations \
+        || echo "WARNING: some conversation text could not be removed; see \"${SHRED_RESULT}\"." >&2
 fi
 
 echo "==> Removing the LaunchDaemon plist"
