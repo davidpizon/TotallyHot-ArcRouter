@@ -33,6 +33,9 @@ public partial class SettingsModal
     /// </summary>
     private const int RecommendedEmbeddingMemoryCapacity = 20_000;
 
+    /// <summary>The most recent passkey approvals the Passkeys section lists; the router keeps a longer log.</summary>
+    private const int MaxApprovalsShown = 8;
+
     private string? _activeAction;
     private bool _adaptiveRoutingEnabled;
     private bool _clearTranscriptsFailed;
@@ -53,6 +56,8 @@ public partial class SettingsModal
     private bool _judgeEnabled;
     private string _judgeModelName = string.Empty;
     private bool _confirmingRegenerateManagementToken;
+    private bool _addingPasskey;
+    private bool _managementTokenBusy;
     private bool _managementTokenCopied;
     private bool _managementTokenFailed;
     private string? _managementTokenMessage;
@@ -103,6 +108,10 @@ public partial class SettingsModal
         UpdateStore.Changed -= OnUpdateStoreChanged;
         CostReconciliationStore.Changed -= OnCostReconciliationStoreChanged;
         ManagementTokenStore.Changed -= OnManagementTokenStoreChanged;
+        PasskeyStore.Changed -= OnPasskeyStoreChanged;
+
+        // Never leave a fetched token sitting in the singleton store after the window that earned it closes.
+        ManagementTokenStore.ClearToken();
     }
 
     /// <inheritdoc/>
@@ -117,8 +126,11 @@ public partial class SettingsModal
         CostReconciliationStore.Changed += OnCostReconciliationStoreChanged;
         await CostReconciliationStore.LoadAsync();
 
+        // The management token is no longer loaded up front: since ADR-0020 the router releases it only
+        // against a passkey ceremony, which Copy runs on demand. What loads here is the passkey list.
         ManagementTokenStore.Changed += OnManagementTokenStoreChanged;
-        await ManagementTokenStore.LoadAsync();
+        PasskeyStore.Changed += OnPasskeyStoreChanged;
+        await PasskeyStore.RefreshAsync();
     }
 
     // Shared by the initial load and every instant save's post-mutation refresh (success re-syncs to the
@@ -447,14 +459,46 @@ public partial class SettingsModal
         InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Copies the current token to the clipboard - needs no confirmation, unlike Regenerate.</summary>
+    /// <summary>Re-renders when the passkey store's state changes (a refresh, an enrollment, a lock).</summary>
+    private void OnPasskeyStoreChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Copies the management token to the clipboard. The router releases the token only against a passkey
+    /// ceremony bound to <see cref="PasskeyOperations.GetManagementToken"/> (ADR-0020), so this runs one,
+    /// fetches the token with the resulting single-use authorization, copies it, and drops it from memory
+    /// again whether or not the copy succeeded.
+    /// </summary>
     private async Task CopyManagementToken()
     {
-        if (ManagementTokenStore.Token is not { } token) return;
-
-        await ClipboardService.SetTextAsync(token);
-        _managementTokenCopied = true;
+        _managementTokenBusy = true;
+        _managementTokenCopied = false;
         _managementTokenMessage = null;
+        _managementTokenFailed = false;
+        try
+        {
+            if (await AuthorizeManagementTokenOperationAsync(PasskeyOperations.GetManagementToken) is not
+                { } authorization) return;
+
+            if (!await ManagementTokenStore.LoadAsync(authorization) || ManagementTokenStore.Token is not { } token)
+            {
+                _managementTokenMessage = ManagementTokenStore.IsReachable
+                    ? ManagementTokenStore.LastError
+                    : "Could not reach the router. Is the proxy running?";
+                _managementTokenFailed = true;
+                return;
+            }
+
+            await ClipboardService.SetTextAsync(token);
+            _managementTokenCopied = true;
+        }
+        finally
+        {
+            ManagementTokenStore.ClearToken();
+            _managementTokenBusy = false;
+        }
     }
 
     /// <summary>Opens the regenerate confirmation dialog.</summary>
@@ -464,23 +508,68 @@ public partial class SettingsModal
         _managementTokenMessage = null;
     }
 
-    /// <summary>Mints and persists a fresh token once the operator confirms via <see cref="RegenerateManagementTokenDialog"/>.</summary>
+    /// <summary>
+    /// Mints and persists a fresh token once the operator confirms via
+    /// <see cref="RegenerateManagementTokenDialog"/>, then runs the passkey ceremony bound to
+    /// <see cref="PasskeyOperations.RegenerateManagementToken"/> that the router requires (ADR-0020) - the
+    /// confirmation says what will break, the ceremony proves who is asking. The new token is not shown or
+    /// kept; Copy fetches it under its own ceremony.
+    /// </summary>
     private async Task RegenerateManagementTokenConfirmed()
     {
         _confirmingRegenerateManagementToken = false;
+        _managementTokenBusy = true;
         _managementTokenCopied = false;
+        _managementTokenFailed = false;
+        _managementTokenMessage = null;
         try
         {
-            await ManagementTokenStore.RegenerateAsync();
-            _managementTokenMessage = "Regenerated.";
-            _managementTokenFailed = false;
+            if (await AuthorizeManagementTokenOperationAsync(PasskeyOperations.RegenerateManagementToken) is not
+                { } authorization) return;
+
+            try
+            {
+                await ManagementTokenStore.RegenerateAsync(authorization);
+                _managementTokenMessage = "Regenerated. Use Copy MCP token to read the new one.";
+                _managementTokenFailed = false;
+            }
+            catch (GrpcAdminException)
+            {
+                _managementTokenMessage = ManagementTokenStore.IsReachable
+                    ? ManagementTokenStore.LastError
+                    : "Could not reach the router. Is the proxy running?";
+                _managementTokenFailed = true;
+            }
         }
-        catch (GrpcAdminException)
+        finally
         {
-            _managementTokenMessage = ManagementTokenStore.IsReachable
-                ? ManagementTokenStore.LastError
-                : "Could not reach the router. Is the proxy running?";
-            _managementTokenFailed = true;
+            ManagementTokenStore.ClearToken();
+            _managementTokenBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Runs the passkey ceremony for <paramref name="operation"/> and returns the single-use authorization it
+    /// earned, or <see langword="null"/> after recording why not in the token row's message: the operator
+    /// dismissed the browser prompt, the router refused, or it could not be reached.
+    /// </summary>
+    private async Task<string?> AuthorizeManagementTokenOperationAsync(string operation)
+    {
+        try
+        {
+            return await PasskeyStore.AuthorizeOperationAsync(operation: operation,
+                parameters: PasskeyOperations.NoParameters);
+        }
+        catch (WebAuthnCeremonyException ex)
+        {
+            _managementTokenMessage = ex.Message;
+        }
+        catch (GrpcAdminException ex)
+        {
+            _managementTokenMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+        }
+
+        _managementTokenFailed = true;
+        return null;
     }
 }

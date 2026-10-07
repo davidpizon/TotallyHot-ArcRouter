@@ -22,11 +22,26 @@ builder.Services.AddSingleton<ToastService>();
 // navigator.clipboard.writeText via JS interop - the browser counterpart to MauiProgram's
 // MauiClipboardService registration.
 builder.Services.AddSingleton<IClipboardService, WasmClipboardService>();
+// ADR-0020 passkey content gate. ContentGrantStore holds the short-lived content grant in memory only (never
+// localStorage, sessionStorage, or a cookie); the channel provider below attaches it as x-content-grant on
+// every call, and the conversation stores drop their cached text whenever it is cleared. See
+// Services/ContentGrantStore.cs.
+builder.Services.AddSingleton<ContentGrantStore>();
+// navigator.credentials.create/get via JS interop - the WebAuthn ceremony half of the passkey gate.
+builder.Services.AddSingleton<IWebAuthnCeremony, WasmWebAuthnCeremony>();
+// Backs the Sessions tab's unlock/lock state and the System Settings Passkeys section. See
+// Services/PasskeyAdminStore.cs.
+builder.Services.AddSingleton<PasskeyAdminStore>();
 // The one shared, authenticated call invoker every admin client and store talks through (web GUI
 // migration plan Phase P5a/P6) - gRPC-Web to this same origin, unlike the native host's real TCP+TLS
-// channel. See WasmRouterChannelProvider's remarks.
+// channel. See WasmRouterChannelProvider's remarks. contentGrantAccessor makes it carry x-content-grant.
 builder.Services.AddSingleton<IRouterChannelProvider>(sp =>
-    new WasmRouterChannelProvider(sp.GetRequiredService<NavigationManager>()));
+{
+    var grant = sp.GetRequiredService<ContentGrantStore>();
+    return new WasmRouterChannelProvider(
+        navigation: sp.GetRequiredService<NavigationManager>(),
+        contentGrantAccessor: () => grant.Token);
+});
 // Live routing telemetry from the router (see Services/LiveDataStore.cs). A singleton so the gRPC-Web
 // stream and accumulated conversation state survive navigation between tabs.
 builder.Services.AddSingleton<LiveDataStore>();

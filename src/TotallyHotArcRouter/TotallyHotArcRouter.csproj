@@ -62,6 +62,7 @@
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
+    <PackageReference Include="Fido2" Version="4.2.0" />
     <PackageReference Include="Google.Protobuf" Version="3.36.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
     <!-- Backs Program.cs's UseSystemd() call (web GUI migration plan Phase P10) so the host can run
@@ -145,8 +146,7 @@
          assets (the actual wwwroot files MapStaticAssets serves) still flow through a ProjectReference
          with this flag set - that is a separate MSBuild item flow from the compiled-assembly reference
          the flag suppresses. -->
-    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Web\TotallyHotArcRouter.Gui.Web.csproj"
-                       ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TotallyHotArcRouter.Gui.Web\TotallyHotArcRouter.Gui.Web.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

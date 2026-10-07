@@ -61,35 +61,62 @@ public sealed class ManagementTokenAdminStore : AdminStoreBase<IManagementTokenA
         _reauthenticateAsync = reauthenticateAsync;
     }
 
-    /// <summary>The last-loaded (or freshly regenerated) token, or <see langword="null"/> before the first load.</summary>
+    /// <summary>
+    /// The last-fetched (or freshly regenerated) token, or <see langword="null"/> when none is held. Held only
+    /// between a successful gated call and <see cref="ClearToken"/>: since ADR-0020 the router releases the
+    /// token only against a passkey ceremony, so a token left sitting in memory would outlive the approval
+    /// that earned it.
+    /// </summary>
     public string? Token { get; private set; }
 
     /// <summary>
-    /// Loads the router's current management token. Failures are swallowed and surfaced via
-    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>.
+    /// Fetches the router's current management token. The router requires a single-use passkey
+    /// authorization bound to <see cref="PasskeyOperations.GetManagementToken"/> (ADR-0020), so the caller
+    /// runs the ceremony first and passes the result here. Failures are swallowed and surfaced via
+    /// <see cref="AdminStoreBase{TClient}.IsReachable"/>/<see cref="AdminStoreBase{TClient}.LastError"/>;
+    /// a refusal (missing or spent authorization) leaves <see cref="Token"/> <see langword="null"/>.
     /// </summary>
+    /// <param name="authorizationToken">The one-operation authorization from the passkey ceremony.</param>
     /// <param name="cancellationToken">Cancels the load.</param>
-    public Task LoadAsync(CancellationToken cancellationToken = default)
+    /// <returns>Whether the token was fetched.</returns>
+    public Task<bool> LoadAsync(string authorizationToken, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(authorizationToken);
+
         return LoadGuardedAsync(
-            async ct => Token = await Client.GetTokenAsync(ct).ConfigureAwait(false),
+            async ct => Token = await Client.GetTokenAsync(authorizationToken, ct).ConfigureAwait(false),
             "load the management token",
-            cancellationToken);
+            cancellationToken,
+            onFailure: () => Token = null);
+    }
+
+    /// <summary>Drops the held token so it does not outlive the passkey approval that fetched it.</summary>
+    public void ClearToken()
+    {
+        if (Token is null) return;
+
+        Token = null;
+        NotifyChanged();
     }
 
     /// <summary>
     /// Mints and persists a fresh token - the confirmed "Regenerate" action, expected to already be gated
     /// behind the caller's own confirm dialog (invalidating every already-configured MCP client's saved
-    /// token is not undoable). Rethrows on failure so the caller's confirm flow can report it inline, in
-    /// addition to recording it in <see cref="AdminStoreBase{TClient}.LastError"/>.
+    /// token is not undoable) and then a passkey ceremony bound to
+    /// <see cref="PasskeyOperations.RegenerateManagementToken"/> (ADR-0020). Rethrows on failure so the
+    /// caller's confirm flow can report it inline, in addition to recording it in
+    /// <see cref="AdminStoreBase{TClient}.LastError"/>.
     /// </summary>
+    /// <param name="authorizationToken">The one-operation authorization from the passkey ceremony.</param>
     /// <param name="cancellationToken">Cancels the mutation.</param>
-    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
-    public async Task RegenerateAsync(CancellationToken cancellationToken = default)
+    /// <exception cref="GrpcAdminException">The call failed, was not authorized, or the router is unreachable.</exception>
+    public async Task RegenerateAsync(string authorizationToken, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(authorizationToken);
+
         try
         {
-            Token = await Client.RegenerateAsync(cancellationToken).ConfigureAwait(false);
+            Token = await Client.RegenerateAsync(authorizationToken, cancellationToken).ConfigureAwait(false);
             RecordSuccess();
         }
         catch (GrpcAdminException ex)

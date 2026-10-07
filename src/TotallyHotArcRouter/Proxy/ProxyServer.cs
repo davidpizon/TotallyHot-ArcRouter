@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Auth;
+using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
@@ -89,6 +90,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 
         var broadcaster = dependencies?.Telemetry ?? new TelemetryBroadcaster();
         var managementTokenProvider = dependencies?.ManagementTokenProvider;
+        var passkeyGate = dependencies?.PasskeyGate;
         var routingOptions = dependencies?.RoutingOptions;
         var modelRoutingTemplates = dependencies?.ModelRoutingTemplates;
 
@@ -287,6 +289,23 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 
                     services.AddSingleton(broadcaster);
 
+                    // The passkey content gate (ADR-0020, #185). Handed across from the outer container for the
+                    // same reason as the broadcaster - the same instances the elevated enrollment channel and
+                    // bootstrap service use - and mirrors how the transcript store reaches TelemetryGrpcService
+                    // through the admin modules below: TelemetryGrpcService takes ContentGate as an optional
+                    // constructor parameter, so registering it here is what switches the gate on.
+                    if (passkeyGate is not null)
+                    {
+                        services.AddSingleton(passkeyGate.ContentGate);
+                        services.AddSingleton(passkeyGate.EnrollmentCodes);
+                        services.AddSingleton(passkeyGate.Ceremonies);
+                        services.AddSingleton(passkeyGate.ContentGrants);
+                        services.AddSingleton(passkeyGate.OneOperationAuthorizations);
+                        services.AddSingleton(passkeyGate.ApprovalLog);
+                        services.AddSingleton(passkeyGate.CredentialStore);
+                        services.AddSingleton(passkeyGate.Options);
+                    }
+
                     // Same reasoning as the broadcaster: every optional admin feature's collaborators live
                     // in the outer container, so its gRPC service can only be constructed here if they are
                     // handed across explicitly. Each group knows its own registrations - see
@@ -479,8 +498,13 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         // The System Settings "Copy MCP token / Regenerate" row API (Phase P9). Only
                         // mapped alongside real inbound auth, same condition as the session endpoints
                         // above - a router with no token provider configured has no token to administer.
-                        if (managementTokenProvider is not null)
+                        // Both it and the passkey API also need the passkey gate (ADR-0020): without one the
+                        // token RPCs would be ungated, so they stay unmapped rather than open.
+                        if (managementTokenProvider is not null && passkeyGate is not null)
+                        {
                             endpoints.MapGrpcService<ManagementTokenAdminGrpcService>();
+                            endpoints.MapGrpcService<PasskeyAdminGrpcService>();
+                        }
 
                         // The WASM dashboard's fingerprinted assets (web GUI migration plan Phase P6) -
                         // endpoint-routing metadata (cache headers, content negotiation) on top of the

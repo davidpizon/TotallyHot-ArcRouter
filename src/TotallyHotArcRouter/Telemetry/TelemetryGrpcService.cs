@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Globalization;
 using System.Threading.Channels;
+using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 using TotallyHot.ArcRouter.Telemetry.Contract;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -61,6 +62,7 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
     private readonly ILogger<TelemetryGrpcService> _logger;
     private readonly IOptionsMonitor<TranscriptOptions> _transcriptOptions;
     private readonly ITranscriptStore _transcriptStore;
+    private readonly ContentGate? _contentGate;
 
     /// <param name="broadcaster">Registers/unregisters each call's channel writer and receives published events.</param>
     /// <param name="transcriptStore">Backs <see cref="ListPersistedSessions"/> with persisted <c>request_transcripts</c> rows.</param>
@@ -72,11 +74,19 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
     /// Records when <see cref="MaxListResponseBytes"/>, rather than the row limit, cut a
     /// <see cref="ListPersistedSessions"/> response. Optional so tests can omit it.
     /// </param>
+    /// <param name="contentGate">
+    /// The passkey content gate (ADR-0020). When supplied, conversation text - persisted prompt/response
+    /// text, live request/response summaries, and content-bearing log lines - reaches only calls carrying a
+    /// valid <c>x-content-grant</c> header. <see langword="null"/> disables the gate and serves text as
+    /// before; the router always registers one, so only tests that exercise the telemetry plumbing alone
+    /// omit it.
+    /// </param>
     public TelemetryGrpcService(
         TelemetryBroadcaster broadcaster,
         ITranscriptStore transcriptStore,
         IOptionsMonitor<TranscriptOptions> transcriptOptions,
-        ILogger<TelemetryGrpcService>? logger = null)
+        ILogger<TelemetryGrpcService>? logger = null,
+        ContentGate? contentGate = null)
     {
         ArgumentNullException.ThrowIfNull(broadcaster);
         ArgumentNullException.ThrowIfNull(transcriptStore);
@@ -85,6 +95,7 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         _transcriptStore = transcriptStore;
         _transcriptOptions = transcriptOptions;
         _logger = logger ?? NullLogger<TelemetryGrpcService>.Instance;
+        _contentGate = contentGate;
     }
 
     /// <summary>
@@ -105,7 +116,10 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         try
         {
             await foreach (var telemetryEvent in channel.Reader.ReadAllAsync(context.CancellationToken))
-                await responseStream.WriteAsync(telemetryEvent);
+            {
+                var outgoing = ApplyContentGate(telemetryEvent, context);
+                if (outgoing is not null) await responseStream.WriteAsync(outgoing);
+            }
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
@@ -113,6 +127,37 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         finally
         {
             _broadcaster.Unregister(channel.Writer);
+        }
+    }
+
+    /// <summary>
+    /// Applies the passkey content gate to one broadcast event for one stream (ADR-0020). The grant is
+    /// re-checked per event, so a grant that expires or is revoked mid-stream stops text immediately. A
+    /// content-bearing log line is dropped without a grant; a routing event's request/response summaries are
+    /// stripped from a clone (the broadcast instance is shared by every stream and must not be mutated).
+    /// </summary>
+    /// <returns>The event to write, or <see langword="null"/> when this stream must not see it at all.</returns>
+    private TelemetryEvent? ApplyContentGate(TelemetryEvent telemetryEvent, ServerCallContext context)
+    {
+        if (_contentGate is null) return telemetryEvent;
+
+        switch (telemetryEvent.EventCase)
+        {
+            case TelemetryEvent.EventOneofCase.LogLine when telemetryEvent.LogLine.ContentBearing:
+                return _contentGate.TryGetContentGrant(context, out _) ? telemetryEvent : null;
+
+            case TelemetryEvent.EventOneofCase.RoutingTelemetry
+                when telemetryEvent.RoutingTelemetry.HasRequestSummary ||
+                     telemetryEvent.RoutingTelemetry.HasResponseSummary:
+                if (_contentGate.TryGetContentGrant(context, out _)) return telemetryEvent;
+
+                var redacted = telemetryEvent.Clone();
+                redacted.RoutingTelemetry.ClearRequestSummary();
+                redacted.RoutingTelemetry.ClearResponseSummary();
+                return redacted;
+
+            default:
+                return telemetryEvent;
         }
     }
 
@@ -155,10 +200,13 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             .ListSessionsAsync(limit: limit + 1, cancellationToken: context.CancellationToken)
             .ConfigureAwait(false);
 
+        // Metadata only unless the caller holds a content grant (ADR-0020); one check covers every row.
+        var includeText = _contentGate is null || _contentGate.TryGetContentGrant(context, out _);
+
         var size = ListResponseFlagBytes;
         foreach (var transcript in transcripts.Take(limit))
         {
-            var row = ToContract(transcript);
+            var row = ToContract(transcript, includeText);
             // One tag byte for repeated field 2, then the length-prefixed row.
             var rowBytes = 1 + CodedOutputStream.ComputeMessageSize(row);
             if (size + rowBytes > MaxListResponseBytes)
@@ -181,9 +229,11 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
 
     /// <summary>
     /// Maps one <see cref="SessionTranscript"/> onto its wire representation, with display previews in place
-    /// of the stored texts (ADR-0023).
+    /// of the stored texts (ADR-0023). With <paramref name="includeText"/> false (no content grant, ADR-0020)
+    /// the prompt and response previews and their truncation flags are left unset; lengths stay, since they
+    /// are metadata rather than content.
     /// </summary>
-    private static PersistedTranscript ToContract(SessionTranscript transcript)
+    private static PersistedTranscript ToContract(SessionTranscript transcript, bool includeText)
     {
         var contract = new PersistedTranscript
         {
@@ -195,13 +245,13 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             TranscriptId = transcript.Id
         };
 
-        if (transcript.PromptText is { } promptText)
+        if (includeText && transcript.PromptText is { } promptText)
         {
             contract.PromptText = TextTruncator.Truncate(promptText)!;
             contract.PromptTruncated = promptText.Length > TextTruncator.DefaultMaxLength;
         }
 
-        if (transcript.ResponseText is { } responseText)
+        if (includeText && transcript.ResponseText is { } responseText)
         {
             contract.ResponseText = TextTruncator.Truncate(responseText)!;
             contract.ResponseTruncated = responseText.Length > TextTruncator.DefaultMaxLength;

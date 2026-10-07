@@ -1,6 +1,6 @@
 # 0020. Require passkey user verification before conversation content leaves the router
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-09-30
 **Deciders:** David Pizon
 

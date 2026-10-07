@@ -1,0 +1,81 @@
+@* The Sessions tab's passkey content-gate strip (ADR-0020). Locked: states that prompt and response text is
+   hidden and offers the unlock CTA - or, when no passkey is enrolled yet, names the elevated enrollment
+   command and offers Add passkey instead, since an unlock can never succeed until then. Unlocked: shows when
+   the unlock lapses and offers Lock. Purely presentational: the caller owns the gate state and decides what
+   each button does. *@
+@if (Locked)
+{
+    <div class="shrink-0 mb-2 flex items-center gap-3 flex-wrap text-xs" role="status" data-testid="content-locked">
+        <Icon Name="lock" Size="16" Class="text-slate-500"/>
+        <span class="text-slate-400">Conversation text is locked.</span>
+        @if (ShowEnrollmentHint)
+        {
+            <span class="text-amber-400" data-testid="content-enrollment-hint">
+                No passkey is enrolled. Run <span class="font-mono text-slate-200">@EnrollmentCommandHint</span>
+                from an elevated shell, then add a passkey.
+            </span>
+            <button @onclick="OnAddPasskey" class="btn btn-ghost" data-testid="content-add-passkey">
+                Add passkey
+            </button>
+        }
+        else
+        {
+            <button @onclick="OnUnlock" class="btn btn-primary" data-testid="content-unlock">
+                Unlock with passkey
+            </button>
+        }
+    </div>
+}
+else
+{
+    <div class="shrink-0 mb-2 flex items-center gap-3 flex-wrap text-xs" role="status" data-testid="content-unlocked">
+        <Icon Name="unlock" Size="16" Class="text-emerald-400"/>
+        <span class="text-emerald-400">
+            Conversation text unlocked@(ExpiresAtUtc is { } expires ? $" until {FormatLocalTime(expires)}" : string.Empty).
+        </span>
+        <button @onclick="OnLock" class="btn btn-ghost" data-testid="content-lock">
+            Lock
+        </button>
+    </div>
+}
+
+@code {
+
+    /// <summary>Whether conversation text is currently locked (no active content grant).</summary>
+    [Parameter]
+    public bool Locked { get; set; } = true;
+
+    /// <summary>
+    /// Whether to show the enrollment hint in place of the unlock button - true only once the router has
+    /// confirmed no passkey is enrolled, so an unknown state (router unreachable) does not claim it.
+    /// </summary>
+    [Parameter]
+    public bool ShowEnrollmentHint { get; set; }
+
+    /// <summary>The elevated-shell command that mints an enrollment code, named in the enrollment hint.</summary>
+    [Parameter]
+    public string EnrollmentCommandHint { get; set; } = PasskeyOperations.EnrollmentCommandFlag;
+
+    /// <summary>When the active unlock lapses, shown while unlocked; <see langword="null"/> shows no time.</summary>
+    [Parameter]
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
+
+    /// <summary>Invoked when the operator asks to unlock with a passkey.</summary>
+    [Parameter]
+    public EventCallback OnUnlock { get; set; }
+
+    /// <summary>Invoked when the operator asks to add the first passkey.</summary>
+    [Parameter]
+    public EventCallback OnAddPasskey { get; set; }
+
+    /// <summary>Invoked when the operator asks to lock conversation text again.</summary>
+    [Parameter]
+    public EventCallback OnLock { get; set; }
+
+    /// <summary>Formats <paramref name="utc"/> as a local-time "HH:mm" string.</summary>
+    private static string FormatLocalTime(DateTimeOffset utc)
+    {
+        return utc.ToLocalTime().ToString(format: "HH:mm", formatProvider: CultureInfo.InvariantCulture);
+    }
+
+}

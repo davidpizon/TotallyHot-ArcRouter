@@ -1,3 +1,4 @@
+using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
 using TotallyHot.ArcRouter.Gui.Models;
@@ -28,18 +29,27 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
     /// </summary>
     private const int RequestLimit = 500;
 
+    private ContentGrantStore? _contentGrant;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="PersistedSessionStore"/> class, over the shared
     /// <see cref="IRouterChannelProvider"/> every admin client and store talks through (web GUI
     /// migration plan Phase P5a) - see <see cref="IRouterChannelProvider"/>'s remarks.
     /// </summary>
     /// <param name="channelProvider">Supplies the shared call invoker this store's client is constructed over.</param>
+    /// <param name="contentGrant">
+    /// The content grant (ADR-0020), or <see langword="null"/> for a host with no passkey gate. When supplied,
+    /// clearing it drops every cached prompt and response, and setting one reloads the list so the text the
+    /// router now releases appears.
+    /// </param>
     /// <param name="logger">Optional logger.</param>
     public PersistedSessionStore(
         IRouterChannelProvider channelProvider,
+        ContentGrantStore? contentGrant = null,
         ILogger<PersistedSessionStore>? logger = null)
         : base(client: new PersistedSessionsClient(channelProvider.CallInvoker), logger: logger)
     {
+        AttachContentGrant(contentGrant);
     }
 
     /// <summary>
@@ -48,10 +58,15 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
     /// lifetime.
     /// </summary>
     /// <param name="client">The persisted-sessions client to read through.</param>
+    /// <param name="contentGrant">See the other constructor's <c>contentGrant</c> parameter.</param>
     /// <param name="logger">Optional logger.</param>
-    public PersistedSessionStore(IPersistedSessionsClient client, ILogger<PersistedSessionStore>? logger = null)
+    public PersistedSessionStore(
+        IPersistedSessionsClient client,
+        ContentGrantStore? contentGrant = null,
+        ILogger<PersistedSessionStore>? logger = null)
         : base(client: client, logger: logger)
     {
+        AttachContentGrant(contentGrant);
     }
 
     /// <summary>Persisted sessions as of the last successful load, oldest first. Empty before the first load.</summary>
@@ -102,13 +117,27 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
     /// isn't running.
     /// </summary>
     /// <param name="cancellationToken">Cancels the load.</param>
-    public Task LoadAsync(CancellationToken cancellationToken = default)
+    public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
-        return LoadGuardedAsync(
+        var unauthenticated = false;
+        var loaded = await LoadGuardedAsync(
             async ct =>
             {
-                var result = await Client.ListAsync(limit: RequestLimit, cancellationToken: ct)
-                    .ConfigureAwait(false);
+                PersistedSessionsResult result;
+                try
+                {
+                    result = await Client.ListAsync(limit: RequestLimit, cancellationToken: ct)
+                        .ConfigureAwait(false);
+                }
+                catch (GrpcAdminException ex) when (ex.InnerException is RpcException
+                                                    {
+                                                        StatusCode: StatusCode.Unauthenticated
+                                                    })
+                {
+                    unauthenticated = true;
+                    throw;
+                }
+
                 TranscriptCaptureEnabled = result.TranscriptCaptureEnabled;
                 HasMore = result.HasMore;
                 LoadedTurnCount = result.Transcripts.Count;
@@ -118,6 +147,65 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
                 ];
             },
             "load persisted sessions",
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+
+        // The router answered Unauthenticated while this dashboard believed it held a grant, so the grant is
+        // no good any more (the router restarted, or another tab locked it). Fail closed: forget it, which
+        // also clears every cached prompt and response.
+        if (!loaded && unauthenticated && _contentGrant is { IsActive: true }) _contentGrant.Clear();
+    }
+
+    /// <summary>
+    /// Drops every cached prompt and response from <see cref="Sessions"/> while keeping each session and turn's
+    /// metadata (ids, models, tokens, costs, timestamps), so the Sessions tab can keep listing what happened
+    /// after the content is locked (ADR-0020). Called when the content grant is cleared.
+    /// </summary>
+    public void ClearConversationText()
+    {
+        Sessions =
+        [
+            .. Sessions.Select(session => session with
+            {
+                Turns = [.. session.Turns.Select(turn => turn with { RequestSummary = null, ResponseSummary = null })]
+            })
+        ];
+        NotifyChanged();
+    }
+
+    /// <inheritdoc/>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && _contentGrant is not null)
+        {
+            _contentGrant.Cleared -= OnGrantCleared;
+            _contentGrant.Granted -= OnGrantGranted;
+        }
+
+        base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// Wires this store to <paramref name="contentGrant"/> so a lock drops cached text and an unlock reloads the
+    /// list. Does nothing for a host without a passkey gate.
+    /// </summary>
+    private void AttachContentGrant(ContentGrantStore? contentGrant)
+    {
+        _contentGrant = contentGrant;
+        if (contentGrant is null) return;
+
+        contentGrant.Cleared += OnGrantCleared;
+        contentGrant.Granted += OnGrantGranted;
+    }
+
+    /// <summary>Drops cached text when the grant is cleared, whatever cleared it.</summary>
+    private void OnGrantCleared()
+    {
+        ClearConversationText();
+    }
+
+    /// <summary>Reloads the list when a grant is set, since the router now releases the text it withheld.</summary>
+    private void OnGrantGranted()
+    {
+        _ = LoadAsync();
     }
 }

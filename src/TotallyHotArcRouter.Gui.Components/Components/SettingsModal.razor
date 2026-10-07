@@ -11,6 +11,7 @@
 @inject UpdateStore UpdateStore
 @inject CostReconciliationStore CostReconciliationStore
 @inject ManagementTokenAdminStore ManagementTokenStore
+@inject PasskeyAdminStore PasskeyStore
 @inject IClipboardService ClipboardService
 <DialogShell Title="System Settings" CloseAriaLabel="Close system settings" OnClose="OnClose">
 @* Client drop-in sits first: a new user opening Settings after install is looking for the base URL
@@ -253,9 +254,83 @@
     }
 </div>
 
+@* Passkeys (ADR-0020, #185): the WebAuthn passkeys that unlock conversation text and approve the
+               gated operations below. Adding one needs a single-use code minted from an elevated shell; removing
+               one is deliberately an elevated-shell action too (ADR-0020 decision 4), so a dashboard that is
+               currently unlocked still cannot delete the last passkey. BE / BS are the WebAuthn backup flags:
+               BE = the passkey can sync across devices, BS = it currently is synced. *@
+<div class="space-y-2" data-testid="passkeys-section">
+    <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+        Passkeys
+    </label>
+    @if (PasskeyStore.IsLoaded && !PasskeyStore.IsReachable)
+    {
+        <p class="text-xs text-amber-400">Could not reach the router. Is the proxy running?</p>
+    }
+    @if (PasskeyStore.Passkeys.Count == 0)
+    {
+        <p class="text-xs text-slate-500 leading-5" data-testid="passkeys-empty">
+            No passkey is enrolled. Conversation text and the MCP token stay locked until one is. Run
+            <span class="font-mono text-slate-200">@PasskeyStore.EnrollmentCommandHint</span> from an elevated
+            shell, then choose Add passkey.
+        </p>
+    }
+    @foreach (var passkey in PasskeyStore.Passkeys)
+    {
+        <div class="space-y-2" data-testid="passkey-row">
+            <div class="flex items-center gap-2 flex-wrap text-xs">
+                <span class="font-semibold text-slate-200">@passkey.Name</span>
+                <span class="font-mono px-1.5 py-0.5 rounded border border-slate-700 @(passkey.BackupEligible ? "text-emerald-400" : "text-slate-600")"
+                      title="Backup eligible: this passkey can sync across your devices"
+                      data-testid="passkey-badge-be">BE</span>
+                <span class="font-mono px-1.5 py-0.5 rounded border border-slate-700 @(passkey.BackupState ? "text-emerald-400" : "text-slate-600")"
+                      title="Backup state: this passkey is currently synced"
+                      data-testid="passkey-badge-bs">BS</span>
+                <span class="text-slate-500">@passkey.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)</span>
+            </div>
+            <p class="text-xs text-slate-600 font-mono" style="overflow-wrap:anywhere" data-testid="passkey-revoke-hint">
+                Remove: @(PasskeyOperations.RevokeCommandFlag + passkey.Id)
+            </p>
+        </div>
+    }
+    <div class="flex gap-2">
+        <button @onclick="@(() => _addingPasskey = true)" class="flex-1 btn btn-ghost" data-testid="passkeys-add">
+            Add passkey
+        </button>
+    </div>
+    <p class="text-xs text-slate-600 leading-5">
+        Passkeys can only be removed from an elevated shell with
+        <span class="font-mono">@(PasskeyOperations.RevokeCommandFlag)&lt;id&gt;</span>.
+    </p>
+    @if (PasskeyStore.Approvals.Count > 0)
+    {
+        <label class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+            Recent approvals
+        </label>
+        <div class="space-y-2" data-testid="passkey-approvals">
+            @foreach (var approval in PasskeyStore.Approvals.Take(MaxApprovalsShown))
+            {
+                <div class="flex items-center justify-between gap-3 text-xs" data-testid="passkey-approval-row">
+                    <span class="font-mono text-slate-200">@approval.Operation</span>
+                    <span class="text-slate-500">@(string.IsNullOrEmpty(approval.CredentialName) ? "-" : approval.CredentialName)</span>
+                    <span class="@(string.Equals(approval.Outcome, "succeeded", StringComparison.OrdinalIgnoreCase) ? "text-emerald-400" : "text-red-400")">@approval.Outcome</span>
+                    <span class="font-mono text-slate-600">@approval.AtUtc.ToLocalTime().ToString("MM-dd HH:mm", CultureInfo.InvariantCulture)</span>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (_addingPasskey)
+{
+    <AddPasskeyDialog OnCancel="@(() => _addingPasskey = false)" OnEnrolled="@(() => _addingPasskey = false)"/>
+}
+
 @* MCP token (web GUI migration plan Phase P9): the shared bearer token gating every gRPC admin
                service and MCP, now that it lives in the encrypted secret store rather than a plaintext file
-               the GUI could read directly. Copy needs no confirmation; Regenerate is gated behind
+               the GUI could read directly. Since ADR-0020 the router releases it - and rotates it - only
+               against a passkey ceremony bound to that exact operation, so Copy and Regenerate each run one
+               first; the token is held just long enough to copy. Regenerate is also gated behind
                RegenerateManagementTokenDialog since it invalidates every already-configured MCP client's
                saved token immediately. *@
 <div class="space-y-2">
@@ -266,11 +341,17 @@
     {
         <p class="text-xs text-amber-400">Could not reach the router. Is the proxy running?</p>
     }
+    @if (PasskeyStore.GateStatus is { Enrolled: false })
+    {
+        <p class="text-xs text-amber-400 leading-5" data-testid="token-enrollment-hint">
+            Copying or regenerating the token needs a passkey. Enroll one first (see Passkeys above).
+        </p>
+    }
     <div class="flex gap-2">
-        <button @onclick="CopyManagementToken" disabled="@(ManagementTokenStore.Token is null)" class="flex-1 btn btn-ghost">
-            @(_managementTokenCopied ? "Copied" : "Copy MCP token")
+        <button @onclick="CopyManagementToken" disabled="@(_managementTokenBusy || PasskeyStore.GateStatus is { Enrolled: false })" class="flex-1 btn btn-ghost">
+            @(_managementTokenBusy ? "Waiting for passkey…" : _managementTokenCopied ? "Copied" : "Copy MCP token")
         </button>
-        <button @onclick="StartRegenerateManagementToken" disabled="@(ManagementTokenStore.Token is null)" class="flex-1 btn btn-ghost-warning">
+        <button @onclick="StartRegenerateManagementToken" disabled="@(_managementTokenBusy || PasskeyStore.GateStatus is { Enrolled: false })" class="flex-1 btn btn-ghost-warning">
             Regenerate
         </button>
     </div>

@@ -14,12 +14,23 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 public sealed class DashboardTests
 {
-    private static BunitContext NewContext(PersistedSessionStore? persistedSessionStore = null)
+    private static BunitContext NewContext(
+        PersistedSessionStore? persistedSessionStore = null,
+        FakePasskeyAdminClient? passkeyClient = null,
+        FakeWebAuthnCeremony? ceremony = null,
+        ContentGrantStore? contentGrant = null,
+        LiveDataStore? liveDataStore = null)
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         var unreachable = new StubRouterChannelProvider("https://127.0.0.1:59996");
-        ctx.Services.AddSingleton(new LiveDataStore(channelProvider: unreachable));
+        contentGrant ??= new ContentGrantStore();
+        ctx.Services.AddSingleton(contentGrant);
+        ctx.Services.AddSingleton(new PasskeyAdminStore(
+            client: passkeyClient ?? new FakePasskeyAdminClient(),
+            ceremony: ceremony ?? new FakeWebAuthnCeremony(),
+            contentGrant: contentGrant));
+        ctx.Services.AddSingleton(liveDataStore ?? new LiveDataStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(persistedSessionStore ??
                                   new PersistedSessionStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: unreachable));
@@ -163,6 +174,150 @@ public sealed class DashboardTests
         var cut = ctx.Render<Dashboard>();
 
         cut.Markup.Should().NotContain("No conversations yet.");
+    }
+
+    private static async Task<PersistedSessionStore> LoadedStoreAsync(ContentGrantStore? grant = null)
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(true, Transcripts: [CreateTranscript(sessionId: "persisted-only")])
+        };
+        var store = grant is null ? new PersistedSessionStore(client) : new PersistedSessionStore(client, grant);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+        return store;
+    }
+
+    [Fact]
+    public async Task Sessions_tab_is_locked_by_default_and_offers_the_passkey_unlock()
+    {
+        var store = await LoadedStoreAsync();
+        await using var ctx = NewContext(store);
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-locked']").TextContent
+            .Should().Contain("Conversation text is locked."));
+        cut.Find("[data-testid='content-unlock']").TextContent.Should().Contain("Unlock with passkey");
+        cut.FindAll("[data-testid='content-enrollment-hint']").Should().BeEmpty();
+        cut.FindAll("[data-testid='content-lock']").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Sessions_tab_names_the_enrollment_command_when_no_passkey_is_enrolled()
+    {
+        var passkeys = new FakePasskeyAdminClient { Passkeys = [] };
+        passkeys.Status = passkeys.Status with { Enrolled = false };
+        var store = await LoadedStoreAsync();
+        await using var ctx = NewContext(store, passkeyClient: passkeys);
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-enrollment-hint']").TextContent
+            .Should().Contain("--mint-passkey-enrollment-code"));
+        cut.FindAll("[data-testid='content-unlock']").Should().BeEmpty("an unlock cannot succeed before enrollment");
+        cut.Find("[data-testid='content-add-passkey']").Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Unlocking_with_a_passkey_holds_the_grant_closes_the_dialog_and_offers_Lock()
+    {
+        var passkeys = new FakePasskeyAdminClient();
+        var ceremony = new FakeWebAuthnCeremony();
+        var grant = new ContentGrantStore();
+        var store = await LoadedStoreAsync();
+        await using var ctx = NewContext(store, passkeyClient: passkeys, ceremony: ceremony, contentGrant: grant);
+        var cut = ctx.Render<Dashboard>();
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlock']"));
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='content-unlock']").Click());
+        cut.Markup.Should().Contain("Unlock Conversations");
+        await cut.InvokeAsync(() => cut.Find("[data-testid='unlock-confirm']").Click());
+
+        grant.IsActive.Should().BeTrue();
+        ceremony.GetOptions.Should().ContainSingle();
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlocked']"));
+        cut.Markup.Should().NotContain("Unlock Conversations", "the dialog closes once the grant is held");
+    }
+
+    [Fact]
+    public async Task A_dismissed_unlock_prompt_keeps_the_dialog_open_with_the_reason_and_stays_locked()
+    {
+        var ceremony = new FakeWebAuthnCeremony
+        {
+            Failure = new WebAuthnCeremonyException("The passkey prompt was dismissed or timed out.")
+        };
+        var grant = new ContentGrantStore();
+        var store = await LoadedStoreAsync();
+        await using var ctx = NewContext(store, ceremony: ceremony, contentGrant: grant);
+        var cut = ctx.Render<Dashboard>();
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlock']"));
+        await cut.InvokeAsync(() => cut.Find("[data-testid='content-unlock']").Click());
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='unlock-confirm']").Click());
+
+        cut.Find("[data-testid='unlock-error']").TextContent.Should().Contain("dismissed or timed out");
+        grant.IsActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Lock_clears_the_grant_and_every_cached_conversation_text()
+    {
+        var grant = new ContentGrantStore();
+        var passkeys = new FakePasskeyAdminClient();
+        passkeys.Status = passkeys.Status with { GrantActive = true };
+        var store = await LoadedStoreAsync(grant);
+        store.Sessions.Single().Turns.Single().RequestSummary.Should().Be("hello");
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(10));
+        await using var ctx = NewContext(store, passkeyClient: passkeys, contentGrant: grant);
+        var cut = ctx.Render<Dashboard>();
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlocked']"));
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='content-lock']").Click());
+
+        grant.IsActive.Should().BeFalse();
+        passkeys.LockCalls.Should().Be(1);
+        store.Sessions.Single().Turns.Single().RequestSummary.Should().BeNull();
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-locked']"));
+    }
+
+    [Fact]
+    public async Task The_grant_expiring_locks_the_view_and_clears_the_text_without_any_click()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 10, 7, 12, 0, 0, TimeSpan.Zero));
+        var grant = new ContentGrantStore(clock);
+        var passkeys = new FakePasskeyAdminClient();
+        passkeys.Status = passkeys.Status with { GrantActive = true };
+        var store = await LoadedStoreAsync(grant);
+        grant.SetGrant("tok", clock.GetUtcNow().AddMinutes(15));
+        await using var ctx = NewContext(store, passkeyClient: passkeys, contentGrant: grant);
+        var cut = ctx.Render<Dashboard>();
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlocked']"));
+
+        clock.Advance(TimeSpan.FromMinutes(15));
+
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-locked']"));
+        store.Sessions.Single().Turns.Single().RequestSummary.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Opening_a_locked_session_says_the_text_is_locked_rather_than_not_captured()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(true, Transcripts:
+                [CreateTranscript(sessionId: "persisted-only") with { PromptText = null, ResponseText = null }])
+        };
+        var store = new PersistedSessionStore(client);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+        await using var ctx = NewContext(store);
+        var cut = ctx.Render<Dashboard>();
+        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlock']"));
+
+        await cut.InvokeAsync(() => cut.FindAll("button")
+            .First(b => b.TextContent.Contains("Session persist", StringComparison.Ordinal)).DoubleClick());
+
+        cut.Markup.Should().Contain("Locked - unlock with a passkey to view");
+        cut.Markup.Should().NotContain("No request captured");
     }
 
     private static PersistedTranscriptDto CreateTranscript(string sessionId, int turnNumber = 1)
