@@ -1,6 +1,6 @@
 # 0019. Store conversation text in encrypted per-session files, with SQLite as a text-free index
 
-**Status:** proposed
+**Status:** accepted (David approved 2026-10-07)
 **Date:** 2026-09-30
 **Deciders:** David Pizon
 
