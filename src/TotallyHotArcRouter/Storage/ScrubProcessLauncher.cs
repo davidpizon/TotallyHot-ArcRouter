@@ -33,7 +33,7 @@ internal static class ScrubProcessLauncher
     /// <param name="markerPath">The completion marker.</param>
     /// <param name="tempDirectory">The protected folder for SQLite's temporary files.</param>
     /// <returns>The start info, with output captured so the host can log it.</returns>
-    internal static ProcessStartInfo BuildStartInfo(
+    private static ProcessStartInfo BuildStartInfo(
         string executablePath,
         string databasePath,
         string markerPath,
@@ -106,7 +106,8 @@ internal static class ScrubProcessLauncher
     /// </summary>
     private static async Task<int> StartAsync(ProcessStartInfo start, ILogger logger, CancellationToken cancellationToken)
     {
-        using var process = new Process { StartInfo = start };
+        using var process = new Process();
+        process.StartInfo = start;
         process.OutputDataReceived += (_, e) => Forward(logger: logger, line: e.Data);
         process.ErrorDataReceived += (_, e) => Forward(logger: logger, line: e.Data);
         process.Start();

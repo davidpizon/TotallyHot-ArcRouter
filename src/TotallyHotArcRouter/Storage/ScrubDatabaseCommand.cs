@@ -19,7 +19,7 @@ internal static class ScrubDatabaseCommand
     internal const int DoneExitCode = 0;
 
     /// <summary>The exit code for a scrub that was deferred or failed, to be retried at the next start.</summary>
-    internal const int DeferredExitCode = 3;
+    private const int DeferredExitCode = 3;
 
     /// <summary>The exit code for malformed arguments.</summary>
     internal const int UsageExitCode = 2;
