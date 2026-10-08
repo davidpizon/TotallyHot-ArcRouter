@@ -10,11 +10,10 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// </summary>
 public sealed class SecretStoreSessionMasterKeyStore : ISessionMasterKeyStore
 {
-    /// <summary>The secret name of the current master key.</summary>
-    internal const string CurrentName = "sessions.master-key";
-
-    /// <summary>The secret name of the key staged by a rotation that has not finished.</summary>
-    internal const string NextName = "sessions.master-key.next";
+    private const string CurrentName = "sessions.master-key";
+    private const string NextName = "sessions.master-key.next";
+    private const string RotationRequiredName = "sessions.rotation-required";
+    private const string RotationRequiredValue = "1";
 
     private readonly ProtectedSecretStore _store;
 
@@ -60,10 +59,20 @@ public sealed class SecretStoreSessionMasterKeyStore : ISessionMasterKeyStore
     public void DiscardNext() => _store.Delete(NextName);
 
     /// <inheritdoc/>
+    public void RequireRotation() => _store.Write(RotationRequiredName, RotationRequiredValue);
+
+    /// <inheritdoc/>
+    public bool IsRotationRequired() => _store.TryRead(RotationRequiredName, out _);
+
+    /// <inheritdoc/>
+    public void ClearRotationRequired() => _store.Delete(RotationRequiredName);
+
+    /// <inheritdoc/>
     public void DestroyAll()
     {
         _store.Delete(NextName);
         _store.Delete(CurrentName);
+        _store.Delete(RotationRequiredName);
     }
 
     private byte[]? TryGet(string name) => _store.TryRead(name, out var value) ? Decode(value) : null;

@@ -39,6 +39,19 @@ public interface ISessionMasterKeyStore
     void DiscardNext();
 
     /// <summary>
+    /// Records that a master-key rotation must still run to finalize a deletion. Durable across a crash:
+    /// <see cref="SessionStore.DeleteSessions"/> sets it before removing index rows, and only a successful
+    /// rotation clears it, so a failed finalization remains retryable even when the deleted ids are gone.
+    /// </summary>
+    void RequireRotation();
+
+    /// <summary>Whether <see cref="RequireRotation"/> is recorded and not yet cleared by a successful rotation.</summary>
+    bool IsRotationRequired();
+
+    /// <summary>Clears the rotation-required marker after a successful promotion.</summary>
+    void ClearRotationRequired();
+
+    /// <summary>
     /// Destroys the current and staged keys, which makes every session file unreadable. Used by the
     /// uninstall shred.
     /// </summary>

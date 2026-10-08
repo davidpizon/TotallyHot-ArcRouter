@@ -74,22 +74,24 @@ public sealed record SessionDeletionResult(int DeletedSessions, bool WalTruncate
 /// </para>
 /// <para>
 /// <b>Concurrency.</b> Appends to one session are serialized; different sessions append in parallel.
-/// Rotation takes the exclusive side of a lock that every append and delete holds shared, so no session key
-/// is wrapped under a master key that is about to be replaced.
+/// Resolving a client session id and inserting its first index row share a per-client lock so concurrent
+/// first requests cannot mint two archive ids across that commit. Rotation takes the exclusive side of a
+/// lock that every append and delete holds shared, so no session key is wrapped under a master key that is
+/// about to be replaced.
 /// </para>
 /// </remarks>
 public sealed class SessionStore
 {
     private const string SessionFileExtension = ".thsess";
 
-    /// <summary>The name of the session folder beside <c>transcripts.db</c>.</summary>
-    internal const string FolderName = "sessions";
+    private const string FolderName = "sessions";
 
     private readonly SessionIndex _index;
     private readonly ISessionMasterKeyStore _masterKeys;
     private readonly string _folder;
     private readonly ILogger<SessionStore> _logger;
     private readonly ConcurrentDictionary<Guid, object> _sessionGates = new();
+    private readonly ConcurrentDictionary<string, object> _clientSessionGates = new();
     private readonly ConcurrentDictionary<string, Guid> _pendingSessionIds = new();
     private readonly ReaderWriterLockSlim _rotationLock = new();
     private readonly Lock _masterKeyGate = new();
@@ -147,8 +149,13 @@ public sealed class SessionStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientSessionId);
 
-        return _index.FindNewestByClientSessionId(clientSessionId)?.ArchiveSessionId
-               ?? _pendingSessionIds.GetOrAdd(clientSessionId, static _ => SessionArchiveIds.NewArchiveSessionId());
+        // Same client-session gate as the first InsertSession: a resolver that observed no row must not
+        // mint a second pending id across the commit that removes the first.
+        lock (_clientSessionGates.GetOrAdd(clientSessionId, static _ => new object()))
+        {
+            return _index.FindNewestByClientSessionId(clientSessionId)?.ArchiveSessionId
+                   ?? _pendingSessionIds.GetOrAdd(clientSessionId, static _ => SessionArchiveIds.NewArchiveSessionId());
+        }
     }
 
     /// <summary>
@@ -207,6 +214,14 @@ public sealed class SessionStore
                 try
                 {
                     using var file = SessionFile.Open(PathOf(row), sessionKey, archiveSessionId);
+                    // Open truncates a torn trailing frame; a short committed prefix must not look like a
+                    // successful partial read the way Take would.
+                    if ((long)file.FrameCount < row.CommittedFrames || file.Length < row.CommittedLength)
+                    {
+                        throw new InvalidDataException(
+                            $"Session {archiveSessionId} is shorter than its committed extent and cannot be read.");
+                    }
+
                     return file.ReadAllBodies().Take(checked((int)row.CommittedFrames)).ToList();
                 }
                 finally
@@ -236,7 +251,15 @@ public sealed class SessionStore
         _rotationLock.EnterReadLock();
         try
         {
-            foreach (var id in archiveSessionIds.Distinct())
+            var ids = archiveSessionIds.Distinct().ToList();
+            // Mark before the first row removal: if rotation fails (or the process dies) after the rows
+            // are gone, retrying with the same ids must still finish the key retirement.
+            if (ids.Exists(id => _index.TryGetSession(id) is not null))
+            {
+                _masterKeys.RequireRotation();
+            }
+
+            foreach (var id in ids)
             {
                 lock (_sessionGates.GetOrAdd(id, static _ => new object()))
                 {
@@ -252,13 +275,17 @@ public sealed class SessionStore
             _rotationLock.ExitReadLock();
         }
 
-        if (deletedFiles.Count == 0) return new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false);
+        if (deletedFiles.Count == 0 && !_masterKeys.IsRotationRequired())
+        {
+            return new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false);
+        }
 
-        var walTruncated = _index.TruncateWal();
+        var walTruncated = deletedFiles.Count == 0 || _index.TruncateWal();
         foreach (var fileName in deletedFiles) DeleteFile(Path.Combine(_folder, fileName));
 
         // Database remnants could still hold an old copy of a wrapped key; the rotation is what makes that
-        // copy useless, so it runs after every pass that deleted anything.
+        // copy useless, so it runs after every pass that deleted anything (and after a prior pass that
+        // recorded RequireRotation but could not finish).
         RotateMasterKey();
         walTruncated = _index.TruncateWal() && walTruncated;
 
@@ -277,49 +304,7 @@ public sealed class SessionStore
         _rotationLock.EnterWriteLock();
         try
         {
-            var oldKey = _masterKeys.TryGetCurrent();
-            if (oldKey is null) return;
-
-            var newKey = SessionKeyMaterial.CreateMasterKey();
-            try
-            {
-                _masterKeys.StageNext(newKey);
-                _index.RewrapAllKeys(wrapped =>
-                {
-                    var sessionKey = SessionKeyMaterial.UnwrapSessionKey(oldKey, wrapped);
-                    try
-                    {
-                        return SessionKeyMaterial.WrapSessionKey(newKey, sessionKey);
-                    }
-                    finally
-                    {
-                        CryptographicOperations.ZeroMemory(sessionKey);
-                    }
-                });
-                _masterKeys.PromoteNext();
-            }
-            catch (Exception ex)
-            {
-                // The index may already be wrapped under the staged key while the secret store still names the
-                // old one. Left alone, every later append would fail until a restart, so resolve it now.
-                _logger.LogError(ex, "Master-key rotation failed; resolving it before reporting the failure.");
-                try
-                {
-                    RecoverRotation();
-                }
-                catch (Exception recovery) when (recovery is IOException or UnauthorizedAccessException or CryptographicException)
-                {
-                    _logger.LogError(recovery, "The interrupted master-key rotation could not be resolved.");
-                }
-
-                throw;
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(oldKey);
-                CryptographicOperations.ZeroMemory(newKey);
-                ClearMasterKeyCache();
-            }
+            RotateMasterKeyUnlocked();
         }
         finally
         {
@@ -329,9 +314,10 @@ public sealed class SessionStore
 
     /// <summary>
     /// Brings the folder and index back to a consistent state after a crash: resolves an interrupted
-    /// rotation, cuts every file back to its committed extent, drops index rows whose file is gone, and
-    /// deletes files and spools that no committed index row names (ADR-0019, "Commit order and recovery").
-    /// Run once at startup, before any append.
+    /// rotation, finishes a deletion that still needs key retirement, cuts every file back to its
+    /// committed extent, drops index rows whose file is gone, and deletes files and spools that no
+    /// committed index row names (ADR-0019, "Commit order and recovery"). Run once at startup, before any
+    /// append.
     /// </summary>
     /// <returns>What was found and fixed.</returns>
     public SessionRecoveryResult RecoverOnStartup()
@@ -342,6 +328,18 @@ public sealed class SessionStore
             ClearMasterKeyCache();
             var rotation = RecoverRotation();
             ClearMasterKeyCache();
+
+            // Deletion finalization can leave RequireRotation set with no staged next key (crash before
+            // StageNext). Finish that here; mid-rotation discard/promote above does not clear it.
+            if (_masterKeys.IsRotationRequired())
+            {
+                RotateMasterKeyUnlocked();
+                if (rotation is SessionRotationRecovery.None or SessionRotationRecovery.Discarded)
+                {
+                    rotation = SessionRotationRecovery.Promoted;
+                }
+            }
+
             var truncated = 0;
             var corrupt = 0;
             var dropped = 0;
@@ -371,6 +369,65 @@ public sealed class SessionStore
         }
     }
 
+    /// <summary>
+    /// Runs a master-key rotation while the caller already holds the exclusive rotation lock.
+    /// </summary>
+    private void RotateMasterKeyUnlocked()
+    {
+        var oldKey = _masterKeys.TryGetCurrent();
+        if (oldKey is null)
+        {
+            // Nothing to retire; clear a stale deletion marker so startup does not loop.
+            _masterKeys.ClearRotationRequired();
+            return;
+        }
+
+        var newKey = SessionKeyMaterial.CreateMasterKey();
+        try
+        {
+            _masterKeys.StageNext(newKey);
+            _index.RewrapAllKeys(wrapped =>
+            {
+                var sessionKey = SessionKeyMaterial.UnwrapSessionKey(oldKey, wrapped);
+                try
+                {
+                    return SessionKeyMaterial.WrapSessionKey(newKey, sessionKey);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(sessionKey);
+                }
+            });
+            _masterKeys.PromoteNext();
+            _masterKeys.ClearRotationRequired();
+        }
+        catch (Exception ex)
+        {
+            // The index may already be wrapped under the staged key while the secret store still names the
+            // old one. Left alone, every later append would fail until a restart, so resolve it now.
+            _logger.LogError(ex, "Master-key rotation failed; resolving it before reporting the failure.");
+            try
+            {
+                if (RecoverRotation() is SessionRotationRecovery.Promoted)
+                {
+                    _masterKeys.ClearRotationRequired();
+                }
+            }
+            catch (Exception recovery) when (recovery is IOException or UnauthorizedAccessException or CryptographicException)
+            {
+                _logger.LogError(recovery, "The interrupted master-key rotation could not be resolved.");
+            }
+
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(oldKey);
+            CryptographicOperations.ZeroMemory(newKey);
+            ClearMasterKeyCache();
+        }
+    }
+
     private SessionTurnRow AppendLocked(Guid archiveSessionId, string clientSessionId, SessionTurnInput turn)
     {
         var masterKey = GetMasterKey(create: true)!;
@@ -389,10 +446,15 @@ public sealed class SessionStore
                     SessionKeyMaterial.WrapSessionKey(masterKey, sessionKey),
                     file.Length, (long)file.FrameCount, TurnCount: 0, DateTimeOffset.UtcNow, LastTurnAtUtc: null);
 
-                // The wrapped key commits before any frame is written, so a frame can never exist whose key
-                // was lost. A crash after this leaves an empty session that recovery keeps.
-                _index.InsertSession(row);
-                _pendingSessionIds.TryRemove(clientSessionId, out _);
+                // Same client-session gate as ResolveArchiveSessionId: InsertSession and pending removal are
+                // one critical section with the lookup that mints a pending id.
+                lock (_clientSessionGates.GetOrAdd(clientSessionId, static _ => new object()))
+                {
+                    // The wrapped key commits before any frame is written, so a frame can never exist whose key
+                    // was lost. A crash after this leaves an empty session that recovery keeps.
+                    _index.InsertSession(row);
+                    _pendingSessionIds.TryRemove(clientSessionId, out _);
+                }
             }
             else
             {

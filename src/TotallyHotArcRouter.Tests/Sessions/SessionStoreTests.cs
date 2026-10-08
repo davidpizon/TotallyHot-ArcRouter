@@ -1,8 +1,10 @@
 using System.Text;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Sessions;
+using TotallyHot.ArcRouter.Storage;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Sessions;
@@ -53,8 +55,8 @@ public sealed class SessionStoreTests : IDisposable
     public void AppendTurn_RoundTripsBodiesAndIndexesTheTurn()
     {
         var sessionId = _store.ResolveArchiveSessionId("client-1");
-        var request = Encoding.UTF8.GetBytes("""{"messages":[{"role":"user","content":"hello"}]}""");
-        var response = Encoding.UTF8.GetBytes("""{"content":"hi"}""");
+        var request = """{"messages":[{"role":"user","content":"hello"}]}"""u8.ToArray();
+        var response = """{"content":"hi"}"""u8.ToArray();
         var turn = NewTurn(request, response);
 
         var row = _store.AppendTurn(sessionId, "client-1", turn);
@@ -142,6 +144,23 @@ public sealed class SessionStoreTests : IDisposable
 
         Assert.Throws<ArgumentException>(
             () => _store.AppendTurn(SessionArchiveIds.NewArchiveSessionId(), "client-1", turn));
+    }
+
+    /// <summary>An imported turn keeps its origin in the index (phase 4 will write these for real).</summary>
+    [Fact]
+    public void AppendTurn_RecordsImportedOrigin()
+    {
+        var sessionId = _store.ResolveArchiveSessionId("client-1");
+        var turn = new SessionTurnInput(
+            SessionArchiveIds.NewArchiveTurnId(),
+            DateTimeOffset.UtcNow,
+            [new SessionBodyInput(SessionBodyKind.ClientRequest, "a"u8.ToArray())],
+            Origin: SessionTurnOrigin.Imported);
+
+        var row = _store.AppendTurn(sessionId, "client-1", turn);
+
+        Assert.Equal(SessionTurnOrigin.Imported, row.Origin);
+        Assert.Equal(SessionTurnOrigin.Imported, Assert.Single(_store.ListTurns(sessionId)).Origin);
     }
 
     /// <summary>Concurrent appends to one session serialize into distinct, gap-free sequences.</summary>
@@ -326,6 +345,7 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal("k1", Encoding.UTF8.GetString(_store.ReadBodies(keep)[0].Plaintext!));
         Assert.NotEqual(oldMaster, _masterKeys.TryGetCurrent());
         Assert.Null(_masterKeys.TryGetNext());
+        Assert.False(_masterKeys.IsRotationRequired());
 
         // The old master key no longer exists anywhere the store can reach, so the leftover blob is inert.
         Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(
@@ -344,6 +364,80 @@ public sealed class SessionStoreTests : IDisposable
 
         Assert.Equal(new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false), result);
         Assert.Equal(master, _masterKeys.TryGetCurrent());
+        Assert.False(_masterKeys.IsRotationRequired());
+    }
+
+    /// <summary>
+    /// A deletion that dies before StageNext still retires the old master key on the next
+    /// <see cref="SessionStore.DeleteSessions"/> call, even when the deleted ids are already gone.
+    /// </summary>
+    [Fact]
+    public void DeleteSessions_RetriesRotationWhenRequireRotationIsStillSet()
+    {
+        var keep = _store.ResolveArchiveSessionId("keep");
+        var drop = _store.ResolveArchiveSessionId("drop");
+        _store.AppendTurn(keep, "keep", NewTurn("k1"u8.ToArray(), "k2"u8.ToArray()));
+        _store.AppendTurn(drop, "drop", NewTurn("d1"u8.ToArray(), "d2"u8.ToArray()));
+        var leftoverWrappedKey = _index.TryGetSession(drop)!.WrappedKey;
+        var oldMaster = _masterKeys.TryGetCurrent()!;
+
+        _masterKeys.FailNextStage = true;
+        Assert.Throws<IOException>(() => _store.DeleteSessions([drop]));
+        Assert.True(_masterKeys.IsRotationRequired());
+        Assert.Null(_index.TryGetSession(drop));
+
+        // Same ids again: nothing left to delete, but the marker forces the key retirement.
+        var result = _store.DeleteSessions([drop]);
+
+        Assert.Equal(new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: true), result);
+        Assert.False(_masterKeys.IsRotationRequired());
+        Assert.NotEqual(oldMaster, _masterKeys.TryGetCurrent());
+        Assert.Equal("k1", Encoding.UTF8.GetString(_store.ReadBodies(keep)[0].Plaintext!));
+        Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(
+            () => SessionKeyMaterial.UnwrapSessionKey(_masterKeys.TryGetCurrent()!, leftoverWrappedKey));
+    }
+
+    /// <summary>
+    /// Startup finishes a deletion whose rows are gone and whose rotation never staged a next key.
+    /// </summary>
+    [Fact]
+    public void Recover_CompletesARequiredRotationLeftByAFailedDeletion()
+    {
+        var keep = _store.ResolveArchiveSessionId("keep");
+        var drop = _store.ResolveArchiveSessionId("drop");
+        _store.AppendTurn(keep, "keep", NewTurn("k1"u8.ToArray(), "k2"u8.ToArray()));
+        _store.AppendTurn(drop, "drop", NewTurn("d1"u8.ToArray(), "d2"u8.ToArray()));
+        var leftoverWrappedKey = _index.TryGetSession(drop)!.WrappedKey;
+        var oldMaster = _masterKeys.TryGetCurrent()!;
+
+        var dropFile = _index.TryGetSession(drop)!.FileName;
+        _masterKeys.RequireRotation();
+        _index.DeleteSession(drop);
+        File.Delete(Path.Combine(_folder, dropFile));
+
+        var result = _store.RecoverOnStartup();
+
+        Assert.Equal(SessionRotationRecovery.Promoted, result.RotationOutcome);
+        Assert.False(_masterKeys.IsRotationRequired());
+        Assert.NotEqual(oldMaster, _masterKeys.TryGetCurrent());
+        Assert.Equal("k1", Encoding.UTF8.GetString(_store.ReadBodies(keep)[0].Plaintext!));
+        Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(
+            () => SessionKeyMaterial.UnwrapSessionKey(_masterKeys.TryGetCurrent()!, leftoverWrappedKey));
+    }
+
+    /// <summary>A short committed extent fails the read the same way an append would, not with a partial body list.</summary>
+    [Fact]
+    public void ReadBodies_RejectsAFileShorterThanItsCommittedExtent()
+    {
+        var sessionId = _store.ResolveArchiveSessionId("client-1");
+        _store.AppendTurn(sessionId, "client-1", NewTurn("a"u8.ToArray(), "b"u8.ToArray()));
+        var path = Directory.GetFiles(_folder).Single();
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+        {
+            stream.SetLength(stream.Length - 5);
+        }
+
+        Assert.Throws<InvalidDataException>(() => _store.ReadBodies(sessionId));
     }
 
     /// <summary>A crash after the re-wrap but before the promotion is finished by promoting the staged key.</summary>
@@ -415,14 +509,14 @@ public sealed class SessionStoreTests : IDisposable
         _store.AppendTurn(sessionId, "client-1", NewTurn("a"u8.ToArray(), "b"u8.ToArray()));
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
 
-        var exitCode = TotallyHot.ArcRouter.Storage.ShredConversationsCommand.Shred(
+        var exitCode = ShredConversationsCommand.Shred(
             databasePath: _databasePath,
             logsDirectory: Path.Combine(_root, "logs"),
-            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
-            probeVolume: _ => new TotallyHot.ArcRouter.Storage.SqliteScrub.VolumeSpace(Free: long.MaxValue, Total: 1),
+            logger: NullLogger.Instance,
+            probeVolume: _ => new SqliteScrub.VolumeSpace(Free: long.MaxValue, Total: 1),
             masterKeys: _masterKeys);
 
-        Assert.Equal(TotallyHot.ArcRouter.Storage.ShredConversationsCommand.DoneExitCode, exitCode);
+        Assert.Equal(ShredConversationsCommand.DoneExitCode, exitCode);
         Assert.False(Directory.Exists(_folder));
         Assert.Empty(_index.ListSessions());
         Assert.Null(_masterKeys.TryGetCurrent());
@@ -449,8 +543,14 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal(next, keys.TryGetCurrent());
         Assert.Null(keys.TryGetNext());
 
+        keys.RequireRotation();
+        Assert.True(keys.IsRotationRequired());
+        keys.ClearRotationRequired();
+        Assert.False(keys.IsRotationRequired());
+
         keys.DestroyAll();
         Assert.Null(keys.TryGetCurrent());
+        Assert.False(keys.IsRotationRequired());
     }
 
     private static SessionTurnInput NewTurn(byte[] request, byte[] response) => new(
@@ -473,9 +573,13 @@ public sealed class SessionStoreTests : IDisposable
     {
         private byte[]? _current;
         private byte[]? _next;
+        private bool _rotationRequired;
 
         /// <summary>Gets or sets whether the next <see cref="PromoteNext"/> throws once, as a locked secret store would.</summary>
         public bool FailNextPromote { get; set; }
+
+        /// <summary>Gets or sets whether the next <see cref="StageNext"/> throws once, as a locked secret store would.</summary>
+        public bool FailNextStage { get; set; }
 
         /// <inheritdoc/>
         public byte[] GetOrCreateCurrent() => (byte[])(_current ??= SessionKeyMaterial.CreateMasterKey()).Clone();
@@ -487,7 +591,16 @@ public sealed class SessionStoreTests : IDisposable
         public byte[]? TryGetNext() => (byte[]?)_next?.Clone();
 
         /// <inheritdoc/>
-        public void StageNext(byte[] nextKey) => _next = (byte[])nextKey.Clone();
+        public void StageNext(byte[] nextKey)
+        {
+            if (FailNextStage)
+            {
+                FailNextStage = false;
+                throw new IOException("The secret store is locked.");
+            }
+
+            _next = (byte[])nextKey.Clone();
+        }
 
         /// <inheritdoc/>
         public void PromoteNext()
@@ -507,10 +620,20 @@ public sealed class SessionStoreTests : IDisposable
         public void DiscardNext() => _next = null;
 
         /// <inheritdoc/>
+        public void RequireRotation() => _rotationRequired = true;
+
+        /// <inheritdoc/>
+        public bool IsRotationRequired() => _rotationRequired;
+
+        /// <inheritdoc/>
+        public void ClearRotationRequired() => _rotationRequired = false;
+
+        /// <inheritdoc/>
         public void DestroyAll()
         {
             _current = null;
             _next = null;
+            _rotationRequired = false;
         }
     }
 }
