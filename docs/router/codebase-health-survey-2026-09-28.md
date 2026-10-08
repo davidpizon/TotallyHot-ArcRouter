@@ -444,7 +444,7 @@ HS-01 adds its VM install/uninstall/upgrade check.
 | ID | Status | Notes |
 |---|---|---|
 | HS-01 | Done, **not VM-verified** | `UninstallCertificate` now runs `Before="RemoveFiles"` with `REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE`; comment corrected. Installer builds. The install/uninstall/upgrade VM check in the plan is still owed. Outcome logging was not added. |
-| HS-02 | Step 1 done; step 2 **proposed** | `Response.CompleteAsync()` now precedes telemetry. Step 2 (bounded channel writer) is [ADR-0018](../adr/0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md), status `proposed`; no code yet. Client-visible EOF latency was not measured. |
+| HS-02 | Step 1 done; step 2 **accepted**, not yet built | `Response.CompleteAsync()` now precedes telemetry. Step 2 (bounded channel writer) is [ADR-0018](../adr/0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md), accepted 2026-10-08; implementation not yet started. Client-visible EOF latency was not measured. |
 | HS-03 | Done | Failover candidates share the primary's flags and rewrite their body lazily from the primary's serialized snapshot. No allocation benchmark run. |
 | HS-04 | Done | `IsEnabled(Debug)` guards; truncate-before-sanitize; response decode limited to a byte prefix. |
 | HS-05 | **Not done** | Measure-first item; needs the ONNX model and a benchmark harness. |

@@ -1,6 +1,6 @@
 # 0018. Persist request telemetry off the request path via a bounded channel
 
-**Status:** proposed
+**Status:** accepted (accepted by David Pizon on 2026-10-08)
 **Date:** 2026-09-28
 **Deciders:** David Pizon
 
