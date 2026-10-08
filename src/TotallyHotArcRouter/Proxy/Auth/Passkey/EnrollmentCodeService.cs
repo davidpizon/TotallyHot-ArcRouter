@@ -71,10 +71,12 @@ public sealed class EnrollmentCodeService
 
     /// <summary>
     /// Validates <paramref name="code"/> in constant time against the stored hash when still within TTL
-    /// and under the failure budget.
+    /// and under the failure budget, and spends it in the same critical section: two concurrent requests
+    /// cannot both succeed with one code, and a code minted meanwhile is never deleted by a late
+    /// invalidation.
     /// </summary>
-    /// <returns><see langword="true"/> when the code matches and remains valid.</returns>
-    public bool TryValidate(string code)
+    /// <returns><see langword="true"/> when the code matched and has now been consumed.</returns>
+    public bool TryConsume(string code)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         var normalized = PasskeyEncoding.NormalizeEnrollmentCode(code);
@@ -94,7 +96,11 @@ public sealed class EnrollmentCodeService
             var match = storedHash.Length == presentedHash.Length &&
                         CryptographicOperations.FixedTimeEquals(storedHash, presentedHash);
 
-            if (match) return true;
+            if (match)
+            {
+                _writer.Delete(name: StoreKey);
+                return true;
+            }
 
             payload = payload with { Failures = payload.Failures + 1 };
             if (payload.Failures >= MaxFailures)

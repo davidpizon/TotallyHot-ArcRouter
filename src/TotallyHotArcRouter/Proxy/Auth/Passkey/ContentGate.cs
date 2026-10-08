@@ -102,6 +102,11 @@ public sealed class ContentGate
         ArgumentNullException.ThrowIfNull(context);
         grantToken = GetHeader(context, ContentGrantHeaderName);
         if (string.IsNullOrWhiteSpace(grantToken)) return false;
+
+        // Same closed-until-enrolled boundary as RequireContentGrant: once the last passkey is revoked or the
+        // store becomes unprotected, outstanding grants stop working at once instead of at expiry.
+        if (!StoreProtected || !HasPasskeys()) return false;
+
         return _contentGrants.IsValid(grantToken);
     }
 

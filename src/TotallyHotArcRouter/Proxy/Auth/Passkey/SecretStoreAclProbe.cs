@@ -46,7 +46,7 @@ public sealed class SecretStoreAclProbe
         var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
 
         var rules = new FileInfo(secretsPath).GetAccessControl()
-            .GetAccessRules(includeExplicit: true, includeInherited: false, targetType: typeof(SecurityIdentifier))
+            .GetAccessRules(includeExplicit: true, includeInherited: true, targetType: typeof(SecurityIdentifier))
             .Cast<FileSystemAccessRule>()
             .ToList();
 

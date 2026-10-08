@@ -96,7 +96,40 @@ public static class EnrollmentCliCommand
             direction: PipeDirection.InOut,
             options: PipeOptions.Asynchronous);
         client.Connect(timeout: 5000);
+        // ADR-0020: never send anything to a pipe server that is not the router service. The name is
+        // predictable, so an unelevated process could have created it first.
+        VerifyWindowsPipeServer(client);
         return ExchangeLine(client, requestJson);
+    }
+
+    /// <summary>
+    /// Throws <see cref="IOException"/> unless the process serving <paramref name="client"/> is this same
+    /// executable running in session 0, where only services run: an unelevated user's squatting process
+    /// lives in an interactive session, and a copy of the binary elsewhere has a different image path.
+    /// </summary>
+    private static void VerifyWindowsPipeServer(NamedPipeClientStream client)
+    {
+        if (!NativeMethods.GetNamedPipeServerProcessId(client.SafePipeHandle, out var serverPid))
+            throw new IOException("Could not identify the enrollment pipe's server process.");
+
+        using var server = System.Diagnostics.Process.GetProcessById((int)serverPid);
+        var serverPath = server.MainModule?.FileName;
+        var ownPath = Environment.ProcessPath;
+        if (server.SessionId != 0 ||
+            serverPath is null ||
+            !string.Equals(Path.GetFullPath(serverPath), Path.GetFullPath(ownPath ?? string.Empty),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException("The enrollment pipe is not served by the router service; refusing to send.");
+        }
+    }
+
+    private static class NativeMethods
+    {
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        internal static extern bool GetNamedPipeServerProcessId(
+            Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint serverProcessId);
     }
 
     private static string SendUnix(string requestJson)
@@ -110,11 +143,12 @@ public static class EnrollmentCliCommand
 
     private static string ExchangeLine(Stream stream, string requestJson)
     {
-        using var writer = new StreamWriter(stream, Encoding.UTF8, bufferSize: 4096, leaveOpen: true)
+        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        using var writer = new StreamWriter(stream, utf8, bufferSize: 4096, leaveOpen: true)
         {
             AutoFlush = true,
         };
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+        using var reader = new StreamReader(stream, utf8, detectEncodingFromByteOrderMarks: false,
             bufferSize: 4096, leaveOpen: true);
         writer.WriteLine(requestJson);
         return reader.ReadLine() ?? throw new IOException("Enrollment channel closed without a response.");

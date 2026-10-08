@@ -80,7 +80,7 @@ public sealed class ElevatedEnrollmentChannel : BackgroundService
             direction: PipeDirection.InOut,
             maxNumberOfServerInstances: 1,
             transmissionMode: PipeTransmissionMode.Byte,
-            options: PipeOptions.Asynchronous,
+            options: PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance,
             inBufferSize: 4096,
             outBufferSize: 4096,
             pipeSecurity: security);
@@ -112,9 +112,12 @@ public sealed class ElevatedEnrollmentChannel : BackgroundService
 
     private async Task HandleConnectionAsync(Stream stream, CancellationToken stoppingToken)
     {
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+        // BOM-free UTF-8 on both sides: the client reads with BOM detection off and hands the line to a JSON
+        // parser, which rejects a leading BOM.
+        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        using var reader = new StreamReader(stream, utf8, detectEncodingFromByteOrderMarks: false,
             bufferSize: 4096, leaveOpen: true);
-        await using var writer = new StreamWriter(stream, Encoding.UTF8, bufferSize: 4096, leaveOpen: true)
+        await using var writer = new StreamWriter(stream, utf8, bufferSize: 4096, leaveOpen: true)
         {
             AutoFlush = true,
         };

@@ -31,6 +31,10 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
 
     private ContentGrantStore? _contentGrant;
 
+    // Serializes publishing a load's result with clearing, so a load that finishes after a lock cannot put
+    // text back.
+    private readonly object _publishGate = new();
+
     /// <summary>
     /// Initializes a new instance of the <see cref="PersistedSessionStore"/> class, over the shared
     /// <see cref="IRouterChannelProvider"/> every admin client and store talks through (web GUI
@@ -124,6 +128,7 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
             async ct =>
             {
                 PersistedSessionsResult result;
+                var grantAtStart = _contentGrant?.Token;
                 try
                 {
                     result = await Client.ListAsync(limit: RequestLimit, cancellationToken: ct)
@@ -138,13 +143,24 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
                     throw;
                 }
 
-                TranscriptCaptureEnabled = result.TranscriptCaptureEnabled;
-                HasMore = result.HasMore;
-                LoadedTurnCount = result.Transcripts.Count;
-                Sessions =
-                [
-                    .. PersistedSessionAggregator.Aggregate(result.Transcripts).Select(PersistedSessionMapper.ToModel)
-                ];
+                lock (_publishGate)
+                {
+                    // The grant this request was sent under was cleared or replaced while it was in flight:
+                    // its text-bearing response is stale and must not be shown while the dashboard is locked.
+                    if (_contentGrant is not null &&
+                        !string.Equals(_contentGrant.Token, grantAtStart, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    TranscriptCaptureEnabled = result.TranscriptCaptureEnabled;
+                    HasMore = result.HasMore;
+                    LoadedTurnCount = result.Transcripts.Count;
+                    Sessions =
+                    [
+                        .. PersistedSessionAggregator.Aggregate(result.Transcripts).Select(PersistedSessionMapper.ToModel)
+                    ];
+                }
             },
             "load persisted sessions",
             cancellationToken).ConfigureAwait(false);
@@ -162,13 +178,17 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
     /// </summary>
     public void ClearConversationText()
     {
-        Sessions =
-        [
-            .. Sessions.Select(session => session with
-            {
-                Turns = [.. session.Turns.Select(turn => turn with { RequestSummary = null, ResponseSummary = null })]
-            })
-        ];
+        lock (_publishGate)
+        {
+            Sessions =
+            [
+                .. Sessions.Select(session => session with
+                {
+                    Turns = [.. session.Turns.Select(turn => turn with { RequestSummary = null, ResponseSummary = null })]
+                })
+            ];
+        }
+
         NotifyChanged();
     }
 

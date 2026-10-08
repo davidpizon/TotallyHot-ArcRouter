@@ -111,7 +111,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
             if (string.IsNullOrWhiteSpace(request.EnrollmentCode))
                 throw new RpcException(new Status(StatusCode.InvalidArgument, "An enrollment code is required."));
 
-            if (!_enrollmentCodes.TryValidate(request.EnrollmentCode))
+            if (!_enrollmentCodes.TryConsume(request.EnrollmentCode))
             {
                 _approvalLog.Record("enroll", string.Empty, _timeProvider.GetUtcNow(), OutcomeFailed);
                 _logger.LogWarning("Passkey enrollment refused: the enrollment code was invalid or expired");
@@ -119,8 +119,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
                     "The enrollment code is invalid or has expired."));
             }
 
-            // Single use: spent as soon as it opens a ceremony, so one code cannot enroll twice.
-            _enrollmentCodes.Invalidate();
+            // Single use: TryConsume spent the code atomically, so one code cannot enroll twice.
             return new Contract.WebAuthnOptionsResponse { OptionsJson = _ceremonies.BeginRegistration() };
         });
     }

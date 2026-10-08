@@ -430,6 +430,10 @@ public sealed class LiveDataStore : IAsyncDisposable
     private void OnGrantCleared()
     {
         ClearConversationText();
+
+        // Log lines can carry conversation text while unlocked and the DTO does not mark which ones do, so a
+        // lock discards the whole buffer rather than leaving prompts visible and copyable in the Console tab.
+        ClearLogLines();
     }
 
     /// <summary>
