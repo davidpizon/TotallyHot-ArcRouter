@@ -45,7 +45,7 @@ public static class SessionKeyMaterial
     public static byte[] WrapSessionKey(ReadOnlySpan<byte> masterKey, ReadOnlySpan<byte> sessionKey)
     {
         ValidateKeyLength(masterKey, nameof(masterKey));
-        ValidateKeyLength(sessionKey, nameof(sessionKey));
+        ValidateKeyLength(sessionKey);
 
         var nonce = new byte[NonceLengthBytes];
         RandomNumberGenerator.Fill(nonce);

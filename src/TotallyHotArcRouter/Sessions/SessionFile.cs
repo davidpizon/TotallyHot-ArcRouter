@@ -141,7 +141,6 @@ public sealed class SessionFile : IDisposable
     /// <param name="archiveTurnId">The turn's stable archive id.</param>
     public void AppendBody(uint turnSequence, SessionBodyKind kind, ReadOnlySpan<byte> plaintext, Guid archiveTurnId)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         ValidateKind(kind);
 
         Span<byte> header = stackalloc byte[FrameHeaderLength];

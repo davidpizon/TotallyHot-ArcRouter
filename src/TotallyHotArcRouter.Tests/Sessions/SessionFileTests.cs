@@ -21,24 +21,33 @@ public sealed class SessionFileTests
             var archiveSessionId = SessionArchiveIds.NewArchiveSessionId();
             var archiveTurnId = SessionArchiveIds.NewArchiveTurnId();
             var sessionKey = SessionKeyMaterial.CreateSessionKey();
-            var request = Encoding.UTF8.GetBytes("""{"messages":[{"role":"user","content":"hello"}]}""");
-            var response = Encoding.UTF8.GetBytes("""{"content":[{"type":"text","text":"hi"}]}""");
+            var request = """{"messages":[{"role":"user","content":"hello"}]}"""u8.ToArray();
+            var response = """{"content":[{"type":"text","text":"hi"}]}"""u8.ToArray();
+            var providerRequest = """{"model":"translated"}"""u8.ToArray();
+            var providerResponse = """{"candidates":[]}"""u8.ToArray();
 
             using (var file = SessionFile.Create(path, archiveSessionId, (byte[])sessionKey.Clone()))
             {
                 file.AppendBody(0, SessionBodyKind.ClientRequest, request, archiveTurnId);
                 file.AppendBody(0, SessionBodyKind.ClientResponse, response, archiveTurnId);
+                file.AppendBody(0, SessionBodyKind.ProviderRequest, providerRequest, archiveTurnId);
+                file.AppendBody(0, SessionBodyKind.ProviderResponse, providerResponse, archiveTurnId);
             }
 
             using var reopened = SessionFile.Open(path, sessionKey, archiveSessionId);
             var frames = reopened.ReadAllBodies();
 
-            Assert.Equal(2, frames.Count);
+            Assert.Equal(4, frames.Count);
             Assert.Equal(request, frames[0].Plaintext);
             Assert.Equal(response, frames[1].Plaintext);
+            Assert.Equal(providerRequest, frames[2].Plaintext);
+            Assert.Equal(providerResponse, frames[3].Plaintext);
             Assert.Equal(archiveTurnId, frames[0].ArchiveTurnId);
             Assert.Equal(SessionBodyKind.ClientRequest, frames[0].Kind);
             Assert.Equal(SessionBodyKind.ClientResponse, frames[1].Kind);
+            Assert.Equal(SessionBodyKind.ProviderRequest, frames[2].Kind);
+            Assert.Equal(SessionBodyKind.ProviderResponse, frames[3].Kind);
+            Assert.Equal(archiveSessionId, reopened.ArchiveSessionId);
         }
         finally
         {
@@ -111,6 +120,9 @@ public sealed class SessionFileTests
     {
         var master = SessionKeyMaterial.CreateMasterKey();
         var session = SessionKeyMaterial.CreateSessionKey();
+
+        Assert.Equal(SessionKeyMaterial.KeyLengthBytes, session.Length);
+        Assert.Equal(SessionKeyMaterial.KeyLengthBytes, master.Length);
 
         var wrapped = SessionKeyMaterial.WrapSessionKey(master, session);
         var unwrapped = SessionKeyMaterial.UnwrapSessionKey(master, wrapped);
@@ -194,7 +206,7 @@ public sealed class SessionFileTests
             File.WriteAllBytes(path, bytes);
 
             using var reopened = SessionFile.Open(path, sessionKey);
-            Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(() => reopened.ReadAllBodies());
+            Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(reopened.ReadAllBodies);
         }
         finally
         {
