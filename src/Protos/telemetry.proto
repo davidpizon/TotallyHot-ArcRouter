@@ -504,12 +504,133 @@ service ManagementTokenAdminService {
   rpc RegenerateManagementToken (RegenerateManagementTokenRequest) returns (ManagementTokenResponse);
 }
 
-message GetManagementTokenRequest {}
+message GetManagementTokenRequest {
+  // One-operation passkey authorization token (ADR-0020) from PasskeyAdminService.FinishOneOperation,
+  // bound to get_management_token. Optional on the wire; the router refuses the call without a valid one.
+  optional string authorization_token = 1;
+}
 
-message RegenerateManagementTokenRequest {}
+message RegenerateManagementTokenRequest {
+  // One-operation passkey authorization token bound to regenerate_management_token (ADR-0020).
+  optional string authorization_token = 1;
+}
 
 message ManagementTokenResponse {
   string token = 1;
+}
+
+// Passkey content gate (ADR-0020, #185): WebAuthn enrollment, content unlock (a short-lived grant carried in
+// the x-content-grant header), and one-operation authorizations for gated actions such as copying or
+// rotating the management token. Mapped alongside ManagementTokenAdminService, only when a management token
+// provider is configured.
+service PasskeyAdminService {
+  rpc GetPasskeyGateStatus (GetPasskeyGateStatusRequest) returns (PasskeyGateStatusResponse);
+  rpc ListPasskeys (ListPasskeysRequest) returns (ListPasskeysResponse);
+  rpc BeginEnrollment (BeginEnrollmentRequest) returns (WebAuthnOptionsResponse);
+  rpc FinishEnrollment (FinishEnrollmentRequest) returns (PasskeyCredentialResponse);
+  rpc BeginContentUnlock (BeginContentUnlockRequest) returns (WebAuthnOptionsResponse);
+  rpc FinishContentUnlock (FinishContentUnlockRequest) returns (ContentGrantResponse);
+  rpc BeginOneOperation (BeginOneOperationRequest) returns (WebAuthnOptionsResponse);
+  rpc FinishOneOperation (FinishOneOperationRequest) returns (OneOperationAuthorizationResponse);
+  rpc LockContent (LockContentRequest) returns (LockContentResponse);
+  rpc ListRecentApprovals (ListRecentApprovalsRequest) returns (ListRecentApprovalsResponse);
+}
+
+message GetPasskeyGateStatusRequest {}
+
+message PasskeyGateStatusResponse {
+  // The secret store ACL probe passed at the last refresh.
+  bool store_protected = 1;
+  // At least one passkey is enrolled.
+  bool enrolled = 2;
+  // The calling request carried a valid x-content-grant header.
+  bool grant_active = 3;
+  // Reserved for grant expiry reporting; absent when the router cannot attribute an expiry to the header.
+  optional google.protobuf.Timestamp grant_expires_at_utc = 4;
+  // The elevated-shell command that mints an enrollment code.
+  string enrollment_command_hint = 5;
+}
+
+message ListPasskeysRequest {}
+
+message PasskeyCredentialInfo {
+  // Credential id, base64url.
+  string id = 1;
+  string name = 2;
+  google.protobuf.Timestamp created_at_utc = 3;
+  bool backup_eligible = 4;
+  bool backup_state = 5;
+}
+
+message ListPasskeysResponse {
+  repeated PasskeyCredentialInfo credentials = 1;
+}
+
+message BeginEnrollmentRequest {
+  // The code minted by the elevated enrollment command.
+  string enrollment_code = 1;
+}
+
+message FinishEnrollmentRequest {
+  // Browser attestation response JSON.
+  string attestation_json = 1;
+  // Operator-chosen credential name.
+  string name = 2;
+}
+
+message PasskeyCredentialResponse {
+  PasskeyCredentialInfo credential = 1;
+}
+
+message WebAuthnOptionsResponse {
+  // WebAuthn create or get options JSON for navigator.credentials.
+  string options_json = 1;
+}
+
+message BeginContentUnlockRequest {}
+
+message FinishContentUnlockRequest {
+  string assertion_json = 1;
+}
+
+message ContentGrantResponse {
+  // Bearer token for the x-content-grant header.
+  string grant_token = 1;
+  google.protobuf.Timestamp expires_at_utc = 2;
+}
+
+message BeginOneOperationRequest {
+  // A GatedOperation constant, for example get_management_token.
+  string operation = 1;
+  string parameters = 2;
+}
+
+message FinishOneOperationRequest {
+  string assertion_json = 1;
+  string operation = 2;
+  string parameters = 3;
+}
+
+message OneOperationAuthorizationResponse {
+  string authorization_token = 1;
+  google.protobuf.Timestamp expires_at_utc = 2;
+}
+
+message LockContentRequest {}
+
+message LockContentResponse {}
+
+message ListRecentApprovalsRequest {}
+
+message PasskeyApproval {
+  string operation = 1;
+  string credential_name = 2;
+  google.protobuf.Timestamp at_utc = 3;
+  string outcome = 4;
+}
+
+message ListRecentApprovalsResponse {
+  repeated PasskeyApproval approvals = 1;
 }
 
 // The Governance UI's System Settings window's "Adaptive Routing", "Shadow Judge", and "Transcription
@@ -992,6 +1113,8 @@ message LogLineEvent {
   google.protobuf.Timestamp timestamp_utc = 1;
   string level = 2;
   string message = 3;
+  // The line carries opt-in conversation-body text (ADR-0020); streams without a content grant never see it.
+  bool content_bearing = 4;
 }
 
 // Field names map 1:1 onto TotallyHot.ArcRouter.Telemetry.QualitySignalEvent's C# properties, same convention

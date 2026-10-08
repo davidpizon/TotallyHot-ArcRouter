@@ -10,6 +10,8 @@ using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Storage;
@@ -145,6 +147,16 @@ public static class Program
             if (printManagementToken)
             {
                 RunPrintManagementToken();
+                return;
+            }
+
+            // ADR-0020 (#185): mints a passkey enrollment code or revokes a credential through the running
+            // router's elevated enrollment channel. Host-independent like the flags above - it only talks
+            // to the channel, so no host is built and the data directory is never touched here.
+            var enrollmentExitCode = EnrollmentCliCommand.TryRun(remainingArgs);
+            if (enrollmentExitCode is { } exitCode)
+            {
+                Environment.ExitCode = exitCode;
                 return;
             }
 
@@ -497,14 +509,29 @@ public static class Program
     /// migration plan Phase P9). Loads (creating, or importing from the legacy plaintext file, if
     /// necessary) via <see cref="Proxy.Management.ManagementAccessToken.GetOrCreate"/> exactly as the
     /// running router's own <see cref="Proxy.Management.ManagementTokenProvider"/> would, so this always
-    /// prints the same token an already-running instance is actually enforcing.
+    /// prints the same token an already-running instance is actually enforcing. ADR-0020 / #185 gates
+    /// disclosure behind passkey verification; this CLI path refuses and sends the operator to the
+    /// dashboard until a native ceremony is available (see <see cref="Proxy.Auth.Passkey.PrintManagementTokenGate"/>).
     /// </summary>
     private static void RunPrintManagementToken()
     {
         try
         {
             EnsureServiceDataDirectory();
-            var token = Proxy.Management.ManagementAccessToken.GetOrCreate();
+            var store = new ProtectedSecretStore();
+            var credentials = new PasskeyCredentialStore(store);
+            var aclProbe = new SecretStoreAclProbe();
+            var refusal = PrintManagementTokenGate.TryGetRefusalMessage(
+                credentialStore: credentials,
+                storeProtected: aclProbe.Check(ProtectedSecretStore.DefaultPath()));
+            if (refusal is not null)
+            {
+                Console.Error.WriteLine(refusal);
+                Environment.ExitCode = 2;
+                return;
+            }
+
+            var token = ManagementAccessToken.GetOrCreate();
             Console.WriteLine(token);
         }
         catch (Exception ex)

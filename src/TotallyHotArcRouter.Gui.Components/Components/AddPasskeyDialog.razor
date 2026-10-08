@@ -1,0 +1,102 @@
+@* Enrolls a passkey (ADR-0020). The operator pastes the single-use enrollment code that an elevated shell
+   minted, names the passkey, and the browser creates the credential (user verification required). The code
+   is the proof of elevation: every local process can reach the router's gRPC surface, but only an
+   administrator can mint a code, so nobody else can add a passkey. Follows the SettingsModal shell
+   (docs/gui/DESIGN.md 4.1). *@
+@inject PasskeyAdminStore PasskeyStore
+<DialogShell Title="Add Passkey" CloseAriaLabel="Close add passkey dialog" OnClose="OnCancel" EnableEscapeToClose="true">
+    <p class="text-xs text-slate-400 leading-5">
+        From an elevated shell, run
+        <span class="font-mono text-slate-200">@PasskeyStore.EnrollmentCommandHint</span>
+        and paste the code it prints. The code works once and expires after a few minutes.
+    </p>
+
+    <div class="space-y-2">
+        <label for="passkey-enrollment-code" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+            Enrollment code
+        </label>
+        <input id="passkey-enrollment-code"
+               type="text"
+               autocomplete="off"
+               spellcheck="false"
+               value="@_code"
+               @oninput="e => _code = (string?)e.Value ?? string.Empty"
+               disabled="@_busy"
+               data-testid="add-passkey-code"
+               class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+    </div>
+
+    <div class="space-y-2">
+        <label for="passkey-name" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+            Name
+        </label>
+        <input id="passkey-name"
+               type="text"
+               placeholder="Windows Hello"
+               value="@_name"
+               @oninput="e => _name = (string?)e.Value ?? string.Empty"
+               disabled="@_busy"
+               data-testid="add-passkey-name"
+               class="w-full px-3 py-2 text-sm ds-input"/>
+    </div>
+
+    @if (_errorMessage is not null)
+    {
+        <p class="text-xs text-red-400" role="alert" data-testid="add-passkey-error">@_errorMessage</p>
+    }
+
+    <div class="flex gap-2">
+        <button @onclick="OnCancel" class="flex-1 btn btn-ghost" data-testid="add-passkey-cancel">
+            Cancel
+        </button>
+        <button @onclick="EnrollAsync"
+                disabled="@(_busy || string.IsNullOrWhiteSpace(_code))"
+                class="flex-1 btn btn-primary"
+                data-testid="add-passkey-confirm">
+            @(_busy ? "Waiting for passkey…" : "Add passkey")
+        </button>
+    </div>
+</DialogShell>
+
+@code {
+
+    /// <summary>Invoked when the dialog should close without enrolling - backdrop, the X, Cancel, or Escape.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>Invoked after the passkey is enrolled; the caller closes the dialog.</summary>
+    [Parameter]
+    public EventCallback OnEnrolled { get; set; }
+
+    private string _code = string.Empty;
+    private string _name = string.Empty;
+    private bool _busy;
+    private string? _errorMessage;
+
+    /// <summary>
+    /// Runs the registration ceremony. A rejected code, a dismissed browser prompt, or a failed verification is
+    /// shown inline and leaves the dialog open; the code is spent as soon as the router accepts it, so a retry
+    /// after a browser failure needs a fresh code.
+    /// </summary>
+    private async Task EnrollAsync()
+    {
+        _busy = true;
+        _errorMessage = null;
+        try
+        {
+            await PasskeyStore.EnrollAsync(enrollmentCode: _code, name: _name);
+        }
+        catch (Exception ex) when (ex is GrpcAdminException or WebAuthnCeremonyException)
+        {
+            _errorMessage = ex.Message;
+            return;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await OnEnrolled.InvokeAsync();
+    }
+
+}

@@ -1,0 +1,76 @@
+@* Unlocks conversation text with a passkey (ADR-0020). The router withholds every prompt and response until
+   the operator verifies with a WebAuthn passkey (biometrics or PIN - user verification is required, so
+   merely touching a key is not enough); the grant it issues lives in memory only and lapses on its own,
+   on Lock, or on a router restart. Follows the SettingsModal shell (docs/gui/DESIGN.md 4.1). *@
+@inject PasskeyAdminStore PasskeyStore
+<DialogShell Title="Unlock Conversations" CloseAriaLabel="Close unlock conversations dialog" OnClose="OnCancel" EnableEscapeToClose="true">
+    <p class="text-xs text-slate-400 leading-5">
+        Prompt and response text is hidden until you verify with a passkey. Unlocking is temporary: the
+        text is cleared again when you lock it, when the unlock expires, or when the router restarts.
+    </p>
+
+    @if (!PasskeyStore.IsEnrolled)
+    {
+        <p class="text-xs text-amber-400 leading-5" data-testid="unlock-enrollment-hint">
+            No passkey is enrolled yet. Run <span class="font-mono text-slate-200">@PasskeyStore.EnrollmentCommandHint</span>
+            from an elevated shell, then add a passkey in Settings.
+        </p>
+    }
+
+    @if (_errorMessage is not null)
+    {
+        <p class="text-xs text-red-400" role="alert" data-testid="unlock-error">@_errorMessage</p>
+    }
+
+    <div class="flex gap-2">
+        <button @onclick="OnCancel" class="flex-1 btn btn-ghost" data-testid="unlock-cancel">
+            Cancel
+        </button>
+        <button @onclick="UnlockAsync"
+                disabled="@(_busy || !PasskeyStore.IsEnrolled)"
+                class="flex-1 btn btn-primary"
+                data-testid="unlock-confirm">
+            @(_busy ? "Waiting for passkey…" : "Unlock with passkey")
+        </button>
+    </div>
+</DialogShell>
+
+@code {
+
+    /// <summary>Invoked when the dialog should close without unlocking - backdrop, the X, Cancel, or Escape.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>Invoked after a successful unlock, once the grant is held; the caller closes the dialog.</summary>
+    [Parameter]
+    public EventCallback OnUnlocked { get; set; }
+
+    private bool _busy;
+    private string? _errorMessage;
+
+    /// <summary>
+    /// Runs the unlock ceremony. A dismissed browser prompt or a router refusal is shown inline and leaves
+    /// the dialog open so the operator can retry; nothing is held until the router has issued a grant.
+    /// </summary>
+    private async Task UnlockAsync()
+    {
+        _busy = true;
+        _errorMessage = null;
+        try
+        {
+            await PasskeyStore.UnlockContentAsync();
+        }
+        catch (Exception ex) when (ex is GrpcAdminException or WebAuthnCeremonyException)
+        {
+            _errorMessage = ex.Message;
+            return;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await OnUnlocked.InvokeAsync();
+    }
+
+}

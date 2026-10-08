@@ -4,6 +4,9 @@
 @inject PersistedSessionStore PersistedSessionStore
 @inject ProviderAdminStore ProviderStore
 @inject UsageStore UsageStore
+@inject PasskeyAdminStore PasskeyStore
+@inject ContentGrantStore ContentGrant
+@inject ToastService Toasts
 
 <div class="flex flex-col h-screen overflow-hidden ds-surface-base">
     @* ── HEADER ── *@
@@ -103,7 +106,15 @@
             @switch (_activeTab)
             {
                 case Tab.Live:
-                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" HistoryNotice="@PersistedSessionStore.HistoryNotice"/>
+                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" HistoryNotice="@PersistedSessionStore.HistoryNotice"
+                                ShowContentGate="true"
+                                ContentLocked="@(!ContentGrant.IsActive)"
+                                ShowEnrollmentHint="@(PasskeyStore.GateStatus is { Enrolled: false })"
+                                EnrollmentCommandHint="@PasskeyStore.EnrollmentCommandHint"
+                                ContentExpiresAtUtc="@ContentGrant.ExpiresAtUtc"
+                                OnUnlockRequested="() => _showUnlock = true"
+                                OnAddPasskeyRequested="() => _showAddPasskey = true"
+                                OnLockRequested="LockContentAsync"/>
                     break;
                 case Tab.Analytics:
                     <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId"/>
@@ -131,6 +142,16 @@
     @if (_showSettings)
     {
         <SettingsModal OnClose="() => _showSettings = false"/>
+    }
+
+    @* ── PASSKEY CONTENT GATE (ADR-0020) ── *@
+    @if (_showUnlock)
+    {
+        <UnlockContentDialog OnCancel="() => _showUnlock = false" OnUnlocked="() => _showUnlock = false"/>
+    }
+    @if (_showAddPasskey)
+    {
+        <AddPasskeyDialog OnCancel="() => _showAddPasskey = false" OnEnrolled="() => _showAddPasskey = false"/>
     }
 </div>
 
@@ -162,6 +183,8 @@
     // until a conversation arrives, so an empty starting id is correct rather than a mock fallback.
     private string _selectedConversationId = string.Empty;
     private bool _showSettings;
+    private bool _showUnlock;
+    private bool _showAddPasskey;
 
     // Provider keys whose monthly budget is breached / approaching (>=80%), derived from real budget state
     // published by ProviderAdminStore. Kept as lists so the banner markup's `.Count` reads unchanged.
@@ -179,7 +202,14 @@
         LiveDataStore.Changed += HandleLiveDataChanged;
         PersistedSessionStore.Changed += HandlePersistedSessionsChanged;
         ProviderStore.Changed += HandleProvidersChanged;
+        PasskeyStore.Changed += HandlePasskeyGateChanged;
+        ContentGrant.Changed += HandlePasskeyGateChanged;
         await LiveDataStore.StartAsync();
+
+        // Best-effort: tells the Sessions tab whether to offer Unlock or the enrollment hint. A failure is
+        // swallowed into the store's reachability state; the strip then simply offers Unlock, and the router's
+        // own refusal explains what is missing if the operator tries.
+        await PasskeyStore.RefreshAsync();
 
         // Best-effort: populates the Sessions tab's persisted history. Failures are swallowed by the
         // store (surfaced via its IsReachable flag), so the tab simply shows only live sessions when the
@@ -306,6 +336,34 @@
         LiveDataStore.Changed -= HandleLiveDataChanged;
         PersistedSessionStore.Changed -= HandlePersistedSessionsChanged;
         ProviderStore.Changed -= HandleProvidersChanged;
+        PasskeyStore.Changed -= HandlePasskeyGateChanged;
+        ContentGrant.Changed -= HandlePasskeyGateChanged;
+    }
+
+    // ContentGrantStore raises Changed from the thread that set or cleared the grant - for the expiry timer, a
+    // thread-pool thread - and PasskeyAdminStore from whichever thread its call completed on.
+    /// <summary>Re-renders the Sessions tab's lock/unlock strip when the passkey gate state or the grant changes.</summary>
+    private void HandlePasskeyGateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Locks conversation text: <see cref="PasskeyAdminStore.LockAsync"/> clears the local grant and every
+    /// cached prompt and response first, then asks the router to revoke. An unreachable router is reported but
+    /// the dashboard stays locked either way.
+    /// </summary>
+    private async Task LockContentAsync()
+    {
+        try
+        {
+            await PasskeyStore.LockAsync();
+        }
+        catch (GrpcAdminException ex)
+        {
+            Toasts.ShowError(title: "Locked on this dashboard only",
+                message: $"The router could not be told to revoke the unlock, so it lapses on its own. {ex.Message}");
+        }
     }
 
     // Clicking the alert banner jumps to the Governance tab's Providers view, where each over-budget

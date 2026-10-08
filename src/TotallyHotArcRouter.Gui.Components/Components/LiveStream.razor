@@ -27,6 +27,17 @@
     {
         <p class="shrink-0 mb-2 text-xs text-slate-500 ls-history-notice" role="status">@HistoryNotice</p>
     }
+    @if (ShowContentGate)
+    {
+        @* ADR-0020: prompt/response text is withheld until a passkey unlock; the strip is the unlock/lock control. *@
+        <ContentGateBar Locked="ContentLocked"
+                        ShowEnrollmentHint="ShowEnrollmentHint"
+                        EnrollmentCommandHint="@EnrollmentCommandHint"
+                        ExpiresAtUtc="ContentExpiresAtUtc"
+                        OnUnlock="OnUnlockRequested"
+                        OnAddPasskey="OnAddPasskeyRequested"
+                        OnLock="OnLockRequested"/>
+    }
     <div class="relative shrink-0 mb-2">
         <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
         <input type="text"
@@ -71,7 +82,7 @@
 
             @* Right panel: chat-style conversation reproduction *@
             <div class="flex flex-col min-h-0 flex-1 ls-livestream-right-panel">
-                <SessionConversationPane Conversation="opened"/>
+                <SessionConversationPane Conversation="opened" ContentLocked="ShowContentGate && ContentLocked"/>
             </div>
         </div>
     }
@@ -103,6 +114,44 @@
     /// </summary>
     [Parameter]
     public string? HistoryNotice { get; set; }
+
+    /// <summary>
+    /// Whether this host has the passkey content gate (ADR-0020) and so shows the lock/unlock strip. Off by
+    /// default so a host without the gate renders exactly as before.
+    /// </summary>
+    [Parameter]
+    public bool ShowContentGate { get; set; }
+
+    /// <summary>Whether conversation text is currently locked (no active content grant). Only read when <see cref="ShowContentGate"/> is set.</summary>
+    [Parameter]
+    public bool ContentLocked { get; set; }
+
+    /// <summary>
+    /// Whether the router has confirmed that no passkey is enrolled, so the strip names the enrollment command
+    /// and offers Add passkey in place of an unlock that cannot succeed.
+    /// </summary>
+    [Parameter]
+    public bool ShowEnrollmentHint { get; set; }
+
+    /// <summary>The elevated-shell command that mints an enrollment code, named in the enrollment hint.</summary>
+    [Parameter]
+    public string EnrollmentCommandHint { get; set; } = PasskeyOperations.EnrollmentCommandFlag;
+
+    /// <summary>When the active unlock lapses, shown while unlocked; <see langword="null"/> shows no time.</summary>
+    [Parameter]
+    public DateTimeOffset? ContentExpiresAtUtc { get; set; }
+
+    /// <summary>Invoked when the operator asks to unlock conversation text with a passkey.</summary>
+    [Parameter]
+    public EventCallback OnUnlockRequested { get; set; }
+
+    /// <summary>Invoked when the operator asks to add the first passkey from the locked strip.</summary>
+    [Parameter]
+    public EventCallback OnAddPasskeyRequested { get; set; }
+
+    /// <summary>Invoked when the operator asks to lock conversation text again.</summary>
+    [Parameter]
+    public EventCallback OnLockRequested { get; set; }
 
     private string _search = string.Empty;
 

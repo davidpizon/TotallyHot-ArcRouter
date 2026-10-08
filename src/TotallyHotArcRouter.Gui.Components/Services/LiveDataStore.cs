@@ -54,6 +54,7 @@ public sealed class LiveDataStore : IAsyncDisposable
     private long _nextSessionOrder;
     private readonly LogBuffer _logBuffer = new();
     private readonly ILogger<LiveDataStore>? _logger;
+    private readonly ContentGrantStore? _contentGrant;
     private readonly string _serverAddress;
     private volatile IReadOnlyList<Conversation> _conversations = [];
 
@@ -76,9 +77,27 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// same OS user on the same machine and there's no CA to issue a "real" certificate for a loopback
     /// address anyway.
     /// </remarks>
-    public LiveDataStore(IRouterChannelProvider channelProvider, ILogger<LiveDataStore>? logger = null)
+    /// <param name="channelProvider">Supplies the shared call invoker the stream is opened over.</param>
+    /// <param name="contentGrant">
+    /// The content grant (ADR-0020), or <see langword="null"/> for a host with no passkey gate. When supplied,
+    /// clearing it drops every cached request and response summary; setting one restarts the stream so the new
+    /// <c>x-content-grant</c> header reaches the router; and a stream that has to reconnect after a failure
+    /// clears it, since a router that dropped the connection may have restarted and lost every grant.
+    /// </param>
+    /// <param name="logger">Optional logger.</param>
+    public LiveDataStore(
+        IRouterChannelProvider channelProvider,
+        ContentGrantStore? contentGrant = null,
+        ILogger<LiveDataStore>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(channelProvider);
+
+        _contentGrant = contentGrant;
+        if (contentGrant is not null)
+        {
+            contentGrant.Cleared += OnGrantCleared;
+            contentGrant.Granted += OnGrantGranted;
+        }
 
         _logger = logger;
         _serverAddress = channelProvider.ServerAddress;
@@ -102,6 +121,12 @@ public sealed class LiveDataStore : IAsyncDisposable
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
+        if (_contentGrant is not null)
+        {
+            _contentGrant.Cleared -= OnGrantCleared;
+            _contentGrant.Granted -= OnGrantGranted;
+        }
+
         if (_streamCts is not null)
         {
             await _streamCts.CancelAsync();
@@ -191,6 +216,11 @@ public sealed class LiveDataStore : IAsyncDisposable
                         ex.GetType().Name,
                         ex.Message,
                         ReconnectDelay.TotalSeconds);
+
+                    // A dropped stream may mean the router restarted, which empties its grant table, so
+                    // nothing here can vouch for the grant any more. Fail closed: forget it (and the text
+                    // it unlocked) before the reconnect, which then goes out without the header.
+                    _contentGrant?.Clear();
                     await Task.Delay(delay: ReconnectDelay, cancellationToken: cancellationToken);
                 }
         }
@@ -363,5 +393,58 @@ public sealed class LiveDataStore : IAsyncDisposable
         }
 
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Zeroes every retained request and response summary while keeping every session and turn's metadata
+    /// (models, tokens, costs, timing), so the Sessions tab keeps listing what happened after the content is
+    /// locked (ADR-0020). Rewrites the retained telemetry events and re-derives each session's view model
+    /// from them under <see cref="_lock"/>, the same way <see cref="OnRoutingTelemetryReceived"/> does, so a
+    /// summary can neither survive in <see cref="Conversations"/> nor be resurrected by the next event for an
+    /// existing session.
+    /// </summary>
+    public void ClearConversationText()
+    {
+        lock (_lock)
+        {
+            foreach (var entry in _sessions.Values)
+            {
+                for (var i = 0; i < entry.Events.Count; i++)
+                    entry.Events[i] = entry.Events[i] with { RequestSummary = null, ResponseSummary = null };
+
+                if (entry.Events.Count == 0) continue;
+
+                entry.Model = LiveConversationMapper.ToModel(ConversationAggregator.Aggregate(entry.Events)[0]);
+            }
+
+            _conversations = [.. _sessions.Values
+                .OrderByDescending(e => e.LastTimestampUtc)
+                .ThenBy(e => e.FirstSeenOrder)
+                .Select(e => e.Model!)];
+        }
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>Drops cached text when the content grant is cleared, whatever cleared it.</summary>
+    private void OnGrantCleared()
+    {
+        ClearConversationText();
+
+        // Log lines can carry conversation text while unlocked and the DTO does not mark which ones do, so a
+        // lock discards the whole buffer rather than leaving prompts visible and copyable in the Console tab.
+        ClearLogLines();
+    }
+
+    /// <summary>
+    /// Starts the stream over when a grant is set: a gRPC stream carries the metadata it was opened with, so
+    /// without a restart it would keep running without the new <c>x-content-grant</c> header and the router
+    /// would keep withholding the text. No-ops before <see cref="StartAsync"/> has been called.
+    /// </summary>
+    private void OnGrantGranted()
+    {
+        if (_streamCts is null) return;
+
+        _ = StartAsync();
     }
 }

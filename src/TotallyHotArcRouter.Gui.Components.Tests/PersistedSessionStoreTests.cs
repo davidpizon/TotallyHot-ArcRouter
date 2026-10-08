@@ -185,6 +185,102 @@ public sealed class PersistedSessionStoreTests
     }
 
     [Fact]
+    public async Task ClearConversationText_erases_prompts_and_responses_but_keeps_metadata()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(true, Transcripts: [CreateTranscript()])
+        };
+        var store = new PersistedSessionStore(client);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+        store.Sessions.Single().Turns.Single().RequestSummary.Should().Be("hello");
+        var changed = 0;
+        store.Changed += () => changed++;
+
+        store.ClearConversationText();
+
+        var session = store.Sessions.Should().ContainSingle().Subject;
+        var turn = session.Turns.Should().ContainSingle().Subject;
+        turn.RequestSummary.Should().BeNull();
+        turn.ResponseSummary.Should().BeNull();
+        turn.PromptTokens.Should().Be(10);
+        turn.Model.Should().Be("kimi-k2.5");
+        changed.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Clearing_the_content_grant_erases_the_persisted_text()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(true, Transcripts: [CreateTranscript()])
+        };
+        var grant = new ContentGrantStore();
+        var store = new PersistedSessionStore(client, grant);
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(5));
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        grant.Clear();
+
+        store.Sessions.Single().Turns.Single().RequestSummary.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Setting_the_content_grant_reloads_the_sessions_so_the_released_text_appears()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(true, Transcripts: [CreateTranscript()])
+        };
+        var grant = new ContentGrantStore();
+        var store = new PersistedSessionStore(client, grant);
+        var loaded = new TaskCompletionSource();
+        store.Changed += () => loaded.TrySetResult();
+
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(5));
+
+        await loaded.Task.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+        store.Sessions.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task A_rejected_grant_on_load_clears_the_grant()
+    {
+        var rpc = new Grpc.Core.RpcException(new Grpc.Core.Status(Grpc.Core.StatusCode.Unauthenticated, "grant expired"));
+        var client = new FakePersistedSessionsClient
+        {
+            Failure = new GrpcAdminException(message: "Could not read persisted sessions: grant expired",
+                innerException: rpc)
+        };
+        var grant = new ContentGrantStore();
+        var store = new PersistedSessionStore(client, grant);
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(5));
+        // SetGrant triggers its own background reload; let it settle before asserting on the explicit one.
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        grant.IsActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_non_authentication_failure_leaves_the_grant_alone()
+    {
+        var client = new FakePersistedSessionsClient
+        {
+            Failure = new GrpcAdminException(message: "router is gone", isUnavailable: true)
+        };
+        var grant = new ContentGrantStore();
+        var store = new PersistedSessionStore(client, grant);
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(5));
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+
+        grant.IsActive.Should().BeTrue("an outage says nothing about the grant");
+    }
+
+    [Fact]
     public void Dispose_OverCallerSuppliedClient_DoesNotDisposeTheClient()
     {
         var client = new FakePersistedSessionsClient();

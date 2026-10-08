@@ -7,6 +7,11 @@
 > **Accepted 2026-09-15**, on completion of the web GUI migration plan's Phases P1-P10: the loopback
 > session-cookie scheme and the encrypted-secret-store-backed management token both shipped and were
 > verified against a real running router (P4, P9).
+>
+> **Content exception (2026-10-07):** [ADR-0020](0020-require-passkey-verification-for-conversation-content.md)
+> narrows this ADR's boundary for conversation text and management-token disclosure. Metadata, routing,
+> providers, prices, and settings stay on the loopback session; reading conversation content and
+> copying/regenerating the management token require passkey user verification.
 
 ## Context and Problem Statement
 

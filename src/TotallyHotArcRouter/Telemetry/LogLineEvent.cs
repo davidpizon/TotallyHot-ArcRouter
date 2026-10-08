@@ -9,4 +9,8 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <param name="TimestampUtc">When the log event was emitted.</param>
 /// <param name="Level">Normalized level: DEBUG, INFO, WARN, ERROR, or FATAL.</param>
 /// <param name="Message">The rendered log message, with Serilog's structured properties substituted in.</param>
-public sealed record LogLineEvent(DateTimeOffset TimestampUtc, string Level, string Message);
+/// <param name="ContentBearing">
+/// Whether the line carries opt-in conversation-body text (#184). <see cref="TelemetryGrpcService"/>
+/// skips such lines for streams without a valid content grant (ADR-0020).
+/// </param>
+public sealed record LogLineEvent(DateTimeOffset TimestampUtc, string Level, string Message, bool ContentBearing = false);

@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Mcp;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
@@ -298,6 +299,41 @@ internal static class ProxyServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<McpOptions>, PortRangeOptionsValidator>();
         services.AddHostedService<McpHostedService>();
 
+        // The passkey content gate (ADR-0020, #185). After McpHostedService on purpose: it is the earliest
+        // service to create secrets.dat, and PasskeyBootstrapHostedService probes that file's ACL.
+        services.AddPasskeyGate();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the passkey content gate (ADR-0020, #185): the credential store and enrollment-code
+    /// service over the shared <see cref="ProtectedSecretStore"/>, the challenge, grant, and one-operation
+    /// tables, the approval log, <see cref="ContentGate"/>, the WebAuthn ceremony service, the elevated
+    /// enrollment channel, and the startup ACL probe. Every one is a singleton the proxy inner host is
+    /// handed by reference through <see cref="PasskeyGateDependencies"/>, so both containers see one gate.
+    /// </summary>
+    private static IServiceCollection AddPasskeyGate(this IServiceCollection services)
+    {
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<IConfiguration>().GetSection(PasskeyOptions.SectionName).Get<PasskeyOptions>()
+            ?? new PasskeyOptions());
+        services.AddSingleton<SecretStoreAclProbe>();
+        services.AddSingleton<IPasskeyCredentialStore>(sp =>
+            new PasskeyCredentialStore(sp.GetRequiredService<ProtectedSecretStore>()));
+        services.AddSingleton(sp => new EnrollmentCodeService(sp.GetRequiredService<ProtectedSecretStore>()));
+        services.AddSingleton<ChallengeStore>();
+        services.AddSingleton<ContentGrantTable>();
+        services.AddSingleton<OneOperationAuthorizationTable>();
+        services.AddSingleton<PasskeyApprovalLog>();
+        services.AddSingleton<ContentGate>();
+        services.AddSingleton<IWebAuthnCeremonyService>(sp => new WebAuthnCeremonyService(
+            webInterfaceOptions: sp.GetRequiredService<IOptions<WebInterfaceOptions>>().Value,
+            challengeStore: sp.GetRequiredService<ChallengeStore>(),
+            credentialStore: sp.GetRequiredService<IPasskeyCredentialStore>()));
+        services.AddHostedService<ElevatedEnrollmentChannel>();
+        services.AddHostedService<PasskeyBootstrapHostedService>();
+
         return services;
     }
 
@@ -354,6 +390,17 @@ internal static class ProxyServiceCollectionExtensions
                     // management surfaces are gated identically out of the box, and a rotation from either
                     // one is visible to both immediately.
                     ManagementTokenProvider = sp.GetRequiredService<IManagementTokenProvider>(),
+                    // The passkey content gate (ADR-0020, #185) - the same singletons the elevated
+                    // enrollment channel and bootstrap service use, so one gate spans both containers.
+                    PasskeyGate = new PasskeyGateDependencies(
+                        ContentGate: sp.GetRequiredService<ContentGate>(),
+                        EnrollmentCodes: sp.GetRequiredService<EnrollmentCodeService>(),
+                        Ceremonies: sp.GetRequiredService<IWebAuthnCeremonyService>(),
+                        ContentGrants: sp.GetRequiredService<ContentGrantTable>(),
+                        OneOperationAuthorizations: sp.GetRequiredService<OneOperationAuthorizationTable>(),
+                        ApprovalLog: sp.GetRequiredService<PasskeyApprovalLog>(),
+                        CredentialStore: sp.GetRequiredService<IPasskeyCredentialStore>(),
+                        Options: sp.GetRequiredService<PasskeyOptions>()),
                     // Routes the inner Kestrel host's own logs (routing, endpoint dispatch, bind
                     // failures) through the same Serilog pipeline (console + file) the rest of the
                     // application uses - see ProxyServerDependencies.SerilogLogger's remarks. Read once

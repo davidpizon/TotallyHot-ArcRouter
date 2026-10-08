@@ -10,13 +10,28 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// </summary>
 public interface IManagementTokenAdminClient
 {
-    /// <summary>Reads the router's current shared management token.</summary>
-    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
-    Task<string> GetTokenAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Reads the router's current shared management token. The router refuses the call unless it carries
+    /// a one-operation passkey authorization for <see cref="PasskeyOperations.GetManagementToken"/> (ADR-0020).
+    /// </summary>
+    /// <param name="authorizationToken">
+    /// The single-use authorization from <see cref="IPasskeyAdminClient.FinishOneOperationAsync"/>.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">The call failed, was not authorized, or the router is unreachable.</exception>
+    Task<string> GetTokenAsync(string authorizationToken, CancellationToken cancellationToken = default);
 
-    /// <summary>Mints and persists a fresh token, returning the confirmed new value.</summary>
-    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
-    Task<string> RegenerateAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Mints and persists a fresh token, returning the confirmed new value. The router refuses the call
+    /// unless it carries a one-operation passkey authorization for
+    /// <see cref="PasskeyOperations.RegenerateManagementToken"/> (ADR-0020).
+    /// </summary>
+    /// <param name="authorizationToken">
+    /// The single-use authorization from <see cref="IPasskeyAdminClient.FinishOneOperationAsync"/>.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">The call failed, was not authorized, or the router is unreachable.</exception>
+    Task<string> RegenerateAsync(string authorizationToken, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -38,13 +53,27 @@ public sealed class ManagementTokenAdminClient
     {
     }
 
-    /// <inheritdoc/>
-    public async Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ManagementTokenAdminClient"/> class over a caller-supplied
+    /// generated client. The seam tests use to substitute a fake without a live server; the caller owns the
+    /// channel's lifetime.
+    /// </summary>
+    /// <param name="client">The generated client to wrap.</param>
+    public ManagementTokenAdminClient(Contract.ManagementTokenAdminService.ManagementTokenAdminServiceClient client)
+        : base(client)
     {
+    }
+
+    /// <inheritdoc/>
+    public async Task<string> GetTokenAsync(string authorizationToken, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(authorizationToken);
+
         try
         {
             var response = await Client
-                .GetManagementTokenAsync(request: new Contract.GetManagementTokenRequest(),
+                .GetManagementTokenAsync(
+                    request: new Contract.GetManagementTokenRequest { AuthorizationToken = authorizationToken },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
@@ -57,12 +86,15 @@ public sealed class ManagementTokenAdminClient
     }
 
     /// <inheritdoc/>
-    public async Task<string> RegenerateAsync(CancellationToken cancellationToken = default)
+    public async Task<string> RegenerateAsync(string authorizationToken, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrEmpty(authorizationToken);
+
         try
         {
             var response = await Client
-                .RegenerateManagementTokenAsync(request: new Contract.RegenerateManagementTokenRequest(),
+                .RegenerateManagementTokenAsync(
+                    request: new Contract.RegenerateManagementTokenRequest { AuthorizationToken = authorizationToken },
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 

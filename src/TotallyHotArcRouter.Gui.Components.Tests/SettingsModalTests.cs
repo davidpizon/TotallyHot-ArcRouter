@@ -22,7 +22,9 @@ public sealed class SettingsModalTests
         FakeRouterSettingsAdminClient? routerSettingsClient = null,
         FakeUpdateAdminClient? updateClient = null,
         FakeManagementTokenAdminClient? managementTokenClient = null,
-        bool updateSupportsApply = true)
+        bool updateSupportsApply = true,
+        FakePasskeyAdminClient? passkeyClient = null,
+        FakeWebAuthnCeremony? ceremony = null)
     {
         var ctx = new BunitContext();
         liveDataStore = new LiveDataStore(channelProvider: new StubRouterChannelProvider("https://127.0.0.1:59996"));
@@ -34,6 +36,10 @@ public sealed class SettingsModalTests
         ctx.Services.AddSingleton(new CostReconciliationStore(new FakeCostReconciliationAdminClient()));
         ctx.Services.AddSingleton(
             new ManagementTokenAdminStore(managementTokenClient ?? new FakeManagementTokenAdminClient()));
+        ctx.Services.AddSingleton(new PasskeyAdminStore(
+            client: passkeyClient ?? new FakePasskeyAdminClient(),
+            ceremony: ceremony ?? new FakeWebAuthnCeremony(),
+            contentGrant: new ContentGrantStore()));
         ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         return ctx;
     }
@@ -95,17 +101,121 @@ public sealed class SettingsModalTests
     }
 
     [Fact]
-    public void CopyMcpToken_CopiesTheLoadedTokenToTheClipboard()
+    public async Task CopyMcpToken_RunsAPasskeyCeremonyFirst_ThenCopiesTheToken()
     {
         var tokenClient = new FakeManagementTokenAdminClient { Token = "the-real-token" };
-        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
-            managementTokenClient: tokenClient);
+        var passkeys = new FakePasskeyAdminClient();
+        var ceremony = new FakeWebAuthnCeremony();
+        await using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
+            managementTokenClient: tokenClient, passkeyClient: passkeys, ceremony: ceremony);
         var clipboard = (FakeClipboardService)ctx.Services.GetRequiredService<IClipboardService>();
 
         var cut = ctx.Render<SettingsModal>();
-        cut.FindAll("button").First(b => b.TextContent.Contains("Copy MCP token")).Click();
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Contains("Copy MCP token")).Click());
 
+        passkeys.BegunOperations.Should().Equal("get_management_token");
+        ceremony.GetOptions.Should().ContainSingle();
+        tokenClient.Authorizations.Should().Equal("authz-get_management_token");
         clipboard.LastCopiedText.Should().Be("the-real-token");
+        ctx.Services.GetRequiredService<ManagementTokenAdminStore>().Token
+            .Should().BeNull("the token must not stay in memory after it was copied");
+    }
+
+    [Fact]
+    public async Task CopyMcpToken_ADismissedPasskeyPrompt_CopiesNothingAndNeverAsksTheRouterForTheToken()
+    {
+        var tokenClient = new FakeManagementTokenAdminClient { Token = "the-real-token" };
+        var ceremony = new FakeWebAuthnCeremony
+        {
+            Failure = new WebAuthnCeremonyException("The passkey prompt was dismissed or timed out.")
+        };
+        await using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
+            managementTokenClient: tokenClient, ceremony: ceremony);
+        var clipboard = (FakeClipboardService)ctx.Services.GetRequiredService<IClipboardService>();
+
+        var cut = ctx.Render<SettingsModal>();
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Contains("Copy MCP token")).Click());
+
+        clipboard.LastCopiedText.Should().BeNull();
+        tokenClient.Authorizations.Should().BeEmpty();
+        cut.Markup.Should().Contain("The passkey prompt was dismissed or timed out.");
+    }
+
+    [Fact]
+    public void WithNoPasskeyEnrolled_TheTokenButtonsAreDisabledAndTheEnrollmentCommandIsNamed()
+    {
+        var passkeys = new FakePasskeyAdminClient { Passkeys = [] };
+        passkeys.Status = passkeys.Status with { Enrolled = false };
+        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _, passkeyClient: passkeys);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("Copy MCP token")).HasAttribute("disabled")
+            .Should().BeTrue();
+        cut.Find("[data-testid='token-enrollment-hint']").Should().NotBeNull();
+        cut.Find("[data-testid='passkeys-empty']").TextContent.Should().Contain("--mint-passkey-enrollment-code");
+    }
+
+    [Fact]
+    public void PasskeysSection_ListsEachPasskeyWithItsSyncBadgesAndTheElevatedRemoveHint()
+    {
+        var passkeys = new FakePasskeyAdminClient
+        {
+            Passkeys =
+            [
+                new PasskeyInfo("id-synced", "Phone", new DateTimeOffset(2026, 10, 7, 12, 0, 0, TimeSpan.Zero),
+                    BackupEligible: true, BackupState: true),
+                new PasskeyInfo("id-local", "Laptop key", new DateTimeOffset(2026, 10, 7, 12, 0, 0, TimeSpan.Zero),
+                    BackupEligible: false, BackupState: false)
+            ]
+        };
+        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _, passkeyClient: passkeys);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        var rows = cut.FindAll("[data-testid='passkey-row']");
+        rows.Should().HaveCount(2);
+        rows[0].TextContent.Should().Contain("Phone");
+        rows[0].QuerySelector("[data-testid='passkey-badge-be']")!.ClassList.Should().Contain("text-emerald-400");
+        rows[0].QuerySelector("[data-testid='passkey-badge-bs']")!.ClassList.Should().Contain("text-emerald-400");
+        rows[1].QuerySelector("[data-testid='passkey-badge-be']")!.ClassList.Should().NotContain("text-emerald-400");
+        rows[1].QuerySelector("[data-testid='passkey-badge-bs']")!.ClassList.Should().NotContain("text-emerald-400");
+        rows[0].QuerySelector("[data-testid='passkey-revoke-hint']")!.TextContent
+            .Should().Contain("--revoke-passkey=id-synced");
+    }
+
+    [Fact]
+    public void PasskeysSection_ListsTheRecentApprovals()
+    {
+        var passkeys = new FakePasskeyAdminClient
+        {
+            Approvals =
+            [
+                new PasskeyApprovalInfo("get_management_token", "Phone", DateTimeOffset.UtcNow, "succeeded"),
+                new PasskeyApprovalInfo("content_unlock", "", DateTimeOffset.UtcNow, "failed")
+            ]
+        };
+        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _, passkeyClient: passkeys);
+
+        var cut = ctx.Render<SettingsModal>();
+
+        var rows = cut.FindAll("[data-testid='passkey-approval-row']");
+        rows.Should().HaveCount(2);
+        rows[0].TextContent.Should().Contain("get_management_token").And.Contain("Phone").And.Contain("succeeded");
+        rows[1].TextContent.Should().Contain("failed");
+    }
+
+    [Fact]
+    public void AddPasskey_OpensTheEnrollmentDialogOnTheSharedShell()
+    {
+        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _);
+
+        var cut = ctx.Render<SettingsModal>();
+        cut.Find("[data-testid='passkeys-add']").Click();
+
+        cut.Markup.Should().Contain("Add Passkey");
+        cut.Find("[data-testid='add-passkey-code']").Should().NotBeNull();
+        cut.FindAll(".overlay-panel").Should().HaveCount(2, "the dialog stacks on the DialogShell panel");
     }
 
     [Fact]
@@ -788,13 +898,18 @@ public sealed class SettingsModalTests
     {
         public string Token { get; set; } = "fake-management-token";
 
-        public Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
+        /// <summary>The authorization tokens the router was sent, in order - one per gated call.</summary>
+        public List<string> Authorizations { get; } = [];
+
+        public Task<string> GetTokenAsync(string authorizationToken, CancellationToken cancellationToken = default)
         {
+            Authorizations.Add(authorizationToken);
             return Task.FromResult(Token);
         }
 
-        public Task<string> RegenerateAsync(CancellationToken cancellationToken = default)
+        public Task<string> RegenerateAsync(string authorizationToken, CancellationToken cancellationToken = default)
         {
+            Authorizations.Add(authorizationToken);
             Token = "fake-regenerated-token";
             return Task.FromResult(Token);
         }

@@ -3,6 +3,7 @@ using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
@@ -49,6 +50,16 @@ public sealed record ProxyServerDependencies
     /// forwarding should choose.
     /// </summary>
     public IManagementTokenProvider? ManagementTokenProvider { get; init; }
+
+    /// <summary>
+    /// The passkey content gate (ADR-0020, #185) and its collaborators. Registered in the inner container
+    /// so <see cref="TelemetryGrpcService"/> can withhold conversation text from calls without a content
+    /// grant. <see cref="ManagementTokenAdminGrpcService"/> and <see cref="PasskeyAdminGrpcService"/> are
+    /// mapped only when this is supplied <em>and</em> <see cref="ManagementTokenProvider"/> is, so a server
+    /// built without a gate never exposes the management token through an ungated RPC. <see langword="null"/>
+    /// leaves telemetry text ungated, which only tests exercising plain forwarding should choose.
+    /// </summary>
+    public PasskeyGateDependencies? PasskeyGate { get; init; }
 
     /// <summary>
     /// The outer host's Serilog logger, so this inner host's own framework/request logs (routing,
@@ -207,6 +218,31 @@ public interface IAdminServiceModule
     /// <param name="endpoints">The inner host's endpoint builder.</param>
     void Map(IEndpointRouteBuilder endpoints);
 }
+
+/// <summary>
+/// Everything the passkey content gate (ADR-0020) needs across the boundary into the inner host's own
+/// container. All members are required and must be the same instances the outer container's
+/// <see cref="ElevatedEnrollmentChannel"/> and <see cref="PasskeyBootstrapHostedService"/> use, so an
+/// enrollment code minted through the elevated channel is the one <see cref="PasskeyAdminGrpcService"/>
+/// validates and a store-protection refresh is seen by every gated RPC.
+/// </summary>
+/// <param name="ContentGate">Shared gate rules consulted by telemetry, token administration, and passkey RPCs.</param>
+/// <param name="EnrollmentCodes">Validates codes minted through the elevated channel.</param>
+/// <param name="Ceremonies">Runs WebAuthn registration and assertion ceremonies.</param>
+/// <param name="ContentGrants">Issues and revokes content grants.</param>
+/// <param name="OneOperationAuthorizations">Issues single-use operation authorizations.</param>
+/// <param name="ApprovalLog">Bounded in-memory audit list of recent approvals.</param>
+/// <param name="CredentialStore">Enrolled credentials.</param>
+/// <param name="Options">Passkey gate configuration.</param>
+public sealed record PasskeyGateDependencies(
+    ContentGate ContentGate,
+    EnrollmentCodeService EnrollmentCodes,
+    IWebAuthnCeremonyService Ceremonies,
+    ContentGrantTable ContentGrants,
+    OneOperationAuthorizationTable OneOperationAuthorizations,
+    PasskeyApprovalLog ApprovalLog,
+    IPasskeyCredentialStore CredentialStore,
+    PasskeyOptions Options);
 
 /// <summary>
 /// Backs <see cref="ProviderAdminGrpcService"/>/<see cref="UsageAdminGrpcService"/>, the Governance UI's

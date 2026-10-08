@@ -170,7 +170,8 @@ public sealed class TelemetryBroadcaster
         {
             TimestampUtc = Timestamp.FromDateTimeOffset(e.TimestampUtc),
             Level = e.Level,
-            Message = e.Message
+            Message = e.Message,
+            ContentBearing = e.ContentBearing
         };
     }
 

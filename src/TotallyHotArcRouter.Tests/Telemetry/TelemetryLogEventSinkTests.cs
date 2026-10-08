@@ -84,9 +84,12 @@ public class TelemetryLogEventSinkTests
         Assert.Equal(expected: expected, actual: TelemetryLogEventSink.NormalizeLevel(level));
     }
 
-    /// <summary>Conversation-body excerpts never reach the Console tab (#184 phase 3).</summary>
+    /// <summary>
+    /// Conversation-body excerpts (#184 phase 3) are forwarded flagged as content-bearing, so the gRPC
+    /// stream can withhold them from calls without a content grant (ADR-0020).
+    /// </summary>
     [Fact]
-    public void Emit_ConversationBodyMarkedEvent_IsDropped()
+    public void Emit_ConversationBodyMarkedEvent_SetsContentBearing()
     {
         var publisherMock = new Mock<ITelemetryPublisher>();
         var sink = new TelemetryLogEventSink(publisherMock.Object);
@@ -102,8 +105,30 @@ public class TelemetryLogEventSinkTests
             ]));
 
         publisherMock.Verify(
-            p => p.PublishLogLineAsync(It.IsAny<LogLineEvent>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            p => p.PublishLogLineAsync(
+                It.Is<LogLineEvent>(l => l.ContentBearing && l.Message == "body"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public void Emit_PlainEvent_IsNotContentBearing()
+    {
+        var publisherMock = new Mock<ITelemetryPublisher>();
+        var sink = new TelemetryLogEventSink(publisherMock.Object);
+
+        sink.Emit(new LogEvent(
+            timestamp: DateTimeOffset.UtcNow,
+            level: LogEventLevel.Information,
+            exception: null,
+            messageTemplate: new MessageTemplateParser().Parse("plain"),
+            properties: []));
+
+        publisherMock.Verify(
+            p => p.PublishLogLineAsync(
+                It.Is<LogLineEvent>(l => !l.ContentBearing),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

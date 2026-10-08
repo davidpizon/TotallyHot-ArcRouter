@@ -139,4 +139,87 @@ public sealed class LiveDataStoreTests
         store.Conversations.Select(c => c.Id).Should().NotContain("s0");
         store.Conversations[0].Id.Should().Be($"s{LiveDataStore.MaxRetainedSessions + 24}");
     }
+
+    private static RoutingTelemetryEventDto EventWithText(string session, int turn, DateTimeOffset at)
+    {
+        return new RoutingTelemetryEventDto(
+            SessionId: session, TurnNumber: turn, IsSessionSynthesized: false, RequestedModel: "auto",
+            ResolvedModel: "m", Provider: "p", IsFallback: false, PromptTokens: 10, CompletionTokens: 5,
+            EstimatedCostUsd: 0.02m, IsStreaming: false, LatencyToHeadersMs: 1, TotalDurationMs: 1, StatusCode: 200,
+            TimestampUtc: at, RoutedModel: "m", RequestSummary: "secret prompt", ResponseSummary: "secret reply");
+    }
+
+    /// <summary>
+    /// ADR-0020: locking must erase every cached prompt and response from the live view but leave the metadata
+    /// (turns, tokens, cost) so the Sessions tab keeps listing what happened.
+    /// </summary>
+    [Fact]
+    public void ClearConversationText_erases_summaries_but_keeps_metadata()
+    {
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
+        var now = DateTimeOffset.UtcNow;
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 1, now));
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 2, now.AddSeconds(1)));
+        store.Conversations.Single().Turns.Should().OnlyContain(t => t.RequestSummary == "secret prompt");
+        var changed = 0;
+        store.Changed += () => changed++;
+
+        store.ClearConversationText();
+
+        var conversation = store.Conversations.Single();
+        conversation.Turns.Should().HaveCount(2);
+        conversation.Turns.Should().OnlyContain(t => t.RequestSummary == null && t.ResponseSummary == null);
+        conversation.TotalPromptTokens.Should().Be(20);
+        conversation.TotalCost.Should().Be(0.04m);
+        changed.Should().Be(1);
+    }
+
+    [Fact]
+    public void ClearConversationText_is_not_undone_by_the_next_event_for_the_same_session()
+    {
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
+        var now = DateTimeOffset.UtcNow;
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 1, now));
+        store.ClearConversationText();
+
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 2, now.AddSeconds(1)) with
+        {
+            RequestSummary = null,
+            ResponseSummary = null
+        });
+
+        store.Conversations.Single().Turns.Should().OnlyContain(t => t.RequestSummary == null);
+    }
+
+    [Fact]
+    public void Clearing_the_content_grant_erases_the_live_text()
+    {
+        var grant = new ContentGrantStore();
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress),
+            contentGrant: grant);
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(5));
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 1, DateTimeOffset.UtcNow));
+
+        grant.Clear();
+
+        store.Conversations.Single().Turns.Should().OnlyContain(t => t.RequestSummary == null);
+    }
+
+    [Fact]
+    public async Task A_stream_that_fails_clears_the_content_grant_before_reconnecting()
+    {
+        // The stub fails every stream as Unavailable, which stands in for a router that restarted and so
+        // lost every grant: nothing can vouch for the one the dashboard holds.
+        var grant = new ContentGrantStore();
+        await using var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress),
+            contentGrant: grant);
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(5));
+        var cleared = new TaskCompletionSource();
+        grant.Cleared += () => cleared.TrySetResult();
+
+        await store.StartAsync(TestContext.Current.CancellationToken);
+
+        await cleared.Task.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+        grant.IsActive.Should().BeFalse();
+    }
 }

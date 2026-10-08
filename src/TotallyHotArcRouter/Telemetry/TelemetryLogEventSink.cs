@@ -9,8 +9,8 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// <see cref="LogLineEvent"/> via <see cref="ITelemetryPublisher"/> (backed by
 /// <see cref="TelemetryGrpcService"/>'s stream), powering the GUI's Console tab. Wired into the
 /// pipeline in <c>Program.cs</c> alongside (not replacing) the existing Console sink. Conversation-body
-/// excerpts (#184 phase 3) are dropped here so the Console tab never shows opt-in body text; ADR-0020
-/// will later re-admit them for sessions with a content grant.
+/// excerpts (#184 phase 3) are forwarded with <see cref="LogLineEvent.ContentBearing"/> set so
+/// <see cref="TelemetryGrpcService"/> can withhold them from streams without a content grant (ADR-0020).
 /// </summary>
 public sealed class TelemetryLogEventSink : ILogEventSink
 {
@@ -28,12 +28,11 @@ public sealed class TelemetryLogEventSink : ILogEventSink
     {
         ArgumentNullException.ThrowIfNull(logEvent);
 
-        if (logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName)) return;
-
         var line = new LogLineEvent(
             TimestampUtc: logEvent.Timestamp.ToUniversalTime(),
             Level: NormalizeLevel(logEvent.Level),
-            Message: logEvent.RenderMessage());
+            Message: logEvent.RenderMessage(),
+            ContentBearing: logEvent.Properties.ContainsKey(ConversationBodyLogging.PropertyName));
 
         // Emit is a synchronous callback invoked directly on the calling thread by every Log.*() call
         // in the app - it must never block on network I/O. PublishLogLineAsync is itself

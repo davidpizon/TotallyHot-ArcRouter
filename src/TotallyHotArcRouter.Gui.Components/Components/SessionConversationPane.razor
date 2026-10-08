@@ -23,13 +23,15 @@
                 <span class="font-mono normal-case ml-auto">@turn.Timestamp</span>
             </div>
 
+            @* Locked (ADR-0020): the router withholds the text, so an empty bubble means "hidden", not
+               "never captured" - say so, or the operator would read a locked session as an empty one. *@
             <div class="rounded px-3 py-2 text-xs ls-chat-bubble-user @(HasRequest(turn) ? "text-slate-200" : "text-slate-500 italic")">
-                @(HasRequest(turn) ? turn.RequestSummary : "No request captured")
+                @(HasRequest(turn) ? turn.RequestSummary : EmptyRequestText)
             </div>
 
             <div class="rounded px-3 py-2 text-xs ls-chat-bubble-model @(HasResponse(turn) ? "text-slate-200" : "text-slate-500 italic")"
                  style="border-right:3px solid @AgentColorFor(turn)">
-                @(HasResponse(turn) ? turn.ResponseSummary : "No response captured")
+                @(HasResponse(turn) ? turn.ResponseSummary : EmptyResponseText)
             </div>
         </div>
     }
@@ -41,6 +43,19 @@
     [Parameter]
     [EditorRequired]
     public Conversation Conversation { get; set; } = null!;
+
+    /// <summary>
+    /// Whether conversation text is locked behind a passkey (ADR-0020). While locked, a turn with no text shows
+    /// a "locked" placeholder instead of "No request captured", because the text exists but is withheld.
+    /// </summary>
+    [Parameter]
+    public bool ContentLocked { get; set; }
+
+    /// <summary>The placeholder for a turn with no request text.</summary>
+    private string EmptyRequestText => ContentLocked ? "Locked - unlock with a passkey to view" : "No request captured";
+
+    /// <summary>The placeholder for a turn with no response text.</summary>
+    private string EmptyResponseText => ContentLocked ? "Locked - unlock with a passkey to view" : "No response captured";
 
     /// <summary><see cref="Conversation"/>'s turns in ascending <see cref="ConversationTurn.TurnNumber"/> order.</summary>
     private IEnumerable<ConversationTurn> OrderedTurns => Conversation.Turns.OrderBy(t => t.TurnNumber);
