@@ -1,22 +1,22 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Unicode;
 using TotallyHot.ArcRouter.Logging;
 
 namespace TotallyHot.ArcRouter.Sessions;
 
 /// <summary>
 /// Obscures secrets, Brotli-compresses, and AES-GCM-encrypts a single body so session files never
-/// hold plaintext. Round-trips are byte-exact for valid UTF-8 apart from <see cref="SecretObscurer"/>
-/// replacements (ADR-0019's only permitted mutation of stored text); bodies that are not valid UTF-8
-/// are not yet byte-exact — see <see cref="Seal"/>.
+/// hold plaintext. Round-trips are byte-exact, including bodies that are not valid UTF-8, apart from
+/// <see cref="SecretObscurer"/> replacements (ADR-0019's only permitted mutation of stored text).
 /// </summary>
 public static class SessionRecordCodec
 {
     /// <summary>
-    /// Obscures key-shaped strings in UTF-8 body text, then compresses and encrypts the result.
-    /// Invalid UTF-8 is replaced before obscuring; call sites that need strict invalid-UTF-8 fidelity
-    /// must use a streaming byte obscurer (left to a later phase-1 slice).
+    /// Obscures key-shaped strings in the body, then compresses and encrypts the result. Valid UTF-8
+    /// runs are obscured as text; bytes that are not valid UTF-8 are copied through untouched.
     /// </summary>
     /// <param name="sessionKey">The 32-byte per-session AES key.</param>
     /// <param name="plaintext">Raw body bytes as received or relayed.</param>
@@ -28,9 +28,7 @@ public static class SessionRecordCodec
     {
         SessionKeyMaterial.ValidateKeyLength(sessionKey);
 
-        var text = Encoding.UTF8.GetString(plaintext);
-        var obscured = SecretObscurer.Obscure(text);
-        var obscuredBytes = Encoding.UTF8.GetBytes(obscured);
+        var obscuredBytes = ObscureBytes(plaintext);
         var compressed = BrotliCompress(obscuredBytes);
 
         var nonce = new byte[SessionKeyMaterial.NonceLengthBytes];
@@ -64,6 +62,57 @@ public static class SessionRecordCodec
         return BrotliDecompress(compressed);
     }
 
+    /// <summary>
+    /// Runs <see cref="SecretObscurer"/> over a body without altering any byte that is not part of a
+    /// match. A fully valid UTF-8 body is obscured in one pass. Otherwise each maximal valid run is
+    /// obscured on its own and every invalid byte is copied through, so decoding never substitutes
+    /// U+FFFD. A secret is pure ASCII, so it can never straddle an invalid byte.
+    /// </summary>
+    /// <param name="input">Raw body bytes.</param>
+    /// <returns>The body with matched secrets replaced and all other bytes unchanged.</returns>
+    private static byte[] ObscureBytes(ReadOnlySpan<byte> input)
+    {
+        if (Utf8.IsValid(input))
+        {
+            return ObscureValidRun(input);
+        }
+
+        using var output = new MemoryStream(input.Length);
+        var runStart = 0;
+        var position = 0;
+        while (position < input.Length)
+        {
+            var status = Rune.DecodeFromUtf8(input[position..], out _, out var consumed);
+            if (status == OperationStatus.Done)
+            {
+                position += consumed;
+                continue;
+            }
+
+            output.Write(ObscureValidRun(input[runStart..position]));
+            var invalidLength = Math.Max(consumed, 1);
+            output.Write(input.Slice(position, invalidLength));
+            position += invalidLength;
+            runStart = position;
+        }
+
+        output.Write(ObscureValidRun(input[runStart..]));
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// Obscures a span already known to be valid UTF-8 and re-encodes it.
+    /// </summary>
+    /// <param name="run">A valid UTF-8 byte run (possibly empty).</param>
+    /// <returns>The obscured run as UTF-8 bytes.</returns>
+    private static byte[] ObscureValidRun(ReadOnlySpan<byte> run) =>
+        run.IsEmpty ? [] : Encoding.UTF8.GetBytes(SecretObscurer.Obscure(Encoding.UTF8.GetString(run)));
+
+    /// <summary>
+    /// Brotli-compresses a buffer at the fastest level.
+    /// </summary>
+    /// <param name="input">Bytes to compress.</param>
+    /// <returns>The compressed bytes.</returns>
     private static byte[] BrotliCompress(byte[] input)
     {
         using var output = new MemoryStream();
@@ -75,6 +124,11 @@ public static class SessionRecordCodec
         return output.ToArray();
     }
 
+    /// <summary>
+    /// Reverses <see cref="BrotliCompress"/>.
+    /// </summary>
+    /// <param name="input">Brotli-compressed bytes.</param>
+    /// <returns>The decompressed bytes.</returns>
     private static byte[] BrotliDecompress(byte[] input)
     {
         using var inputStream = new MemoryStream(input);

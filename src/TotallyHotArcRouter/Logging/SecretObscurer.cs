@@ -30,8 +30,10 @@ public static partial class SecretObscurer
     }
 
     /// <summary>
-    /// Common API-key and token shapes: OpenAI-style <c>sk-</c>, Slack <c>xox*</c>, GitHub <c>gh*</c>,
-    /// Google <c>AIza</c>, <c>Bearer</c> tokens, and long high-entropy base64-ish runs.
+    /// Common API-key and token shapes: OpenAI/Anthropic-style <c>sk-</c> (which includes <c>sk-ant-</c>),
+    /// Slack <c>xox*</c>, GitHub <c>gh*_</c> and <c>github_pat_</c>, AWS access-key IDs (<c>AKIA</c>/<c>ASIA</c>
+    /// plus 16 characters), Google <c>AIza</c>, <c>Bearer</c> tokens, PEM private-key blocks, and long
+    /// high-entropy base64-ish runs.
     /// </summary>
     [GeneratedRegex(
         """
@@ -39,6 +41,9 @@ public static partial class SecretObscurer
         \bsk-[A-Za-z0-9_-]{16,}
         | \bxox[baprs]-[A-Za-z0-9-]{10,}
         | \bgh[pousr]_[A-Za-z0-9_]{20,}
+        | \bgithub_pat_[A-Za-z0-9_]{20,}
+        | \b(?:AKIA|ASIA)[0-9A-Z]{16}\b
+        | -----BEGIN\ [A-Z\ ]*PRIVATE\ KEY-----[\s\S]*?(?:-----END\ [A-Z\ ]*PRIVATE\ KEY-----|\z)
         | \bAIza[0-9A-Za-z_-]{20,}
         | \bBearer\s+[A-Za-z0-9._\-+/=]{20,}
         | (?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/=])
