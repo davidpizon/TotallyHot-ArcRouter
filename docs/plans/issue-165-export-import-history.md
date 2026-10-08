@@ -422,3 +422,14 @@ The storage layer is in `src/TotallyHotArcRouter/Sessions/` (`SessionStore`, `Se
 - **Session folder.** `sessions` beside `transcripts.db`, inside the data directory the bootstrap verified (#184). The store adds only a check that the path is not a file or a link; it does not re-check the access list, because the folder inherits the verified root (#184 plan, decision 10). File names are random.
 - **Append cost.** The master key is cached in memory (cleared on rotation and recovery), so an append no longer decrypts the secret store. `AppendTurn` still opens the session file on every call, which scans the frame headers to find the end, linear in the number of frames. The hot-path slice should keep a bounded cache of open files if measurement shows it matters.
 - **Not yet built:** the ADR-0018 writer wiring and spool, hot-path capture, delta compression, wiring `RecoverOnStartup` into host startup, and calling `DeleteSessions` from retention. The uninstall shred (`--shred-conversations`) now also removes the session folder and index rows and destroys the master key, as #184 §11 said it would.
+
+## 9. Implementation notes (phase 1, capture slices)
+
+David settled these on 2026-10-08 before the capture work started. The remainder of phase 1 lands as two stacked pull requests.
+
+- **PR A, capture engine (no proxy change).**
+  - A streaming secret obscurer with a fixed 64 KiB look-back window. A body whose unterminated match outgrows the window abandons the capture and is recorded as missing, rather than leaking part of a key.
+  - The session file moves to format version 2: a body is a run of fixed-size sealed chunks. Each chunk authenticates the session id, its ordinal within the body and a final-chunk flag, so a dropped tail is detected. The per-turn spool is written in file format, so commit appends it verbatim and re-encrypts nothing. Version 1 files stay readable; appending to one is refused.
+  - A capture-only background writer: a bounded channel with one consumer, shaped like ADR-0018 so it can be merged with it later. Telemetry persistence (spend, ledger, transcript rows) is not touched; implementing ADR-0018 in full is a separate item.
+  - Spool cleanup and `RecoverOnStartup` wired into host startup, DI registration, and the normalized harness allowlist as a pure function.
+- **PR B, hot-path wiring.** Raw request bytes before decoding, an uncapped response tee beside the 4 MiB telemetry capture, provider-side bodies for translated turns, the metadata snapshot, and Transcription Capture gating that no longer requires Adaptive Routing. ADR-0008's hub rules and the golden-path smoke apply. Capture is a separate sink that owns `SessionStore`, so `RequestTelemetryPublisher`'s constructor does not widen.
