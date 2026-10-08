@@ -1,6 +1,6 @@
 # Plan: Export and import agent conversation history (#165)
 
-**Status:** Proposed. Awaiting David's approval. No implementation in this change.
+**Status:** Approved by David on 2026-10-08 (Project chat: “I sign off on 165”; [issue comment](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165#issuecomment-6059606868)). Implementation may proceed; PRs must link this plan.
 **Issue:** [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165) — "Feature: Export/import full agent conversation history as a zip file".
 **Related:** [`tracked-todos.md` #8](../router/tracked-todos.md#8-capture-and-analyze-real-claude-code-and-codex-traffic-before-deciding-adr-0017s-pin-policy) (live, content-free traffic census).
 **ADR-0008 Amendment 1:** Binding. This plan adds a feature and does not schedule a smell audit. It does not change `ManagementFacade`.
