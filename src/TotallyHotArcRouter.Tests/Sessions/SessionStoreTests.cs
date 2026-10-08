@@ -103,12 +103,15 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Null(frames[1].Plaintext);
     }
 
-    /// <summary>The same client id keeps landing in its newest local session.</summary>
+    /// <summary>
+    /// The same client id keeps landing in one session, including before its first turn commits, so
+    /// concurrent first requests of one client session do not split it.
+    /// </summary>
     [Fact]
-    public void ResolveArchiveSessionId_ReusesTheSessionOnceItExists()
+    public void ResolveArchiveSessionId_ReusesTheSessionBeforeAndAfterItExists()
     {
         var first = _store.ResolveArchiveSessionId("client-1");
-        Assert.NotEqual(first, _store.ResolveArchiveSessionId("client-1"));
+        Assert.Equal(first, _store.ResolveArchiveSessionId("client-1"));
 
         _store.AppendTurn(first, "client-1", NewTurn("a"u8.ToArray(), "b"u8.ToArray()));
 
@@ -218,6 +221,53 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal(2, result.DeletedOrphanFiles);
         Assert.Single(Directory.GetFiles(_folder));
         Assert.Equal(2, _store.ReadBodies(sessionId).Count);
+    }
+
+    /// <summary>A file the store did not create is left alone by the orphan sweep.</summary>
+    [Fact]
+    public void Recover_LeavesUnrelatedFilesAlone()
+    {
+        var stray = Path.Combine(_folder, "notes.txt");
+        File.WriteAllText(stray, "keep me");
+
+        var result = _store.RecoverOnStartup();
+
+        Assert.Equal(0, result.DeletedOrphanFiles);
+        Assert.True(File.Exists(stray));
+    }
+
+    /// <summary>Appending to a file that lost committed frames reports corruption instead of a parameter error.</summary>
+    [Fact]
+    public void AppendTurn_ToAFileShorterThanItsCommittedExtentThrowsInvalidData()
+    {
+        var sessionId = _store.ResolveArchiveSessionId("client-1");
+        _store.AppendTurn(sessionId, "client-1", NewTurn("a"u8.ToArray(), "b"u8.ToArray()));
+        var path = Directory.GetFiles(_folder).Single();
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+        {
+            stream.SetLength(stream.Length - 5);
+        }
+
+        Assert.Throws<InvalidDataException>(
+            () => _store.AppendTurn(sessionId, "client-1", NewTurn("c"u8.ToArray(), "d"u8.ToArray())));
+    }
+
+    /// <summary>
+    /// A rotation whose promotion fails after the index was re-wrapped is resolved in-process, so appends
+    /// keep working without a restart.
+    /// </summary>
+    [Fact]
+    public void RotateMasterKey_WhenPromotionFailsResolvesTheRotationInProcess()
+    {
+        var sessionId = _store.ResolveArchiveSessionId("client-1");
+        _store.AppendTurn(sessionId, "client-1", NewTurn("a"u8.ToArray(), "b"u8.ToArray()));
+        _masterKeys.FailNextPromote = true;
+
+        Assert.Throws<IOException>(() => _store.RotateMasterKey());
+
+        Assert.Null(_masterKeys.TryGetNext());
+        _store.AppendTurn(sessionId, "client-1", NewTurn("c"u8.ToArray(), "d"u8.ToArray()));
+        Assert.Equal(4, _store.ReadBodies(sessionId).Count);
     }
 
     /// <summary>An index row whose file vanished is removed, because the session cannot be read.</summary>
@@ -424,6 +474,9 @@ public sealed class SessionStoreTests : IDisposable
         private byte[]? _current;
         private byte[]? _next;
 
+        /// <summary>Gets or sets whether the next <see cref="PromoteNext"/> throws once, as a locked secret store would.</summary>
+        public bool FailNextPromote { get; set; }
+
         /// <inheritdoc/>
         public byte[] GetOrCreateCurrent() => (byte[])(_current ??= SessionKeyMaterial.CreateMasterKey()).Clone();
 
@@ -439,6 +492,12 @@ public sealed class SessionStoreTests : IDisposable
         /// <inheritdoc/>
         public void PromoteNext()
         {
+            if (FailNextPromote)
+            {
+                FailNextPromote = false;
+                throw new IOException("The secret store is locked.");
+            }
+
             if (_next is null) return;
             _current = _next;
             _next = null;

@@ -90,7 +90,10 @@ public sealed class SessionStore
     private readonly string _folder;
     private readonly ILogger<SessionStore> _logger;
     private readonly ConcurrentDictionary<Guid, object> _sessionGates = new();
+    private readonly ConcurrentDictionary<string, Guid> _pendingSessionIds = new();
     private readonly ReaderWriterLockSlim _rotationLock = new();
+    private readonly Lock _masterKeyGate = new();
+    private byte[]? _cachedMasterKey;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionStore"/> class and prepares its folder.
@@ -135,13 +138,17 @@ public sealed class SessionStore
     /// client id only repeats across machines, so locally the newest match is the live session.
     /// </summary>
     /// <param name="clientSessionId">The client's session id.</param>
-    /// <returns>The existing or newly minted archive session id. Minting creates nothing on disk.</returns>
+    /// <returns>
+    /// The existing or newly minted archive session id. Minting creates nothing on disk, and the minted id is
+    /// remembered until the session's first turn commits, so concurrent first requests of one client session
+    /// (a main request and its subagents) land in one session instead of one each.
+    /// </returns>
     public Guid ResolveArchiveSessionId(string clientSessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientSessionId);
 
         return _index.FindNewestByClientSessionId(clientSessionId)?.ArchiveSessionId
-               ?? SessionArchiveIds.NewArchiveSessionId();
+               ?? _pendingSessionIds.GetOrAdd(clientSessionId, static _ => SessionArchiveIds.NewArchiveSessionId());
     }
 
     /// <summary>
@@ -236,7 +243,8 @@ public sealed class SessionStore
                     if (_index.DeleteSession(id) is { } fileName) deletedFiles.Add(fileName);
                 }
 
-                _sessionGates.TryRemove(id, out _);
+                // The gate stays: removing it would let an append that already holds it and one that creates
+                // a replacement run together. One small object per session is the whole cost.
             }
         }
         finally
@@ -290,10 +298,27 @@ public sealed class SessionStore
                 });
                 _masterKeys.PromoteNext();
             }
+            catch (Exception ex)
+            {
+                // The index may already be wrapped under the staged key while the secret store still names the
+                // old one. Left alone, every later append would fail until a restart, so resolve it now.
+                _logger.LogError(ex, "Master-key rotation failed; resolving it before reporting the failure.");
+                try
+                {
+                    RecoverRotation();
+                }
+                catch (Exception recovery) when (recovery is IOException or UnauthorizedAccessException or CryptographicException)
+                {
+                    _logger.LogError(recovery, "The interrupted master-key rotation could not be resolved.");
+                }
+
+                throw;
+            }
             finally
             {
                 CryptographicOperations.ZeroMemory(oldKey);
                 CryptographicOperations.ZeroMemory(newKey);
+                ClearMasterKeyCache();
             }
         }
         finally
@@ -314,7 +339,9 @@ public sealed class SessionStore
         _rotationLock.EnterWriteLock();
         try
         {
+            ClearMasterKeyCache();
             var rotation = RecoverRotation();
+            ClearMasterKeyCache();
             var truncated = 0;
             var corrupt = 0;
             var dropped = 0;
@@ -346,7 +373,7 @@ public sealed class SessionStore
 
     private SessionTurnRow AppendLocked(Guid archiveSessionId, string clientSessionId, SessionTurnInput turn)
     {
-        var masterKey = _masterKeys.GetOrCreateCurrent();
+        var masterKey = GetMasterKey(create: true)!;
         byte[]? sessionKey = null;
         SessionFile? file = null;
         var row = _index.TryGetSession(archiveSessionId);
@@ -365,11 +392,17 @@ public sealed class SessionStore
                 // The wrapped key commits before any frame is written, so a frame can never exist whose key
                 // was lost. A crash after this leaves an empty session that recovery keeps.
                 _index.InsertSession(row);
+                _pendingSessionIds.TryRemove(clientSessionId, out _);
             }
             else
             {
                 sessionKey = SessionKeyMaterial.UnwrapSessionKey(masterKey, row.WrappedKey);
                 file = SessionFile.Open(PathOf(row), sessionKey, archiveSessionId);
+                if ((long)file.FrameCount < row.CommittedFrames || file.Length < row.CommittedLength)
+                {
+                    throw new InvalidDataException(
+                        $"Session {archiveSessionId} is shorter than its committed extent and cannot take another turn.");
+                }
 
                 // Frames a failed earlier append left behind are cut away before this turn writes its own.
                 if ((long)file.FrameCount != row.CommittedFrames || file.Length != row.CommittedLength)
@@ -390,7 +423,7 @@ public sealed class SessionStore
             }
             catch
             {
-                file.TruncateTo(row.CommittedLength, (ulong)row.CommittedFrames);
+                RollBackQuietly(file, row);
                 throw;
             }
 
@@ -403,7 +436,7 @@ public sealed class SessionStore
             }
             catch
             {
-                file.TruncateTo(row.CommittedLength, (ulong)row.CommittedFrames);
+                RollBackQuietly(file, row);
                 throw;
             }
 
@@ -449,9 +482,49 @@ public sealed class SessionStore
         }
     }
 
+    /// <summary>
+    /// Cuts a file back to its committed extent after a failed append. A failure here is logged and
+    /// swallowed so it cannot replace the exception that caused the rollback; startup recovery repeats the cut.
+    /// </summary>
+    private void RollBackQuietly(SessionFile file, SessionFileRow row)
+    {
+        try
+        {
+            file.TruncateTo(row.CommittedLength, (ulong)row.CommittedFrames);
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentOutOfRangeException or ObjectDisposedException)
+        {
+            _logger.LogError(ex, "Could not cut session {ArchiveSessionId} back after a failed append.", row.ArchiveSessionId);
+        }
+    }
+
+    /// <summary>
+    /// Returns a copy of the master key, reading the secret store once and caching the result until a
+    /// rotation or recovery clears it, so an append does not decrypt the secret store every time.
+    /// </summary>
+    /// <param name="create">Whether to create the key when none exists yet.</param>
+    /// <returns>A key the caller must zero, or <see langword="null"/> when none exists and <paramref name="create"/> is false.</returns>
+    private byte[]? GetMasterKey(bool create)
+    {
+        lock (_masterKeyGate)
+        {
+            _cachedMasterKey ??= create ? _masterKeys.GetOrCreateCurrent() : _masterKeys.TryGetCurrent();
+            return (byte[]?)_cachedMasterKey?.Clone();
+        }
+    }
+
+    private void ClearMasterKeyCache()
+    {
+        lock (_masterKeyGate)
+        {
+            if (_cachedMasterKey is not null) CryptographicOperations.ZeroMemory(_cachedMasterKey);
+            _cachedMasterKey = null;
+        }
+    }
+
     private FileRecovery CutBackToCommitted(SessionFileRow row, string path)
     {
-        var masterKey = _masterKeys.TryGetCurrent();
+        var masterKey = GetMasterKey(create: false);
         if (masterKey is null)
         {
             _logger.LogError("Session {ArchiveSessionId} has an index row but the master key is gone.", row.ArchiveSessionId);
@@ -495,7 +568,8 @@ public sealed class SessionStore
         var deleted = 0;
         foreach (var path in Directory.EnumerateFiles(_folder))
         {
-            if (known.Contains(Path.GetFileName(path))) continue;
+            // Only the store's own artifacts: a stray file that is none of these is not ours to delete.
+            if (!IsOwnArtifact(path) || known.Contains(Path.GetFileName(path))) continue;
 
             if (DeleteFile(path)) deleted++;
         }
@@ -503,6 +577,9 @@ public sealed class SessionStore
         if (deleted > 0) _logger.LogInformation("Deleted {Count} session files that no index row names.", deleted);
         return deleted;
     }
+
+    private static bool IsOwnArtifact(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is SessionFileExtension or ".spool" or ".tmp";
 
     private bool DeleteFile(string path)
     {
@@ -520,7 +597,7 @@ public sealed class SessionStore
 
     private byte[] UnwrapSessionKey(byte[] wrapped)
     {
-        var masterKey = _masterKeys.TryGetCurrent()
+        var masterKey = GetMasterKey(create: false)
                         ?? throw new InvalidOperationException("The session master key is not available.");
         try
         {
