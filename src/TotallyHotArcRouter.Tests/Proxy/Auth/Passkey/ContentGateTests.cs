@@ -10,7 +10,7 @@ public sealed class ContentGateTests
     {
         var gate = CreateGate(storeProtected: true, enrolled: false);
 
-        var ex = Assert.Throws<RpcException>(() => gate.EnsureEnrolled());
+        var ex = Assert.Throws<RpcException>(gate.EnsureEnrolled);
         Assert.Equal(StatusCode.FailedPrecondition, ex.StatusCode);
         Assert.Contains(EnrollmentCliCommand.FlagName, ex.Status.Detail, StringComparison.Ordinal);
     }

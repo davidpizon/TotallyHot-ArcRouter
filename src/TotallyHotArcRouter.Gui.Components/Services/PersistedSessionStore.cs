@@ -33,7 +33,7 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
 
     // Serializes publishing a load's result with clearing, so a load that finishes after a lock cannot put
     // text back.
-    private readonly object _publishGate = new();
+    private readonly Lock _publishGate = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PersistedSessionStore"/> class, over the shared

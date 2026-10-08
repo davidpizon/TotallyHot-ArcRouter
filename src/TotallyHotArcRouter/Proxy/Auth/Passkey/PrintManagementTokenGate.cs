@@ -15,10 +15,15 @@ public static class PrintManagementTokenGate
     /// Checks whether <c>--print-management-token</c> may print. Returns <see langword="null"/> when
     /// allowed, or a refusal message for stderr when the operator must enroll or use the dashboard.
     /// </summary>
+    /// <remarks>
+    /// Every current path refuses because the native WebAuthn CLI ceremony is not wired yet; the nullable
+    /// return stays so <c>Program</c>'s allow-path remains once that ceremony lands (ADR-0020).
+    /// </remarks>
     /// <param name="credentialStore">Reads whether any passkey exists.</param>
     /// <param name="storeProtected">
     /// Result of <see cref="SecretStoreAclProbe.Check"/> for the secrets file; fail closed when false.
     /// </param>
+    // ReSharper disable once ReturnTypeCanBeNotNullable
     public static string? TryGetRefusalMessage(IPasskeyCredentialStore credentialStore, bool storeProtected)
     {
         ArgumentNullException.ThrowIfNull(credentialStore);
@@ -51,7 +56,7 @@ public static class PrintManagementTokenGate
     /// Returns whether <c>webauthn.dll</c> can be loaded — present from Windows 10 1903 onward. Used to
     /// choose the ADR-0020 refusal wording when the API is missing (1809).
     /// </summary>
-    public static bool IsWebAuthnApiAvailable()
+    private static bool IsWebAuthnApiAvailable()
     {
         if (!OperatingSystem.IsWindows()) return false;
         return NativeLibrary.TryLoad("webauthn.dll", out var handle) && handle != 0;

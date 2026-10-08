@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 
@@ -14,7 +13,6 @@ public sealed class FakeWebAuthnCeremonyService : IWebAuthnCeremonyService
     private readonly ChallengeStore _challengeStore;
     private readonly IPasskeyCredentialStore _credentialStore;
     private readonly TimeProvider _timeProvider;
-    private readonly ConcurrentDictionary<string, (string Operation, string Parameters)> _pendingAssertions = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="FakeWebAuthnCeremonyService"/> class.</summary>
     public FakeWebAuthnCeremonyService(
@@ -60,16 +58,15 @@ public sealed class FakeWebAuthnCeremonyService : IWebAuthnCeremonyService
     }
 
     /// <inheritdoc/>
-    public string BeginAssertion(string operation, string parameters)
+    public string BeginAssertion(string operation, string? parameters)
     {
         var challenge = _challengeStore.Issue(operation, parameters);
         var key = PasskeyEncoding.ToBase64Url(challenge);
-        _pendingAssertions[key] = (operation, parameters);
         return JsonSerializer.Serialize(new { challenge = key });
     }
 
     /// <inheritdoc/>
-    public string FinishAssertion(string assertionJson, string operation, string parameters)
+    public string FinishAssertion(string assertionJson, string operation, string? parameters)
     {
         var challengeKey = ExtractChallengeHex(assertionJson);
         if (!_challengeStore.TryConsume(PasskeyEncoding.FromBase64Url(challengeKey), out var pending) ||

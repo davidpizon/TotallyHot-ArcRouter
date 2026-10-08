@@ -46,7 +46,7 @@ public sealed class PasskeyDialogTests
     [Fact]
     public async Task UnlockContentDialog_unlocking_holds_the_grant_and_reports_success_without_any_js_interop()
     {
-        using var ctx = NewContext(out var client, out _, out var grant);
+        await using var ctx = NewContext(out var client, out _, out var grant);
         client.Grant = new ContentGrantInfo("g-1", DateTimeOffset.UtcNow.AddMinutes(15));
         var unlocked = false;
         await ctx.Services.GetRequiredService<PasskeyAdminStore>().RefreshAsync(TestContext.Current.CancellationToken);
@@ -62,7 +62,7 @@ public sealed class PasskeyDialogTests
     [Fact]
     public async Task UnlockContentDialog_a_failed_ceremony_shows_the_reason_and_does_not_report_success()
     {
-        using var ctx = NewContext(out _, out var ceremony, out var grant);
+        await using var ctx = NewContext(out _, out var ceremony, out var grant);
         ceremony.Failure = new WebAuthnCeremonyException("The passkey prompt was dismissed or timed out.");
         var unlocked = false;
         await ctx.Services.GetRequiredService<PasskeyAdminStore>().RefreshAsync(TestContext.Current.CancellationToken);
@@ -112,11 +112,11 @@ public sealed class PasskeyDialogTests
     [Fact]
     public async Task AddPasskeyDialog_enrolls_with_the_pasted_code_and_chosen_name()
     {
-        using var ctx = NewContext(out var client, out var ceremony, out _);
+        await using var ctx = NewContext(out var client, out var ceremony, out _);
         var enrolled = false;
         var cut = ctx.Render<AddPasskeyDialog>(p => p.Add(c => c.OnEnrolled, () => enrolled = true));
-        cut.Find("[data-testid='add-passkey-code']").Input("ABCD-EFGH");
-        cut.Find("[data-testid='add-passkey-name']").Input("Laptop");
+        await cut.Find("[data-testid='add-passkey-code']").InputAsync("ABCD-EFGH");
+        await cut.Find("[data-testid='add-passkey-name']").InputAsync("Laptop");
 
         await cut.InvokeAsync(() => cut.Find("[data-testid='add-passkey-confirm']").Click());
 
@@ -130,11 +130,11 @@ public sealed class PasskeyDialogTests
     [Fact]
     public async Task AddPasskeyDialog_a_rejected_code_is_shown_inline_and_the_dialog_stays_open()
     {
-        using var ctx = NewContext(out var client, out var ceremony, out _);
+        await using var ctx = NewContext(out var client, out var ceremony, out _);
         client.Failure = new GrpcAdminException(message: "Could not start the passkey enrollment: The enrollment code is invalid or has expired.");
         var enrolled = false;
         var cut = ctx.Render<AddPasskeyDialog>(p => p.Add(c => c.OnEnrolled, () => enrolled = true));
-        cut.Find("[data-testid='add-passkey-code']").Input("WRONG");
+        await cut.Find("[data-testid='add-passkey-code']").InputAsync("WRONG");
 
         await cut.InvokeAsync(() => cut.Find("[data-testid='add-passkey-confirm']").Click());
 

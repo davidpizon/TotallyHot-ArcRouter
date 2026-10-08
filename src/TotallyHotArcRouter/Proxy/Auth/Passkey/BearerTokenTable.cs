@@ -40,9 +40,8 @@ public sealed class BearerTokenTable<TEntry> where TEntry : class
     }
 
     /// <summary>Checks whether <paramref name="token"/> maps to a non-expired entry without removing it.</summary>
-    public bool TryPeek(string? token, out TEntry? entry, Func<TEntry, DateTimeOffset> getExpiry)
+    public bool TryPeek(string? token, Func<TEntry, DateTimeOffset> getExpiry)
     {
-        entry = null;
         if (string.IsNullOrWhiteSpace(token)) return false;
         var hashKey = HashToken(token);
         if (!_entries.TryGetValue(hashKey, out var stored)) return false;
@@ -52,7 +51,6 @@ public sealed class BearerTokenTable<TEntry> where TEntry : class
             return false;
         }
 
-        entry = stored;
         return true;
     }
 
@@ -83,7 +81,7 @@ public sealed class BearerTokenTable<TEntry> where TEntry : class
     public void RevokeAll() => _entries.Clear();
 
     /// <summary>Hashes a presented token for dictionary lookup.</summary>
-    public static string HashToken(string token)
+    private static string HashToken(string token)
     {
         var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token));
         return Convert.ToHexString(hash);

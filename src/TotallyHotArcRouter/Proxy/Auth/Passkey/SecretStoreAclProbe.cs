@@ -80,7 +80,7 @@ public sealed class SecretStoreAclProbe
     {
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
-            var uid = InteropUnix.GetEffectiveUserId();
+            var uid = InteropUnix.Geteuid();
             if (uid >= 0) return uid;
         }
 
@@ -98,7 +98,7 @@ public sealed class SecretStoreAclProbe
     private static class InteropUnix
     {
         [DllImport("libc", SetLastError = true, EntryPoint = "geteuid")]
-        public static extern int GetEffectiveUserId();
+        public static extern int Geteuid();
 
         // libc writes the platform's whole `struct stat` (144 bytes on x86-64 Linux), which is larger and laid
         // out differently from any small hand-written struct: a short managed struct is overrun and corrupts

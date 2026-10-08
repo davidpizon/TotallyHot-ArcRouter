@@ -11,6 +11,7 @@ using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Storage;
@@ -507,12 +508,12 @@ public static class Program
         try
         {
             EnsureServiceDataDirectory();
-            var store = new Proxy.Management.ProtectedSecretStore();
-            var credentials = new Proxy.Auth.Passkey.PasskeyCredentialStore(store);
-            var aclProbe = new Proxy.Auth.Passkey.SecretStoreAclProbe();
-            var refusal = Proxy.Auth.Passkey.PrintManagementTokenGate.TryGetRefusalMessage(
+            var store = new ProtectedSecretStore();
+            var credentials = new PasskeyCredentialStore(store);
+            var aclProbe = new SecretStoreAclProbe();
+            var refusal = PrintManagementTokenGate.TryGetRefusalMessage(
                 credentialStore: credentials,
-                storeProtected: aclProbe.Check(Proxy.Management.ProtectedSecretStore.DefaultPath()));
+                storeProtected: aclProbe.Check(ProtectedSecretStore.DefaultPath()));
             if (refusal is not null)
             {
                 Console.Error.WriteLine(refusal);
@@ -520,7 +521,7 @@ public static class Program
                 return;
             }
 
-            var token = Proxy.Management.ManagementAccessToken.GetOrCreate();
+            var token = ManagementAccessToken.GetOrCreate();
             Console.WriteLine(token);
         }
         catch (Exception ex)

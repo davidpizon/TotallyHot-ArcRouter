@@ -144,12 +144,12 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         switch (telemetryEvent.EventCase)
         {
             case TelemetryEvent.EventOneofCase.LogLine when telemetryEvent.LogLine.ContentBearing:
-                return _contentGate.TryGetContentGrant(context, out _) ? telemetryEvent : null;
+                return _contentGate.TryGetContentGrant(context) ? telemetryEvent : null;
 
             case TelemetryEvent.EventOneofCase.RoutingTelemetry
                 when telemetryEvent.RoutingTelemetry.HasRequestSummary ||
                      telemetryEvent.RoutingTelemetry.HasResponseSummary:
-                if (_contentGate.TryGetContentGrant(context, out _)) return telemetryEvent;
+                if (_contentGate.TryGetContentGrant(context)) return telemetryEvent;
 
                 var redacted = telemetryEvent.Clone();
                 redacted.RoutingTelemetry.ClearRequestSummary();
@@ -201,7 +201,7 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             .ConfigureAwait(false);
 
         // Metadata only unless the caller holds a content grant (ADR-0020); one check covers every row.
-        var includeText = _contentGate is null || _contentGate.TryGetContentGrant(context, out _);
+        var includeText = _contentGate is null || _contentGate.TryGetContentGrant(context);
 
         var size = ListResponseFlagBytes;
         foreach (var transcript in transcripts.Take(limit))

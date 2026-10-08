@@ -21,7 +21,7 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
     /// <summary>Gets or sets the passkeys returned by <see cref="ListPasskeysAsync"/>.</summary>
     public IReadOnlyList<PasskeyInfo> Passkeys { get; set; } =
     [
-        new PasskeyInfo(Id: "cred-1", Name: "Windows Hello", CreatedAtUtc: new DateTimeOffset(2026, 10, 7, 0, 0, 0, TimeSpan.Zero),
+        new PasskeyInfo(Id: "cred-1", Name: "Windows Hello", CreatedAtUtc: new(2026, 10, 7, 0, 0, 0, TimeSpan.Zero),
             BackupEligible: true, BackupState: false)
     ];
 
@@ -51,9 +51,6 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
 
     /// <summary>Gets how many times <see cref="LockContentAsync"/> ran.</summary>
     public int LockCalls { get; private set; }
-
-    /// <summary>Gets how many times <see cref="BeginContentUnlockAsync"/> ran.</summary>
-    public int UnlockBegins { get; private set; }
 
     /// <inheritdoc/>
     public Task<PasskeyGateStatusInfo> GetGateStatusAsync(CancellationToken cancellationToken = default) =>
@@ -87,11 +84,8 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
     }
 
     /// <inheritdoc/>
-    public Task<string> BeginContentUnlockAsync(CancellationToken cancellationToken = default)
-    {
-        UnlockBegins++;
-        return Run(() => "{\"challenge\":\"unlock\"}");
-    }
+    public Task<string> BeginContentUnlockAsync(CancellationToken cancellationToken = default) =>
+        Run(() => "{\"challenge\":\"unlock\"}");
 
     /// <inheritdoc/>
     public Task<ContentGrantInfo> FinishContentUnlockAsync(string assertionJson,
@@ -211,20 +205,13 @@ internal sealed class ManualTimeProvider : TimeProvider
         return timer;
     }
 
-    private sealed class ManualTimer : ITimer
+    private sealed class ManualTimer(TimerCallback callback, object? state, DateTimeOffset dueAt) : ITimer
     {
-        public ManualTimer(TimerCallback callback, object? state, DateTimeOffset dueAt)
-        {
-            Callback = callback;
-            State = state;
-            DueAt = dueAt;
-        }
+        public TimerCallback Callback { get; } = callback;
 
-        public TimerCallback Callback { get; }
+        public object? State { get; } = state;
 
-        public object? State { get; }
-
-        public DateTimeOffset DueAt { get; }
+        public DateTimeOffset DueAt { get; } = dueAt;
 
         public bool Disposed { get; set; }
 

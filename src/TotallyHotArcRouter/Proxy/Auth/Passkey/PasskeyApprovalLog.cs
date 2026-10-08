@@ -16,16 +16,15 @@ public sealed class PasskeyApprovalLog
     /// <param name="credentialName">The enrolled credential display name, if known.</param>
     /// <param name="utc">When the event occurred.</param>
     /// <param name="outcome">A short outcome label such as <c>succeeded</c> or <c>failed</c>.</param>
-    public void Record(string operation, string credentialName, DateTimeOffset utc, string outcome)
+    public void Record(string operation, string? credentialName, DateTimeOffset utc, string outcome)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         ArgumentException.ThrowIfNullOrWhiteSpace(outcome);
-        credentialName ??= string.Empty;
 
         lock (_lock)
         {
             if (_entries.Count >= MaxEntries) _entries.Dequeue();
-            _entries.Enqueue(new PasskeyApprovalEntry(operation, credentialName, utc, outcome));
+            _entries.Enqueue(new PasskeyApprovalEntry(operation, credentialName ?? string.Empty, utc, outcome));
         }
     }
 

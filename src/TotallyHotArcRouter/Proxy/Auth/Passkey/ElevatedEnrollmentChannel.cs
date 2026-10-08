@@ -6,6 +6,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Serilog;
 using TotallyHot.ArcRouter.Hosting;
 
 namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
@@ -46,9 +47,9 @@ public sealed class ElevatedEnrollmentChannel : BackgroundService
             else
                 await RunUnixAsync(stoppingToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Net.Sockets.SocketException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SocketException)
         {
-            Serilog.Log.Error(ex, "The elevated passkey enrollment channel failed to start or stopped unexpectedly; enrollment is unavailable");
+            Log.Error(ex, "The elevated passkey enrollment channel failed to start or stopped unexpectedly; enrollment is unavailable");
         }
     }
 
@@ -117,10 +118,10 @@ public sealed class ElevatedEnrollmentChannel : BackgroundService
         var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         using var reader = new StreamReader(stream, utf8, detectEncodingFromByteOrderMarks: false,
             bufferSize: 4096, leaveOpen: true);
-        await using var writer = new StreamWriter(stream, utf8, bufferSize: 4096, leaveOpen: true)
-        {
-            AutoFlush = true,
-        };
+        // Set AutoFlush after construction: an object initializer on a using/await-using variable would
+        // skip Dispose if the initializer threw.
+        await using var writer = new StreamWriter(stream, utf8, bufferSize: 4096, leaveOpen: true);
+        writer.AutoFlush = true;
 
         var line = await reader.ReadLineAsync(stoppingToken).ConfigureAwait(false);
         if (line is null) return;
@@ -170,10 +171,10 @@ public sealed class ElevatedEnrollmentChannel : BackgroundService
     private sealed class EnrollmentRequest
     {
         [JsonPropertyName("op")]
-        public string? Op { get; set; }
+        public string? Op { get; init; }
 
         [JsonPropertyName("id")]
-        public string? Id { get; set; }
+        public string? Id { get; init; }
     }
 
     private static string SerializeOk(string? code) =>

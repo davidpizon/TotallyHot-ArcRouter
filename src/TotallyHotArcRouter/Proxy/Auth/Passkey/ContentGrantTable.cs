@@ -30,7 +30,7 @@ public sealed class ContentGrantTable
 
     /// <summary>Returns whether <paramref name="token"/> is a known, unexpired grant.</summary>
     public bool IsValid(string? token) =>
-        _table.TryPeek(token, out _, getExpiry: e => e.ExpiresAtUtc);
+        _table.TryPeek(token, getExpiry: e => e.ExpiresAtUtc);
 
     /// <summary>Revokes a single grant token.</summary>
     public bool Revoke(string? token) => _table.Revoke(token);

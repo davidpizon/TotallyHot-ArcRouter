@@ -20,7 +20,7 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 public sealed class ContentGrantClientInterceptor : Interceptor
 {
     /// <summary>The gRPC metadata key the router reads the grant from.</summary>
-    public const string HeaderName = "x-content-grant";
+    private const string HeaderName = "x-content-grant";
 
     private readonly Func<string?> _grantAccessor;
 

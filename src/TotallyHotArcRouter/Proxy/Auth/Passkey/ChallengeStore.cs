@@ -15,11 +15,11 @@ public sealed class ChallengeStore
     public const int MaxPending = 32;
 
     /// <summary>How long a issued challenge remains valid.</summary>
-    public static readonly TimeSpan ChallengeTtl = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan ChallengeTtl = TimeSpan.FromMinutes(2);
 
     private readonly ConcurrentDictionary<string, PendingChallenge> _pending = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;
-    private readonly object _bucketLock = new();
+    private readonly Lock _bucketLock = new();
     private readonly int _tokensPerMinute;
     private readonly int _burst;
     private double _tokens;

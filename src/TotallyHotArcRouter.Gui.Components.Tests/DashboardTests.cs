@@ -195,7 +195,7 @@ public sealed class DashboardTests
 
         var cut = ctx.Render<Dashboard>();
 
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-locked']").TextContent
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-locked']").TextContent
             .Should().Contain("Conversation text is locked."));
         cut.Find("[data-testid='content-unlock']").TextContent.Should().Contain("Unlock with passkey");
         cut.FindAll("[data-testid='content-enrollment-hint']").Should().BeEmpty();
@@ -212,7 +212,7 @@ public sealed class DashboardTests
 
         var cut = ctx.Render<Dashboard>();
 
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-enrollment-hint']").TextContent
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-enrollment-hint']").TextContent
             .Should().Contain("--mint-passkey-enrollment-code"));
         cut.FindAll("[data-testid='content-unlock']").Should().BeEmpty("an unlock cannot succeed before enrollment");
         cut.Find("[data-testid='content-add-passkey']").Should().NotBeNull();
@@ -227,7 +227,7 @@ public sealed class DashboardTests
         var store = await LoadedStoreAsync();
         await using var ctx = NewContext(store, passkeyClient: passkeys, ceremony: ceremony, contentGrant: grant);
         var cut = ctx.Render<Dashboard>();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlock']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlock']"));
 
         await cut.InvokeAsync(() => cut.Find("[data-testid='content-unlock']").Click());
         cut.Markup.Should().Contain("Unlock Conversations");
@@ -235,7 +235,7 @@ public sealed class DashboardTests
 
         grant.IsActive.Should().BeTrue();
         ceremony.GetOptions.Should().ContainSingle();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlocked']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlocked']"));
         cut.Markup.Should().NotContain("Unlock Conversations", "the dialog closes once the grant is held");
     }
 
@@ -250,7 +250,7 @@ public sealed class DashboardTests
         var store = await LoadedStoreAsync();
         await using var ctx = NewContext(store, ceremony: ceremony, contentGrant: grant);
         var cut = ctx.Render<Dashboard>();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlock']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlock']"));
         await cut.InvokeAsync(() => cut.Find("[data-testid='content-unlock']").Click());
 
         await cut.InvokeAsync(() => cut.Find("[data-testid='unlock-confirm']").Click());
@@ -270,14 +270,14 @@ public sealed class DashboardTests
         grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(10));
         await using var ctx = NewContext(store, passkeyClient: passkeys, contentGrant: grant);
         var cut = ctx.Render<Dashboard>();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlocked']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlocked']"));
 
         await cut.InvokeAsync(() => cut.Find("[data-testid='content-lock']").Click());
 
         grant.IsActive.Should().BeFalse();
         passkeys.LockCalls.Should().Be(1);
         store.Sessions.Single().Turns.Single().RequestSummary.Should().BeNull();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-locked']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-locked']"));
     }
 
     [Fact]
@@ -291,11 +291,11 @@ public sealed class DashboardTests
         grant.SetGrant("tok", clock.GetUtcNow().AddMinutes(15));
         await using var ctx = NewContext(store, passkeyClient: passkeys, contentGrant: grant);
         var cut = ctx.Render<Dashboard>();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlocked']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlocked']"));
 
         clock.Advance(TimeSpan.FromMinutes(15));
 
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-locked']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-locked']"));
         store.Sessions.Single().Turns.Single().RequestSummary.Should().BeNull();
     }
 
@@ -311,7 +311,7 @@ public sealed class DashboardTests
         await store.LoadAsync(TestContext.Current.CancellationToken);
         await using var ctx = NewContext(store);
         var cut = ctx.Render<Dashboard>();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='content-unlock']"));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlock']"));
 
         await cut.InvokeAsync(() => cut.FindAll("button")
             .First(b => b.TextContent.Contains("Session persist", StringComparison.Ordinal)).DoubleClick());

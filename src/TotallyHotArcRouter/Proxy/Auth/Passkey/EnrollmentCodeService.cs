@@ -13,7 +13,7 @@ namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 public sealed class EnrollmentCodeService
 {
     /// <summary>Secret-store key for the active enrollment code metadata.</summary>
-    public const string StoreKey = "passkey.enrollment-code.v1";
+    private const string StoreKey = "passkey.enrollment-code.v1";
 
     private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
     private const int MaxFailures = 5;
@@ -29,7 +29,7 @@ public sealed class EnrollmentCodeService
     /// <param name="reader">Reads the protected secret store.</param>
     /// <param name="writer">Writes the protected secret store.</param>
     /// <param name="timeProvider">Clock for TTL checks; defaults to <see cref="TimeProvider.System"/>.</param>
-    public EnrollmentCodeService(ISecretReader reader, ISecretWriter writer, TimeProvider? timeProvider = null)
+    private EnrollmentCodeService(ISecretReader reader, ISecretWriter writer, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(writer);
@@ -111,15 +111,6 @@ public sealed class EnrollmentCodeService
 
             _writer.Write(name: StoreKey, value: JsonSerializer.Serialize(payload, JsonOptions));
             return false;
-        }
-    }
-
-    /// <summary>Removes any active enrollment code without validating it.</summary>
-    public void Invalidate()
-    {
-        lock (_lock)
-        {
-            _writer.Delete(name: StoreKey);
         }
     }
 

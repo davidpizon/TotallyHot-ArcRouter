@@ -26,4 +26,16 @@ public sealed class ContentGrantTableTests
 
         Assert.False(table.IsValid(token));
     }
+
+    [Fact]
+    public void Revoke_InvalidatesOnlyTheNamedGrant()
+    {
+        var table = new ContentGrantTable(new PasskeyOptions());
+        var kept = table.IssueGrant();
+        var revoked = table.IssueGrant();
+
+        Assert.True(table.Revoke(revoked));
+        Assert.False(table.IsValid(revoked));
+        Assert.True(table.IsValid(kept));
+    }
 }

@@ -22,11 +22,9 @@ internal sealed class InMemoryPasskeyCredentialStore : IPasskeyCredentialStore
         _records.RemoveAll(r => PasskeyEncoding.ToBase64Url(r.Id) == credentialIdBase64Url) > 0;
 }
 
-internal sealed class ManualTimeProvider : TimeProvider
+internal sealed class ManualTimeProvider(DateTimeOffset start) : TimeProvider
 {
-    public ManualTimeProvider(DateTimeOffset start) => UtcNow = start;
-
-    public DateTimeOffset UtcNow { get; set; }
+    public DateTimeOffset UtcNow { get; set; } = start;
 
     public override DateTimeOffset GetUtcNow() => UtcNow;
 }

@@ -97,10 +97,10 @@ public sealed class ContentGate
     /// Reads <see cref="ContentGrantHeaderName"/> from <paramref name="context"/> and checks the grant
     /// table.
     /// </summary>
-    public bool TryGetContentGrant(ServerCallContext context, out string? grantToken)
+    public bool TryGetContentGrant(ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        grantToken = GetHeader(context, ContentGrantHeaderName);
+        var grantToken = GetHeader(context, ContentGrantHeaderName);
         if (string.IsNullOrWhiteSpace(grantToken)) return false;
 
         // Same closed-until-enrolled boundary as RequireContentGrant: once the last passkey is revoked or the
@@ -117,7 +117,7 @@ public sealed class ContentGate
     public void RequireContentGrant(ServerCallContext context)
     {
         EnsureEnrolled();
-        if (!TryGetContentGrant(context, out _))
+        if (!TryGetContentGrant(context))
         {
             throw new RpcException(new Status(
                 statusCode: StatusCode.Unauthenticated,

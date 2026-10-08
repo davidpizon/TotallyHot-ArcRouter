@@ -27,7 +27,7 @@ public sealed class WebAuthnCeremonyService : IWebAuthnCeremonyService
     /// <param name="credentialStore">Persists enrolled credentials.</param>
     /// <param name="timeProvider">Optional clock override for tests.</param>
     public WebAuthnCeremonyService(
-        TotallyHot.ArcRouter.Proxy.WebInterfaceOptions webInterfaceOptions,
+        WebInterfaceOptions webInterfaceOptions,
         ChallengeStore challengeStore,
         IPasskeyCredentialStore credentialStore,
         TimeProvider? timeProvider = null)
@@ -123,7 +123,7 @@ public sealed class WebAuthnCeremonyService : IWebAuthnCeremonyService
     }
 
     /// <inheritdoc/>
-    public string BeginAssertion(string operation, string parameters)
+    public string BeginAssertion(string operation, string? parameters)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         parameters ??= string.Empty;
@@ -147,7 +147,7 @@ public sealed class WebAuthnCeremonyService : IWebAuthnCeremonyService
     }
 
     /// <inheritdoc/>
-    public string FinishAssertion(string assertionJson, string operation, string parameters)
+    public string FinishAssertion(string assertionJson, string operation, string? parameters)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assertionJson);
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);

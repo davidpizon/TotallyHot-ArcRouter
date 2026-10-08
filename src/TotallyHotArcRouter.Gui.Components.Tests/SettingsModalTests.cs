@@ -106,7 +106,7 @@ public sealed class SettingsModalTests
         var tokenClient = new FakeManagementTokenAdminClient { Token = "the-real-token" };
         var passkeys = new FakePasskeyAdminClient();
         var ceremony = new FakeWebAuthnCeremony();
-        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
+        await using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
             managementTokenClient: tokenClient, passkeyClient: passkeys, ceremony: ceremony);
         var clipboard = (FakeClipboardService)ctx.Services.GetRequiredService<IClipboardService>();
 
@@ -129,7 +129,7 @@ public sealed class SettingsModalTests
         {
             Failure = new WebAuthnCeremonyException("The passkey prompt was dismissed or timed out.")
         };
-        using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
+        await using var ctx = NewContext(liveDataStore: out _, routerSettingsStore: out _,
             managementTokenClient: tokenClient, ceremony: ceremony);
         var clipboard = (FakeClipboardService)ctx.Services.GetRequiredService<IClipboardService>();
 

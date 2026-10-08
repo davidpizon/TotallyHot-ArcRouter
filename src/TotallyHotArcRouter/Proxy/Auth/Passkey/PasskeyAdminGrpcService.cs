@@ -84,7 +84,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
         {
             StoreProtected = _contentGate.StoreProtected,
             Enrolled = _contentGate.HasPasskeys(),
-            GrantActive = _contentGate.TryGetContentGrant(context, out _),
+            GrantActive = _contentGate.TryGetContentGrant(context),
             EnrollmentCommandHint = EnrollmentCliCommand.FlagName
         });
     }

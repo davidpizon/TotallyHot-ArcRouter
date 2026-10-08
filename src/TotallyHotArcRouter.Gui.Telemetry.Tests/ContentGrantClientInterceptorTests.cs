@@ -71,16 +71,22 @@ public class ContentGrantClientInterceptorTests
     [Fact]
     public void Re_reads_the_grant_on_every_call_so_unlock_and_lock_take_effect_without_rebuilding_the_channel()
     {
-        string? grant = null;
-        var interceptor = new ContentGrantClientInterceptor(() => grant);
+        // Holder avoids AccessToModifiedClosure: the interceptor captures the box, not a reassigned local.
+        var grant = new GrantHolder();
+        var interceptor = new ContentGrantClientInterceptor(() => grant.Value);
 
         Capture(interceptor).Options.Headers.Should().BeNull();
 
-        grant = "unlocked";
+        grant.Value = "unlocked";
         Capture(interceptor).Options.Headers!.Get(HeaderName)!.Value.Should().Be("unlocked");
 
-        grant = null;
+        grant.Value = null;
         Capture(interceptor).Options.Headers.Should().BeNull();
+    }
+
+    private sealed class GrantHolder
+    {
+        public string? Value { get; set; }
     }
 
     [Fact]

@@ -22,11 +22,11 @@ public interface IWebAuthnCeremonyService
     /// Starts an assertion bound to <paramref name="operation"/> and <paramref name="parameters"/>; returns
     /// request-options JSON for <c>navigator.credentials.get</c>.
     /// </summary>
-    string BeginAssertion(string operation, string parameters);
+    string BeginAssertion(string operation, string? parameters);
 
     /// <summary>
     /// Verifies an assertion and returns the credential display name used. Updates the stored signature
     /// counter when the authenticator reports a non-zero value.
     /// </summary>
-    string FinishAssertion(string assertionJson, string operation, string parameters);
+    string FinishAssertion(string assertionJson, string operation, string? parameters);
 }

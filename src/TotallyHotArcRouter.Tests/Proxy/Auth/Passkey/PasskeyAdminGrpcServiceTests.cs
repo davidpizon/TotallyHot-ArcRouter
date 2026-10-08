@@ -79,8 +79,9 @@ public sealed class PasskeyAdminGrpcServiceTests
         var listed = await f.Service.ListPasskeys(new Contract.ListPasskeysRequest(), Ctx());
         Assert.Single(listed.Credentials);
 
-        var reuse = () => f.Service.BeginEnrollment(new Contract.BeginEnrollmentRequest { EnrollmentCode = code }, Ctx());
-        var ex = await Assert.ThrowsAsync<RpcException>(reuse);
+        Task<Contract.WebAuthnOptionsResponse> Reuse() =>
+            f.Service.BeginEnrollment(new Contract.BeginEnrollmentRequest { EnrollmentCode = code }, Ctx());
+        var ex = await Assert.ThrowsAsync<RpcException>(Reuse);
         Assert.Equal(StatusCode.PermissionDenied, ex.StatusCode);
     }
 
@@ -118,7 +119,7 @@ public sealed class PasskeyAdminGrpcServiceTests
             new Contract.FinishContentUnlockRequest { AssertionJson = Response(Challenge(options.OptionsJson)) }, Ctx());
 
         Assert.False(string.IsNullOrEmpty(grant.GrantToken));
-        Assert.True(f.Harness.Gate.TryGetContentGrant(Ctx(grant.GrantToken), out _));
+        Assert.True(f.Harness.Gate.TryGetContentGrant(Ctx(grant.GrantToken)));
         Assert.Contains(f.Log.Recent(), e => e.Operation == GatedOperation.ContentUnlock && e.Outcome == "succeeded");
     }
 
@@ -209,7 +210,7 @@ public sealed class PasskeyAdminGrpcServiceTests
 
         await f.Service.LockContent(new Contract.LockContentRequest(), Ctx(grant));
 
-        Assert.False(f.Harness.Gate.TryGetContentGrant(Ctx(grant), out _));
+        Assert.False(f.Harness.Gate.TryGetContentGrant(Ctx(grant)));
         var approvals = await f.Service.ListRecentApprovals(new Contract.ListRecentApprovalsRequest(), Ctx());
         Assert.Contains(approvals.Approvals, a => a.Operation == "lock");
     }

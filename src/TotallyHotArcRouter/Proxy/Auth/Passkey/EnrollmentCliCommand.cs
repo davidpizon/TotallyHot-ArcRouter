@@ -17,7 +17,7 @@ public static class EnrollmentCliCommand
     public const string FlagName = "--mint-passkey-enrollment-code";
 
     /// <summary>Optional flag prefix to revoke a credential: <c>--revoke-passkey=&lt;id&gt;</c>.</summary>
-    public const string RevokePasskeyPrefix = "--revoke-passkey=";
+    private const string RevokePasskeyPrefix = "--revoke-passkey=";
 
     /// <summary>
     /// Executes a mint or revoke request when <paramref name="args"/> contain <see cref="FlagName"/> or
@@ -42,10 +42,10 @@ public static class EnrollmentCliCommand
     }
 
     /// <summary>Mints an enrollment code and prints it to stdout.</summary>
-    public static int RunMint() => RunRequest(new { op = "mint" });
+    private static int RunMint() => RunRequest(new { op = "mint" });
 
     /// <summary>Revokes the credential whose id is <paramref name="credentialIdBase64Url"/>.</summary>
-    public static int RunRevoke(string credentialIdBase64Url) =>
+    private static int RunRevoke(string credentialIdBase64Url) =>
         RunRequest(new { op = "revoke", id = credentialIdBase64Url });
 
     private static int RunRequest(object payload)
@@ -144,10 +144,10 @@ public static class EnrollmentCliCommand
     private static string ExchangeLine(Stream stream, string requestJson)
     {
         var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        using var writer = new StreamWriter(stream, utf8, bufferSize: 4096, leaveOpen: true)
-        {
-            AutoFlush = true,
-        };
+        // Set AutoFlush after construction: an object initializer on a using variable would skip Dispose
+        // if the initializer threw.
+        using var writer = new StreamWriter(stream, utf8, bufferSize: 4096, leaveOpen: true);
+        writer.AutoFlush = true;
         using var reader = new StreamReader(stream, utf8, detectEncodingFromByteOrderMarks: false,
             bufferSize: 4096, leaveOpen: true);
         writer.WriteLine(requestJson);

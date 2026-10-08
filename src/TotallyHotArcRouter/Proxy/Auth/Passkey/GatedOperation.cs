@@ -60,10 +60,9 @@ public static class GatedOperation
     /// Combines <paramref name="operation"/> and <paramref name="parameters"/> into the single binding key
     /// stored with a one-operation authorization.
     /// </summary>
-    public static string FormatBinding(string operation, string parameters)
+    public static string FormatBinding(string operation, string? parameters)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
-        parameters ??= string.Empty;
-        return $"{operation}\0{parameters}";
+        return $"{operation}\0{parameters ?? string.Empty}";
     }
 }

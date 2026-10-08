@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 public sealed class PasskeyCredentialStore : IPasskeyCredentialStore
 {
     /// <summary>Secret-store key for the credential JSON array (ADR-0020 §3.4).</summary>
-    public const string StoreKey = "passkey.credentials.v1";
+    private const string StoreKey = "passkey.credentials.v1";
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
@@ -29,7 +29,7 @@ public sealed class PasskeyCredentialStore : IPasskeyCredentialStore
     /// <summary>Initializes a new instance with explicit reader and writer surfaces.</summary>
     /// <param name="reader">Reads the encrypted store.</param>
     /// <param name="writer">Writes the encrypted store.</param>
-    public PasskeyCredentialStore(ISecretReader reader, ISecretWriter writer)
+    private PasskeyCredentialStore(ISecretReader reader, ISecretWriter writer)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(writer);
