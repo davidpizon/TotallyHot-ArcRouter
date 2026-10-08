@@ -7,8 +7,9 @@ namespace TotallyHot.ArcRouter.Sessions;
 
 /// <summary>
 /// Obscures secrets, Brotli-compresses, and AES-GCM-encrypts a single body so session files never
-/// hold plaintext. Round-trips are byte-exact apart from <see cref="SecretObscurer"/> replacements
-/// (ADR-0019's only permitted mutation of stored text).
+/// hold plaintext. Round-trips are byte-exact for valid UTF-8 apart from <see cref="SecretObscurer"/>
+/// replacements (ADR-0019's only permitted mutation of stored text); bodies that are not valid UTF-8
+/// are not yet byte-exact — see <see cref="Seal"/>.
 /// </summary>
 public static class SessionRecordCodec
 {
@@ -19,8 +20,11 @@ public static class SessionRecordCodec
     /// </summary>
     /// <param name="sessionKey">The 32-byte per-session AES key.</param>
     /// <param name="plaintext">Raw body bytes as received or relayed.</param>
+    /// <param name="associatedData">Data authenticated with the ciphertext but not stored in it; <see cref="Open"/>
+    /// must be given the same bytes.</param>
     /// <returns>Nonce, tag, and ciphertext for the framed record.</returns>
-    public static EncryptedSessionPayload Seal(ReadOnlySpan<byte> sessionKey, ReadOnlySpan<byte> plaintext)
+    public static EncryptedSessionPayload Seal(
+        ReadOnlySpan<byte> sessionKey, ReadOnlySpan<byte> plaintext, ReadOnlySpan<byte> associatedData = default)
     {
         SessionKeyMaterial.ValidateKeyLength(sessionKey);
 
@@ -35,7 +39,7 @@ public static class SessionRecordCodec
         var tag = new byte[SessionKeyMaterial.TagLengthBytes];
 
         using var aes = new AesGcm(sessionKey, SessionKeyMaterial.TagLengthBytes);
-        aes.Encrypt(nonce, compressed, ciphertext, tag);
+        aes.Encrypt(nonce, compressed, ciphertext, tag, associatedData);
 
         return new EncryptedSessionPayload(nonce, tag, ciphertext);
     }
@@ -45,15 +49,18 @@ public static class SessionRecordCodec
     /// </summary>
     /// <param name="sessionKey">The 32-byte per-session AES key.</param>
     /// <param name="payload">Nonce, tag, and ciphertext from <see cref="Seal"/>.</param>
+    /// <param name="associatedData">The same associated data that was passed to <see cref="Seal"/>.</param>
     /// <returns>The obscured plaintext bytes.</returns>
-    public static byte[] Open(ReadOnlySpan<byte> sessionKey, EncryptedSessionPayload payload)
+    /// <exception cref="CryptographicException">When authentication fails.</exception>
+    public static byte[] Open(
+        ReadOnlySpan<byte> sessionKey, EncryptedSessionPayload payload, ReadOnlySpan<byte> associatedData = default)
     {
         ArgumentNullException.ThrowIfNull(payload);
         SessionKeyMaterial.ValidateKeyLength(sessionKey);
 
         var compressed = new byte[payload.Ciphertext.Length];
         using var aes = new AesGcm(sessionKey, SessionKeyMaterial.TagLengthBytes);
-        aes.Decrypt(payload.Nonce, payload.Ciphertext, payload.Tag, compressed);
+        aes.Decrypt(payload.Nonce, payload.Ciphertext, payload.Tag, compressed, associatedData);
         return BrotliDecompress(compressed);
     }
 

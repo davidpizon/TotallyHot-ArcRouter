@@ -118,6 +118,109 @@ public sealed class SessionFileTests
         Assert.Equal(session, unwrapped);
     }
 
+    /// <summary>The file works on its own copy of the key, so disposing it never zeroes the caller's array.</summary>
+    [Fact]
+    public void Dispose_DoesNotZeroCallerKey()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var expected = (byte[])sessionKey.Clone();
+
+            SessionFile.Create(Path.Combine(dir, "session.bin"), SessionArchiveIds.NewArchiveSessionId(), sessionKey).Dispose();
+
+            Assert.Equal(expected, sessionKey);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>A crash mid-append leaves a partial frame; reopening drops it so later appends stay readable.</summary>
+    [Fact]
+    public void Open_TruncatesTornTrailingFrame()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var turnId = SessionArchiveIds.NewArchiveTurnId();
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, "one"u8, turnId);
+                file.AppendBody(0, SessionBodyKind.ClientResponse, "two"u8, turnId);
+            }
+
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite))
+            {
+                stream.SetLength(stream.Length - 5);
+            }
+
+            using (var reopened = SessionFile.Open(path, sessionKey))
+            {
+                reopened.AppendBody(1, SessionBodyKind.ClientRequest, "three"u8, turnId);
+                var frames = reopened.ReadAllBodies();
+
+                Assert.Equal(2, frames.Count);
+                Assert.Equal("one"u8.ToArray(), frames[0].Plaintext);
+                Assert.Equal("three"u8.ToArray(), frames[1].Plaintext);
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>Relabelling a frame's kind on disk fails authentication instead of silently swapping bodies.</summary>
+    [Fact]
+    public void ReadAllBodies_RejectsRelabelledFrame()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, "one"u8, SessionArchiveIds.NewArchiveTurnId());
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            bytes[8 + 16 + 2] = (byte)SessionBodyKind.ClientResponse; // first frame's kind byte
+            File.WriteAllBytes(path, bytes);
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+            Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(() => reopened.ReadAllBodies());
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>Opening with another session's id in the index is rejected.</summary>
+    [Fact]
+    public void Open_RejectsMismatchedArchiveId()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey).Dispose();
+
+            Assert.Throws<InvalidDataException>(() => SessionFile.Open(path, sessionKey, SessionArchiveIds.NewArchiveSessionId()));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static string CreateTempDir()
     {
         var dir = Path.Combine(Path.GetTempPath(), "thar-session-" + Guid.NewGuid().ToString("N"));

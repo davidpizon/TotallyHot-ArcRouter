@@ -33,12 +33,7 @@ public static class SessionKeyMaterial
     /// Generates a fresh random master key for wrapping session keys. Persisted once via the secret store.
     /// </summary>
     /// <returns>A 32-byte AES key, typically Base64-encoded at rest.</returns>
-    public static byte[] CreateMasterKey()
-    {
-        var key = new byte[KeyLengthBytes];
-        RandomNumberGenerator.Fill(key);
-        return key;
-    }
+    public static byte[] CreateMasterKey() => CreateSessionKey();
 
     /// <summary>
     /// Wraps <paramref name="sessionKey"/> under <paramref name="masterKey"/> as
@@ -49,8 +44,8 @@ public static class SessionKeyMaterial
     /// <returns>The wrap blob.</returns>
     public static byte[] WrapSessionKey(ReadOnlySpan<byte> masterKey, ReadOnlySpan<byte> sessionKey)
     {
-        ValidateKey(masterKey, nameof(masterKey));
-        ValidateKey(sessionKey, nameof(sessionKey));
+        ValidateKeyLength(masterKey, nameof(masterKey));
+        ValidateKeyLength(sessionKey, nameof(sessionKey));
 
         var nonce = new byte[NonceLengthBytes];
         RandomNumberGenerator.Fill(nonce);
@@ -76,9 +71,8 @@ public static class SessionKeyMaterial
     /// <exception cref="CryptographicException">When authentication fails.</exception>
     public static byte[] UnwrapSessionKey(ReadOnlySpan<byte> masterKey, ReadOnlySpan<byte> wrapped)
     {
-        ValidateKey(masterKey, nameof(masterKey));
-        var minLength = NonceLengthBytes + TagLengthBytes + KeyLengthBytes;
-        if (wrapped.Length != minLength)
+        ValidateKeyLength(masterKey, nameof(masterKey));
+        if (wrapped.Length != NonceLengthBytes + TagLengthBytes + KeyLengthBytes)
         {
             throw new CryptographicException("Wrapped session key has an unexpected length.");
         }
@@ -105,7 +99,4 @@ public static class SessionKeyMaterial
             throw new ArgumentException($"Expected a {KeyLengthBytes}-byte key.", paramName);
         }
     }
-
-    private static void ValidateKey(ReadOnlySpan<byte> key, string paramName) =>
-        ValidateKeyLength(key, paramName);
 }
