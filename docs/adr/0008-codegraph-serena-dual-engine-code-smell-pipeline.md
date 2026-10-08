@@ -183,6 +183,26 @@ Catalog drift since 2026-09-02:
 - `TrayWindowManager` no longer exists, which retires the old plan's A3 and the S-table row that
   mentioned it.
 
+### Catalog entry (2026-10-08): #165 export/import blast-radius scan — **Serena skipped**
+
+**Pain-triggered** by the approved [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165)
+plan approaching the proxy hot path (storage layer on PR #215; capture not wired yet). **Serena MCP
+auth timed out**, so classification is the agent's own — not a dual-engine result. Full write-up:
+[issue comment](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165#issuecomment-6064414059).
+
+**Verdict: file nothing.** No observed cost beyond the feature work the plan already schedules.
+Existing hub grades (S1–S4, S10) still bind; size drift on this branch is noted only:
+
+| Symbol | Catalog size (earlier) | Size on `feat/165-phase1-session-store-index` |
+|---|---|---|
+| `ProxyMiddleware` | 1345 | ~1219 |
+| `RequestTelemetryPublisher` | 799 | ~898 |
+| `RequestInterceptor` | 670–761 | ~1012 |
+
+**Noted, not scheduled** (plan §8 / §6 already own them): `SessionStore` not in DI; `ClearTranscripts`
+does not yet call `DeleteSessions`; prefer ADR-0018's writer over widening the S4 constructor;
+`AppendTurn`'s open-per-call cost waits on hot-path measurement. Retry Serena on the next smell survey.
+
 ### Non-smell use: the CodeGraph step applied to a correctness bug
 
 Step 1 of this pipeline (map with CodeGraph first) is not exclusive to smell surveys — it is the
