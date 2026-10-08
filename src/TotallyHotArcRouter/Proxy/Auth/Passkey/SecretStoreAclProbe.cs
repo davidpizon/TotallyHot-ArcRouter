@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
@@ -99,30 +100,50 @@ public sealed class SecretStoreAclProbe
         [DllImport("libc", SetLastError = true, EntryPoint = "geteuid")]
         public static extern int GetEffectiveUserId();
 
-        [StructLayout(LayoutKind.Sequential)]
-        public struct StatStruct
-        {
-            public uint st_dev;
-            public uint st_ino;
-            public uint st_mode;
-            public uint st_nlink;
-            public uint st_uid;
-            public uint st_gid;
-        }
+        // libc writes the platform's whole `struct stat` (144 bytes on x86-64 Linux), which is larger and laid
+        // out differently from any small hand-written struct: a short managed struct is overrun and corrupts
+        // the heap. So the call gets a generously oversized byte buffer and only the owner's uid is read.
+        private const int StatBufferSize = 512;
 
         [DllImport("libc", SetLastError = true, EntryPoint = "stat")]
-        private static extern int statNative(string path, out StatStruct buf);
+        private static extern int statNative(string path, byte[] buf);
 
         public static bool TryStat(string path, out UnixFileStat stat)
         {
-            if (statNative(path, out var raw) != 0)
+            stat = default;
+            if (!TryGetOwnerOffsets(out var uidOffset, out var gidOffset)) return false;
+
+            var buffer = new byte[StatBufferSize];
+            try
             {
-                stat = default;
+                if (statNative(path, buffer) != 0) return false;
+            }
+            catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException)
+            {
+                // Fail closed on a libc that does not export `stat` (glibc before 2.33).
                 return false;
             }
 
-            stat = new UnixFileStat(raw.st_uid, raw.st_gid);
+            stat = new UnixFileStat(
+                Uid: BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(uidOffset)),
+                Gid: BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(gidOffset)));
             return true;
+        }
+
+        /// <summary>
+        /// The byte offsets of <c>st_uid</c> and <c>st_gid</c> in <c>struct stat</c> for the supported
+        /// platforms; unsupported combinations return <see langword="false"/> so the probe fails closed.
+        /// </summary>
+        private static bool TryGetOwnerOffsets(out int uidOffset, out int gidOffset)
+        {
+            (uidOffset, gidOffset) = (OperatingSystem.IsMacOS(), OperatingSystem.IsLinux(), RuntimeInformation.ProcessArchitecture) switch
+            {
+                (true, _, Architecture.X64 or Architecture.Arm64) => (16, 20),
+                (_, true, Architecture.X64) => (28, 32),
+                (_, true, Architecture.Arm64) => (24, 28),
+                _ => (-1, -1),
+            };
+            return uidOffset >= 0;
         }
     }
 }

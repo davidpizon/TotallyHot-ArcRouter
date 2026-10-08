@@ -1,5 +1,4 @@
 using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
-using Xunit;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Auth.Passkey;
 
