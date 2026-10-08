@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.Quality.DependencyInjection;
 using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Transcripts;
 using TotallyHot.ArcRouter.Update;
 
@@ -218,6 +219,11 @@ public static class ServiceCollectionExtensions
         // ProxyHostedService binds Kestrel below. The background poll loop is registered between them;
         // it does not run its own initial cycle.
         services.AddHostedService<StartupHealthCheckHostedService>();
+
+        // ADR-0019 session storage (#165). Its recovery service reads the session master key from
+        // ProtectedSecretStore, so it starts after StartupHealthCheckHostedService (see the migration note in
+        // AddServices above) and, like everything here, before ProxyHostedService binds Kestrel.
+        services.AddSessionCapture();
         services.AddHostedService<TranscriptScrubHostedService>();
         services.AddHostedService<PriceCatalogIngestionHostedService>();
         services.AddHostedService<CostReconciliationHostedService>();

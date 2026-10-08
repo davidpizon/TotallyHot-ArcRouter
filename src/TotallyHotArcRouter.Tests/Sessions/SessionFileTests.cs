@@ -356,6 +356,108 @@ public sealed class SessionFileTests
         }
     }
 
+    /// <summary>A body that compresses to several chunks reads back whole, and its neighbours are undisturbed.</summary>
+    [Fact]
+    public void AppendAndRead_MultiChunkBodyRoundTrips()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var turnId = SessionArchiveIds.NewArchiveTurnId();
+            var big = new byte[300_000];
+            new Random(165).NextBytes(big);
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, "before"u8, turnId);
+                file.AppendBody(0, SessionBodyKind.ClientResponse, big, turnId);
+                file.AppendBody(1, SessionBodyKind.ClientRequest, "after"u8, turnId);
+            }
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+            var frames = reopened.ReadAllBodies();
+
+            Assert.Equal(3, frames.Count);
+            Assert.Equal("before"u8.ToArray(), frames[0].Plaintext);
+            Assert.True(big.AsSpan().SequenceEqual(frames[1].Plaintext));
+            Assert.Equal("after"u8.ToArray(), frames[2].Plaintext);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>A multi-chunk body cut off before its final chunk is a torn frame, not a shorter body.</summary>
+    [Fact]
+    public void Open_BodyCutBeforeItsFinalChunk_IsDroppedWhole()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var turnId = SessionArchiveIds.NewArchiveTurnId();
+            var big = new byte[300_000];
+            new Random(2).NextBytes(big);
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, "kept"u8, turnId);
+                file.AppendBody(0, SessionBodyKind.ClientResponse, big, turnId);
+            }
+
+            // Cut at a chunk boundary: the first two chunks of the large body survive, the final one does not.
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite))
+            {
+                stream.SetLength(stream.Length - 40_000);
+            }
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+
+            var frames = reopened.ReadAllBodies();
+            Assert.Single(frames);
+            Assert.Equal("kept"u8.ToArray(), frames[0].Plaintext);
+            Assert.Equal(1UL, reopened.FrameCount);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>A body whose final chunk loses its final flag is a torn frame: it is dropped whole, never read as complete.</summary>
+    [Fact]
+    public void Open_BodyWithoutFinalFlag_IsDroppedAsTorn()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, "one"u8, SessionArchiveIds.NewArchiveTurnId());
+            }
+
+            // 8 magic + 16 session id + 2 version + 22 frame header: the first chunk's final flag is next.
+            const int finalFlagOffset = 8 + 16 + 2 + 22;
+            var bytes = File.ReadAllBytes(path);
+            Assert.Equal(1, bytes[finalFlagOffset]);
+            bytes[finalFlagOffset] = 0;
+            File.WriteAllBytes(path, bytes);
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+
+            Assert.Equal(0UL, reopened.FrameCount);
+            Assert.Empty(reopened.ReadAllBodies());
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     /// <summary>Creates a fresh, uniquely named directory under the system temp path for one test.</summary>
     /// <returns>The absolute path of the new directory; the caller deletes it.</returns>
     private static string CreateTempDir()

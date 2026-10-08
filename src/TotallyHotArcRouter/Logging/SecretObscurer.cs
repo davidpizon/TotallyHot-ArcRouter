@@ -30,6 +30,13 @@ public static partial class SecretObscurer
     }
 
     /// <summary>
+    /// Gets the compiled key-shaped pattern, so <see cref="TotallyHot.ArcRouter.Sessions.StreamingSecretObscurer"/> applies exactly the
+    /// patterns <see cref="Obscure"/> does instead of keeping a second copy that could drift.
+    /// </summary>
+    /// <returns>The shared regular expression.</returns>
+    internal static Regex Pattern() => KeyShapedPattern();
+
+    /// <summary>
     /// Common API-key and token shapes: OpenAI/Anthropic-style <c>sk-</c> (which includes <c>sk-ant-</c>),
     /// Slack <c>xox*</c>, GitHub <c>gh*_</c> and <c>github_pat_</c>, AWS access-key IDs (<c>AKIA</c>/<c>ASIA</c>
     /// plus 16 characters), Google <c>AIza</c>, <c>Bearer</c> tokens, PEM private-key blocks, and long
