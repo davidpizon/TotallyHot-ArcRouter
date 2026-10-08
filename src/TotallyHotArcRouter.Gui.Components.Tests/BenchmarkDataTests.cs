@@ -651,9 +651,10 @@ public sealed class BenchmarkDataTests
 
     /// <summary>
     /// A configurable, reachable-by-default <see cref="ILlmRouterModelAdminClient"/> fake, so
-    /// <see cref="NewContext"/> can register a <see cref="LlmRouterModelStore"/> for the Local Voter Model
-    /// section without needing a live proxy. Defaults to no files (a "Current" vacuously-true status) for
-    /// tests that don't exercise this section; tests that do pass <see cref="FakeVoterClient.Files"/> and/or
+    /// <see cref="NewContext(IBenchmarkDataAdminClient, ILlmRouterModelAdminClient)"/> can register a
+    /// <see cref="LlmRouterModelStore"/> for the Local Voter Model section without needing a live proxy.
+    /// Defaults to no files (a "Current" vacuously-true status) for tests that don't exercise this section;
+    /// tests that do pass <see cref="FakeVoterClient.Files"/> and/or
     /// <see cref="FakeVoterClient.SyncEvents"/>.
     /// </summary>
     private sealed class FakeVoterClient : ILlmRouterModelAdminClient

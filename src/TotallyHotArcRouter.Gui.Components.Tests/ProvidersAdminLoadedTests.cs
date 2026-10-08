@@ -108,16 +108,6 @@ public sealed class ProvidersAdminLoadedTests
     // "As of ... stale" branch distinctly from the fresh-and-projected one.
     private static Contract.ProviderListResponse ProvidersWithStaleRateLimit()
     {
-        var rateLimit = new Contract.ProviderRateLimitState
-        {
-            ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")),
-            IsStale = true
-        };
-        rateLimit.Dimensions["tokens"] = new Contract.RateLimitDimensionState
-        {
-            Limit = 200000, Remaining = 158000,
-            ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
-        };
         return new Contract.ProviderListResponse
         {
             Providers =
@@ -128,7 +118,19 @@ public sealed class ProvidersAdminLoadedTests
                     ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
                     Enabled = true, WindowKind = "Monthly",
                     UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
-                    RateLimit = rateLimit
+                    RateLimit = new Contract.ProviderRateLimitState
+                    {
+                        ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")),
+                        IsStale = true,
+                        Dimensions =
+                        {
+                            ["tokens"] = new Contract.RateLimitDimensionState
+                            {
+                                Limit = 200000, Remaining = 158000,
+                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
+                            }
+                        }
+                    }
                 }
             }
         };
@@ -140,30 +142,40 @@ public sealed class ProvidersAdminLoadedTests
     // clock.
     private static Contract.ProviderListResponse ProvidersWithUsageAndRateLimit()
     {
-        var response = new Contract.ProviderListResponse();
-        var rateLimit = new Contract.ProviderRateLimitState
+        return new Contract.ProviderListResponse
         {
-            ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z"))
+            Providers =
+            {
+                new Contract.ProviderState
+                {
+                    Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
+                    ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
+                    Enabled = true, WindowKind = "Monthly",
+                    UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
+                    RateLimit = new Contract.ProviderRateLimitState
+                    {
+                        ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")),
+                        Dimensions =
+                        {
+                            ["tokens"] = new Contract.RateLimitDimensionState
+                            {
+                                Limit = 200000, Remaining = 158000,
+                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z")),
+                                TimeToExhaustionSeconds = 19 * 60, BurnRatePerMinute = 2210.5
+                            }
+                        },
+                        UnifiedWindows =
+                        {
+                            ["5h"] = new Contract.UnifiedWindowState
+                            {
+                                Status = "allowed",
+                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
+                            }
+                        }
+                    }
+                }
+            }
         };
-        rateLimit.Dimensions["tokens"] = new Contract.RateLimitDimensionState
-        {
-            Limit = 200000, Remaining = 158000,
-            ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z")),
-            TimeToExhaustionSeconds = 19 * 60, BurnRatePerMinute = 2210.5
-        };
-        rateLimit.UnifiedWindows["5h"] = new Contract.UnifiedWindowState
-        {
-            Status = "allowed", ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
-        };
-        response.Providers.Add(new Contract.ProviderState
-        {
-            Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
-            ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
-            Enabled = true, WindowKind = "Monthly",
-            UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
-            RateLimit = rateLimit
-        });
-        return response;
     }
 
     // Same three providers as DefaultProviders, but openai's adminAction carries a failed "Refresh from

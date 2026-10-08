@@ -10,7 +10,9 @@
 
 @code {
 
-    // The serialized CostChartModel / GroupedBarsModel / DonutModel to render. Changing it re-renders.
+    /// <summary>
+    /// The serialized CostChartModel / GroupedBarsModel / DonutModel to render. Changing it re-renders.
+    /// </summary>
     [Parameter] [EditorRequired] public string ModelJson { get; set; } = string.Empty;
 
     private readonly string _elementId = "echart-" + Guid.NewGuid().ToString("N");
