@@ -50,6 +50,61 @@ public sealed class SessionFile : IDisposable
     public Guid ArchiveSessionId { get; }
 
     /// <summary>
+    /// How many complete frames the file holds, counting any appended since it was opened. The index
+    /// records this beside <see cref="Length"/> when a turn commits, so recovery can tell frames that
+    /// were committed from frames a crash left behind.
+    /// </summary>
+    public ulong FrameCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return _frameCount;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The file's length in bytes, which after a complete append is the end of the last frame. The index
+    /// records it when a turn commits (ADR-0019, "Commit order and recovery").
+    /// </summary>
+    public long Length
+    {
+        get
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return _stream.Length;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cuts the file back to a length the index committed, discarding frames that were flushed but whose
+    /// index rows never committed. Appends resume from the new end. <paramref name="length"/> must be a
+    /// frame boundary taken from <see cref="Length"/> after an append, which is what the index records.
+    /// </summary>
+    /// <param name="length">The committed length in bytes, no smaller than the header and no larger than the file.</param>
+    /// <param name="frameCount">How many frames the file held at that length.</param>
+    /// <exception cref="ArgumentOutOfRangeException">When the length is outside the file's header-to-end range.</exception>
+    public void TruncateTo(long length, ulong frameCount)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ArgumentOutOfRangeException.ThrowIfLessThan(length, DataStart);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(length, _stream.Length);
+
+            _stream.SetLength(length);
+            _stream.Seek(0, SeekOrigin.End);
+            _frameCount = frameCount;
+        }
+    }
+
+    /// <summary>
     /// Creates a new session file with a fresh header. The caller owns key custody and must wrap
     /// <paramref name="sessionKey"/> before the file is considered durable. The key is copied; the
     /// caller's array is left untouched.

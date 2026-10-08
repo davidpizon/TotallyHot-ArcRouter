@@ -27,6 +27,7 @@
 
 @code {
 
+    /// <inheritdoc/>
     protected override void OnInitialized()
     {
         Toasts.Changed += HandleChanged;
@@ -38,6 +39,7 @@
         InvokeAsync(StateHasChanged);
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         Toasts.Changed -= HandleChanged;

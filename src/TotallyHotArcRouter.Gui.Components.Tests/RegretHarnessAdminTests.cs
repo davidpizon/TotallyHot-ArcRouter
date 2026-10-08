@@ -186,7 +186,7 @@ public sealed class RegretHarnessAdminTests
         /// Optional gate awaited immediately before yielding a <see cref="RegretHarnessRunEvent.Result"/>
         /// event, so a test can observe the streaming-but-not-yet-final state before releasing it.
         /// </summary>
-        public TaskCompletionSource<bool>? Gate { get; set; }
+        public TaskCompletionSource<bool>? Gate { get; init; }
 
         public Task<RegretHarnessStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
         {
