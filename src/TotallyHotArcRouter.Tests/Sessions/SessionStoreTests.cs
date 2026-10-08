@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -348,7 +349,7 @@ public sealed class SessionStoreTests : IDisposable
         Assert.False(_masterKeys.IsRotationRequired());
 
         // The old master key no longer exists anywhere the store can reach, so the leftover blob is inert.
-        Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(
+        Assert.ThrowsAny<CryptographicException>(
             () => SessionKeyMaterial.UnwrapSessionKey(_masterKeys.TryGetCurrent()!, leftoverWrappedKey));
     }
 
@@ -393,7 +394,7 @@ public sealed class SessionStoreTests : IDisposable
         Assert.False(_masterKeys.IsRotationRequired());
         Assert.NotEqual(oldMaster, _masterKeys.TryGetCurrent());
         Assert.Equal("k1", Encoding.UTF8.GetString(_store.ReadBodies(keep)[0].Plaintext!));
-        Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(
+        Assert.ThrowsAny<CryptographicException>(
             () => SessionKeyMaterial.UnwrapSessionKey(_masterKeys.TryGetCurrent()!, leftoverWrappedKey));
     }
 
@@ -421,7 +422,7 @@ public sealed class SessionStoreTests : IDisposable
         Assert.False(_masterKeys.IsRotationRequired());
         Assert.NotEqual(oldMaster, _masterKeys.TryGetCurrent());
         Assert.Equal("k1", Encoding.UTF8.GetString(_store.ReadBodies(keep)[0].Plaintext!));
-        Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(
+        Assert.ThrowsAny<CryptographicException>(
             () => SessionKeyMaterial.UnwrapSessionKey(_masterKeys.TryGetCurrent()!, leftoverWrappedKey));
     }
 
