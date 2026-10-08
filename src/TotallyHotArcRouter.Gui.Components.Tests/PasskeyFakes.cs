@@ -21,7 +21,7 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
     /// <summary>Gets or sets the passkeys returned by <see cref="ListPasskeysAsync"/>.</summary>
     public IReadOnlyList<PasskeyInfo> Passkeys { get; set; } =
     [
-        new PasskeyInfo(Id: "cred-1", Name: "Windows Hello", CreatedAtUtc: new(2026, 10, 7, 0, 0, 0, TimeSpan.Zero),
+        new(Id: "cred-1", Name: "Windows Hello", CreatedAtUtc: new(2026, 10, 7, 0, 0, 0, TimeSpan.Zero),
             BackupEligible: true, BackupState: false)
     ];
 
