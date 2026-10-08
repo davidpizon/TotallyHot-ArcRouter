@@ -2,6 +2,8 @@ using Microsoft.Data.Sqlite;
 using TotallyHot.ArcRouter.Hosting;
 using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Sessions;
 
 namespace TotallyHot.ArcRouter.Storage;
 
@@ -14,9 +16,9 @@ namespace TotallyHot.ArcRouter.Storage;
 /// <para>
 /// This is the interim form. It deletes every row of <c>request_transcripts</c>, truncates the write-ahead
 /// log, rebuilds the database file so no freed page keeps old text, and deletes every <c>bodies-*.log</c>
-/// file. It keeps the spend and routing databases, which hold no conversation text. Once ADR-0019's
-/// per-session files exist, the command also deletes the master-key entry from <c>secrets.dat</c> and
-/// removes the session folder; until then there is no key or folder to remove.
+/// file. It keeps the spend and routing databases, which hold no conversation text. It also deletes
+/// ADR-0019's session files and index rows, then destroys the master-key entries in <c>secrets.dat</c>,
+/// so a copy of a session file or of the database cannot be decrypted afterwards.
 /// </para>
 /// <para>
 /// It runs in its own process, so it points SQLite's temporary folder at the protected data directory before
@@ -63,7 +65,8 @@ internal static class ShredConversationsCommand
 
             try
             {
-                var exitCode = Shred(databasePath: databasePath, logsDirectory: logsDirectory, logger: logger);
+                var exitCode = Shred(databasePath: databasePath, logsDirectory: logsDirectory, logger: logger,
+                    masterKeys: new SecretStoreSessionMasterKeyStore(new ProtectedSecretStore()));
                 RecordResult(directory: resultDirectory, exitCode: exitCode, detail: $"database={databasePath}; logs={logsDirectory}");
                 return exitCode;
             }
@@ -108,18 +111,26 @@ internal static class ShredConversationsCommand
     /// <param name="logsDirectory">The directory holding <c>bodies-*.log</c>.</param>
     /// <param name="logger">Receives the outcome of each step.</param>
     /// <param name="probeVolume">Overrides the scrub's free-space probe, for tests.</param>
+    /// <param name="masterKeys">
+    /// The session master-key custody to destroy once the session files are gone; <see langword="null"/> skips
+    /// that step, for tests that exercise only the files.
+    /// </param>
     /// <returns><see cref="DoneExitCode"/> when nothing was left behind, otherwise <see cref="IncompleteExitCode"/>.</returns>
     internal static int Shred(
         string databasePath,
         string logsDirectory,
         ILogger logger,
-        Func<string, SqliteScrub.VolumeSpace>? probeVolume = null)
+        Func<string, SqliteScrub.VolumeSpace>? probeVolume = null,
+        ISessionMasterKeyStore? masterKeys = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(logsDirectory);
         ArgumentNullException.ThrowIfNull(logger);
 
-        var complete = ShredDatabase(databasePath: databasePath, logger: logger, probeVolume: probeVolume);
+        // Files before the key: a key destroyed first would leave unreadable files that a failed delete keeps.
+        var complete = ShredSessionFolder(SessionStore.FolderBeside(databasePath), logger);
+        complete &= ShredDatabase(databasePath: databasePath, logger: logger, probeVolume: probeVolume);
+        complete &= DestroyMasterKeys(masterKeys, logger);
 
         if (BodyLogController.DeleteBodyFiles(logsDirectory))
             logger.LogInformation("Removed the body-excerpt logs under {LogsDirectory}.", logsDirectory);
@@ -152,6 +163,20 @@ internal static class ShredConversationsCommand
                     delete.CommandText = "DELETE FROM request_transcripts;";
                     delete.ExecuteNonQuery();
                 }
+            }
+
+            // The wrapped session keys and turn positions are not text, but with the files and master key
+            // gone they are meaningless, and an uninstall should leave no trace of what sessions existed.
+            foreach (var table in new[] { "session_turns", "session_files" })
+            {
+                using var present = connection.CreateCommand();
+                present.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name;";
+                present.Parameters.AddWithValue("$name", table);
+                if (present.ExecuteScalar() is null) continue;
+
+                using var clear = connection.CreateCommand();
+                clear.CommandText = $"DELETE FROM {table};";
+                clear.ExecuteNonQuery();
             }
 
             if (!SqliteHardening.TruncateWal(connection))
@@ -187,6 +212,43 @@ internal static class ShredConversationsCommand
         }
 
         return false;
+    }
+
+    /// <summary>Deletes the session folder and everything in it.</summary>
+    /// <returns><see langword="true"/> when no session file remains.</returns>
+    private static bool ShredSessionFolder(string sessionsDirectory, ILogger logger)
+    {
+        try
+        {
+            if (!Directory.Exists(sessionsDirectory)) return true;
+
+            Directory.Delete(path: sessionsDirectory, recursive: true);
+            logger.LogInformation("Removed the session files under {SessionsDirectory}.", sessionsDirectory);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogError(exception: ex, message: "Could not delete the session files under {SessionsDirectory}.", sessionsDirectory);
+            return false;
+        }
+    }
+
+    /// <summary>Destroys the master-key entries, which makes any surviving copy of a session file undecryptable.</summary>
+    /// <returns><see langword="true"/> when the entries are gone or there was no custody to ask.</returns>
+    private static bool DestroyMasterKeys(ISessionMasterKeyStore? masterKeys, ILogger logger)
+    {
+        if (masterKeys is null) return true;
+
+        try
+        {
+            masterKeys.DestroyAll();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+            logger.LogError(exception: ex, message: "Could not destroy the session master key.");
+            return false;
+        }
     }
 
     /// <summary>

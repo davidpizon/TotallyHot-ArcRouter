@@ -410,3 +410,15 @@ Unit tests, each well under the 5-second ceiling. No live provider, no GUI brows
 12. **Session checksum.** **Decided (David, 2026-09-30): yes**, as described in §2.
     - It gives one comparison per session before any per-turn work.
     - Together with verifying only the bodies being stored, it means re-importing data that is already present reads almost nothing.
+
+## 8. Implementation notes (phase 1, storage layer)
+
+The storage layer is in `src/TotallyHotArcRouter/Sessions/` (`SessionStore`, `SessionIndex`, `ISessionMasterKeyStore`, `SecretStoreSessionMasterKeyStore`). It follows ADR-0019 and the phase 1 exit criteria that do not need the hot path. It differs from, or settles, the plan in these places:
+
+- **Slice boundary.** David chose (2026-10-08) to land the storage layer before any proxy change. This slice has no capture, so ADR-0008's hub rules and the golden-path smoke test do not apply yet; they apply to the hot-path slice. It also has no delta compression or snapshots: each body is still compressed alone, as `SessionFile` already does. The file format is versioned, so the delta encoding can be added later.
+- **Index tables.** `session_files` (wrapped key, committed length and frame count, turn count) and `session_turns` (frame position of each turn) are new tables in `transcripts.db`. `request_transcripts` is untouched until phase 2. Neither table holds text, and every connection runs under `secure_delete`.
+- **Master key.** It is two entries in the protected secret store (`sessions.master-key` and, during a rotation, `sessions.master-key.next`), so ADR-0015 custody applies unchanged.
+- **Rotation.** After any deletion pass, the store stages a new key, re-wraps every session key in one SQLite transaction, then promotes the staged key. Startup recovery resolves a crash between those steps by testing which key opens a stored wrapped key.
+- **Session folder.** `sessions` beside `transcripts.db`, inside the data directory the bootstrap verified (#184). The store adds only a check that the path is not a file or a link; it does not re-check the access list, because the folder inherits the verified root (#184 plan, decision 10). File names are random.
+- **Append cost.** `AppendTurn` opens the session file on every call, which scans the frame headers to find the end. That is linear in the number of frames. The hot-path slice should keep a bounded cache of open files if measurement shows it matters.
+- **Not yet built:** the ADR-0018 writer wiring and spool, hot-path capture, delta compression, wiring `RecoverOnStartup` into host startup, and calling `DeleteSessions` from retention. The uninstall shred (`--shred-conversations`) now also removes the session folder and index rows and destroys the master key, as #184 §11 said it would.
