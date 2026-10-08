@@ -14,7 +14,7 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// valid UTF-8 run with invalid bytes copied through untouched, with two deliberate exceptions that both err
 /// toward redacting more:
 /// <list type="bullet">
-/// <item>A base64-alphabet run longer than <see cref="RunCollapseChars"/> is redacted as one token whatever
+/// <item>A run of base64, base64url or dot characters longer than <see cref="RunCollapseChars"/> is redacted as one token whatever
 /// follows it, including a run that the one-shot pattern would leave alone because three or more <c>=</c>
 /// follow it.</item>
 /// <item>The text in front of such a run is emitted without the match context that would have joined the two
@@ -30,7 +30,7 @@ public sealed class StreamingSecretObscurer : Stream
     /// <summary>How many characters of undecided text the obscurer holds before it abandons the capture.</summary>
     public const int DefaultWindowChars = 64 * 1024;
 
-    /// <summary>A trailing base64-alphabet run longer than this is redacted without being held.</summary>
+    /// <summary>A trailing base64, base64url or dot run longer than this is redacted without being held.</summary>
     public const int RunCollapseChars = 4096;
 
     /// <summary>The most input processed per step, which bounds the character buffer beside the window.</summary>
@@ -185,8 +185,15 @@ public sealed class StreamingSecretObscurer : Stream
             or UnicodeCategory.NonSpacingMark or UnicodeCategory.DecimalDigitNumber
             or UnicodeCategory.ConnectorPunctuation;
 
-    private static bool IsBase64Char(char c) =>
-        c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '+' or '/';
+    /// <summary>
+    /// Whether a character can sit in a long unbroken run that is redacted without being held: the base64 and
+    /// base64url alphabets plus <c>.</c>, so an encoded blob or a JWT-shaped string over
+    /// <see cref="RunCollapseChars"/> is redacted instead of outgrowing the window.
+    /// </summary>
+    /// <param name="c">The character to test.</param>
+    /// <returns><see langword="true"/> when the character can belong to such a run.</returns>
+    private static bool IsRunChar(char c) =>
+        c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '+' or '/' or '-' or '_' or '.';
 
     /// <summary>
     /// Finds where the longest safely decidable prefix of <paramref name="text"/> ends. Everything before the
@@ -252,6 +259,12 @@ public sealed class StreamingSecretObscurer : Stream
         return true;
     }
 
+    /// <summary>
+    /// Decodes one slice of input (with any bytes carried from the previous write) into the pending text, and
+    /// emits what is decidable. An invalid byte flushes the valid run and is copied through; an incomplete
+    /// sequence at the end of the slice is carried to the next write.
+    /// </summary>
+    /// <param name="input">At most <c>SliceBytes</c> of the body.</param>
     private void Feed(ReadOnlySpan<byte> input)
     {
         byte[]? rented = null;
@@ -314,7 +327,7 @@ public sealed class StreamingSecretObscurer : Stream
         if (_inRun)
         {
             var skip = 0;
-            while (skip < text.Length && (IsBase64Char(text[skip]) || text[skip] == '=')) skip++;
+            while (skip < text.Length && (IsRunChar(text[skip]) || text[skip] == '=')) skip++;
             if (skip == text.Length)
             {
                 _count = 0;
@@ -337,7 +350,7 @@ public sealed class StreamingSecretObscurer : Stream
         }
 
         var runStart = text.Length;
-        while (runStart > 0 && IsBase64Char(text[runStart - 1])) runStart--;
+        while (runStart > 0 && IsRunChar(text[runStart - 1])) runStart--;
         if (text.Length - runStart > RunCollapseChars)
         {
             EmitReplaced(text, runStart);
@@ -379,6 +392,8 @@ public sealed class StreamingSecretObscurer : Stream
         WriteText(text[cursor..limit]);
     }
 
+    /// <summary>Encodes text as UTF-8 and writes it to the output.</summary>
+    /// <param name="text">Text that is already decided, possibly empty.</param>
     private void WriteText(ReadOnlySpan<char> text)
     {
         if (text.IsEmpty) return;
@@ -394,12 +409,16 @@ public sealed class StreamingSecretObscurer : Stream
         }
     }
 
+    /// <summary>Drops the first <paramref name="chars"/> characters of the pending text, which were emitted or skipped.</summary>
+    /// <param name="chars">How many leading characters to drop.</param>
     private void Discard(int chars)
     {
         _chars.AsSpan(chars, _count - chars).CopyTo(_chars);
         _count -= chars;
     }
 
+    /// <summary>Grows the pending-text buffer, clearing the old one, so it can hold <paramref name="needed"/> characters.</summary>
+    /// <param name="needed">The total characters the buffer must hold.</param>
     private void EnsureCapacity(int needed)
     {
         if (needed <= _chars.Length) return;
@@ -409,6 +428,7 @@ public sealed class StreamingSecretObscurer : Stream
         _chars = bigger;
     }
 
+    /// <summary>Marks the stream unusable and clears every buffer that held body text.</summary>
     private void Abandon()
     {
         _abandoned = true;
@@ -418,6 +438,9 @@ public sealed class StreamingSecretObscurer : Stream
         Array.Clear(_carry);
     }
 
+    /// <summary>Rejects a write after the stream was abandoned or finished.</summary>
+    /// <exception cref="SessionCaptureAbandonedException">When the stream was abandoned.</exception>
+    /// <exception cref="InvalidOperationException">When the stream was already finished.</exception>
     private void ThrowIfAbandonedOrFinished()
     {
         if (_abandoned) throw new SessionCaptureAbandonedException("The secret obscurer was abandoned.");

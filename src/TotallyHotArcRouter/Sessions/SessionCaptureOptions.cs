@@ -17,7 +17,4 @@ public sealed class SessionCaptureOptions
 
     /// <summary>Gets how long shutdown waits for queued turns to be written before abandoning the rest.</summary>
     public TimeSpan ShutdownDrainTimeout { get; init; } = TimeSpan.FromSeconds(10);
-
-    /// <summary>Gets the free disk space, in bytes, below which a body capture is abandoned.</summary>
-    public long MinFreeDiskBytes { get; init; } = SessionBodySpool.DefaultMinFreeBytes;
 }

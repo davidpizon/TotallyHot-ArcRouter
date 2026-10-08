@@ -129,6 +129,21 @@ public sealed class StreamingSecretObscurerTests
         Assert.Equal("before [REDACTED] after", Encoding.UTF8.GetString(output.ToArray()));
     }
 
+    /// <summary>An unbroken base64url or dotted blob over the window is redacted whole instead of abandoning the capture.</summary>
+    [Fact]
+    public void Stream_HugeBase64UrlBlob_IsRedactedNotAbandoned()
+    {
+        var blob = string.Concat(Enumerable.Repeat("eyJhbGciOi-_.JIUzI1NiJ9", 8_000));
+        var output = new MemoryStream();
+        using (var obscurer = new StreamingSecretObscurer(output, leaveOpen: true))
+        {
+            foreach (var chunk in Encoding.UTF8.GetBytes($"data:{blob} tail").Chunk(10_000)) obscurer.Write(chunk);
+            obscurer.Finish();
+        }
+
+        Assert.Equal("data:[REDACTED] tail", Encoding.UTF8.GetString(output.ToArray()));
+    }
+
     /// <summary>A match that cannot be decided inside the window abandons the capture rather than leaking part of it.</summary>
     [Fact]
     public void Stream_UnterminatedKeyBeyondWindow_Abandons()

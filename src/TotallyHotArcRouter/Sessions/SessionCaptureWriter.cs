@@ -22,6 +22,8 @@ public sealed class SessionCaptureWriter : BackgroundService
     private readonly Channel<SessionCaptureItem> _channel;
     private int _inFlight;
     private volatile bool _abandonRemaining;
+    private volatile bool _stopping;
+    private volatile bool _running;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionCaptureWriter"/> class.
@@ -58,6 +60,12 @@ public sealed class SessionCaptureWriter : BackgroundService
         ArgumentNullException.ThrowIfNull(item);
 
         Interlocked.Increment(ref _inFlight);
+        if (_stopping)
+        {
+            Complete(item);
+            return false;
+        }
+
         try
         {
             if (_channel.Writer.TryWrite(item)) return true;
@@ -93,7 +101,14 @@ public sealed class SessionCaptureWriter : BackgroundService
     /// <inheritdoc/>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        _stopping = true;
         _channel.Writer.TryComplete();
+        if (!_running)
+        {
+            // Nothing is reading the queue, so waiting would only run out the clock; release what is in it.
+            while (_channel.Reader.TryRead(out var stranded)) Complete(stranded);
+        }
+
         if (!await WaitForIdleAsync(_options.ShutdownDrainTimeout).ConfigureAwait(false))
         {
             _logger.LogWarning(
@@ -107,6 +122,8 @@ public sealed class SessionCaptureWriter : BackgroundService
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _running = true;
+
         // Leave the thread that started the host before any blocking write.
         await Task.Yield();
 

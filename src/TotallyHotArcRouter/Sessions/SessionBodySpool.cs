@@ -182,10 +182,16 @@ public sealed class SessionBodySpool : IDisposable
         while (!final);
     }
 
+    /// <summary>Whether an exception is a capture failure that abandons the spool rather than a bug to surface.</summary>
+    /// <param name="ex">The exception thrown by the pipeline.</param>
+    /// <returns><see langword="true"/> for I/O, access, cryptographic and disposal failures.</returns>
     private static bool IsCaptureFailure(Exception ex) =>
         ex is IOException or UnauthorizedAccessException or CryptographicException or ObjectDisposedException
             or InvalidDataException;
 
+    /// <summary>Reads the free bytes on the drive holding <paramref name="path"/>.</summary>
+    /// <param name="path">A path in the session folder.</param>
+    /// <returns>The free bytes, or <see cref="long.MaxValue"/> when the drive cannot be read (a UNC share, for one).</returns>
     private static long DriveFreeBytes(string path)
     {
         try
@@ -198,17 +204,37 @@ public sealed class SessionBodySpool : IDisposable
         }
     }
 
+    /// <summary>
+    /// Releases the pipeline of a spool that is being discarded. The file closes first, so the final flush the
+    /// compressor makes on disposal fails harmlessly instead of writing a chunk; the obscurer is disposed so its
+    /// plaintext buffer is cleared and the compressor's native encoder is released now, not by a finalizer.
+    /// </summary>
     private void CloseWriters()
     {
-        // Disposing the obscurer or compressor here would flush more output; the spool is being discarded, so
-        // only the file handle matters.
         _file?.Dispose();
         _file = null;
+        DisposeQuietly(_obscurer);
+        DisposeQuietly(_brotli);
         _obscurer = null;
         _brotli = null;
         _sealing = null;
     }
 
+    /// <summary>Disposes a stream of the closed pipeline, ignoring the failure its final flush causes.</summary>
+    /// <param name="stream">The stream to dispose, or <see langword="null"/>.</param>
+    private static void DisposeQuietly(IDisposable? stream)
+    {
+        try
+        {
+            stream?.Dispose();
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            // The file is already closed, so the compressor's closing flush has nowhere to go.
+        }
+    }
+
+    /// <summary>Deletes the spool file, leaving a stuck one for startup recovery.</summary>
     private void DeleteQuietly()
     {
         try
@@ -238,7 +264,17 @@ public sealed class SessionBodySpool : IDisposable
         private readonly byte[] _buffer = new byte[SessionChunkCodec.ChunkBytes];
         private int _buffered;
         private uint _chunkIndex;
+        private long _bytesWritten;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SealingStream"/> class.
+        /// </summary>
+        /// <param name="file">The spool file, owned by the spool.</param>
+        /// <param name="aes">The cipher for the spool's ephemeral key.</param>
+        /// <param name="aad">The spool's authenticated data.</param>
+        /// <param name="path">The spool path, used to find the drive for the reserve check.</param>
+        /// <param name="minFreeBytes">Free space that must remain beyond the commit's copy of the body.</param>
+        /// <param name="freeSpace">Reports free bytes at a path.</param>
         public SealingStream(
             FileStream file, AesGcm aes, byte[] aad, string path, long minFreeBytes, Func<string, long> freeSpace)
         {
@@ -250,32 +286,43 @@ public sealed class SessionBodySpool : IDisposable
             _freeSpace = freeSpace;
         }
 
+        /// <inheritdoc/>
         public override bool CanRead => false;
 
+        /// <inheritdoc/>
         public override bool CanSeek => false;
 
+        /// <inheritdoc/>
         public override bool CanWrite => true;
 
+        /// <inheritdoc/>
         public override long Length => throw new NotSupportedException();
 
+        /// <inheritdoc/>
         public override long Position
         {
             get => throw new NotSupportedException();
             set => throw new NotSupportedException();
         }
 
+        /// <inheritdoc/>
         public override void Flush()
         {
         }
 
+        /// <inheritdoc/>
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
+        /// <inheritdoc/>
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
+        /// <inheritdoc/>
         public override void SetLength(long value) => throw new NotSupportedException();
 
+        /// <inheritdoc/>
         public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
 
+        /// <inheritdoc/>
         public override void Write(ReadOnlySpan<byte> buffer)
         {
             while (!buffer.IsEmpty)
@@ -291,14 +338,22 @@ public sealed class SessionBodySpool : IDisposable
         /// <summary>Seals whatever remains (possibly nothing) as the body's final chunk.</summary>
         public void FinishBody() => SealBuffered(final: true);
 
+        /// <summary>
+        /// Seals the buffered bytes as the next chunk. Every <c>ReserveCheckEveryChunks</c> chunks it checks
+        /// that the disk could still take the reserve plus a second copy of everything spooled so far, because
+        /// commit re-seals the body into the session file while the spool still exists.
+        /// </summary>
+        /// <param name="final">Whether this is the body's last chunk.</param>
+        /// <exception cref="SessionCaptureAbandonedException">When free space is too low.</exception>
         private void SealBuffered(bool final)
         {
-            if (_chunkIndex % ReserveCheckEveryChunks == 0 && _freeSpace(_path) < _minFreeBytes)
+            if (_chunkIndex % ReserveCheckEveryChunks == 0 && _freeSpace(_path) < _minFreeBytes + _bytesWritten)
             {
                 throw new SessionCaptureAbandonedException("Free disk space fell below the capture reserve.");
             }
 
             SessionChunkCodec.WriteRecord(_file, _aes, _aad, _chunkIndex++, final, _buffer.AsSpan(0, _buffered));
+            _bytesWritten += _buffered + SessionChunkCodec.RecordOverhead;
             _buffered = 0;
         }
     }
