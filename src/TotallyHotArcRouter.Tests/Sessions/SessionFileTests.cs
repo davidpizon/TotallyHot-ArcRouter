@@ -114,6 +114,129 @@ public sealed class SessionFileTests
         }
     }
 
+    /// <summary>Bytes that are not valid UTF-8 survive the seal untouched, even beside a secret that is obscured.</summary>
+    [Fact]
+    public void AppendAndRead_PreservesInvalidUtf8Bytes()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            byte[] body = [0xFF, 0xFE, (byte)'a', 0xC3, 0x28, 0xE2, 0x82, (byte)'z', 0x80];
+
+            byte[] withSecret = [.. body, .. "AKIAIOSFODNN7EXAMPLE"u8, 0xFF, .. body];
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), (byte[])sessionKey.Clone()))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, body, SessionArchiveIds.NewArchiveTurnId());
+                file.AppendBody(0, SessionBodyKind.ClientResponse, withSecret, SessionArchiveIds.NewArchiveTurnId());
+            }
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+            var frames = reopened.ReadAllBodies();
+
+            Assert.Equal(body, frames[0].Plaintext);
+            byte[] expected = [.. body, .. Encoding.UTF8.GetBytes(SecretObscurer.RedactedToken), 0xFF, .. body];
+            Assert.Equal(expected, frames[1].Plaintext);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>Altering a missing-body marker's kind on disk fails authentication.</summary>
+    [Fact]
+    public void ReadAllBodies_RejectsRelabelledMissingMarker()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey))
+            {
+                file.AppendMissingBody(0, SessionBodyKind.ClientRequest, SessionArchiveIds.NewArchiveTurnId());
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            bytes[8 + 16 + 2] = (byte)SessionBodyKind.ClientResponse; // first frame's kind byte
+            File.WriteAllBytes(path, bytes);
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+            Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(reopened.ReadAllBodies);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>Swapping two whole frames fails authentication because each is bound to its file position.</summary>
+    [Fact]
+    public void ReadAllBodies_RejectsReorderedFrames()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            const int dataStart = 8 + 16 + 2;
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey))
+            {
+                file.AppendMissingBody(0, SessionBodyKind.ClientRequest, SessionArchiveIds.NewArchiveTurnId());
+                file.AppendMissingBody(1, SessionBodyKind.ClientRequest, SessionArchiveIds.NewArchiveTurnId());
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            var frameLength = (bytes.Length - dataStart) / 2;
+            var swapped = new byte[bytes.Length];
+            bytes.AsSpan(0, dataStart).CopyTo(swapped);
+            bytes.AsSpan(dataStart + frameLength, frameLength).CopyTo(swapped.AsSpan(dataStart));
+            bytes.AsSpan(dataStart, frameLength).CopyTo(swapped.AsSpan(dataStart + frameLength));
+            File.WriteAllBytes(path, swapped);
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+            Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(reopened.ReadAllBodies);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>Frames appended after a reopen continue the file's position count and still authenticate.</summary>
+    [Fact]
+    public void Open_ThenAppend_ContinuesFramePositions()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            using (var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), (byte[])sessionKey.Clone()))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, "one"u8, SessionArchiveIds.NewArchiveTurnId());
+            }
+
+            using (var file = SessionFile.Open(path, (byte[])sessionKey.Clone()))
+            {
+                file.AppendMissingBody(0, SessionBodyKind.ClientResponse, SessionArchiveIds.NewArchiveTurnId());
+            }
+
+            using var reopened = SessionFile.Open(path, sessionKey);
+            var frames = reopened.ReadAllBodies();
+
+            Assert.Equal(2, frames.Count);
+            Assert.Equal("one"u8.ToArray(), frames[0].Plaintext);
+            Assert.Null(frames[1].Plaintext);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     /// <summary>Wrap then unwrap recovers the same session key under a master key.</summary>
     [Fact]
     public void WrapAndUnwrap_RoundTripsSessionKey()
@@ -233,6 +356,8 @@ public sealed class SessionFileTests
         }
     }
 
+    /// <summary>Creates a fresh, uniquely named directory under the system temp path for one test.</summary>
+    /// <returns>The absolute path of the new directory; the caller deletes it.</returns>
     private static string CreateTempDir()
     {
         var dir = Path.Combine(Path.GetTempPath(), "thar-session-" + Guid.NewGuid().ToString("N"));
