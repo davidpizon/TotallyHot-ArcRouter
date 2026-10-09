@@ -34,6 +34,14 @@ public sealed class SessionBodySpool : IDisposable
     private BrotliStream? _brotli;
     private SealingStream? _sealing;
 
+    /// <summary>
+    /// Creates the spool file and the pipeline that fills it. If the file cannot be created, the key and cipher
+    /// made so far are released before the exception reaches the caller.
+    /// </summary>
+    /// <param name="path">Where the spool file goes.</param>
+    /// <param name="minFreeBytes">Free space that must remain beyond the commit's copy of the body.</param>
+    /// <param name="freeSpace">Reports free bytes at a path.</param>
+    /// <param name="windowChars">The obscurer's look-back window.</param>
     private SessionBodySpool(string path, long minFreeBytes, Func<string, long> freeSpace, int windowChars)
     {
         _path = path;
@@ -42,17 +50,35 @@ public sealed class SessionBodySpool : IDisposable
         Guid.NewGuid().TryWriteBytes(_aad.AsSpan(AadPrefix.Length));
         _aes = new AesGcm(_key, SessionKeyMaterial.TagLengthBytes);
 
-        _file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        try
+        {
+            _file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        }
+        catch
+        {
+            _aes.Dispose();
+            CryptographicOperations.ZeroMemory(_key);
+            throw;
+        }
+
         _sealing = new SealingStream(_file, _aes, _aad, path, minFreeBytes, freeSpace);
         _brotli = new BrotliStream(_sealing, CompressionLevel.Fastest, leaveOpen: true);
         _obscurer = new StreamingSecretObscurer(_brotli, leaveOpen: true, windowChars);
     }
 
+    /// <summary>Where a spool is in its life: filling, holding a whole body, given up, or released.</summary>
     private enum SpoolState
     {
+        /// <summary>Bytes are still being added.</summary>
         Writing,
+
+        /// <summary>The whole body is in the file and can be committed.</summary>
         Completed,
+
+        /// <summary>The capture was given up and the file deleted.</summary>
         Abandoned,
+
+        /// <summary>The owner released the spool.</summary>
         Disposed,
     }
 
@@ -63,7 +89,9 @@ public sealed class SessionBodySpool : IDisposable
     public bool IsAbandoned => _state == SpoolState.Abandoned;
 
     /// <summary>
-    /// Starts a spool in <paramref name="folder"/>.
+    /// Starts a spool in <paramref name="folder"/>. Unlike the writes, this can throw an I/O exception (the
+    /// folder is read-only or the disk is full), so a caller that must never fail a request catches it and
+    /// records the body as missing.
     /// </summary>
     /// <param name="folder">The session folder, whose startup sweep removes a spool a crash left behind.</param>
     /// <param name="minFreeBytes">Free space below which the capture is abandoned.</param>

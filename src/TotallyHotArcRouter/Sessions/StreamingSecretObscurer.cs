@@ -178,9 +178,15 @@ public sealed class StreamingSecretObscurer : Stream
     /// <returns><see langword="true"/> when the character can be part of a token.</returns>
     private static bool IsTokenChar(char c) => IsWordChar(c) || c is '-' or '+' or '/' or '=' or '.';
 
-    /// <summary>The .NET <c>\w</c> class: letters, non-spacing marks, decimal digits, connector punctuation.</summary>
+    /// <summary>
+    /// The characters .NET's <c>\b</c> treats as word characters: the <c>\w</c> class (letters, non-spacing
+    /// marks, decimal digits, connector punctuation) plus the zero-width joiner and non-joiner. Matching
+    /// <c>\b</c> exactly matters because a cut placed after one of these would give the next window a boundary
+    /// the one-shot obscurer does not see, and the stored text would then depend on where the chunks fell.
+    /// </summary>
     private static bool IsWordChar(char c) =>
-        char.GetUnicodeCategory(c) is UnicodeCategory.UppercaseLetter or UnicodeCategory.LowercaseLetter
+        c is '‌' or '‍'
+        || char.GetUnicodeCategory(c) is UnicodeCategory.UppercaseLetter or UnicodeCategory.LowercaseLetter
             or UnicodeCategory.TitlecaseLetter or UnicodeCategory.ModifierLetter or UnicodeCategory.OtherLetter
             or UnicodeCategory.NonSpacingMark or UnicodeCategory.DecimalDigitNumber
             or UnicodeCategory.ConnectorPunctuation;
@@ -237,6 +243,27 @@ public sealed class StreamingSecretObscurer : Stream
         }
 
         return boundary;
+    }
+
+    /// <summary>
+    /// Whether the text ends inside a private-key block that has not reached its end marker: a match that
+    /// starts with <c>-----BEGIN</c> and runs to the end of the text.
+    /// </summary>
+    /// <param name="text">The text in front of a run that is about to be collapsed.</param>
+    /// <returns><see langword="true"/> when a private-key block is still open at the end of the text.</returns>
+    private static bool EndsInsideOpenPrivateKey(ReadOnlySpan<char> text)
+    {
+        foreach (var match in KeyShaped.EnumerateMatches(text))
+        {
+            if (match.Index + match.Length == text.Length
+                && text.Slice(match.Index, Math.Min(match.Length, PemBegin.Length))
+                    .StartsWith(PemBegin, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -353,6 +380,14 @@ public sealed class StreamingSecretObscurer : Stream
         while (runStart > 0 && IsRunChar(text[runStart - 1])) runStart--;
         if (text.Length - runStart > RunCollapseChars)
         {
+            // The run would be redacted, but the rest of an open private-key block after it would no longer be
+            // recognised as part of the block: its short last line could then pass through as ordinary text.
+            if (EndsInsideOpenPrivateKey(text[..runStart]))
+            {
+                throw new SessionCaptureAbandonedException(
+                    "A private-key block continues into a run too long to hold, so the body was not captured.");
+            }
+
             EmitReplaced(text, runStart);
             _output.Write(RedactedBytes);
             _count = 0;

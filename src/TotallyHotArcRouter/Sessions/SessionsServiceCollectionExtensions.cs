@@ -10,9 +10,11 @@ namespace TotallyHot.ArcRouter.Sessions;
 internal static class SessionsServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the master key store, the session index and store, the startup recovery service and the
-    /// capture writer. The recovery service is registered first, so it starts before the writer and before the
-    /// proxy begins serving.
+    /// Registers the master key store, the session index, the store, the startup service and the capture
+    /// writer. The store is built lazily, on first use or at startup when something has already been stored, so
+    /// a router that never captures creates no database or folder, and a store that cannot be opened fails the
+    /// capture, not the host. The startup service is registered first, so it starts before the writer and
+    /// before the proxy begins serving.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection.</returns>
@@ -25,15 +27,38 @@ internal static class SessionsServiceCollectionExtensions
         services.AddSingleton<ISessionMasterKeyStore>(sp =>
             new SecretStoreSessionMasterKeyStore(sp.GetRequiredService<ProtectedSecretStore>()));
         services.AddSingleton<SessionIndex>();
-        services.AddSingleton(sp => new SessionStore(
-            sp.GetRequiredService<SessionIndex>(),
-            sp.GetRequiredService<ISessionMasterKeyStore>(),
-            SessionStore.FolderBeside(sp.GetRequiredService<TranscriptDatabase>().DatabasePath),
-            sp.GetRequiredService<ILogger<SessionStore>>()));
+        services.AddSingleton(sp => new Lazy<SessionStore>(() => OpenStore(sp)));
+        services.AddSingleton(sp => sp.GetRequiredService<Lazy<SessionStore>>().Value);
 
         services.AddHostedService<SessionStoreStartupService>();
         services.AddSingleton<SessionCaptureWriter>();
         services.AddHostedService(sp => sp.GetRequiredService<SessionCaptureWriter>());
         return services;
+    }
+
+    /// <summary>
+    /// Creates the index tables, builds the store and runs its startup recovery, in that order, so nothing can
+    /// append to a store that has not recovered.
+    /// </summary>
+    /// <param name="services">The provider that supplies the store's dependencies.</param>
+    /// <returns>A recovered store.</returns>
+    private static SessionStore OpenStore(IServiceProvider services)
+    {
+        var index = services.GetRequiredService<SessionIndex>();
+        index.EnsureCreated();
+
+        var logger = services.GetRequiredService<ILogger<SessionStore>>();
+        var store = new SessionStore(
+            index,
+            services.GetRequiredService<ISessionMasterKeyStore>(),
+            SessionStore.FolderBeside(services.GetRequiredService<TranscriptDatabase>().DatabasePath),
+            logger);
+
+        var result = store.RecoverOnStartup();
+        logger.LogInformation(
+            "Session storage recovered: {Truncated} files cut back, {Orphans} orphans deleted, {Dropped} rows without a file removed, {Corrupt} corrupt files left, rotation {Rotation}.",
+            result.TruncatedFiles, result.DeletedOrphanFiles, result.DroppedMissingFiles, result.CorruptFiles,
+            result.RotationOutcome);
+        return store;
     }
 }

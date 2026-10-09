@@ -24,8 +24,9 @@ public static partial class HarnessToken
     /// </summary>
     /// <param name="userAgent">The raw header, or <see langword="null"/> when absent.</param>
     /// <returns>
-    /// <c>product/version</c> (lower-case product) for an allowlisted product, <c>product</c> alone when the
-    /// version is missing or not a plain version string, or <c>other:&lt;length&gt;</c> for anything else.
+    /// <c>product/version</c> (lower-case product, numeric version) for an allowlisted product, <c>product</c>
+    /// alone when the version is missing or does not start with a number, or <c>other:&lt;length&gt;</c> for
+    /// anything else.
     /// </returns>
     public static string Normalize(string? userAgent)
     {
@@ -44,8 +45,9 @@ public static partial class HarnessToken
 
     /// <summary>
     /// The first product token of a <c>User-Agent</c>, optionally followed by <c>/version</c> where the version
-    /// is digits, letters, dots, dashes and plus signs only (no spaces, so no comment text can ride along).
+    /// is one to four dot-separated numbers. Anything after the numbers (a pre-release tag, a comment) is not
+    /// captured, so a client cannot put its own text into the stored token.
     /// </summary>
-    [GeneratedRegex(@"^\s*(?<product>[A-Za-z0-9_\-]+)(?:/(?<version>[0-9A-Za-z.+\-]{1,32}))?(?=[\s;(/]|$)")]
+    [GeneratedRegex(@"^\s*(?<product>[A-Za-z0-9_\-]+)(?=[\s;(/]|$)(?:/(?<version>[0-9]{1,6}(?:\.[0-9]{1,6}){0,3}))?")]
     private static partial Regex LeadingProduct();
 }

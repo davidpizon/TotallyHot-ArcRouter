@@ -144,6 +144,33 @@ public sealed class StreamingSecretObscurerTests
         Assert.Equal("data:[REDACTED] tail", Encoding.UTF8.GetString(output.ToArray()));
     }
 
+    /// <summary>
+    /// A private-key block whose first body line is a long collapsed run must not let the rest of the block
+    /// through as ordinary text: either the whole block is redacted or the capture is abandoned.
+    /// </summary>
+    [Fact]
+    public void Stream_LongRunInsideUnterminatedPrivateKey_DoesNotLeakTheBlocksTail()
+    {
+        var key = "-----BEGIN RSA PRIVATE KEY-----\n" + new string('Q', 20_000) + "\nSHORTTAIL12345\n-----END RSA PRIVATE KEY-----\nafter";
+        var output = new MemoryStream();
+        using var obscurer = new StreamingSecretObscurer(output, leaveOpen: true);
+
+        var exception = Record.Exception(() =>
+        {
+            foreach (var chunk in Encoding.UTF8.GetBytes(key).Chunk(5_000)) obscurer.Write(chunk);
+            obscurer.Finish();
+        });
+
+        if (exception is null)
+        {
+            Assert.DoesNotContain("SHORTTAIL12345", Encoding.UTF8.GetString(output.ToArray()));
+        }
+        else
+        {
+            Assert.IsType<SessionCaptureAbandonedException>(exception);
+        }
+    }
+
     /// <summary>A match that cannot be decided inside the window abandons the capture rather than leaking part of it.</summary>
     [Fact]
     public void Stream_UnterminatedKeyBeyondWindow_Abandons()

@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// before it is cut into sealed chunks. Round-trips are byte-exact, including bodies that are not valid
 /// UTF-8, apart from <see cref="SecretObscurer"/> replacements (ADR-0019's only permitted mutation of stored
 /// text). Bodies too large to hold go through <see cref="StreamingSecretObscurer"/> instead, which produces
-/// the same bytes.
+/// the same bytes except where its remarks say it redacts more.
 /// </summary>
 public static class SessionRecordCodec
 {

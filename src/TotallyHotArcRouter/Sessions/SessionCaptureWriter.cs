@@ -16,7 +16,7 @@ public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput
 /// </summary>
 public sealed class SessionCaptureWriter : BackgroundService
 {
-    private readonly SessionStore _store;
+    private readonly Lazy<SessionStore> _store;
     private readonly SessionCaptureOptions _options;
     private readonly ILogger<SessionCaptureWriter> _logger;
     private readonly Channel<SessionCaptureItem> _channel;
@@ -28,11 +28,11 @@ public sealed class SessionCaptureWriter : BackgroundService
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionCaptureWriter"/> class.
     /// </summary>
-    /// <param name="store">Where turns are written.</param>
+    /// <param name="store">Where turns are written; opened on the first write, which creates the index and recovers.</param>
     /// <param name="options">Queue size and shutdown deadline.</param>
     /// <param name="logger">Receives write failures; message templates are static.</param>
     public SessionCaptureWriter(
-        SessionStore store, IOptions<SessionCaptureOptions> options, ILogger<SessionCaptureWriter> logger)
+        Lazy<SessionStore> store, IOptions<SessionCaptureOptions> options, ILogger<SessionCaptureWriter> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
@@ -134,14 +134,20 @@ public sealed class SessionCaptureWriter : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Writes one queued turn and releases its spools. A failure is logged and the turn is lost; it never
+    /// escapes, so one bad turn cannot stop the consumer.
+    /// </summary>
+    /// <param name="item">The turn to write.</param>
     private void Write(SessionCaptureItem item)
     {
         try
         {
             if (_abandonRemaining) return;
 
-            var archiveSessionId = _store.ResolveArchiveSessionId(item.ClientSessionId);
-            _store.AppendTurn(archiveSessionId, item.ClientSessionId, item.Turn);
+            var store = _store.Value;
+            var archiveSessionId = store.ResolveArchiveSessionId(item.ClientSessionId);
+            store.AppendTurn(archiveSessionId, item.ClientSessionId, item.Turn);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -153,6 +159,8 @@ public sealed class SessionCaptureWriter : BackgroundService
         }
     }
 
+    /// <summary>Disposes the turn's spools and counts the turn as no longer in flight.</summary>
+    /// <param name="item">The turn that was written, dropped or refused.</param>
     private void Complete(SessionCaptureItem item)
     {
         foreach (var body in item.Turn.Bodies) body.Spool?.Dispose();

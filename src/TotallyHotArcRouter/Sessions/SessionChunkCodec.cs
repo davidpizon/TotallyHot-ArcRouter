@@ -97,13 +97,7 @@ internal static class SessionChunkCodec
     {
         final = false;
         Span<byte> prefix = stackalloc byte[RecordOverhead];
-        var filled = 0;
-        while (filled < prefix.Length)
-        {
-            var read = stream.Read(prefix[filled..]);
-            if (read == 0) return false;
-            filled += read;
-        }
+        if (stream.ReadAtLeast(prefix, prefix.Length, throwOnEndOfStream: false) < prefix.Length) return false;
 
         if (prefix[0] > 1) return false;
         final = prefix[0] == 1;
@@ -117,6 +111,10 @@ internal static class SessionChunkCodec
     /// <summary>
     /// Builds the data one chunk authenticates: the body data, the chunk's index and its final flag.
     /// </summary>
+    /// <param name="bodyAad">Data identifying the body.</param>
+    /// <param name="chunkIndex">Zero-based position of the chunk within its body.</param>
+    /// <param name="final">Whether this is the body's last chunk.</param>
+    /// <returns>The associated data to seal or open the chunk with.</returns>
     private static byte[] ChunkAad(ReadOnlySpan<byte> bodyAad, uint chunkIndex, bool final)
     {
         var aad = new byte[bodyAad.Length + sizeof(uint) + 1];
@@ -126,6 +124,10 @@ internal static class SessionChunkCodec
         return aad;
     }
 
+    /// <summary>Reads a record's final flag, which is stored as exactly 0 or 1.</summary>
+    /// <param name="flag">The stored byte.</param>
+    /// <returns>Whether the record is the body's last chunk.</returns>
+    /// <exception cref="InvalidDataException">When the byte is neither 0 nor 1.</exception>
     private static bool ParseFinal(byte flag) => flag switch
     {
         0 => false,

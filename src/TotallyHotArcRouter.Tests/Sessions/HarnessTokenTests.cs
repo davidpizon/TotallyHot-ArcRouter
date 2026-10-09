@@ -9,7 +9,9 @@ public sealed class HarnessTokenTests
     [Theory]
     [InlineData("claude-cli/2.1.286 (external, cli)", "claude-cli/2.1.286")]
     [InlineData("codex_cli_rs/0.46.0 (Windows 10.0.26100; x86_64) WindowsTerminal", "codex_cli_rs/0.46.0")]
-    [InlineData("Claude-CLI/2.0.0-beta+7", "claude-cli/2.0.0-beta+7")]
+    [InlineData("Claude-CLI/2.0.0-beta+7", "claude-cli/2.0.0")]
+    [InlineData("claude-cli/sk-ant-api03-AbCdEfGhIjKlMnOpQrSt", "claude-cli")]
+    [InlineData("claude-cli/1.2.3.4.5", "claude-cli/1.2.3.4")]
     [InlineData("claude-code", "claude-code")]
     [InlineData("claude-cli/ weird", "claude-cli")]
     public void Normalize_KnownProduct_KeepsNameAndVersionOnly(string userAgent, string expected) =>

@@ -347,19 +347,50 @@ public sealed class SessionFile : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             var frameAad = BuildAssociatedData(header, _frameCount);
-            _stream.Write(header);
-            uint chunkIndex = 0;
-            var sawFinal = false;
-            writeChunks((chunk, final) =>
+            var frameStart = _stream.Length;
+            try
             {
-                if (sawFinal) throw new InvalidOperationException("A chunk followed the final chunk.");
-                SessionChunkCodec.WriteRecord(_stream, _aes, frameAad, chunkIndex++, final, chunk);
-                sawFinal = final;
-            });
+                _stream.Write(header);
+                uint chunkIndex = 0;
+                var sawFinal = false;
+                writeChunks((chunk, final) =>
+                {
+                    if (sawFinal) throw new InvalidOperationException("A chunk followed the final chunk.");
+                    SessionChunkCodec.WriteRecord(_stream, _aes, frameAad, chunkIndex++, final, chunk);
+                    sawFinal = final;
+                });
 
-            if (!sawFinal) throw new InvalidOperationException("The body ended without a final chunk.");
-            _stream.Flush(flushToDisk: true);
+                if (!sawFinal) throw new InvalidOperationException("The body ended without a final chunk.");
+                _stream.Flush(flushToDisk: true);
+            }
+            catch
+            {
+                // Chunks are written one at a time, so a failure part-way leaves a header and some chunks
+                // behind. Cut them away here, so this instance stays appendable and a caller that does not
+                // roll back to a committed extent (the store does) is not left with a torn frame.
+                CutBackToFrameStart(frameStart);
+                throw;
+            }
+
             _frameCount++;
+        }
+    }
+
+    /// <summary>
+    /// Removes what a failed append wrote and leaves the stream at end-of-file. A failure to cut back is
+    /// swallowed so it cannot replace the exception that caused the cut; <see cref="Open"/> repeats the cut.
+    /// </summary>
+    /// <param name="frameStart">The file length before the failed frame's header was written.</param>
+    private void CutBackToFrameStart(long frameStart)
+    {
+        try
+        {
+            _stream.SetLength(frameStart);
+            _stream.Seek(0, SeekOrigin.End);
+        }
+        catch (IOException)
+        {
+            // Open drops a frame without a final chunk the next time the file is opened.
         }
     }
 
@@ -411,9 +442,9 @@ public sealed class SessionFile : IDisposable
     }
 
     /// <summary>
-    /// Walks frame lengths (without decrypting) from the end of the file header and returns the offset
-    /// just past the last complete frame, plus how many complete frames precede it. Anything after
-    /// the offset is a torn append.
+    /// Walks the frame headers and chunk records (without decrypting) from the end of the file header and
+    /// returns the offset just past the last frame whose final chunk is present, plus how many complete frames
+    /// precede it. Anything after the offset is a torn append.
     /// </summary>
     /// <param name="stream">The open session file.</param>
     /// <returns>The end offset of the last complete frame and the number of complete frames.</returns>
@@ -438,20 +469,6 @@ public sealed class SessionFile : IDisposable
         }
 
         return (good, count);
-    }
-
-    /// <summary>
-    /// Fills <paramref name="buffer"/> or throws when the stream ends first.
-    /// </summary>
-    /// <param name="stream">Source stream.</param>
-    /// <param name="buffer">Destination to fill completely.</param>
-    /// <exception cref="EndOfStreamException">When the stream ends before the buffer is full.</exception>
-    private static void ReadExact(Stream stream, Span<byte> buffer)
-    {
-        if (!TryReadExact(stream, buffer))
-        {
-            throw new EndOfStreamException();
-        }
     }
 
     /// <summary>Fills <paramref name="buffer"/>; returns false on a clean EOF before the first byte.</summary>

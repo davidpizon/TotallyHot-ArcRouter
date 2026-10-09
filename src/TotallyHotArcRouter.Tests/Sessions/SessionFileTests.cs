@@ -458,6 +458,70 @@ public sealed class SessionFileTests
         }
     }
 
+    /// <summary>A frame that fails part-way is cut away by the file itself, so the same instance stays appendable and readable.</summary>
+    [Fact]
+    public void AppendBodyFromSpool_FailingMidFrame_LeavesNoTornFrameBehind()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var turnId = SessionArchiveIds.NewArchiveTurnId();
+            var big = new byte[250_000];
+            new Random(3).NextBytes(big);
+            using var spool = SessionBodySpool.Create(dir);
+            Assert.True(spool.TryWrite(big));
+            Assert.True(spool.TryComplete());
+            var spoolPath = Directory.EnumerateFiles(dir, "*" + SessionBodySpool.FileExtension).Single();
+            var spoolBytes = File.ReadAllBytes(spoolPath);
+            spoolBytes[^30] ^= 0xFF; // inside the last chunk, so earlier chunks are written before the failure
+            File.WriteAllBytes(spoolPath, spoolBytes);
+
+            using var file = SessionFile.Create(path, SessionArchiveIds.NewArchiveSessionId(), sessionKey);
+            file.AppendBody(0, SessionBodyKind.ClientRequest, "one"u8, turnId);
+            var lengthBefore = file.Length;
+
+            Assert.ThrowsAny<System.Security.Cryptography.CryptographicException>(
+                () => file.AppendBodyFromSpool(0, SessionBodyKind.ClientResponse, spool, turnId));
+
+            Assert.Equal(lengthBefore, file.Length);
+            Assert.Equal(1UL, file.FrameCount);
+            file.AppendBody(0, SessionBodyKind.ClientResponse, "two"u8, turnId);
+            var frames = file.ReadAllBodies();
+            Assert.Equal(["one", "two"], frames.Select(f => Encoding.UTF8.GetString(f.Plaintext!)));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>A file written in the retired version 1 layout is refused instead of misread as chunks.</summary>
+    [Fact]
+    public void Open_VersionOneFile_IsRefused()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionId = SessionArchiveIds.NewArchiveSessionId();
+            var header = new List<byte>("THSESS01"u8.ToArray());
+            header.AddRange(sessionId.ToByteArray());
+            header.AddRange([1, 0]);
+            File.WriteAllBytes(path, header.ToArray());
+
+            var exception = Assert.Throws<InvalidDataException>(
+                () => SessionFile.Open(path, SessionKeyMaterial.CreateSessionKey(), sessionId));
+
+            Assert.Contains("version 1", exception.Message);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     /// <summary>Creates a fresh, uniquely named directory under the system temp path for one test.</summary>
     /// <returns>The absolute path of the new directory; the caller deletes it.</returns>
     private static string CreateTempDir()

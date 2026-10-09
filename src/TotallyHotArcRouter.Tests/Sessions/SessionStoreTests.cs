@@ -189,7 +189,20 @@ public sealed class SessionStoreTests : IDisposable
 
         foreach (var path in Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories))
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            // Another test class's ClearAllPools can close the last connection to this database, and SQLite
+            // then deletes its -wal and -shm files between the listing and the open. A file that is gone has
+            // nothing left to search.
+            FileStream stream;
+            try
+            {
+                stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            }
+            catch (FileNotFoundException)
+            {
+                continue;
+            }
+
+            using var disposeStream = stream;
             using var buffer = new MemoryStream();
             stream.CopyTo(buffer);
             Assert.DoesNotContain(Canary, Encoding.Latin1.GetString(buffer.ToArray()));
