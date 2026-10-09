@@ -23,7 +23,7 @@ public sealed class SessionCaptureWriter : BackgroundService
     private int _inFlight;
     private volatile bool _abandonRemaining;
     private volatile bool _stopping;
-    private volatile bool _running;
+    private volatile bool _started;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionCaptureWriter"/> class.
@@ -103,9 +103,11 @@ public sealed class SessionCaptureWriter : BackgroundService
     {
         _stopping = true;
         _channel.Writer.TryComplete();
-        if (!_running)
+        if (!_started)
         {
-            // Nothing is reading the queue, so waiting would only run out the clock; release what is in it.
+            // The writer was never started, so nothing will ever read the queue and waiting would only run out
+            // the clock; release what is in it. A started writer is drained even if its consumer loop has not
+            // begun running yet, because the host may call StopAsync before ExecuteAsync gets a thread.
             while (_channel.Reader.TryRead(out var stranded)) Complete(stranded);
         }
 
@@ -120,10 +122,15 @@ public sealed class SessionCaptureWriter : BackgroundService
     }
 
     /// <inheritdoc/>
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        _started = true;
+        return base.StartAsync(cancellationToken);
+    }
+
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _running = true;
-
         // Leave the thread that started the host before any blocking write.
         await Task.Yield();
 
