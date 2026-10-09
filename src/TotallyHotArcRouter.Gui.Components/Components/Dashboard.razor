@@ -106,7 +106,7 @@
             @switch (_activeTab)
             {
                 case Tab.Live:
-                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="id => _selectedConversationId = id" HistoryNotice="@PersistedSessionStore.HistoryNotice"
+                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="OpenPersistedSessionAsync" HistoryNotice="@PersistedSessionStore.HistoryNotice"
                                 ShowContentGate="true"
                                 ContentLocked="@(!ContentGrant.IsActive)"
                                 ShowEnrollmentHint="@(PasskeyStore.GateStatus is { Enrolled: false })"
@@ -182,6 +182,13 @@
     // Sessions tab starts empty (no telemetry received yet); the Sessions page shows no cards
     // until a conversation arrives, so an empty starting id is correct rather than a mock fallback.
     private string _selectedConversationId = string.Empty;
+
+    /// <summary>Selects a persisted session and loads its conversation text while the content lock is open.</summary>
+    private async Task OpenPersistedSessionAsync(string id)
+    {
+        _selectedConversationId = id;
+        await PersistedSessionStore.LoadTurnTextsAsync(id);
+    }
     private bool _showSettings;
     private bool _showUnlock;
     private bool _showAddPasskey;

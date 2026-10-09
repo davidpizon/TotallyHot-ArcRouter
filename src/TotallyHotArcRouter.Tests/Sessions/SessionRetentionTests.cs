@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Tests.TestSupport;
@@ -276,6 +278,37 @@ public sealed class SessionRetentionTests : IDisposable
 
         Assert.True(result.IsFinal);
         Assert.Empty(_store.ListSessions());
+    }
+
+    /// <summary>Deleting a session removes its transcript rows and the embeddings those rows pointed at.</summary>
+    [Fact]
+    public void EnforceRetention_DeletesTranscriptRowsAndMemoryEntries()
+    {
+        var oldest = AddSession("a", turns: 3, firstMinute: 0);
+        AddSession("b", turns: 3, firstMinute: 10);
+        var transcripts = new SqliteTranscriptStore(
+            _database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        transcripts.InsertAsync(new TranscriptRecord(
+            0, "a:1", Start, "gpt-5.4", "kimi-k2.5", null, null, null, false,
+            "secret prompt", "secret reply", null, null, false, 1, null, null, 42,
+            ArchiveSessionId: oldest, ArchiveTurnId: Guid.CreateVersion7())).GetAwaiter().GetResult();
+        var deletedMemory = new List<long>();
+        var memory = new Mock<IMemoryEntryStore>();
+        memory.Setup(store => store.DeleteManyAsync(It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyCollection<long>, CancellationToken>((ids, _) => deletedMemory.AddRange(ids))
+            .Returns(Task.CompletedTask);
+        var maintenance = new SessionMaintenance(
+            new Lazy<SessionStore>(() => _store),
+            _database,
+            transcripts: transcripts,
+            memory: memory.Object);
+
+        var result = maintenance.EnforceRetention(maxTurns: 3);
+
+        Assert.Equal(1, result.DeletedSessions);
+        Assert.Equal([42L], deletedMemory);
+        Assert.Empty(transcripts.ListSessionsAsync(10).GetAwaiter().GetResult());
     }
 
     /// <summary>The retention service reads the Sample Size live and trims to it.</summary>

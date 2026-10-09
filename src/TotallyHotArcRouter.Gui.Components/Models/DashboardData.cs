@@ -64,7 +64,9 @@ public sealed record ConversationTurn(
     string? RequestedModel = null,
     string? RoutedModel = null,
     string? SubstitutionReason = null,
-    string? SubagentSignal = null);
+    string? SubagentSignal = null,
+    // request_transcripts.id for a persisted turn, so opening the chat can load its text. Zero for a live turn.
+    long TranscriptId = 0);
 
 /// <summary>A conversation (session) whose turns are shown in the Live Stream tab.</summary>
 /// <param name="Id">The session id.</param>

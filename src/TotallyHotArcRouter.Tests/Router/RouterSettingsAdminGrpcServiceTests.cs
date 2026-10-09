@@ -538,10 +538,7 @@ public sealed class RouterSettingsAdminGrpcServiceTests
             throw new NotSupportedException();
         }
 
-        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
         {

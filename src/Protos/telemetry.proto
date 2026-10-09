@@ -33,6 +33,11 @@ service TelemetryService {
   // new admin service: the GUI already holds an open TelemetryServiceClient channel for StreamEvents, and
   // this read needs no new channel or DI wiring to reuse it.
   rpc ListPersistedSessions (ListPersistedSessionsRequest) returns (ListPersistedSessionsResponse);
+
+  // Loads conversation text for turns the caller already has from ListPersistedSessions (#165 phase 2).
+  // The list itself no longer carries prompt or response text. Requires a content grant when a passkey
+  // gate is enrolled (ADR-0020). Each side is a display preview, not the raw HTTP body.
+  rpc GetTurnTexts (GetTurnTextsRequest) returns (GetTurnTextsResponse);
 }
 
 message StreamEventsRequest {}
@@ -49,10 +54,9 @@ message ListPersistedSessionsRequest {
 }
 
 // One request_transcripts row, per SessionTranscript (TotallyHot.ArcRouter.Transcripts), shaped for display
-// (#179, ADR-0023). prompt_text and response_text are PREVIEWS, not the stored text: at most
-// TextTruncator.DefaultMaxLength (2,000) UTF-16 code units, plus "…" when cut - the same preview the live
-// RoutingTelemetryEvent carries. Storage keeps the full text. Nothing that needs the full text - #165's
-// export and import above all - may read it through this message; they use the lossless record tier.
+// (#179, ADR-0023; #165 phase 2). The list is metadata only: prompt_text and response_text are left unset.
+// Lengths stay, so the tab can say how long a turn is before it is opened. Opening a chat loads previews
+// through GetTurnTexts. Nothing that needs the full body - #165's export and import - reads it here.
 message PersistedTranscript {
   string session_id = 1;
   string correlation_id = 2;
@@ -68,7 +72,7 @@ message PersistedTranscript {
   // Set only when this transcript's embedding was folded into memory_entries - the literal "used for live
   // training" signal the Sessions tab badges. Absent, not zero, when it was not.
   optional int64 memory_entry_id = 11;
-  // request_transcripts.id - the key #176's per-turn text RPC takes to load more of this row's text.
+  // request_transcripts.id - the key GetTurnTexts takes to load this row's text.
   int64 transcript_id = 12;
   // The stored text's length in characters, as SQLite's length() counts them. Displayed, never compared:
   // prompt_truncated and response_truncated, not these, say whether a preview was cut. Absent when the
@@ -90,6 +94,29 @@ message ListPersistedSessionsResponse {
   // would have taken the serialized response past the router's 3 MiB budget, which keeps it under the GUI
   // gRPC client's default 4 MiB receive cap (#179, ADR-0023).
   bool has_more = 3;
+}
+
+// Up to 50 transcript ids from a chat the operator opened.
+message GetTurnTextsRequest {
+  repeated int64 transcript_ids = 1;
+}
+
+message GetTurnTextsResponse {
+  bool transcript_capture_enabled = 1;
+  repeated TurnText texts = 2;
+}
+
+// One turn's display preview. prompt_text and response_text are cut at TextTruncator.DefaultMaxLength
+// (2,000 characters) plus an ellipsis when longer. Lengths are the stored character counts.
+message TurnText {
+  int64 transcript_id = 1;
+  bool found = 2;
+  optional string prompt_text = 3;
+  optional string response_text = 4;
+  bool prompt_truncated = 5;
+  bool response_truncated = 6;
+  optional int32 prompt_text_length = 7;
+  optional int32 response_text_length = 8;
 }
 
 // The Governance > Price Sources panel's management plane: read the price feeds' status, switch one on or

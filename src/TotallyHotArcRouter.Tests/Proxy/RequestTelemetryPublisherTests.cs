@@ -293,6 +293,44 @@ public class RequestTelemetryPublisherTests
         Assert.Equal(0.62, actual: transcriptStore.LastInserted.UntrainedBaselinePredictedScore);
     }
 
+    /// <summary>
+    /// #165 phase 2: the transcript row follows capture, not Adaptive Routing, and stores the archive ids the
+    /// capture minted.
+    /// </summary>
+    [Fact]
+    public async Task PublishAsync_AdaptiveRoutingOff_StillWritesTheRowWithArchiveIds()
+    {
+        var telemetryPublisher = new FakeTelemetryPublisher();
+        var transcriptStore = new CapturingTranscriptStore();
+        var publisher = CreatePublisher(
+            telemetryPublisher: telemetryPublisher,
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: new StaticOptionsMonitor<RoutingOptions>(
+                new RoutingOptions { EnableAdaptiveRouting = false }));
+        var sessionId = Guid.CreateVersion7();
+        var turnId = Guid.CreateVersion7();
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-archive"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: """{"choices":[]}"""u8.ToArray(),
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken,
+            resolveArchive: _ => new ArchiveBinding(sessionId, turnId));
+
+        Assert.NotNull(transcriptStore.LastInserted);
+        Assert.Equal(sessionId, transcriptStore.LastInserted!.ArchiveSessionId);
+        Assert.Equal(turnId, transcriptStore.LastInserted.ArchiveTurnId);
+    }
+
     // #189: a translated route with no native capture (Gemini here) is parsed as an OpenAI-shaped stream, and
     // its whitespace-only deltas must reach both the persisted transcript row and the live event intact.
     [Fact]

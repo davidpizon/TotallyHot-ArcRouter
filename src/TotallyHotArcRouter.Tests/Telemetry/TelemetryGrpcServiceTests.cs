@@ -209,8 +209,8 @@ public class TelemetryGrpcServiceTests
         Assert.Equal(expected: transcript.CorrelationId, actual: mapped.CorrelationId);
         Assert.Equal(expected: transcript.RequestedModel, actual: mapped.RequestedModel);
         Assert.Equal(expected: transcript.RoutedModel, actual: mapped.RoutedModel);
-        Assert.Equal(expected: transcript.PromptText, actual: mapped.PromptText);
-        Assert.Equal(expected: transcript.ResponseText, actual: mapped.ResponseText);
+        Assert.False(mapped.HasPromptText);
+        Assert.False(mapped.HasResponseText);
         Assert.Equal(expected: "0.0042", actual: mapped.CostUsd);
         Assert.Equal(expected: transcript.InputTokens, actual: mapped.InputTokens);
         Assert.Equal(expected: transcript.OutputTokens, actual: mapped.OutputTokens);
@@ -296,34 +296,25 @@ public class TelemetryGrpcServiceTests
     }
 
     /// <summary>
-    /// The character cap alone is not a byte guarantee: 2,000 CJK characters are 6,000 UTF-8 bytes, so 500 rows
-    /// of CJK previews come to about 6 MB. The byte budget cuts the list, reports <c>has_more</c>, and keeps the
-    /// newest rows, each one whole.
+    /// The list no longer carries prompt or response text (#165 phase 2), so 500 rows whose stored text is
+    /// long CJK still fit. Opening a chat loads a truncated preview through <c>GetTurnTexts</c>.
     /// </summary>
     [Fact(Timeout = 5000)]
-    public async Task ListPersistedSessions_CjkTextAtTheGuiRowLimit_IsCutByTheBudgetToTheNewestWholeRows()
+    public async Task ListPersistedSessions_LongCjkText_StaysMetadataOnly()
     {
         var cjk = new string('漢', 5_000);
         var rows = RealisticRows(count: GuiRequestLimit, promptText: cjk, responseText: cjk);
-        var logger = new CapturingLogger();
 
-        var response = await ListAsync(rows: rows, limit: GuiRequestLimit, logger: logger);
+        var response = await ListAsync(rows: rows, limit: GuiRequestLimit);
 
         Assert.InRange(actual: response.CalculateSize(), low: 0, high: TelemetryGrpcService.MaxListResponseBytes);
-        Assert.True(response.HasMore);
-        Assert.InRange(actual: response.Transcripts.Count, low: 200, high: GuiRequestLimit - 1);
-        var expectedPreview = TextTruncator.Truncate(cjk);
-        for (var i = 0; i < response.Transcripts.Count; i++)
+        Assert.False(response.HasMore);
+        Assert.Equal(expected: GuiRequestLimit, actual: response.Transcripts.Count);
+        Assert.All(response.Transcripts, row =>
         {
-            Assert.Equal(expected: rows[i].Id, actual: response.Transcripts[i].TranscriptId);
-            Assert.Equal(expected: expectedPreview, actual: response.Transcripts[i].PromptText);
-            Assert.Equal(expected: expectedPreview, actual: response.Transcripts[i].ResponseText);
-        }
-
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(expected: LogLevel.Information, actual: entry.Level);
-        Assert.Contains(expectedSubstring: FormattableString.Invariant($"returned {response.Transcripts.Count} of {GuiRequestLimit} rows"),
-            actualString: entry.Message);
+            Assert.False(row.HasPromptText);
+            Assert.False(row.HasResponseText);
+        });
     }
 
     /// <summary>
@@ -353,12 +344,11 @@ public class TelemetryGrpcServiceTests
     }
 
     /// <summary>
-    /// One pasted 4 MiB prompt failed the load at any row limit before the fix: <c>prompt_text</c> is bounded
-    /// only by Kestrel's default 30,000,000-byte request body limit, and a row is persisted even when the
-    /// provider rejects the prompt. Now the row loads as a preview that says it was cut, with its stored length.
+    /// Opening a chat loads a display preview. A 4 MiB reply is cut at the same cap as live telemetry, and
+    /// the list itself still carries only the stored length.
     /// </summary>
     [Fact(Timeout = 5000)]
-    public async Task ListPersistedSessions_OneRowWithAFourMebibytePrompt_LoadsAsAFlaggedPreview()
+    public async Task GetTurnTexts_OneRowWithAFourMebibytePrompt_LoadsAsAFlaggedPreview()
     {
         var prompt = new string('p', 4 * 1024 * 1024);
         var row = RealisticRows(count: 1, promptText: prompt, responseText: "ok")[0] with
@@ -366,35 +356,43 @@ public class TelemetryGrpcServiceTests
             PromptTextLength = prompt.Length,
             ResponseTextLength = 2
         };
+        var service = CreateService(sessions: [row], transcriptCaptureEnabled: true);
 
-        var response = await ListAsync(rows: [row], limit: 1);
+        var list = await service.ListPersistedSessions(
+            new Contract.ListPersistedSessionsRequest { Limit = 1 },
+            CreateContext(TestContext.Current.CancellationToken));
+        var texts = await service.GetTurnTexts(
+            new Contract.GetTurnTextsRequest { TranscriptIds = { row.Id } },
+            CreateContext(TestContext.Current.CancellationToken));
 
-        Assert.InRange(actual: response.CalculateSize(), low: 0, high: TelemetryGrpcService.MaxListResponseBytes);
-        var mapped = Assert.Single(response.Transcripts);
+        Assert.False(Assert.Single(list.Transcripts).HasPromptText);
+        Assert.Equal(expected: prompt.Length, actual: Assert.Single(list.Transcripts).PromptTextLength);
+        var mapped = Assert.Single(texts.Texts);
         Assert.Equal(expected: TextTruncator.Truncate(prompt), actual: mapped.PromptText);
         Assert.True(mapped.PromptTruncated);
-        Assert.Equal(expected: prompt.Length, actual: mapped.PromptTextLength);
         Assert.Equal(expected: "ok", actual: mapped.ResponseText);
         Assert.False(mapped.ResponseTruncated);
-        Assert.Equal(expected: 2, actual: mapped.ResponseTextLength);
     }
 
     /// <summary>
-    /// Previews equal <see cref="TextTruncator.Truncate"/> of the stored text, the live telemetry preview, and
-    /// the truncation flags are set exactly when a preview was cut: at the cap a text is sent whole, one
-    /// character over it is cut.
+    /// Previews equal <see cref="TextTruncator.Truncate"/> of the stored text, and the truncation flags are
+    /// set exactly when a preview was cut.
     /// </summary>
     [Theory]
     [InlineData(TextTruncator.DefaultMaxLength, false)]
     [InlineData(TextTruncator.DefaultMaxLength + 1, true)]
-    public async Task ListPersistedSessions_Previews_MatchLiveTelemetryAndFlagExactlyWhenCut(int length,
+    public async Task GetTurnTexts_Previews_MatchLiveTelemetryAndFlagExactlyWhenCut(int length,
         bool expectedTruncated)
     {
         var text = new string('x', length);
-        var response = await ListAsync(rows: RealisticRows(count: 1, promptText: text, responseText: text),
-            limit: 1);
+        var row = RealisticRows(count: 1, promptText: text, responseText: text)[0];
+        var service = CreateService(sessions: [row], transcriptCaptureEnabled: true);
 
-        var mapped = Assert.Single(response.Transcripts);
+        var texts = await service.GetTurnTexts(
+            new Contract.GetTurnTextsRequest { TranscriptIds = { row.Id } },
+            CreateContext(TestContext.Current.CancellationToken));
+
+        var mapped = Assert.Single(texts.Texts);
         Assert.Equal(expected: TextTruncator.Truncate(text), actual: mapped.PromptText);
         Assert.Equal(expected: TextTruncator.Truncate(text), actual: mapped.ResponseText);
         Assert.Equal(expected: expectedTruncated, actual: mapped.PromptTruncated);
@@ -520,29 +518,6 @@ public class TelemetryGrpcServiceTests
         }
     }
 
-    /// <summary>Records each entry's level and rendered message.</summary>
-    private sealed class CapturingLogger : ILogger<TelemetryGrpcService>
-    {
-        public List<(LogLevel Level, string Message)> Entries { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
-        {
-            return null;
-        }
-
-        public bool IsEnabled(LogLevel logLevel)
-        {
-            return true;
-        }
-
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            Entries.Add((logLevel, formatter(arg1: state, arg2: exception)));
-        }
-    }
-
     /// <summary>
     /// Minimal <see cref="ITranscriptStore"/> fake over a fixed, pre-seeded, newest-first session list. Honours
     /// the requested limit, as <see cref="SqliteTranscriptStore"/> does, and records it.
@@ -629,6 +604,20 @@ public class TelemetryGrpcServiceTests
         {
             RequestedLimit = limit;
             return Task.FromResult<IReadOnlyList<SessionTranscript>>([.. sessions.Take(limit)]);
+        }
+
+        public Task<IReadOnlyList<StoredTurnText>> LoadTurnTextsAsync(
+            IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
+        {
+            var byId = sessions.ToDictionary(row => row.Id);
+            IReadOnlyList<StoredTurnText> texts =
+            [
+                .. transcriptIds.Select(id => byId.TryGetValue(id, out var row)
+                    ? new StoredTurnText(id, true, row.PromptText, row.ResponseText, row.PromptTextLength,
+                        row.ResponseTextLength)
+                    : new StoredTurnText(id, false, null, null, null, null))
+            ];
+            return Task.FromResult(texts);
         }
     }
 }

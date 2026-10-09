@@ -779,7 +779,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         classification: resolution.Classification, taskText: resolution.TaskText,
                         dimBestModel: resolution.DimBestModel,
                         untrainedBaselineModel: resolution.UntrainedBaselineModel,
-                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore);
+                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore,
+                        resolveArchive: capture is null ? null : capture.BindArchive);
 
                     // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
                     if (publishedTurn.TelemetryFailure is { } telemetryFailure)

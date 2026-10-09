@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Storage;
 
 namespace TotallyHot.ArcRouter.Transcripts;
@@ -16,6 +17,7 @@ namespace TotallyHot.ArcRouter.Transcripts;
 public sealed class SqliteTranscriptStore : ITranscriptStore
 {
     private readonly TranscriptDatabase _database;
+    private readonly Lazy<ISessionExtractReader>? _extracts;
     private readonly ILogger<SqliteTranscriptStore> _logger;
     private readonly IOptionsMonitor<TranscriptOptions> _options;
     private readonly Lock _schemaLock = new();
@@ -36,10 +38,15 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     /// Reports a log truncation that could not complete after a delete. Optional so a store built by hand
     /// in a test needs no logging setup.
     /// </param>
+    /// <param name="extracts">
+    /// Reads prompt and response text from session files. Optional so a store built by hand in a test
+    /// returns rows whose text is null.
+    /// </param>
     public SqliteTranscriptStore(
         TranscriptDatabase database,
         IOptionsMonitor<TranscriptOptions> options,
-        ILogger<SqliteTranscriptStore>? logger = null)
+        ILogger<SqliteTranscriptStore>? logger = null,
+        Lazy<ISessionExtractReader>? extracts = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(options);
@@ -47,6 +54,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         _database = database;
         _options = options;
         _logger = logger ?? NullLogger<SqliteTranscriptStore>.Instance;
+        _extracts = extracts;
     }
 
     /// <summary>
@@ -74,12 +82,14 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                                   correlation_id, session_id, created_at_utc, requested_model, routed_model, dimension,
                                   difficulty, language, is_utility, prompt_text, response_text, score, cost, is_exploratory,
                                   propensity, input_tokens, output_tokens, memory_entry_id, dim_best_model,
-                                  untrained_baseline_model, untrained_baseline_predicted_score)
+                                  untrained_baseline_model, untrained_baseline_predicted_score,
+                                  archive_session_id, archive_turn_id, prompt_text_length, response_text_length)
                               VALUES (
                                   $correlationId, $sessionId, $createdAtUtc, $requestedModel, $routedModel, $dimension,
-                                  $difficulty, $language, $isUtility, $promptText, $responseText, $score, $cost,
+                                  $difficulty, $language, $isUtility, NULL, NULL, $score, $cost,
                                   $isExploratory, $propensity, $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel,
-                                  $untrainedBaselineModel, $untrainedBaselinePredictedScore);
+                                  $untrainedBaselineModel, $untrainedBaselinePredictedScore,
+                                  $archiveSessionId, $archiveTurnId, $promptTextLength, $responseTextLength);
                               SELECT last_insert_rowid();
                               """;
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: record.CorrelationId);
@@ -93,10 +103,6 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             value: (object?)record.Difficulty ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$language", value: (object?)record.Language ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$isUtility", value: record.IsUtility ? 1 : 0);
-        command.Parameters.AddWithValue(parameterName: "$promptText",
-            value: (object?)record.PromptText ?? DBNull.Value);
-        command.Parameters.AddWithValue(parameterName: "$responseText",
-            value: (object?)record.ResponseText ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$score", value: (object?)record.Score ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$cost", value: (object?)record.Cost ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$isExploratory", value: record.IsExploratory ? 1 : 0);
@@ -113,6 +119,12 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             value: (object?)record.UntrainedBaselineModel ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$untrainedBaselinePredictedScore",
             value: (object?)record.UntrainedBaselinePredictedScore ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$archiveSessionId",
+            value: record.ArchiveSessionId is { } sessionId ? sessionId.ToString("D") : DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$archiveTurnId",
+            value: record.ArchiveTurnId is { } turnId ? turnId.ToString("D") : DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$promptTextLength", value: CharacterLength(record.PromptText));
+        command.Parameters.AddWithValue(parameterName: "$responseTextLength", value: CharacterLength(record.ResponseText));
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult<long?>(id);
@@ -157,6 +169,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.CommandText = """
                               SELECT id FROM request_transcripts
                               WHERE memory_entry_id IS NULL AND score IS NOT NULL
+                                AND archive_turn_id IS NOT NULL AND prompt_text_length > 0
                               ORDER BY id ASC
                               LIMIT $limit;
                               """;
@@ -189,7 +202,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         // never-scanned row - exactly the rows this sweep exists to find.
         command.CommandText = """
                               SELECT id FROM request_transcripts
-                              WHERE response_text IS NOT NULL
+                              WHERE response_text_length > 0
                                 AND scorer_version IS NOT $scorerVersion
                               ORDER BY id ASC
                               LIMIT $limit;
@@ -249,7 +262,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                                   id, correlation_id, created_at_utc, requested_model, routed_model, dimension, difficulty,
                                   language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
                                   input_tokens, output_tokens, memory_entry_id, dim_best_model, untrained_baseline_model,
-                                  untrained_baseline_predicted_score, is_judge_scored
+                                  untrained_baseline_predicted_score, is_judge_scored,
+                                  archive_session_id, archive_turn_id
                               FROM request_transcripts
                               WHERE id = $id;
                               """;
@@ -258,8 +272,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return Task.FromResult<TranscriptRecord?>(null);
 
-        var record = ReadTranscriptRecord(reader);
-        return Task.FromResult<TranscriptRecord?>(record);
+        return Task.FromResult<TranscriptRecord?>(WithExtracts(ReadTranscriptRecord(reader)));
     }
 
     /// <inheritdoc/>
@@ -405,14 +418,37 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-                              SELECT memory_entry_id, prompt_text
+                              SELECT memory_entry_id, archive_session_id, archive_turn_id
                               FROM request_transcripts
-                              WHERE memory_entry_id IS NOT NULL AND prompt_text IS NOT NULL;
+                              WHERE memory_entry_id IS NOT NULL
+                                AND archive_session_id IS NOT NULL
+                                AND archive_turn_id IS NOT NULL;
                               """;
 
+        var links = new List<(long MemoryId, Guid SessionId, Guid TurnId)>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                if (Guid.TryParse(reader.GetString(1), out var sessionId) &&
+                    Guid.TryParse(reader.GetString(2), out var turnId))
+                {
+                    links.Add((reader.GetInt64(0), sessionId, turnId));
+                }
+            }
+        }
+
+        // One pass over each session file for all of its turns, not one file open and scan per linked row.
         var promptTextByMemoryEntryId = new Dictionary<long, string>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read()) promptTextByMemoryEntryId[reader.GetInt64(0)] = reader.GetString(1);
+        foreach (var session in links.GroupBy(link => link.SessionId))
+        {
+            var extracts = ReadExtractsBatch(session.Key, [.. session.Select(link => link.TurnId).Distinct()]);
+            foreach (var (memoryId, _, turnId) in session)
+            {
+                if (extracts.TryGetValue(turnId, out var found) && found.NewestUserMessage is { Length: > 0 } prompt)
+                    promptTextByMemoryEntryId[memoryId] = prompt;
+            }
+        }
 
         return Task.FromResult<IReadOnlyDictionary<long, string>>(promptTextByMemoryEntryId);
     }
@@ -433,8 +469,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.CommandText = """
                               SELECT
                                   id, session_id, correlation_id, created_at_utc, requested_model, routed_model,
-                                  prompt_text, response_text, cost, input_tokens, output_tokens, memory_entry_id,
-                                  length(prompt_text), length(response_text)
+                                  cost, input_tokens, output_tokens, memory_entry_id,
+                                  prompt_text_length, response_text_length
                               FROM request_transcripts
                               ORDER BY id DESC
                               LIMIT $limit;
@@ -451,14 +487,14 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                 CreatedAtUtc: DateTimeOffset.Parse(reader.GetString(3)),
                 RequestedModel: reader.GetString(4),
                 RoutedModel: reader.GetString(5),
-                PromptText: reader.IsDBNull(6) ? null : reader.GetString(6),
-                ResponseText: reader.IsDBNull(7) ? null : reader.GetString(7),
-                Cost: reader.IsDBNull(8) ? null : (decimal)reader.GetDouble(8),
-                InputTokens: reader.IsDBNull(9) ? null : reader.GetInt32(9),
-                OutputTokens: reader.IsDBNull(10) ? null : reader.GetInt32(10),
-                MemoryEntryId: reader.IsDBNull(11) ? null : reader.GetInt64(11),
-                PromptTextLength: reader.IsDBNull(12) ? null : reader.GetInt32(12),
-                ResponseTextLength: reader.IsDBNull(13) ? null : reader.GetInt32(13)));
+                PromptText: null,
+                ResponseText: null,
+                Cost: reader.IsDBNull(6) ? null : (decimal)reader.GetDouble(6),
+                InputTokens: reader.IsDBNull(7) ? null : reader.GetInt32(7),
+                OutputTokens: reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                MemoryEntryId: reader.IsDBNull(9) ? null : reader.GetInt64(9),
+                PromptTextLength: reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                ResponseTextLength: reader.IsDBNull(11) ? null : reader.GetInt32(11)));
 
         return Task.FromResult<IReadOnlyList<SessionTranscript>>(rows);
     }
@@ -539,6 +575,168 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             DimBestModel: reader.IsDBNull(18) ? null : reader.GetString(18),
             UntrainedBaselineModel: reader.IsDBNull(19) ? null : reader.GetString(19),
             UntrainedBaselinePredictedScore: reader.IsDBNull(20) ? null : reader.GetDouble(20),
-            IsJudgeScored: !reader.IsDBNull(21) && reader.GetInt32(21) != 0);
+            IsJudgeScored: !reader.IsDBNull(21) && reader.GetInt32(21) != 0,
+            ArchiveSessionId: reader.FieldCount > 22 && !reader.IsDBNull(22) && Guid.TryParse(reader.GetString(22), out var sessionId)
+                ? sessionId
+                : null,
+            ArchiveTurnId: reader.FieldCount > 23 && !reader.IsDBNull(23) && Guid.TryParse(reader.GetString(23), out var turnId)
+                ? turnId
+                : null);
     }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<long> DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds)
+    {
+        ArgumentNullException.ThrowIfNull(archiveSessionIds);
+        if (archiveSessionIds.Count == 0) return [];
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        var memoryIds = new List<long>();
+        foreach (var archiveSessionId in archiveSessionIds.Distinct())
+        {
+            using var select = connection.CreateCommand();
+            select.Transaction = transaction;
+            select.CommandText = """
+                                 SELECT memory_entry_id FROM request_transcripts
+                                 WHERE archive_session_id = $id AND memory_entry_id IS NOT NULL;
+                                 """;
+            select.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
+            using (var reader = select.ExecuteReader())
+            {
+                while (reader.Read()) memoryIds.Add(reader.GetInt64(0));
+            }
+
+            using var delete = connection.CreateCommand();
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM request_transcripts WHERE archive_session_id = $id;";
+            delete.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
+            delete.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        TruncateWalAfterDelete(connection);
+        return memoryIds;
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<StoredTurnText>> LoadTurnTextsAsync(
+        IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transcriptIds);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_options.CurrentValue.Enabled || transcriptIds.Count == 0)
+            return Task.FromResult<IReadOnlyList<StoredTurnText>>([]);
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        var rows = new List<StoredTurnText>(transcriptIds.Count);
+        foreach (var id in transcriptIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                                  SELECT archive_session_id, archive_turn_id, prompt_text_length, response_text_length
+                                  FROM request_transcripts
+                                  WHERE id = $id;
+                                  """;
+            command.Parameters.AddWithValue("$id", id);
+            using var reader = command.ExecuteReader();
+            if (!reader.Read())
+            {
+                rows.Add(new StoredTurnText(id, false, null, null, null, null));
+                continue;
+            }
+
+            SessionExtracts? extracts = null;
+            if (!reader.IsDBNull(0) && !reader.IsDBNull(1) &&
+                Guid.TryParse(reader.GetString(0), out var sessionId) &&
+                Guid.TryParse(reader.GetString(1), out var turnId))
+            {
+                extracts = ReadExtracts(sessionId, turnId);
+            }
+
+            rows.Add(new StoredTurnText(
+                id,
+                true,
+                extracts?.NewestUserMessage,
+                extracts?.ResponseText,
+                reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                reader.IsDBNull(3) ? null : reader.GetInt32(3)));
+        }
+
+        return Task.FromResult<IReadOnlyList<StoredTurnText>>(rows);
+    }
+
+    /// <summary>Fills prompt and response text from the session file when this row points at one.</summary>
+    private TranscriptRecord WithExtracts(TranscriptRecord record)
+    {
+        if (record.ArchiveSessionId is not { } sessionId || record.ArchiveTurnId is not { } turnId)
+            return record with { PromptText = null, ResponseText = null };
+
+        var extracts = ReadExtracts(sessionId, turnId);
+        return record with
+        {
+            PromptText = extracts?.NewestUserMessage,
+            ResponseText = extracts?.ResponseText
+        };
+    }
+
+    /// <summary>Reads several turns' extracts from one session file, or nothing when no reader is wired or the file is unreadable.</summary>
+    /// <param name="archiveSessionId">The session file's archive id.</param>
+    /// <param name="archiveTurnIds">The turns wanted.</param>
+    /// <returns>The extracts by turn id; an unreadable turn has no entry.</returns>
+    private IReadOnlyDictionary<Guid, SessionExtracts> ReadExtractsBatch(
+        Guid archiveSessionId, IReadOnlyCollection<Guid> archiveTurnIds)
+    {
+        if (_extracts is null) return new Dictionary<Guid, SessionExtracts>();
+
+        try
+        {
+            return _extracts.Value.TryReadExtracts(archiveSessionId, archiveTurnIds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
+            return new Dictionary<Guid, SessionExtracts>();
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task MarkPromptUnavailableAsync(long id, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_options.CurrentValue.Enabled) return Task.CompletedTask;
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE request_transcripts SET prompt_text_length = 0 WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Reads one turn's extracts, or <see langword="null"/> when no reader is wired or the frame is missing.</summary>
+    private SessionExtracts? ReadExtracts(Guid archiveSessionId, Guid archiveTurnId)
+    {
+        if (_extracts is null) return null;
+
+        try
+        {
+            return _extracts.Value.TryReadExtracts(archiveSessionId, archiveTurnId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Counts Unicode scalar values, matching SQLite's <c>length()</c> on text, so an emoji is one character.
+    /// </summary>
+    private static object CharacterLength(string? text) =>
+        text is null ? DBNull.Value : text.EnumerateRunes().Count();
 }

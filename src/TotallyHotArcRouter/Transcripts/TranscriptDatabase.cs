@@ -10,8 +10,9 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// Owns the SQLite connection string and schema for the opt-in transcript store
 /// (docs/router/self-organizing-classification-plan.md Phase T1a). A dedicated file
 /// (<c>transcripts.db</c>, resolved via <see cref="StorageOptions.ResolveTranscriptDatabasePath"/>),
-/// separate from <see cref="Router.RouterMemoryDatabase"/>'s file: this table carries raw prompt/response
-/// text, which the router's other learned-memory tables deliberately do not, so its creation is gated on
+/// separate from <see cref="Router.RouterMemoryDatabase"/>'s file: this table used to carry raw prompt/response
+/// text, which the router's other learned-memory tables deliberately do not. That text now lives in session
+/// files (#165 phase 2). Creation stays gated on
 /// <see cref="TranscriptOptions.Enabled"/> rather than happening unconditionally at startup like every
 /// other database in this codebase.
 /// </summary>
@@ -40,7 +41,11 @@ public sealed class TranscriptDatabase
                                          memory_entry_id    INTEGER NULL,
                                          dim_best_model     TEXT    NULL,
                                          scorer_version     TEXT    NULL,
-                                         is_judge_scored    INTEGER NOT NULL DEFAULT 0
+                                         is_judge_scored    INTEGER NOT NULL DEFAULT 0,
+                                         archive_session_id TEXT    NULL,
+                                         archive_turn_id    TEXT    NULL,
+                                         prompt_text_length INTEGER NULL,
+                                         response_text_length INTEGER NULL
                                      );
 
                                      CREATE INDEX IF NOT EXISTS ix_request_transcripts_correlation_id
@@ -174,6 +179,9 @@ public sealed class TranscriptDatabase
         MigrateUntrainedBaselinePredictedScoreColumn(connection);
         MigrateTaxonomyComparisonTokenizerRatioColumns(connection);
         MigrateIsJudgeScoredColumn(connection);
+        MigrateArchiveIdColumns(connection);
+        MigrateTextLengthColumns(connection);
+        ScrubConversationText(connection);
     }
 
     /// <summary>
@@ -352,6 +360,114 @@ public sealed class TranscriptDatabase
         using var alter = connection.CreateCommand();
         alter.CommandText = "ALTER TABLE request_transcripts ADD COLUMN is_judge_scored INTEGER NOT NULL DEFAULT 0;";
         alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the archive id columns that join a metadata row to its session-file Extracts frame (#165 phase 2).
+    /// Nullable with no backfill: rows written before capture have no session file to point at.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    private static void MigrateArchiveIdColumns(SqliteConnection connection)
+    {
+        AddColumnIfMissing(connection, "archive_session_id", "TEXT NULL");
+        AddColumnIfMissing(connection, "archive_turn_id", "TEXT NULL");
+
+        using var index = connection.CreateCommand();
+        index.CommandText = """
+                            CREATE INDEX IF NOT EXISTS ix_request_transcripts_archive_session
+                                ON request_transcripts (archive_session_id);
+                            CREATE INDEX IF NOT EXISTS ix_request_transcripts_archive_turn
+                                ON request_transcripts (archive_turn_id);
+                            """;
+        index.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds the character-length columns the Sessions list shows without opening a session file.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    private static void MigrateTextLengthColumns(SqliteConnection connection)
+    {
+        AddColumnIfMissing(connection, "prompt_text_length", "INTEGER NULL");
+        AddColumnIfMissing(connection, "response_text_length", "INTEGER NULL");
+    }
+
+    /// <summary>
+    /// Adds one nullable column to <c>request_transcripts</c> when a database from before it exists.
+    /// </summary>
+    private static void AddColumnIfMissing(SqliteConnection connection, string name, string type)
+    {
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText =
+            "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = $name;";
+        pragma.Parameters.AddWithValue("$name", name);
+        if (Convert.ToInt64(value: pragma.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE request_transcripts ADD COLUMN {name} {type};";
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Deletes conversation text from <c>request_transcripts</c> once, copies character lengths first, then
+    /// rebuilds the file so freed pages do not keep the words (#165 phase 2). A later call sees the marker
+    /// and does nothing.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database, not inside a transaction.</param>
+    private static void ScrubConversationText(SqliteConnection connection)
+    {
+        using (var marker = connection.CreateCommand())
+        {
+            marker.CommandText = """
+                                 CREATE TABLE IF NOT EXISTS schema_markers (name TEXT PRIMARY KEY);
+                                 """;
+            marker.ExecuteNonQuery();
+        }
+
+        using (var exists = connection.CreateCommand())
+        {
+            exists.CommandText = "SELECT COUNT(*) FROM schema_markers WHERE name = 'conversation-text-left-sqlite';";
+            if (Convert.ToInt64(value: exists.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0) return;
+        }
+
+        using (var lengths = connection.CreateCommand())
+        {
+            lengths.CommandText = """
+                                  UPDATE request_transcripts
+                                  SET prompt_text_length = length(prompt_text)
+                                  WHERE prompt_text IS NOT NULL AND prompt_text_length IS NULL;
+                                  UPDATE request_transcripts
+                                  SET response_text_length = length(response_text)
+                                  WHERE response_text IS NOT NULL AND response_text_length IS NULL;
+                                  UPDATE request_transcripts
+                                  SET prompt_text = NULL, response_text = NULL
+                                  WHERE prompt_text IS NOT NULL OR response_text IS NOT NULL;
+                                  """;
+            lengths.ExecuteNonQuery();
+        }
+
+        using (var checkpoint = connection.CreateCommand())
+        {
+            checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            checkpoint.ExecuteNonQuery();
+        }
+
+        try
+        {
+            using var vacuum = connection.CreateCommand();
+            vacuum.CommandText = "VACUUM;";
+            vacuum.ExecuteNonQuery();
+        }
+        catch (SqliteException)
+        {
+            // Another connection can hold the file at startup. Leave the marker unset so the next open retries.
+            // The words are already NULL; a retry only finishes the page rebuild.
+            return;
+        }
+
+        using var stamp = connection.CreateCommand();
+        stamp.CommandText = "INSERT INTO schema_markers (name) VALUES ('conversation-text-left-sqlite');";
+        stamp.ExecuteNonQuery();
     }
 
     /// <summary>

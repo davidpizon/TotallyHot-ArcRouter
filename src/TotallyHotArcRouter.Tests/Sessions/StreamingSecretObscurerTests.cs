@@ -155,11 +155,16 @@ public sealed class StreamingSecretObscurerTests
         var output = new MemoryStream();
         using var obscurer = new StreamingSecretObscurer(output, leaveOpen: true);
 
-        var exception = Record.Exception(() =>
+        Exception? exception = null;
+        try
         {
             foreach (var chunk in Encoding.UTF8.GetBytes(key).Chunk(5_000)) obscurer.Write(chunk);
             obscurer.Finish();
-        });
+        }
+        catch (Exception ex)
+        {
+            exception = ex;
+        }
 
         if (exception is null)
         {
@@ -181,12 +186,17 @@ public sealed class StreamingSecretObscurerTests
         var output = new MemoryStream();
         using var obscurer = new StreamingSecretObscurer(output, leaveOpen: true);
 
-        var exception = Record.Exception(() =>
+        Exception? exception = null;
+        try
         {
             obscurer.Write(Encoding.UTF8.GetBytes("-----BEGIN " + new string('Q', 5_000)));
             obscurer.Write(" PRIVATE KEY-----\nSHORTTAIL12345\n-----END PRIVATE KEY-----\nafter"u8);
             obscurer.Finish();
-        });
+        }
+        catch (Exception ex)
+        {
+            exception = ex;
+        }
 
         if (exception is null)
         {
@@ -228,10 +238,15 @@ public sealed class StreamingSecretObscurerTests
         using var obscurer = new StreamingSecretObscurer(output, leaveOpen: true, windowChars: 512);
         obscurer.Write("-----BEGIN RSA PRIVATE KEY-----\n"u8);
 
-        var ex = Record.Exception(() =>
+        Exception? ex = null;
+        try
         {
             for (var i = 0; i < 100; i++) obscurer.Write(Encoding.UTF8.GetBytes(new string('M', 63) + "\n"));
-        });
+        }
+        catch (Exception caught)
+        {
+            ex = caught;
+        }
 
         Assert.IsType<SessionCaptureAbandonedException>(ex);
         Assert.DoesNotContain("MMMM", Encoding.UTF8.GetString(output.ToArray()));

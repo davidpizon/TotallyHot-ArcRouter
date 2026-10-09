@@ -235,17 +235,24 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var rowsDeleted = await _transcriptStore.DeleteAllAsync(context.CancellationToken).ConfigureAwait(false);
+        // Sessions go first: deleting them removes the transcript rows that point at them together with the
+        // learned embeddings those rows link to, and that link is gone once every row has been deleted.
+        // #165: the full conversation text lives in the encrypted session files, so Clear deletes those too,
+        // and rotates the master key so no copy of a deleted session key can be unwrapped. A failure leaves
+        // the text on disk, which is reported exactly like a body file that could not be removed.
+        var rowsBefore = await _transcriptStore.GetRowCountAsync(context.CancellationToken).ConfigureAwait(false);
+        var sessionsFinal = await ClearSessionsAsync().ConfigureAwait(false);
+
+        // Rows the session deletes already removed no longer count in this result, so report the larger of the two.
+        var rowsDeleted = Math.Max(rowsBefore,
+            await _transcriptStore.DeleteAllAsync(context.CancellationToken).ConfigureAwait(false));
 
         // Clear cannot lean on the retention cycle to finish the job (it does not run when capture is off),
         // so it makes the deletion final itself and says so when it could not.
         var deletionFinal = await _transcriptStore.FinalizeDeletionAsync(context.CancellationToken)
             .ConfigureAwait(false);
 
-        // #165: the full conversation text lives in the encrypted session files, so Clear deletes those too,
-        // and rotates the master key so no copy of a deleted session key can be unwrapped. A failure leaves
-        // the text on disk, which is reported exactly like a body file that could not be removed.
-        if (!await ClearSessionsAsync().ConfigureAwait(false)) deletionFinal = false;
+        if (!sessionsFinal) deletionFinal = false;
 
         // #184 phase 3: close the body sink, delete every bodies-*.log, reopen. Diagnostic logs stay.
         // A locked leftover is reported through the same deletion_final flag the UI already surfaces for

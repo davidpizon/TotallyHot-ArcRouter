@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -644,29 +645,161 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     /// <summary>
-    /// Storage guard for #179: the Sessions tab's list is cut to previews, but nothing written to the store may
-    /// be. Text over 4 MiB on both sides round-trips exactly, through both the write and the full-row read.
+    /// #165 phase 2: the database keeps lengths and archive ids, and none of the words. A later read fills
+    /// the text from the session file.
     /// </summary>
     [Fact(Timeout = 5000)]
-    public async Task InsertAsync_TextOverFourMebibytes_RoundTripsExactly()
+    public async Task InsertAsync_StoresNullTextLengthsAndArchiveIds()
     {
-        var prompt = new string('p', 4 * 1024 * 1024 + 1);
-        var response = new string('r', 4 * 1024 * 1024 + 7);
+        var sessionId = Guid.CreateVersion7();
+        var turnId = Guid.CreateVersion7();
         var (_, store) = CreateEnabledStore();
 
         var id = await store.InsertAsync(
-            record: MakeRecord("sess-big:1") with { PromptText = prompt, ResponseText = response },
+            record: MakeRecord("sess-ids:1") with
+            {
+                ArchiveSessionId = sessionId,
+                ArchiveTurnId = turnId
+            },
             cancellationToken: TestContext.Current.CancellationToken);
+
         var stored = await store.GetTranscriptAsync(id: id!.Value,
             cancellationToken: TestContext.Current.CancellationToken);
         var listed = Assert.Single(await store.ListSessionsAsync(10,
             cancellationToken: TestContext.Current.CancellationToken));
 
-        Assert.Equal(expected: prompt, actual: stored!.PromptText);
-        Assert.Equal(expected: response, actual: stored.ResponseText);
-        Assert.Equal(expected: prompt, actual: listed.PromptText);
-        Assert.Equal(expected: prompt.Length, actual: listed.PromptTextLength);
-        Assert.Equal(expected: response.Length, actual: listed.ResponseTextLength);
+        Assert.Null(stored!.PromptText);
+        Assert.Null(stored.ResponseText);
+        Assert.Equal(sessionId, stored.ArchiveSessionId);
+        Assert.Equal(turnId, stored.ArchiveTurnId);
+        Assert.Null(listed.PromptText);
+        Assert.Null(listed.ResponseText);
+        Assert.Equal(expected: "fix this bug".Length, actual: listed.PromptTextLength);
+        Assert.Equal(expected: "here is the fix".Length, actual: listed.ResponseTextLength);
+        SqliteConnection.ClearAllPools();
+        AssertFileDoesNotContain(_dbPath, "fix this bug");
+    }
+
+    /// <summary>A full-row read and the cluster-name map take words from extracts, not from SQLite.</summary>
+    [Fact]
+    public async Task GetTranscriptAndClusterNames_ReadExtracts()
+    {
+        var sessionId = Guid.CreateVersion7();
+        var turnId = Guid.CreateVersion7();
+        var reader = new StubExtractReader(new SessionExtracts("from the diary", "graded reply"));
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(
+            database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }),
+            extracts: new Lazy<ISessionExtractReader>(() => reader));
+
+        var id = await store.InsertAsync(
+            record: MakeRecord("sess-extract:1") with
+            {
+                ArchiveSessionId = sessionId,
+                ArchiveTurnId = turnId,
+                MemoryEntryId = 42
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var stored = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var names = await store.LoadPromptTextByMemoryEntryIdAsync(TestContext.Current.CancellationToken);
+        var pending = await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("from the diary", stored!.PromptText);
+        Assert.Equal("graded reply", stored.ResponseText);
+        Assert.Equal("from the diary", names[42]);
+        Assert.Equal([id.Value], pending);
+        Assert.Equal((sessionId, turnId), reader.Last);
+    }
+
+    /// <summary>Deleting a session's rows returns the memory ids those rows pointed at and leaves other rows.</summary>
+    [Fact]
+    public async Task DeleteByArchiveSessions_RemovesThoseRowsAndReturnsMemoryIds()
+    {
+        var gone = Guid.CreateVersion7();
+        var kept = Guid.CreateVersion7();
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(
+            record: MakeRecord("gone:1") with { ArchiveSessionId = gone, ArchiveTurnId = Guid.CreateVersion7(), MemoryEntryId = 7 },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var keptId = await store.InsertAsync(
+            record: MakeRecord("kept:1") with { ArchiveSessionId = kept, ArchiveTurnId = Guid.CreateVersion7() },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var memoryIds = store.DeleteByArchiveSessions([gone]);
+
+        Assert.Equal([7L], memoryIds);
+        Assert.Null(await store.GetTranscriptAsync(1, TestContext.Current.CancellationToken));
+        Assert.Equal(keptId, (await store.GetTranscriptAsync(keptId!.Value, TestContext.Current.CancellationToken))!.Id);
+    }
+
+    /// <summary>
+    /// An upgrade nulls text that was already in the file and rebuilds it, so the planted words are not left
+    /// in a freed page.
+    /// </summary>
+    [Fact]
+    public void EnsureCreated_ScrubsPlantedConversationTextFromTheFile()
+    {
+        const string planted = "phase2-planted-secret-9f3c2a";
+        Directory.CreateDirectory(_tempDirectory);
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var create = connection.CreateCommand();
+            create.CommandText = """
+                                 CREATE TABLE request_transcripts (
+                                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                     correlation_id TEXT NOT NULL,
+                                     created_at_utc TEXT NOT NULL,
+                                     requested_model TEXT NOT NULL,
+                                     routed_model TEXT NOT NULL,
+                                     is_utility INTEGER NOT NULL,
+                                     prompt_text TEXT NULL,
+                                     response_text TEXT NULL,
+                                     is_exploratory INTEGER NOT NULL,
+                                     propensity REAL NOT NULL);
+                                 INSERT INTO request_transcripts (
+                                     correlation_id, created_at_utc, requested_model, routed_model,
+                                     is_utility, prompt_text, response_text, is_exploratory, propensity)
+                                 VALUES ('old:1', '2026-01-01T00:00:00Z', 'gpt-5.4', 'kimi-k2.5', 0, $planted, $planted, 0, 0.1);
+                                 """;
+            create.Parameters.AddWithValue("$planted", planted);
+            create.ExecuteNonQuery();
+        }
+
+        SqliteConnection.ClearAllPools();
+        CreateDatabase().EnsureCreated();
+        SqliteConnection.ClearAllPools();
+
+        AssertFileDoesNotContain(_dbPath, planted);
+        var wal = _dbPath + "-wal";
+        if (File.Exists(wal)) AssertFileDoesNotContain(wal, planted);
+    }
+
+    private static void AssertFileDoesNotContain(string path, string planted)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var needle = System.Text.Encoding.UTF8.GetBytes(planted);
+        for (var i = 0; i <= bytes.Length - needle.Length; i++)
+        {
+            if (bytes.AsSpan(i, needle.Length).SequenceEqual(needle))
+                Assert.Fail($"'{planted}' is still in {path} at offset {i}.");
+        }
+    }
+
+    private sealed class StubExtractReader(SessionExtracts extracts) : ISessionExtractReader
+    {
+        public (Guid SessionId, Guid TurnId) Last { get; private set; }
+
+        public SessionExtracts? TryReadExtracts(Guid archiveSessionId, Guid archiveTurnId)
+        {
+            Last = (archiveSessionId, archiveTurnId);
+            return extracts;
+        }
     }
 
     [Fact]

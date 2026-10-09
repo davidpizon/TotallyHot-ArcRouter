@@ -292,7 +292,8 @@ internal sealed class BedrockInvocationHandler
                 routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory,
                 propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
                 untrainedBaselineModel: untrainedBaselineModel,
-                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore);
+                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
+                resolveArchive: capture is null ? null : capture.BindArchive);
 
             // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
             if (publishedTurn.TelemetryFailure is { } telemetryFailure)

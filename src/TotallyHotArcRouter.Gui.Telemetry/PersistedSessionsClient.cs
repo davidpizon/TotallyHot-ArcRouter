@@ -29,7 +29,34 @@ public interface IPersistedSessionsClient
     /// <param name="limit">The maximum number of rows to request.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads display previews for the given transcript ids. Empty when this client has not implemented the
+    /// call, so existing test fakes keep compiling.
+    /// </summary>
+    /// <param name="transcriptIds">The ids of the turns in the opened chat.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    Task<IReadOnlyList<PersistedTurnText>> GetTurnTextsAsync(
+        IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<PersistedTurnText>>([]);
+    }
 }
+
+/// <summary>One turn's display preview from <c>GetTurnTexts</c>.</summary>
+/// <param name="TranscriptId">The transcript row.</param>
+/// <param name="Found">Whether the router still has that row.</param>
+/// <param name="PromptText">The truncated newest user message, or <see langword="null"/>.</param>
+/// <param name="ResponseText">The truncated response, or <see langword="null"/>.</param>
+/// <param name="PromptTruncated">Whether the prompt preview was cut.</param>
+/// <param name="ResponseTruncated">Whether the response preview was cut.</param>
+public sealed record PersistedTurnText(
+    long TranscriptId,
+    bool Found,
+    string? PromptText,
+    string? ResponseText,
+    bool PromptTruncated,
+    bool ResponseTruncated);
 
 /// <summary>
 /// Client for the proxy's <c>TelemetryService.ListPersistedSessions</c> RPC - the GUI Sessions tab's
@@ -82,6 +109,34 @@ public sealed class PersistedSessionsClient
         catch (RpcException ex)
         {
             throw Wrap(ex: ex, action: "Could not read persisted sessions");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<PersistedTurnText>> GetTurnTextsAsync(
+        IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transcriptIds);
+        try
+        {
+            var request = new Contract.GetTurnTextsRequest();
+            request.TranscriptIds.AddRange(transcriptIds);
+            var response = await Client.GetTurnTextsAsync(request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return
+            [
+                .. response.Texts.Select(text => new PersistedTurnText(
+                    TranscriptId: text.TranscriptId,
+                    Found: text.Found,
+                    PromptText: text.HasPromptText ? text.PromptText : null,
+                    ResponseText: text.HasResponseText ? text.ResponseText : null,
+                    PromptTruncated: text.PromptTruncated,
+                    ResponseTruncated: text.ResponseTruncated))
+            ];
+        }
+        catch (RpcException ex)
+        {
+            throw Wrap(ex: ex, action: "Could not read turn text");
         }
     }
 

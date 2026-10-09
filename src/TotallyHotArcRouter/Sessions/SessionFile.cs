@@ -239,8 +239,7 @@ public sealed class SessionFile : IDisposable
     public void AppendBodyFromSpool(uint turnSequence, SessionBodyKind kind, SessionBodySpool spool, Guid archiveTurnId)
     {
         ArgumentNullException.ThrowIfNull(spool);
-        AppendFrame(turnSequence, kind, flags: 0, archiveTurnId, writeChunks: write =>
-            spool.Replay(write));
+        AppendFrame(turnSequence, kind, flags: 0, archiveTurnId, writeChunks: spool.Replay);
     }
 
     /// <summary>
@@ -309,6 +308,107 @@ public sealed class SessionFile : IDisposable
 
             return results;
         }
+    }
+
+    /// <summary>
+    /// Decrypts the Extracts frame for <paramref name="archiveTurnId"/>. A convenience over
+    /// <see cref="TryReadExtracts"/> for one turn.
+    /// </summary>
+    /// <param name="archiveTurnId">The turn whose extracts are wanted.</param>
+    /// <param name="maxFrames">How many committed frames to walk.</param>
+    /// <returns>The Extracts plaintext, or <see langword="null"/> when that frame is absent or marked missing.</returns>
+    public byte[]? TryReadExtract(Guid archiveTurnId, long maxFrames) =>
+        TryReadExtracts(new HashSet<Guid> { archiveTurnId }, maxFrames).GetValueOrDefault(archiveTurnId);
+
+    /// <summary>
+    /// Decrypts the Extracts frames of the wanted turns in one pass and skips every other frame's ciphertext
+    /// without opening it. Stops at <paramref name="maxFrames"/> so a torn tail past the committed extent is
+    /// not read, and as soon as every wanted turn has been found.
+    /// </summary>
+    /// <param name="archiveTurnIds">The turns whose extracts are wanted.</param>
+    /// <param name="maxFrames">How many committed frames to walk.</param>
+    /// <returns>The Extracts plaintext by turn id; a turn whose frame is absent or marked missing has no entry.</returns>
+    public Dictionary<Guid, byte[]> TryReadExtracts(IReadOnlySet<Guid> archiveTurnIds, long maxFrames)
+    {
+        ArgumentNullException.ThrowIfNull(archiveTurnIds);
+        var found = new Dictionary<Guid, byte[]>();
+        if (archiveTurnIds.Count == 0) return found;
+
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            ulong ordinal = 0;
+            try
+            {
+                _stream.Seek(DataStart, SeekOrigin.Begin);
+                Span<byte> header = stackalloc byte[FrameHeaderLength];
+                while (ordinal < (ulong)maxFrames && found.Count < archiveTurnIds.Count && TryReadExact(_stream, header))
+                {
+                    var kind = (SessionBodyKind)header[0];
+                    ValidateKind(kind);
+                    var flags = header[1];
+                    if (flags is not (0 or FlagMissing))
+                    {
+                        throw new InvalidDataException($"Unknown session frame flags {flags}.");
+                    }
+
+                    var turnId = new Guid(header[6..FrameHeaderLength]);
+                    var take = kind == SessionBodyKind.Extracts && flags != FlagMissing &&
+                               archiveTurnIds.Contains(turnId);
+                    if (take)
+                    {
+                        found[turnId] = ReadCompressedBody(header, ordinal);
+                    }
+                    else if (!SkipBody())
+                    {
+                        break;
+                    }
+
+                    ordinal++;
+                }
+            }
+            finally
+            {
+                _stream.Seek(0, SeekOrigin.End);
+            }
+
+            return found;
+        }
+    }
+
+    /// <summary>Steps over one body's chunk records without decrypting them.</summary>
+    /// <returns><see langword="false"/> when a record is torn.</returns>
+    private static bool SkipBody(Stream stream)
+    {
+        bool final;
+        do
+        {
+            if (!SessionChunkCodec.TrySkipRecord(stream, out final)) return false;
+        }
+        while (!final);
+
+        return true;
+    }
+
+    /// <summary>Steps over one body's chunk records in this file's stream without decrypting them.</summary>
+    /// <returns><see langword="false"/> when a record is torn.</returns>
+    private bool SkipBody() => SkipBody(_stream);
+
+    /// <summary>Decrypts one body's chunks into the decompressed plaintext.</summary>
+    private byte[] ReadCompressedBody(ReadOnlySpan<byte> header, ulong ordinal)
+    {
+        using var compressed = new MemoryStream();
+        var frameAad = BuildAssociatedData(header, ordinal);
+        uint chunkIndex = 0;
+        bool final;
+        do
+        {
+            compressed.Write(SessionChunkCodec.ReadRecord(_stream, _aes, frameAad, chunkIndex++, out final));
+        }
+        while (!final);
+
+        return SessionRecordCodec.Decompress(compressed.ToArray());
     }
 
     /// <inheritdoc />
