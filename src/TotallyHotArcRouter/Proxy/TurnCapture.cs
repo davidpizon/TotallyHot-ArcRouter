@@ -260,6 +260,10 @@ internal sealed class TurnCapture : IDisposable
         _providerResponse?.Release();
         foreach (var spool in _ownedSpools) spool.Dispose();
         _ownedSpools.Clear();
+
+        // The request's completion was posted when the first candidate began answering, so by now the worker
+        // has usually finished that spool and handed it to the completion task, out of Release's reach.
+        DisposeWhenFinished(_requestCompletion);
     }
 
     /// <summary>
@@ -297,14 +301,24 @@ internal sealed class TurnCapture : IDisposable
         }
         catch (OperationCanceledException)
         {
-            _ = completion.ContinueWith(
-                static finished =>
-                {
-                    if (finished.IsCompletedSuccessfully) finished.Result?.Dispose();
-                },
-                TaskScheduler.Default);
+            DisposeWhenFinished(completion);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Disposes the spool a body's completion yields, whenever it arrives, for a body nobody will store. The
+    /// spool's own disposal is idempotent, so this is safe even when the spool was already taken and disposed.
+    /// </summary>
+    /// <param name="completion">The body's completion, or <see langword="null"/> when the body never started.</param>
+    private static void DisposeWhenFinished(Task<SessionBodySpool?>? completion)
+    {
+        _ = completion?.ContinueWith(
+            static finished =>
+            {
+                if (finished.IsCompletedSuccessfully) finished.Result?.Dispose();
+            },
+            TaskScheduler.Default);
     }
 
     /// <summary>

@@ -96,6 +96,21 @@ public sealed class SessionRetentionTests : IDisposable
         Assert.Equal(6, _store.ListTurns(only).Count);
     }
 
+    /// <summary>A non-positive Sample Size is a misconfiguration, not a policy, and must not wipe the store.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void EnforceRetention_WithNonPositiveLimit_DeletesNothing(int maxTurns)
+    {
+        AddSession("a", turns: 3, firstMinute: 0);
+        AddSession("b", turns: 3, firstMinute: 10);
+
+        var result = _store.EnforceRetention(maxTurns);
+
+        Assert.Equal(0, result.DeletedSessions);
+        Assert.Equal(2, _store.ListSessions().Count);
+    }
+
     /// <summary>At or under the limit nothing is deleted and the key is not rotated.</summary>
     [Fact]
     public void EnforceRetention_WithinTheLimit_ChangesNothing()

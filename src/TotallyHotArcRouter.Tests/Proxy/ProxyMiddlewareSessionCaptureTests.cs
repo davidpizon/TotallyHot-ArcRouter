@@ -426,6 +426,99 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, null, new TotallyHot.ArcRouter.Telemetry.IncrementalUsageScanner()));
     }
 
+    /// <summary>A turn that is never submitted (the response was not committed) leaves no spool file behind, request spool included.</summary>
+    [Fact]
+    public async Task CaptureOn_ResponseNotCommitted_LeavesNoSpoolBehind()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gemini-2.5-pro", providerModelId: "gemini-2.5-pro", baseUrl: "https://generativelanguage.googleapis.com",
+            authHeaderName: "x-goog-api-key", authHeaderScheme: string.Empty, apiKey: "k", providerName: "gemini");
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["gemini"] = new GeminiPayloadTranslator()
+        };
+
+        // A buffered (non-streaming) translation reads the whole upstream body first; when that read fails the
+        // router answers 502 instead, so no turn exists to store even though the request spool was started.
+        var context = await RunAsync(
+            "{\"model\":\"gemini-2.5-pro\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}",
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new FailingReadStream([]))
+                {
+                    Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json") }
+                }
+            },
+            resolver: resolver,
+            translators: translators);
+
+        Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
+        await WaitForNoSpoolsAsync();
+        Assert.Empty(Directory.EnumerateFiles(_folder));
+    }
+
+    /// <summary>A stream translator that stops on an embedded provider error leaves a prefix, which is stored as a missing response.</summary>
+    [Fact]
+    public async Task CaptureOn_TranslatedStreamEndsInProviderError_StoresResponsesAsMissing()
+    {
+        var resolver = ModelRouteResolverTestFactory.Create(
+            modelName: "gemini-2.5-pro", providerModelId: "gemini-2.5-pro", baseUrl: "https://generativelanguage.googleapis.com",
+            authHeaderName: "x-goog-api-key", authHeaderScheme: string.Empty, apiKey: "k", providerName: "gemini");
+        var translators = new Dictionary<string, IPayloadTranslator>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["gemini"] = new GeminiPayloadTranslator()
+        };
+        var request = "{\"model\":\"gemini-2.5-pro\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}";
+        const string error = "data: {\"error\":{\"code\":429,\"message\":\"quota\",\"status\":\"RESOURCE_EXHAUSTED\"}}\n\n";
+
+        await RunAsync(request, _ => Sse(error), resolver: resolver, translators: translators);
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Contains("hello", Text(frames, SessionBodyKind.ProviderRequest));
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ProviderResponse).Plaintext);
+    }
+
+    /// <summary>A Bedrock stream the client drops leaves a prefix, so both responses are stored as missing and the provider request is kept.</summary>
+    [Fact]
+    public async Task CaptureOn_BedrockStreamClientDrops_StoresResponsesAsMissing()
+    {
+        var eventStream = new MemoryStream();
+        string[] payloads =
+        [
+            "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":5}}}",
+            "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
+            "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}",
+            "{\"type\":\"message_stop\"}",
+        ];
+        foreach (var payload in payloads) BedrockProviderTests.AppendFrame(eventStream, "chunk", payload);
+        eventStream.Position = 0;
+        var client = new Mock<IAmazonBedrockRuntime>();
+        client.Setup(c => c.InvokeModelWithResponseStreamAsync(
+                It.IsAny<InvokeModelWithResponseStreamRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvokeModelWithResponseStreamResponse { Body = new ResponseStream(eventStream) });
+        var request = "{\"model\":\"claude-bedrock\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}";
+
+        await RunAsync(request, _ => Json("{}"), resolver: BedrockResolver(), translators: BedrockTranslators(),
+            bedrock: client.Object, responseBody: new FailingWriteStream(failAfterBytes: 10));
+        var stored = await ReadFramesAsync();
+
+        Assert.Equal(request, Text(stored, SessionBodyKind.ClientRequest));
+        Assert.Contains("bedrock-2023-05-31", Text(stored, SessionBodyKind.ProviderRequest));
+        Assert.Null(stored.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+        Assert.Null(stored.Single(f => f.Kind == SessionBodyKind.ProviderResponse).Plaintext);
+    }
+
+    private async Task WaitForNoSpoolsAsync()
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension).Any() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+    }
+
     private static string ChatRequest(string userText) =>
         "{\"model\":\"primary\",\"messages\":[{\"role\":\"user\",\"content\":\"" + userText + "\"}]}";
 
@@ -584,7 +677,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
 
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            if (_delivered) throw new IOException("The upstream reset the connection.");
+            if (_delivered || first.Length == 0) throw new IOException("The upstream reset the connection.");
 
             _delivered = true;
             first.CopyTo(buffer);

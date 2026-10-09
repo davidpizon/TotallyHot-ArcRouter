@@ -71,6 +71,23 @@ public sealed class SessionCaptureWriterTests : IDisposable
         await writer.StopAsync(CancellationToken.None);
     }
 
+    /// <summary>A writer stopped the instant it starts still writes every turn it accepted (no stop-before-consumer gap).</summary>
+    [Fact]
+    public async Task StartThenImmediateStop_StillWritesEveryAcceptedTurn()
+    {
+        for (var round = 0; round < 25; round++)
+        {
+            using var writer = NewWriter();
+            var client = "client-" + round;
+            await writer.StartAsync(CancellationToken.None);
+            await writer.EnqueueAsync(new SessionCaptureItem(client, Turn(spool: null)));
+
+            await writer.StopAsync(CancellationToken.None);
+
+            Assert.Single(_store.ListTurns(_store.ResolveArchiveSessionId(client)));
+        }
+    }
+
     /// <summary>A write that fails is swallowed and logged, the spool is still disposed, and the next turn is written.</summary>
     [Fact]
     public async Task Enqueue_FailingWrite_DoesNotStopTheWriter()

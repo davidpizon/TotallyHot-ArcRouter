@@ -14,7 +14,12 @@ public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput
 /// proxy response; a turn that cannot be stored is logged and lost, and its spools are always disposed. A
 /// producer that finds the queue full waits (it does not drop the turn).
 /// </summary>
-public sealed class SessionCaptureWriter : BackgroundService
+/// <remarks>
+/// A plain hosted service rather than a <see cref="BackgroundService"/>: on .NET 10 a <c>BackgroundService</c>
+/// stopped right after it starts never runs <c>ExecuteAsync</c>, which would leave queued turns unwritten
+/// until the shutdown deadline. This type starts its consumer in <see cref="StartAsync"/> and always runs it.
+/// </remarks>
+public sealed class SessionCaptureWriter : IHostedService, IDisposable
 {
     private readonly Lazy<SessionStore> _store;
     private readonly SessionCaptureOptions _options;
@@ -24,6 +29,7 @@ public sealed class SessionCaptureWriter : BackgroundService
     private volatile bool _abandonRemaining;
     private volatile bool _stopping;
     private volatile bool _started;
+    private Task? _consumer;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionCaptureWriter"/> class.
@@ -99,7 +105,7 @@ public sealed class SessionCaptureWriter : BackgroundService
     }
 
     /// <inheritdoc/>
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         _stopping = true;
         _channel.Writer.TryComplete();
@@ -118,23 +124,28 @@ public sealed class SessionCaptureWriter : BackgroundService
             _abandonRemaining = true;
         }
 
-        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        if (_consumer is not null) await _consumer.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
-    public override Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         _started = true;
-        return base.StartAsync(cancellationToken);
+
+        // Task.Run leaves the thread that started the host before any blocking write.
+        _consumer ??= Task.Run(ConsumeAsync, CancellationToken.None);
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Leave the thread that started the host before any blocking write.
-        await Task.Yield();
+    public void Dispose() => _channel.Writer.TryComplete();
 
-        // Reads until the channel is completed by StopAsync, not until cancellation, so a stop drains first.
+    /// <summary>
+    /// Writes queued turns until the channel is completed by <see cref="StopAsync"/> and drained, not until
+    /// cancellation, so a stop finishes what was already queued.
+    /// </summary>
+    private async Task ConsumeAsync()
+    {
         await foreach (var item in _channel.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
         {
             Write(item);

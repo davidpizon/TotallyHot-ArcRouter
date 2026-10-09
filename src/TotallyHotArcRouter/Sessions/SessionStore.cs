@@ -320,10 +320,16 @@ public sealed class SessionStore
     /// sessions, oldest first (by last turn). The newest session is never deleted, even when it alone exceeds
     /// the limit, because it may be the one still being written and deleting it would empty the store.
     /// </summary>
-    /// <param name="maxTurns">The most turns to keep (the Sample Size setting).</param>
+    /// <param name="maxTurns">
+    /// The most turns to keep (the Sample Size setting). A value of zero or less is not a retention policy but a
+    /// misconfiguration (the setting's own minimum is 500), so it deletes nothing, like the transcript retention
+    /// sweep treats a non-positive age.
+    /// </param>
     /// <returns>What was deleted; zero sessions when the store is within the limit.</returns>
     public SessionDeletionResult EnforceRetention(int maxTurns)
     {
+        if (maxTurns <= 0) return new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false);
+
         var sessions = _index.ListSessions()
             .OrderBy(row => row.LastTurnAtUtc ?? row.CreatedAtUtc)
             .ThenBy(row => row.CreatedAtUtc)

@@ -784,9 +784,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     if (capture is not null)
                         await capture.SubmitAsync(
                             turn: publishedTurn, context: context,
-                            telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
-                                clientShapeBytes: capturedResponseBytes, nativeBytes: nativeResponseBytes,
-                                tailScanner: tailScanner));
+                            telemetryCaptureTruncated: written.IsTelemetryCaptureTruncated);
                 }
                 catch (Exception ex)
                 {

@@ -92,7 +92,15 @@ internal readonly record struct UpstreamResponseResult(
     byte[] CapturedResponseBytes,
     byte[]? NativeResponseBytes,
     IncrementalUsageScanner? TailScanner,
-    bool IsStreaming);
+    bool IsStreaming)
+{
+    /// <summary>
+    /// Gets a value indicating whether telemetry's capped copies of this response lost bytes, so text
+    /// extracted from them is a prefix. See <see cref="UpstreamResponseWriter.IsTelemetryCaptureTruncated"/>.
+    /// </summary>
+    public bool IsTelemetryCaptureTruncated => UpstreamResponseWriter.IsTelemetryCaptureTruncated(
+        clientShapeBytes: CapturedResponseBytes, nativeBytes: NativeResponseBytes, tailScanner: TailScanner);
+}
 
 /// <summary>
 /// Commits one upstream response to the client: copies the forwardable headers, decides between the
