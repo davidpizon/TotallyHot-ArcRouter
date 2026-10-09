@@ -36,7 +36,6 @@ public sealed class StreamingSecretObscurer : Stream
     /// <summary>The most input processed per step, which bounds the character buffer beside the window.</summary>
     private const int SliceBytes = 16 * 1024;
 
-    private const int PemHeaderLookBackChars = 160;
     private const string PemBegin = "-----BEGIN";
 
     private static readonly Regex KeyShaped = SecretObscurer.Pattern();
@@ -226,12 +225,8 @@ public sealed class StreamingSecretObscurer : Stream
             boundary = afterBearer - bearerLength;
         }
 
-        var pemSearchStart = Math.Max(0, length - PemHeaderLookBackChars);
-        var pem = text[pemSearchStart..].LastIndexOf(PemBegin, StringComparison.OrdinalIgnoreCase);
-        if (pem >= 0 && IsUnfinishedPemHeader(text[(pemSearchStart + pem + PemBegin.Length)..]))
-        {
-            boundary = Math.Min(boundary, pemSearchStart + pem);
-        }
+        var unfinishedHeader = UnfinishedPemHeaderStart(text);
+        if (unfinishedHeader >= 0) boundary = Math.Min(boundary, unfinishedHeader);
 
         foreach (var match in KeyShaped.EnumerateMatches(text))
         {
@@ -246,13 +241,16 @@ public sealed class StreamingSecretObscurer : Stream
     }
 
     /// <summary>
-    /// Whether the text ends inside a private-key block that has not reached its end marker: a match that
-    /// starts with <c>-----BEGIN</c> and runs to the end of the text.
+    /// Whether the text ends inside a private-key block that is not finished: either its header is still being
+    /// typed, or the header is complete and the end marker has not arrived (a match that starts with
+    /// <c>-----BEGIN</c> and runs to the end of the text).
     /// </summary>
     /// <param name="text">The text in front of a run that is about to be collapsed.</param>
     /// <returns><see langword="true"/> when a private-key block is still open at the end of the text.</returns>
-    private static bool EndsInsideOpenPrivateKey(ReadOnlySpan<char> text)
+    private static bool EndsInsidePrivateKey(ReadOnlySpan<char> text)
     {
+        if (UnfinishedPemHeaderStart(text) >= 0) return true;
+
         foreach (var match in KeyShaped.EnumerateMatches(text))
         {
             if (match.Index + match.Length == text.Length
@@ -264,6 +262,20 @@ public sealed class StreamingSecretObscurer : Stream
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Finds the last <c>-----BEGIN</c> in the text and reports where it starts if everything after it could
+    /// still grow into a private-key header. The whole text is searched, not a fixed tail, because the header
+    /// may contain any number of letters and spaces before <c>PRIVATE KEY-----</c> and the text held is already
+    /// bounded by the look-back window.
+    /// </summary>
+    /// <param name="text">The undecided text.</param>
+    /// <returns>The start of the unfinished header, or -1 when there is none.</returns>
+    private static int UnfinishedPemHeaderStart(ReadOnlySpan<char> text)
+    {
+        var begin = text.LastIndexOf(PemBegin, StringComparison.OrdinalIgnoreCase);
+        return begin >= 0 && IsUnfinishedPemHeader(text[(begin + PemBegin.Length)..]) ? begin : -1;
     }
 
     /// <summary>
@@ -382,7 +394,7 @@ public sealed class StreamingSecretObscurer : Stream
         {
             // The run would be redacted, but the rest of an open private-key block after it would no longer be
             // recognised as part of the block: its short last line could then pass through as ordinary text.
-            if (EndsInsideOpenPrivateKey(text[..runStart]))
+            if (EndsInsidePrivateKey(text[..runStart]))
             {
                 throw new SessionCaptureAbandonedException(
                     "A private-key block continues into a run too long to hold, so the body was not captured.");

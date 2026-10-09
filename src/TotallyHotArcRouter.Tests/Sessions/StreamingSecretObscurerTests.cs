@@ -171,6 +171,55 @@ public sealed class StreamingSecretObscurerTests
         }
     }
 
+    /// <summary>
+    /// A long letter run inside a private-key header that has not finished yet must not collapse: the rest of
+    /// the header would then no longer match, and the key's body would reach the spool as ordinary text.
+    /// </summary>
+    [Fact]
+    public void Stream_LongRunInsideUnfinishedPrivateKeyHeader_DoesNotLeakTheKey()
+    {
+        var output = new MemoryStream();
+        using var obscurer = new StreamingSecretObscurer(output, leaveOpen: true);
+
+        var exception = Record.Exception(() =>
+        {
+            obscurer.Write(Encoding.UTF8.GetBytes("-----BEGIN " + new string('Q', 5_000)));
+            obscurer.Write(" PRIVATE KEY-----\nSHORTTAIL12345\n-----END PRIVATE KEY-----\nafter"u8);
+            obscurer.Finish();
+        });
+
+        if (exception is null)
+        {
+            Assert.DoesNotContain("SHORTTAIL12345", Encoding.UTF8.GetString(output.ToArray()));
+        }
+        else
+        {
+            Assert.IsType<SessionCaptureAbandonedException>(exception);
+        }
+    }
+
+    /// <summary>A header padded past any fixed look-back is still held until it finishes, so the whole block is redacted.</summary>
+    [Fact]
+    public void Stream_PaddedPrivateKeyHeader_IsRedactedLikeTheOneShotObscurer()
+    {
+        var text = "intro -----BEGIN " + string.Concat(Enumerable.Repeat("PADDING ", 60)) + "PRIVATE KEY-----\nSHORTTAIL12345\n-----END PRIVATE KEY-----\nafter";
+        var bytes = Encoding.UTF8.GetBytes(text);
+        var expected = Encoding.UTF8.GetBytes(SecretObscurer.Obscure(text));
+
+        for (var cut = 0; cut <= bytes.Length; cut += 7)
+        {
+            var output = new MemoryStream();
+            using (var obscurer = new StreamingSecretObscurer(output, leaveOpen: true))
+            {
+                obscurer.Write(bytes.AsSpan(0, cut));
+                obscurer.Write(bytes.AsSpan(cut));
+                obscurer.Finish();
+            }
+
+            Assert.Equal(expected, output.ToArray());
+        }
+    }
+
     /// <summary>A match that cannot be decided inside the window abandons the capture rather than leaking part of it.</summary>
     [Fact]
     public void Stream_UnterminatedKeyBeyondWindow_Abandons()
