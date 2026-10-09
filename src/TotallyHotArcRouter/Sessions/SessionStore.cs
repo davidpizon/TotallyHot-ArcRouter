@@ -7,7 +7,11 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// <summary>One body to store with a turn, or the record that capturing it failed.</summary>
 /// <param name="Kind">Which body this is.</param>
 /// <param name="Body">The raw bytes, or <see langword="null"/> to record the body as missing (never an empty stand-in).</param>
-public sealed record SessionBodyInput(SessionBodyKind Kind, byte[]? Body);
+/// <param name="Spool">
+/// A spooled capture to store instead of <paramref name="Body"/>. A spool that is not complete (abandoned or
+/// never finished) is recorded as missing. The store does not dispose it; the owner does once the turn commits.
+/// </param>
+public sealed record SessionBodyInput(SessionBodyKind Kind, byte[]? Body, SessionBodySpool? Spool = null);
 
 /// <summary>One turn to append to a session.</summary>
 /// <param name="ArchiveTurnId">The turn's cross-machine identity, minted at capture or import.</param>
@@ -174,6 +178,11 @@ public sealed class SessionStore
         if (turn.Bodies.Count == 0)
         {
             throw new ArgumentException("A turn needs at least one body.", nameof(turn));
+        }
+
+        if (turn.Bodies.Any(b => b.Body is not null && b.Spool is not null))
+        {
+            throw new ArgumentException("A body is either in memory or spooled, not both.", nameof(turn));
         }
 
         _rotationLock.EnterReadLock();
@@ -479,7 +488,8 @@ public sealed class SessionStore
             {
                 foreach (var body in turn.Bodies)
                 {
-                    if (body.Body is null) file.AppendMissingBody(sequence, body.Kind, turn.ArchiveTurnId);
+                    if (body.Spool is { IsComplete: true } spool) file.AppendBodyFromSpool(sequence, body.Kind, spool, turn.ArchiveTurnId);
+                    else if (body.Body is null) file.AppendMissingBody(sequence, body.Kind, turn.ArchiveTurnId);
                     else file.AppendBody(sequence, body.Kind, body.Body, turn.ArchiveTurnId);
                 }
             }

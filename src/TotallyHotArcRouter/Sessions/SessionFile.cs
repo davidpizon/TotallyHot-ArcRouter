@@ -4,18 +4,19 @@ using System.Security.Cryptography;
 namespace TotallyHot.ArcRouter.Sessions;
 
 /// <summary>
-/// One encrypted, append-mostly session file on disk (ADR-0019). The header names the
-/// <c>archive_session_id</c>; each frame stores one sealed body for a turn. Callers hold the
-/// plaintext session key in memory and persist only its wrap blob in SQLite. The file copies the
-/// key it is given, so disposing the file zeroes its own copy and never the caller's array. Every
-/// frame is written with a single write under a lock. Every frame, including a missing-body marker
-/// (which carries an empty sealed body), authenticates its header fields, the session id, and its
-/// zero-based position in the file as AES-GCM associated data, so frames cannot be relabelled,
-/// reordered, dropped from the middle, or moved between sessions without failing authentication.
+/// One encrypted, append-mostly session file on disk (ADR-0019, format version 2). The header names the
+/// <c>archive_session_id</c>; each frame holds one body for a turn as a run of sealed chunks, the last flagged
+/// final. Callers hold the plaintext session key in memory and persist only its wrap blob in SQLite. The file
+/// copies the key it is given, so disposing the file zeroes its own copy and never the caller's array. A frame
+/// is written under a lock, chunk by chunk, and counts only once its final chunk is written; a frame cut short
+/// by a crash has no final chunk and is cut away on the next open. Every chunk, including the lone chunk of a
+/// missing-body marker, authenticates its frame header, the session id, the frame's zero-based position in the
+/// file, its own index and its final flag as AES-GCM associated data, so chunks cannot be relabelled,
+/// reordered, dropped, or moved between sessions without failing authentication.
 /// </summary>
 public sealed class SessionFile : IDisposable
 {
-    private const ushort FormatVersion = 1;
+    private const ushort FormatVersion = 2;
     private const int IdLength = 16;
     private const int VersionLength = 2;
     private const int FrameHeaderLength = 1 + 1 + 4 + IdLength; // kind | flags | turnSequence | archiveTurnId
@@ -26,6 +27,7 @@ public sealed class SessionFile : IDisposable
 
     private readonly FileStream _stream;
     private readonly byte[] _sessionKey;
+    private readonly AesGcm _aes;
     private readonly Lock _gate = new();
     private ulong _frameCount;
     private bool _disposed;
@@ -43,6 +45,7 @@ public sealed class SessionFile : IDisposable
         _stream = stream;
         ArchiveSessionId = archiveSessionId;
         _sessionKey = (byte[])sessionKey.Clone();
+        _aes = new AesGcm(_sessionKey, SessionKeyMaterial.TagLengthBytes);
         _frameCount = frameCount;
     }
 
@@ -196,18 +199,49 @@ public sealed class SessionFile : IDisposable
     }
 
     /// <summary>
-    /// Appends one sealed body frame and flushes to disk. The frame is sealed and assembled before
-    /// anything is written, then written with a single call, so a failure never leaves a header
-    /// without its payload. Sealing happens under the file lock because the frame's position is part
-    /// of its authenticated data.
+    /// Appends one body frame and flushes to disk. The body is obscured and compressed in memory, then
+    /// written as sealed chunks, all under the file lock because the frame's position is part of its
+    /// authenticated data. A failure part-way leaves a frame without its final chunk, which
+    /// <see cref="Open"/> and the store's rollback cut away.
     /// </summary>
     /// <param name="turnSequence">Zero-based turn order inside the session.</param>
     /// <param name="kind">Which body this frame holds.</param>
     /// <param name="plaintext">Raw body bytes; an empty span is a legitimately empty body. Use
     /// <see cref="AppendMissingBody"/> when capture failed.</param>
     /// <param name="archiveTurnId">The turn's stable archive id.</param>
-    public void AppendBody(uint turnSequence, SessionBodyKind kind, ReadOnlySpan<byte> plaintext, Guid archiveTurnId) =>
-        SealAndAppend(turnSequence, kind, flags: 0, plaintext, archiveTurnId);
+    public void AppendBody(uint turnSequence, SessionBodyKind kind, ReadOnlySpan<byte> plaintext, Guid archiveTurnId)
+    {
+        var compressed = SessionRecordCodec.ObscureAndCompress(plaintext);
+        AppendFrame(turnSequence, kind, flags: 0, archiveTurnId, writeChunks: write =>
+        {
+            var offset = 0;
+            do
+            {
+                var length = Math.Min(SessionChunkCodec.ChunkBytes, compressed.Length - offset);
+                var final = offset + length >= compressed.Length;
+                write(compressed.AsSpan(offset, length), final);
+                offset += length;
+            }
+            while (offset < compressed.Length);
+        });
+    }
+
+    /// <summary>
+    /// Appends a body that a capture spooled to disk, re-sealing its chunks under this file's key one at a
+    /// time so memory stays bounded however large the body is. The spool already holds obscured, compressed
+    /// bytes, so nothing is recompressed.
+    /// </summary>
+    /// <param name="turnSequence">Zero-based turn order inside the session.</param>
+    /// <param name="kind">Which body this frame holds.</param>
+    /// <param name="spool">A completed spool; the caller keeps ownership and disposes it after the turn commits.</param>
+    /// <param name="archiveTurnId">The turn's stable archive id.</param>
+    /// <exception cref="InvalidOperationException">When the spool did not complete.</exception>
+    public void AppendBodyFromSpool(uint turnSequence, SessionBodyKind kind, SessionBodySpool spool, Guid archiveTurnId)
+    {
+        ArgumentNullException.ThrowIfNull(spool);
+        AppendFrame(turnSequence, kind, flags: 0, archiveTurnId, writeChunks: write =>
+            spool.Replay(write));
+    }
 
     /// <summary>
     /// Appends a missing-body marker so export can record absence without inventing empty content.
@@ -218,7 +252,7 @@ public sealed class SessionFile : IDisposable
     /// <param name="kind">Which body is missing.</param>
     /// <param name="archiveTurnId">The turn's stable archive id.</param>
     public void AppendMissingBody(uint turnSequence, SessionBodyKind kind, Guid archiveTurnId) =>
-        SealAndAppend(turnSequence, kind, FlagMissing, [], archiveTurnId);
+        AppendFrame(turnSequence, kind, FlagMissing, archiveTurnId, writeChunks: write => write([], true));
 
     /// <summary>
     /// Reads every body frame from the file start (after the header) for tests and export rebuilds.
@@ -241,7 +275,6 @@ public sealed class SessionFile : IDisposable
                 _stream.Seek(DataStart, SeekOrigin.Begin);
 
                 Span<byte> header = stackalloc byte[FrameHeaderLength];
-                Span<byte> lenBytes = stackalloc byte[sizeof(uint)];
                 while (TryReadExact(_stream, header))
                 {
                     var kind = (SessionBodyKind)header[0];
@@ -255,26 +288,18 @@ public sealed class SessionFile : IDisposable
                         throw new InvalidDataException($"Unknown session frame flags {flags}.");
                     }
 
-                    var nonce = new byte[SessionKeyMaterial.NonceLengthBytes];
-                    var tag = new byte[SessionKeyMaterial.TagLengthBytes];
-                    ReadExact(_stream, nonce);
-                    ReadExact(_stream, tag);
-                    ReadExact(_stream, lenBytes);
-                    var cipherLen = BinaryPrimitives.ReadUInt32LittleEndian(lenBytes);
-                    if (cipherLen > _stream.Length - _stream.Position)
+                    using var compressed = new MemoryStream();
+                    var frameAad = BuildAssociatedData(header, ordinal++);
+                    uint chunkIndex = 0;
+                    bool final;
+                    do
                     {
-                        throw new InvalidDataException("Session frame length exceeds the file.");
+                        compressed.Write(SessionChunkCodec.ReadRecord(_stream, _aes, frameAad, chunkIndex++, out final));
                     }
+                    while (!final);
 
-                    var ciphertext = new byte[cipherLen];
-                    ReadExact(_stream, ciphertext);
-
-                    var plaintext = SessionRecordCodec.Open(
-                        _sessionKey,
-                        new EncryptedSessionPayload(nonce, tag, ciphertext),
-                        BuildAssociatedData(header, ordinal++));
-                    results.Add(new SessionBodyFrame(
-                        turnSequence, kind, archiveTurnId, flags == FlagMissing ? null : plaintext));
+                    var plaintext = flags == FlagMissing ? null : SessionRecordCodec.Decompress(compressed.ToArray());
+                    results.Add(new SessionBodyFrame(turnSequence, kind, archiveTurnId, plaintext));
                 }
             }
             finally
@@ -293,49 +318,79 @@ public sealed class SessionFile : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
+            _aes.Dispose();
             CryptographicOperations.ZeroMemory(_sessionKey);
             _stream.Dispose();
         }
     }
 
     /// <summary>
-    /// Seals <paramref name="plaintext"/> against the next frame position, assembles
-    /// <c>header | nonce | tag | cipherLen(4) | cipher</c>, and appends it with one write.
+    /// Writes one frame: its plaintext header, then the sealed chunks <paramref name="writeChunks"/> supplies,
+    /// the last flagged final, and flushes. Everything is authenticated against the next frame position, so
+    /// the work happens under the file lock. The frame count advances only once the final chunk is written.
     /// </summary>
     /// <param name="turnSequence">Zero-based turn order inside the session.</param>
     /// <param name="kind">Which body this frame holds.</param>
     /// <param name="flags">0 for a body, <see cref="FlagMissing"/> for a missing-body marker.</param>
-    /// <param name="plaintext">Raw body bytes; empty for a missing-body marker.</param>
     /// <param name="archiveTurnId">The turn's stable archive id.</param>
-    private void SealAndAppend(
-        uint turnSequence, SessionBodyKind kind, byte flags, ReadOnlySpan<byte> plaintext, Guid archiveTurnId)
+    /// <param name="writeChunks">Hands each chunk, in order, to the sink it is given; the last call passes <c>final: true</c>.</param>
+    /// <exception cref="InvalidOperationException">When the producer supplies no final chunk.</exception>
+    private void AppendFrame(uint turnSequence, SessionBodyKind kind, byte flags, Guid archiveTurnId, ChunkProducer writeChunks)
     {
         ValidateKind(kind);
 
-        Span<byte> header = stackalloc byte[FrameHeaderLength];
+        byte[] header = new byte[FrameHeaderLength];
         WriteFrameHeader(header, kind, flags, turnSequence, archiveTurnId);
 
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            var sealedPayload = SessionRecordCodec.Seal(
-                _sessionKey, plaintext, BuildAssociatedData(header, _frameCount));
-            var frame = new byte[FrameHeaderLength + SessionKeyMaterial.NonceLengthBytes
-                + SessionKeyMaterial.TagLengthBytes + sizeof(uint) + sealedPayload.Ciphertext.Length];
-            var cursor = frame.AsSpan();
-            header.CopyTo(cursor);
-            cursor = cursor[FrameHeaderLength..];
-            sealedPayload.Nonce.CopyTo(cursor);
-            cursor = cursor[SessionKeyMaterial.NonceLengthBytes..];
-            sealedPayload.Tag.CopyTo(cursor);
-            cursor = cursor[SessionKeyMaterial.TagLengthBytes..];
-            BinaryPrimitives.WriteUInt32LittleEndian(cursor, (uint)sealedPayload.Ciphertext.Length);
-            sealedPayload.Ciphertext.CopyTo(cursor[sizeof(uint)..]);
+            var frameAad = BuildAssociatedData(header, _frameCount);
+            var frameStart = _stream.Length;
+            try
+            {
+                _stream.Write(header);
+                uint chunkIndex = 0;
+                var sawFinal = false;
+                writeChunks((chunk, final) =>
+                {
+                    if (sawFinal) throw new InvalidOperationException("A chunk followed the final chunk.");
+                    SessionChunkCodec.WriteRecord(_stream, _aes, frameAad, chunkIndex++, final, chunk);
+                    sawFinal = final;
+                });
 
-            _stream.Write(frame);
-            _stream.Flush(flushToDisk: true);
+                if (!sawFinal) throw new InvalidOperationException("The body ended without a final chunk.");
+                _stream.Flush(flushToDisk: true);
+            }
+            catch
+            {
+                // Chunks are written one at a time, so a failure part-way leaves a header and some chunks
+                // behind. Cut them away here, so this instance stays appendable and a caller that does not
+                // roll back to a committed extent (the store does) is not left with a torn frame.
+                CutBackToFrameStart(frameStart);
+                throw;
+            }
+
             _frameCount++;
+        }
+    }
+
+    /// <summary>
+    /// Removes what a failed append wrote and leaves the stream at end-of-file. A failure to cut back is
+    /// swallowed so it cannot replace the exception that caused the cut; <see cref="Open"/> repeats the cut.
+    /// </summary>
+    /// <param name="frameStart">The file length before the failed frame's header was written.</param>
+    private void CutBackToFrameStart(long frameStart)
+    {
+        try
+        {
+            _stream.SetLength(frameStart);
+            _stream.Seek(0, SeekOrigin.End);
+        }
+        catch (IOException)
+        {
+            // Open drops a frame without a final chunk the next time the file is opened.
         }
     }
 
@@ -387,9 +442,9 @@ public sealed class SessionFile : IDisposable
     }
 
     /// <summary>
-    /// Walks frame lengths (without decrypting) from the end of the file header and returns the offset
-    /// just past the last complete frame, plus how many complete frames precede it. Anything after
-    /// the offset is a torn append.
+    /// Walks the frame headers and chunk records (without decrypting) from the end of the file header and
+    /// returns the offset just past the last frame whose final chunk is present, plus how many complete frames
+    /// precede it. Anything after the offset is a torn append.
     /// </summary>
     /// <param name="stream">The open session file.</param>
     /// <returns>The end offset of the last complete frame and the number of complete frames.</returns>
@@ -400,41 +455,20 @@ public sealed class SessionFile : IDisposable
         stream.Seek(DataStart, SeekOrigin.Begin);
 
         Span<byte> header = stackalloc byte[FrameHeaderLength];
-        Span<byte> prefix = stackalloc byte[SessionKeyMaterial.NonceLengthBytes + SessionKeyMaterial.TagLengthBytes + sizeof(uint)];
         while (TryReadPartial(stream, header))
         {
-            if (!TryReadPartial(stream, prefix))
+            bool final;
+            do
             {
-                break;
+                if (!SessionChunkCodec.TrySkipRecord(stream, out final)) return (good, count);
             }
+            while (!final);
 
-            var cipherLen = BinaryPrimitives.ReadUInt32LittleEndian(
-                prefix[(SessionKeyMaterial.NonceLengthBytes + SessionKeyMaterial.TagLengthBytes)..]);
-            if (cipherLen > stream.Length - stream.Position)
-            {
-                break;
-            }
-
-            stream.Seek(cipherLen, SeekOrigin.Current);
             good = stream.Position;
             count++;
         }
 
         return (good, count);
-    }
-
-    /// <summary>
-    /// Fills <paramref name="buffer"/> or throws when the stream ends first.
-    /// </summary>
-    /// <param name="stream">Source stream.</param>
-    /// <param name="buffer">Destination to fill completely.</param>
-    /// <exception cref="EndOfStreamException">When the stream ends before the buffer is full.</exception>
-    private static void ReadExact(Stream stream, Span<byte> buffer)
-    {
-        if (!TryReadExact(stream, buffer))
-        {
-            throw new EndOfStreamException();
-        }
     }
 
     /// <summary>Fills <paramref name="buffer"/>; returns false on a clean EOF before the first byte.</summary>
