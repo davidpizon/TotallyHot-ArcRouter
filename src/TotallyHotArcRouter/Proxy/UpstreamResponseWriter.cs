@@ -121,6 +121,21 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     internal const int MaxCapturedResponseBytes = 4 * 1024 * 1024;
 
     /// <summary>
+    /// Reports whether telemetry's own capped copy of a response lost bytes: the client-shape or the native
+    /// copy reached <see cref="MaxCapturedResponseBytes"/>, or the trailing-window scanner was needed (it is
+    /// allocated only once a chunk crossed the cap). Reply text extracted from such a copy is a prefix.
+    /// </summary>
+    /// <param name="clientShapeBytes">The capped copy of what reached the client.</param>
+    /// <param name="nativeBytes">The capped pre-translation copy, when one was taken.</param>
+    /// <param name="tailScanner">The trailing-window scanner, when one was allocated.</param>
+    /// <returns><see langword="true"/> when any telemetry copy may be a prefix of its body.</returns>
+    internal static bool IsTelemetryCaptureTruncated(
+        byte[] clientShapeBytes, byte[]? nativeBytes, IncrementalUsageScanner? tailScanner) =>
+        tailScanner is not null ||
+        clientShapeBytes.Length >= MaxCapturedResponseBytes ||
+        nativeBytes?.Length >= MaxCapturedResponseBytes;
+
+    /// <summary>
     /// Writes the committed response and returns what reached the client.
     /// </summary>
     /// <param name="context">The client request/response being served.</param>
@@ -212,7 +227,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             {
                 var (captured, tailScanner) = await CopyAndCaptureAsync(
                     source: upstreamSource, destination: clientBody, captureCap: MaxCapturedResponseBytes,
-                    cancellationToken: context.RequestAborted);
+                    cancellationToken: context.RequestAborted, turnCapture: capture);
                 return new UpstreamResponseResult(true, CapturedResponseBytes: captured, null, TailScanner: tailScanner,
                     IsStreaming: isStreaming);
             }
@@ -220,10 +235,10 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             var translated = isStreaming
                 ? await TranslateAndCaptureStreamAsync(translator: translator, source: upstreamSource,
                     destination: clientBody, captureCap: MaxCapturedResponseBytes,
-                    cancellationToken: context.RequestAborted)
+                    cancellationToken: context.RequestAborted, turnCapture: capture)
                 : await TranslateAndCaptureBufferedAsync(translator: translator, source: upstreamSource,
                     destination: clientBody, captureCap: MaxCapturedResponseBytes,
-                    cancellationToken: context.RequestAborted);
+                    cancellationToken: context.RequestAborted, turnCapture: capture);
 
             return new UpstreamResponseResult(
                 true,
@@ -322,7 +337,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// costs nothing extra beyond the capped copy.
     /// </summary>
     private async Task<CapturedResponse> TranslateAndCaptureBufferedAsync(IPayloadTranslator translator, Stream source,
-        Stream destination, int captureCap, CancellationToken cancellationToken)
+        Stream destination, int captureCap, CancellationToken cancellationToken, TurnCapture? turnCapture)
     {
         try
         {
@@ -367,6 +382,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             logger.LogWarning(exception: ex,
                 message:
                 "Buffered response to the client was interrupted by a client disconnect; the forward was terminated early.");
+            turnCapture?.MarkInterrupted();
             return new CapturedResponse(ClientShapeBytes: [], null, null);
         }
     }
@@ -384,7 +400,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// already been committed to the wire and the status can no longer change.
     /// </summary>
     private async Task<CapturedResponse> TranslateAndCaptureStreamAsync(IPayloadTranslator translator, Stream source,
-        Stream destination, int captureCap, CancellationToken cancellationToken)
+        Stream destination, int captureCap, CancellationToken cancellationToken, TurnCapture? turnCapture)
     {
         var streamTranslator = translator.CreateStreamTranslator();
         var captureNativeBytes = UsageExtractor.SupportsNativeShape(translator.Provider);
@@ -428,17 +444,20 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             logger.LogWarning(exception: ex,
                 message:
                 "Gemini streaming response terminated by an embedded provider error; the client stream was truncated.");
+            turnCapture?.MarkInterrupted();
         }
         catch (AnthropicStreamException ex)
         {
             logger.LogWarning(exception: ex,
                 message: "Anthropic streaming response terminated by an error event; the client stream was truncated.");
+            turnCapture?.MarkInterrupted();
         }
         catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
         {
             logger.LogWarning(exception: ex,
                 message:
                 "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+            turnCapture?.MarkInterrupted();
         }
         finally
         {
@@ -457,7 +476,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// in-memory side copy of each chunk immediately after (not instead of) writing it downstream.
     /// </summary>
     private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> CopyAndCaptureAsync(Stream source,
-        Stream destination, int captureCap, CancellationToken cancellationToken)
+        Stream destination, int captureCap, CancellationToken cancellationToken, TurnCapture? turnCapture)
     {
         using var capture = new ResponseCaptureAccumulator(captureCap);
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
@@ -490,6 +509,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             logger.LogWarning(exception: ex,
                 message:
                 "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+            turnCapture?.MarkInterrupted();
         }
         finally
         {

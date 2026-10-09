@@ -252,9 +252,6 @@ internal sealed class BedrockInvocationHandler
         _circuitBreaker.RecordSuccess(circuitTarget);
         var totalDurationMs = stopwatch.ElapsedMilliseconds;
 
-        // A relay the client abandoned left a prefix, which is recorded as a missing body, not stored.
-        capture?.CompleteResponse(relayInterrupted: context.RequestAborted.IsCancellationRequested);
-
         try
         {
             // Bedrock's native tap is out of scope (docs/router/openai-format-usage-accuracy-plan.md §4.2):
@@ -274,7 +271,9 @@ internal sealed class BedrockInvocationHandler
 
             if (capture is not null)
                 await capture.SubmitAsync(
-                    turn: publishedTurn, context: context, telemetryCapturedBytes: capturedResponseBytes.Length);
+                    turn: publishedTurn, context: context,
+                    telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
+                        clientShapeBytes: capturedResponseBytes, nativeBytes: null, tailScanner: tailScanner));
         }
         catch (Exception ex)
         {
@@ -374,6 +373,7 @@ internal sealed class BedrockInvocationHandler
             _logger.LogWarning(exception: ex,
                 message:
                 "Bedrock Claude streaming response terminated by an error event; the client stream was truncated.");
+            turnCapture?.MarkInterrupted();
         }
         catch (ModelStreamErrorException ex)
         {
@@ -382,12 +382,14 @@ internal sealed class BedrockInvocationHandler
             _logger.LogWarning(exception: ex,
                 message:
                 "Bedrock streaming response terminated by a ModelStreamErrorException; the client stream was truncated.");
+            turnCapture?.MarkInterrupted();
         }
         catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
         {
             _logger.LogWarning(exception: ex,
                 message:
                 "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+            turnCapture?.MarkInterrupted();
         }
 
         return (capture.ToArray(), tailScanner);

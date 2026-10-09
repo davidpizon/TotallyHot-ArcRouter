@@ -6,7 +6,10 @@ using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Sessions;
+using TotallyHot.ArcRouter.Tests.Sessions;
 using TotallyHot.ArcRouter.Tests.Proxy;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
@@ -350,7 +353,8 @@ public sealed class RouterSettingsAdminGrpcServiceTests
         StaticOptionsMonitor<TranscriptOptions>? transcriptMonitor = null,
         ITranscriptStore? transcriptStore = null,
         StaticOptionsMonitor<PortfolioGraderOptions>? portfolioGraderMonitor = null,
-        IBodyLogController? bodyLogController = null)
+        IBodyLogController? bodyLogController = null,
+        SessionMaintenance? sessionMaintenance = null)
     {
         return new RouterSettingsAdminGrpcService(
             store: store ?? CreateStore(),
@@ -364,7 +368,60 @@ public sealed class RouterSettingsAdminGrpcServiceTests
             transcriptOptionsMonitor: transcriptMonitor ??
                                       new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()),
             transcriptStore: transcriptStore ?? new FakeTranscriptStore(),
-            bodyLogController: bodyLogController);
+            bodyLogController: bodyLogController,
+            sessionMaintenance: sessionMaintenance);
+    }
+
+    /// <summary>Builds session storage over a scratch directory, holding one captured turn.</summary>
+    private static (SessionMaintenance Maintenance, SessionStore Store, string Root) CreateSessionStorage()
+    {
+        var root = Path.Combine(TestScratchDirectory.RunRoot, "clear-sessions-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var database = new TranscriptDatabase(Options.Create(new StorageOptions
+        {
+            TranscriptDatabasePath = Path.Combine(root, "transcripts.db")
+        }));
+        var index = new SessionIndex(database);
+        index.EnsureCreated();
+        var store = new SessionStore(index, new InMemoryMasterKeyStore(), SessionStore.FolderBeside(database.DatabasePath));
+        var sessionId = store.ResolveArchiveSessionId("client-1");
+        store.AppendTurn(sessionId, "client-1", new SessionTurnInput(
+            SessionArchiveIds.NewArchiveTurnId(),
+            DateTimeOffset.UtcNow,
+            [new SessionBodyInput(SessionBodyKind.ClientRequest, "request"u8.ToArray())]));
+        return (new SessionMaintenance(new Lazy<SessionStore>(() => store), database), store, root);
+    }
+
+    [Fact]
+    public async Task ClearTranscripts_AlsoDeletesCapturedSessions()
+    {
+        var (maintenance, store, _) = CreateSessionStorage();
+        var service = CreateService(sessionMaintenance: maintenance);
+
+        var response =
+            await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
+
+        response.DeletionFinal.Should().BeTrue();
+        store.ListSessions().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClearTranscripts_WhenSessionsCannotBeDeleted_ReportsDeletionNotFinal()
+    {
+        var root = Path.Combine(TestScratchDirectory.RunRoot, "clear-sessions-" + Guid.NewGuid().ToString("N"));
+        var database = new TranscriptDatabase(Options.Create(new StorageOptions
+        {
+            TranscriptDatabasePath = Path.Combine(root, "transcripts.db")
+        }));
+        Directory.CreateDirectory(SessionStore.FolderBeside(database.DatabasePath));
+        var maintenance = new SessionMaintenance(
+            new Lazy<SessionStore>(() => throw new InvalidOperationException("cannot open")), database);
+        var service = CreateService(sessionMaintenance: maintenance);
+
+        var response =
+            await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
+
+        response.DeletionFinal.Should().BeFalse();
     }
 
     private sealed class RecordingBodyLogController : IBodyLogController

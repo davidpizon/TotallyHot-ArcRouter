@@ -11,8 +11,9 @@ namespace TotallyHot.ArcRouter.Sessions;
 internal static class SessionsServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the master key store, the session index, the store, the startup service and the capture
-    /// writer. The store is built lazily, on first use or at startup when something has already been stored, so
+    /// Registers the master key store, the session index, the store, the startup service, the capture writer
+    /// and its body pump, the capture factory, and the maintenance and retention services that delete sessions.
+    /// The store is built lazily, on first use or at startup when something has already been stored, so
     /// a router that never captures creates no database or folder, and a store that cannot be opened fails the
     /// capture, not the host. The startup service is registered first, so it starts before the writer and
     /// before the proxy begins serving.
@@ -34,7 +35,14 @@ internal static class SessionsServiceCollectionExtensions
         services.AddHostedService<SessionStoreStartupService>();
         services.AddSingleton<SessionCaptureWriter>();
         services.AddHostedService(sp => sp.GetRequiredService<SessionCaptureWriter>());
+
+        // Registered after the writer, so a stop drains the pump first and its last turns still reach the writer.
+        services.AddSingleton<CaptureBodyPump>();
+        services.AddHostedService(sp => sp.GetRequiredService<CaptureBodyPump>());
         services.AddSingleton<TurnCaptureFactory>();
+
+        services.AddSingleton<SessionMaintenance>();
+        services.AddHostedService<SessionRetentionService>();
         return services;
     }
 

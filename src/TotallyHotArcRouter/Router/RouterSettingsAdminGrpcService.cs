@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
@@ -56,6 +57,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     private const int MaxEmbeddingMemoryCapacity = 50_000;
 
     private readonly EmbeddingMemory? _embeddingMemory;
+    private readonly SessionMaintenance? _sessionMaintenance;
     private readonly JudgeModelSelector _judgeModelSelector;
     private readonly IOptionsMonitor<JudgeOptions> _judgeOptionsMonitor;
     private readonly ILogger<RouterSettingsAdminGrpcService> _logger;
@@ -105,6 +107,10 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     /// tests that never wire body logging can omit it; production always supplies
     /// <see cref="BodyLogController"/>.
     /// </param>
+    /// <param name="sessionMaintenance">
+    /// Deletes the captured session files when the operator clears captured data (#165). Optional so tests that
+    /// never capture can omit it; production always supplies it.
+    /// </param>
     public RouterSettingsAdminGrpcService(
         RouterSettingsStore store,
         IOptionsMonitor<RoutingOptions> optionsMonitor,
@@ -116,7 +122,8 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         ITranscriptStore transcriptStore,
         IOptionsMonitor<PortfolioGraderOptions> portfolioGraderOptionsMonitor,
         EmbeddingMemory? embeddingMemory = null,
-        IBodyLogController? bodyLogController = null)
+        IBodyLogController? bodyLogController = null,
+        SessionMaintenance? sessionMaintenance = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(optionsMonitor);
@@ -138,6 +145,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         _transcriptStore = transcriptStore;
         _portfolioGraderOptionsMonitor = portfolioGraderOptionsMonitor;
         _bodyLogController = bodyLogController ?? NullBodyLogController.Instance;
+        _sessionMaintenance = sessionMaintenance;
         _logger = logger;
     }
 
@@ -233,6 +241,11 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         var deletionFinal = await _transcriptStore.FinalizeDeletionAsync(context.CancellationToken)
             .ConfigureAwait(false);
 
+        // #165: the full conversation text lives in the encrypted session files, so Clear deletes those too,
+        // and rotates the master key so no copy of a deleted session key can be unwrapped. A failure leaves
+        // the text on disk, which is reported exactly like a body file that could not be removed.
+        if (!ClearSessions()) deletionFinal = false;
+
         // #184 phase 3: close the body sink, delete every bodies-*.log, reopen. Diagnostic logs stay.
         // A locked leftover is reported through the same deletion_final flag the UI already surfaces for
         // a busy write-ahead log — Clear is the privacy wipe, so a remaining body file is not "done".
@@ -243,6 +256,31 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
             rowsDeleted, deletionFinal);
 
         return new Contract.ClearTranscriptsResponse { RowsDeleted = rowsDeleted, DeletionFinal = deletionFinal };
+    }
+
+    /// <summary>
+    /// Deletes every captured session (#165). Does nothing, and counts as final, when no
+    /// <see cref="SessionMaintenance"/> was supplied or nothing was ever captured.
+    /// </summary>
+    /// <returns><see langword="true"/> when the sessions are gone and the deletion is final.</returns>
+    private bool ClearSessions()
+    {
+        if (_sessionMaintenance is null) return true;
+
+        try
+        {
+            var result = _sessionMaintenance.DeleteAll();
+            if (result.DeletedSessions > 0)
+                _logger.LogInformation(message: "Session capture cleared: SessionsDeleted={SessionsDeleted}",
+                    result.DeletedSessions);
+
+            return result.WalTruncated && (result.DeletedSessions == 0 || result.MasterKeyRotated);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(exception: ex, message: "Session capture could not be cleared; the sessions remain on disk.");
+            return false;
+        }
     }
 
     /// <summary>

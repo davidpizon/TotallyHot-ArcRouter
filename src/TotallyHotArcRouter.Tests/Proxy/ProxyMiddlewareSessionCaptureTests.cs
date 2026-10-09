@@ -5,6 +5,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
@@ -13,6 +14,7 @@ using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Tests.Sessions;
+using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -35,6 +37,9 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
     private readonly SessionIndex _index;
     private readonly SessionStore _store;
     private readonly SessionCaptureWriter _writer;
+    private CaptureBodyPump _pump;
+    private SessionCaptureOptions _captureOptions = new();
+    private ILogger<TurnCaptureFactory> _factoryLogger = NullLogger<TurnCaptureFactory>.Instance;
     private readonly StaticOptionsMonitor<TranscriptOptions> _transcriptOptions = new(new TranscriptOptions { Enabled = true });
 
     /// <summary>Builds a store, a started writer and the capture factory over a scratch directory.</summary>
@@ -54,11 +59,14 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
             Options.Create(new SessionCaptureOptions()),
             NullLogger<SessionCaptureWriter>.Instance);
         _writer.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        _pump = StartPump(_captureOptions);
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
+        _pump.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+        _pump.Dispose();
         _writer.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
         _writer.Dispose();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
@@ -309,6 +317,115 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         };
     }
 
+    /// <summary>A client that drops mid-stream leaves a prefix, which is stored as a missing response, not as a whole body.</summary>
+    [Fact]
+    public async Task CaptureOn_ClientDropsMidStream_StoresResponseAsMissing_AndKeepsTheRequest()
+    {
+        var sse = string.Concat(Enumerable.Repeat("data: {\"choices\":[{\"delta\":{\"content\":\"word \"}}]}\n\n", 200)) +
+                  "data: [DONE]\n\n";
+        var request = ChatRequest("go");
+
+        await RunAsync(request, _ => Sse(sse), responseBody: new FailingWriteStream(failAfterBytes: 2000));
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+    }
+
+    /// <summary>A client that disconnects after the relay finished (RequestAborted fires during bookkeeping) does not cost the whole response.</summary>
+    [Fact]
+    public async Task CaptureOn_ClientDisconnectsAfterTheRelay_StillStoresTheWholeResponse()
+    {
+        var sse = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+                  "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n" +
+                  "data: [DONE]\n\n";
+        using var aborted = new CancellationTokenSource();
+
+        // The abort lands while telemetry is being published, i.e. after every byte was relayed.
+        await RunAsync(ChatRequest("go"), _ => Sse(sse), requestAborted: aborted.Token,
+            telemetry: new CancellingTelemetryPublisher(aborted));
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(sse, Text(frames, SessionBodyKind.ClientResponse));
+    }
+
+    /// <summary>An upstream that fails part-way through its body leaves a prefix, which is stored as a missing response.</summary>
+    [Fact]
+    public async Task CaptureOn_UpstreamFailsMidBody_StoresResponseAsMissing()
+    {
+        var request = ChatRequest("go");
+
+        await RunAsync(request, _ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new FailingReadStream(
+                Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")))
+            {
+                Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream") }
+            }
+        });
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+    }
+
+    /// <summary>A pump queue that cannot hold a body drops that body rather than slowing the relay or storing a prefix.</summary>
+    [Fact]
+    public async Task CaptureOn_PumpQueueFull_RecordsOversizedResponseAsMissing()
+    {
+        ReplacePump(new SessionCaptureOptions { PumpMaxQueuedBytes = 1024 });
+        var filler = string.Concat(Enumerable.Repeat("lorem ipsum dolor ", 400));
+        var sse = $"data: {{\"choices\":[{{\"delta\":{{\"content\":\"{filler}\"}}}}]}}\n\ndata: [DONE]\n\n";
+        var request = ChatRequest("go");
+
+        var context = await RunAsync(request, _ => Sse(sse));
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(sse, ReadClientBody(context));
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+        Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
+    }
+
+    /// <summary>A request the router rejects, or one nothing answers, never creates a file.</summary>
+    [Fact]
+    public async Task CaptureOn_RejectedRequest_CreatesNoFileAtAll()
+    {
+        await RunAsync("{\"model\":", _ => Json("{}"));
+        await RunAsync("{\"messages\":[]}", _ => Json("{}"));
+        await _writer.WaitForIdleAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Empty(Directory.EnumerateFiles(_folder));
+    }
+
+    /// <summary>A turn the writer refuses is dropped with a warning, not silently.</summary>
+    [Fact]
+    public async Task CaptureOn_WriterStopped_LogsTheDroppedTurn()
+    {
+        var logger = new RecordingLogger<TurnCaptureFactory>();
+        _factoryLogger = logger;
+        await _writer.StopAsync(CancellationToken.None);
+
+        await RunAsync(ChatRequest("hi"), _ => Json("{\"choices\":[]}"));
+
+        Assert.Contains(logger.Messages, m => m.Contains("refused by the session writer", StringComparison.Ordinal));
+        Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
+    }
+
+    /// <summary>Telemetry's native copy hitting its cap marks the reply text as cut off even when the client-shape copy did not.</summary>
+    [Fact]
+    public void IsTelemetryCaptureTruncated_ReportsEveryWayTelemetryLosesBytes()
+    {
+        var small = new byte[10];
+        var atCap = new byte[UpstreamResponseWriter.MaxCapturedResponseBytes];
+
+        Assert.False(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, null, null));
+        Assert.False(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, small, null));
+        Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(atCap, null, null));
+        Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, atCap, null));
+        Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, null, new TotallyHot.ArcRouter.Telemetry.IncrementalUsageScanner()));
+    }
+
     private static string ChatRequest(string userText) =>
         "{\"model\":\"primary\",\"messages\":[{\"role\":\"user\",\"content\":\"" + userText + "\"}]}";
 
@@ -333,13 +450,16 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         return _store.ReadBodies(_store.ResolveArchiveSessionId(ClientSession));
     }
 
-    private async Task RunAsync(
+    private async Task<DefaultHttpContext> RunAsync(
         string requestBody,
         Func<HttpRequestMessage, HttpResponseMessage> upstream,
         string? userAgent = null,
         IModelRouteResolver? resolver = null,
         IReadOnlyDictionary<string, IPayloadTranslator>? translators = null,
-        IAmazonBedrockRuntime? bedrock = null)
+        IAmazonBedrockRuntime? bedrock = null,
+        Stream? responseBody = null,
+        CancellationToken requestAborted = default,
+        ITelemetryPublisher? telemetry = null)
     {
         resolver ??= ModelRouteResolverTestFactory.CreateWithModels(("primary", "openai", "primary-upstream", "https://primary.test"));
         var middleware = new ProxyMiddleware(
@@ -349,13 +469,15 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
             dependencies: new ProxyMiddlewareDependencies
             {
                 Translators = translators,
+                TelemetryPublisher = telemetry,
                 BedrockClientFactory = bedrock is null ? null : new FakeBedrockClientFactory(bedrock),
                 TurnCapture = new TurnCaptureFactory(
+                    _pump,
                     _writer,
                     _transcriptOptions,
-                    Options.Create(new SessionCaptureOptions()),
+                    Options.Create(_captureOptions),
                     _database,
-                    NullLogger<TurnCaptureFactory>.Instance)
+                    _factoryLogger)
             });
 
         var context = new DefaultHttpContext();
@@ -368,11 +490,114 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         var bytes = Encoding.UTF8.GetBytes(requestBody);
         context.Request.Body = new MemoryStream(bytes);
         context.Request.ContentLength = bytes.Length;
-        context.Response.Body = new MemoryStream();
-        context.RequestAborted = TestContext.Current.CancellationToken;
+        context.Response.Body = responseBody ?? new MemoryStream();
+        context.RequestAborted = requestAborted == default ? TestContext.Current.CancellationToken : requestAborted;
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+        return context;
     }
+
+    /// <summary>Stops the running pump and starts a new one with <paramref name="options"/>, which later requests use.</summary>
+    private void ReplacePump(SessionCaptureOptions options)
+    {
+        _pump.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+        _pump.Dispose();
+        _captureOptions = options;
+        _pump = StartPump(options);
+    }
+
+    private static CaptureBodyPump StartPump(SessionCaptureOptions options)
+    {
+        var pump = new CaptureBodyPump(Options.Create(options), NullLogger<CaptureBodyPump>.Instance);
+        pump.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return pump;
+    }
+
+    private static string ReadClientBody(DefaultHttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        return new StreamReader(context.Response.Body, Encoding.UTF8).ReadToEnd();
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
+    private sealed class CancellingTelemetryPublisher(CancellationTokenSource toCancel) : ITelemetryPublisher
+    {
+        public Task PublishAsync(RoutingTelemetryEvent telemetryEvent, CancellationToken cancellationToken = default)
+        {
+            toCancel.Cancel();
+            return Task.CompletedTask;
+        }
+
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    /// <summary>A response body that accepts some bytes and then fails like a connection the client dropped.</summary>
+    private sealed class FailingWriteStream(int failAfterBytes) : MemoryStream
+    {
+        private int _written;
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _written += buffer.Length;
+            if (_written > failAfterBytes) throw new IOException("The client closed the connection.");
+
+            return base.WriteAsync(buffer, cancellationToken);
+        }
+    }
+
+    /// <summary>An upstream body that delivers its bytes and then fails like a reset connection.</summary>
+    private sealed class FailingReadStream(byte[] first) : Stream
+    {
+        private bool _delivered;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_delivered) throw new IOException("The upstream reset the connection.");
+
+            _delivered = true;
+            first.CopyTo(buffer);
+            return ValueTask.FromResult(first.Length);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
 
     private sealed class FakeBedrockClientFactory(IAmazonBedrockRuntime client) : IBedrockRuntimeClientFactory
     {

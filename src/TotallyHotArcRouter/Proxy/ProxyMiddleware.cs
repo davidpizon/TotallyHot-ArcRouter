@@ -372,7 +372,6 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         var resolution =
             await _interceptor.ResolveModelRouteAsync(context: context, cancellationToken: context.RequestAborted);
-        capture?.CompleteRequest();
 
         if (!resolution.IsSuccess)
         {
@@ -547,14 +546,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // Target URL, translated body, and the forwarded header set are all UpstreamRequestBuilder's.
             // A fresh message per candidate is mandatory, not incidental: an HttpRequestMessage cannot be
             // sent twice, so the failover path below must rebuild rather than retry this instance.
-            var requestMessage = UpstreamRequestBuilder.Build(context: context, route: route, translator: translator,
-                rewrittenBody: rewrittenBody, droppedBetaPrefixes: featureStrip.BetaPrefixes);
+            var (requestMessage, forwardBody) = UpstreamRequestBuilder.BuildWithBody(context: context, route: route,
+                translator: translator, rewrittenBody: rewrittenBody, droppedBetaPrefixes: featureStrip.BetaPrefixes);
 
-            // #165: the provider-facing request differs from the client's only when a translator rewrote it.
-            // Taken now because the content is not readable once the send has completed it; a failover
-            // candidate's copy replaces this one.
-            if (capture is not null && translator is not null && requestMessage.Content is { } providerContent)
-                capture.SetProviderRequest(await providerContent.ReadAsByteArrayAsync(context.RequestAborted));
+            // #165: the provider-facing request differs from the client's only when a translator rewrote it;
+            // a failover candidate's copy replaces this one.
+            if (translator is not null) capture?.SetProviderRequest(forwardBody);
 
             // ADR-0017 Strip rule 4, as adopted by ADR-0022 Amendment 1: every strip is recorded. Once per attempt
             // that actually sends a stripped copy, so a failover that strips differently logs its own line.
@@ -723,9 +720,6 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // so there is nothing to publish telemetry about.
                     return;
 
-                // A relay the client abandoned left a prefix, which is recorded as a missing body, not stored.
-                capture?.CompleteResponse(relayInterrupted: context.RequestAborted.IsCancellationRequested);
-
                 var capturedResponseBytes = written.CapturedResponseBytes;
                 var nativeResponseBytes = written.NativeResponseBytes;
                 var tailScanner = written.TailScanner;
@@ -789,7 +783,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
                     if (capture is not null)
                         await capture.SubmitAsync(
-                            turn: publishedTurn, context: context, telemetryCapturedBytes: capturedResponseBytes.Length);
+                            turn: publishedTurn, context: context,
+                            telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
+                                clientShapeBytes: capturedResponseBytes, nativeBytes: nativeResponseBytes,
+                                tailScanner: tailScanner));
                 }
                 catch (Exception ex)
                 {

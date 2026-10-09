@@ -303,6 +303,46 @@ public sealed class SessionStore
         return new SessionDeletionResult(deletedFiles.Count, walTruncated, MasterKeyRotated: true);
     }
 
+    /// <summary>Lists every session in the index, oldest first.</summary>
+    /// <returns>All session rows.</returns>
+    public IReadOnlyList<SessionFileRow> ListSessions() => _index.ListSessions();
+
+    /// <summary>
+    /// Deletes every session, which is what the Transcription Capture "Clear" action means: no conversation
+    /// text is left, and the master key rotates so no copy of a deleted session key can be unwrapped.
+    /// </summary>
+    /// <returns>What was deleted, and whether the deletion is final.</returns>
+    public SessionDeletionResult DeleteAllSessions() =>
+        DeleteSessions(_index.ListSessions().Select(row => row.ArchiveSessionId).ToList());
+
+    /// <summary>
+    /// Applies ADR-0019's retention rule: keeps the newest <paramref name="maxTurns"/> turns by deleting whole
+    /// sessions, oldest first (by last turn). The newest session is never deleted, even when it alone exceeds
+    /// the limit, because it may be the one still being written and deleting it would empty the store.
+    /// </summary>
+    /// <param name="maxTurns">The most turns to keep (the Sample Size setting).</param>
+    /// <returns>What was deleted; zero sessions when the store is within the limit.</returns>
+    public SessionDeletionResult EnforceRetention(int maxTurns)
+    {
+        var sessions = _index.ListSessions()
+            .OrderBy(row => row.LastTurnAtUtc ?? row.CreatedAtUtc)
+            .ThenBy(row => row.CreatedAtUtc)
+            .ToList();
+        var total = sessions.Sum(row => (long)row.TurnCount);
+        var doomed = new List<Guid>();
+
+        // Stops one short of the end so the newest session survives.
+        for (var i = 0; i < sessions.Count - 1 && total > maxTurns; i++)
+        {
+            doomed.Add(sessions[i].ArchiveSessionId);
+            total -= sessions[i].TurnCount;
+        }
+
+        return doomed.Count == 0
+            ? new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false)
+            : DeleteSessions(doomed);
+    }
+
     /// <summary>
     /// Replaces the master key: stages a new one, re-wraps every session key in a single transaction, then
     /// promotes it and destroys the old one. A crash at any point is resolved by

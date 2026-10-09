@@ -19,6 +19,13 @@ public sealed class SessionCaptureOptions
     public TimeSpan ShutdownDrainTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Gets how many bytes of captured request and response data may wait for the background pump that writes
+    /// them to disk. A body that would exceed this is abandoned and recorded as missing rather than slowing the
+    /// client's stream.
+    /// </summary>
+    public long PumpMaxQueuedBytes { get; init; } = 64L * 1024 * 1024;
+
+    /// <summary>
     /// Gets the free disk space that must remain after a captured body's second copy (the commit re-seals the
     /// spool into the session file), below which the capture is abandoned and the body is recorded as missing.
     /// </summary>
