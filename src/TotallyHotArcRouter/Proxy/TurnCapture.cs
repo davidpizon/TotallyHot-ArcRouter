@@ -19,6 +19,10 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// The lazily opened session store. Opening it creates the index and runs startup recovery, which deletes every
 /// spool no index row names, so it is opened before the first spool is created.
 /// </param>
+/// <param name="epoch">
+/// The Clear epoch each capture begins under, so a turn that was in flight when Clear ran is dropped instead of
+/// stored after it.
+/// </param>
 /// <param name="transcriptOptions">The live Transcription Capture toggle.</param>
 /// <param name="captureOptions">The disk reserve every spool honours.</param>
 /// <param name="database">Names where the session folder lives, beside <c>transcripts.db</c>.</param>
@@ -27,6 +31,7 @@ public sealed class TurnCaptureFactory(
     CaptureBodyPump pump,
     SessionCaptureWriter writer,
     Lazy<SessionStore> store,
+    CaptureEpoch epoch,
     IOptionsMonitor<TranscriptOptions> transcriptOptions,
     IOptions<SessionCaptureOptions> captureOptions,
     TranscriptDatabase database,
@@ -53,7 +58,7 @@ public sealed class TurnCaptureFactory(
         var expectedBytes = context.Request.ContentLength is > 0 and <= MaxRequestBufferHint
             ? (int)context.Request.ContentLength.Value
             : 0;
-        var capture = new TurnCapture(pump, writer, CreateSpool, logger, DateTimeOffset.UtcNow, expectedBytes);
+        var capture = new TurnCapture(pump, writer, epoch, CreateSpool, logger, DateTimeOffset.UtcNow, expectedBytes);
         context.Request.Body = capture.TeeRequest(context.Request.Body);
         return capture;
     }
@@ -102,6 +107,8 @@ internal sealed class TurnCapture : IDisposable
 
     private readonly CaptureBodyPump _pump;
     private readonly SessionCaptureWriter _writer;
+    private readonly CaptureEpoch _epoch;
+    private readonly long _startEpoch;
     private readonly Func<SessionBodySpool> _createSpool;
     private readonly ILogger _logger;
     private readonly DateTimeOffset _startedAtUtc;
@@ -121,6 +128,7 @@ internal sealed class TurnCapture : IDisposable
     /// </summary>
     /// <param name="pump">Applies every body's disk work off the relay path.</param>
     /// <param name="writer">Stores the finished turn.</param>
+    /// <param name="epoch">The Clear epoch; the value now is the one this turn begins under.</param>
     /// <param name="createSpool">Creates a spool; called on the pump's worker.</param>
     /// <param name="logger">Receives failures; templates are static.</param>
     /// <param name="startedAtUtc">When the request arrived, recorded as the turn's creation time.</param>
@@ -128,6 +136,7 @@ internal sealed class TurnCapture : IDisposable
     internal TurnCapture(
         CaptureBodyPump pump,
         SessionCaptureWriter writer,
+        CaptureEpoch epoch,
         Func<SessionBodySpool> createSpool,
         ILogger logger,
         DateTimeOffset startedAtUtc,
@@ -135,6 +144,8 @@ internal sealed class TurnCapture : IDisposable
     {
         _pump = pump;
         _writer = writer;
+        _epoch = epoch;
+        _startEpoch = epoch.Current;
         _createSpool = createSpool;
         _logger = logger;
         _startedAtUtc = startedAtUtc;
@@ -224,6 +235,14 @@ internal sealed class TurnCapture : IDisposable
     {
         if (_submitted) return;
 
+        // Clear ran while this turn was in flight. Its request holds the whole conversation so far, which Clear just
+        // wiped, so storing it would write that history straight back; Dispose releases the bodies instead.
+        if (_epoch.Current != _startEpoch)
+        {
+            _logger.LogInformation("A captured turn that began before Clear was dropped instead of stored.");
+            return;
+        }
+
         // A short bound so a stalled pump or writer cannot hold this request's bookkeeping open.
         using var timeout = new CancellationTokenSource(SubmitTimeout);
         var cancellationToken = timeout.Token;
@@ -270,7 +289,8 @@ internal sealed class TurnCapture : IDisposable
 
             var item = new SessionCaptureItem(
                 turn.SessionId,
-                new SessionTurnInput(SessionArchiveIds.NewArchiveTurnId(), _startedAtUtc, bodies));
+                new SessionTurnInput(SessionArchiveIds.NewArchiveTurnId(), _startedAtUtc, bodies),
+                _startEpoch);
 
             // From here the writer owns every spool, including when it refuses the turn.
             _submitted = true;

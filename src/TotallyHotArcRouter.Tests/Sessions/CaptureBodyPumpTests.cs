@@ -110,10 +110,18 @@ public sealed class CaptureBodyPumpTests : IDisposable
         using var pump = await StartAsync(new SessionCaptureOptions { PumpMaxQueuedBytes = 10 });
         Assert.True(pump.TryReserve(9));
         using var stop = new CancellationTokenSource();
-        var refuser = Task.Run(() =>
-        {
-            while (!stop.IsCancellationRequested) pump.TryReserve(5);
-        });
+
+        // The pump and the token travel as state, not as captured variables: both are disposed by this method's scope.
+        var refuser = Task.Factory.StartNew(
+            static state =>
+            {
+                var (target, token) = ((CaptureBodyPump, CancellationToken))state!;
+                while (!token.IsCancellationRequested) target.TryReserve(5);
+            },
+            (pump, stop.Token),
+            TestContext.Current.CancellationToken,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
 
         var refusedThatShouldFit = 0;
         for (var i = 0; i < 200_000; i++)

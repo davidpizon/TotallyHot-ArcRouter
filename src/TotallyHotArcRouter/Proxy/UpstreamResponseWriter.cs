@@ -204,8 +204,8 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
                     code = statusCode.ToString()
                 }
             });
-            await clientBody.WriteAsync(buffer: errorPayload, cancellationToken: context.RequestAborted);
-            capture?.RecordProviderResponse(preReadErrorBody!);
+            await WriteErrorBodyAsync(clientBody: clientBody, body: errorPayload, providerBody: preReadErrorBody,
+                capture: capture, cancellationToken: context.RequestAborted);
             return new UpstreamResponseResult(true, CapturedResponseBytes: errorPayload, null, null,
                 IsStreaming: isStreaming);
         }
@@ -215,8 +215,8 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // Pre-read, but no recognizable embedded error object - per TryExtractEmbeddedError's contract,
             // forward the raw body unchanged rather than losing it behind a synthetic generic message.
             context.Response.Headers.Remove("Content-Length");
-            await clientBody.WriteAsync(buffer: preReadErrorBody, cancellationToken: context.RequestAborted);
-            capture?.RecordProviderResponse(preReadErrorBody);
+            await WriteErrorBodyAsync(clientBody: clientBody, body: preReadErrorBody, providerBody: preReadErrorBody,
+                capture: capture, cancellationToken: context.RequestAborted);
             return new UpstreamResponseResult(true, CapturedResponseBytes: preReadErrorBody, null, null,
                 IsStreaming: isStreaming);
         }
@@ -268,6 +268,36 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
                 errorMessage: "The upstream provider closed the connection unexpectedly.");
             return new UpstreamResponseResult(false, CapturedResponseBytes: [], null, null, IsStreaming: isStreaming);
         }
+    }
+
+    /// <summary>
+    /// Writes an error body the router already holds to the client. A client that has gone is handled like the
+    /// copy paths handle it: the failure is logged, the capture is told the relay did not complete (so the
+    /// response is stored as missing, not as a body the client never received), and nothing is rethrown, so the
+    /// turn's telemetry and capture still finish. The provider-side copy is recorded either way, since the
+    /// router did receive it.
+    /// </summary>
+    /// <param name="clientBody">The client's response body, wrapped for capture when capture is on.</param>
+    /// <param name="body">The bytes to send to the client.</param>
+    /// <param name="providerBody">The provider's own body for a translated turn, recorded beside the client's.</param>
+    /// <param name="capture">The session capture, or <see langword="null"/> when capture is off.</param>
+    /// <param name="cancellationToken">The request's abort token.</param>
+    private async Task WriteErrorBodyAsync(
+        Stream clientBody, byte[] body, byte[] providerBody, TurnCapture? capture, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await clientBody.WriteAsync(buffer: body, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
+        {
+            logger.LogWarning(exception: ex,
+                message:
+                "Error response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+            capture?.MarkInterrupted();
+        }
+
+        capture?.RecordProviderResponse(providerBody);
     }
 
     /// <summary>

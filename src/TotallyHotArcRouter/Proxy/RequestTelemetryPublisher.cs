@@ -131,7 +131,10 @@ internal sealed class RequestTelemetryPublisher
     /// </summary>
     /// <returns>
     /// The identity, usage, cost and text extracts this method computed, so session capture can snapshot them
-    /// (#165) without this publisher depending on session storage.
+    /// (#165) without this publisher depending on session storage. The turn is returned even when a telemetry side
+    /// effect throws (including when the request was aborted and the publisher honours its token): the failure
+    /// is carried on <see cref="PublishedTurn.TelemetryFailure"/> for the caller to log, so a broken sink can
+    /// never stop a turn that was served and relayed from being stored.
     /// </returns>
     public async Task<PublishedTurn> PublishAsync(
         HttpContext context,
@@ -185,20 +188,6 @@ internal sealed class RequestTelemetryPublisher
             isStreaming: isStreaming,
             tailScanner: tailScanner);
 
-        await RecordSpendAndBudgetAsync(
-            route: route,
-            requestedModel: requestedModel,
-            promptTokens: promptTokens,
-            completionTokens: completionTokens,
-            cacheCreationTokens: cacheCreationTokens,
-            cacheReadTokens: cacheReadTokens,
-            estimatedCostUsd: estimatedCostUsd,
-            costConfidence: costConfidence,
-            usageExtracted: usageExtracted,
-            sessionId: sessionId,
-            turnNumber: turnNumber,
-            upstreamHeaders: upstreamHeaders).ConfigureAwait(false);
-
         var (newestUserMessage, requestSummary, responseSummary, responseText, correlationId) =
             ExtractResponseTextAndCachePending(
                 requestBody: requestBody,
@@ -213,50 +202,7 @@ internal sealed class RequestTelemetryPublisher
                 propensity: propensity,
                 classification: classification);
 
-        await PersistTranscriptAsync(
-            correlationId: correlationId,
-            requestedModelName: requestedModelName,
-            route: route,
-            classification: classification,
-            taskText: taskText,
-            responseText: responseText,
-            estimatedCostUsd: estimatedCostUsd,
-            isExploratory: isExploratory,
-            propensity: propensity,
-            promptTokens: promptTokens,
-            completionTokens: completionTokens,
-            dimBestModel: dimBestModel,
-            untrainedBaselineModel: untrainedBaselineModel,
-            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore).ConfigureAwait(false);
-
-        await PublishTelemetryEventAsync(
-            sessionId: sessionId,
-            turnNumber: turnNumber,
-            isSynthesized: isSynthesized,
-            requestedModel: requestedModel,
-            route: route,
-            isFallback: isFallback,
-            promptTokens: promptTokens,
-            completionTokens: completionTokens,
-            estimatedCostUsd: estimatedCostUsd,
-            isStreaming: isStreaming,
-            latencyToHeadersMs: latencyToHeadersMs,
-            totalDurationMs: totalDurationMs,
-            statusCode: statusCode,
-            cacheCreationTokens: cacheCreationTokens,
-            cacheReadTokens: cacheReadTokens,
-            costConfidence: costConfidence,
-            requestSummary: requestSummary,
-            responseSummary: responseSummary,
-            correlationId: correlationId,
-            routerTokens: routerTokens,
-            substitutionReason: substitutionReason,
-            cancellationToken: cancellationToken,
-            responseText: responseText,
-            newestUserMessage: newestUserMessage,
-            subagentSignal: classification?.Subagent?.ToLabel()).ConfigureAwait(false);
-
-        return new PublishedTurn(
+        var published = new PublishedTurn(
             SessionId: sessionId,
             TurnNumber: turnNumber,
             IsSessionSynthesized: isSynthesized,
@@ -282,6 +228,75 @@ internal sealed class RequestTelemetryPublisher
             IsStreaming: isStreaming,
             NewestUserMessage: newestUserMessage,
             ResponseText: responseText);
+
+        // The side effects below are best-effort: the response has already reached the client, and a publisher is
+        // allowed to throw (or to observe a cancelled request token once the client has gone). Whatever they do,
+        // the turn computed above is still returned, so session capture stores it; the failure travels with it.
+        try
+        {
+            await RecordSpendAndBudgetAsync(
+                route: route,
+                requestedModel: requestedModel,
+                promptTokens: promptTokens,
+                completionTokens: completionTokens,
+                cacheCreationTokens: cacheCreationTokens,
+                cacheReadTokens: cacheReadTokens,
+                estimatedCostUsd: estimatedCostUsd,
+                costConfidence: costConfidence,
+                usageExtracted: usageExtracted,
+                sessionId: sessionId,
+                turnNumber: turnNumber,
+                upstreamHeaders: upstreamHeaders).ConfigureAwait(false);
+
+            await PersistTranscriptAsync(
+                correlationId: correlationId,
+                requestedModelName: requestedModelName,
+                route: route,
+                classification: classification,
+                taskText: taskText,
+                responseText: responseText,
+                estimatedCostUsd: estimatedCostUsd,
+                isExploratory: isExploratory,
+                propensity: propensity,
+                promptTokens: promptTokens,
+                completionTokens: completionTokens,
+                dimBestModel: dimBestModel,
+                untrainedBaselineModel: untrainedBaselineModel,
+                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore).ConfigureAwait(false);
+
+            await PublishTelemetryEventAsync(
+                sessionId: sessionId,
+                turnNumber: turnNumber,
+                isSynthesized: isSynthesized,
+                requestedModel: requestedModel,
+                route: route,
+                isFallback: isFallback,
+                promptTokens: promptTokens,
+                completionTokens: completionTokens,
+                estimatedCostUsd: estimatedCostUsd,
+                isStreaming: isStreaming,
+                latencyToHeadersMs: latencyToHeadersMs,
+                totalDurationMs: totalDurationMs,
+                statusCode: statusCode,
+                cacheCreationTokens: cacheCreationTokens,
+                cacheReadTokens: cacheReadTokens,
+                costConfidence: costConfidence,
+                requestSummary: requestSummary,
+                responseSummary: responseSummary,
+                correlationId: correlationId,
+                routerTokens: routerTokens,
+                substitutionReason: substitutionReason,
+                cancellationToken: cancellationToken,
+                responseText: responseText,
+                newestUserMessage: newestUserMessage,
+                subagentSignal: classification?.Subagent?.ToLabel()).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return published with { TelemetryFailure = ex };
+        }
+
+        return published;
     }
 
     /// <summary>

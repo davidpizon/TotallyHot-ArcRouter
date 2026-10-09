@@ -781,6 +781,11 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         untrainedBaselineModel: resolution.UntrainedBaselineModel,
                         untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore);
 
+                    // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
+                    if (publishedTurn.TelemetryFailure is { } telemetryFailure)
+                        _logger.LogDebug(exception: telemetryFailure,
+                            message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
+
                     if (capture is not null)
                         await capture.SubmitAsync(
                             turn: publishedTurn, context: context,

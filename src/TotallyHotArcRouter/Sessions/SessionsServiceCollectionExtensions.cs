@@ -33,6 +33,7 @@ internal static class SessionsServiceCollectionExtensions
         services.AddSingleton(sp => sp.GetRequiredService<Lazy<SessionStore>>().Value);
 
         services.AddHostedService<SessionStoreStartupService>();
+        services.AddSingleton<CaptureEpoch>();
         services.AddSingleton<SessionCaptureWriter>();
         services.AddHostedService(sp => sp.GetRequiredService<SessionCaptureWriter>());
 

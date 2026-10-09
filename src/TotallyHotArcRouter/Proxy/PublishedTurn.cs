@@ -58,4 +58,12 @@ internal sealed record PublishedTurn(
     long TotalDurationMs,
     bool IsStreaming,
     string? NewestUserMessage,
-    string? ResponseText);
+    string? ResponseText)
+{
+    /// <summary>
+    /// Gets the failure of the best-effort telemetry side effects (spend, budget, ledger, transcript row, event
+    /// publication), or <see langword="null"/> when they all ran. Carried here rather than thrown, so a telemetry
+    /// failure never stops session capture from storing a turn that was served and relayed.
+    /// </summary>
+    public Exception? TelemetryFailure { get; init; }
+}

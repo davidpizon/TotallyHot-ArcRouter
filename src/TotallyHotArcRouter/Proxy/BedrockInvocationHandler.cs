@@ -147,11 +147,23 @@ internal sealed class BedrockInvocationHandler
                 context.Response.Headers[ProxyMiddleware.RoutedModelHeaderName] = route.ModelName;
                 context.Response.Headers[ProxyMiddleware.SubstitutionReasonHeaderName] = RequestTelemetryPublisher
                     .ResolveSubstitutionReason(isFallback: isFallback, resolutionReason: resolutionReason).ToString();
-                await clientBody.WriteAsync(buffer: translated, cancellationToken: context.RequestAborted);
-
                 capturedResponseBytes = translated.Length <= UpstreamResponseWriter.MaxCapturedResponseBytes
                     ? translated
                     : translated[..UpstreamResponseWriter.MaxCapturedResponseBytes];
+
+                try
+                {
+                    await clientBody.WriteAsync(buffer: translated, cancellationToken: context.RequestAborted);
+                }
+                catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
+                {
+                    // A client that left mid-write fails open, as the streaming path does: Bedrock has already
+                    // answered (and billed), so telemetry still runs and the capture stores the response as missing.
+                    _logger.LogWarning(exception: ex,
+                        message:
+                        "Response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+                    capture?.MarkInterrupted();
+                }
 
                 // Only worth the ~64KB tail-window allocation when capturedResponseBytes above actually
                 // lost data - a response that fits within the cap is already fully captured.
@@ -281,6 +293,11 @@ internal sealed class BedrockInvocationHandler
                 propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
                 untrainedBaselineModel: untrainedBaselineModel,
                 untrainedBaselinePredictedScore: untrainedBaselinePredictedScore);
+
+            // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
+            if (publishedTurn.TelemetryFailure is { } telemetryFailure)
+                _logger.LogDebug(exception: telemetryFailure,
+                    message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
 
             if (capture is not null)
                 await capture.SubmitAsync(

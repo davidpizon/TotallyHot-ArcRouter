@@ -6,7 +6,11 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// <summary>One finished turn waiting to be written to its session file.</summary>
 /// <param name="ClientSessionId">The client's own session id, resolved to an archive session by the writer.</param>
 /// <param name="Turn">The turn, whose bodies may be spooled captures the writer disposes after the write.</param>
-public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput Turn);
+/// <param name="Epoch">
+/// The <see cref="CaptureEpoch"/> value the turn began under. The writer drops a turn whose epoch is no longer
+/// current, because Clear has run since and the turn's request holds the history it wiped.
+/// </param>
+public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput Turn, long Epoch = 0);
 
 /// <summary>
 /// Writes captured turns to <see cref="SessionStore"/> off the request path: a bounded channel with one
@@ -24,6 +28,7 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
     private readonly Lazy<SessionStore> _store;
     private readonly SessionCaptureOptions _options;
     private readonly ILogger<SessionCaptureWriter> _logger;
+    private readonly CaptureEpoch? _epoch;
     private readonly Channel<SessionCaptureItem> _channel;
     private int _inFlight;
     private volatile bool _abandonRemaining;
@@ -37,8 +42,15 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
     /// <param name="store">Where turns are written; opened on the first write, which creates the index and recovers.</param>
     /// <param name="options">Queue size and shutdown deadline.</param>
     /// <param name="logger">Receives write failures; message templates are static.</param>
+    /// <param name="epoch">
+    /// The Clear epoch, so a turn from before a Clear is dropped instead of written after it. Optional: without
+    /// one every turn is written.
+    /// </param>
     public SessionCaptureWriter(
-        Lazy<SessionStore> store, IOptions<SessionCaptureOptions> options, ILogger<SessionCaptureWriter> logger)
+        Lazy<SessionStore> store,
+        IOptions<SessionCaptureOptions> options,
+        ILogger<SessionCaptureWriter> logger,
+        CaptureEpoch? epoch = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
@@ -47,6 +59,7 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
         _store = store;
         _options = options.Value;
         _logger = logger;
+        _epoch = epoch;
         _channel = Channel.CreateBounded<SessionCaptureItem>(new BoundedChannelOptions(Math.Max(1, _options.QueueCapacity))
         {
             SingleReader = true,
@@ -172,6 +185,13 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
         try
         {
             if (_abandonRemaining) return;
+
+            // Clear ran after this turn began: its request holds the history Clear wiped, so it is not written.
+            if (_epoch is not null && item.Epoch != _epoch.Current)
+            {
+                _logger.LogInformation("A captured turn that began before Clear was dropped instead of written.");
+                return;
+            }
 
             var store = _store.Value;
             var archiveSessionId = store.ResolveArchiveSessionId(item.ClientSessionId);

@@ -39,6 +39,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
     private readonly SessionIndex _index;
     private readonly Lazy<SessionStore> _lazyStore;
     private readonly SessionCaptureWriter _writer;
+    private readonly CaptureEpoch _epoch = new();
     private CaptureBodyPump _pump;
     private SessionCaptureOptions _captureOptions = new();
     private ILogger<TurnCaptureFactory> _factoryLogger = NullLogger<TurnCaptureFactory>.Instance;
@@ -70,7 +71,8 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         _writer = new SessionCaptureWriter(
             _lazyStore,
             Options.Create(new SessionCaptureOptions()),
-            NullLogger<SessionCaptureWriter>.Instance);
+            NullLogger<SessionCaptureWriter>.Instance,
+            _epoch);
         _writer.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
         _pump = StartPump(_captureOptions);
     }
@@ -374,7 +376,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         await RunAsync(request, _ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StreamContent(new FailingReadStream(
-                Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")))
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"u8.ToArray()))
             {
                 Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream") }
             }
@@ -440,7 +442,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         Assert.False(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, small, null));
         Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(atCap, null, null));
         Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, atCap, null));
-        Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, null, new TotallyHot.ArcRouter.Telemetry.IncrementalUsageScanner()));
+        Assert.True(UpstreamResponseWriter.IsTelemetryCaptureTruncated(small, null, new IncrementalUsageScanner()));
     }
 
     /// <summary>A turn that is never submitted (the response was not committed) leaves no spool file behind, request spool included.</summary>
@@ -606,6 +608,87 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
             "A reply cut off by an interrupted relay must not be stored as if it were whole.");
     }
 
+    /// <summary>
+    /// Clear runs while a turn is still being relayed. That turn's request carries the whole conversation, which
+    /// Clear has just wiped, so the turn must not be stored afterwards.
+    /// </summary>
+    [Fact]
+    public async Task CaptureOn_ClearRunsWhileTheTurnIsInFlight_TheTurnIsNotStored()
+    {
+        await RunAsync(ChatRequest("history that Clear wipes"), _ =>
+        {
+            _epoch.Advance();
+            return Json("{\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
+        });
+        await WaitForNoSpoolsAsync();
+
+        Assert.Empty(Store.ListSessions());
+        Assert.Empty(AllFiles());
+    }
+
+    /// <summary>A telemetry publisher that throws does not stop the turn from being stored, and the client still gets its response.</summary>
+    [Fact]
+    public async Task CaptureOn_TelemetryPublisherThrows_TheTurnIsStillStored()
+    {
+        const string response = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"served\"}}]," +
+                                "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1}}";
+        var request = ChatRequest("telemetry is down");
+
+        var context = await RunAsync(request, _ => Json(response), telemetry: new ThrowingTelemetryPublisher());
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(response, ReadClientBody(context));
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Equal(response, Text(frames, SessionBodyKind.ClientResponse));
+    }
+
+    /// <summary>A client that leaves during a non-streaming Bedrock write does not stop the turn from being captured, as a missing response.</summary>
+    [Fact]
+    public async Task CaptureOn_BedrockNonStreamingClientDrops_StoresResponseAsMissing()
+    {
+        const string claudeResponse = "{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\"," +
+                                      "\"content\":[{\"type\":\"text\",\"text\":\"Hello from Bedrock.\"}],\"stop_reason\":\"end_turn\"," +
+                                      "\"usage\":{\"input_tokens\":12,\"output_tokens\":6}}";
+        var client = new Mock<IAmazonBedrockRuntime>();
+        client.Setup(c => c.InvokeModelAsync(It.IsAny<InvokeModelRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new InvokeModelResponse
+            {
+                Body = new MemoryStream(Encoding.UTF8.GetBytes(claudeResponse)),
+                ContentType = "application/json"
+            });
+        var request = "{\"model\":\"claude-bedrock\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+
+        await RunAsync(request, _ => Json("{}"), resolver: BedrockResolver(), translators: BedrockTranslators(),
+            bedrock: client.Object, responseBody: new FailingWriteStream(failAfterBytes: 0));
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Contains("bedrock-2023-05-31", Text(frames, SessionBodyKind.ProviderRequest));
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ProviderResponse).Plaintext);
+        AssertReplyTextWithheld(frames);
+    }
+
+    /// <summary>An upstream error written to a client that has already gone is stored as a missing response, not thrown past the capture.</summary>
+    [Fact]
+    public async Task CaptureOn_ErrorBodyWrittenToADepartedClient_StoresResponseAsMissing()
+    {
+        var request = ChatRequest("rejected upstream");
+
+        await RunAsync(
+            request,
+            _ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("{\"error\":{\"message\":\"bad request\"}}", Encoding.UTF8, "application/json")
+            },
+            responseBody: new FailingWriteStream(failAfterBytes: 0));
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+        AssertReplyTextWithheld(frames);
+    }
+
     private static string ChatRequest(string userText) =>
         "{\"model\":\"primary\",\"messages\":[{\"role\":\"user\",\"content\":\"" + userText + "\"}]}";
 
@@ -656,6 +739,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
                     _pump,
                     _writer,
                     _lazyStore,
+                    _epoch,
                     _transcriptOptions,
                     Options.Create(_captureOptions),
                     _database,
@@ -673,7 +757,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         context.Request.Body = new MemoryStream(bytes);
         context.Request.ContentLength = bytes.Length;
         context.Response.Body = responseBody ?? new MemoryStream();
-        context.RequestAborted = requestAborted == default ? TestContext.Current.CancellationToken : requestAborted;
+        context.RequestAborted = requestAborted == CancellationToken.None ? TestContext.Current.CancellationToken : requestAborted;
         configureContext?.Invoke(context);
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
@@ -742,6 +826,16 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
             ResponseCompletedWhenPublished = responseCompleted();
             return Task.CompletedTask;
         }
+
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    /// <summary>A telemetry publisher that always fails, standing in for a broken sink.</summary>
+    private sealed class ThrowingTelemetryPublisher : ITelemetryPublisher
+    {
+        public Task PublishAsync(RoutingTelemetryEvent telemetryEvent, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The telemetry sink is down.");
 
         public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;

@@ -271,11 +271,15 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         try
         {
             var result = await _sessionMaintenance.DeleteAllAsync().ConfigureAwait(false);
-            if (result.DeletedSessions > 0)
+            if (result.Deletion.DeletedSessions > 0)
                 _logger.LogInformation(message: "Session capture cleared: SessionsDeleted={SessionsDeleted}",
-                    result.DeletedSessions);
+                    result.Deletion.DeletedSessions);
 
-            return result.WalTruncated && (result.DeletedSessions == 0 || result.MasterKeyRotated);
+            if (!result.QueueDrained)
+                _logger.LogWarning(
+                    message: "Session capture still had turns queued after the drain timeout; Clear is not final and should be repeated.");
+
+            return result.IsFinal;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

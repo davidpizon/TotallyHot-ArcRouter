@@ -71,6 +71,31 @@ public sealed class SessionCaptureWriterTests : IDisposable
         await writer.StopAsync(CancellationToken.None);
     }
 
+    /// <summary>A turn that began before Clear is dropped, its spools disposed, while a turn that began after it is written.</summary>
+    [Fact]
+    public async Task Enqueue_TurnThatBeganBeforeClear_IsDroppedNotWritten()
+    {
+        var epoch = new CaptureEpoch();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, epoch);
+        await writer.StartAsync(CancellationToken.None);
+        var beganBeforeClear = epoch.Current;
+        epoch.Advance();
+        var spool = SessionBodySpool.Create(_folder);
+        Assert.True(spool.TryWrite("history Clear wiped"u8));
+        Assert.True(spool.TryComplete());
+
+        await writer.EnqueueAsync(new SessionCaptureItem("old-turn", Turn(spool), beganBeforeClear));
+        await writer.EnqueueAsync(new SessionCaptureItem("new-turn", Turn(spool: null), epoch.Current));
+        Assert.True(await writer.WaitForIdleAsync(TimeSpan.FromSeconds(30)));
+        await writer.StopAsync(CancellationToken.None);
+
+        Assert.Empty(_store.ListTurns(_store.ResolveArchiveSessionId("old-turn")));
+        Assert.Single(_store.ListTurns(_store.ResolveArchiveSessionId("new-turn")));
+        Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
+    }
+
     /// <summary>A writer stopped the instant it starts still writes every turn it accepted (no stop-before-consumer gap).</summary>
     [Fact]
     public async Task StartThenImmediateStop_StillWritesEveryAcceptedTurn()

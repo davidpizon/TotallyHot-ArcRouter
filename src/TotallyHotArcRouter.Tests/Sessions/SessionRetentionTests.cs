@@ -162,20 +162,97 @@ public sealed class SessionRetentionTests : IDisposable
         var retained = maintenance.EnforceRetention(10);
 
         Assert.False(opened);
-        Assert.Equal(0, all.DeletedSessions);
-        Assert.True(all.WalTruncated);
+        Assert.Equal(0, all.Deletion.DeletedSessions);
+        Assert.True(all.IsFinal);
         Assert.Equal(0, retained.DeletedSessions);
     }
 
+    /// <summary>Clear invalidates in-flight turns even on a router that has captured nothing yet, so a first turn still being relayed is not stored after it.</summary>
+    [Fact]
+    public async Task DeleteAllAsync_AdvancesTheEpochEvenWhenNothingWasCaptured()
+    {
+        var epoch = new CaptureEpoch();
+        var neverCreated = new TranscriptDatabase(Options.Create(new StorageOptions
+        {
+            TranscriptDatabasePath = Path.Combine(_root, "fresh", "transcripts.db")
+        }));
+        var maintenance = new SessionMaintenance(new Lazy<SessionStore>(() => _store), neverCreated, epoch: epoch);
+        var before = epoch.Current;
+
+        await maintenance.DeleteAllAsync();
+
+        Assert.True(epoch.Current > before);
+    }
+
+    /// <summary>A writer that cannot drain in time makes Clear report that it is not final, so the caller can repeat it.</summary>
+    [Fact]
+    public async Task DeleteAllAsync_WhenTheWriterCannotDrain_IsNotFinal()
+    {
+        Directory.CreateDirectory(_folder);
+
+        // Never started, so nothing ever reads its queue and it never goes idle.
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance);
+        await writer.EnqueueAsync(new SessionCaptureItem("stuck", Turn(Start)));
+        var maintenance = new SessionMaintenance(
+            new Lazy<SessionStore>(() => _store), _database, writer, TimeSpan.FromMilliseconds(200));
+
+        var result = await maintenance.DeleteAllAsync();
+
+        Assert.False(result.QueueDrained);
+        Assert.False(result.IsFinal);
+        await writer.StopAsync(CancellationToken.None);
+    }
+
     /// <summary>
-    /// A turn that finished just before Clear sits in the capture writer's queue; Clear lets it land first and
-    /// then deletes it, instead of deleting around it and leaving the newest conversation on disk.
+    /// A session that gained a turn after retention chose its candidates is no longer an old one; deleting it
+    /// would delete the turn just written, so it is skipped.
+    /// </summary>
+    [Fact]
+    public void DeleteUnchanged_SkipsASessionThatGainedATurnAfterTheSnapshot()
+    {
+        var oldest = AddSession("a", turns: 3, firstMinute: 0);
+        var newest = AddSession("b", turns: 3, firstMinute: 10);
+        var candidates = _store.SelectExpiredSessions(maxTurns: 3);
+        Assert.Equal(oldest, Assert.Single(candidates).ArchiveSessionId);
+
+        _store.AppendTurn(oldest, "a", Turn(Start.AddMinutes(30)));
+        var result = _store.DeleteUnchanged(candidates);
+
+        Assert.Equal(0, result.DeletedSessions);
+        Assert.False(result.MasterKeyRotated);
+        Assert.Equal(4, _store.ListTurns(oldest).Count);
+        Assert.Equal(3, _store.ListTurns(newest).Count);
+    }
+
+    /// <summary>A candidate nothing has touched is deleted as before, and the master key rotates.</summary>
+    [Fact]
+    public void DeleteUnchanged_DeletesAnUntouchedCandidate()
+    {
+        var oldest = AddSession("a", turns: 3, firstMinute: 0);
+        AddSession("b", turns: 3, firstMinute: 10);
+
+        var result = _store.DeleteUnchanged(_store.SelectExpiredSessions(maxTurns: 3));
+
+        Assert.Equal(1, result.DeletedSessions);
+        Assert.True(result.MasterKeyRotated);
+        Assert.Empty(_store.ListTurns(oldest));
+    }
+
+    /// <summary>
+    /// A turn that finished just before Clear sits in the capture writer's queue. Clear invalidates it (its request
+    /// holds the history being wiped) and waits for the writer to go idle, so nothing from before the wipe is on
+    /// disk afterwards, whichever way the race between the queue and the deletion falls.
     /// </summary>
     [Fact]
     public async Task DeleteAllAsync_LetsTurnsAlreadyQueuedLandFirst()
     {
         Directory.CreateDirectory(_folder);
-        using var gate = new ManualResetEventSlim();
+
+        // Not disposed: nothing asks it for a wait handle, so it holds no operating-system resource, and the
+        // writer's thread still reads it until the test has stopped the writer.
+        var gate = new ManualResetEventSlim();
 
         // Opening the store blocks the writer's consumer, so the turn stays queued while Clear starts.
         var lazy = new Lazy<SessionStore>(() =>
@@ -191,12 +268,13 @@ public sealed class SessionRetentionTests : IDisposable
 
         // On a pool thread: should the wait ever be skipped, Clear would block opening the store behind the writer,
         // and the test must then fail instead of hanging on the gate it releases itself.
-        var clear = Task.Run(() => maintenance.DeleteAllAsync());
+        var clear = Task.Run(maintenance.DeleteAllAsync);
         await Task.Delay(100);
         gate.Set();
-        await clear.WaitAsync(TimeSpan.FromSeconds(30));
+        var result = await clear.WaitAsync(TimeSpan.FromSeconds(30));
         await writer.StopAsync(CancellationToken.None);
 
+        Assert.True(result.IsFinal);
         Assert.Empty(_store.ListSessions());
     }
 
