@@ -61,7 +61,7 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) | Machine-scoped protection and an administrator-only ACL for the shared secret store | accepted |
 | [0016](0016-remove-authheadername-and-mark-secrets-per-header.md) | Remove `AuthHeaderName`; mark secret headers per header and strip every configured header name | proposed |
 | [0017](0017-pin-auto-routed-requests-only-when-they-carry-backend-specific-features.md) | Constrain auto-routed requests by per-model capability and conversation affinity | proposed |
-| [0018](0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md) | Persist request telemetry off the request path via a bounded channel | proposed |
+| [0018](0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md) | Persist request telemetry off the request path via a bounded channel | accepted |
 | [0019](0019-store-conversation-text-in-encrypted-per-session-files.md) | Store conversation text in encrypted per-session files, with SQLite as a text-free index | accepted |
 | [0020](0020-require-passkey-verification-for-conversation-content.md) | Require passkey user verification before conversation content leaves the router | accepted |
 | [0021](0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) | Carry the subagent routing signal on the telemetry wire as an optional field | accepted |
