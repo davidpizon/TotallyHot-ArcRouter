@@ -112,8 +112,8 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
         if (!_started)
         {
             // The writer was never started, so nothing will ever read the queue and waiting would only run out
-            // the clock; release what is in it. A started writer is drained even if its consumer loop has not
-            // begun running yet, because the host may call StopAsync before ExecuteAsync gets a thread.
+            // the clock; release what is in it. A started writer is drained even if its consumer has not begun
+            // running yet: StartAsync already started it, and it reads until the completed channel is empty.
             while (_channel.Reader.TryRead(out var stranded)) Complete(stranded);
         }
 
