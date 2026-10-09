@@ -298,4 +298,12 @@ public sealed record ProxyMiddlewareDependencies
     /// <see langword="null"/> or disabled, those templates emit nothing.
     /// </summary>
     public IOptionsMonitor<BodyExcerptOptions>? BodyExcerptOptions { get; init; }
+
+    /// <summary>
+    /// Optional session capture (#165, ADR-0019). When supplied and the Transcription Capture toggle is on,
+    /// each proxied turn's request and response bodies are captured beside the existing 4 MiB telemetry
+    /// capture and written to an encrypted session file. Defaults to <see langword="null"/>: nothing is
+    /// captured and the hot path makes no second copy of any body, so existing callers and tests are unaffected.
+    /// </summary>
+    public TurnCaptureFactory? TurnCapture { get; init; }
 }

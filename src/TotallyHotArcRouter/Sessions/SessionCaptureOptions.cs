@@ -17,4 +17,10 @@ public sealed class SessionCaptureOptions
 
     /// <summary>Gets how long shutdown waits for queued turns to be written before abandoning the rest.</summary>
     public TimeSpan ShutdownDrainTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Gets the free disk space that must remain after a captured body's second copy (the commit re-seals the
+    /// spool into the session file), below which the capture is abandoned and the body is recorded as missing.
+    /// </summary>
+    public long MinFreeDiskBytes { get; init; } = SessionBodySpool.DefaultMinFreeBytes;
 }

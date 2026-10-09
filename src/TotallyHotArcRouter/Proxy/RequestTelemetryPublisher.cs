@@ -129,7 +129,11 @@ internal sealed class RequestTelemetryPublisher
     /// side-effect (transcript capture excepted, which self-guards) is not expected to surface as a
     /// request failure, since the response has already been fully sent to the client by this point.
     /// </summary>
-    public async Task PublishAsync(
+    /// <returns>
+    /// The identity, usage, cost and text extracts this method computed, so session capture can snapshot them
+    /// (#165) without this publisher depending on session storage.
+    /// </returns>
+    public async Task<PublishedTurn> PublishAsync(
         HttpContext context,
         ResolvedModelRoute route,
         string requestedModelName,
@@ -251,6 +255,33 @@ internal sealed class RequestTelemetryPublisher
             responseText: responseText,
             newestUserMessage: newestUserMessage,
             subagentSignal: classification?.Subagent?.ToLabel()).ConfigureAwait(false);
+
+        return new PublishedTurn(
+            SessionId: sessionId,
+            TurnNumber: turnNumber,
+            IsSessionSynthesized: isSynthesized,
+            CorrelationId: correlationId,
+            RequestedModel: requestedModel,
+            SubstitutionReason: substitutionReason,
+            Provider: route.Provider,
+            RoutedModel: route.ModelName,
+            ProviderModelId: route.ProviderModelId,
+            IsFallback: isFallback,
+            IsExploratory: isExploratory,
+            Propensity: propensity,
+            Classification: classification,
+            PromptTokens: promptTokens,
+            CompletionTokens: completionTokens,
+            CacheCreationTokens: cacheCreationTokens,
+            CacheReadTokens: cacheReadTokens,
+            EstimatedCostUsd: estimatedCostUsd,
+            CostConfidence: costConfidence,
+            StatusCode: statusCode,
+            LatencyToHeadersMs: latencyToHeadersMs,
+            TotalDurationMs: totalDurationMs,
+            IsStreaming: isStreaming,
+            NewestUserMessage: newestUserMessage,
+            ResponseText: responseText);
     }
 
     /// <summary>

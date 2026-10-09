@@ -138,6 +138,11 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// </param>
     /// <param name="embeddedErrorMessage">The translator-decoded error message, when one was extracted.</param>
     /// <param name="statusCode">The upstream status, used as the <c>code</c> of a synthesized error envelope.</param>
+    /// <param name="capture">
+    /// The #165 session capture, or <see langword="null"/> when capture is off. When set, every byte written
+    /// to the client is also spooled with no size cap (beside, not instead of, the 4 MiB telemetry capture),
+    /// and a translated turn's provider-side response is spooled too.
+    /// </param>
     internal async Task<UpstreamResponseResult> WriteAsync(
         HttpContext context,
         HttpResponseMessage responseMessage,
@@ -146,11 +151,17 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
         IReadOnlySet<string>? configuredHeaderNames,
         byte[]? preReadErrorBody,
         string? embeddedErrorMessage,
-        int statusCode)
+        int statusCode,
+        TurnCapture? capture = null)
     {
         var isStreaming = CopyStatusAndHeaders(context: context, responseMessage: responseMessage,
             translator: translator, routingHeaders: routingHeaders, configuredHeaderNames: configuredHeaderNames,
             statusCode: statusCode);
+
+        // Every body byte reaches the client through this stream, so tapping it captures exactly what was
+        // relayed, including a synthesized error envelope; with capture off it is the response body itself.
+        var clientBody = capture?.BeginResponse(clientBody: context.Response.Body, translated: translator is not null)
+                         ?? context.Response.Body;
 
         if (preReadErrorBody is not null && embeddedErrorMessage is not null)
         {
@@ -171,7 +182,8 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
                     code = statusCode.ToString()
                 }
             });
-            await context.Response.Body.WriteAsync(buffer: errorPayload, cancellationToken: context.RequestAborted);
+            await clientBody.WriteAsync(buffer: errorPayload, cancellationToken: context.RequestAborted);
+            if (translator is not null) capture?.RecordProviderResponse(preReadErrorBody!);
             return new UpstreamResponseResult(true, CapturedResponseBytes: errorPayload, null, null,
                 IsStreaming: isStreaming);
         }
@@ -181,29 +193,36 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // Pre-read, but no recognizable embedded error object - per TryExtractEmbeddedError's contract,
             // forward the raw body unchanged rather than losing it behind a synthetic generic message.
             context.Response.Headers.Remove("Content-Length");
-            await context.Response.Body.WriteAsync(buffer: preReadErrorBody, cancellationToken: context.RequestAborted);
+            await clientBody.WriteAsync(buffer: preReadErrorBody, cancellationToken: context.RequestAborted);
+            if (translator is not null) capture?.RecordProviderResponse(preReadErrorBody);
             return new UpstreamResponseResult(true, CapturedResponseBytes: preReadErrorBody, null, null,
                 IsStreaming: isStreaming);
         }
 
         await using var upstreamBody = await responseMessage.Content.ReadAsStreamAsync(context.RequestAborted);
+
+        // The provider-side response is what the upstream sent before any translation; with no translator it
+        // is the client's response and is not stored twice.
+        var upstreamSource = translator is not null && capture is not null
+            ? capture.TeeProviderResponse(upstreamBody)
+            : upstreamBody;
         try
         {
             if (translator is null)
             {
                 var (captured, tailScanner) = await CopyAndCaptureAsync(
-                    source: upstreamBody, destination: context.Response.Body, captureCap: MaxCapturedResponseBytes,
+                    source: upstreamSource, destination: clientBody, captureCap: MaxCapturedResponseBytes,
                     cancellationToken: context.RequestAborted);
                 return new UpstreamResponseResult(true, CapturedResponseBytes: captured, null, TailScanner: tailScanner,
                     IsStreaming: isStreaming);
             }
 
             var translated = isStreaming
-                ? await TranslateAndCaptureStreamAsync(translator: translator, source: upstreamBody,
-                    destination: context.Response.Body, captureCap: MaxCapturedResponseBytes,
+                ? await TranslateAndCaptureStreamAsync(translator: translator, source: upstreamSource,
+                    destination: clientBody, captureCap: MaxCapturedResponseBytes,
                     cancellationToken: context.RequestAborted)
-                : await TranslateAndCaptureBufferedAsync(translator: translator, source: upstreamBody,
-                    destination: context.Response.Body, captureCap: MaxCapturedResponseBytes,
+                : await TranslateAndCaptureBufferedAsync(translator: translator, source: upstreamSource,
+                    destination: clientBody, captureCap: MaxCapturedResponseBytes,
                     cancellationToken: context.RequestAborted);
 
             return new UpstreamResponseResult(

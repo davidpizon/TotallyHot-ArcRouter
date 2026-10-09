@@ -198,6 +198,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     private readonly UpstreamResponseWriter _upstreamResponseWriter;
     private readonly SemanticCacheCoordinator _semanticCache;
 
+    // Optional #165 session capture; null (the default) leaves the hot path exactly as it was.
+    private readonly TurnCaptureFactory? _turnCapture;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ProxyMiddleware"/> class.
     /// </summary>
@@ -289,6 +292,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             bedrockClientFactory: _bedrockClientFactory, circuitBreaker: _circuitBreaker,
             requestTelemetryPublisher: _requestTelemetryPublisher);
         _semanticCache = new SemanticCacheCoordinator(cache: dependencies?.SemanticResponseCache, logger: logger);
+        _turnCapture = dependencies?.TurnCapture;
     }
 
     /// <summary>
@@ -361,8 +365,14 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         await _interceptor.InterceptRequestAsync(context);
 
+        // #165: when capture is on, the request body is wrapped here so the bytes the interceptor reads are
+        // also spooled exactly as the client sent them, before they are decoded. A null capture (toggle off)
+        // makes no copy. Disposed on every exit; a turn the writer accepted is no longer this scope's to delete.
+        using var capture = _turnCapture?.Begin(context);
+
         var resolution =
             await _interceptor.ResolveModelRouteAsync(context: context, cancellationToken: context.RequestAborted);
+        capture?.CompleteRequest();
 
         if (!resolution.IsSuccess)
         {
@@ -521,7 +531,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         propensity: resolution.Propensity, classification: resolution.Classification,
                         taskText: resolution.TaskText, dimBestModel: resolution.DimBestModel,
                         untrainedBaselineModel: resolution.UntrainedBaselineModel,
-                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore)) return;
+                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore,
+                        capture: capture)) return;
 
                 continue;
             }
@@ -538,6 +549,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // sent twice, so the failover path below must rebuild rather than retry this instance.
             var requestMessage = UpstreamRequestBuilder.Build(context: context, route: route, translator: translator,
                 rewrittenBody: rewrittenBody, droppedBetaPrefixes: featureStrip.BetaPrefixes);
+
+            // #165: the provider-facing request differs from the client's only when a translator rewrote it.
+            // Taken now because the content is not readable once the send has completed it; a failover
+            // candidate's copy replaces this one.
+            if (capture is not null && translator is not null && requestMessage.Content is { } providerContent)
+                capture.SetProviderRequest(await providerContent.ReadAsByteArrayAsync(context.RequestAborted));
 
             // ADR-0017 Strip rule 4, as adopted by ADR-0022 Amendment 1: every strip is recorded. Once per attempt
             // that actually sends a stripped copy, so a failover that strips differently logs its own line.
@@ -698,12 +715,16 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     configuredHeaderNames: route.ConfiguredHeaderNames,
                     preReadErrorBody: preReadErrorBody,
                     embeddedErrorMessage: embeddedErrorMessage,
-                    statusCode: statusCode);
+                    statusCode: statusCode,
+                    capture: capture);
 
                 if (!written.Committed)
                     // The writer already sent an error envelope in place of a forward that never happened,
                     // so there is nothing to publish telemetry about.
                     return;
+
+                // A relay the client abandoned left a prefix, which is recorded as a missing body, not stored.
+                capture?.CompleteResponse(relayInterrupted: context.RequestAborted.IsCancellationRequested);
 
                 var capturedResponseBytes = written.CapturedResponseBytes;
                 var nativeResponseBytes = written.NativeResponseBytes;
@@ -751,7 +772,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
+                    var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
                         requestedModelName: requestedModelName, isFallback: isFallback,
                         telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenBody,
                         capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
@@ -765,6 +786,10 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                         dimBestModel: resolution.DimBestModel,
                         untrainedBaselineModel: resolution.UntrainedBaselineModel,
                         untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore);
+
+                    if (capture is not null)
+                        await capture.SubmitAsync(
+                            turn: publishedTurn, context: context, telemetryCapturedBytes: capturedResponseBytes.Length);
                 }
                 catch (Exception ex)
                 {

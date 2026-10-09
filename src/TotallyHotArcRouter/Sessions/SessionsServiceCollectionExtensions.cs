@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -33,6 +34,7 @@ internal static class SessionsServiceCollectionExtensions
         services.AddHostedService<SessionStoreStartupService>();
         services.AddSingleton<SessionCaptureWriter>();
         services.AddHostedService(sp => sp.GetRequiredService<SessionCaptureWriter>());
+        services.AddSingleton<TurnCaptureFactory>();
         return services;
     }
 

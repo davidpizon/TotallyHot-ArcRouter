@@ -251,7 +251,8 @@ internal static class ProxyServiceCollectionExtensions
             ContextWindowStore = sp.GetService<IModelContextWindowStore>(),
             InteractionStatusStore = sp.GetService<IProviderInteractionStatusStore>(),
             SemanticResponseCache = sp.GetService<SemanticResponseCache>(),
-            BodyExcerptOptions = sp.GetService<IOptionsMonitor<BodyExcerptOptions>>()
+            BodyExcerptOptions = sp.GetService<IOptionsMonitor<BodyExcerptOptions>>(),
+            TurnCapture = sp.GetService<TurnCaptureFactory>()
         });
 
         services.AddSingleton<ProxyMiddleware>();
