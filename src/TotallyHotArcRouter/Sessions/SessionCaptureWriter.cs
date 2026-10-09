@@ -6,7 +6,11 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// <summary>One finished turn waiting to be written to its session file.</summary>
 /// <param name="ClientSessionId">The client's own session id, resolved to an archive session by the writer.</param>
 /// <param name="Turn">The turn, whose bodies may be spooled captures the writer disposes after the write.</param>
-public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput Turn);
+/// <param name="Epoch">
+/// The <see cref="CaptureEpoch"/> value the turn began under. The writer drops a turn whose epoch is no longer
+/// current, because Clear has run since and the turn's request holds the history it wiped.
+/// </param>
+public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput Turn, long Epoch = 0);
 
 /// <summary>
 /// Writes captured turns to <see cref="SessionStore"/> off the request path: a bounded channel with one
@@ -14,16 +18,23 @@ public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput
 /// proxy response; a turn that cannot be stored is logged and lost, and its spools are always disposed. A
 /// producer that finds the queue full waits (it does not drop the turn).
 /// </summary>
-public sealed class SessionCaptureWriter : BackgroundService
+/// <remarks>
+/// A plain hosted service rather than a <see cref="BackgroundService"/>: on .NET 10 a <c>BackgroundService</c>
+/// stopped right after it starts never runs <c>ExecuteAsync</c>, which would leave queued turns unwritten
+/// until the shutdown deadline. This type starts its consumer in <see cref="StartAsync"/> and always runs it.
+/// </remarks>
+public sealed class SessionCaptureWriter : IHostedService, IDisposable
 {
     private readonly Lazy<SessionStore> _store;
     private readonly SessionCaptureOptions _options;
     private readonly ILogger<SessionCaptureWriter> _logger;
+    private readonly CaptureEpoch? _epoch;
     private readonly Channel<SessionCaptureItem> _channel;
     private int _inFlight;
     private volatile bool _abandonRemaining;
     private volatile bool _stopping;
     private volatile bool _started;
+    private Task? _consumer;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionCaptureWriter"/> class.
@@ -31,8 +42,15 @@ public sealed class SessionCaptureWriter : BackgroundService
     /// <param name="store">Where turns are written; opened on the first write, which creates the index and recovers.</param>
     /// <param name="options">Queue size and shutdown deadline.</param>
     /// <param name="logger">Receives write failures; message templates are static.</param>
+    /// <param name="epoch">
+    /// The Clear epoch, so a turn from before a Clear is dropped instead of written after it. Optional: without
+    /// one every turn is written.
+    /// </param>
     public SessionCaptureWriter(
-        Lazy<SessionStore> store, IOptions<SessionCaptureOptions> options, ILogger<SessionCaptureWriter> logger)
+        Lazy<SessionStore> store,
+        IOptions<SessionCaptureOptions> options,
+        ILogger<SessionCaptureWriter> logger,
+        CaptureEpoch? epoch = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
@@ -41,6 +59,7 @@ public sealed class SessionCaptureWriter : BackgroundService
         _store = store;
         _options = options.Value;
         _logger = logger;
+        _epoch = epoch;
         _channel = Channel.CreateBounded<SessionCaptureItem>(new BoundedChannelOptions(Math.Max(1, _options.QueueCapacity))
         {
             SingleReader = true,
@@ -99,15 +118,15 @@ public sealed class SessionCaptureWriter : BackgroundService
     }
 
     /// <inheritdoc/>
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         _stopping = true;
         _channel.Writer.TryComplete();
         if (!_started)
         {
             // The writer was never started, so nothing will ever read the queue and waiting would only run out
-            // the clock; release what is in it. A started writer is drained even if its consumer loop has not
-            // begun running yet, because the host may call StopAsync before ExecuteAsync gets a thread.
+            // the clock; release what is in it. A started writer is drained even if its consumer has not begun
+            // running yet: StartAsync already started it, and it reads until the completed channel is empty.
             while (_channel.Reader.TryRead(out var stranded)) Complete(stranded);
         }
 
@@ -118,23 +137,38 @@ public sealed class SessionCaptureWriter : BackgroundService
             _abandonRemaining = true;
         }
 
-        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        if (_consumer is null) return;
+
+        try
+        {
+            await _consumer.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The host's shutdown deadline passed. Like a BackgroundService, stop waiting without failing the
+            // host's stop; the consumer keeps draining (or skipping, once abandoned) what is queued.
+        }
     }
 
     /// <inheritdoc/>
-    public override Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         _started = true;
-        return base.StartAsync(cancellationToken);
+
+        // Task.Run leaves the thread that started the host before any blocking write.
+        _consumer ??= Task.Run(ConsumeAsync, CancellationToken.None);
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Leave the thread that started the host before any blocking write.
-        await Task.Yield();
+    public void Dispose() => _channel.Writer.TryComplete();
 
-        // Reads until the channel is completed by StopAsync, not until cancellation, so a stop drains first.
+    /// <summary>
+    /// Writes queued turns until the channel is completed by <see cref="StopAsync"/> and drained, not until
+    /// cancellation, so a stop finishes what was already queued.
+    /// </summary>
+    private async Task ConsumeAsync()
+    {
         await foreach (var item in _channel.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
         {
             Write(item);
@@ -151,6 +185,13 @@ public sealed class SessionCaptureWriter : BackgroundService
         try
         {
             if (_abandonRemaining) return;
+
+            // Clear ran after this turn began: its request holds the history Clear wiped, so it is not written.
+            if (_epoch is not null && item.Epoch != _epoch.Current)
+            {
+                _logger.LogInformation("A captured turn that began before Clear was dropped instead of written.");
+                return;
+            }
 
             var store = _store.Value;
             var archiveSessionId = store.ResolveArchiveSessionId(item.ClientSessionId);

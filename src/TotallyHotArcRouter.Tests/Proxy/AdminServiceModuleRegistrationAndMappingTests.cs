@@ -13,6 +13,7 @@ using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -100,6 +101,25 @@ public sealed class AdminServiceModuleRegistrationAndMappingTests
         // AddSingleton in Register maps successfully and only throws on the service's first RPC.
         var service = ActivatorUtilities.CreateInstance(app.Services, serviceType);
         service.Should().BeOfType(serviceType);
+    }
+
+    /// <summary>
+    /// The proxy's inner host has its own container, so a collaborator the System Settings service takes as an
+    /// optional constructor parameter is silently null there unless the module hands it across. The session
+    /// maintenance service is such a collaborator: without it the Clear action reports success while the
+    /// captured conversations stay on disk (#165).
+    /// </summary>
+    [Fact]
+    public void RouterSettings_module_hands_the_session_maintenance_service_to_the_inner_host()
+    {
+        var module = CreatePopulatedModule(typeof(RouterSettingsAdminDependencies));
+        var services = new ServiceCollection();
+
+        module.Register(services);
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetService<SessionMaintenance>().Should().NotBeNull(
+            "ClearTranscripts cannot delete sessions through a service its inner host cannot resolve");
     }
 
     /// <summary>

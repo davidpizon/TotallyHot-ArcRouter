@@ -596,7 +596,7 @@ public class BedrockProviderTests
     /// field to populate <see cref="PayloadPart.Bytes"/>, matching how Bedrock's real wire protocol
     /// nests the native chunk one level deeper than some SDKs' code samples suggest.
     /// </summary>
-    private static void AppendFrame(Stream destination, string eventType, string nativeChunkJson)
+    internal static void AppendFrame(Stream destination, string eventType, string nativeChunkJson)
     {
         var wrapped = "{\"bytes\":\"" + Convert.ToBase64String(Encoding.UTF8.GetBytes(nativeChunkJson)) + "\"}";
         var frame = EncodeEventStreamMessage(eventType: eventType, payloadJson: wrapped);

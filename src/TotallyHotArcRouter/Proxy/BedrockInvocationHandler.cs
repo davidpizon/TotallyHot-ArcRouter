@@ -24,6 +24,9 @@ internal sealed class BedrockInvocationHandler
     private readonly ILogger _logger;
     private readonly RequestTelemetryPublisher _requestTelemetryPublisher;
 
+    /// <summary>Separates Bedrock event payloads in the stored provider-side response.</summary>
+    private static readonly byte[] NewLine = "\n"u8.ToArray();
+
     /// <summary>
     /// Initializes a new instance of the <see cref="BedrockInvocationHandler"/> class.
     /// </summary>
@@ -54,7 +57,9 @@ internal sealed class BedrockInvocationHandler
     /// publishes routing telemetry for it. Returns <see langword="true"/> once this candidate has been
     /// fully handled - either served successfully or failed in a way with no further backup to try, in
     /// which case an error response has already been written - and <see langword="false"/> when the caller
-    /// should fail over to <paramref name="hasNextCandidate"/>'s next candidate instead.
+    /// should fail over to <paramref name="hasNextCandidate"/>'s next candidate instead. When
+    /// <paramref name="capture"/> is set (#165) the client's response, the request sent to Bedrock and the
+    /// payloads Bedrock returned are captured and the finished turn is submitted after telemetry.
     /// </summary>
     public async Task<bool> InvokeAsync(
         HttpContext context,
@@ -74,7 +79,8 @@ internal sealed class BedrockInvocationHandler
         string? taskText = null,
         string? dimBestModel = null,
         string? untrainedBaselineModel = null,
-        double? untrainedBaselinePredictedScore = null)
+        double? untrainedBaselinePredictedScore = null,
+        TurnCapture? capture = null)
     {
         var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
         var nativeRequestBody = translator.TranslateRequest(rewrittenBody);
@@ -103,6 +109,7 @@ internal sealed class BedrockInvocationHandler
                 var response = await client.InvokeModelWithResponseStreamAsync(request: request,
                     cancellationToken: context.RequestAborted);
                 latencyToHeadersMs = stopwatch.ElapsedMilliseconds;
+                var clientBody = BeginCapture(capture, context, nativeRequestBody);
 
                 context.Response.StatusCode = StatusCodes.Status200OK;
                 context.Response.ContentType = "text/event-stream";
@@ -112,9 +119,9 @@ internal sealed class BedrockInvocationHandler
                     .ResolveSubstitutionReason(isFallback: isFallback, resolutionReason: resolutionReason).ToString();
 
                 (capturedResponseBytes, tailScanner) = await TranslateAndCaptureBedrockStreamAsync(
-                    translator: translator, body: response.Body, destination: context.Response.Body,
+                    translator: translator, body: response.Body, destination: clientBody,
                     captureCap: UpstreamResponseWriter.MaxCapturedResponseBytes,
-                    cancellationToken: context.RequestAborted);
+                    cancellationToken: context.RequestAborted, turnCapture: capture);
             }
             else
             {
@@ -129,7 +136,10 @@ internal sealed class BedrockInvocationHandler
                     await client.InvokeModelAsync(request: request, cancellationToken: context.RequestAborted);
                 latencyToHeadersMs = stopwatch.ElapsedMilliseconds;
 
-                var translated = translator.TranslateResponse(response.Body.ToArray());
+                var nativeResponseBody = response.Body.ToArray();
+                var translated = translator.TranslateResponse(nativeResponseBody);
+                var clientBody = BeginCapture(capture, context, nativeRequestBody);
+                capture?.RecordProviderResponse(nativeResponseBody);
 
                 context.Response.StatusCode = StatusCodes.Status200OK;
                 context.Response.ContentType = "application/json";
@@ -137,11 +147,23 @@ internal sealed class BedrockInvocationHandler
                 context.Response.Headers[ProxyMiddleware.RoutedModelHeaderName] = route.ModelName;
                 context.Response.Headers[ProxyMiddleware.SubstitutionReasonHeaderName] = RequestTelemetryPublisher
                     .ResolveSubstitutionReason(isFallback: isFallback, resolutionReason: resolutionReason).ToString();
-                await context.Response.Body.WriteAsync(buffer: translated, cancellationToken: context.RequestAborted);
-
                 capturedResponseBytes = translated.Length <= UpstreamResponseWriter.MaxCapturedResponseBytes
                     ? translated
                     : translated[..UpstreamResponseWriter.MaxCapturedResponseBytes];
+
+                try
+                {
+                    await clientBody.WriteAsync(buffer: translated, cancellationToken: context.RequestAborted);
+                }
+                catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
+                {
+                    // A client that left mid-write fails open, as the streaming path does: Bedrock has already
+                    // answered (and billed), so telemetry still runs and the capture stores the response as missing.
+                    _logger.LogWarning(exception: ex,
+                        message:
+                        "Response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+                    capture?.MarkInterrupted();
+                }
 
                 // Only worth the ~64KB tail-window allocation when capturedResponseBytes above actually
                 // lost data - a response that fits within the cap is already fully captured.
@@ -242,13 +264,26 @@ internal sealed class BedrockInvocationHandler
         _circuitBreaker.RecordSuccess(circuitTarget);
         var totalDurationMs = stopwatch.ElapsedMilliseconds;
 
+        // Finish the response now, as the HTTP path does, so the bookkeeping below - SQLite telemetry and, with
+        // session capture on, waiting for the capture pump to flush its spools to disk - never delays the
+        // client's end of stream. Best-effort: a client that already disconnected must not become a proxy error.
+        try
+        {
+            await context.Response.CompleteAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(exception: ex,
+                message: "Completing the response early failed; telemetry persistence continues.");
+        }
+
         try
         {
             // Bedrock's native tap is out of scope (docs/router/openai-format-usage-accuracy-plan.md §4.2):
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
-            await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
+            var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
                 requestedModelName: requestedModelName, isFallback: isFallback, telemetryShapeProvider: "openai",
                 rewrittenRequestBody: rewrittenBody, capturedResponseBytes: capturedResponseBytes, null,
                 isStreaming: isStreamingRequest, latencyToHeadersMs: latencyToHeadersMs,
@@ -258,6 +293,17 @@ internal sealed class BedrockInvocationHandler
                 propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
                 untrainedBaselineModel: untrainedBaselineModel,
                 untrainedBaselinePredictedScore: untrainedBaselinePredictedScore);
+
+            // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
+            if (publishedTurn.TelemetryFailure is { } telemetryFailure)
+                _logger.LogDebug(exception: telemetryFailure,
+                    message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
+
+            if (capture is not null)
+                await capture.SubmitAsync(
+                    turn: publishedTurn, context: context,
+                    telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
+                        clientShapeBytes: capturedResponseBytes, nativeBytes: null, tailScanner: tailScanner));
         }
         catch (Exception ex)
         {
@@ -269,6 +315,23 @@ internal sealed class BedrockInvocationHandler
     }
 
     /// <summary>
+    /// Starts the #165 capture of an answered Bedrock turn: records the body sent to Bedrock as the
+    /// provider-side request and returns the stream the response must be written to. Called once the SDK has
+    /// accepted the call, so a candidate that fails over before answering captures nothing.
+    /// </summary>
+    /// <param name="capture">The capture, or <see langword="null"/> when capture is off.</param>
+    /// <param name="context">The request being served.</param>
+    /// <param name="nativeRequestBody">The translated body sent to Bedrock.</param>
+    /// <returns>The client's response body, wrapped to feed the capture when one is active.</returns>
+    private static Stream BeginCapture(TurnCapture? capture, HttpContext context, byte[] nativeRequestBody)
+    {
+        if (capture is null) return context.Response.Body;
+
+        capture.SetProviderRequest(nativeRequestBody);
+        return capture.BeginResponse(clientBody: context.Response.Body);
+    }
+
+    /// <summary>
     /// Translates a Bedrock response stream chunk-by-chunk to the client while capturing (up to
     /// <paramref name="captureCap"/>) what was sent, mirroring <c>TranslateAndCaptureStreamAsync</c>'s role
     /// for the HTTP forwarding path but driven by Bedrock's own <see cref="ResponseStream"/> event
@@ -276,7 +339,7 @@ internal sealed class BedrockInvocationHandler
     /// </summary>
     private async Task<(byte[] Captured, IncrementalUsageScanner? TailScanner)> TranslateAndCaptureBedrockStreamAsync(
         IBedrockPayloadTranslator translator, ResponseStream body, Stream destination, int captureCap,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, TurnCapture? turnCapture)
     {
         var chunkTranslator = translator.CreateBedrockStreamChunkTranslator();
         using var capture = new MemoryStream();
@@ -314,7 +377,19 @@ internal sealed class BedrockInvocationHandler
         {
             await foreach (var streamEvent in body.WithCancellation(cancellationToken))
                 if (streamEvent is PayloadPart part)
-                    await EmitAsync(chunkTranslator.TranslateChunk(part.Bytes.ToArray()));
+                {
+                    var payload = part.Bytes.ToArray();
+
+                    // The provider-side response is the event payloads as Bedrock sent them, one per line:
+                    // the event stream's binary framing is the SDK's, so the payloads are what is left to store.
+                    if (turnCapture is not null)
+                    {
+                        turnCapture.RecordProviderResponse(payload);
+                        turnCapture.RecordProviderResponse(NewLine);
+                    }
+
+                    await EmitAsync(chunkTranslator.TranslateChunk(payload));
+                }
 
             // A non-PayloadPart event (e.g. a future AWS-added event kind this codebase doesn't yet
             // know about) carries nothing client-visible today - skipped rather than guessed at.
@@ -328,6 +403,7 @@ internal sealed class BedrockInvocationHandler
             _logger.LogWarning(exception: ex,
                 message:
                 "Bedrock Claude streaming response terminated by an error event; the client stream was truncated.");
+            turnCapture?.MarkInterrupted();
         }
         catch (ModelStreamErrorException ex)
         {
@@ -336,12 +412,14 @@ internal sealed class BedrockInvocationHandler
             _logger.LogWarning(exception: ex,
                 message:
                 "Bedrock streaming response terminated by a ModelStreamErrorException; the client stream was truncated.");
+            turnCapture?.MarkInterrupted();
         }
         catch (Exception ex) when (ProxyMiddleware.IsStreamAbort(ex))
         {
             _logger.LogWarning(exception: ex,
                 message:
                 "Streaming response to the client was interrupted (client disconnected, or the connection was aborted); the forward was terminated early.");
+            turnCapture?.MarkInterrupted();
         }
 
         return (capture.ToArray(), tailScanner);

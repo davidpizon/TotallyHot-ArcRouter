@@ -67,6 +67,26 @@ internal static class UpstreamRequestBuilder
         ResolvedModelRoute route,
         IPayloadTranslator? translator,
         byte[] rewrittenBody,
+        IReadOnlyList<string>? droppedBetaPrefixes = null) =>
+        BuildWithBody(context: context, route: route, translator: translator, rewrittenBody: rewrittenBody,
+            droppedBetaPrefixes: droppedBetaPrefixes).Message;
+
+    /// <summary>
+    /// Builds the same message as <see cref="Build"/> and also returns the bytes it sends, so session capture
+    /// (#165) can record the provider-facing request without reading the content back and copying it again.
+    /// The content is not readable once the send has completed it, so the bytes must be taken here.
+    /// </summary>
+    /// <param name="context">The client request, supplying method, headers and query.</param>
+    /// <param name="route">The resolved target the request is addressed to.</param>
+    /// <param name="translator">The provider's translator, or <see langword="null"/> for a pass-through route.</param>
+    /// <param name="rewrittenBody">The client body after model rewriting, before any provider translation.</param>
+    /// <param name="droppedBetaPrefixes">See <see cref="Build"/>.</param>
+    /// <returns>The message (the caller must dispose it) and the body bytes it carries.</returns>
+    internal static (HttpRequestMessage Message, byte[] ForwardBody) BuildWithBody(
+        HttpContext context,
+        ResolvedModelRoute route,
+        IPayloadTranslator? translator,
+        byte[] rewrittenBody,
         IReadOnlyList<string>? droppedBetaPrefixes = null)
     {
         var (targetUri, forwardBody) = ResolveTargetAndBody(context: context, route: route, translator: translator,
@@ -104,7 +124,7 @@ internal static class UpstreamRequestBuilder
             if (value is not null) requestMessage.Headers.TryAddWithoutValidation(name: headerName, value: value);
         }
 
-        return requestMessage;
+        return (requestMessage, forwardBody);
     }
 
     /// <summary>

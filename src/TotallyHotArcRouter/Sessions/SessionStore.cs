@@ -256,22 +256,53 @@ public sealed class SessionStore
     {
         ArgumentNullException.ThrowIfNull(archiveSessionIds);
 
+        return DeleteSessionsCore(archiveSessionIds, unchangedSince: null);
+    }
+
+    /// <summary>
+    /// Deletes sessions, optionally only those still exactly as a caller saw them. With
+    /// <paramref name="unchangedSince"/> each session is looked at again under the same per-session gate an
+    /// append holds, and one that gained a turn since the caller's snapshot is skipped, so a decision made from a
+    /// stale list never deletes a conversation that has just been written to.
+    /// </summary>
+    /// <param name="archiveSessionIds">The sessions to delete; unknown ids are ignored.</param>
+    /// <param name="unchangedSince">The rows the caller based its choice on, keyed by session id; <see langword="null"/> deletes unconditionally.</param>
+    /// <returns>What was deleted, and whether the log was truncated and the key rotated.</returns>
+    private SessionDeletionResult DeleteSessionsCore(
+        IReadOnlyCollection<Guid> archiveSessionIds, IReadOnlyDictionary<Guid, SessionFileRow>? unchangedSince)
+    {
         var deletedFiles = new List<string>();
         _rotationLock.EnterReadLock();
         try
         {
             var ids = archiveSessionIds.Distinct().ToList();
+
             // Mark before the first row removal: if rotation fails (or the process dies) after the rows
-            // are gone, retrying with the same ids must still finish the key retirement.
-            if (ids.Exists(id => _index.TryGetSession(id) is not null))
+            // are gone, retrying with the same ids must still finish the key retirement. A conditional delete
+            // cannot know up front whether anything will qualify, so it marks just before its first removal.
+            var marked = false;
+            if (unchangedSince is null && ids.Exists(id => _index.TryGetSession(id) is not null))
             {
                 _masterKeys.RequireRotation();
+                marked = true;
             }
 
             foreach (var id in ids)
             {
                 lock (_sessionGates.GetOrAdd(id, static _ => new object()))
                 {
+                    if (unchangedSince is not null)
+                    {
+                        var current = _index.TryGetSession(id);
+                        if (current is null || !IsUnchanged(current, unchangedSince[id])) continue;
+
+                        if (!marked)
+                        {
+                            _masterKeys.RequireRotation();
+                            marked = true;
+                        }
+                    }
+
                     if (_index.DeleteSession(id) is { } fileName) deletedFiles.Add(fileName);
                 }
 
@@ -302,6 +333,81 @@ public sealed class SessionStore
             deletedFiles.Count, walTruncated);
         return new SessionDeletionResult(deletedFiles.Count, walTruncated, MasterKeyRotated: true);
     }
+
+    /// <summary>Lists every session in the index, oldest first.</summary>
+    /// <returns>All session rows.</returns>
+    public IReadOnlyList<SessionFileRow> ListSessions() => _index.ListSessions();
+
+    /// <summary>
+    /// Deletes every session, which is what the Transcription Capture "Clear" action means: no conversation
+    /// text is left, and the master key rotates so no copy of a deleted session key can be unwrapped.
+    /// </summary>
+    /// <returns>What was deleted, and whether the deletion is final.</returns>
+    public SessionDeletionResult DeleteAllSessions() =>
+        DeleteSessions(_index.ListSessions().Select(row => row.ArchiveSessionId).ToList());
+
+    /// <summary>
+    /// Applies ADR-0019's retention rule: keeps the newest <paramref name="maxTurns"/> turns by deleting whole
+    /// sessions, oldest first (by last turn). The newest session is never deleted, even when it alone exceeds
+    /// the limit, because it may be the one still being written and deleting it would empty the store.
+    /// </summary>
+    /// <param name="maxTurns">
+    /// The most turns to keep (the Sample Size setting). A value of zero or less is not a retention policy but a
+    /// misconfiguration (the setting's own minimum is 500), so it deletes nothing, like the transcript retention
+    /// sweep treats a non-positive age.
+    /// </param>
+    /// <returns>What was deleted; zero sessions when the store is within the limit.</returns>
+    public SessionDeletionResult EnforceRetention(int maxTurns) => DeleteUnchanged(SelectExpiredSessions(maxTurns));
+
+    /// <summary>
+    /// Picks the sessions retention would delete: the oldest, by last turn, until what remains fits in
+    /// <paramref name="maxTurns"/>. This is a snapshot; <see cref="DeleteUnchanged"/> checks each one again
+    /// before deleting it.
+    /// </summary>
+    /// <param name="maxTurns">The most turns to keep; zero or less selects nothing.</param>
+    /// <returns>The rows the choice was based on, oldest first.</returns>
+    internal IReadOnlyList<SessionFileRow> SelectExpiredSessions(int maxTurns)
+    {
+        if (maxTurns <= 0) return [];
+
+        var sessions = _index.ListSessions()
+            .OrderBy(row => row.LastTurnAtUtc ?? row.CreatedAtUtc)
+            .ThenBy(row => row.CreatedAtUtc)
+            .ToList();
+        var total = sessions.Sum(row => (long)row.TurnCount);
+        var expired = new List<SessionFileRow>();
+
+        // Stops one short of the end so the newest session survives.
+        for (var i = 0; i < sessions.Count - 1 && total > maxTurns; i++)
+        {
+            expired.Add(sessions[i]);
+            total -= sessions[i].TurnCount;
+        }
+
+        return expired;
+    }
+
+    /// <summary>
+    /// Deletes the given sessions unless one has gained a turn since it was selected. A session appended to after
+    /// the snapshot is no longer an old one, and deleting it would delete the turn just written.
+    /// </summary>
+    /// <param name="candidates">The rows <see cref="SelectExpiredSessions"/> returned.</param>
+    /// <returns>What was deleted; zero sessions when none was still unchanged.</returns>
+    internal SessionDeletionResult DeleteUnchanged(IReadOnlyList<SessionFileRow> candidates)
+    {
+        if (candidates.Count == 0) return new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false);
+
+        return DeleteSessionsCore(
+            candidates.Select(row => row.ArchiveSessionId).ToList(),
+            candidates.ToDictionary(row => row.ArchiveSessionId));
+    }
+
+    /// <summary>Reports whether a session still has the turn count and last turn it had when it was selected.</summary>
+    /// <param name="current">The session as it is now.</param>
+    /// <param name="snapshot">The session as it was when selected.</param>
+    /// <returns><see langword="true"/> when nothing has been appended since.</returns>
+    private static bool IsUnchanged(SessionFileRow current, SessionFileRow snapshot) =>
+        current.TurnCount == snapshot.TurnCount && current.LastTurnAtUtc == snapshot.LastTurnAtUtc;
 
     /// <summary>
     /// Replaces the master key: stages a new one, re-wraps every session key in a single transaction, then
