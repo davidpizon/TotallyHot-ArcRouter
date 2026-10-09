@@ -169,6 +169,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.CommandText = """
                               SELECT id FROM request_transcripts
                               WHERE memory_entry_id IS NULL AND score IS NOT NULL
+                                AND archive_turn_id IS NOT NULL AND prompt_text_length > 0
                               ORDER BY id ASC
                               LIMIT $limit;
                               """;

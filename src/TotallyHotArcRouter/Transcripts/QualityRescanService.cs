@@ -180,10 +180,19 @@ public sealed class QualityRescanService : BackgroundService
     {
         var record = await _transcriptStore.GetTranscriptAsync(id: transcriptId, cancellationToken: stoppingToken)
             .ConfigureAwait(false);
-        if (record?.ResponseText is not { Length: > 0 } responseText)
-            // Selected on a positive response length, so this means the extracts are gone or the row was
-            // deleted between the sweep's select and this read. Nothing to stamp; the row may not exist.
+        if (record is null) return false;
+
+        if (record.ResponseText is not { Length: > 0 } responseText)
+        {
+            // The sweep selects on a stored response length, but the words now live in a session file. A row
+            // from before capture, one captured with its reply left out, or one whose file is unreadable has
+            // none to grade. Stamp it with a null score: left unstamped it would head every sweep forever.
+            await _transcriptStore
+                .MarkQualityRescannedAsync(transcriptId: transcriptId, scorerVersion: _qualityOptions.ScorerVersion,
+                    null, cancellationToken: stoppingToken)
+                .ConfigureAwait(false);
             return false;
+        }
 
         var request = _extractor.Extract(new SignalExtractionContext(
             ResponseText: responseText,

@@ -13,9 +13,9 @@ public sealed record SessionExtracts(string? NewestUserMessage, string? Response
     /// <summary>Parses the Extracts JSON written at capture. Unknown fields are ignored.</summary>
     /// <param name="utf8Json">The decrypted Extracts body.</param>
     /// <returns>The two text fields, either of which may be null.</returns>
-    public static SessionExtracts Parse(ReadOnlySpan<byte> utf8Json)
+    public static SessionExtracts Parse(ReadOnlyMemory<byte> utf8Json)
     {
-        using var document = JsonDocument.Parse(utf8Json.ToArray());
+        using var document = JsonDocument.Parse(utf8Json);
         var root = document.RootElement;
         return new SessionExtracts(Text(root, "newest_user_message"), Text(root, "response_text"));
     }

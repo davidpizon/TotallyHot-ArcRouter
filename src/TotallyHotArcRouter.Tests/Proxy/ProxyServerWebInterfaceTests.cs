@@ -185,9 +185,8 @@ public sealed class ProxyServerWebInterfaceTests
             Assert.Equal(expected: 500, actual: response.Transcripts.Count);
             Assert.True(response.HasMore);
             Assert.InRange(actual: response.CalculateSize(), low: 0, high: TelemetryGrpcService.MaxListResponseBytes);
-            Assert.True(response.Transcripts[0].PromptTruncated);
-            Assert.Equal(expected: TextTruncator.Truncate(hugePrompt), actual: response.Transcripts[0].PromptText);
-            Assert.All(response.Transcripts, t => Assert.True(t.ResponseTruncated));
+            // The list is metadata only (#165 phase 2): no text rides along, so the 4 MiB prompt costs nothing here.
+            Assert.All(response.Transcripts, t => Assert.False(t.HasPromptText || t.HasResponseText));
         }
         finally
         {

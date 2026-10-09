@@ -35,7 +35,9 @@ public interface ITranscriptStore
 
     /// <summary>
     /// Loads up to <paramref name="limit"/> transcript IDs where <c>memory_entry_id IS NULL AND score IS NOT NULL</c>,
-    /// ordered by <c>id ASC</c> (oldest first), for embedding backfill by Phase T1d. Returns an empty list if
+    /// ordered by <c>id ASC</c> (oldest first), for embedding backfill by Phase T1d. Only rows with a session-file
+    /// turn and a stored prompt length are returned: a row with no text to embed would otherwise head every batch
+    /// forever (#165 phase 2). Returns an empty list if
     /// transcript capture is disabled or no unembedded scored rows exist.
     /// </summary>
     /// <param name="limit">The maximum number of row ids to return.</param>

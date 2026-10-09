@@ -325,7 +325,6 @@ public sealed class SessionFile : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
 
-            byte[]? found = null;
             ulong ordinal = 0;
             try
             {
@@ -345,11 +344,12 @@ public sealed class SessionFile : IDisposable
                     var take = kind == SessionBodyKind.Extracts && turnId == archiveTurnId && flags != FlagMissing;
                     if (!take)
                     {
-                        if (!SkipBody()) return found;
+                        if (!SkipBody()) return null;
                     }
                     else
                     {
-                        found = ReadCompressedBody(header, ordinal);
+                        // A turn has exactly one Extracts frame, so nothing after it can match.
+                        return ReadCompressedBody(header, ordinal);
                     }
 
                     ordinal++;
@@ -360,7 +360,7 @@ public sealed class SessionFile : IDisposable
                 _stream.Seek(0, SeekOrigin.End);
             }
 
-            return found;
+            return null;
         }
     }
 

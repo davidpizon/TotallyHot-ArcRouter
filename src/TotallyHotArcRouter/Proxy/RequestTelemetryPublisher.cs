@@ -264,7 +264,8 @@ internal sealed class RequestTelemetryPublisher
                 dimBestModel: dimBestModel,
                 untrainedBaselineModel: untrainedBaselineModel,
                 untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
-                archive: resolveArchive?.Invoke(sessionId)).ConfigureAwait(false);
+                sessionId: sessionId,
+                resolveArchive: resolveArchive).ConfigureAwait(false);
 
             await PublishTelemetryEventAsync(
                 sessionId: sessionId,
@@ -748,7 +749,8 @@ internal sealed class RequestTelemetryPublisher
         string? dimBestModel,
         string? untrainedBaselineModel,
         double? untrainedBaselinePredictedScore,
-        ArchiveBinding? archive)
+        string sessionId,
+        Func<string, ArchiveBinding>? resolveArchive)
     {
         // The transcript row is metadata only (#165 phase 2). Text lives in the session file. The insert
         // follows TranscriptOptions.Enabled inside the store, the same toggle as capture, and no longer
@@ -758,6 +760,9 @@ internal sealed class RequestTelemetryPublisher
         if (_transcriptStore is not null)
             try
             {
+                // Resolved here, inside the try, so a session store that cannot open costs this transcript row and
+                // nothing else: the live telemetry event after this call still publishes.
+                var archive = resolveArchive?.Invoke(sessionId);
                 await _transcriptStore.InsertAsync(
                     record: new TranscriptRecord(
                         0,

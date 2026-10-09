@@ -389,7 +389,19 @@ public sealed class SessionStore : ISessionExtractReader
             result = new SessionDeletionResult(deletedFiles.Count, walTruncated, MasterKeyRotated: true);
         }
 
-        if (deletedIds.Count > 0) SessionsDeleted?.Invoke(deletedIds);
+        if (deletedIds.Count > 0 && SessionsDeleted is { } onDeleted)
+        {
+            // The files are already gone, so a failing cleanup must not turn a completed delete into an error.
+            try
+            {
+                onDeleted(deletedIds);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Transcript rows for {Count} deleted sessions could not be removed.",
+                    deletedIds.Count);
+            }
+        }
 
         return result;
     }

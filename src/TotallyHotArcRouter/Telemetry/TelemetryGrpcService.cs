@@ -228,7 +228,7 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
     private const int MaxTurnTextIds = 50;
 
     /// <inheritdoc />
-    public override Task<GetTurnTextsResponse> GetTurnTexts(GetTurnTextsRequest request, ServerCallContext context)
+    public override async Task<GetTurnTextsResponse> GetTurnTexts(GetTurnTextsRequest request, ServerCallContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (_contentGate is not null) ContentGateHooks.RequireTurnTexts(_contentGate, context);
@@ -243,12 +243,11 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         {
             TranscriptCaptureEnabled = _transcriptOptions.CurrentValue.Enabled
         };
-        if (!response.TranscriptCaptureEnabled) return Task.FromResult(response);
+        if (!response.TranscriptCaptureEnabled) return response;
 
-        var texts = _transcriptStore
+        var texts = await _transcriptStore
             .LoadTurnTextsAsync(request.TranscriptIds, context.CancellationToken)
-            .GetAwaiter()
-            .GetResult();
+            .ConfigureAwait(false);
 
         foreach (var text in texts)
         {
@@ -270,7 +269,7 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             response.Texts.Add(row);
         }
 
-        return Task.FromResult(response);
+        return response;
     }
 
     /// <summary>
