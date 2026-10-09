@@ -11,20 +11,39 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// </summary>
 /// <param name="store">The lazily opened store.</param>
 /// <param name="database">Names where the session folder lives, beside <c>transcripts.db</c>.</param>
-public sealed class SessionMaintenance(Lazy<SessionStore> store, TranscriptDatabase database)
+/// <param name="writer">
+/// The capture writer. <see cref="DeleteAllAsync"/> lets it finish the turns already queued before deleting, so
+/// a turn that completed just before Clear is not written just after it. Optional: without one nothing is awaited.
+/// </param>
+/// <param name="drainTimeout">The longest <see cref="DeleteAllAsync"/> waits for queued turns; five seconds when omitted.</param>
+public sealed class SessionMaintenance(
+    Lazy<SessionStore> store,
+    TranscriptDatabase database,
+    SessionCaptureWriter? writer = null,
+    TimeSpan? drainTimeout = null)
 {
     private static readonly SessionDeletionResult NothingToDelete =
         new(0, WalTruncated: true, MasterKeyRotated: false);
+
+    private static readonly TimeSpan DefaultDrainTimeout = TimeSpan.FromSeconds(5);
 
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);
 
     /// <summary>
     /// Deletes every session, so the Clear action leaves no conversation text on disk. The master key rotates
-    /// afterwards, which is what makes the deletion final.
+    /// afterwards, which is what makes the deletion final. Turns already handed to the capture writer are written
+    /// first (within the drain timeout) and then deleted with the rest; a request still being relayed when this
+    /// runs finishes after it and is captured as new data.
     /// </summary>
     /// <returns>What was deleted; zero sessions and a final result when nothing was ever captured.</returns>
-    public SessionDeletionResult DeleteAll() =>
-        Directory.Exists(_folder) ? store.Value.DeleteAllSessions() : NothingToDelete;
+    public async Task<SessionDeletionResult> DeleteAllAsync()
+    {
+        if (!Directory.Exists(_folder)) return NothingToDelete;
+
+        if (writer is not null) await writer.WaitForIdleAsync(drainTimeout ?? DefaultDrainTimeout).ConfigureAwait(false);
+
+        return store.Value.DeleteAllSessions();
+    }
 
     /// <summary>
     /// Keeps the newest <paramref name="maxTurns"/> turns by deleting whole oldest sessions (ADR-0019,

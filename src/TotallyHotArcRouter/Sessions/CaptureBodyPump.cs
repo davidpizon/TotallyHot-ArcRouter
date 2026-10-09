@@ -30,8 +30,8 @@ internal readonly record struct CaptureWork(
     TaskCompletionSource<SessionBodySpool?>? Completion);
 
 /// <summary>
-/// Moves every captured body's compression, encryption and disk writes off the proxy's relay path (#165 review
-/// finding): a tee on the client's request or response hands its bytes to this pump, which has one worker
+/// Moves every captured body's compression, encryption and disk writes off the proxy's relay path: a tee on
+/// the client's request or response hands its bytes to this pump, which has one worker
 /// that feeds the spools in order, so the relay pays a memory copy and never waits on the disk. The queue is
 /// bounded by bytes. A body that would push it over <see cref="SessionCaptureOptions.PumpMaxQueuedBytes"/>
 /// is abandoned and recorded as missing, because slowing the client's stream is the one thing capture must
@@ -94,7 +94,17 @@ public sealed class CaptureBodyPump : IHostedService, IDisposable
     {
         // Completing the channel lets the worker drain what is queued and then end; nothing new is accepted.
         _channel.Writer.TryComplete();
-        if (_worker is not null) await _worker.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (_worker is null) return;
+
+        try
+        {
+            await _worker.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The host's shutdown deadline passed. Like a BackgroundService, stop waiting without failing the
+            // host's stop; the worker keeps draining what is queued.
+        }
     }
 
     /// <inheritdoc/>
@@ -105,10 +115,16 @@ public sealed class CaptureBodyPump : IHostedService, IDisposable
     /// <returns><see langword="false"/> when queuing it would exceed the limit, in which case nothing is counted.</returns>
     internal bool TryReserve(int bytes)
     {
-        if (Interlocked.Add(ref _queuedBytes, bytes) <= _maxQueuedBytes) return true;
+        // Compare-and-swap rather than add-then-undo: a refused caller must not inflate the count even for a
+        // moment, or a concurrent caller whose bytes would fit is refused too and loses an unrelated body.
+        while (true)
+        {
+            var current = Volatile.Read(ref _queuedBytes);
+            var next = current + bytes;
+            if (next > _maxQueuedBytes) return false;
 
-        Interlocked.Add(ref _queuedBytes, -bytes);
-        return false;
+            if (Interlocked.CompareExchange(ref _queuedBytes, next, current) == current) return true;
+        }
     }
 
     /// <summary>Gives back bytes counted by <see cref="TryReserve"/>.</summary>

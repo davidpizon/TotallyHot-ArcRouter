@@ -109,7 +109,8 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     /// </param>
     /// <param name="sessionMaintenance">
     /// Deletes the captured session files when the operator clears captured data (#165). Optional so tests that
-    /// never capture can omit it; production always supplies it.
+    /// never capture can omit it. The proxy's inner host has its own container, so production supplies it through
+    /// <see cref="Proxy.RouterSettingsAdminDependencies"/>, not through the application's container.
     /// </param>
     public RouterSettingsAdminGrpcService(
         RouterSettingsStore store,
@@ -244,7 +245,7 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
         // #165: the full conversation text lives in the encrypted session files, so Clear deletes those too,
         // and rotates the master key so no copy of a deleted session key can be unwrapped. A failure leaves
         // the text on disk, which is reported exactly like a body file that could not be removed.
-        if (!ClearSessions()) deletionFinal = false;
+        if (!await ClearSessionsAsync().ConfigureAwait(false)) deletionFinal = false;
 
         // #184 phase 3: close the body sink, delete every bodies-*.log, reopen. Diagnostic logs stay.
         // A locked leftover is reported through the same deletion_final flag the UI already surfaces for
@@ -263,13 +264,13 @@ public sealed class RouterSettingsAdminGrpcService : Contract.RouterSettingsAdmi
     /// <see cref="SessionMaintenance"/> was supplied or nothing was ever captured.
     /// </summary>
     /// <returns><see langword="true"/> when the sessions are gone and the deletion is final.</returns>
-    private bool ClearSessions()
+    private async Task<bool> ClearSessionsAsync()
     {
         if (_sessionMaintenance is null) return true;
 
         try
         {
-            var result = _sessionMaintenance.DeleteAll();
+            var result = await _sessionMaintenance.DeleteAllAsync().ConfigureAwait(false);
             if (result.DeletedSessions > 0)
                 _logger.LogInformation(message: "Session capture cleared: SessionsDeleted={SessionsDeleted}",
                     result.DeletedSessions);

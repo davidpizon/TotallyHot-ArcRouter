@@ -71,6 +71,9 @@ public sealed class CaptureBodyPumpTests : IDisposable
         var body = pump.CreateBody(NewSpool);
         body.Write("before"u8);
 
+        // Wait for the worker to create the spool, so Release has a real file to delete; releasing at once would
+        // usually skip the write altogether and pass without exercising the deletion.
+        await WaitUntilAsync(() => SpoolFiles().Length == 1);
         body.Release();
         body.Write("after"u8);
         var spool = await body.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
@@ -78,6 +81,51 @@ public sealed class CaptureBodyPumpTests : IDisposable
 
         Assert.Null(spool);
         Assert.Empty(SpoolFiles());
+    }
+
+    /// <summary>A write larger than the pool's biggest buffer is split into chunks and still completes as one spool.</summary>
+    [Fact]
+    public async Task LargeWrite_IsSplitIntoChunksAndStillCompletes()
+    {
+        using var pump = await StartAsync();
+        var body = pump.CreateBody(NewSpool);
+
+        body.Write(new byte[3 * 1024 * 1024 + 17]);
+        var spool = await body.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        await pump.StopAsync(CancellationToken.None);
+
+        Assert.NotNull(spool);
+        Assert.True(spool.IsComplete);
+        spool.Dispose();
+    }
+
+    /// <summary>
+    /// A caller refused for being over the limit must not count against another caller whose bytes would fit.
+    /// Nine of ten bytes are held; one thread keeps asking for five (always refused) while another asks for one
+    /// (always fits), so any refusal of the second is the first one's transient count leaking into it.
+    /// </summary>
+    [Fact]
+    public async Task TryReserve_ARefusedCallerNeverCostsAnotherItsBytes()
+    {
+        using var pump = await StartAsync(new SessionCaptureOptions { PumpMaxQueuedBytes = 10 });
+        Assert.True(pump.TryReserve(9));
+        using var stop = new CancellationTokenSource();
+        var refuser = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested) pump.TryReserve(5);
+        });
+
+        var refusedThatShouldFit = 0;
+        for (var i = 0; i < 200_000; i++)
+        {
+            if (pump.TryReserve(1)) pump.Unreserve(1);
+            else refusedThatShouldFit++;
+        }
+
+        await stop.CancelAsync();
+        await refuser;
+
+        Assert.Equal(0, refusedThatShouldFit);
     }
 
     /// <summary>A write that would push the queue past its byte limit drops that body, and nothing is stored as a prefix.</summary>
@@ -166,6 +214,14 @@ public sealed class CaptureBodyPumpTests : IDisposable
     }
 
     private SessionBodySpool NewSpool() => SessionBodySpool.Create(_folder);
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (!condition() && DateTime.UtcNow < deadline) await Task.Delay(10);
+
+        Assert.True(condition(), "The condition was not met in time.");
+    }
 
     private string[] SpoolFiles() =>
         Directory.Exists(_folder) ? Directory.GetFiles(_folder, "*" + SessionBodySpool.FileExtension) : [];

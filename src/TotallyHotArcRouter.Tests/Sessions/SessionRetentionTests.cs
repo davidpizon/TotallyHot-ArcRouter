@@ -143,7 +143,7 @@ public sealed class SessionRetentionTests : IDisposable
 
     /// <summary>A router that never captured a turn has no folder, so neither operation opens the store.</summary>
     [Fact]
-    public void Maintenance_WhenNothingWasEverCaptured_DoesNotOpenTheStore()
+    public async Task Maintenance_WhenNothingWasEverCaptured_DoesNotOpenTheStore()
     {
         var neverCreated = new TranscriptDatabase(Options.Create(new StorageOptions
         {
@@ -158,13 +158,46 @@ public sealed class SessionRetentionTests : IDisposable
             }),
             neverCreated);
 
-        var all = maintenance.DeleteAll();
+        var all = await maintenance.DeleteAllAsync();
         var retained = maintenance.EnforceRetention(10);
 
         Assert.False(opened);
         Assert.Equal(0, all.DeletedSessions);
         Assert.True(all.WalTruncated);
         Assert.Equal(0, retained.DeletedSessions);
+    }
+
+    /// <summary>
+    /// A turn that finished just before Clear sits in the capture writer's queue; Clear lets it land first and
+    /// then deletes it, instead of deleting around it and leaving the newest conversation on disk.
+    /// </summary>
+    [Fact]
+    public async Task DeleteAllAsync_LetsTurnsAlreadyQueuedLandFirst()
+    {
+        Directory.CreateDirectory(_folder);
+        using var gate = new ManualResetEventSlim();
+
+        // Opening the store blocks the writer's consumer, so the turn stays queued while Clear starts.
+        var lazy = new Lazy<SessionStore>(() =>
+        {
+            gate.Wait();
+            return _store;
+        });
+        using var writer = new SessionCaptureWriter(
+            lazy, Options.Create(new SessionCaptureOptions()), NullLogger<SessionCaptureWriter>.Instance);
+        await writer.StartAsync(CancellationToken.None);
+        var maintenance = new SessionMaintenance(lazy, _database, writer, TimeSpan.FromSeconds(30));
+        await writer.EnqueueAsync(new SessionCaptureItem("queued", Turn(Start)));
+
+        // On a pool thread: should the wait ever be skipped, Clear would block opening the store behind the writer,
+        // and the test must then fail instead of hanging on the gate it releases itself.
+        var clear = Task.Run(() => maintenance.DeleteAllAsync());
+        await Task.Delay(100);
+        gate.Set();
+        await clear.WaitAsync(TimeSpan.FromSeconds(30));
+        await writer.StopAsync(CancellationToken.None);
+
+        Assert.Empty(_store.ListSessions());
     }
 
     /// <summary>The retention service reads the Sample Size live and trims to it.</summary>

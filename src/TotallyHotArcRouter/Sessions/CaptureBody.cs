@@ -11,6 +11,13 @@ namespace TotallyHot.ArcRouter.Sessions;
 /// </summary>
 public sealed class CaptureBody
 {
+    /// <summary>
+    /// The most bytes copied into one queued item. A larger write is split, so every rented buffer stays within
+    /// what <see cref="ArrayPool{T}.Shared"/> actually pools (it allocates and drops anything over 1 MiB). It is
+    /// also above the proxy's 80 KiB relay buffer, so a relay chunk is never split.
+    /// </summary>
+    private const int MaxChunkBytes = 128 * 1024;
+
     private readonly CaptureBodyPump _pump;
     private readonly Func<SessionBodySpool> _createSpool;
 
@@ -41,21 +48,13 @@ public sealed class CaptureBody
     /// <param name="bytes">The next bytes exactly as sent or relayed; copied before this returns.</param>
     public void Write(ReadOnlySpan<byte> bytes)
     {
-        if (_dropped || bytes.IsEmpty) return;
-
-        if (!_pump.TryReserve(bytes.Length))
+        while (!bytes.IsEmpty && !_dropped)
         {
-            Release();
-            return;
+            var take = Math.Min(bytes.Length, MaxChunkBytes);
+            if (!QueueChunk(bytes[..take])) return;
+
+            bytes = bytes[take..];
         }
-
-        var buffer = ArrayPool<byte>.Shared.Rent(bytes.Length);
-        bytes.CopyTo(buffer);
-        if (_pump.Post(new CaptureWork(this, CaptureOp.Write, buffer, bytes.Length, null))) return;
-
-        ArrayPool<byte>.Shared.Return(buffer);
-        _pump.Unreserve(bytes.Length);
-        _dropped = true;
     }
 
     /// <summary>
@@ -103,6 +102,36 @@ public sealed class CaptureBody
         }
     }
 
+    /// <summary>
+    /// Copies one chunk into a rented buffer and queues it. The queue's byte budget is charged first, so a chunk
+    /// that would overflow it drops the whole body instead of queuing a prefix.
+    /// </summary>
+    /// <param name="chunk">The chunk, at most <see cref="MaxChunkBytes"/> long.</param>
+    /// <returns><see langword="false"/> when the body was dropped and no more should be queued.</returns>
+    private bool QueueChunk(ReadOnlySpan<byte> chunk)
+    {
+        if (!_pump.TryReserve(chunk.Length))
+        {
+            Release();
+            return false;
+        }
+
+        var buffer = ArrayPool<byte>.Shared.Rent(chunk.Length);
+        chunk.CopyTo(buffer);
+        if (_pump.Post(new CaptureWork(this, CaptureOp.Write, buffer, chunk.Length, null))) return true;
+
+        ReturnBuffer(buffer, chunk.Length);
+        _dropped = true;
+        return false;
+    }
+
+    /// <summary>
+    /// Feeds a queued chunk to the spool, creating the spool on the first one. A failure, or a spool that gave
+    /// up on its own (disk reserve, an unterminated secret match), drops the body. The chunk's buffer and byte
+    /// budget are always given back.
+    /// </summary>
+    /// <param name="buffer">The rented buffer holding the chunk.</param>
+    /// <param name="length">How many bytes of <paramref name="buffer"/> are valid.</param>
     private void ApplyWrite(byte[] buffer, int length)
     {
         try
@@ -119,46 +148,76 @@ public sealed class CaptureBody
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buffer);
-            _pump.Unreserve(length);
+            ReturnBuffer(buffer, length);
         }
     }
 
+    /// <summary>
+    /// Ends the body on the worker and always settles <paramref name="completion"/>: with the finished spool
+    /// when every earlier chunk was applied, or with <see langword="null"/> when the body was dropped or failed.
+    /// An empty body still gets a complete, empty spool, so it is stored as empty and not as missing.
+    /// </summary>
+    /// <param name="completion">Receives the finished spool, or <see langword="null"/>.</param>
     private void ApplyComplete(TaskCompletionSource<SessionBodySpool?> completion)
     {
+        SessionBodySpool? finished = null;
         try
         {
             if (!_dropped && !_completed)
             {
-                // An empty body still needs a (complete, empty) spool so it is stored as empty, not missing.
                 _spool ??= _createSpool();
                 if (_spool.TryComplete())
                 {
-                    var finished = _spool;
+                    finished = _spool;
                     _spool = null;
                     _completed = true;
-                    completion.SetResult(finished);
-                    return;
                 }
-
-                _dropped = true;
+                else
+                {
+                    _dropped = true;
+                }
             }
-
-            DisposeSpool();
-            completion.SetResult(null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _dropped = true;
             _pump.LogFailure(ex);
-            DisposeSpool();
-            completion.SetResult(null);
+        }
+        finally
+        {
+            // Whatever happened above, the caller is waiting on this and must hear back.
+            if (finished is null) DisposeSpool();
+            completion.TrySetResult(finished);
         }
     }
 
+    /// <summary>
+    /// Disposes the spool the worker still holds, if any, which deletes its file. A disposal that fails is logged
+    /// and swallowed, because the worker must go on to settle the caller's completion.
+    /// </summary>
     private void DisposeSpool()
     {
-        _spool?.Dispose();
+        var spool = _spool;
         _spool = null;
+        try
+        {
+            spool?.Dispose();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _pump.LogFailure(ex);
+        }
+    }
+
+    /// <summary>
+    /// Returns a chunk's buffer to the pool and gives its bytes back to the queue's budget. The buffer holds the
+    /// body before secrets were obscured, so it is cleared rather than left for the next renter.
+    /// </summary>
+    /// <param name="buffer">The rented buffer.</param>
+    /// <param name="length">How many bytes were charged for it.</param>
+    private void ReturnBuffer(byte[] buffer, int length)
+    {
+        ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+        _pump.Unreserve(length);
     }
 }

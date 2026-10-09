@@ -546,6 +546,14 @@ public sealed record RouterSettingsAdminDependencies(
     /// </summary>
     public required IOptionsMonitor<PortfolioGraderOptions> PortfolioGraderOptionsMonitor { get; init; }
 
+    /// <summary>
+    /// Deletes the captured session files when the operator presses Clear (#165, ADR-0019 "Deletion"). The
+    /// service is constructed in the proxy's inner host, which cannot see the application's container, so
+    /// without this it is silently absent there and Clear leaves the full conversation text on disk. Optional
+    /// within the group, like <see cref="EmbeddingMemory"/>: a host with no session capture supplies none.
+    /// </summary>
+    public Sessions.SessionMaintenance? SessionMaintenance { get; init; }
+
     /// <inheritdoc/>
     void IAdminServiceModule.Register(IServiceCollection services)
     {
@@ -557,6 +565,7 @@ public sealed record RouterSettingsAdminDependencies(
         services.AddSingleton(JudgeModelSelector);
         services.AddSingleton(TranscriptOptionsMonitor);
         services.AddSingleton(TranscriptStore);
+        if (SessionMaintenance is not null) services.AddSingleton(SessionMaintenance);
 
         // Optional within the group - the service takes it as an optional constructor parameter and falls
         // back to the reactive OnChange trim when it is absent.

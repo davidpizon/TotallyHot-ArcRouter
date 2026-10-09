@@ -392,36 +392,64 @@ public sealed class RouterSettingsAdminGrpcServiceTests
         return (new SessionMaintenance(new Lazy<SessionStore>(() => store), database), store, root);
     }
 
+    /// <summary>Releases the SQLite handles of a scratch session store and removes its directory, best effort.</summary>
+    private static void DiscardSessionStorage(string root)
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        try
+        {
+            Directory.Delete(root, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Scratch cleanup is also done by TestTempDirectorySweeper.
+        }
+    }
+
     [Fact]
     public async Task ClearTranscripts_AlsoDeletesCapturedSessions()
     {
-        var (maintenance, store, _) = CreateSessionStorage();
-        var service = CreateService(sessionMaintenance: maintenance);
+        var (maintenance, store, root) = CreateSessionStorage();
+        try
+        {
+            var service = CreateService(sessionMaintenance: maintenance);
 
-        var response =
-            await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
+            var response =
+                await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
 
-        response.DeletionFinal.Should().BeTrue();
-        store.ListSessions().Should().BeEmpty();
+            response.DeletionFinal.Should().BeTrue();
+            store.ListSessions().Should().BeEmpty();
+        }
+        finally
+        {
+            DiscardSessionStorage(root);
+        }
     }
 
     [Fact]
     public async Task ClearTranscripts_WhenSessionsCannotBeDeleted_ReportsDeletionNotFinal()
     {
         var root = Path.Combine(TestScratchDirectory.RunRoot, "clear-sessions-" + Guid.NewGuid().ToString("N"));
-        var database = new TranscriptDatabase(Options.Create(new StorageOptions
+        try
         {
-            TranscriptDatabasePath = Path.Combine(root, "transcripts.db")
-        }));
-        Directory.CreateDirectory(SessionStore.FolderBeside(database.DatabasePath));
-        var maintenance = new SessionMaintenance(
-            new Lazy<SessionStore>(() => throw new InvalidOperationException("cannot open")), database);
-        var service = CreateService(sessionMaintenance: maintenance);
+            var database = new TranscriptDatabase(Options.Create(new StorageOptions
+            {
+                TranscriptDatabasePath = Path.Combine(root, "transcripts.db")
+            }));
+            Directory.CreateDirectory(SessionStore.FolderBeside(database.DatabasePath));
+            var maintenance = new SessionMaintenance(
+                new Lazy<SessionStore>(() => throw new InvalidOperationException("cannot open")), database);
+            var service = CreateService(sessionMaintenance: maintenance);
 
-        var response =
-            await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
+            var response =
+                await service.ClearTranscripts(request: new Contract.ClearTranscriptsRequest(), context: CreateContext());
 
-        response.DeletionFinal.Should().BeFalse();
+            response.DeletionFinal.Should().BeFalse();
+        }
+        finally
+        {
+            DiscardSessionStorage(root);
+        }
     }
 
     private sealed class RecordingBodyLogController : IBodyLogController

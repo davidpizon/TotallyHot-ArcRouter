@@ -124,7 +124,17 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
             _abandonRemaining = true;
         }
 
-        if (_consumer is not null) await _consumer.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (_consumer is null) return;
+
+        try
+        {
+            await _consumer.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The host's shutdown deadline passed. Like a BackgroundService, stop waiting without failing the
+            // host's stop; the consumer keeps draining (or skipping, once abandoned) what is queued.
+        }
     }
 
     /// <inheritdoc/>

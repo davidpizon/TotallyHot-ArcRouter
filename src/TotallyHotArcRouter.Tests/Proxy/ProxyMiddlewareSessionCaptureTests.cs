@@ -5,9 +5,11 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
@@ -35,14 +37,16 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
     private readonly string _folder;
     private readonly TranscriptDatabase _database;
     private readonly SessionIndex _index;
-    private readonly SessionStore _store;
+    private readonly Lazy<SessionStore> _lazyStore;
     private readonly SessionCaptureWriter _writer;
     private CaptureBodyPump _pump;
     private SessionCaptureOptions _captureOptions = new();
     private ILogger<TurnCaptureFactory> _factoryLogger = NullLogger<TurnCaptureFactory>.Instance;
     private readonly StaticOptionsMonitor<TranscriptOptions> _transcriptOptions = new(new TranscriptOptions { Enabled = true });
 
-    /// <summary>Builds a store, a started writer and the capture factory over a scratch directory.</summary>
+    private SessionStore Store => _lazyStore.Value;
+
+    /// <summary>Builds a lazily opened store and a started writer and pump over a scratch directory.</summary>
     public ProxyMiddlewareSessionCaptureTests()
     {
         Directory.CreateDirectory(_root);
@@ -53,9 +57,18 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         }));
         _index = new SessionIndex(_database);
         _index.EnsureCreated();
-        _store = new SessionStore(_index, new InMemoryMasterKeyStore(), _folder);
+
+        // Opened on first use and recovered when opened, like the real one (SessionsServiceCollectionExtensions.OpenStore):
+        // constructing a SessionStore creates its folder, and recovery deletes every spool no index row names, so an
+        // eager or unrecovered store would hide both whether the proxy creates the folder and the spool sweep.
+        _lazyStore = new Lazy<SessionStore>(() =>
+        {
+            var store = new SessionStore(_index, new InMemoryMasterKeyStore(), _folder);
+            store.RecoverOnStartup();
+            return store;
+        });
         _writer = new SessionCaptureWriter(
-            new Lazy<SessionStore>(() => _store),
+            _lazyStore,
             Options.Create(new SessionCaptureOptions()),
             NullLogger<SessionCaptureWriter>.Instance);
         _writer.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
@@ -127,8 +140,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         await RunAsync(ChatRequest("hi"), _ => Json("{\"choices\":[]}"));
         await _writer.WaitForIdleAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Empty(Directory.EnumerateFiles(_folder));
-        Assert.Empty(_store.ListTurns(_store.ResolveArchiveSessionId(ClientSession)));
+        Assert.False(Directory.Exists(_folder), "With capture off the proxy must not even create the sessions folder.");
     }
 
     /// <summary>A streamed response over the 4 MiB telemetry cap is stored whole, not as a prefix.</summary>
@@ -158,7 +170,9 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         var response = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"your key is " + secret +
                        "\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}";
 
-        await RunAsync(ChatRequest("my key is " + secret), _ => Json(response));
+        var request = ChatRequest("my key is " + secret);
+
+        await RunAsync(request, _ => Json(response));
         var frames = await ReadFramesAsync();
 
         foreach (var frame in frames.Where(f => f.Plaintext is not null))
@@ -166,7 +180,9 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
             Assert.DoesNotContain(secret, Encoding.UTF8.GetString(frame.Plaintext!));
         }
 
-        Assert.DoesNotContain(secret, string.Concat(Directory.EnumerateFiles(_folder).Select(File.ReadAllText)));
+        // Obscured, and nothing else changed: the stored request is exactly what the obscurer makes of the client's.
+        Assert.NotEqual(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.Equal(SecretObscurer.Obscure(request), Text(frames, SessionBodyKind.ClientRequest));
     }
 
     /// <summary>A translated turn also stores the provider-side request and the untranslated provider response.</summary>
@@ -205,8 +221,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         await RunAsync("{\"model\":", _ => Json("{}"));
         await _writer.WaitForIdleAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
-        Assert.Empty(_store.ListTurns(_store.ResolveArchiveSessionId(ClientSession)));
+        Assert.False(Directory.Exists(_folder), "A rejected request must not create the sessions folder or a spool.");
     }
 
     /// <summary>A failover from a translated candidate to a pass-through one leaves no stale provider-side bodies.</summary>
@@ -236,7 +251,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         using var metadata = JsonDocument.Parse(Text(frames, SessionBodyKind.TurnMetadata));
         Assert.False(metadata.RootElement.GetProperty("translated").GetBoolean());
         Assert.True(metadata.RootElement.GetProperty("fallback").GetBoolean());
-        Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
+        Assert.Empty(SpoolFiles());
     }
 
     /// <summary>A non-streaming Bedrock turn stores the body sent to Bedrock and the payload it returned.</summary>
@@ -330,6 +345,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
 
         Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
         Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+        AssertReplyTextWithheld(frames);
     }
 
     /// <summary>A client that disconnects after the relay finished (RequestAborted fires during bookkeeping) does not cost the whole response.</summary>
@@ -367,6 +383,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
 
         Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
         Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+        AssertReplyTextWithheld(frames);
     }
 
     /// <summary>A pump queue that cannot hold a body drops that body rather than slowing the relay or storing a prefix.</summary>
@@ -384,7 +401,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         Assert.Equal(sse, ReadClientBody(context));
         Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
         Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
-        Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
+        Assert.Empty(SpoolFiles());
     }
 
     /// <summary>A request the router rejects, or one nothing answers, never creates a file.</summary>
@@ -395,7 +412,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         await RunAsync("{\"messages\":[]}", _ => Json("{}"));
         await _writer.WaitForIdleAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Empty(Directory.EnumerateFiles(_folder));
+        Assert.False(Directory.Exists(_folder));
     }
 
     /// <summary>A turn the writer refuses is dropped with a warning, not silently.</summary>
@@ -409,7 +426,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         await RunAsync(ChatRequest("hi"), _ => Json("{\"choices\":[]}"));
 
         Assert.Contains(logger.Messages, m => m.Contains("refused by the session writer", StringComparison.Ordinal));
-        Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
+        Assert.Empty(SpoolFiles());
     }
 
     /// <summary>Telemetry's native copy hitting its cap marks the reply text as cut off even when the client-shape copy did not.</summary>
@@ -454,7 +471,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
 
         Assert.Equal(StatusCodes.Status502BadGateway, context.Response.StatusCode);
         await WaitForNoSpoolsAsync();
-        Assert.Empty(Directory.EnumerateFiles(_folder));
+        Assert.Empty(AllFiles().Select(Path.GetFileName));
     }
 
     /// <summary>A stream translator that stops on an embedded provider error leaves a prefix, which is stored as a missing response.</summary>
@@ -478,6 +495,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         Assert.Contains("hello", Text(frames, SessionBodyKind.ProviderRequest));
         Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
         Assert.Null(frames.Single(f => f.Kind == SessionBodyKind.ProviderResponse).Plaintext);
+        AssertReplyTextWithheld(frames);
     }
 
     /// <summary>A Bedrock stream the client drops leaves a prefix, so both responses are stored as missing and the provider request is kept.</summary>
@@ -508,15 +526,84 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         Assert.Contains("bedrock-2023-05-31", Text(stored, SessionBodyKind.ProviderRequest));
         Assert.Null(stored.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
         Assert.Null(stored.Single(f => f.Kind == SessionBodyKind.ProviderResponse).Plaintext);
+        AssertReplyTextWithheld(stored);
     }
 
+    private string[] SpoolFiles() =>
+        Directory.Exists(_folder) ? Directory.GetFiles(_folder, "*" + SessionBodySpool.FileExtension) : [];
+
+    private string[] AllFiles() => Directory.Exists(_folder) ? Directory.GetFiles(_folder) : [];
+
+    /// <summary>
+    /// Waits until no spool file is left. The pump is stopped first, which runs everything already queued: a spool
+    /// the worker was still in the middle of creating when the request ended is created, released and deleted
+    /// before this returns, so an empty folder means it, too, is gone rather than not yet written.
+    /// </summary>
     private async Task WaitForNoSpoolsAsync()
     {
+        await _pump.StopAsync(CancellationToken.None);
         var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension).Any() && DateTime.UtcNow < deadline)
+        while (SpoolFiles().Any() && DateTime.UtcNow < deadline)
         {
             await Task.Delay(20);
         }
+    }
+
+    /// <summary>
+    /// Capture switched on while the process runs, with nothing stored yet: the first captured turn must survive
+    /// the store being opened for the first time. Opening it runs recovery, which deletes every spool no index
+    /// row names, so the spools must not exist before it has been opened.
+    /// </summary>
+    [Fact]
+    public async Task CaptureOn_StoreNotYetOpened_FirstTurnIsStored()
+    {
+        Assert.False(Directory.Exists(_folder), "Precondition: nothing has opened the store or created the folder.");
+        var request = ChatRequest("first turn");
+
+        await RunAsync(request, _ => Json("{\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"));
+        var frames = await ReadFramesAsync();
+
+        Assert.Equal(request, Text(frames, SessionBodyKind.ClientRequest));
+        Assert.NotNull(frames.Single(f => f.Kind == SessionBodyKind.ClientResponse).Plaintext);
+    }
+
+    /// <summary>
+    /// A Bedrock turn finishes the client's response before telemetry and capture bookkeeping, as the HTTP path
+    /// does, so waiting for the capture pump never delays the client's end of stream.
+    /// </summary>
+    [Fact]
+    public async Task CaptureOn_BedrockCompletesTheResponseBeforeTheBookkeeping()
+    {
+        const string claudeResponse = "{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\"," +
+                                      "\"content\":[{\"type\":\"text\",\"text\":\"Hello from Bedrock.\"}],\"stop_reason\":\"end_turn\"," +
+                                      "\"usage\":{\"input_tokens\":12,\"output_tokens\":6}}";
+        var client = new Mock<IAmazonBedrockRuntime>();
+        client.Setup(c => c.InvokeModelAsync(It.IsAny<InvokeModelRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new InvokeModelResponse
+            {
+                Body = new MemoryStream(Encoding.UTF8.GetBytes(claudeResponse)),
+                ContentType = "application/json"
+            });
+        var feature = new RecordingBodyFeature();
+        var publisher = new CompletionObservingPublisher(() => feature.Completed);
+        var request = "{\"model\":\"claude-bedrock\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+
+        await RunAsync(request, _ => Json("{}"), resolver: BedrockResolver(), translators: BedrockTranslators(),
+            bedrock: client.Object, telemetry: publisher,
+            configureContext: context => context.Features.Set<IHttpResponseBodyFeature>(feature));
+        await ReadFramesAsync();
+
+        Assert.True(publisher.Published, "Telemetry should have been published.");
+        Assert.True(publisher.ResponseCompletedWhenPublished,
+            "The response must be completed before telemetry and capture bookkeeping run.");
+    }
+
+    private static void AssertReplyTextWithheld(IReadOnlyList<SessionBodyFrame> frames)
+    {
+        using var extracts = JsonDocument.Parse(Text(frames, SessionBodyKind.Extracts));
+        Assert.Equal(JsonValueKind.Null, extracts.RootElement.GetProperty("response_text").ValueKind);
+        Assert.True(extracts.RootElement.GetProperty("response_text_truncated").GetBoolean(),
+            "A reply cut off by an interrupted relay must not be stored as if it were whole.");
     }
 
     private static string ChatRequest(string userText) =>
@@ -540,7 +627,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
     private async Task<IReadOnlyList<SessionBodyFrame>> ReadFramesAsync()
     {
         Assert.True(await _writer.WaitForIdleAsync(TimeSpan.FromSeconds(30)));
-        return _store.ReadBodies(_store.ResolveArchiveSessionId(ClientSession));
+        return Store.ReadBodies(Store.ResolveArchiveSessionId(ClientSession));
     }
 
     private async Task<DefaultHttpContext> RunAsync(
@@ -552,7 +639,8 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         IAmazonBedrockRuntime? bedrock = null,
         Stream? responseBody = null,
         CancellationToken requestAborted = default,
-        ITelemetryPublisher? telemetry = null)
+        ITelemetryPublisher? telemetry = null,
+        Action<DefaultHttpContext>? configureContext = null)
     {
         resolver ??= ModelRouteResolverTestFactory.CreateWithModels(("primary", "openai", "primary-upstream", "https://primary.test"));
         var middleware = new ProxyMiddleware(
@@ -567,6 +655,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
                 TurnCapture = new TurnCaptureFactory(
                     _pump,
                     _writer,
+                    _lazyStore,
                     _transcriptOptions,
                     Options.Create(_captureOptions),
                     _database,
@@ -585,6 +674,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         context.Request.ContentLength = bytes.Length;
         context.Response.Body = responseBody ?? new MemoryStream();
         context.RequestAborted = requestAborted == default ? TestContext.Current.CancellationToken : requestAborted;
+        configureContext?.Invoke(context);
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
         return context;
@@ -610,6 +700,51 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
     {
         context.Response.Body.Position = 0;
         return new StreamReader(context.Response.Body, Encoding.UTF8).ReadToEnd();
+    }
+
+    /// <summary>A response body feature that records whether the response was completed, to observe ordering.</summary>
+    private sealed class RecordingBodyFeature : IHttpResponseBodyFeature
+    {
+        private readonly MemoryStream _stream = new();
+
+        public bool Completed { get; private set; }
+
+        public Stream Stream => _stream;
+
+        public System.IO.Pipelines.PipeWriter Writer => System.IO.Pipelines.PipeWriter.Create(_stream);
+
+        public void DisableBuffering()
+        {
+        }
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task SendFileAsync(string path, long offset, long? count, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task CompleteAsync()
+        {
+            Completed = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>Notes whether the response had been completed at the moment telemetry was published.</summary>
+    private sealed class CompletionObservingPublisher(Func<bool> responseCompleted) : ITelemetryPublisher
+    {
+        public bool Published { get; private set; }
+
+        public bool ResponseCompletedWhenPublished { get; private set; }
+
+        public Task PublishAsync(RoutingTelemetryEvent telemetryEvent, CancellationToken cancellationToken = default)
+        {
+            Published = true;
+            ResponseCompletedWhenPublished = responseCompleted();
+            return Task.CompletedTask;
+        }
+
+        public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class RecordingLogger<T> : ILogger<T>

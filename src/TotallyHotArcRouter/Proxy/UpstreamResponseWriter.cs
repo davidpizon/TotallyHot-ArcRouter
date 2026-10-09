@@ -163,8 +163,8 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
     /// <param name="statusCode">The upstream status, used as the <c>code</c> of a synthesized error envelope.</param>
     /// <param name="capture">
     /// The #165 session capture, or <see langword="null"/> when capture is off. When set, every byte written
-    /// to the client is also spooled with no size cap (beside, not instead of, the 4 MiB telemetry capture),
-    /// and a translated turn's provider-side response is spooled too.
+    /// to the client is also captured with no size cap (beside, not instead of, the 4 MiB telemetry capture),
+    /// and a translated turn's provider-side response is captured too.
     /// </param>
     internal async Task<UpstreamResponseResult> WriteAsync(
         HttpContext context,
@@ -183,8 +183,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
 
         // Every body byte reaches the client through this stream, so tapping it captures exactly what was
         // relayed, including a synthesized error envelope; with capture off it is the response body itself.
-        var clientBody = capture?.BeginResponse(clientBody: context.Response.Body, translated: translator is not null)
-                         ?? context.Response.Body;
+        var clientBody = capture?.BeginResponse(clientBody: context.Response.Body) ?? context.Response.Body;
 
         if (preReadErrorBody is not null && embeddedErrorMessage is not null)
         {
@@ -206,7 +205,7 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
                 }
             });
             await clientBody.WriteAsync(buffer: errorPayload, cancellationToken: context.RequestAborted);
-            if (translator is not null) capture?.RecordProviderResponse(preReadErrorBody!);
+            capture?.RecordProviderResponse(preReadErrorBody!);
             return new UpstreamResponseResult(true, CapturedResponseBytes: errorPayload, null, null,
                 IsStreaming: isStreaming);
         }
@@ -217,18 +216,16 @@ internal sealed class UpstreamResponseWriter(ILogger logger)
             // forward the raw body unchanged rather than losing it behind a synthetic generic message.
             context.Response.Headers.Remove("Content-Length");
             await clientBody.WriteAsync(buffer: preReadErrorBody, cancellationToken: context.RequestAborted);
-            if (translator is not null) capture?.RecordProviderResponse(preReadErrorBody);
+            capture?.RecordProviderResponse(preReadErrorBody);
             return new UpstreamResponseResult(true, CapturedResponseBytes: preReadErrorBody, null, null,
                 IsStreaming: isStreaming);
         }
 
         await using var upstreamBody = await responseMessage.Content.ReadAsStreamAsync(context.RequestAborted);
 
-        // The provider-side response is what the upstream sent before any translation; with no translator it
-        // is the client's response and is not stored twice.
-        var upstreamSource = translator is not null && capture is not null
-            ? capture.TeeProviderResponse(upstreamBody)
-            : upstreamBody;
+        // The provider-side response is what the upstream sent before any translation. A turn with no translator
+        // has no separate provider-side capture, because it is the client's response and is not stored twice.
+        var upstreamSource = capture?.TeeProviderResponse(upstreamBody) ?? upstreamBody;
         try
         {
             if (translator is null)

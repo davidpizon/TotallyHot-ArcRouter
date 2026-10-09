@@ -366,7 +366,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         await _interceptor.InterceptRequestAsync(context);
 
         // #165: when capture is on, the request body is wrapped here so the bytes the interceptor reads are
-        // also spooled exactly as the client sent them, before they are decoded. A null capture (toggle off)
+        // also kept exactly as the client sent them, before they are decoded. A null capture (toggle off)
         // makes no copy. Disposed on every exit; a turn the writer accepted is no longer this scope's to delete.
         using var capture = _turnCapture?.Begin(context);
 
@@ -549,9 +549,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             var (requestMessage, forwardBody) = UpstreamRequestBuilder.BuildWithBody(context: context, route: route,
                 translator: translator, rewrittenBody: rewrittenBody, droppedBetaPrefixes: featureStrip.BetaPrefixes);
 
-            // #165: the provider-facing request differs from the client's only when a translator rewrote it;
-            // a failover candidate's copy replaces this one.
-            if (translator is not null) capture?.SetProviderRequest(forwardBody);
+            // #165: the provider-facing request differs from the client's only when a translator rewrote it. Set
+            // for every attempt (null when none ran), so a failover candidate replaces an earlier one's.
+            capture?.SetProviderRequest(translator is not null ? forwardBody : null);
 
             // ADR-0017 Strip rule 4, as adopted by ADR-0022 Amendment 1: every strip is recorded. Once per attempt
             // that actually sends a stripped copy, so a failover that strips differently logs its own line.

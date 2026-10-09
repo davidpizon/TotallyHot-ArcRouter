@@ -20,6 +20,7 @@ using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
 using TotallyHot.ArcRouter.Update;
@@ -484,7 +485,11 @@ internal static class ProxyServiceCollectionExtensions
                         TranscriptStore: sp.GetRequiredService<ITranscriptStore>())
                     {
                         EmbeddingMemory = sp.GetRequiredService<EmbeddingMemory>(),
-                        PortfolioGraderOptionsMonitor = sp.GetRequiredService<IOptionsMonitor<PortfolioGraderOptions>>()
+                        PortfolioGraderOptionsMonitor = sp.GetRequiredService<IOptionsMonitor<PortfolioGraderOptions>>(),
+
+                        // The inner host cannot resolve it from this container; without it Clear would skip the
+                        // captured sessions (#165).
+                        SessionMaintenance = sp.GetService<SessionMaintenance>()
                     },
 
                     // Backs the Governance UI's System Settings window's "Software Update" section gRPC

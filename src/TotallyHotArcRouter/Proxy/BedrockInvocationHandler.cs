@@ -252,6 +252,19 @@ internal sealed class BedrockInvocationHandler
         _circuitBreaker.RecordSuccess(circuitTarget);
         var totalDurationMs = stopwatch.ElapsedMilliseconds;
 
+        // Finish the response now, as the HTTP path does, so the bookkeeping below - SQLite telemetry and, with
+        // session capture on, waiting for the capture pump to flush its spools to disk - never delays the
+        // client's end of stream. Best-effort: a client that already disconnected must not become a proxy error.
+        try
+        {
+            await context.Response.CompleteAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(exception: ex,
+                message: "Completing the response early failed; telemetry persistence continues.");
+        }
+
         try
         {
             // Bedrock's native tap is out of scope (docs/router/openai-format-usage-accuracy-plan.md §4.2):
@@ -298,7 +311,7 @@ internal sealed class BedrockInvocationHandler
         if (capture is null) return context.Response.Body;
 
         capture.SetProviderRequest(nativeRequestBody);
-        return capture.BeginResponse(clientBody: context.Response.Body, translated: true);
+        return capture.BeginResponse(clientBody: context.Response.Body);
     }
 
     /// <summary>

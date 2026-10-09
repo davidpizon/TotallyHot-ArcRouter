@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Transcripts;
@@ -14,6 +15,10 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// </summary>
 /// <param name="pump">Moves the compression, encryption and disk writes off the relay path.</param>
 /// <param name="writer">The background writer that stores finished turns.</param>
+/// <param name="store">
+/// The lazily opened session store. Opening it creates the index and runs startup recovery, which deletes every
+/// spool no index row names, so it is opened before the first spool is created.
+/// </param>
 /// <param name="transcriptOptions">The live Transcription Capture toggle.</param>
 /// <param name="captureOptions">The disk reserve every spool honours.</param>
 /// <param name="database">Names where the session folder lives, beside <c>transcripts.db</c>.</param>
@@ -21,11 +26,15 @@ namespace TotallyHot.ArcRouter.Proxy;
 public sealed class TurnCaptureFactory(
     CaptureBodyPump pump,
     SessionCaptureWriter writer,
+    Lazy<SessionStore> store,
     IOptionsMonitor<TranscriptOptions> transcriptOptions,
     IOptions<SessionCaptureOptions> captureOptions,
     TranscriptDatabase database,
     ILogger<TurnCaptureFactory> logger)
 {
+    /// <summary>The largest declared <c>Content-Length</c> used to presize the in-memory copy of a request.</summary>
+    private const long MaxRequestBufferHint = 32L * 1024 * 1024;
+
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);
 
     /// <summary>
@@ -39,14 +48,28 @@ public sealed class TurnCaptureFactory(
     {
         if (!transcriptOptions.CurrentValue.Enabled) return null;
 
-        var capture = new TurnCapture(pump, writer, CreateSpool, logger, DateTimeOffset.UtcNow);
+        // A declared length sizes the in-memory copy up front, so a multi-megabyte history is not copied through
+        // a chain of doubling buffers; a larger or unknown length starts empty and grows.
+        var expectedBytes = context.Request.ContentLength is > 0 and <= MaxRequestBufferHint
+            ? (int)context.Request.ContentLength.Value
+            : 0;
+        var capture = new TurnCapture(pump, writer, CreateSpool, logger, DateTimeOffset.UtcNow, expectedBytes);
         context.Request.Body = capture.TeeRequest(context.Request.Body);
         return capture;
     }
 
-    /// <summary>Creates a spool in the session folder, so startup recovery sweeps any leftover. Runs on the pump's worker.</summary>
+    /// <summary>
+    /// Creates a spool in the session folder, so startup recovery sweeps any leftover. Runs on the pump's worker.
+    /// The store is opened first: its recovery deletes every spool no index row names, so a store opened after a
+    /// spool exists (capture switched on at run time, with nothing stored yet) would delete that spool and the
+    /// turn it belongs to.
+    /// </summary>
     /// <returns>A new spool.</returns>
-    private SessionBodySpool CreateSpool() => SessionBodySpool.Create(_folder, captureOptions.Value.MinFreeDiskBytes);
+    private SessionBodySpool CreateSpool()
+    {
+        _ = store.Value;
+        return SessionBodySpool.Create(_folder, captureOptions.Value.MinFreeDiskBytes);
+    }
 }
 
 /// <summary>
@@ -61,13 +84,20 @@ public sealed class TurnCaptureFactory(
 /// <remarks>
 /// A body is complete or absent, never a prefix (ADR-0019). A body whose spool was abandoned (disk reserve,
 /// an unterminated secret match, an I/O error, a full pump queue), and a response whose relay was cut short
-/// (the client left, or the upstream or a stream translator failed part-way), are recorded as missing.
+/// (the client left, or the upstream or a stream translator failed part-way), are recorded as missing. The reply
+/// text in the extracts follows the same rule.
 /// </remarks>
 internal sealed class TurnCapture : IDisposable
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
+    // Telemetry's own numbers can be non-finite (a propensity that is NaN); writing them as named literals keeps
+    // one odd value from losing the whole turn, which is what a serializer exception would do.
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = false,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+    };
 
-    /// <summary>How long a finished turn waits for the pump and the writer before it is dropped.</summary>
+    /// <summary>How long a finished turn waits for the pump and the writer before its bodies are given up.</summary>
     private static readonly TimeSpan SubmitTimeout = TimeSpan.FromSeconds(30);
 
     private readonly CaptureBodyPump _pump;
@@ -76,14 +106,13 @@ internal sealed class TurnCapture : IDisposable
     private readonly ILogger _logger;
     private readonly DateTimeOffset _startedAtUtc;
     private readonly List<SessionBodySpool> _ownedSpools = [];
-    private MemoryStream? _requestBuffer = new();
+    private MemoryStream? _requestBuffer;
     private CaptureBody? _request;
     private Task<SessionBodySpool?>? _requestCompletion;
     private CaptureBody? _response;
     private CaptureBody? _providerResponse;
     private TeeWriteStream? _clientTee;
     private byte[]? _providerRequest;
-    private bool _translated;
     private bool _interrupted;
     private bool _submitted;
 
@@ -95,18 +124,21 @@ internal sealed class TurnCapture : IDisposable
     /// <param name="createSpool">Creates a spool; called on the pump's worker.</param>
     /// <param name="logger">Receives failures; templates are static.</param>
     /// <param name="startedAtUtc">When the request arrived, recorded as the turn's creation time.</param>
+    /// <param name="expectedRequestBytes">The request's declared length, to presize its in-memory copy; zero when unknown.</param>
     internal TurnCapture(
         CaptureBodyPump pump,
         SessionCaptureWriter writer,
         Func<SessionBodySpool> createSpool,
         ILogger logger,
-        DateTimeOffset startedAtUtc)
+        DateTimeOffset startedAtUtc,
+        int expectedRequestBytes = 0)
     {
         _pump = pump;
         _writer = writer;
         _createSpool = createSpool;
         _logger = logger;
         _startedAtUtc = startedAtUtc;
+        _requestBuffer = new MemoryStream(Math.Max(0, expectedRequestBytes));
     }
 
     /// <summary>
@@ -118,31 +150,27 @@ internal sealed class TurnCapture : IDisposable
     internal Stream TeeRequest(Stream body) => new TeeReadStream(body, bytes => _requestBuffer?.Write(bytes));
 
     /// <summary>
-    /// Remembers the body sent to the provider when a translator rewrote the client's request. A later
-    /// failover candidate replaces an earlier one's, and <see cref="BeginResponse"/> decides whether the
-    /// candidate that actually answered was translated at all.
+    /// Records what is being sent to the provider for the candidate about to be attempted: the translated body
+    /// when a translator rewrote the client's request, or <see langword="null"/> when the client's own request
+    /// goes through unchanged. It is called for every attempt, so a failover candidate replaces an earlier one's
+    /// (a pass-through candidate that serves after a translated one failed must not inherit its provider
+    /// request), and whether the turn counts as translated is simply whether this holds a body.
     /// </summary>
-    /// <param name="body">The provider-facing request body.</param>
-    internal void SetProviderRequest(byte[] body)
-    {
-        _translated = true;
-        _providerRequest = body;
-    }
+    /// <param name="body">The provider-facing request body, or <see langword="null"/> when no translator ran.</param>
+    internal void SetProviderRequest(byte[]? body) => _providerRequest = body;
 
     /// <summary>
     /// Starts capturing the response relayed to the client and returns the stream the writer must use in place
     /// of the client's response body. This is also the moment the request's spool starts, because a candidate
-    /// is now answering. A failed-over candidate's bodies are released first.
+    /// is now answering. A failed-over candidate's bodies are released first, and a translated turn (one with a
+    /// provider request) also captures the provider's response.
     /// </summary>
     /// <param name="clientBody">The client's response body.</param>
-    /// <param name="translated">Whether a translator ran, which makes the provider's response a separate body.</param>
     /// <returns>A write-through stream that also feeds the response capture.</returns>
-    internal Stream BeginResponse(Stream clientBody, bool translated)
+    internal Stream BeginResponse(Stream clientBody)
     {
-        // The candidate that answers decides: an earlier translated candidate that failed over must not leave
-        // its provider request, or its interruption, behind on a turn a later candidate served.
-        _translated = translated;
-        if (!translated) _providerRequest = null;
+        // The candidate that answers decides: an earlier candidate that failed over must not leave its
+        // interruption or its provider response behind on a turn a later candidate served.
         _interrupted = false;
         _response?.Release();
         _providerResponse?.Release();
@@ -150,7 +178,7 @@ internal sealed class TurnCapture : IDisposable
 
         AttachRequest();
         _response = _pump.CreateBody(_createSpool);
-        if (translated) _providerResponse = _pump.CreateBody(_createSpool);
+        if (_providerRequest is not null) _providerResponse = _pump.CreateBody(_createSpool);
 
         _clientTee = new TeeWriteStream(clientBody, _response.Write);
         return _clientTee;
@@ -168,6 +196,7 @@ internal sealed class TurnCapture : IDisposable
     /// <summary>
     /// Appends bytes to the provider-side response when the router already has them in hand rather than
     /// reading them from a stream: an error body inspected for classification, or one Bedrock event payload.
+    /// Does nothing for a turn with no provider-side response.
     /// </summary>
     /// <param name="body">The next bytes of the provider's response body.</param>
     internal void RecordProviderResponse(byte[] body) => _providerResponse?.Write(body);
@@ -180,15 +209,16 @@ internal sealed class TurnCapture : IDisposable
 
     /// <summary>
     /// Ends the turn's bodies and hands the finished turn to the background writer, which then owns and
-    /// disposes the spools. A turn whose bodies cannot be finished in time, or that the writer refuses, is
-    /// dropped and logged; it never fails the request.
+    /// disposes the spools. A body that cannot be finished before the deadline is recorded as missing and the
+    /// stall is logged, and a turn the writer refuses is logged and dropped; neither fails the request.
     /// </summary>
     /// <param name="turn">What telemetry worked out for the turn.</param>
     /// <param name="context">The request, whose <c>User-Agent</c> is reduced to a harness token before it is stored.</param>
     /// <param name="telemetryCaptureTruncated">
     /// Whether telemetry's own capped copy of the response lost bytes (the client-shape or native copy hit its
     /// cap, or the tail scanner was needed). The reply text was extracted from that copy, so it is then left out
-    /// of the extracts rather than stored cut off.
+    /// of the extracts rather than stored cut off. A relay that did not run to its end is treated the same way:
+    /// the copy then holds only what arrived before it stopped.
     /// </param>
     internal async Task SubmitAsync(PublishedTurn turn, HttpContext context, bool telemetryCaptureTruncated)
     {
@@ -216,12 +246,18 @@ internal sealed class TurnCapture : IDisposable
                 ? null
                 : await FinishAsync(_providerResponse?.CompleteAsync(), cancellationToken).ConfigureAwait(false);
 
+            if (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "Captured bodies were not finished before the turn's deadline and are recorded as missing; the capture pump may be stalled.");
+            }
+
             var bodies = new List<SessionBodyInput>(6)
             {
                 new(SessionBodyKind.ClientRequest, null, requestSpool),
                 new(SessionBodyKind.ClientResponse, null, responseSpool),
             };
-            if (_translated)
+            if (_providerRequest is not null)
             {
                 bodies.Add(new SessionBodyInput(SessionBodyKind.ProviderRequest, _providerRequest));
                 bodies.Add(new SessionBodyInput(SessionBodyKind.ProviderResponse, null, providerResponseSpool));
@@ -229,7 +265,8 @@ internal sealed class TurnCapture : IDisposable
 
             bodies.Add(new SessionBodyInput(
                 SessionBodyKind.TurnMetadata, BuildMetadata(turn, context.Request.Headers.UserAgent.ToString())));
-            bodies.Add(new SessionBodyInput(SessionBodyKind.Extracts, BuildExtracts(turn, telemetryCaptureTruncated)));
+            bodies.Add(new SessionBodyInput(
+                SessionBodyKind.Extracts, BuildExtracts(turn, telemetryCaptureTruncated || interrupted)));
 
             var item = new SessionCaptureItem(
                 turn.SessionId,
@@ -363,17 +400,21 @@ internal sealed class TurnCapture : IDisposable
             ["total_duration_ms"] = turn.TotalDurationMs,
             ["streaming"] = turn.IsStreaming,
             ["content_encoding"] = turn.IsStreaming ? "sse" : "json",
-            ["translated"] = _translated,
+            ["translated"] = _providerRequest is not null,
         };
         return JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOptions);
     }
 
     /// <summary>
     /// Builds the text extracts stored with the turn. The reply text is omitted, and flagged, when it was
-    /// extracted from a capture that hit its cap, because a cut-off reply must not be stored as if whole.
+    /// extracted from a copy that is only a prefix of the reply, because a cut-off reply must not be stored as
+    /// if whole.
     /// </summary>
     /// <param name="turn">What telemetry worked out.</param>
-    /// <param name="responseTruncated">Whether telemetry's capped copy of the response lost bytes.</param>
+    /// <param name="responseTruncated">
+    /// Whether the reply text was extracted from a prefix: telemetry's capped copy lost bytes, or the relay
+    /// stopped before the end.
+    /// </param>
     /// <returns>The extracts as UTF-8 JSON.</returns>
     private static byte[] BuildExtracts(PublishedTurn turn, bool responseTruncated)
     {
