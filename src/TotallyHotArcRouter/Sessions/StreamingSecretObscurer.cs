@@ -31,7 +31,7 @@ public sealed class StreamingSecretObscurer : Stream
     public const int DefaultWindowChars = 64 * 1024;
 
     /// <summary>A trailing base64, base64url or dot run longer than this is redacted without being held.</summary>
-    public const int RunCollapseChars = 4096;
+    private const int RunCollapseChars = 4096;
 
     /// <summary>The most input processed per step, which bounds the character buffer beside the window.</summary>
     private const int SliceBytes = 16 * 1024;

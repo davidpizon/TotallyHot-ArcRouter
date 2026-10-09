@@ -128,6 +128,11 @@ public sealed class EmbeddingBackfillService : BackgroundService
                     _logger.LogDebug(
                         message: "Transcript row {TranscriptId} has no prompt text; skipping embedding backfill.",
                         transcriptId);
+
+                    // The words live in a session file the turn may never have reached. Without this the row
+                    // stays selected and, once a batch of them exists, starves every later row.
+                    await _transcriptStore.MarkPromptUnavailableAsync(transcriptId, cancellationToken)
+                        .ConfigureAwait(false);
                     continue;
                 }
 

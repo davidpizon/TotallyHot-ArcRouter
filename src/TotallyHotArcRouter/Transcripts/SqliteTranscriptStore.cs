@@ -438,11 +438,16 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             }
         }
 
+        // One pass over each session file for all of its turns, not one file open and scan per linked row.
         var promptTextByMemoryEntryId = new Dictionary<long, string>();
-        foreach (var (memoryId, sessionId, turnId) in links)
+        foreach (var session in links.GroupBy(link => link.SessionId))
         {
-            if (ReadExtracts(sessionId, turnId)?.NewestUserMessage is { Length: > 0 } prompt)
-                promptTextByMemoryEntryId[memoryId] = prompt;
+            var extracts = ReadExtractsBatch(session.Key, [.. session.Select(link => link.TurnId).Distinct()]);
+            foreach (var (memoryId, _, turnId) in session)
+            {
+                if (extracts.TryGetValue(turnId, out var found) && found.NewestUserMessage is { Length: > 0 } prompt)
+                    promptTextByMemoryEntryId[memoryId] = prompt;
+            }
         }
 
         return Task.FromResult<IReadOnlyDictionary<long, string>>(promptTextByMemoryEntryId);
@@ -676,6 +681,41 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             PromptText = extracts?.NewestUserMessage,
             ResponseText = extracts?.ResponseText
         };
+    }
+
+    /// <summary>Reads several turns' extracts from one session file, or nothing when no reader is wired or the file is unreadable.</summary>
+    /// <param name="archiveSessionId">The session file's archive id.</param>
+    /// <param name="archiveTurnIds">The turns wanted.</param>
+    /// <returns>The extracts by turn id; an unreadable turn has no entry.</returns>
+    private IReadOnlyDictionary<Guid, SessionExtracts> ReadExtractsBatch(
+        Guid archiveSessionId, IReadOnlyCollection<Guid> archiveTurnIds)
+    {
+        if (_extracts is null) return new Dictionary<Guid, SessionExtracts>();
+
+        try
+        {
+            return _extracts.Value.TryReadExtracts(archiveSessionId, archiveTurnIds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
+            return new Dictionary<Guid, SessionExtracts>();
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task MarkPromptUnavailableAsync(long id, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_options.CurrentValue.Enabled) return Task.CompletedTask;
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE request_transcripts SET prompt_text_length = 0 WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+        return Task.CompletedTask;
     }
 
     /// <summary>Reads one turn's extracts, or <see langword="null"/> when no reader is wired or the frame is missing.</summary>

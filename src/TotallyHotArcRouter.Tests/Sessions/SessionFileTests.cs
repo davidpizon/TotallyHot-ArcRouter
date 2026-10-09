@@ -524,6 +524,103 @@ public sealed class SessionFileTests
 
     /// <summary>Creates a fresh, uniquely named directory under the system temp path for one test.</summary>
     /// <returns>The absolute path of the new directory; the caller deletes it.</returns>
+    /// <summary>Only the wanted turns' Extracts frames are decrypted; other kinds and turns are skipped.</summary>
+    [Fact]
+    public void TryReadExtracts_SelectsWantedTurnsAmongOtherFrames()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var sessionId = SessionArchiveIds.NewArchiveSessionId();
+            var turnA = SessionArchiveIds.NewArchiveTurnId();
+            var turnB = SessionArchiveIds.NewArchiveTurnId();
+            var turnC = SessionArchiveIds.NewArchiveTurnId();
+            using (var file = SessionFile.Create(path, sessionId, (byte[])sessionKey.Clone()))
+            {
+                file.AppendBody(0, SessionBodyKind.ClientRequest, "req-a"u8, turnA);
+                file.AppendBody(0, SessionBodyKind.Extracts, """{"newest_user_message":"a"}"""u8, turnA);
+                file.AppendBody(1, SessionBodyKind.ClientRequest, "req-b"u8, turnB);
+                file.AppendBody(1, SessionBodyKind.Extracts, """{"newest_user_message":"b"}"""u8, turnB);
+                file.AppendBody(2, SessionBodyKind.Extracts, """{"newest_user_message":"c"}"""u8, turnC);
+            }
+
+            using var reopened = SessionFile.Open(path, sessionKey, sessionId);
+            var found = reopened.TryReadExtracts(new HashSet<Guid> { turnB, turnC }, maxFrames: 5);
+
+            Assert.Equal(2, found.Count);
+            Assert.Equal("b", SessionExtracts.Parse(found[turnB]).NewestUserMessage);
+            Assert.Equal("c", SessionExtracts.Parse(found[turnC]).NewestUserMessage);
+            Assert.Equal("a", SessionExtracts.Parse(reopened.TryReadExtract(turnA, 5)!).NewestUserMessage);
+            Assert.Null(reopened.TryReadExtract(Guid.NewGuid(), 5));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>A missing-flagged Extracts frame yields no entry, and frames past the committed extent are not read.</summary>
+    [Fact]
+    public void TryReadExtracts_IgnoresMissingFramesAndStopsAtMaxFrames()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var sessionId = SessionArchiveIds.NewArchiveSessionId();
+            var missing = SessionArchiveIds.NewArchiveTurnId();
+            var late = SessionArchiveIds.NewArchiveTurnId();
+            using (var file = SessionFile.Create(path, sessionId, (byte[])sessionKey.Clone()))
+            {
+                file.AppendMissingBody(0, SessionBodyKind.Extracts, missing);
+                file.AppendBody(1, SessionBodyKind.ClientRequest, "req"u8, late);
+                file.AppendBody(1, SessionBodyKind.Extracts, """{"newest_user_message":"late"}"""u8, late);
+            }
+
+            using var reopened = SessionFile.Open(path, sessionKey, sessionId);
+
+            Assert.Null(reopened.TryReadExtract(missing, maxFrames: 3));
+            Assert.Null(reopened.TryReadExtract(late, maxFrames: 2));
+            Assert.NotNull(reopened.TryReadExtract(late, maxFrames: 3));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>A flipped ciphertext byte inside a wanted Extracts frame fails authentication.</summary>
+    [Fact]
+    public void TryReadExtracts_RejectsTamperedFrame()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var path = Path.Combine(dir, "session.bin");
+            var sessionKey = SessionKeyMaterial.CreateSessionKey();
+            var sessionId = SessionArchiveIds.NewArchiveSessionId();
+            var turn = SessionArchiveIds.NewArchiveTurnId();
+            using (var file = SessionFile.Create(path, sessionId, (byte[])sessionKey.Clone()))
+            {
+                file.AppendBody(0, SessionBodyKind.Extracts, """{"newest_user_message":"x"}"""u8, turn);
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            bytes[^1] ^= 0xFF;
+            File.WriteAllBytes(path, bytes);
+
+            using var reopened = SessionFile.Open(path, sessionKey, sessionId);
+            Assert.ThrowsAny<Exception>(() => reopened.TryReadExtract(turn, 1));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static string CreateTempDir()
     {
         var dir = Path.Combine(Path.GetTempPath(), "thar-session-" + Guid.NewGuid().ToString("N"));

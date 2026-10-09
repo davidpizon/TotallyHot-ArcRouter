@@ -217,6 +217,16 @@ public interface ITranscriptStore
     }
 
     /// <summary>
+    /// Records that a row's prompt cannot be read from its session file (the turn was dropped before it was
+    /// written, or the file is unreadable), by zeroing <c>prompt_text_length</c>. That takes the row out of
+    /// <see cref="LoadUnembeddedScoredAsync"/>, so unreadable rows cannot fill every backfill batch. The
+    /// default does nothing so existing test fakes compile.
+    /// </summary>
+    /// <param name="id">The transcript row id.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    Task MarkPromptUnavailableAsync(long id, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <summary>
     /// Deletes transcript rows whose <c>archive_session_id</c> is one of <paramref name="archiveSessionIds"/>
     /// and returns the <c>memory_entry_id</c> values those rows pointed at, so the caller can delete the
     /// embeddings with the session (#165 phase 2).

@@ -144,6 +144,14 @@ public sealed class TokenCalibrationService : BackgroundService
             .ListSessionsAsync(limit: options.MaxSamplesPerCycle * 4, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
+        // The list carries metadata only (#165 phase 2); the prompts come from the session files, one bounded
+        // batch at a time and only for rows that could be counted at all.
+        var countable = candidates.Where(row => TryResolveCountableModel(row.RoutedModel, out _))
+            .Take(options.MaxSamplesPerCycle * 2).Select(row => row.Id).ToList();
+        var texts = await _transcriptStore.LoadTurnTextsAsync(countable, cancellationToken).ConfigureAwait(false);
+        var promptById = texts.Where(text => !string.IsNullOrWhiteSpace(text.PromptText))
+            .ToDictionary(text => text.TranscriptId, text => text.PromptText!);
+
         var recorded = 0;
 
         foreach (var row in candidates)
@@ -161,15 +169,18 @@ public sealed class TokenCalibrationService : BackgroundService
                 break;
             }
 
-            if (string.IsNullOrWhiteSpace(row.PromptText)) continue;
+            var promptText = !string.IsNullOrWhiteSpace(row.PromptText)
+                ? row.PromptText
+                : promptById.GetValueOrDefault(row.Id);
+            if (string.IsNullOrWhiteSpace(promptText)) continue;
             if (!TryResolveCountableModel(row.RoutedModel, out var key)) continue;
 
-            if (!_localCounter.TryCountPromptTokens(text: row.PromptText, key: key, tokens: out var localTokens,
+            if (!_localCounter.TryCountPromptTokens(text: promptText, key: key, tokens: out var localTokens,
                     source: out _))
                 continue;
 
             var providerTokens = await _countClient
-                .TryCountTokensAsync(model: key.ModelName, text: row.PromptText, cancellationToken: cancellationToken)
+                .TryCountTokensAsync(model: key.ModelName, text: promptText, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             if (providerTokens is not { } counted) continue;
 

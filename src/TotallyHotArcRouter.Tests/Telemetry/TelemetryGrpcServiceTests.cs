@@ -518,29 +518,6 @@ public class TelemetryGrpcServiceTests
         }
     }
 
-    /// <summary>Records each entry's level and rendered message.</summary>
-    private sealed class CapturingLogger : ILogger<TelemetryGrpcService>
-    {
-        public List<(LogLevel Level, string Message)> Entries { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull
-        {
-            return null;
-        }
-
-        public bool IsEnabled(LogLevel logLevel)
-        {
-            return true;
-        }
-
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            Entries.Add((logLevel, formatter(arg1: state, arg2: exception)));
-        }
-    }
-
     /// <summary>
     /// Minimal <see cref="ITranscriptStore"/> fake over a fixed, pre-seeded, newest-first session list. Honours
     /// the requested limit, as <see cref="SqliteTranscriptStore"/> does, and records it.

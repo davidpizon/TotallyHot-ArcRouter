@@ -67,7 +67,6 @@ public class TranscriptRetentionServiceTests
     {
 
         public int DeleteOldestCount { get; private set; }
-        public int LastDeleteOldestArgument { get; private set; }
         public int DeleteBeforeCount { get; private set; }
         public bool DeleteOldestWasCalled => DeleteOldestCount > 0;
         public bool DeleteBeforeWasCalled => DeleteBeforeCount > 0;
@@ -108,7 +107,6 @@ public class TranscriptRetentionServiceTests
         public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default)
         {
             DeleteOldestCount++;
-            LastDeleteOldestArgument = count;
             return Task.FromResult(count);
         }
 

@@ -52,7 +52,6 @@ public sealed class StartupHealthCheckHostedService : IHostedService
     private readonly ToolCallCapabilityStore _toolCallCapabilityStore;
     private readonly TranscriptDatabase _transcriptDatabase;
     private readonly TranscriptOptions _transcriptOptions;
-    private readonly ITranscriptStore _transcriptStore;
     private readonly IUsageLedger _usageLedger;
 
     /// <summary>
@@ -119,7 +118,6 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         _benchmarkDatabase = benchmarkDatabase;
         _benchmarkStatusService = benchmarkStatusService;
         _transcriptDatabase = transcriptDatabase;
-        _transcriptStore = transcriptStore;
         _transcriptOptions = transcriptOptions.Value;
         _hostLifetime = hostLifetime;
         _embeddingClient = embeddingClient;
@@ -332,24 +330,8 @@ public sealed class StartupHealthCheckHostedService : IHostedService
                 _logger.LogInformation(message: "Transcript capture is enabled; ensured transcript database at {Path}.",
                     _transcriptDatabase.DatabasePath);
 
-                // Phase T1e: run one purge at startup to clean any retention-expired rows from before this restart.
-                try
-                {
-                    var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromDays(_transcriptOptions.RetentionDays);
-                    var deleted = await _transcriptStore
-                        .DeleteBeforeAsync(cutoff: cutoff, cancellationToken: cancellationToken).ConfigureAwait(false);
-                    if (deleted > 0)
-                        _logger.LogInformation(
-                            message:
-                            "Transcript retention startup purge deleted {DeletedRows} row(s) older than {RetentionDays} days.",
-                            deleted,
-                            _transcriptOptions.RetentionDays);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(exception: ex,
-                        message: "Transcript retention purge failed at startup; continuing.");
-                }
+                // No row-level age purge here (#165 phase 2): Sample Size session retention deletes whole sessions
+                // together with their transcript rows, so a row-only purge would strand the session files.
             }
             catch (Exception ex)
             {

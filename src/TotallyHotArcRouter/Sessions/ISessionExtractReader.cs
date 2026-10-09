@@ -20,6 +20,10 @@ public sealed record SessionExtracts(string? NewestUserMessage, string? Response
         return new SessionExtracts(Text(root, "newest_user_message"), Text(root, "response_text"));
     }
 
+    /// <summary>Reads one string property, or <see langword="null"/> when it is absent or not a string.</summary>
+    /// <param name="root">The Extracts object.</param>
+    /// <param name="name">The property name.</param>
+    /// <returns>The string value, or <see langword="null"/>.</returns>
     private static string? Text(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
@@ -37,4 +41,23 @@ public interface ISessionExtractReader
     /// <param name="archiveTurnId">The turn's archive id.</param>
     /// <returns>The extracts, or <see langword="null"/> when they cannot be read.</returns>
     SessionExtracts? TryReadExtracts(Guid archiveSessionId, Guid archiveTurnId);
+
+    /// <summary>
+    /// Decrypts the Extracts frames for several turns of one session in a single pass over its file. The
+    /// default reads them one at a time, so existing fakes keep compiling.
+    /// </summary>
+    /// <param name="archiveSessionId">The session file's archive id.</param>
+    /// <param name="archiveTurnIds">The turns wanted.</param>
+    /// <returns>The extracts by turn id; a turn that cannot be read has no entry.</returns>
+    IReadOnlyDictionary<Guid, SessionExtracts> TryReadExtracts(
+        Guid archiveSessionId, IReadOnlyCollection<Guid> archiveTurnIds)
+    {
+        var results = new Dictionary<Guid, SessionExtracts>();
+        foreach (var turnId in archiveTurnIds)
+        {
+            if (TryReadExtracts(archiveSessionId, turnId) is { } extracts) results[turnId] = extracts;
+        }
+
+        return results;
+    }
 }

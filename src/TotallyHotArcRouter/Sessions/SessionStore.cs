@@ -207,15 +207,24 @@ public sealed class SessionStore : ISessionExtractReader
     public Action<IReadOnlyCollection<Guid>>? SessionsDeleted { get; set; }
 
     /// <inheritdoc />
-    public SessionExtracts? TryReadExtracts(Guid archiveSessionId, Guid archiveTurnId)
+    public SessionExtracts? TryReadExtracts(Guid archiveSessionId, Guid archiveTurnId) =>
+        TryReadExtracts(archiveSessionId, [archiveTurnId]).GetValueOrDefault(archiveTurnId);
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<Guid, SessionExtracts> TryReadExtracts(
+        Guid archiveSessionId, IReadOnlyCollection<Guid> archiveTurnIds)
     {
+        ArgumentNullException.ThrowIfNull(archiveTurnIds);
+        var results = new Dictionary<Guid, SessionExtracts>();
+        if (archiveTurnIds.Count == 0) return results;
+
         _rotationLock.EnterReadLock();
         try
         {
             lock (_sessionGates.GetOrAdd(archiveSessionId, static _ => new object()))
             {
                 var row = _index.TryGetSession(archiveSessionId);
-                if (row is null) return null;
+                if (row is null) return results;
 
                 var sessionKey = UnwrapSessionKey(row.WrappedKey);
                 try
@@ -223,17 +232,22 @@ public sealed class SessionStore : ISessionExtractReader
                     using var file = SessionFile.Open(PathOf(row), sessionKey, archiveSessionId);
                     if ((long)file.FrameCount < row.CommittedFrames || file.Length < row.CommittedLength)
                     {
-                        return null;
+                        return results;
                     }
 
-                    var plaintext = file.TryReadExtract(archiveTurnId, row.CommittedFrames);
-                    return plaintext is { Length: > 0 } ? SessionExtracts.Parse(plaintext) : null;
+                    var wanted = archiveTurnIds.ToHashSet();
+                    foreach (var (turnId, plaintext) in file.TryReadExtracts(wanted, row.CommittedFrames))
+                    {
+                        if (plaintext.Length > 0) results[turnId] = SessionExtracts.Parse(plaintext);
+                    }
+
+                    return results;
                 }
                 catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException
                                                or JsonException)
                 {
                     _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
-                    return null;
+                    return results;
                 }
                 finally
                 {
@@ -368,6 +382,23 @@ public sealed class SessionStore : ISessionExtractReader
             _rotationLock.ExitReadLock();
         }
 
+        // Runs before the key rotation below: the index rows are already gone, so if the rotation throws no retry
+        // would find these sessions again, and their transcript rows and embeddings would be stranded.
+        if (deletedIds.Count > 0 && SessionsDeleted is { } onDeleted)
+        {
+            // The files are already gone, so a failing cleanup must not turn a completed delete into an error.
+            try
+            {
+                onDeleted(deletedIds);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Transcript rows for {Count} deleted sessions could not be removed.",
+                    deletedIds.Count);
+            }
+        }
+
+
         SessionDeletionResult result;
         if (deletedFiles.Count == 0 && !_masterKeys.IsRotationRequired())
         {
@@ -387,20 +418,6 @@ public sealed class SessionStore : ISessionExtractReader
             _logger.LogInformation("Deleted {Count} sessions; write-ahead log truncated: {WalTruncated}.",
                 deletedFiles.Count, walTruncated);
             result = new SessionDeletionResult(deletedFiles.Count, walTruncated, MasterKeyRotated: true);
-        }
-
-        if (deletedIds.Count > 0 && SessionsDeleted is { } onDeleted)
-        {
-            // The files are already gone, so a failing cleanup must not turn a completed delete into an error.
-            try
-            {
-                onDeleted(deletedIds);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Transcript rows for {Count} deleted sessions could not be removed.",
-                    deletedIds.Count);
-            }
         }
 
         return result;

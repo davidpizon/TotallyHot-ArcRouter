@@ -126,7 +126,7 @@ internal sealed class TurnCapture : IDisposable
     private readonly Func<string, Guid>? _resolveArchiveSession;
 
     /// <summary>The turn id minted when capture began, shared with the transcript row.</summary>
-    internal Guid ArchiveTurnId { get; } = SessionArchiveIds.NewArchiveTurnId();
+    private Guid ArchiveTurnId { get; } = SessionArchiveIds.NewArchiveTurnId();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TurnCapture"/> class.
