@@ -3,15 +3,12 @@ using Microsoft.Extensions.Options;
 namespace TotallyHot.ArcRouter.Transcripts;
 
 /// <summary>
-/// Background service that enforces configurable age and size bounds on the transcript table
-/// (docs/router/self-organizing-classification-plan.md Phase T1e). Runs on a 5-minute check interval,
-/// mirroring <see cref="Hosting.LogRegRetrainHostedService"/>'s shape. A no-op when
-/// <see cref="TranscriptOptions.Enabled"/> is <see langword="false"/>.
+/// Formerly enforced age and row-count bounds on <c>request_transcripts</c>. #165 phase 2 retires that:
+/// Sample Size session retention deletes whole sessions, and those deletes remove the matching transcript
+/// rows. This service stays registered so the host layout does not change, and it no longer deletes.
 /// </summary>
 public sealed class TranscriptRetentionService : BackgroundService
 {
-    private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
-
     private readonly ILogger<TranscriptRetentionService> _logger;
     private readonly TranscriptOptions _options;
     private readonly ITranscriptStore _transcriptStore;
@@ -35,70 +32,24 @@ public sealed class TranscriptRetentionService : BackgroundService
     }
 
     /// <inheritdoc/>
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.Enabled)
-        {
-            _logger.LogInformation("Transcript capture is disabled; retention loop will not fire.");
-            return;
-        }
-
-        using var timer = new PeriodicTimer(CheckInterval);
-        try
-        {
-            do
-            {
-                try
-                {
-                    await CheckAndPurgeAsync(stoppingToken).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogError(exception: ex,
-                        message: "Transcript retention check threw unexpectedly; continuing.");
-                }
-            } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException)
-        {
-            // Normal shutdown.
-        }
+        _logger.LogInformation(
+            "Transcript row retention is retired (capture enabled {Enabled}, max rows {MaxRows}); Sample Size session retention deletes whole sessions.",
+            _options.Enabled,
+            _options.MaxRows);
+        _ = _transcriptStore;
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Runs one cycle of the retention purge - the loop body <see cref="ExecuteAsync"/>
-    /// runs on every tick. Internal (not private) so <c>TranscriptRetentionServiceTests</c> can exercise
-    /// one cycle directly rather than waiting on <see cref="CheckInterval"/>, mirroring
-    /// <c>Program.ExtractFlag</c>'s "internal for direct test access" convention.
+    /// The former purge cycle. It now does nothing: Sample Size session retention is the deleter.
+    /// Internal so <c>TranscriptRetentionServiceTests</c> can call it directly.
     /// </summary>
     /// <param name="cancellationToken">A cancellation token.</param>
-    internal async Task CheckAndPurgeAsync(CancellationToken cancellationToken)
+    internal Task CheckAndPurgeAsync(CancellationToken cancellationToken)
     {
-        if (!_options.Enabled) return;
-
-        var rowCount = await _transcriptStore.GetRowCountAsync(cancellationToken).ConfigureAwait(false);
-        var deletedByOverage = 0;
-
-        // First, enforce the max-rows bound by deleting oldest-first if over the limit
-        if (rowCount > _options.MaxRows)
-        {
-            var overageCount = rowCount - _options.MaxRows;
-            deletedByOverage = await _transcriptStore
-                .DeleteOldestAsync(count: overageCount, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        // Then, delete rows past the retention age
-        var cutoffTime = DateTimeOffset.UtcNow - TimeSpan.FromDays(_options.RetentionDays);
-        var deletedByAge = await _transcriptStore
-            .DeleteBeforeAsync(cutoff: cutoffTime, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        if (deletedByOverage > 0 || deletedByAge > 0)
-            _logger.LogInformation(
-                message:
-                "Transcript retention purge complete: {DeletedByOverage} rows deleted by overage, {DeletedByAge} rows deleted by age.",
-                deletedByOverage,
-                deletedByAge);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
     }
 }

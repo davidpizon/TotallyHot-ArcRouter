@@ -200,13 +200,10 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             .ListSessionsAsync(limit: limit + 1, cancellationToken: context.CancellationToken)
             .ConfigureAwait(false);
 
-        // Metadata only unless the caller holds a content grant (ADR-0020); one check covers every row.
-        var includeText = _contentGate is null || _contentGate.TryGetContentGrant(context);
-
         var size = ListResponseFlagBytes;
         foreach (var transcript in transcripts.Take(limit))
         {
-            var row = ToContract(transcript, includeText);
+            var row = ToContract(transcript);
             // One tag byte for repeated field 2, then the length-prefixed row.
             var rowBytes = 1 + CodedOutputStream.ComputeMessageSize(row);
             if (size + rowBytes > MaxListResponseBytes)
@@ -227,13 +224,60 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         return response;
     }
 
+    /// <summary>The most transcript ids one <see cref="GetTurnTexts"/> call accepts.</summary>
+    private const int MaxTurnTextIds = 50;
+
+    /// <inheritdoc />
+    public override Task<GetTurnTextsResponse> GetTurnTexts(GetTurnTextsRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_contentGate is not null) ContentGateHooks.RequireTurnTexts(_contentGate, context);
+
+        if (request.TranscriptIds.Count is 0 or > MaxTurnTextIds)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument,
+                "GetTurnTexts takes between 1 and 50 transcript ids."));
+        }
+
+        var response = new GetTurnTextsResponse
+        {
+            TranscriptCaptureEnabled = _transcriptOptions.CurrentValue.Enabled
+        };
+        if (!response.TranscriptCaptureEnabled) return Task.FromResult(response);
+
+        var texts = _transcriptStore
+            .LoadTurnTextsAsync(request.TranscriptIds, context.CancellationToken)
+            .GetAwaiter()
+            .GetResult();
+
+        foreach (var text in texts)
+        {
+            var row = new TurnText { TranscriptId = text.TranscriptId, Found = text.Found };
+            if (text.PromptText is { } prompt)
+            {
+                row.PromptText = TextTruncator.Truncate(prompt)!;
+                row.PromptTruncated = prompt.Length > TextTruncator.DefaultMaxLength;
+            }
+
+            if (text.ResponseText is { } reply)
+            {
+                row.ResponseText = TextTruncator.Truncate(reply)!;
+                row.ResponseTruncated = reply.Length > TextTruncator.DefaultMaxLength;
+            }
+
+            if (text.PromptTextLength is { } promptLength) row.PromptTextLength = promptLength;
+            if (text.ResponseTextLength is { } responseLength) row.ResponseTextLength = responseLength;
+            response.Texts.Add(row);
+        }
+
+        return Task.FromResult(response);
+    }
+
     /// <summary>
-    /// Maps one <see cref="SessionTranscript"/> onto its wire representation, with display previews in place
-    /// of the stored texts (ADR-0023). With <paramref name="includeText"/> false (no content grant, ADR-0020)
-    /// the prompt and response previews and their truncation flags are left unset; lengths stay, since they
-    /// are metadata rather than content.
+    /// Maps one <see cref="SessionTranscript"/> onto its wire representation. The list carries lengths and
+    /// other metadata only (#165 phase 2). Opening a chat loads previews through <see cref="GetTurnTexts"/>.
     /// </summary>
-    private static PersistedTranscript ToContract(SessionTranscript transcript, bool includeText)
+    private static PersistedTranscript ToContract(SessionTranscript transcript)
     {
         var contract = new PersistedTranscript
         {
@@ -244,18 +288,6 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
             RoutedModel = transcript.RoutedModel,
             TranscriptId = transcript.Id
         };
-
-        if (includeText && transcript.PromptText is { } promptText)
-        {
-            contract.PromptText = TextTruncator.Truncate(promptText)!;
-            contract.PromptTruncated = promptText.Length > TextTruncator.DefaultMaxLength;
-        }
-
-        if (includeText && transcript.ResponseText is { } responseText)
-        {
-            contract.ResponseText = TextTruncator.Truncate(responseText)!;
-            contract.ResponseTruncated = responseText.Length > TextTruncator.DefaultMaxLength;
-        }
 
         if (transcript.PromptTextLength is { } promptTextLength) contract.PromptTextLength = promptTextLength;
 

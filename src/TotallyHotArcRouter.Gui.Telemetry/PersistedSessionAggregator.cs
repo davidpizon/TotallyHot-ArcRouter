@@ -20,6 +20,7 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// The linked <c>memory_entries</c> row id, or <see langword="null"/> if never folded into the
 /// live-learning corpus.
 /// </param>
+/// <param name="TranscriptId"><c>request_transcripts.id</c>, used to load this turn's text when the chat is opened.</param>
 public sealed record PersistedConversationTurn(
     string CorrelationId,
     int TurnNumber,
@@ -31,7 +32,8 @@ public sealed record PersistedConversationTurn(
     int? InputTokens,
     int? OutputTokens,
     DateTimeOffset TimestampUtc,
-    long? MemoryEntryId);
+    long? MemoryEntryId,
+    long TranscriptId = 0);
 
 /// <summary>A conversation (session) reconstructed from persisted <c>request_transcripts</c> history.</summary>
 /// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
@@ -97,7 +99,8 @@ public static class PersistedSessionAggregator
                 InputTokens: t.InputTokens,
                 OutputTokens: t.OutputTokens,
                 TimestampUtc: t.CreatedAtUtc,
-                MemoryEntryId: t.MemoryEntryId))
+                MemoryEntryId: t.MemoryEntryId,
+                TranscriptId: t.TranscriptId))
             .OrderBy(t => t.TurnNumber)
             .ToList();
 

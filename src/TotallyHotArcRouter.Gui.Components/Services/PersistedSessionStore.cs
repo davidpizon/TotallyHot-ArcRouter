@@ -30,6 +30,7 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
     private const int RequestLimit = 500;
 
     private ContentGrantStore? _contentGrant;
+    private string? _openSessionId;
 
     // Serializes publishing a load's result with clearing, so a load that finishes after a lock cannot put
     // text back.
@@ -192,6 +193,72 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
         NotifyChanged();
     }
 
+    /// <summary>
+    /// Loads display previews for the turns of <paramref name="sessionId"/> and writes them onto that
+    /// session. Does nothing while a content grant exists and is locked. A failure leaves the metadata in
+    /// place.
+    /// </summary>
+    /// <param name="sessionId">The session the operator opened.</param>
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public async Task LoadTurnTextsAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(sessionId);
+        _openSessionId = sessionId;
+        if (_contentGrant is { IsActive: false }) return;
+
+        Conversation? session;
+        lock (_publishGate) session = Sessions.FirstOrDefault(item => item.Id == sessionId);
+        if (session is null) return;
+
+        var ids = session.Turns.Where(turn => turn.TranscriptId > 0).Select(turn => turn.TranscriptId).Distinct().ToList();
+        if (ids.Count == 0) return;
+
+        var grantAtStart = _contentGrant?.Token;
+        var texts = new List<PersistedTurnText>();
+        try
+        {
+            for (var offset = 0; offset < ids.Count; offset += 50)
+            {
+                var batch = ids.Skip(offset).Take(50).ToList();
+                texts.AddRange(await Client.GetTurnTextsAsync(batch, cancellationToken).ConfigureAwait(false));
+            }
+        }
+        catch (GrpcAdminException ex)
+        {
+            Logger?.LogWarning(ex, "Could not load turn text for session {SessionId}.", sessionId);
+            return;
+        }
+
+        var byId = texts.ToDictionary(text => text.TranscriptId);
+        lock (_publishGate)
+        {
+            if (_contentGrant is not null &&
+                !string.Equals(_contentGrant.Token, grantAtStart, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!string.Equals(_openSessionId, sessionId, StringComparison.Ordinal)) return;
+
+            Sessions =
+            [
+                .. Sessions.Select(item => item.Id != sessionId
+                    ? item
+                    : item with
+                    {
+                        Turns =
+                        [
+                            .. item.Turns.Select(turn => byId.TryGetValue(turn.TranscriptId, out var text)
+                                ? turn with { RequestSummary = text.PromptText, ResponseSummary = text.ResponseText }
+                                : turn)
+                        ]
+                    })
+            ];
+        }
+
+        NotifyChanged();
+    }
+
     /// <inheritdoc/>
     protected override void Dispose(bool disposing)
     {
@@ -223,9 +290,20 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
         ClearConversationText();
     }
 
-    /// <summary>Reloads the list when a grant is set, since the router now releases the text it withheld.</summary>
-    private void OnGrantGranted()
+    /// <summary>
+    /// Reloads the list when a grant is set, then the open chat's text, since the list itself no longer
+    /// carries words.
+    /// </summary>
+    private async void OnGrantGranted()
     {
-        _ = LoadAsync();
+        try
+        {
+            await LoadAsync().ConfigureAwait(false);
+            if (_openSessionId is { } sessionId) await LoadTurnTextsAsync(sessionId).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger?.LogWarning(ex, "Could not reload persisted sessions after the content grant was set.");
+        }
     }
 }

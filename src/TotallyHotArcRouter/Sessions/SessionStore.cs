@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TotallyHot.ArcRouter.Sessions;
@@ -84,7 +85,7 @@ public sealed record SessionDeletionResult(int DeletedSessions, bool WalTruncate
 /// about to be replaced.
 /// </para>
 /// </remarks>
-public sealed class SessionStore
+public sealed class SessionStore : ISessionExtractReader
 {
     private const string SessionFileExtension = ".thsess";
 
@@ -199,6 +200,53 @@ public sealed class SessionStore
         }
     }
 
+    /// <summary>
+    /// Invoked with the archive ids actually removed by a delete, so transcript rows and learned embeddings
+    /// can leave with the session. Optional; a store built for tests leaves it unset.
+    /// </summary>
+    public Action<IReadOnlyCollection<Guid>>? SessionsDeleted { get; set; }
+
+    /// <inheritdoc />
+    public SessionExtracts? TryReadExtracts(Guid archiveSessionId, Guid archiveTurnId)
+    {
+        _rotationLock.EnterReadLock();
+        try
+        {
+            lock (_sessionGates.GetOrAdd(archiveSessionId, static _ => new object()))
+            {
+                var row = _index.TryGetSession(archiveSessionId);
+                if (row is null) return null;
+
+                var sessionKey = UnwrapSessionKey(row.WrappedKey);
+                try
+                {
+                    using var file = SessionFile.Open(PathOf(row), sessionKey, archiveSessionId);
+                    if ((long)file.FrameCount < row.CommittedFrames || file.Length < row.CommittedLength)
+                    {
+                        return null;
+                    }
+
+                    var plaintext = file.TryReadExtract(archiveTurnId, row.CommittedFrames);
+                    return plaintext is { Length: > 0 } ? SessionExtracts.Parse(plaintext) : null;
+                }
+                catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException
+                                               or JsonException)
+                {
+                    _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
+                    return null;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(sessionKey);
+                }
+            }
+        }
+        finally
+        {
+            _rotationLock.ExitReadLock();
+        }
+    }
+
     /// <summary>Lists a session's committed turns in order.</summary>
     /// <param name="archiveSessionId">The session's archive id.</param>
     /// <returns>The turns, or an empty list for an unknown session.</returns>
@@ -272,6 +320,7 @@ public sealed class SessionStore
         IReadOnlyCollection<Guid> archiveSessionIds, IReadOnlyDictionary<Guid, SessionFileRow>? unchangedSince)
     {
         var deletedFiles = new List<string>();
+        var deletedIds = new List<Guid>();
         _rotationLock.EnterReadLock();
         try
         {
@@ -303,7 +352,11 @@ public sealed class SessionStore
                         }
                     }
 
-                    if (_index.DeleteSession(id) is { } fileName) deletedFiles.Add(fileName);
+                    if (_index.DeleteSession(id) is { } fileName)
+                    {
+                        deletedFiles.Add(fileName);
+                        deletedIds.Add(id);
+                    }
                 }
 
                 // The gate stays: removing it would let an append that already holds it and one that creates
@@ -315,23 +368,30 @@ public sealed class SessionStore
             _rotationLock.ExitReadLock();
         }
 
+        SessionDeletionResult result;
         if (deletedFiles.Count == 0 && !_masterKeys.IsRotationRequired())
         {
-            return new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false);
+            result = new SessionDeletionResult(0, WalTruncated: true, MasterKeyRotated: false);
+        }
+        else
+        {
+            var walTruncated = deletedFiles.Count == 0 || _index.TruncateWal();
+            foreach (var fileName in deletedFiles) DeleteFile(Path.Combine(_folder, fileName));
+
+            // Database remnants could still hold an old copy of a wrapped key; the rotation is what makes that
+            // copy useless, so it runs after every pass that deleted anything (and after a prior pass that
+            // recorded RequireRotation but could not finish).
+            RotateMasterKey();
+            walTruncated = _index.TruncateWal() && walTruncated;
+
+            _logger.LogInformation("Deleted {Count} sessions; write-ahead log truncated: {WalTruncated}.",
+                deletedFiles.Count, walTruncated);
+            result = new SessionDeletionResult(deletedFiles.Count, walTruncated, MasterKeyRotated: true);
         }
 
-        var walTruncated = deletedFiles.Count == 0 || _index.TruncateWal();
-        foreach (var fileName in deletedFiles) DeleteFile(Path.Combine(_folder, fileName));
+        if (deletedIds.Count > 0) SessionsDeleted?.Invoke(deletedIds);
 
-        // Database remnants could still hold an old copy of a wrapped key; the rotation is what makes that
-        // copy useless, so it runs after every pass that deleted anything (and after a prior pass that
-        // recorded RequireRotation but could not finish).
-        RotateMasterKey();
-        walTruncated = _index.TruncateWal() && walTruncated;
-
-        _logger.LogInformation("Deleted {Count} sessions; write-ahead log truncated: {WalTruncated}.",
-            deletedFiles.Count, walTruncated);
-        return new SessionDeletionResult(deletedFiles.Count, walTruncated, MasterKeyRotated: true);
+        return result;
     }
 
     /// <summary>Lists every session in the index, oldest first.</summary>

@@ -181,8 +181,8 @@ public sealed class QualityRescanService : BackgroundService
         var record = await _transcriptStore.GetTranscriptAsync(id: transcriptId, cancellationToken: stoppingToken)
             .ConfigureAwait(false);
         if (record?.ResponseText is not { Length: > 0 } responseText)
-            // Selected on `response_text IS NOT NULL`, so this means the row was deleted by retention or
-            // emptied between the sweep's select and this read. Nothing to stamp; the row may not exist.
+            // Selected on a positive response length, so this means the extracts are gone or the row was
+            // deleted between the sweep's select and this read. Nothing to stamp; the row may not exist.
             return false;
 
         var request = _extractor.Extract(new SignalExtractionContext(

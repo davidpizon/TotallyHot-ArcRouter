@@ -174,7 +174,7 @@ public sealed class TelemetryGrpcServiceContentGateTests
     }
 
     [Fact]
-    public async Task ListPersistedSessions_WithGrant_IncludesText()
+    public async Task ListPersistedSessions_WithGrant_StillOmitsText()
     {
         var harness = PasskeyGateHarness.Create();
         var service = CreateService(new TelemetryBroadcaster(), harness.Gate, [Transcript()]);
@@ -184,8 +184,46 @@ public sealed class TelemetryGrpcServiceContentGateTests
             PasskeyGateHarness.Context(harness.Grants.IssueGrant(), TestContext.Current.CancellationToken));
 
         var row = Assert.Single(response.Transcripts);
-        Assert.Equal("fix this bug", row.PromptText);
-        Assert.Equal("here is the fix", row.ResponseText);
+        Assert.False(row.HasPromptText);
+        Assert.False(row.HasResponseText);
+        Assert.Equal(12, row.PromptTextLength);
+    }
+
+    [Fact]
+    public async Task GetTurnTexts_WithGrant_ReturnsExtracts()
+    {
+        var harness = PasskeyGateHarness.Create();
+        var store = new Mock<ITranscriptStore>();
+        store.Setup(s => s.LoadTurnTextsAsync(It.IsAny<IReadOnlyList<long>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new StoredTurnText(1, true, "fix this bug", "here is the fix", 12, 15)
+            ]);
+        var service = new TelemetryGrpcService(
+            broadcaster: new TelemetryBroadcaster(),
+            transcriptStore: store.Object,
+            transcriptOptions: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }),
+            contentGate: harness.Gate);
+
+        var response = await service.GetTurnTexts(
+            new Contract.GetTurnTextsRequest { TranscriptIds = { 1 } },
+            PasskeyGateHarness.Context(harness.Grants.IssueGrant(), TestContext.Current.CancellationToken));
+
+        var text = Assert.Single(response.Texts);
+        Assert.Equal("fix this bug", text.PromptText);
+        Assert.Equal("here is the fix", text.ResponseText);
+    }
+
+    [Fact]
+    public async Task GetTurnTexts_WithoutGrant_IsRejected()
+    {
+        var service = CreateService(new TelemetryBroadcaster(), PasskeyGateHarness.Create().Gate, [Transcript()]);
+
+        var error = await Assert.ThrowsAsync<RpcException>(() => service.GetTurnTexts(
+            new Contract.GetTurnTextsRequest { TranscriptIds = { 1 } },
+            PasskeyGateHarness.Context(cancellationToken: TestContext.Current.CancellationToken)));
+
+        Assert.Equal(StatusCode.Unauthenticated, error.StatusCode);
     }
 
     private sealed class CollectingWriter : IServerStreamWriter<Contract.TelemetryEvent>

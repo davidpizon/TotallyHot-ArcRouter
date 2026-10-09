@@ -67,7 +67,8 @@ public static class PersistedSessionMapper
             ResponseSummary: turn.ResponseText,
             TimestampUtc: turn.TimestampUtc,
             RequestedModel: turn.RequestedModel,
-            RoutedModel: turn.RoutedModel);
+            RoutedModel: turn.RoutedModel,
+            TranscriptId: turn.TranscriptId);
     }
 
     /// <summary>Builds the conversation card's display title for a persisted session.</summary>

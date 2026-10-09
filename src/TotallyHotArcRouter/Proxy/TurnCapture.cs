@@ -58,7 +58,8 @@ public sealed class TurnCaptureFactory(
         var expectedBytes = context.Request.ContentLength is > 0 and <= MaxRequestBufferHint
             ? (int)context.Request.ContentLength.Value
             : 0;
-        var capture = new TurnCapture(pump, writer, epoch, CreateSpool, logger, DateTimeOffset.UtcNow, expectedBytes);
+        var capture = new TurnCapture(pump, writer, epoch, CreateSpool, logger, DateTimeOffset.UtcNow, expectedBytes,
+            clientSessionId => store.Value.ResolveArchiveSessionId(clientSessionId));
         context.Request.Body = capture.TeeRequest(context.Request.Body);
         return capture;
     }
@@ -122,6 +123,10 @@ internal sealed class TurnCapture : IDisposable
     private byte[]? _providerRequest;
     private bool _interrupted;
     private bool _submitted;
+    private readonly Func<string, Guid>? _resolveArchiveSession;
+
+    /// <summary>The turn id minted when capture began, shared with the transcript row.</summary>
+    internal Guid ArchiveTurnId { get; } = SessionArchiveIds.NewArchiveTurnId();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TurnCapture"/> class.
@@ -133,6 +138,10 @@ internal sealed class TurnCapture : IDisposable
     /// <param name="logger">Receives failures; templates are static.</param>
     /// <param name="startedAtUtc">When the request arrived, recorded as the turn's creation time.</param>
     /// <param name="expectedRequestBytes">The request's declared length, to presize its in-memory copy; zero when unknown.</param>
+    /// <param name="resolveArchiveSession">
+    /// Resolves the session file id for a client session id. The same call the writer makes, so the transcript
+    /// row and the file share one id. Null only for a capture that is never bound to a transcript row.
+    /// </param>
     internal TurnCapture(
         CaptureBodyPump pump,
         SessionCaptureWriter writer,
@@ -140,7 +149,8 @@ internal sealed class TurnCapture : IDisposable
         Func<SessionBodySpool> createSpool,
         ILogger logger,
         DateTimeOffset startedAtUtc,
-        int expectedRequestBytes = 0)
+        int expectedRequestBytes = 0,
+        Func<string, Guid>? resolveArchiveSession = null)
     {
         _pump = pump;
         _writer = writer;
@@ -149,7 +159,24 @@ internal sealed class TurnCapture : IDisposable
         _createSpool = createSpool;
         _logger = logger;
         _startedAtUtc = startedAtUtc;
+        _resolveArchiveSession = resolveArchiveSession;
         _requestBuffer = new MemoryStream(Math.Max(0, expectedRequestBytes));
+    }
+
+    /// <summary>
+    /// Resolves the session file id for <paramref name="clientSessionId"/> and returns the binding the
+    /// transcript row must store. Uses the same pending-id map as the writer.
+    /// </summary>
+    /// <param name="clientSessionId">The client's session id.</param>
+    /// <returns>The archive ids for this turn.</returns>
+    internal ArchiveBinding BindArchive(string clientSessionId)
+    {
+        if (_resolveArchiveSession is null)
+        {
+            throw new InvalidOperationException("This capture has no session-id resolver.");
+        }
+
+        return new ArchiveBinding(_resolveArchiveSession(clientSessionId), ArchiveTurnId);
     }
 
     /// <summary>
@@ -289,7 +316,7 @@ internal sealed class TurnCapture : IDisposable
 
             var item = new SessionCaptureItem(
                 turn.SessionId,
-                new SessionTurnInput(SessionArchiveIds.NewArchiveTurnId(), _startedAtUtc, bodies),
+                new SessionTurnInput(ArchiveTurnId, _startedAtUtc, bodies),
                 _startEpoch);
 
             // From here the writer owns every spool, including when it refuses the turn.

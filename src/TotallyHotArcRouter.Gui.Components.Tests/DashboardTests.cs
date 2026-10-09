@@ -320,6 +320,45 @@ public sealed class DashboardTests
         cut.Markup.Should().NotContain("No request captured");
     }
 
+    [Fact]
+    public async Task Opening_a_session_loads_its_text_and_locking_clears_it()
+    {
+        var grant = new ContentGrantStore();
+        grant.SetGrant("tok", DateTimeOffset.UtcNow.AddMinutes(10));
+        var client = new FakePersistedSessionsClient
+        {
+            Result = new PersistedSessionsResult(true, Transcripts:
+            [
+                CreateTranscript("persisted-only") with
+                {
+                    PromptText = null,
+                    ResponseText = null,
+                    TranscriptId = 9
+                }
+            ]),
+            Texts = [new PersistedTurnText(9, true, "opened words", "opened reply", false, false)]
+        };
+        var store = new PersistedSessionStore(client, grant);
+        await store.LoadAsync(TestContext.Current.CancellationToken);
+        store.Sessions.Single().Turns.Single().RequestSummary.Should().BeNull();
+        var passkeys = new FakePasskeyAdminClient();
+        passkeys.Status = passkeys.Status with { GrantActive = true };
+        await using var ctx = NewContext(store, passkeyClient: passkeys, contentGrant: grant);
+        var cut = ctx.Render<Dashboard>();
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlocked']"));
+
+        await cut.InvokeAsync(() => cut.FindAll("button")
+            .First(button => button.TextContent.Contains("Session persist", StringComparison.Ordinal))
+            .DoubleClick());
+
+        await cut.WaitForAssertionAsync(() => cut.Markup.Should().Contain("opened words"));
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='content-lock']").Click());
+
+        store.Sessions.Single().Turns.Single().RequestSummary.Should().BeNull();
+        await cut.WaitForAssertionAsync(() => cut.Markup.Should().NotContain("opened words"));
+    }
+
     private static PersistedTranscriptDto CreateTranscript(string sessionId, int turnNumber = 1)
     {
         return new PersistedTranscriptDto(
@@ -340,9 +379,17 @@ public sealed class DashboardTests
     {
         public PersistedSessionsResult Result { get; init; } = new(true, Transcripts: []);
 
+        public IReadOnlyList<PersistedTurnText> Texts { get; init; } = [];
+
         public Task<PersistedSessionsResult> ListAsync(int limit, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Result);
+        }
+
+        public Task<IReadOnlyList<PersistedTurnText>> GetTurnTextsAsync(
+            IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Texts);
         }
     }
 }

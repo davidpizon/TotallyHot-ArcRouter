@@ -21,10 +21,13 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <param name="Difficulty">The Phase H heuristic difficulty label, or <see langword="null"/>.</param>
 /// <param name="Language">The Phase H heuristic language label, or <see langword="null"/>.</param>
 /// <param name="IsUtility">Whether the request was classified as utility traffic.</param>
-/// <param name="PromptText">The newest user message's extracted text, or <see langword="null"/> when unavailable.</param>
+/// <param name="PromptText">
+/// The newest user message, held in memory at insert time so the row can store its length. The database
+/// column is left null; a later read fills this from the session file when archive ids are present.
+/// </param>
 /// <param name="ResponseText">
-/// The extracted response text, or <see langword="null"/> until the response completes (or
-/// extraction fails).
+/// The extracted response text, held in memory at insert time for the same reason as
+/// <see cref="PromptText"/>. The database column is left null.
 /// </param>
 /// <param name="Score">The verifier's observed quality score in [0, 1], or <see langword="null"/> until backfilled.</param>
 /// <param name="Cost">The estimated dollar cost of serving this request, or <see langword="null"/> when unknown.</param>
@@ -70,6 +73,11 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// path (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" backfill gap). Defaults to
 /// <see langword="false"/> for a row predating this column.
 /// </param>
+/// <param name="ArchiveSessionId">
+/// The session file this row's text lives in, or <see langword="null"/> for a row written before capture
+/// (#165 phase 2). The database does not store the text itself.
+/// </param>
+/// <param name="ArchiveTurnId">The turn inside that session file, or <see langword="null"/> when there is none.</param>
 public sealed record TranscriptRecord(
     long Id,
     string CorrelationId,
@@ -92,4 +100,6 @@ public sealed record TranscriptRecord(
     string? DimBestModel = null,
     string? UntrainedBaselineModel = null,
     double? UntrainedBaselinePredictedScore = null,
-    bool IsJudgeScored = false);
+    bool IsJudgeScored = false,
+    Guid? ArchiveSessionId = null,
+    Guid? ArchiveTurnId = null);

@@ -1,3 +1,4 @@
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Sessions;
@@ -36,12 +37,19 @@ public sealed record SessionClearResult(SessionDeletionResult Deletion, bool Que
 /// The Clear epoch, advanced by <see cref="DeleteAllAsync"/> so turns that began earlier are dropped instead of
 /// stored after it. Optional: without one nothing is invalidated.
 /// </param>
+/// <param name="transcripts">
+/// Deletes <c>request_transcripts</c> rows for a removed session. Optional so a store built by hand in a test
+/// only removes session files.
+/// </param>
+/// <param name="memory">Deletes the learned embeddings those rows pointed at. Optional when no memory store exists.</param>
 public sealed class SessionMaintenance(
     Lazy<SessionStore> store,
     TranscriptDatabase database,
     SessionCaptureWriter? writer = null,
     TimeSpan? drainTimeout = null,
-    CaptureEpoch? epoch = null)
+    CaptureEpoch? epoch = null,
+    ITranscriptStore? transcripts = null,
+    IMemoryEntryStore? memory = null)
 {
     private static readonly SessionDeletionResult NothingToDelete =
         new(0, WalTruncated: true, MasterKeyRotated: false);
@@ -71,7 +79,7 @@ public sealed class SessionMaintenance(
         var drained = writer is null ||
                       await writer.WaitForIdleAsync(drainTimeout ?? DefaultDrainTimeout).ConfigureAwait(false);
 
-        return new SessionClearResult(store.Value.DeleteAllSessions(), drained);
+        return new SessionClearResult(Open().DeleteAllSessions(), drained);
     }
 
     /// <summary>
@@ -82,5 +90,26 @@ public sealed class SessionMaintenance(
     /// <param name="maxTurns">The most turns to keep (the Sample Size setting).</param>
     /// <returns>What was deleted; zero sessions when the store is within the limit or was never opened.</returns>
     public SessionDeletionResult EnforceRetention(int maxTurns) =>
-        Directory.Exists(_folder) ? store.Value.EnforceRetention(maxTurns) : NothingToDelete;
+        Directory.Exists(_folder) ? Open().EnforceRetention(maxTurns) : NothingToDelete;
+
+    /// <summary>
+    /// Opens the store and remembers to drop transcript rows and embeddings when a session is deleted.
+    /// The callback is installed once; a later delete on the same store still sees it.
+    /// </summary>
+    private SessionStore Open()
+    {
+        var opened = store.Value;
+        if (transcripts is not null) opened.SessionsDeleted ??= OnSessionsDeleted;
+
+        return opened;
+    }
+
+    /// <summary>Deletes the transcript rows and learned embeddings that belonged to the removed sessions.</summary>
+    /// <param name="archiveSessionIds">The sessions whose files were just removed.</param>
+    private void OnSessionsDeleted(IReadOnlyCollection<Guid> archiveSessionIds)
+    {
+        var memoryIds = transcripts!.DeleteByArchiveSessions(archiveSessionIds);
+        if (memory is not null && memoryIds.Count > 0)
+            memory.DeleteManyAsync(memoryIds).GetAwaiter().GetResult();
+    }
 }

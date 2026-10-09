@@ -161,7 +161,8 @@ internal sealed class RequestTelemetryPublisher
         string? taskText = null,
         string? dimBestModel = null,
         string? untrainedBaselineModel = null,
-        double? untrainedBaselinePredictedScore = null)
+        double? untrainedBaselinePredictedScore = null,
+        Func<string, ArchiveBinding>? resolveArchive = null)
     {
         var (requestBody, sessionId, turnNumber, isSynthesized) =
             ResolveSessionAndTurn(context: context, rewrittenRequestBody: rewrittenRequestBody);
@@ -262,7 +263,8 @@ internal sealed class RequestTelemetryPublisher
                 completionTokens: completionTokens,
                 dimBestModel: dimBestModel,
                 untrainedBaselineModel: untrainedBaselineModel,
-                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore).ConfigureAwait(false);
+                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
+                archive: resolveArchive?.Invoke(sessionId)).ConfigureAwait(false);
 
             await PublishTelemetryEventAsync(
                 sessionId: sessionId,
@@ -726,10 +728,10 @@ internal sealed class RequestTelemetryPublisher
 
     /// <summary>
     /// M1 sub-phase 5: writes this request's single transcript row, best-effort and off the hot path in
-    /// spirit (the response has already been fully sent to the client by this point). Gated on
-    /// <see cref="Models.RoutingOptions.EnableAdaptiveRouting"/> read live from <see cref="_routingOptionsMonitor"/>
-    /// (not captured once), and wrapped in its own try/catch so a transcript-store failure can never surface
-    /// as a routing failure, matching every other telemetry side-effect on this path.
+    /// spirit (the response has already been fully sent to the client by this point). Wrapped in its own
+    /// try/catch so a transcript-store failure can never surface as a routing failure.
+    /// <see cref="_routingOptionsMonitor"/> stays on the constructor; adaptive routing no longer gates the row
+    /// (#165 phase 2).
     /// </summary>
     private async Task PersistTranscriptAsync(
         string correlationId,
@@ -745,16 +747,15 @@ internal sealed class RequestTelemetryPublisher
         int? completionTokens,
         string? dimBestModel,
         string? untrainedBaselineModel,
-        double? untrainedBaselinePredictedScore)
+        double? untrainedBaselinePredictedScore,
+        ArchiveBinding? archive)
     {
-        // docs/router/self-organizing-classification-plan.md Phase T1a/T1b: the transcript store's single
-        // insert. Best-effort and off the hot path in spirit (the response has already been fully sent to
-        // the client by this point) - gated on TranscriptOptions.Enabled so a disabled install creates no
-        // table and writes nothing, and wrapped in its own try/catch so a transcript-store failure can
-        // never surface as a routing failure, matching every other telemetry side-effect in this method.
-        // Phase T6 adds RoutingOptions.EnableAdaptiveRouting as a second, live gate - read from the
-        // monitor (not captured once) so toggling it stops or resumes writes without a restart.
-        if (_transcriptStore is not null && (_routingOptionsMonitor?.CurrentValue.EnableAdaptiveRouting ?? false))
+        // The transcript row is metadata only (#165 phase 2). Text lives in the session file. The insert
+        // follows TranscriptOptions.Enabled inside the store, the same toggle as capture, and no longer
+        // also requires adaptive routing. A missing archive binding (capture off, or a test that does not
+        // bind one) still writes the row when the store is enabled; its text columns stay null.
+        _ = _routingOptionsMonitor;
+        if (_transcriptStore is not null)
             try
             {
                 await _transcriptStore.InsertAsync(
@@ -779,7 +780,9 @@ internal sealed class RequestTelemetryPublisher
                         null,
                         DimBestModel: dimBestModel,
                         UntrainedBaselineModel: untrainedBaselineModel,
-                        UntrainedBaselinePredictedScore: untrainedBaselinePredictedScore),
+                        UntrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
+                        ArchiveSessionId: archive?.ArchiveSessionId,
+                        ArchiveTurnId: archive?.ArchiveTurnId),
                     cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

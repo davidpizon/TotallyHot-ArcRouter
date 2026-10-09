@@ -5,9 +5,8 @@ using TotallyHot.ArcRouter.Transcripts;
 namespace TotallyHot.ArcRouter.Tests.Transcripts;
 
 /// <summary>
-/// Covers <see cref="TranscriptRetentionService.CheckAndPurgeAsync"/> (docs/router/self-organizing-
-/// classification-plan.md Phase T1e's retention purge), called directly rather than through
-/// <see cref="TranscriptRetentionService.ExecuteAsync"/>'s <see cref="PeriodicTimer"/> loop.
+/// Covers <see cref="TranscriptRetentionService.CheckAndPurgeAsync"/> after #165 phase 2 retired age and
+/// max-row deletes. Sample Size session retention is the only deleter.
 /// </summary>
 public class TranscriptRetentionServiceTests
 {
@@ -20,7 +19,7 @@ public class TranscriptRetentionServiceTests
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
         Assert.False(store.DeleteOldestWasCalled);
-        Assert.True(store.DeleteBeforeWasCalled);
+        Assert.False(store.DeleteBeforeWasCalled);
     }
 
     [Fact]
@@ -31,10 +30,8 @@ public class TranscriptRetentionServiceTests
 
         await service.CheckAndPurgeAsync(TestContext.Current.CancellationToken);
 
-        // Should delete by overage and age
-        Assert.True(store.DeleteOldestWasCalled);
-        Assert.True(store.DeleteBeforeWasCalled);
-        Assert.Equal(10_000, actual: store.LastDeleteOldestArgument);
+        Assert.False(store.DeleteOldestWasCalled);
+        Assert.False(store.DeleteBeforeWasCalled);
     }
 
     [Fact]

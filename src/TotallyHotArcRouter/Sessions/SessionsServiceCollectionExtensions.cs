@@ -31,6 +31,7 @@ internal static class SessionsServiceCollectionExtensions
         services.AddSingleton<SessionIndex>();
         services.AddSingleton(sp => new Lazy<SessionStore>(() => OpenStore(sp)));
         services.AddSingleton(sp => sp.GetRequiredService<Lazy<SessionStore>>().Value);
+        services.AddSingleton(sp => new Lazy<ISessionExtractReader>(() => sp.GetRequiredService<Lazy<SessionStore>>().Value));
 
         services.AddHostedService<SessionStoreStartupService>();
         services.AddSingleton<CaptureEpoch>();

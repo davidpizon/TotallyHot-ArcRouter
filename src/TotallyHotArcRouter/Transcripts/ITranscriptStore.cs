@@ -44,8 +44,8 @@ public interface ITranscriptStore
     Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves the full row for a transcript by its id, used by embedding backfill to obtain the
-    /// <see cref="TranscriptRecord.PromptText"/> for embedding. Returns <see langword="null"/> if
+    /// Retrieves the full row for a transcript by its id. Prompt and response text, when present, come from
+    /// the session file's Extracts frame rather than from <c>request_transcripts</c>. Returns <see langword="null"/> if
     /// transcript capture is disabled or no row matches the id.
     /// </summary>
     /// <param name="id">The transcript row id.</param>
@@ -73,7 +73,8 @@ public interface ITranscriptStore
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>Transcript row ids needing a grade, up to <paramref name="limit"/> in size.</returns>
     /// <remarks>
-    /// Rows with no <c>response_text</c> are excluded rather than returned and skipped: there is nothing to
+    /// Rows with no stored response (a null or zero <c>response_text_length</c>) are excluded rather than
+    /// returned and skipped: there is nothing to
     /// grade, and returning them would let a run of text-less rows consume an entire batch and starve the
     /// sweep. A row whose text is present but yields no code block is still stamped by
     /// <see cref="MarkQualityRescannedAsync"/> with a null score, so it leaves the pending set instead of
@@ -211,6 +212,29 @@ public interface ITranscriptStore
     Task<IReadOnlyList<SessionTranscript>> ListSessionsAsync(int limit, CancellationToken cancellationToken = default)
     {
         return Task.FromResult<IReadOnlyList<SessionTranscript>>([]);
+    }
+
+    /// <summary>
+    /// Deletes transcript rows whose <c>archive_session_id</c> is one of <paramref name="archiveSessionIds"/>
+    /// and returns the <c>memory_entry_id</c> values those rows pointed at, so the caller can delete the
+    /// embeddings with the session (#165 phase 2).
+    /// </summary>
+    /// <param name="archiveSessionIds">The sessions that were just removed.</param>
+    /// <returns>Memory entry ids that belonged to the deleted rows. Empty when this store keeps no such link.</returns>
+    IReadOnlyList<long> DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds) => [];
+
+    /// <summary>
+    /// Loads conversation text for the given transcript ids, in request order, from session-file extracts.
+    /// A missing id is returned with <see cref="StoredTurnText.Found"/> false. The default returns nothing
+    /// so existing test fakes compile.
+    /// </summary>
+    /// <param name="transcriptIds">The <c>request_transcripts.id</c> values to load. At most a few dozen.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>One result per requested id.</returns>
+    Task<IReadOnlyList<StoredTurnText>> LoadTurnTextsAsync(
+        IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<StoredTurnText>>([]);
     }
 }
 
