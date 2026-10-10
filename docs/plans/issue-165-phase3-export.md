@@ -1,6 +1,6 @@
 # Plan: #165 phase 3 — Export conversations as a zip
 
-**Status:** Draft, awaiting David's sign-off per `docs/router/standing-rules.md`. No implementation until then.
+**Status:** Approved (David, Cursor chat, 2026-10-10 — “I sign off”). Also recorded on [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165#issuecomment-6100715658) and [PR #230](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/230). Implementation may begin; each implementation PR must link this plan.
 
 **Issue:** [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165). **Parent plan:** [`docs/plans/issue-165-export-import-history.md`](docs/plans/issue-165-export-import-history.md) §1 and §5 phase 3 (approved 2026-10-08). 
 **ADR-0008:** no `ManagementFacade` change, no smell work. The proxy hot path is not touched. `SessionStore`'s capture write path gains hashing (PR 3a), so the golden-path smoke is re-run once.
