@@ -27,6 +27,10 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// <param name="captureOptions">The disk reserve every spool honours.</param>
 /// <param name="database">Names where the session folder lives, beside <c>transcripts.db</c>.</param>
 /// <param name="logger">Receives capture failures; message templates are static.</param>
+/// <param name="onTurnDropped">
+/// Marks a transcript row terminal when capture is dropped before the session file is written. Optional so
+/// tests that build the factory by hand need no transcript store.
+/// </param>
 public sealed class TurnCaptureFactory(
     CaptureBodyPump pump,
     SessionCaptureWriter writer,
@@ -35,7 +39,8 @@ public sealed class TurnCaptureFactory(
     IOptionsMonitor<TranscriptOptions> transcriptOptions,
     IOptions<SessionCaptureOptions> captureOptions,
     TranscriptDatabase database,
-    ILogger<TurnCaptureFactory> logger)
+    ILogger<TurnCaptureFactory> logger,
+    Action<Guid>? onTurnDropped = null)
 {
     /// <summary>The largest declared <c>Content-Length</c> used to presize the in-memory copy of a request.</summary>
     private const long MaxRequestBufferHint = 32L * 1024 * 1024;
@@ -59,7 +64,7 @@ public sealed class TurnCaptureFactory(
             ? (int)context.Request.ContentLength.Value
             : 0;
         var capture = new TurnCapture(pump, writer, epoch, CreateSpool, logger, DateTimeOffset.UtcNow, expectedBytes,
-            clientSessionId => store.Value.ResolveArchiveSessionId(clientSessionId));
+            clientSessionId => store.Value.ResolveArchiveSessionId(clientSessionId), onTurnDropped);
         context.Request.Body = capture.TeeRequest(context.Request.Body);
         return capture;
     }
@@ -124,6 +129,7 @@ internal sealed class TurnCapture : IDisposable
     private bool _interrupted;
     private bool _submitted;
     private readonly Func<string, Guid>? _resolveArchiveSession;
+    private readonly Action<Guid>? _onTurnDropped;
 
     /// <summary>The turn id minted when capture began, shared with the transcript row.</summary>
     private Guid ArchiveTurnId { get; } = SessionArchiveIds.NewArchiveTurnId();
@@ -142,6 +148,9 @@ internal sealed class TurnCapture : IDisposable
     /// Resolves the session file id for a client session id. The same call the writer makes, so the transcript
     /// row and the file share one id. Null only for a capture that is never bound to a transcript row.
     /// </param>
+    /// <param name="onTurnDropped">
+    /// Marks the transcript row terminal when this capture is dropped before the writer stores it. Optional.
+    /// </param>
     internal TurnCapture(
         CaptureBodyPump pump,
         SessionCaptureWriter writer,
@@ -150,7 +159,8 @@ internal sealed class TurnCapture : IDisposable
         ILogger logger,
         DateTimeOffset startedAtUtc,
         int expectedRequestBytes = 0,
-        Func<string, Guid>? resolveArchiveSession = null)
+        Func<string, Guid>? resolveArchiveSession = null,
+        Action<Guid>? onTurnDropped = null)
     {
         _pump = pump;
         _writer = writer;
@@ -160,6 +170,7 @@ internal sealed class TurnCapture : IDisposable
         _logger = logger;
         _startedAtUtc = startedAtUtc;
         _resolveArchiveSession = resolveArchiveSession;
+        _onTurnDropped = onTurnDropped;
         _requestBuffer = new MemoryStream(Math.Max(0, expectedRequestBytes));
     }
 
@@ -267,6 +278,7 @@ internal sealed class TurnCapture : IDisposable
         if (_epoch.Current != _startEpoch)
         {
             _logger.LogInformation("A captured turn that began before Clear was dropped instead of stored.");
+            NotifyTurnDropped();
             return;
         }
 
@@ -319,7 +331,7 @@ internal sealed class TurnCapture : IDisposable
                 new SessionTurnInput(ArchiveTurnId, _startedAtUtc, bodies),
                 _startEpoch);
 
-            // From here the writer owns every spool, including when it refuses the turn.
+            // From here the writer owns every spool, including when it refuses the turn (and marks the drop).
             _submitted = true;
             if (!await _writer.EnqueueAsync(item, cancellationToken).ConfigureAwait(false))
             {
@@ -329,6 +341,7 @@ internal sealed class TurnCapture : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "A captured turn could not be queued for session storage and was dropped.");
+            NotifyTurnDropped();
         }
     }
 
@@ -336,6 +349,8 @@ internal sealed class TurnCapture : IDisposable
     public void Dispose()
     {
         if (_submitted) return;
+
+        NotifyTurnDropped();
 
         _requestBuffer?.Dispose();
         _requestBuffer = null;
@@ -349,6 +364,9 @@ internal sealed class TurnCapture : IDisposable
         // has usually finished that spool and handed it to the completion task, out of Release's reach.
         DisposeWhenFinished(_requestCompletion);
     }
+
+    /// <summary>Marks the transcript row terminal when this turn will never reach a session file.</summary>
+    private void NotifyTurnDropped() => _onTurnDropped?.Invoke(ArchiveTurnId);
 
     /// <summary>
     /// Starts the request's spool from the bytes buffered while the router read the body, and ends it. A

@@ -621,6 +621,38 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     }
 
     /// <inheritdoc/>
+    public NullArchivePurgeResult DeleteNullArchiveRows()
+    {
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        var memoryIds = new List<long>();
+        using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = """
+                                 SELECT memory_entry_id FROM request_transcripts
+                                 WHERE archive_session_id IS NULL AND memory_entry_id IS NOT NULL;
+                                 """;
+            using var reader = select.ExecuteReader();
+            while (reader.Read()) memoryIds.Add(reader.GetInt64(0));
+        }
+
+        int deleted;
+        using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM request_transcripts WHERE archive_session_id IS NULL;";
+            deleted = delete.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        if (deleted > 0) TruncateWalAfterDelete(connection);
+        return new NullArchivePurgeResult(deleted, memoryIds);
+    }
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<StoredTurnText>> LoadTurnTextsAsync(
         IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
     {
@@ -716,6 +748,20 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.Parameters.AddWithValue("$id", id);
         command.ExecuteNonQuery();
         return Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public void MarkPromptUnavailableByArchiveTurn(Guid archiveTurnId)
+    {
+        if (!_options.CurrentValue.Enabled) return;
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE request_transcripts SET prompt_text_length = 0 WHERE archive_turn_id = $archiveTurnId;";
+        command.Parameters.AddWithValue("$archiveTurnId", archiveTurnId.ToString("D"));
+        command.ExecuteNonQuery();
     }
 
     /// <summary>Reads one turn's extracts, or <see langword="null"/> when no reader is wired or the frame is missing.</summary>

@@ -39,6 +39,12 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </remarks>
 public sealed class QualityRescanService : BackgroundService
 {
+    /// <summary>
+    /// How long after a row is inserted a missing session-file extract is still treated as in-flight
+    /// (#165 phase 2 follow-up). Younger rows are left for a later sweep instead of being stamped unscorable.
+    /// </summary>
+    internal static readonly TimeSpan MissingExtractGrace = TimeSpan.FromMinutes(2);
+
     private readonly ISignalExtractor _extractor;
     private readonly IQualityGrader _grader;
     private readonly ILogger<QualityRescanService> _logger;
@@ -186,7 +192,10 @@ public sealed class QualityRescanService : BackgroundService
         {
             // The sweep selects on a stored response length, but the words now live in a session file. A row
             // from before capture, one captured with its reply left out, or one whose file is unreadable has
-            // none to grade. Stamp it with a null score: left unstamped it would head every sweep forever.
+            // none to grade. Stamp it with a null score once it is past the in-flight grace; younger rows may
+            // still be writing and must not head every sweep as permanently empty.
+            if (DateTimeOffset.UtcNow - record.CreatedAtUtc < MissingExtractGrace) return false;
+
             await _transcriptStore
                 .MarkQualityRescannedAsync(transcriptId: transcriptId, scorerVersion: _qualityOptions.ScorerVersion,
                     null, cancellationToken: stoppingToken)

@@ -311,6 +311,44 @@ public sealed class SessionRetentionTests : IDisposable
         Assert.Empty(transcripts.ListSessionsAsync(10).GetAwaiter().GetResult());
     }
 
+    /// <summary>
+    /// Rows with no archive session id can never gain extracts; every retention pass deletes them (and their
+    /// memory links) even when no session file is trimmed (#165 phase 2 follow-up).
+    /// </summary>
+    [Fact]
+    public void EnforceRetention_PurgesNullArchiveTranscriptRowsAndTheirMemoryEntries()
+    {
+        var keptSession = AddSession("kept", turns: 2, firstMinute: 0);
+        var transcripts = new SqliteTranscriptStore(
+            _database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        transcripts.InsertAsync(new TranscriptRecord(
+            0, "orphan:1", Start, "gpt-5.4", "kimi-k2.5", null, null, null, false,
+            null, null, null, null, false, 1, null, null, 99)).GetAwaiter().GetResult();
+        transcripts.InsertAsync(new TranscriptRecord(
+            0, "kept:1", Start.AddMinutes(1), "gpt-5.4", "kimi-k2.5", null, null, null, false,
+            null, null, null, null, false, 1, null, null, 7,
+            ArchiveSessionId: keptSession, ArchiveTurnId: Guid.CreateVersion7())).GetAwaiter().GetResult();
+        var deletedMemory = new List<long>();
+        var memory = new Mock<IMemoryEntryStore>();
+        memory.Setup(store => store.DeleteManyAsync(It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyCollection<long>, CancellationToken>((ids, _) => deletedMemory.AddRange(ids))
+            .Returns(Task.CompletedTask);
+        var maintenance = new SessionMaintenance(
+            new Lazy<SessionStore>(() => _store),
+            _database,
+            transcripts: transcripts,
+            memory: memory.Object);
+
+        var result = maintenance.EnforceRetention(maxTurns: 100);
+
+        Assert.Equal(0, result.DeletedSessions);
+        Assert.Equal(1, result.DeletedNullArchiveRows);
+        Assert.Equal([99L], deletedMemory);
+        var remaining = transcripts.ListSessionsAsync(10).GetAwaiter().GetResult();
+        Assert.Equal("kept:1", Assert.Single(remaining).CorrelationId);
+    }
+
     /// <summary>The retention service reads the Sample Size live and trims to it.</summary>
     [Fact]
     public void RetentionService_TrimsToTheLiveSampleSize()

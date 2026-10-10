@@ -96,6 +96,52 @@ public sealed class SessionCaptureWriterTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
     }
 
+    /// <summary>An epoch-dropped turn notifies the drop callback with its archive turn id (#165 phase 2 follow-up).</summary>
+    [Fact]
+    public async Task Enqueue_TurnThatBeganBeforeClear_NotifiesOnTurnDropped()
+    {
+        var epoch = new CaptureEpoch();
+        var dropped = new List<Guid>();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, epoch, dropped.Add);
+        await writer.StartAsync(CancellationToken.None);
+        var beganBeforeClear = epoch.Current;
+        epoch.Advance();
+        var turnId = SessionArchiveIds.NewArchiveTurnId();
+        var turn = new SessionTurnInput(
+            turnId,
+            DateTimeOffset.UtcNow,
+            [new SessionBodyInput(SessionBodyKind.ClientRequest, "x"u8.ToArray())]);
+
+        await writer.EnqueueAsync(new SessionCaptureItem("old-turn", turn, beganBeforeClear));
+        Assert.True(await writer.WaitForIdleAsync(TimeSpan.FromSeconds(30)));
+        await writer.StopAsync(CancellationToken.None);
+
+        Assert.Equal(turnId, Assert.Single(dropped));
+    }
+
+    /// <summary>A refused enqueue (writer already stopped) notifies the drop callback.</summary>
+    [Fact]
+    public async Task Enqueue_AfterStop_NotifiesOnTurnDropped()
+    {
+        var dropped = new List<Guid>();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, onTurnDropped: dropped.Add);
+        await writer.StartAsync(CancellationToken.None);
+        await writer.StopAsync(CancellationToken.None);
+        var turnId = SessionArchiveIds.NewArchiveTurnId();
+        var turn = new SessionTurnInput(
+            turnId,
+            DateTimeOffset.UtcNow,
+            [new SessionBodyInput(SessionBodyKind.ClientRequest, "x"u8.ToArray())]);
+
+        Assert.False(await writer.EnqueueAsync(new SessionCaptureItem("late", turn)));
+
+        Assert.Equal(turnId, Assert.Single(dropped));
+    }
+
     /// <summary>A writer stopped the instant it starts still writes every turn it accepted (no stop-before-consumer gap).</summary>
     [Fact]
     public async Task StartThenImmediateStop_StillWritesEveryAcceptedTurn()

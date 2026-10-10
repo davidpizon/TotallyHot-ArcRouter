@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Transcripts;
@@ -35,17 +36,57 @@ internal static class SessionsServiceCollectionExtensions
 
         services.AddHostedService<SessionStoreStartupService>();
         services.AddSingleton<CaptureEpoch>();
-        services.AddSingleton<SessionCaptureWriter>();
+        services.AddSingleton(CreateCaptureWriter);
         services.AddHostedService(sp => sp.GetRequiredService<SessionCaptureWriter>());
 
         // Registered after the writer, so a stop drains the pump first and its last turns still reach the writer.
         services.AddSingleton<CaptureBodyPump>();
         services.AddHostedService(sp => sp.GetRequiredService<CaptureBodyPump>());
-        services.AddSingleton<TurnCaptureFactory>();
+        services.AddSingleton(CreateTurnCaptureFactory);
 
         services.AddSingleton<SessionMaintenance>();
         services.AddHostedService<SessionRetentionService>();
         return services;
+    }
+
+    /// <summary>
+    /// Builds the capture writer with an optional drop callback that marks transcript rows terminal without
+    /// injecting <see cref="ITranscriptStore"/> into the writer itself (#165 phase 2 follow-up).
+    /// </summary>
+    private static SessionCaptureWriter CreateCaptureWriter(IServiceProvider services)
+    {
+        return new SessionCaptureWriter(
+            services.GetRequiredService<Lazy<SessionStore>>(),
+            services.GetRequiredService<IOptions<SessionCaptureOptions>>(),
+            services.GetRequiredService<ILogger<SessionCaptureWriter>>(),
+            services.GetService<CaptureEpoch>(),
+            CreateTurnDroppedHandler(services));
+    }
+
+    /// <summary>
+    /// Builds the capture factory with the same drop callback the writer uses, so Submit/Dispose drops and
+    /// writer drops share one mark path.
+    /// </summary>
+    private static TurnCaptureFactory CreateTurnCaptureFactory(IServiceProvider services)
+    {
+        return new TurnCaptureFactory(
+            services.GetRequiredService<CaptureBodyPump>(),
+            services.GetRequiredService<SessionCaptureWriter>(),
+            services.GetRequiredService<Lazy<SessionStore>>(),
+            services.GetRequiredService<CaptureEpoch>(),
+            services.GetRequiredService<IOptionsMonitor<TranscriptOptions>>(),
+            services.GetRequiredService<IOptions<SessionCaptureOptions>>(),
+            services.GetRequiredService<TranscriptDatabase>(),
+            services.GetRequiredService<ILogger<TurnCaptureFactory>>(),
+            CreateTurnDroppedHandler(services));
+    }
+
+    /// <summary>Returns a callback that zeros <c>prompt_text_length</c> for a dropped archive turn, or null.</summary>
+    private static Action<Guid>? CreateTurnDroppedHandler(IServiceProvider services)
+    {
+        var transcripts = services.GetService<ITranscriptStore>();
+        if (transcripts is null) return null;
+        return transcripts.MarkPromptUnavailableByArchiveTurn;
     }
 
     /// <summary>

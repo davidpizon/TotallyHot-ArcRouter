@@ -57,6 +57,13 @@ public sealed class SessionRetentionService(
                     "Session retention deleted {Count} sessions to stay within the Sample Size.", result.DeletedSessions);
             }
 
+            if (result.DeletedNullArchiveRows > 0)
+            {
+                logger.LogInformation(
+                    "Retention deleted {Count} transcript rows with no archive session id.",
+                    result.DeletedNullArchiveRows);
+            }
+
             return result;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

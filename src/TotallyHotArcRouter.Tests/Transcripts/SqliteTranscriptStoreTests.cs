@@ -737,6 +737,49 @@ public class SqliteTranscriptStoreTests : IDisposable
         Assert.Equal(keptId, (await store.GetTranscriptAsync(keptId!.Value, TestContext.Current.CancellationToken))!.Id);
     }
 
+    /// <summary>Null-archive purge removes unbound rows and returns their memory ids; bound rows stay.</summary>
+    [Fact]
+    public async Task DeleteNullArchiveRows_RemovesOnlyUnboundRowsAndReturnsMemoryIds()
+    {
+        var kept = Guid.CreateVersion7();
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(
+            record: MakeRecord("orphan:1") with { MemoryEntryId = 11 },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var keptId = await store.InsertAsync(
+            record: MakeRecord("kept:1") with { ArchiveSessionId = kept, ArchiveTurnId = Guid.CreateVersion7() },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var purge = store.DeleteNullArchiveRows();
+
+        Assert.Equal(1, purge.DeletedRows);
+        Assert.Equal([11L], purge.MemoryEntryIds);
+        Assert.Equal(keptId, (await store.GetTranscriptAsync(keptId!.Value, TestContext.Current.CancellationToken))!.Id);
+        Assert.Null(await store.GetTranscriptAsync(1, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>Marking by archive turn id zeros prompt_text_length so the row leaves the backfill set.</summary>
+    [Fact]
+    public async Task MarkPromptUnavailableByArchiveTurn_ZerosPromptLength()
+    {
+        var turnId = Guid.CreateVersion7();
+        var (_, store) = CreateEnabledStore();
+        var id = await store.InsertAsync(
+            record: MakeRecord("sess:1") with
+            {
+                ArchiveSessionId = Guid.CreateVersion7(),
+                ArchiveTurnId = turnId,
+                PromptText = "will be unread",
+                Score = 0.9
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal([id!.Value], await store.LoadUnembeddedScoredAsync(10, TestContext.Current.CancellationToken));
+
+        store.MarkPromptUnavailableByArchiveTurn(turnId);
+
+        Assert.Empty(await store.LoadUnembeddedScoredAsync(10, TestContext.Current.CancellationToken));
+    }
+
     /// <summary>
     /// An upgrade nulls text that was already in the file and rebuilds it, so the planted words are not left
     /// in a freed page.

@@ -85,12 +85,19 @@ public sealed class SessionMaintenance(
     /// <summary>
     /// Keeps the newest <paramref name="maxTurns"/> turns by deleting whole oldest sessions (ADR-0019,
     /// "Retention"). The newest session is never deleted, and a session that gained a turn while the pass was
-    /// choosing is left alone.
+    /// choosing is left alone. Every pass also deletes <c>request_transcripts</c> rows with no
+    /// <c>archive_session_id</c> (legacy or unbound metadata), even when no session file is removed.
     /// </summary>
     /// <param name="maxTurns">The most turns to keep (the Sample Size setting).</param>
     /// <returns>What was deleted; zero sessions when the store is within the limit or was never opened.</returns>
-    public SessionDeletionResult EnforceRetention(int maxTurns) =>
-        Directory.Exists(_folder) ? Open().EnforceRetention(maxTurns) : NothingToDelete;
+    public SessionDeletionResult EnforceRetention(int maxTurns)
+    {
+        var sessionResult = Directory.Exists(_folder) ? Open().EnforceRetention(maxTurns) : NothingToDelete;
+        var purged = PurgeNullArchiveRows();
+        return purged == 0
+            ? sessionResult
+            : sessionResult with { DeletedNullArchiveRows = purged };
+    }
 
     /// <summary>
     /// Opens the store and remembers to drop transcript rows and embeddings when a session is deleted.
@@ -109,6 +116,26 @@ public sealed class SessionMaintenance(
     private void OnSessionsDeleted(IReadOnlyCollection<Guid> archiveSessionIds)
     {
         var memoryIds = transcripts!.DeleteByArchiveSessions(archiveSessionIds);
+        DeleteMemoryEntries(memoryIds);
+    }
+
+    /// <summary>
+    /// Removes transcript rows that can never gain a session-file extract, and their linked embeddings.
+    /// </summary>
+    /// <returns>How many transcript rows were deleted.</returns>
+    private int PurgeNullArchiveRows()
+    {
+        if (transcripts is null) return 0;
+
+        var purge = transcripts.DeleteNullArchiveRows();
+        DeleteMemoryEntries(purge.MemoryEntryIds);
+        return purge.DeletedRows;
+    }
+
+    /// <summary>Deletes the given memory entries when a memory store is wired.</summary>
+    /// <param name="memoryIds">Ids collected from deleted transcript rows.</param>
+    private void DeleteMemoryEntries(IReadOnlyList<long> memoryIds)
+    {
         if (memory is not null && memoryIds.Count > 0)
             memory.DeleteManyAsync(memoryIds).GetAwaiter().GetResult();
     }
