@@ -169,6 +169,61 @@ public sealed class SessionRetentionTests : IDisposable
         Assert.Equal(0, retained.DeletedSessions);
     }
 
+    /// <summary>
+    /// Retention runs whether or not capture is on, with the real transcript store wired. On a router that never
+    /// captured, purging legacy rows must not create the transcript database: nothing is stored until the first
+    /// captured turn.
+    /// </summary>
+    [Fact]
+    public void EnforceRetention_WhenNothingWasEverCaptured_CreatesNoTranscriptDatabase()
+    {
+        var databasePath = Path.Combine(_root, "fresh-with-store", "transcripts.db");
+        var neverCreated = new TranscriptDatabase(Options.Create(new StorageOptions
+        {
+            TranscriptDatabasePath = databasePath
+        }));
+        var transcripts = new SqliteTranscriptStore(
+            neverCreated,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+        var maintenance = new SessionMaintenance(
+            new Lazy<SessionStore>(() => _store),
+            neverCreated,
+            transcripts: transcripts);
+
+        var result = maintenance.EnforceRetention(10);
+
+        Assert.Equal(0, result.DeletedNullArchiveRows);
+        Assert.False(File.Exists(databasePath), "Retention created the transcript database on a router that never captured.");
+        Assert.False(Directory.Exists(Path.GetDirectoryName(databasePath)));
+    }
+
+    /// <summary>
+    /// Turning capture off must not strand legacy rows: when the database already exists, the purge still runs
+    /// with capture disabled.
+    /// </summary>
+    [Fact]
+    public void EnforceRetention_WithCaptureOffAndAnExistingDatabase_StillPurgesNullArchiveRows()
+    {
+        var enabled = new SqliteTranscriptStore(
+            _database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        enabled.InsertAsync(new TranscriptRecord(
+            0, "legacy:1", Start, "gpt-5.4", "kimi-k2.5", null, null, null, false,
+            null, null, null, null, false, 1, null, null, null)).GetAwaiter().GetResult();
+        var captureOff = new SqliteTranscriptStore(
+            _database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+        var maintenance = new SessionMaintenance(
+            new Lazy<SessionStore>(() => _store),
+            _database,
+            transcripts: captureOff);
+
+        var result = maintenance.EnforceRetention(100);
+
+        Assert.Equal(1, result.DeletedNullArchiveRows);
+        Assert.Equal(0, enabled.GetRowCountAsync().GetAwaiter().GetResult());
+    }
+
     /// <summary>Clear invalidates in-flight turns even on a router that has captured nothing yet, so a first turn still being relayed is not stored after it.</summary>
     [Fact]
     public async Task DeleteAllAsync_AdvancesTheEpochEvenWhenNothingWasCaptured()
@@ -309,6 +364,44 @@ public sealed class SessionRetentionTests : IDisposable
         Assert.Equal(1, result.DeletedSessions);
         Assert.Equal([42L], deletedMemory);
         Assert.Empty(transcripts.ListSessionsAsync(10).GetAwaiter().GetResult());
+    }
+
+    /// <summary>
+    /// Rows with no archive session id can never gain extracts; every retention pass deletes them (and their
+    /// memory links) even when no session file is trimmed (#165 phase 2 follow-up).
+    /// </summary>
+    [Fact]
+    public void EnforceRetention_PurgesNullArchiveTranscriptRowsAndTheirMemoryEntries()
+    {
+        var keptSession = AddSession("kept", turns: 2, firstMinute: 0);
+        var transcripts = new SqliteTranscriptStore(
+            _database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        transcripts.InsertAsync(new TranscriptRecord(
+            0, "orphan:1", Start, "gpt-5.4", "kimi-k2.5", null, null, null, false,
+            null, null, null, null, false, 1, null, null, 99)).GetAwaiter().GetResult();
+        transcripts.InsertAsync(new TranscriptRecord(
+            0, "kept:1", Start.AddMinutes(1), "gpt-5.4", "kimi-k2.5", null, null, null, false,
+            null, null, null, null, false, 1, null, null, 7,
+            ArchiveSessionId: keptSession, ArchiveTurnId: Guid.CreateVersion7())).GetAwaiter().GetResult();
+        var deletedMemory = new List<long>();
+        var memory = new Mock<IMemoryEntryStore>();
+        memory.Setup(store => store.DeleteManyAsync(It.IsAny<IReadOnlyCollection<long>>(), It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyCollection<long>, CancellationToken>((ids, _) => deletedMemory.AddRange(ids))
+            .Returns(Task.CompletedTask);
+        var maintenance = new SessionMaintenance(
+            new Lazy<SessionStore>(() => _store),
+            _database,
+            transcripts: transcripts,
+            memory: memory.Object);
+
+        var result = maintenance.EnforceRetention(maxTurns: 100);
+
+        Assert.Equal(0, result.DeletedSessions);
+        Assert.Equal(1, result.DeletedNullArchiveRows);
+        Assert.Equal([99L], deletedMemory);
+        var remaining = transcripts.ListSessionsAsync(10).GetAwaiter().GetResult();
+        Assert.Equal("kept:1", Assert.Single(remaining).CorrelationId);
     }
 
     /// <summary>The retention service reads the Sample Size live and trims to it.</summary>

@@ -54,11 +54,19 @@ public enum SessionRotationRecovery
     Unresolved
 }
 
-/// <summary>What <see cref="SessionStore.DeleteSessions"/> did.</summary>
+/// <summary>What <see cref="SessionStore.DeleteSessions"/> (and retention's null-archive purge) did.</summary>
 /// <param name="DeletedSessions">How many sessions were removed from the index.</param>
 /// <param name="WalTruncated">Whether the write-ahead log was truncated; <see langword="false"/> means retry.</param>
 /// <param name="MasterKeyRotated">Whether the master key was replaced, which is what makes the deletion final.</param>
-public sealed record SessionDeletionResult(int DeletedSessions, bool WalTruncated, bool MasterKeyRotated);
+/// <param name="DeletedNullArchiveRows">
+/// How many <c>request_transcripts</c> rows with no <c>archive_session_id</c> retention removed (#165 phase 2
+/// follow-up). Zero when that purge was not run or found nothing.
+/// </param>
+public sealed record SessionDeletionResult(
+    int DeletedSessions,
+    bool WalTruncated,
+    bool MasterKeyRotated,
+    int DeletedNullArchiveRows = 0);
 
 /// <summary>
 /// The storage layer of ADR-0019: one encrypted file per session in a protected folder, indexed by

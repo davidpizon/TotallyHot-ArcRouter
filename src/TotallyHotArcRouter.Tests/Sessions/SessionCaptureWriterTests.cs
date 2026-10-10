@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Sessions;
@@ -94,6 +95,150 @@ public sealed class SessionCaptureWriterTests : IDisposable
         Assert.Empty(_store.ListTurns(_store.ResolveArchiveSessionId("old-turn")));
         Assert.Single(_store.ListTurns(_store.ResolveArchiveSessionId("new-turn")));
         Assert.Empty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
+    }
+
+    /// <summary>An epoch-dropped turn notifies the drop callback with its archive turn id (#165 phase 2 follow-up).</summary>
+    [Fact]
+    public async Task Enqueue_TurnThatBeganBeforeClear_NotifiesOnTurnDropped()
+    {
+        var epoch = new CaptureEpoch();
+        var dropped = new List<Guid>();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, epoch, dropped.Add);
+        await writer.StartAsync(CancellationToken.None);
+        var beganBeforeClear = epoch.Current;
+        epoch.Advance();
+        var turnId = SessionArchiveIds.NewArchiveTurnId();
+        var turn = new SessionTurnInput(
+            turnId,
+            DateTimeOffset.UtcNow,
+            [new SessionBodyInput(SessionBodyKind.ClientRequest, "x"u8.ToArray())]);
+
+        await writer.EnqueueAsync(new SessionCaptureItem("old-turn", turn, beganBeforeClear));
+        Assert.True(await writer.WaitForIdleAsync(TimeSpan.FromSeconds(30)));
+        await writer.StopAsync(CancellationToken.None);
+
+        Assert.Equal(turnId, Assert.Single(dropped));
+    }
+
+    /// <summary>A refused enqueue (writer already stopped) notifies the drop callback.</summary>
+    [Fact]
+    public async Task Enqueue_AfterStop_NotifiesOnTurnDropped()
+    {
+        var dropped = new List<Guid>();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, onTurnDropped: dropped.Add);
+        await writer.StartAsync(CancellationToken.None);
+        await writer.StopAsync(CancellationToken.None);
+        var turnId = SessionArchiveIds.NewArchiveTurnId();
+        var turn = new SessionTurnInput(
+            turnId,
+            DateTimeOffset.UtcNow,
+            [new SessionBodyInput(SessionBodyKind.ClientRequest, "x"u8.ToArray())]);
+
+        Assert.False(await writer.EnqueueAsync(new SessionCaptureItem("late", turn)));
+
+        Assert.Equal(turnId, Assert.Single(dropped));
+    }
+
+    /// <summary>
+    /// A drop callback that throws (the transcript database is locked, the disk is full) is logged, not propagated: the
+    /// dropped turn still counts as done, and the consumer lives on to write the next turn.
+    /// </summary>
+    [Fact]
+    public async Task Enqueue_WhenTheDropCallbackThrows_TheWriterKeepsWritingAndCountsTheTurnDone()
+    {
+        var epoch = new CaptureEpoch();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, epoch,
+            _ => throw new InvalidOperationException("transcripts.db is locked."));
+        await writer.StartAsync(CancellationToken.None);
+        var beganBeforeClear = epoch.Current;
+        epoch.Advance();
+
+        await writer.EnqueueAsync(new SessionCaptureItem("old-turn", Turn(spool: null), beganBeforeClear));
+        await writer.EnqueueAsync(new SessionCaptureItem("new-turn", Turn(spool: null), epoch.Current));
+
+        Assert.True(
+            await writer.WaitForIdleAsync(TimeSpan.FromSeconds(3)),
+            "The failed callback left a turn counted as in flight, or stopped the consumer.");
+        Assert.Single(_store.ListTurns(_store.ResolveArchiveSessionId("new-turn")));
+        await writer.StopAsync(CancellationToken.None);
+    }
+
+    /// <summary>A refused turn is reported as refused even when the drop callback throws; the exception does not reach the producer.</summary>
+    [Fact]
+    public async Task Enqueue_AfterStop_WhenTheDropCallbackThrows_StillRefusesTheTurn()
+    {
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance,
+            onTurnDropped: _ => throw new InvalidOperationException("transcripts.db is locked."));
+        await writer.StartAsync(CancellationToken.None);
+        await writer.StopAsync(CancellationToken.None);
+
+        var accepted = await writer.EnqueueAsync(new SessionCaptureItem("late", Turn(spool: null)));
+
+        Assert.False(accepted);
+        Assert.True(
+            await writer.WaitForIdleAsync(TimeSpan.FromSeconds(1)),
+            "The failed callback left the refused turn counted as in flight.");
+    }
+
+    /// <summary>A turn whose session-file write fails is dropped, and the drop reaches the callback so its row stops waiting for text.</summary>
+    [Fact]
+    public async Task Enqueue_FailingWrite_NotifiesOnTurnDropped()
+    {
+        var dropped = new List<Guid>();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, onTurnDropped: dropped.Add);
+        await writer.StartAsync(CancellationToken.None);
+        var bad = new SessionTurnInput(SessionArchiveIds.NewArchiveTurnId(), DateTimeOffset.UtcNow, []);
+
+        await writer.EnqueueAsync(new SessionCaptureItem("client-1", bad));
+
+        Assert.True(await writer.WaitForIdleAsync(TimeSpan.FromSeconds(5)));
+        await writer.StopAsync(CancellationToken.None);
+        Assert.Equal(bad.ArchiveTurnId, Assert.Single(dropped));
+    }
+
+    /// <summary>A turn the writer stores is not reported as dropped.</summary>
+    [Fact]
+    public async Task Enqueue_StoredTurn_DoesNotNotifyOnTurnDropped()
+    {
+        var dropped = new List<Guid>();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store), Options.Create(new SessionCaptureOptions()),
+            NullLogger<SessionCaptureWriter>.Instance, onTurnDropped: dropped.Add);
+        await writer.StartAsync(CancellationToken.None);
+
+        await writer.EnqueueAsync(new SessionCaptureItem("client-1", Turn(spool: null)));
+
+        Assert.True(await writer.WaitForIdleAsync(TimeSpan.FromSeconds(5)));
+        await writer.StopAsync(CancellationToken.None);
+        Assert.Empty(dropped);
+        Assert.Single(_store.ListTurns(_store.ResolveArchiveSessionId("client-1")));
+    }
+
+    /// <summary>A writer that was never started releases its queue on stop, and each released turn reaches the drop callback.</summary>
+    [Fact]
+    public async Task Stop_WithoutStart_NotifiesOnTurnDroppedForEachReleasedTurn()
+    {
+        var dropped = new List<Guid>();
+        using var writer = new SessionCaptureWriter(
+            new Lazy<SessionStore>(() => _store),
+            Options.Create(new SessionCaptureOptions { ShutdownDrainTimeout = TimeSpan.FromSeconds(30) }),
+            NullLogger<SessionCaptureWriter>.Instance, onTurnDropped: dropped.Add);
+        var turn = Turn(spool: null);
+        Assert.True(await writer.EnqueueAsync(new SessionCaptureItem("client-1", turn)));
+
+        await writer.StopAsync(CancellationToken.None);
+
+        Assert.Equal(turn.ArchiveTurnId, Assert.Single(dropped));
     }
 
     /// <summary>A writer stopped the instant it starts still writes every turn it accepted (no stop-before-consumer gap).</summary>
@@ -273,6 +418,38 @@ public sealed class SessionCaptureWriterTests : IDisposable
         var frames = store.ReadBodies(store.ResolveArchiveSessionId("client-9"));
         Assert.Equal(["request", "response"], frames.Select(f => Encoding.UTF8.GetString(f.Plaintext!)));
         foreach (var service in hosted.AsEnumerable().Reverse()) await service.StopAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// The real registration hands the transcript store's mark method to the writer, so a turn the writer drops
+    /// reaches the row it belongs to without the writer knowing anything about transcripts.
+    /// </summary>
+    [Fact]
+    public async Task AddSessionCapture_WithATranscriptStore_WiresTheDropCallbackIntoTheWriter()
+    {
+        var data = Path.Combine(_root, "wired-with-store");
+        var transcripts = new Mock<ITranscriptStore>();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(Options.Create(new StorageOptions { TranscriptDatabasePath = Path.Combine(data, "transcripts.db") }));
+        services.AddSingleton<TranscriptDatabase>();
+        services.AddSingleton(new ProtectedSecretStore(Path.Combine(data, "secrets.dat")));
+        services.AddSingleton(transcripts.Object);
+        services.AddSessionCapture();
+        await using var provider = services.BuildServiceProvider();
+        var writer = provider.GetRequiredService<SessionCaptureWriter>();
+        var epoch = provider.GetRequiredService<CaptureEpoch>();
+        await writer.StartAsync(CancellationToken.None);
+        var beganBeforeClear = epoch.Current;
+        epoch.Advance();
+        var turn = Turn(spool: null);
+
+        await writer.EnqueueAsync(new SessionCaptureItem("client-9", turn, beganBeforeClear));
+        Assert.True(await writer.WaitForIdleAsync(TimeSpan.FromSeconds(10)));
+        await writer.StopAsync(CancellationToken.None);
+
+        transcripts.Verify(store => store.MarkPromptUnavailableByArchiveTurn(turn.ArchiveTurnId), Times.Once);
     }
 
     private SessionStoreStartupService NewStartup(Lazy<SessionStore> store) =>

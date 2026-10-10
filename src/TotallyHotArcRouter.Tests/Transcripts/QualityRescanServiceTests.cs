@@ -110,6 +110,48 @@ public class QualityRescanServiceTests
         Assert.Null(mark.Score);
     }
 
+    /// <summary>A young row whose extract is not readable yet is left unstamped for a later sweep.</summary>
+    [Fact]
+    public async Task SweepAsync_YoungRowMissingResponseExtract_DoesNotStamp()
+    {
+        var store = new FakeStore(
+            pending: [7],
+            record: MakeRecord(7) with
+            {
+                ResponseText = null,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            });
+        var grader = new RecordingGrader();
+        var service = CreateService(store: store, grader: grader);
+
+        await service.SweepAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, grader.CallCount);
+        Assert.Empty(store.Marks);
+    }
+
+    /// <summary>Past the grace window, a missing extract is stamped so the row leaves the pending set.</summary>
+    [Fact]
+    public async Task SweepAsync_AgedRowMissingResponseExtract_StampsWithNullScore()
+    {
+        var store = new FakeStore(
+            pending: [7],
+            record: MakeRecord(7) with
+            {
+                ResponseText = null,
+                CreatedAtUtc = DateTimeOffset.UtcNow - TranscriptRecord.MissingExtractGrace -
+                               TimeSpan.FromSeconds(1)
+            });
+        var grader = new RecordingGrader();
+        var service = CreateService(store: store, grader: grader);
+
+        await service.SweepAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, grader.CallCount);
+        var mark = Assert.Single(store.Marks);
+        Assert.Null(mark.Score);
+    }
+
     [Fact]
     public async Task SweepAsync_MissingRow_StampsNothing()
     {

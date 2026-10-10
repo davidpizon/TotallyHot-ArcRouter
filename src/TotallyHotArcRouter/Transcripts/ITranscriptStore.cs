@@ -119,8 +119,9 @@ public interface ITranscriptStore
     Task<int> GetRowCountAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deletes the oldest <paramref name="count"/> rows from <c>request_transcripts</c>, used by
-    /// retention to enforce the <see cref="TranscriptOptions.MaxRows"/> bound when it is exceeded.
+    /// Deletes the oldest <paramref name="count"/> rows from <c>request_transcripts</c>.
+    /// Retired for production retention (#165 phase 2): Sample Size session retention is the deleter.
+    /// Kept for secure-deletion tests that plant canaries and assert the pages are gone.
     /// A no-op when transcript capture is disabled.
     /// </summary>
     /// <param name="count">The number of oldest rows to delete.</param>
@@ -129,9 +130,10 @@ public interface ITranscriptStore
     Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deletes all rows where <c>created_at_utc &lt; <paramref name="cutoff"/></c>, used by retention
-    /// to enforce the <see cref="TranscriptOptions.RetentionDays"/> bound. A no-op when transcript capture
-    /// is disabled.
+    /// Deletes all rows where <c>created_at_utc &lt; <paramref name="cutoff"/></c>.
+    /// Retired for production retention (#165 phase 2): the startup age purge was removed so session files
+    /// are not left without their metadata rows. Kept for secure-deletion tests.
+    /// A no-op when transcript capture is disabled.
     /// </summary>
     /// <param name="cutoff">The exclusive UTC timestamp cutoff; rows older than this are deleted.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
@@ -227,6 +229,15 @@ public interface ITranscriptStore
     Task MarkPromptUnavailableAsync(long id, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     /// <summary>
+    /// Same as <see cref="MarkPromptUnavailableAsync"/> keyed by <c>archive_turn_id</c>, for capture drop sites
+    /// that hold the turn id but not the SQLite row id (#165 phase 2 follow-up). Idempotent when no row matches.
+    /// </summary>
+    /// <param name="archiveTurnId">The turn id minted when capture began.</param>
+    void MarkPromptUnavailableByArchiveTurn(Guid archiveTurnId)
+    {
+    }
+
+    /// <summary>
     /// Deletes transcript rows whose <c>archive_session_id</c> is one of <paramref name="archiveSessionIds"/>
     /// and returns the <c>memory_entry_id</c> values those rows pointed at, so the caller can delete the
     /// embeddings with the session (#165 phase 2).
@@ -234,6 +245,14 @@ public interface ITranscriptStore
     /// <param name="archiveSessionIds">The sessions that were just removed.</param>
     /// <returns>Memory entry ids that belonged to the deleted rows. Empty when this store keeps no such link.</returns>
     IReadOnlyList<long> DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds) => [];
+
+    /// <summary>
+    /// Deletes every <c>request_transcripts</c> row with a null <c>archive_session_id</c> (legacy rows and
+    /// metadata-only inserts that never bound a session file) and returns the <c>memory_entry_id</c> values
+    /// those rows pointed at, together with how many rows were removed (#165 phase 2 follow-up).
+    /// </summary>
+    /// <returns>The purge outcome. Empty when this store keeps no such rows.</returns>
+    NullArchivePurgeResult DeleteNullArchiveRows() => NullArchivePurgeResult.Empty;
 
     /// <summary>
     /// Loads conversation text for the given transcript ids, in request order, from session-file extracts.
@@ -307,3 +326,15 @@ public sealed record SessionTranscript(
 /// <param name="OutputTokens">Mean completion tokens observed for this model.</param>
 /// <param name="ObservationCount">How many captured rows back these means.</param>
 public sealed record ModelTokenAverage(double InputTokens, double OutputTokens, int ObservationCount);
+
+/// <summary>
+/// What <see cref="ITranscriptStore.DeleteNullArchiveRows"/> removed: legacy or unbound transcript rows and
+/// the memory entries those rows pointed at (#165 phase 2 follow-up).
+/// </summary>
+/// <param name="DeletedRows">How many <c>request_transcripts</c> rows were deleted.</param>
+/// <param name="MemoryEntryIds">The <c>memory_entry_id</c> values those rows linked, for the caller to delete.</param>
+public readonly record struct NullArchivePurgeResult(int DeletedRows, IReadOnlyList<long> MemoryEntryIds)
+{
+    /// <summary>An empty purge: nothing deleted.</summary>
+    public static NullArchivePurgeResult Empty { get; } = new(0, []);
+}

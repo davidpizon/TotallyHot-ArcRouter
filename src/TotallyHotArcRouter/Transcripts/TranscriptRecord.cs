@@ -102,4 +102,21 @@ public sealed record TranscriptRecord(
     double? UntrainedBaselinePredictedScore = null,
     bool IsJudgeScored = false,
     Guid? ArchiveSessionId = null,
-    Guid? ArchiveTurnId = null);
+    Guid? ArchiveTurnId = null)
+{
+    /// <summary>
+    /// How long after a row is inserted a missing session-file extract is still treated as in flight. The row is
+    /// written before its turn is handed to the capture writer, so a younger row may simply not have its extract
+    /// yet; the embedding backfill and the quality rescan wait this long before they treat a missing extract as
+    /// final (#165 phase 2 follow-up). One window for both, so they cannot disagree about when a row is final.
+    /// </summary>
+    internal static readonly TimeSpan MissingExtractGrace = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Reports whether this row is young enough that its session-file extract may still be on its way, so a
+    /// missing extract must not yet be read as permanent.
+    /// </summary>
+    /// <param name="nowUtc">The current time, in UTC.</param>
+    /// <returns><see langword="true"/> when the row was inserted less than <see cref="MissingExtractGrace"/> ago.</returns>
+    internal bool IsWithinMissingExtractGrace(DateTimeOffset nowUtc) => nowUtc - CreatedAtUtc < MissingExtractGrace;
+}

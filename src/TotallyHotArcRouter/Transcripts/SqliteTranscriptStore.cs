@@ -621,6 +621,37 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     }
 
     /// <inheritdoc/>
+    public NullArchivePurgeResult DeleteNullArchiveRows()
+    {
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+
+        // One statement, so the rows and the memory links they carried leave together and no read lock has to be
+        // upgraded to a write lock. A SELECT followed by a DELETE in a deferred transaction fails with
+        // SQLITE_BUSY_SNAPSHOT whenever another connection commits between the two, and the busy timeout cannot
+        // retry that; this runs on every retention pass against a database every request writes to.
+        var memoryIds = new List<long>();
+        var deleted = 0;
+        using (var delete = connection.CreateCommand())
+        {
+            delete.CommandText = """
+                                 DELETE FROM request_transcripts
+                                 WHERE archive_session_id IS NULL
+                                 RETURNING memory_entry_id;
+                                 """;
+            using var reader = delete.ExecuteReader();
+            while (reader.Read())
+            {
+                deleted++;
+                if (!reader.IsDBNull(0)) memoryIds.Add(reader.GetInt64(0));
+            }
+        }
+
+        if (deleted > 0) TruncateWalAfterDelete(connection);
+        return new NullArchivePurgeResult(deleted, memoryIds);
+    }
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<StoredTurnText>> LoadTurnTextsAsync(
         IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
     {
@@ -716,6 +747,20 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         command.Parameters.AddWithValue("$id", id);
         command.ExecuteNonQuery();
         return Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public void MarkPromptUnavailableByArchiveTurn(Guid archiveTurnId)
+    {
+        if (!_options.CurrentValue.Enabled) return;
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE request_transcripts SET prompt_text_length = 0 WHERE archive_turn_id = $archiveTurnId;";
+        command.Parameters.AddWithValue("$archiveTurnId", archiveTurnId.ToString("D"));
+        command.ExecuteNonQuery();
     }
 
     /// <summary>Reads one turn's extracts, or <see langword="null"/> when no reader is wired or the frame is missing.</summary>

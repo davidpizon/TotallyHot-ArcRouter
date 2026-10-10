@@ -130,6 +130,72 @@ public class EmbeddingBackfillServiceTests
         Assert.Equal(0, actual: memoryStore.AppendCallCount);
     }
 
+    /// <summary>A young row with no extract yet is left alone so an in-flight AppendTurn is not zeroed.</summary>
+    [Fact]
+    public async Task CheckAndBackfillAsync_YoungRowMissingPrompt_DoesNotMarkUnavailable()
+    {
+        var transcript = new TranscriptRecord(
+            Id: 7,
+            CorrelationId: "sess:1",
+            CreatedAtUtc: DateTimeOffset.UtcNow,
+            RequestedModel: "model-a",
+            RoutedModel: "model-b",
+            Dimension: "code_quality",
+            Difficulty: "medium",
+            Language: "en",
+            false,
+            PromptText: null,
+            ResponseText: null,
+            0.85,
+            null,
+            false,
+            1,
+            null,
+            null,
+            null,
+            ArchiveSessionId: Guid.CreateVersion7(),
+            ArchiveTurnId: Guid.CreateVersion7());
+        var store = new FakeTranscriptStore([7], transcript);
+        var service = CreateService(store, new FakeEmbeddingClient(), new FakeMemoryEntryStore(), true, true);
+
+        await service.CheckAndBackfillAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(store.MarkedUnavailable);
+    }
+
+    /// <summary>Past the grace window, a missing extract is marked so the row leaves the pending set.</summary>
+    [Fact]
+    public async Task CheckAndBackfillAsync_AgedRowMissingPrompt_MarksUnavailable()
+    {
+        var transcript = new TranscriptRecord(
+            Id: 7,
+            CorrelationId: "sess:1",
+            CreatedAtUtc: DateTimeOffset.UtcNow - TranscriptRecord.MissingExtractGrace - TimeSpan.FromSeconds(1),
+            RequestedModel: "model-a",
+            RoutedModel: "model-b",
+            Dimension: "code_quality",
+            Difficulty: "medium",
+            Language: "en",
+            false,
+            PromptText: null,
+            ResponseText: null,
+            0.85,
+            null,
+            false,
+            1,
+            null,
+            null,
+            null,
+            ArchiveSessionId: Guid.CreateVersion7(),
+            ArchiveTurnId: Guid.CreateVersion7());
+        var store = new FakeTranscriptStore([7], transcript);
+        var service = CreateService(store, new FakeEmbeddingClient(), new FakeMemoryEntryStore(), true, true);
+
+        await service.CheckAndBackfillAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(7, Assert.Single(store.MarkedUnavailable));
+    }
+
     private static EmbeddingBackfillService CreateService(
         ITranscriptStore store,
         IEmbeddingClient embeddingClient,
@@ -150,6 +216,14 @@ public class EmbeddingBackfillServiceTests
     {
 
         public Dictionary<long, long> LinkedEntries { get; } = [];
+
+        public List<long> MarkedUnavailable { get; } = [];
+
+        public Task MarkPromptUnavailableAsync(long id, CancellationToken cancellationToken = default)
+        {
+            MarkedUnavailable.Add(id);
+            return Task.CompletedTask;
+        }
 
         public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
         {
