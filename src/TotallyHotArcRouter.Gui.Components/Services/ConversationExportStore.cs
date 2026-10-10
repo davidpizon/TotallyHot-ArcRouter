@@ -86,8 +86,7 @@ public sealed class ConversationExportStore : AdminStoreBase<IConversationAdminC
     /// <param name="authorizationToken">The one-operation authorization from the passkey ceremony.</param>
     /// <param name="cancellationToken">Cancels the export, which then leaves no file behind.</param>
     /// <returns>What the export wrote.</returns>
-    /// <exception cref="GrpcAdminException">The call failed, was not authorized, was refused, or the router is unreachable.</exception>
-    /// <exception cref="InvalidOperationException">The stream ended without a result.</exception>
+    /// <exception cref="GrpcAdminException">The call failed, was not authorized, was refused, the router is unreachable, or the stream ended without a result.</exception>
     public async Task<ConversationExportResultInfo> ExportAsync(
         ConversationExportFilterInfo filter,
         string destinationPath,
@@ -120,7 +119,10 @@ public sealed class ConversationExportStore : AdminStoreBase<IConversationAdminC
                 }
             }
 
-            var finished = Result ?? throw new InvalidOperationException("The router ended the export without a result.");
+            // A GrpcAdminException, not InvalidOperationException: the dialog handles only the former, so a stream
+            // cut short would otherwise escape its event handler as an unhandled exception.
+            var finished = Result ?? throw new GrpcAdminException(
+                "The router ended the export without a result. Check whether the zip was written.");
             RecordSuccess(marksLoaded: false);
             return finished;
         }

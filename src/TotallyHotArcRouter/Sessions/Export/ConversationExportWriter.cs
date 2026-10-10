@@ -159,7 +159,13 @@ public sealed class ConversationExportWriter
         var full = Path.GetFullPath(path);
         var sessionFolder = Path.GetFullPath(store.Folder);
         var dataDirectory = Path.GetDirectoryName(sessionFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (IsUnder(full, sessionFolder) || (dataDirectory is not null && IsUnder(full, dataDirectory)))
+
+        // A symlink or junction in the destination's folder chain can point back into the data directory, which
+        // a purely textual comparison would miss, so the destination is also checked with its links followed.
+        var resolved = Path.Combine(ResolveLinks(Path.GetDirectoryName(full) ?? full), Path.GetFileName(full));
+        if (IsUnder(full, sessionFolder) || (dataDirectory is not null && IsUnder(full, dataDirectory))
+            || IsUnder(resolved, ResolveLinks(sessionFolder))
+            || (dataDirectory is not null && IsUnder(resolved, ResolveLinks(dataDirectory))))
         {
             throw Invalid("The export destination must be outside the router's data directory.");
         }
@@ -179,6 +185,40 @@ public sealed class ConversationExportWriter
 
         static ConversationExportException Invalid(string message) =>
             new(ConversationExportFailure.InvalidDestination, message);
+    }
+
+    /// <summary>
+    /// Follows every symbolic link or junction in a directory path, from the root down, so two spellings of one
+    /// place compare equal. A part that does not exist is kept as written.
+    /// </summary>
+    /// <param name="directory">A normalized absolute directory path.</param>
+    /// <returns>The path with each link in it replaced by its final target.</returns>
+    private static string ResolveLinks(string directory)
+    {
+        var root = Path.GetPathRoot(directory);
+        if (string.IsNullOrEmpty(root)) return directory;
+
+        var current = root;
+        var parts = directory[root.Length..]
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            current = Path.Combine(current, part);
+            try
+            {
+                var info = new DirectoryInfo(current);
+                if (info.LinkTarget is not null && info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                {
+                    current = target.FullName;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // An unreadable part cannot be followed; the textual comparison still applies to it.
+            }
+        }
+
+        return current;
     }
 
     /// <summary>Reports whether <paramref name="path"/> is the folder itself or inside it.</summary>
@@ -247,11 +287,14 @@ public sealed class ConversationExportWriter
 
             if (turns.Count == 0) continue;
 
-            Dictionary<(Guid, SessionBodyKind), SessionBodyHashRow>? hashes = null;
+            // Only the total is kept: the hash rows are read again, one session at a time, while that session is
+            // written, so memory does not grow with the number of sessions in the export.
+            var verified = false;
             var bodyBytes = 0L;
             if (store.HasBodyHashes(session.ArchiveSessionId) || store.BackfillBodyHashes(session.ArchiveSessionId))
             {
-                hashes = store.ListBodyHashes(session.ArchiveSessionId)
+                verified = true;
+                var hashes = store.ListBodyHashes(session.ArchiveSessionId)
                     .ToDictionary(row => (row.ArchiveTurnId, row.Kind));
                 foreach (var turn in turns)
                 {
@@ -262,7 +305,7 @@ public sealed class ConversationExportWriter
                 }
             }
 
-            plan.Add(new PlannedSession(session, turns, hashes, bodyBytes));
+            plan.Add(new PlannedSession(session, turns, verified, bodyBytes));
         }
 
         return plan;
@@ -417,6 +460,11 @@ public sealed class ConversationExportWriter
         var sessionState = new SessionState(session.Row);
         state.Sessions[session.Row.ArchiveSessionId] = sessionState;
 
+        // Null when no stored hashes could be had for this session: its turns are then exported unverified.
+        var hashes = session.Verified
+            ? store.ListBodyHashes(session.Row.ArchiveSessionId).ToDictionary(row => (row.ArchiveTurnId, row.Kind))
+            : null;
+
         foreach (var turn in session.Turns)
         {
             ct.ThrowIfCancellationRequested();
@@ -444,7 +492,7 @@ public sealed class ConversationExportWriter
             bool written;
             using (reader)
             {
-                written = WriteTurn(reader, session, zip, turnsFile, state, sessionState, buffer, ct);
+                written = WriteTurn(reader, session, hashes, zip, turnsFile, state, sessionState, buffer, ct);
             }
 
             // After the turn's locks are released, so a progress handler that calls back into the store
@@ -459,6 +507,7 @@ public sealed class ConversationExportWriter
     /// </summary>
     /// <param name="reader">The open turn.</param>
     /// <param name="session">The session the turn belongs to.</param>
+    /// <param name="hashes">The session's stored body hashes, or <see langword="null"/> when none could be computed.</param>
     /// <param name="zip">The archive being written.</param>
     /// <param name="turnsFile">Scratch file collecting the <c>turns.jsonl</c> lines.</param>
     /// <param name="state">Totals and manifest entries so far.</param>
@@ -469,6 +518,7 @@ public sealed class ConversationExportWriter
     private bool WriteTurn(
         SessionTurnReader reader,
         PlannedSession session,
+        Dictionary<(Guid, SessionBodyKind), SessionBodyHashRow>? hashes,
         ZipArchive zip,
         FileStream turnsFile,
         ExportState state,
@@ -481,7 +531,7 @@ public sealed class ConversationExportWriter
         string? problem;
         try
         {
-            problem = Verify(reader, session.Hashes, buffer, ct, out metadata);
+            problem = Verify(reader, hashes, buffer, ct, out metadata);
         }
         catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException)
         {
@@ -520,8 +570,8 @@ public sealed class ConversationExportWriter
                     length = hashing.BytesWritten;
                 }
 
-                if (session.Hashes is not null
-                    && session.Hashes.TryGetValue((turn.ArchiveTurnId, frame.Kind), out var stored)
+                if (hashes is not null
+                    && hashes.TryGetValue((turn.ArchiveTurnId, frame.Kind), out var stored)
                     && (stored.Sha256 is null || !stored.Sha256.AsSpan().SequenceEqual(sha256) || stored.Length != length))
                 {
                     // Verify just passed, and the turn is locked, so this means the file changed under us.
@@ -534,7 +584,7 @@ public sealed class ConversationExportWriter
             }
         }
 
-        WriteTurnLine(turnsFile, session, turn, metadata, bodies);
+        WriteTurnLine(turnsFile, session, turn, metadata, bodies, verified: hashes is not null);
         state.Turns++;
         state.BodyBytes += turnBytes;
         state.MissingBodies += bodies.Values.Count(body => body.Missing);
@@ -670,12 +720,14 @@ public sealed class ConversationExportWriter
     /// <param name="turn">The turn.</param>
     /// <param name="metadata">The metadata snapshot JSON, or <see langword="null"/> when the turn has none.</param>
     /// <param name="bodies">What was written for each exchange body the turn has.</param>
+    /// <param name="verified">Whether the bodies were checked against stored hashes.</param>
     private static void WriteTurnLine(
         FileStream turnsFile,
         PlannedSession session,
         SessionTurnRow turn,
         byte[]? metadata,
-        Dictionary<SessionBodyKind, WrittenBody> bodies)
+        Dictionary<SessionBodyKind, WrittenBody> bodies,
+        bool verified)
     {
         using var buffer = new MemoryStream();
         using (var json = new Utf8JsonWriter(buffer))
@@ -690,7 +742,7 @@ public sealed class ConversationExportWriter
 
             // The streaming obscurer does not report whether it changed anything, so this is not guessed.
             json.WriteNull("secrets_obscured");
-            json.WriteString("content_fidelity", ContentFidelity(session.Hashes is not null, bodies));
+            json.WriteString("content_fidelity", ContentFidelity(verified, bodies));
 
             json.WritePropertyName("metadata");
             if (!TryWriteJson(json, metadata)) json.WriteNullValue();
@@ -915,12 +967,12 @@ public sealed class ConversationExportWriter
     /// <summary>A session chosen for export, with its selected turns and the hashes to verify them against.</summary>
     /// <param name="Row">The session's index row.</param>
     /// <param name="Turns">The selected turns in order.</param>
-    /// <param name="Hashes">Stored body hashes by turn and kind, or <see langword="null"/> when none could be computed.</param>
+    /// <param name="Verified">Whether stored body hashes exist for the session, so its turns can be verified.</param>
     /// <param name="BodyBytes">The sum of the selected turns' exchange body lengths, for the free-space check.</param>
     private sealed record PlannedSession(
         SessionFileRow Row,
         List<SessionTurnRow> Turns,
-        Dictionary<(Guid, SessionBodyKind), SessionBodyHashRow>? Hashes,
+        bool Verified,
         long BodyBytes);
 
     /// <summary>One body written to the zip, or recorded as missing.</summary>

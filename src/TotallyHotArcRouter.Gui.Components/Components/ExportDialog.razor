@@ -226,8 +226,9 @@
 
         var destination = _destination.Trim();
         _busy = true;
-        _exportCancellation = new CancellationTokenSource();
-        var cancellationToken = _exportCancellation.Token;
+        var cancellation = new CancellationTokenSource();
+        _exportCancellation = cancellation;
+        var cancellationToken = cancellation.Token;
         try
         {
             var authorization = await PasskeyStore.AuthorizeOperationAsync(
@@ -252,6 +253,7 @@
         {
             _busy = false;
             _exportCancellation = null;
+            cancellation.Dispose();
         }
 
         // The summary the dialog opened with is stale once an export has run (a turn may have landed meanwhile).
