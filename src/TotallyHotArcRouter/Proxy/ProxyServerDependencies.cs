@@ -161,6 +161,15 @@ public sealed record ProxyServerDependencies
     public CostReconciliationAdminDependencies? CostReconciliationAdmin { get; init; }
 
     /// <summary>
+    /// The Sessions tab's Export dialog API (#165 phase 3): the session store summary and the passkey-gated
+    /// conversation export. <see langword="null"/> leaves it unmapped. Its approval comes from
+    /// <see cref="PasskeyAdminGrpcService"/>, which is mapped only when <see cref="PasskeyGate"/> and
+    /// <see cref="ManagementTokenProvider"/> are supplied, so without those the export is unmapped in effect:
+    /// no dashboard can earn the authorization it requires.
+    /// </summary>
+    public ConversationAdminDependencies? ConversationAdmin { get; init; }
+
+    /// <summary>
     /// Every optional admin feature group that was actually supplied, as the registration seam
     /// <see cref="ProxyServer"/> drives. Adding an optional admin service means implementing
     /// <see cref="IAdminServiceModule"/> on its group record and adding a name here - never editing
@@ -181,7 +190,7 @@ public sealed record ProxyServerDependencies
         .. new IAdminServiceModule?[]
         {
             PriceSourceAdmin, BenchmarkDataAdmin, LlmRouterModelAdmin, ClusterModelAdmin, LogRegModelAdmin,
-            RouterSettingsAdmin, CostReconciliationAdmin
+            RouterSettingsAdmin, CostReconciliationAdmin, ConversationAdmin
         }.OfType<IAdminServiceModule>()
     ];
 }
@@ -234,6 +243,7 @@ public interface IAdminServiceModule
 /// <param name="ApprovalLog">Bounded in-memory audit list of recent approvals.</param>
 /// <param name="CredentialStore">Enrolled credentials.</param>
 /// <param name="Options">Passkey gate configuration.</param>
+/// <param name="PendingApprovals">Approval requests filed by callers without a browser, waiting for the operator.</param>
 public sealed record PasskeyGateDependencies(
     ContentGate ContentGate,
     EnrollmentCodeService EnrollmentCodes,
@@ -242,7 +252,8 @@ public sealed record PasskeyGateDependencies(
     OneOperationAuthorizationTable OneOperationAuthorizations,
     PasskeyApprovalLog ApprovalLog,
     IPasskeyCredentialStore CredentialStore,
-    PasskeyOptions Options);
+    PasskeyOptions Options,
+    PendingApprovalTable PendingApprovals);
 
 /// <summary>
 /// Backs <see cref="ProviderAdminGrpcService"/>/<see cref="UsageAdminGrpcService"/>, the Governance UI's
@@ -609,6 +620,45 @@ public sealed record CostReconciliationAdminDependencies(
     void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGrpcService<CostReconciliationAdminGrpcService>();
+    }
+}
+
+/// <summary>
+/// Backs <see cref="Sessions.Export.ConversationAdminGrpcService"/>, the Sessions tab's Export dialog
+/// (#165 phase 3): a summary of the session store and the passkey-gated conversation export. Its own group,
+/// not a <see cref="ManagementFacade"/> method and not part of <see cref="UsageAdminGrpcService"/>'s
+/// <c>ExportUsageRollup</c>.
+/// </summary>
+/// <param name="Store">The lazily opened session store; the same instance capture writes to.</param>
+/// <param name="Writer">
+/// The export writer. It must be the one shared instance, because its single-flight rule only holds across
+/// calls that share it.
+/// </param>
+/// <param name="Gate">
+/// The content gate whose one-operation table the export's approval is consumed from. The same singleton as
+/// <see cref="PasskeyGateDependencies.ContentGate"/>, so an approval earned through <c>PasskeyAdminService</c> is
+/// the one this service consumes.
+/// </param>
+/// <param name="Database">Names where the session folder lives, so the summary can report zeros without creating it.</param>
+public sealed record ConversationAdminDependencies(
+    Lazy<Sessions.SessionStore> Store,
+    Sessions.Export.ConversationExportWriter Writer,
+    Auth.Passkey.ContentGate Gate,
+    Transcripts.TranscriptDatabase Database) : IAdminServiceModule
+{
+    /// <inheritdoc/>
+    void IAdminServiceModule.Register(IServiceCollection services)
+    {
+        services.AddSingleton(Store);
+        services.AddSingleton(Writer);
+        services.AddSingleton(Gate);
+        services.AddSingleton(Database);
+    }
+
+    /// <inheritdoc/>
+    void IAdminServiceModule.Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGrpcService<Sessions.Export.ConversationAdminGrpcService>();
     }
 }
 

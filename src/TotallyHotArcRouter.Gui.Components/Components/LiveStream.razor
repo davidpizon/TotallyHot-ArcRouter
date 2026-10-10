@@ -7,14 +7,27 @@
 
 @if (Conversations.Count == 0)
 {
-    <div class="h-full flex items-center justify-center p-4">
-        <div class="w-full max-w-xl space-y-3">
-            <p class="text-xs text-slate-500 text-center">No conversations yet.</p>
-            @if (HistoryNotice is not null)
-            {
-                <p class="text-xs text-slate-500 text-center ls-history-notice" role="status">@HistoryNotice</p>
-            }
-            <ClientDropInPanel/>
+    <div class="h-full flex flex-col min-h-0 p-4">
+        @if (OnExportRequested.HasDelegate)
+        {
+            @* Export stays available with an empty list so an operator can still export archived sessions that the Sessions tab is not showing (filters / retention). *@
+            <div class="flex justify-end shrink-0 mb-2">
+                <button @onclick="OnExportRequested"
+                        data-testid="sessions-export"
+                        class="shrink-0 flex items-center gap-1.5 rounded px-2.5 py-2 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
+                    Export
+                </button>
+            </div>
+        }
+        <div class="flex-1 flex items-center justify-center">
+            <div class="w-full max-w-xl space-y-3">
+                <p class="text-xs text-slate-500 text-center">No conversations yet.</p>
+                @if (HistoryNotice is not null)
+                {
+                    <p class="text-xs text-slate-500 text-center ls-history-notice" role="status">@HistoryNotice</p>
+                }
+                <ClientDropInPanel/>
+            </div>
         </div>
     </div>
     return;
@@ -38,13 +51,24 @@
                         OnAddPasskey="OnAddPasskeyRequested"
                         OnLock="OnLockRequested"/>
     }
-    <div class="relative shrink-0 mb-2">
-        <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
-        <input type="text"
-               placeholder="Search conversations, agents, models..."
-               value="@_search"
-               @oninput="e => _search = (string?)e.Value ?? string.Empty"
-               class="w-full pl-8 pr-3 py-2 text-xs font-mono ds-input ds-input-secondary"/>
+    <div class="flex items-center gap-2 shrink-0 mb-2">
+        <div class="relative flex-1">
+            <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
+            <input type="text"
+                   placeholder="Search conversations, agents, models..."
+                   value="@_search"
+                   @oninput="e => _search = (string?)e.Value ?? string.Empty"
+                   class="w-full pl-8 pr-3 py-2 text-xs font-mono ds-input ds-input-secondary"/>
+        </div>
+        @if (OnExportRequested.HasDelegate)
+        {
+            @* #165 phase 3: opens the Export dialog. A host that has no export surface passes no callback and sees no button. *@
+            <button @onclick="OnExportRequested"
+                    data-testid="sessions-export"
+                    class="shrink-0 flex items-center gap-1.5 rounded px-2.5 py-2 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
+                Export
+            </button>
+        }
     </div>
 
     @if (opened is null)
@@ -152,6 +176,13 @@
     /// <summary>Invoked when the operator asks to lock conversation text again.</summary>
     [Parameter]
     public EventCallback OnLockRequested { get; set; }
+
+    /// <summary>
+    /// Invoked when the operator asks to export conversations (#165 phase 3). The Export button is shown only
+    /// when a host supplies this callback.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnExportRequested { get; set; }
 
     private string _search = string.Empty;
 

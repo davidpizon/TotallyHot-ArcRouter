@@ -1,0 +1,358 @@
+@* Sessions tab's Export dialog (#165 phase 3, docs/plans/issue-165-phase3-export.md PR 3b). Writes the captured
+   conversations that match a filter to one zip on the router machine. Exporting copies conversation text out of
+   the encrypted store, so the router requires a one-operation passkey approval (ADR-0020) bound to exactly this
+   filter and destination: the dialog earns it with PasskeyAdminStore.AuthorizeOperationAsync, then hands it to
+   the export RPC, which refuses a different export. Export only - Import arrives in phase 4, and there is no
+   disabled stand-in for it. Follows the DialogShell contract (docs/gui/DESIGN.md 4.1). *@
+@using System.Globalization
+@implements IDisposable
+@inject ConversationExportStore ExportStore
+@inject PasskeyAdminStore PasskeyStore
+@inject RouterSettingsAdminStore RouterSettingsStore
+<DialogShell Title="Export" CloseAriaLabel="Close export dialog" OnClose="CloseAsync" EnableEscapeToClose="true">
+    @{
+        var capture = RouterSettingsStore.Settings?.TranscriptCaptureEnabled;
+        var summary = ExportStore.Summary;
+    }
+
+    <div class="space-y-1 text-xs" data-testid="export-state">
+        <p class="text-slate-400">
+            Transcription capture:
+            <span class="font-semibold @(capture is true ? "text-emerald-400" : "text-slate-300")" data-testid="export-capture-state">
+                @(capture is null ? "unknown" : capture.Value ? "on" : "off")
+            </span>
+        </p>
+        @if (summary is not null)
+        {
+            <p class="text-slate-400" data-testid="export-summary">
+                <span data-testid="export-session-count">@summary.SessionCount.ToString("N0", CultureInfo.InvariantCulture)</span> sessions,
+                <span data-testid="export-turn-count">@summary.TurnCount.ToString("N0", CultureInfo.InvariantCulture)</span> turns,
+                <span data-testid="export-bytes-on-disk">@FormatBytes(summary.BytesOnDisk)</span> on disk
+            </p>
+        }
+        else if (ExportStore.IsLoaded && !ExportStore.IsReachable)
+        {
+            <p class="text-amber-400" data-testid="export-unreachable">Could not reach the router. Is the proxy running?</p>
+        }
+        @if (RouterSettingsStore.Settings is { } settings)
+        {
+            <p class="text-slate-400" data-testid="export-sample-size">
+                Sample Size: <span class="font-mono text-slate-200">@settings.EmbeddingMemoryCapacity.ToString("N0", CultureInfo.InvariantCulture)</span>
+            </p>
+        }
+    </div>
+
+    @if (ExportStore.Result is { } result)
+    {
+        <div class="space-y-1 text-xs" data-testid="export-result">
+            <p class="text-emerald-400 font-medium">Export written</p>
+            <p class="text-slate-400">Path on the router machine:</p>
+            <p class="font-mono text-slate-200 break-all" data-testid="export-result-path">@result.Path</p>
+            <p class="text-slate-400" data-testid="export-result-counts">
+                @result.Turns turns from @result.Conversations conversations, @FormatBytes(result.BodyBytes) of bodies.
+            </p>
+            @if (result.MissingBodies > 0 || result.CorruptTurns > 0 || result.IncompleteSessions > 0)
+            {
+                <p class="text-amber-400" data-testid="export-result-warnings">
+                    @result.MissingBodies missing bodies, @result.CorruptTurns corrupt turns left out,
+                    @result.IncompleteSessions sessions deleted mid-export.
+                </p>
+            }
+        </div>
+
+        <div class="flex gap-2">
+            <button @onclick="NewExport" class="flex-1 btn btn-ghost" data-testid="export-another">
+                Export another
+            </button>
+            <button @onclick="CloseAsync" class="flex-1 btn btn-primary" data-testid="export-done">
+                Done
+            </button>
+        </div>
+    }
+    else
+    {
+        <p class="text-xs text-slate-400 leading-5">
+            Writes the captured conversations to a zip on the router machine. Each turn's text is exported exactly as
+            stored. You approve with a passkey, and the approval covers only the filter and destination below.
+        </p>
+
+        @if (PasskeyStore.GateStatus is { Enrolled: false })
+        {
+            <p class="text-xs text-amber-400 leading-5" data-testid="export-enrollment-hint">
+                No passkey is enrolled yet. Run <span class="font-mono text-slate-200">@PasskeyStore.EnrollmentCommandHint</span>
+                from an elevated shell, then add a passkey in Settings.
+            </p>
+        }
+
+        <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1">
+                <label for="export-from" class="text-xs text-slate-400 font-medium uppercase tracking-widest">From (UTC)</label>
+                <input id="export-from" type="datetime-local" value="@_from" disabled="@_busy"
+                       @oninput="e => _from = (string?)e.Value ?? string.Empty"
+                       data-testid="export-from" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            </div>
+            <div class="space-y-1">
+                <label for="export-to" class="text-xs text-slate-400 font-medium uppercase tracking-widest">To (UTC)</label>
+                <input id="export-to" type="datetime-local" value="@_to" disabled="@_busy"
+                       @oninput="e => _to = (string?)e.Value ?? string.Empty"
+                       data-testid="export-to" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            </div>
+            <div class="space-y-1">
+                <label for="export-session" class="text-xs text-slate-400 font-medium uppercase tracking-widest">Session</label>
+                <input id="export-session" type="text" autocomplete="off" spellcheck="false" value="@_session" disabled="@_busy"
+                       @oninput="e => _session = (string?)e.Value ?? string.Empty"
+                       data-testid="export-session" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            </div>
+            <div class="space-y-1">
+                <label for="export-harness" class="text-xs text-slate-400 font-medium uppercase tracking-widest">Harness</label>
+                <input id="export-harness" type="text" autocomplete="off" spellcheck="false" value="@_harness" disabled="@_busy"
+                       @oninput="e => _harness = (string?)e.Value ?? string.Empty"
+                       data-testid="export-harness" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            </div>
+            <div class="space-y-1">
+                <label for="export-provider" class="text-xs text-slate-400 font-medium uppercase tracking-widest">Provider</label>
+                <input id="export-provider" type="text" autocomplete="off" spellcheck="false" value="@_provider" disabled="@_busy"
+                       @oninput="e => _provider = (string?)e.Value ?? string.Empty"
+                       data-testid="export-provider" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            </div>
+            <div class="space-y-1">
+                <label for="export-model" class="text-xs text-slate-400 font-medium uppercase tracking-widest">Model</label>
+                <input id="export-model" type="text" autocomplete="off" spellcheck="false" value="@_model" disabled="@_busy"
+                       @oninput="e => _model = (string?)e.Value ?? string.Empty"
+                       data-testid="export-model" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            </div>
+        </div>
+
+        <div class="space-y-1">
+            <label for="export-destination" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+                Destination path (on the router machine)
+            </label>
+            <input id="export-destination" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="C:\exports\conversations.zip" value="@_destination" disabled="@_busy"
+                   @oninput="e => _destination = (string?)e.Value ?? string.Empty"
+                   data-testid="export-destination" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            <p class="text-xs text-slate-600">An absolute path to a file that does not exist yet, outside the router's data folder.</p>
+        </div>
+
+        @if (_errorMessage is not null)
+        {
+            <p class="text-xs text-red-400" role="alert" data-testid="export-error">@_errorMessage</p>
+        }
+
+        @if (_busy)
+        {
+            <p class="text-xs text-slate-400" role="status" data-testid="export-progress">
+                @if (ExportStore.IsExporting && ExportStore.Progress is { } progress)
+                {
+                    <text>Exporting: @progress.TurnsWritten.ToString("N0", CultureInfo.InvariantCulture) turns, @FormatBytes(progress.BytesWritten) written</text>
+                }
+                else if (ExportStore.IsExporting)
+                {
+                    <text>Exporting…</text>
+                }
+                else
+                {
+                    <text>Waiting for passkey…</text>
+                }
+            </p>
+        }
+
+        <div class="flex gap-2">
+            <button @onclick="CloseAsync" class="flex-1 btn btn-ghost" data-testid="export-cancel">
+                Cancel
+            </button>
+            <button @onclick="ExportAsync"
+                    disabled="@(!CanExport)"
+                    class="flex-1 btn btn-primary"
+                    data-testid="export-confirm">
+                Export
+            </button>
+        </div>
+    }
+</DialogShell>
+
+@code {
+
+    /// <summary>Invoked when the dialog should close - backdrop, the X, Cancel, Done, or Escape. A running export is cancelled first.</summary>
+    [Parameter]
+    [EditorRequired]
+    public EventCallback OnClose { get; set; }
+
+    private string _from = string.Empty;
+    private string _to = string.Empty;
+    private string _session = string.Empty;
+    private string _harness = string.Empty;
+    private string _provider = string.Empty;
+    private string _model = string.Empty;
+    private string _destination = string.Empty;
+    private bool _busy;
+    private string? _errorMessage;
+    private CancellationTokenSource? _exportCancellation;
+
+    /// <summary>
+    /// Whether Export is available: a destination is entered, nothing is running, and the router has not said no
+    /// passkey is enrolled (an unknown gate state still allows the attempt, and the router's own refusal then
+    /// explains what is missing).
+    /// </summary>
+    private bool CanExport =>
+        !_busy
+        && !string.IsNullOrWhiteSpace(_destination)
+        && PasskeyStore.GateStatus is not { Enrolled: false };
+
+    /// <inheritdoc/>
+    protected override async Task OnInitializedAsync()
+    {
+        ExportStore.Changed += HandleStoreChanged;
+        RouterSettingsStore.Changed += HandleStoreChanged;
+        ExportStore.Reset();
+
+        // Best-effort, like the Dashboard's own startup loads: a failure leaves the counts out, and the router's
+        // own refusal explains anything that matters if the operator tries to export anyway.
+        await ExportStore.LoadSummaryAsync();
+        if (RouterSettingsStore.Settings is null) await RouterSettingsStore.LoadAsync();
+        if (PasskeyStore.GateStatus is null) await PasskeyStore.RefreshAsync();
+    }
+
+    /// <summary>
+    /// Runs the export: reads the form into one filter and destination, earns the one-operation passkey approval
+    /// bound to exactly them, and hands the approval to the export RPC with those same values. A dismissed
+    /// browser prompt, a refusal, or a router failure is shown inline and leaves the dialog open so the operator
+    /// can correct it and retry (a refused export has spent its approval, so a retry asks for a fresh one).
+    /// </summary>
+    private async Task ExportAsync()
+    {
+        _errorMessage = null;
+        if (!TryBuildFilter(out var filter)) return;
+
+        var destination = _destination.Trim();
+        _busy = true;
+        var cancellation = new CancellationTokenSource();
+        _exportCancellation = cancellation;
+        var cancellationToken = cancellation.Token;
+        try
+        {
+            var authorization = await PasskeyStore.AuthorizeOperationAsync(
+                operation: PasskeyOperations.Export,
+                parameters: PasskeyOperations.ExportParameters(filter, destination),
+                cancellationToken: cancellationToken);
+            await ExportStore.ExportAsync(filter, destination, authorization, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // The dialog was closed mid-export; the router cleans up the partial file.
+        }
+        catch (WebAuthnCeremonyException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        catch (GrpcAdminException ex)
+        {
+            _errorMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            _exportCancellation = null;
+            cancellation.Dispose();
+        }
+
+        // The summary the dialog opened with is stale once an export has run (a turn may have landed meanwhile).
+        // Skipped when the dialog was closed mid-export, because nothing is left to show it.
+        if (!cancellationToken.IsCancellationRequested) await ExportStore.LoadSummaryAsync();
+    }
+
+    /// <summary>Returns to the form after a finished export, keeping the entered filter and destination.</summary>
+    private void NewExport()
+    {
+        // A zip is never overwritten, so the same destination cannot be reused; clear it and keep the filter.
+        _destination = string.Empty;
+        _errorMessage = null;
+        ExportStore.Reset();
+    }
+
+    /// <summary>
+    /// Reads the filter fields into the filter the approval and the request are both built from. A date that
+    /// does not parse is reported inline.
+    /// </summary>
+    /// <param name="filter">The filter, when the fields are valid.</param>
+    /// <returns>Whether the fields are valid.</returns>
+    private bool TryBuildFilter(out ConversationExportFilterInfo filter)
+    {
+        filter = new ConversationExportFilterInfo();
+        if (!TryParseUtc(_from, out var from))
+        {
+            _errorMessage = "From is not a valid date and time.";
+            return false;
+        }
+
+        if (!TryParseUtc(_to, out var to))
+        {
+            _errorMessage = "To is not a valid date and time.";
+            return false;
+        }
+
+        filter = new ConversationExportFilterInfo(
+            From: from,
+            To: to,
+            SessionId: Trimmed(_session),
+            Harness: Trimmed(_harness),
+            Provider: Trimmed(_provider),
+            Model: Trimmed(_model));
+        return true;
+    }
+
+    /// <summary>Parses a <c>datetime-local</c> value as a UTC instant; a blank value is no bound.</summary>
+    /// <param name="text">The input's value.</param>
+    /// <param name="value">The instant, or <see langword="null"/> for a blank value.</param>
+    /// <returns>Whether the text is blank or a valid date and time.</returns>
+    private static bool TryParseUtc(string text, out DateTimeOffset? value)
+    {
+        value = null;
+        if (string.IsNullOrWhiteSpace(text)) return true;
+
+        if (!DateTime.TryParse(text, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
+            return false;
+
+        value = new DateTimeOffset(DateTime.SpecifyKind(parsed, DateTimeKind.Utc));
+        return true;
+    }
+
+    /// <summary>Trims a filter field; a blank field is no filter.</summary>
+    /// <param name="text">The field's text.</param>
+    /// <returns>The trimmed text, or <see langword="null"/> when blank.</returns>
+    private static string? Trimmed(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    /// <summary>Formats a byte count the way the rest of the dashboard talks about sizes: B, KB, MB or GB.</summary>
+    /// <param name="bytes">The byte count.</param>
+    /// <returns>The size with a unit.</returns>
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1L << 30 => $"{bytes / (double)(1L << 30):0.0} GB",
+        >= 1L << 20 => $"{bytes / (double)(1L << 20):0.0} MB",
+        >= 1L << 10 => $"{bytes / (double)(1L << 10):0.0} KB",
+        _ => $"{bytes} B",
+    };
+
+    /// <summary>Closes the dialog, cancelling a running export first so the router discards its partial file.</summary>
+    private async Task CloseAsync()
+    {
+        _exportCancellation?.Cancel();
+        await OnClose.InvokeAsync();
+    }
+
+    /// <summary>Re-renders when the export or settings store changes.</summary>
+    private void HandleStoreChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        ExportStore.Changed -= HandleStoreChanged;
+        RouterSettingsStore.Changed -= HandleStoreChanged;
+        _exportCancellation?.Cancel();
+    }
+
+}

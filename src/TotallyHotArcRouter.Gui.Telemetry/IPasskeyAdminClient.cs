@@ -50,6 +50,22 @@ public sealed record OneOperationAuthorizationInfo(string AuthorizationToken, Da
 public sealed record PasskeyApprovalInfo(string Operation, string CredentialName, DateTimeOffset AtUtc, string Outcome);
 
 /// <summary>
+/// An export a command-line caller has asked the operator to approve (ADR-0020, Amendment 1). What the
+/// approval view shows is exactly what the router binds the passkey ceremony to.
+/// </summary>
+/// <param name="ApprovalId">The router's opaque id for the request.</param>
+/// <param name="Filter">Which turns the export would include.</param>
+/// <param name="DestinationPath">Where on the router machine the zip would be written.</param>
+/// <param name="CreatedAtUtc">When the request was filed.</param>
+/// <param name="ExpiresAtUtc">When the request lapses if nobody decides it.</param>
+public sealed record PendingApprovalInfo(
+    string ApprovalId,
+    ConversationExportFilterInfo Filter,
+    string DestinationPath,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset ExpiresAtUtc);
+
+/// <summary>
 /// Every <c>PasskeyAdminService</c> RPC the dashboard needs for ADR-0020's content gate: gate status,
 /// passkey enrollment, content unlock and lock, one-operation authorizations, and the approvals audit list.
 /// An interface so <c>PasskeyAdminStore</c> can be unit-tested against a fake without a live proxy,
@@ -127,4 +143,32 @@ public interface IPasskeyAdminClient
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<IReadOnlyList<PasskeyApprovalInfo>> ListRecentApprovalsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the approval requests command-line callers have filed and nobody has decided, oldest first.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
+    Task<IReadOnlyList<PendingApprovalInfo>> ListPendingApprovalsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts the passkey ceremony for one pending request. The router binds the challenge to the request's own
+    /// operation and digest, so the ceremony can approve nothing else.
+    /// </summary>
+    /// <param name="approvalId">The request's id from <see cref="ListPendingApprovalsAsync"/>.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The WebAuthn <c>PublicKeyCredentialRequestOptions</c> JSON for <c>navigator.credentials.get</c>.</returns>
+    /// <exception cref="GrpcAdminException">The request is no longer waiting, no passkey is enrolled, or the call failed.</exception>
+    Task<string> BeginApprovalAsync(string approvalId, CancellationToken cancellationToken = default);
+
+    /// <summary>Completes the ceremony begun by <see cref="BeginApprovalAsync"/> and approves the request.</summary>
+    /// <param name="approvalId">The same request id passed to <see cref="BeginApprovalAsync"/>.</param>
+    /// <param name="assertionJson">The assertion response JSON produced by the browser.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">Verification failed, the request is no longer waiting, or the call failed.</exception>
+    Task FinishApprovalAsync(string approvalId, string assertionJson, CancellationToken cancellationToken = default);
+
+    /// <summary>Refuses a pending request; the command waiting on it stops with a denial.</summary>
+    /// <param name="approvalId">The request's id.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">The request is no longer waiting, or the call failed.</exception>
+    Task DenyApprovalAsync(string approvalId, CancellationToken cancellationToken = default);
 }

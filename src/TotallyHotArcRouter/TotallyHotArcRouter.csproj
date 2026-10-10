@@ -130,7 +130,11 @@
          codegen of the same file, so the two sides can never structurally drift. -->
     <!-- Link: see the matching comment on TotallyHotArcRouter.Gui.csproj's copy of this item - keeps this
          out-of-project-tree file correctly recognized by MSBuild/Visual Studio and its codegen step. -->
-    <Protobuf Include="..\Protos\telemetry.proto" Link="Protos\telemetry.proto" GrpcServices="Server" ProtoRoot="..\Protos" />
+    <!-- GrpcServices="Both" (not "Server"): the router's own export-conversations command (#165 phase 3 PR 3c,
+         ADR-0020 Amendment 1) is a gRPC client of the running router, and this project cannot reference
+         Gui.Telemetry for the client stubs without the CS0433 collision described below. The client stubs are
+         generated from the same file, so they cannot drift from the server. -->
+    <Protobuf Include="..\Protos\telemetry.proto" Link="Protos\telemetry.proto" GrpcServices="Both" ProtoRoot="..\Protos" />
     <Protobuf Include="..\Protos\admin.proto" Link="Protos\admin.proto" GrpcServices="Server" ProtoRoot="..\Protos" />
   </ItemGroup>
 

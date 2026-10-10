@@ -1,0 +1,201 @@
+@* Approval view for requests filed by the command line (ADR-0020, Amendment 1). `--export-conversations` cannot run
+   a passkey ceremony, so it files a request with the router and prints a link to this dashboard; this dialog lists
+   what is waiting, shows the destination and filter exactly as the router will bind the approval to them, and runs
+   the passkey ceremony for the one the operator chooses. The router derives the ceremony's operation and digest from
+   the stored request, so what is approved is what is shown. Follows the DialogShell contract (docs/gui/DESIGN.md 4.1). *@
+@using System.Globalization
+@implements IDisposable
+@inject PasskeyAdminStore PasskeyStore
+<DialogShell Title="Approvals" CloseAriaLabel="Close approvals dialog" OnClose="OnClose" EnableEscapeToClose="true">
+    <p class="text-xs text-slate-400 leading-5">
+        Exports requested from the command line wait here for your passkey. Check the destination before you approve:
+        an approval covers only that filter and destination, and nothing is written until you approve.
+    </p>
+
+    @if (PasskeyStore.GateStatus is { Enrolled: false })
+    {
+        <p class="text-xs text-amber-400 leading-5" data-testid="approvals-enrollment-hint">
+            No passkey is enrolled yet. Run <span class="font-mono text-slate-200">@PasskeyStore.EnrollmentCommandHint</span>
+            from an elevated shell, then add a passkey in Settings.
+        </p>
+    }
+
+    @if (!PasskeyStore.IsReachable && PasskeyStore.IsLoaded)
+    {
+        <p class="text-xs text-amber-400" data-testid="approvals-unreachable">Could not reach the router. Is the proxy running?</p>
+    }
+
+    @if (FocusApprovalId is not null && _loaded && PasskeyStore.PendingApprovals.All(p => p.ApprovalId != FocusApprovalId))
+    {
+        <p class="text-xs text-amber-400" data-testid="approvals-focus-missing">
+            The request in that link is no longer waiting: it was decided, it expired after five minutes, or the router restarted.
+            Run the command again to file a new one.
+        </p>
+    }
+
+    @if (_loaded && PasskeyStore.PendingApprovals.Count == 0)
+    {
+        <p class="text-xs text-slate-500" data-testid="approvals-empty">No approvals are waiting.</p>
+    }
+
+    @foreach (var pending in PasskeyStore.PendingApprovals)
+    {
+        var isFocus = pending.ApprovalId == FocusApprovalId;
+        <div class="rounded border @(isFocus ? "border-sky-500" : "border-slate-700") p-3 space-y-2 text-xs"
+             data-testid="approval-@pending.ApprovalId">
+            <p class="text-slate-200 font-medium">Export conversations</p>
+            <div class="space-y-1">
+                <p class="text-slate-400">Write the zip to (on the router machine):</p>
+                <p class="font-mono text-slate-200 break-all" data-testid="approval-destination">@pending.DestinationPath</p>
+            </div>
+            <div class="space-y-1">
+                <p class="text-slate-400">Which turns:</p>
+                <p class="font-mono text-slate-200 break-all" data-testid="approval-filter">@DescribeFilter(pending.Filter)</p>
+            </div>
+            <p class="text-slate-500" data-testid="approval-expires">
+                Expires @pending.ExpiresAtUtc.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture) UTC
+            </p>
+            <div class="flex gap-2">
+                <button @onclick="() => DenyAsync(pending.ApprovalId)"
+                        disabled="@_busy"
+                        class="flex-1 btn btn-ghost"
+                        data-testid="approval-deny">
+                    Deny
+                </button>
+                <button @onclick="() => ApproveAsync(pending.ApprovalId)"
+                        disabled="@(_busy || PasskeyStore.GateStatus is { Enrolled: false })"
+                        class="flex-1 btn btn-primary"
+                        data-testid="approval-approve">
+                    @(_busyId == pending.ApprovalId ? "Waiting for passkey…" : "Approve with passkey")
+                </button>
+            </div>
+        </div>
+    }
+
+    @if (_errorMessage is not null)
+    {
+        <p class="text-xs text-red-400" role="alert" data-testid="approvals-error">@_errorMessage</p>
+    }
+
+    <div class="flex gap-2">
+        <button @onclick="RefreshAsync" disabled="@_busy" class="flex-1 btn btn-ghost" data-testid="approvals-refresh">
+            Refresh
+        </button>
+        <button @onclick="OnClose" class="flex-1 btn btn-primary" data-testid="approvals-done">
+            Done
+        </button>
+    </div>
+</DialogShell>
+
+@code {
+
+    /// <summary>Invoked when the dialog should close - backdrop, the X, Done, or Escape.</summary>
+    [Parameter]
+    [EditorRequired]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>
+    /// The id of the request the operator followed a link to, or <see langword="null"/> when the dialog was opened by
+    /// hand. That request is highlighted, and a note appears when it is no longer waiting.
+    /// </summary>
+    [Parameter]
+    public string? FocusApprovalId { get; set; }
+
+    private bool _loaded;
+    private bool _busy;
+    private string? _busyId;
+    private string? _errorMessage;
+
+    /// <inheritdoc/>
+    protected override async Task OnInitializedAsync()
+    {
+        PasskeyStore.Changed += HandleStoreChanged;
+
+        // Best-effort, like the Dashboard's own startup loads: a failure shows as the unreachable note.
+        if (PasskeyStore.GateStatus is null) await PasskeyStore.RefreshAsync();
+        await PasskeyStore.RefreshPendingApprovalsAsync();
+        _loaded = true;
+    }
+
+    /// <summary>Re-reads the pending requests, for a request filed after the dialog opened.</summary>
+    private async Task RefreshAsync()
+    {
+        _errorMessage = null;
+        await PasskeyStore.RefreshPendingApprovalsAsync();
+    }
+
+    /// <summary>
+    /// Runs the passkey ceremony for one request. A dismissed browser prompt or a refusal is shown inline, and the
+    /// list is re-read because the usual refusal is that the request was decided or lapsed meanwhile.
+    /// </summary>
+    /// <param name="approvalId">The request to approve.</param>
+    private async Task ApproveAsync(string approvalId)
+    {
+        _errorMessage = null;
+        _busy = true;
+        _busyId = approvalId;
+        try
+        {
+            await PasskeyStore.ApprovePendingAsync(approvalId);
+        }
+        catch (Exception ex) when (ex is GrpcAdminException or WebAuthnCeremonyException)
+        {
+            _errorMessage = ex.Message;
+            await PasskeyStore.RefreshPendingApprovalsAsync();
+        }
+        finally
+        {
+            _busy = false;
+            _busyId = null;
+        }
+    }
+
+    /// <summary>Refuses one request; the waiting command stops with a denial.</summary>
+    /// <param name="approvalId">The request to deny.</param>
+    private async Task DenyAsync(string approvalId)
+    {
+        _errorMessage = null;
+        _busy = true;
+        try
+        {
+            await PasskeyStore.DenyPendingAsync(approvalId);
+        }
+        catch (GrpcAdminException ex)
+        {
+            _errorMessage = ex.Message;
+            await PasskeyStore.RefreshPendingApprovalsAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Describes a filter in the words the operator would use: every turn, or the bounds that are set.</summary>
+    /// <param name="filter">The request's filter.</param>
+    /// <returns>A one-line description.</returns>
+    private static string DescribeFilter(ConversationExportFilterInfo filter)
+    {
+        var parts = new List<string>();
+        if (filter.From is { } from) parts.Add($"from {from.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC");
+        if (filter.To is { } to) parts.Add($"to {to.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC");
+        if (!string.IsNullOrWhiteSpace(filter.SessionId)) parts.Add($"session {filter.SessionId}");
+        if (!string.IsNullOrWhiteSpace(filter.Harness)) parts.Add($"harness {filter.Harness}");
+        if (!string.IsNullOrWhiteSpace(filter.Provider)) parts.Add($"provider {filter.Provider}");
+        if (!string.IsNullOrWhiteSpace(filter.Model)) parts.Add($"model {filter.Model}");
+        return parts.Count == 0 ? "every captured turn" : string.Join(", ", parts);
+    }
+
+    /// <summary>Re-renders when the passkey store changes.</summary>
+    private void HandleStoreChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        PasskeyStore.Changed -= HandleStoreChanged;
+    }
+
+}

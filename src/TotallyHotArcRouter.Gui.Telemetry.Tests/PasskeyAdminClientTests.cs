@@ -340,5 +340,116 @@ public class PasskeyAdminClientTests
 
         public override AsyncUnaryCall<Contract.ListRecentApprovalsResponse> ListRecentApprovalsAsync(
             Contract.ListRecentApprovalsRequest request, CallOptions options) => Reply(ApprovalList);
+
+        public Contract.ListPendingApprovalsResponse PendingList { get; init; } = new();
+        public string? LastApprovalId { get; private set; }
+        public int DenyCalls { get; private set; }
+
+        public override AsyncUnaryCall<Contract.ListPendingApprovalsResponse> ListPendingApprovalsAsync(
+            Contract.ListPendingApprovalsRequest request, CallOptions options) => Reply(PendingList);
+
+        public override AsyncUnaryCall<Contract.WebAuthnOptionsResponse> BeginApprovalAsync(
+            Contract.BeginApprovalRequest request, CallOptions options)
+        {
+            LastApprovalId = request.ApprovalId;
+            return Reply(Options);
+        }
+
+        public override AsyncUnaryCall<Contract.FinishApprovalResponse> FinishApprovalAsync(
+            Contract.FinishApprovalRequest request, CallOptions options)
+        {
+            LastApprovalId = request.ApprovalId;
+            LastAssertion = request.AssertionJson;
+            return Reply(new Contract.FinishApprovalResponse());
+        }
+
+        public override AsyncUnaryCall<Contract.DenyApprovalResponse> DenyApprovalAsync(
+            Contract.DenyApprovalRequest request, CallOptions options)
+        {
+            LastApprovalId = request.ApprovalId;
+            DenyCalls++;
+            return Reply(new Contract.DenyApprovalResponse());
+        }
+    }
+
+    [Fact]
+    public async Task ListPendingApprovalsAsync_maps_the_filter_and_destination_and_leaves_absent_options_null()
+    {
+        var stub = new StubClient
+        {
+            PendingList = new Contract.ListPendingApprovalsResponse
+            {
+                Approvals =
+                {
+                    new Contract.PendingApproval
+                    {
+                        ApprovalId = "a1",
+                        Export = new Contract.ExportApprovalDetails
+                        {
+                            FromUtc = Timestamp.FromDateTimeOffset(Created),
+                            Model = "opus",
+                            DestinationPath = "/exports/out.zip"
+                        },
+                        CreatedAtUtc = Timestamp.FromDateTimeOffset(Created),
+                        ExpiresAtUtc = Timestamp.FromDateTimeOffset(Created.AddMinutes(5))
+                    }
+                }
+            }
+        };
+
+        var pending = await new PasskeyAdminClient(stub).ListPendingApprovalsAsync(TestContext.Current.CancellationToken);
+
+        pending.Should().ContainSingle().Which.Should().Be(new PendingApprovalInfo(
+            ApprovalId: "a1",
+            Filter: new ConversationExportFilterInfo(From: Created, Model: "opus"),
+            DestinationPath: "/exports/out.zip",
+            CreatedAtUtc: Created,
+            ExpiresAtUtc: Created.AddMinutes(5)));
+    }
+
+    [Fact]
+    public async Task BeginApprovalAsync_sends_only_the_request_id_and_returns_the_options_json()
+    {
+        var stub = new StubClient { Options = new Contract.WebAuthnOptionsResponse { OptionsJson = "{\"c\":1}" } };
+
+        var options = await new PasskeyAdminClient(stub).BeginApprovalAsync("a1", TestContext.Current.CancellationToken);
+
+        options.Should().Be("{\"c\":1}");
+        stub.LastApprovalId.Should().Be("a1");
+    }
+
+    [Fact]
+    public async Task FinishApprovalAsync_sends_the_request_id_and_the_assertion()
+    {
+        var stub = new StubClient();
+
+        await new PasskeyAdminClient(stub).FinishApprovalAsync("a1", "{\"assertion\":1}", TestContext.Current.CancellationToken);
+
+        stub.LastApprovalId.Should().Be("a1");
+        stub.LastAssertion.Should().Be("{\"assertion\":1}");
+    }
+
+    [Fact]
+    public async Task DenyApprovalAsync_sends_the_request_id()
+    {
+        var stub = new StubClient();
+
+        await new PasskeyAdminClient(stub).DenyApprovalAsync("a1", TestContext.Current.CancellationToken);
+
+        stub.LastApprovalId.Should().Be("a1");
+        stub.DenyCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_request_that_is_no_longer_waiting_keeps_the_routers_detail()
+    {
+        const string detail = "This approval request is no longer waiting";
+        var stub = new StubClient { Failure = new RpcException(new Status(StatusCode.NotFound, detail)) };
+
+        var ex = await Assert.ThrowsAsync<GrpcAdminException>(() =>
+            new PasskeyAdminClient(stub).DenyApprovalAsync("a1", TestContext.Current.CancellationToken));
+
+        ex.Message.Should().Contain(detail);
+        ex.IsUnavailable.Should().BeFalse();
     }
 }

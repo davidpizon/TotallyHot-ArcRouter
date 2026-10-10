@@ -14,6 +14,7 @@ using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
+using TotallyHot.ArcRouter.Sessions.Export;
 using TotallyHot.ArcRouter.Storage;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -68,6 +69,17 @@ public static class Program
             {
                 using var shredLogFactory = new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger);
                 Environment.ExitCode = ShredConversationsCommand.Run(shredLogFactory.CreateLogger("ShredConversations"));
+                return;
+            }
+
+            // #165 phase 3 (ADR-0020, Amendment 1): exports the captured conversations to a zip by asking the
+            // RUNNING router to do it. It is a gRPC client, never a reader of the session files, so it is
+            // dispatched before the host builds (there is nothing to build) and the passkey gate cannot be
+            // bypassed. The destination and filter options stay in `args`; ExportConversationsCommand parses them.
+            var (exportConversations, _) = ExtractFlag(args: args, flagName: ExportConversationsCommand.FlagName);
+            if (exportConversations)
+            {
+                Environment.ExitCode = await RunExportConversationsAsync(args);
                 return;
             }
 
@@ -541,6 +553,67 @@ public static class Program
         }
         finally
         {
+            DataDirectoryBootstrap.RestoreServiceOwnership(Log.Logger);
+        }
+    }
+
+    /// <summary>
+    /// Runs the router's <c>--export-conversations</c> flag (#165 phase 3, ADR-0020 Amendment 1): authenticates to the
+    /// running router's loopback gRPC with the management token from the elevated secret-store path (the same
+    /// elevation gate as <c>--print-management-token</c>, and never the passkey-gated token RPC), then hands the
+    /// export's approval off to the dashboard. See <see cref="ExportConversationsCommand"/> for the flow and the exit
+    /// codes. Ctrl+C cancels the wait or the export.
+    /// </summary>
+    /// <param name="args">The process arguments, including the flag, its destination path and the filter options.</param>
+    /// <returns>The process exit code.</returns>
+    private static async Task<int> RunExportConversationsAsync(string[] args)
+    {
+        if (!ExportConversationsCommand.TryParse(args, out var options, out var error))
+        {
+            await Console.Error.WriteLineAsync(error);
+            return ExportConversationsCommand.ExitUsage;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
+        {
+            // Let the command report the cancellation and exit instead of the runtime killing the process mid-write.
+            eventArgs.Cancel = true;
+            cancellation.Cancel();
+        };
+        Console.CancelKeyPress += onCancel;
+        try
+        {
+            string token;
+            try
+            {
+                EnsureServiceDataDirectory();
+                token = ManagementAccessToken.GetOrCreate();
+            }
+            catch (InvalidOperationException ex)
+            {
+                await Console.Error.WriteLineAsync(ex.Message);
+                return ExportConversationsCommand.ExitNotElevated;
+            }
+
+            using var router = GrpcConversationExportRouter.Connect(GrpcConversationExportRouter.ResolveAddress(), token);
+            using var logFactory = new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger);
+            return await ExportConversationsCommand.RunAsync(
+                options: options!,
+                router: router,
+                stdout: Console.Out,
+                stderr: Console.Error,
+                logger: logFactory.CreateLogger("ExportConversations"),
+                cancellationToken: cancellation.Token);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            Log.Error(exception: ex, messageTemplate: "Could not run the conversation export.");
+            return ExportConversationsCommand.ExitFailed;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= onCancel;
             DataDirectoryBootstrap.RestoreServiceOwnership(Log.Logger);
         }
     }

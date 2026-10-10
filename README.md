@@ -161,6 +161,52 @@ for what it syncs and verifies):
 `outputs/` and `agentic-artifacts/` are not restored yet - see
 [`data/README.md`](data/README.md)'s "Not yet restored" section.
 
+## Exporting conversations
+
+When transcription capture is on, the router keeps each conversation in an encrypted per-session
+file. `TotallyHotArcRouter --export-conversations <path>` writes the captured conversations to one
+zip on the router machine, the same export the dashboard's Sessions tab offers. Run it from an
+elevated shell on the machine the router runs on (as root or the service account on Linux and
+macOS): it talks to the **running** router over loopback gRPC with the management token from the
+protected secret store, and never reads the session files itself.
+
+```text
+TotallyHotArcRouter --export-conversations <path> [--from <date>] [--to <date>] [--session <id>]
+                    [--harness <name>] [--provider <name>] [--model <name>]
+```
+
+| Option | Selects |
+|---|---|
+| `<path>` | The zip to create. Required; it must not exist yet and must lie outside the router's data directory. A relative path is resolved against the current directory. |
+| `--from`, `--to` | Turns at or after / at or before a UTC date or timestamp, for example `2026-10-01` or `2026-10-01T08:30:00Z` (a bare date is midnight UTC). |
+| `--session` | One session, by archive session id or by the client's own session id. |
+| `--harness`, `--provider`, `--model` | Turns from that harness, routed to that provider, or that requested, were routed to, or resolved to that model (case-insensitive). |
+
+Every option also takes the `--option=value` form. Exporting copies conversation text out of the
+encrypted store, so it needs a passkey approval ([ADR-0020](docs/adr/0020-require-passkey-verification-for-conversation-content.md),
+[Amendment 1](docs/adr/0020-require-passkey-verification-for-conversation-content.md#amendment-1-2026-10-10-the-cli-hands-export-approval-off-to-the-dashboard)),
+and a command line cannot run the passkey ceremony. So the command files a request, prints a
+dashboard link, and waits:
+
+1. Open the printed link (`https://localhost:<web port>/?approval=<id>`). The dashboard's
+   **Approvals** dialog shows the destination and filter. Choose **Approve with passkey**, or **Deny**.
+2. After you approve, the command runs the export and prints progress. The zip does not exist
+   until you approve, and a request nobody decides lapses after five minutes.
+
+The same flow works on Windows, macOS and Linux. To approve, a passkey must already be enrolled (see
+the dashboard's Settings).
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The zip was written. Missing bodies, corrupt turns left out, or sessions deleted mid-export are reported on stderr but still exit `0`. |
+| `1` | Something unexpected failed, the router returned an internal error, or the command was interrupted (Ctrl+C). |
+| `2` | The arguments were invalid. Nothing was sent. |
+| `3` | This account cannot open the router service's data directory. Run from an elevated shell. |
+| `4` | You denied the export in the dashboard. Nothing was written. |
+| `5` | Nobody approved before the request lapsed (five minutes). Nothing was written. |
+| `6` | The router could not be reached. Is it running on this machine? |
+| `7` | The router refused the request or the export: no passkey enrolled, too many requests waiting, a destination that already exists or lies in the data directory, another export running, or too little disk space. Nothing was written. |
+
 ## Project Layout
 
 ```text

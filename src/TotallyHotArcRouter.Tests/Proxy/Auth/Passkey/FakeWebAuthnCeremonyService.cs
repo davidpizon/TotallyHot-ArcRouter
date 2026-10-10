@@ -75,7 +75,10 @@ public sealed class FakeWebAuthnCeremonyService : IWebAuthnCeremonyService
             throw new InvalidOperationException("Challenge missing.");
         }
 
-        if (!string.Equals(pending.Operation, operation, StringComparison.Ordinal))
+        // Same binding rule as WebAuthnCeremonyService: a challenge begun for one operation and parameters string
+        // cannot finish another, which is what keeps a pending approval bound to its own digest.
+        if (!string.Equals(pending.Operation, operation, StringComparison.Ordinal) ||
+            !string.Equals(pending.Parameters, parameters ?? string.Empty, StringComparison.Ordinal))
             throw new InvalidOperationException("Operation mismatch.");
 
         var credential = _credentialStore.List().FirstOrDefault()
