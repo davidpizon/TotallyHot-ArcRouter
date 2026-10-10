@@ -215,4 +215,104 @@ public sealed class PasskeyAdminStoreTests
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
+
+    private static PendingApprovalInfo Pending(string id) => new(
+        ApprovalId: id,
+        Filter: new ConversationExportFilterInfo(Model: "opus"),
+        DestinationPath: "/exports/out.zip",
+        CreatedAtUtc: DateTimeOffset.UtcNow,
+        ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(5));
+
+    [Fact]
+    public async Task RefreshPendingApprovalsAsync_loads_the_requests_without_claiming_the_gate_is_loaded()
+    {
+        var store = NewStore(out var client, out _, out _);
+        client.Pending = [Pending("a1"), Pending("a2")];
+
+        await store.RefreshPendingApprovalsAsync(TestContext.Current.CancellationToken);
+
+        store.PendingApprovals.Select(p => p.ApprovalId).Should().Equal("a1", "a2");
+        store.IsReachable.Should().BeTrue();
+        store.IsLoaded.Should().BeFalse("the pending list is a secondary read");
+    }
+
+    [Fact]
+    public async Task RefreshPendingApprovalsAsync_when_the_router_is_down_keeps_the_previous_list()
+    {
+        var store = NewStore(out var client, out _, out _);
+        client.Pending = [Pending("a1")];
+        await store.RefreshPendingApprovalsAsync(TestContext.Current.CancellationToken);
+        client.Failure = new GrpcAdminException(message: "down", isUnavailable: true);
+
+        await store.RefreshPendingApprovalsAsync(TestContext.Current.CancellationToken);
+
+        store.IsReachable.Should().BeFalse();
+        store.PendingApprovals.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ApprovePendingAsync_runs_the_ceremony_for_that_request_and_never_receives_an_authorization()
+    {
+        var store = NewStore(out var client, out var ceremony, out _);
+        client.Pending = [Pending("a1"), Pending("a2")];
+        await store.RefreshPendingApprovalsAsync(TestContext.Current.CancellationToken);
+
+        await store.ApprovePendingAsync("a1", TestContext.Current.CancellationToken);
+
+        client.BegunApprovals.Should().Equal("a1");
+        client.ApprovedApprovals.Should().Equal("a1");
+        ceremony.GetOptions.Should().Equal("{\"challenge\":\"approval\"}");
+        client.Assertions.Should().Equal("{\"assertion\":true}");
+        client.FinishedOperations.Should().BeEmpty("the one-operation RPCs are the dashboard's own flow, not the hand-off");
+        store.PendingApprovals.Select(p => p.ApprovalId).Should().Equal("a2");
+    }
+
+    [Fact]
+    public async Task ApprovePendingAsync_a_dismissed_prompt_throws_and_approves_nothing()
+    {
+        var store = NewStore(out var client, out var ceremony, out _);
+        client.Pending = [Pending("a1")];
+        ceremony.Failure = new WebAuthnCeremonyException("dismissed");
+
+        var act = () => store.ApprovePendingAsync("a1", TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<WebAuthnCeremonyException>();
+        client.ApprovedApprovals.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ApprovePendingAsync_a_request_that_lapsed_rethrows_the_routers_refusal()
+    {
+        var store = NewStore(out var client, out _, out _);
+        client.DecisionFailure = new GrpcAdminException(message: "This approval request is no longer waiting.");
+
+        var act = () => store.ApprovePendingAsync("a1", TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<GrpcAdminException>()).Which.Message.Should().Contain("no longer waiting");
+    }
+
+    [Fact]
+    public async Task DenyPendingAsync_refuses_the_request_without_a_passkey_prompt_and_refreshes_the_list()
+    {
+        var store = NewStore(out var client, out var ceremony, out _);
+        client.Pending = [Pending("a1")];
+        await store.RefreshPendingApprovalsAsync(TestContext.Current.CancellationToken);
+
+        await store.DenyPendingAsync("a1", TestContext.Current.CancellationToken);
+
+        client.DeniedApprovals.Should().Equal("a1");
+        ceremony.GetOptions.Should().BeEmpty();
+        store.PendingApprovals.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ApprovePendingAsync_and_DenyPendingAsync_reject_a_blank_id()
+    {
+        var store = NewStore(out _, out _, out _);
+
+        await store.Invoking(s => s.ApprovePendingAsync("", TestContext.Current.CancellationToken))
+            .Should().ThrowAsync<ArgumentException>();
+        await store.Invoking(s => s.DenyPendingAsync("", TestContext.Current.CancellationToken))
+            .Should().ThrowAsync<ArgumentException>();
+    }
 }

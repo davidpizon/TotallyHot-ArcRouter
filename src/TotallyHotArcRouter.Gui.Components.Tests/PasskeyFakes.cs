@@ -43,6 +43,12 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
     /// <summary>Gets the operations passed to <see cref="BeginOneOperationAsync"/>, in order.</summary>
     public List<string> BegunOperations { get; } = [];
 
+    /// <summary>Gets the parameter strings passed to <see cref="BeginOneOperationAsync"/>, in order.</summary>
+    public List<string> BegunParameters { get; } = [];
+
+    /// <summary>Gets the parameter strings passed to <see cref="FinishOneOperationAsync"/>, in order.</summary>
+    public List<string> FinishedParameters { get; } = [];
+
     /// <summary>Gets the operations passed to <see cref="FinishOneOperationAsync"/>, in order.</summary>
     public List<string> FinishedOperations { get; } = [];
 
@@ -100,6 +106,7 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
         CancellationToken cancellationToken = default)
     {
         BegunOperations.Add(operation);
+        BegunParameters.Add(parameters);
         return Run(() => "{\"challenge\":\"op\"}");
     }
 
@@ -109,6 +116,7 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
     {
         Assertions.Add(assertionJson);
         FinishedOperations.Add(operation);
+        FinishedParameters.Add(parameters);
         return Run(() => new OneOperationAuthorizationInfo($"authz-{operation}", DateTimeOffset.UtcNow.AddMinutes(2)));
     }
 
@@ -122,6 +130,60 @@ internal sealed class FakePasskeyAdminClient : IPasskeyAdminClient
     /// <inheritdoc/>
     public Task<IReadOnlyList<PasskeyApprovalInfo>> ListRecentApprovalsAsync(
         CancellationToken cancellationToken = default) => Run(() => Approvals);
+
+    /// <summary>Gets or sets the requests returned by <see cref="ListPendingApprovalsAsync"/>; approving or denying one removes it.</summary>
+    public IReadOnlyList<PendingApprovalInfo> Pending { get; set; } = [];
+
+    /// <summary>Gets the request ids passed to <see cref="BeginApprovalAsync"/>, in order.</summary>
+    public List<string> BegunApprovals { get; } = [];
+
+    /// <summary>Gets the request ids passed to <see cref="FinishApprovalAsync"/>, in order.</summary>
+    public List<string> ApprovedApprovals { get; } = [];
+
+    /// <summary>Gets the request ids passed to <see cref="DenyApprovalAsync"/>, in order.</summary>
+    public List<string> DeniedApprovals { get; } = [];
+
+    /// <summary>When set, <see cref="FinishApprovalAsync"/> and <see cref="DenyApprovalAsync"/> fail with it, as the router does for a lapsed request.</summary>
+    public GrpcAdminException? DecisionFailure { get; set; }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<PendingApprovalInfo>> ListPendingApprovalsAsync(
+        CancellationToken cancellationToken = default) => Run(() => Pending);
+
+    /// <inheritdoc/>
+    public Task<string> BeginApprovalAsync(string approvalId, CancellationToken cancellationToken = default)
+    {
+        BegunApprovals.Add(approvalId);
+        return Run(() => "{\"challenge\":\"approval\"}");
+    }
+
+    /// <inheritdoc/>
+    public Task FinishApprovalAsync(string approvalId, string assertionJson,
+        CancellationToken cancellationToken = default)
+    {
+        Assertions.Add(assertionJson);
+        if (DecisionFailure is not null) return Task.FromException(DecisionFailure);
+
+        ApprovedApprovals.Add(approvalId);
+        return Run(() =>
+        {
+            Pending = [.. Pending.Where(p => p.ApprovalId != approvalId)];
+            return 0;
+        });
+    }
+
+    /// <inheritdoc/>
+    public Task DenyApprovalAsync(string approvalId, CancellationToken cancellationToken = default)
+    {
+        if (DecisionFailure is not null) return Task.FromException(DecisionFailure);
+
+        DeniedApprovals.Add(approvalId);
+        return Run(() =>
+        {
+            Pending = [.. Pending.Where(p => p.ApprovalId != approvalId)];
+            return 0;
+        });
+    }
 
     private Task<T> Run<T>(Func<T> result)
     {

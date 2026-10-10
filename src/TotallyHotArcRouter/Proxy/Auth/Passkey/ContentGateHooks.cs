@@ -1,4 +1,5 @@
 using Grpc.Core;
+using TotallyHot.ArcRouter.Sessions.Export;
 
 namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 
@@ -12,8 +13,10 @@ namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 /// <remarks>
 /// <para>
 /// <b>Export (#165).</b> The dashboard runs <c>BeginOneOperation</c>/<c>FinishOneOperation</c> with
-/// <see cref="GatedOperation.Export"/> and <see cref="GatedOperation.ExportParameters"/>, then passes the
-/// resulting token in the export request; the RPC calls <see cref="RequireExport"/>.
+/// <see cref="GatedOperation.Export"/> and the digest of the export's filter and destination
+/// (<see cref="GatedOperation.ExportParameters"/>), then passes the resulting token in the export request; the
+/// RPC calls <see cref="RequireExport"/> with the filter and destination it received, so the approval only
+/// authorizes that export.
 /// </para>
 /// <para>
 /// <b>Import (#165).</b> The approval is bound to the SHA-256 of the staged archive
@@ -29,16 +32,20 @@ namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 public static class ContentGateHooks
 {
     /// <summary>
-    /// Consumes a one-operation authorization for <see cref="GatedOperation.Export"/>.
+    /// Consumes a one-operation authorization for <see cref="GatedOperation.Export"/> bound to the export's
+    /// filter and destination, so an approval for one export cannot run another.
     /// </summary>
     /// <param name="gate">The router's content gate.</param>
     /// <param name="authorizationToken">The token from the export request.</param>
-    /// <exception cref="RpcException">When no passkey is enrolled or the token is missing, spent, or mismatched.</exception>
-    public static void RequireExport(ContentGate gate, string? authorizationToken)
+    /// <param name="filter">The filter the request asks for, exactly as received.</param>
+    /// <param name="destinationPath">The destination the request asks for, exactly as received.</param>
+    /// <exception cref="RpcException">When no passkey is enrolled or the token is missing, spent, or bound to a different export.</exception>
+    public static void RequireExport(
+        ContentGate gate, string? authorizationToken, ConversationExportFilter filter, string destinationPath)
     {
         ArgumentNullException.ThrowIfNull(gate);
         gate.RequireAndConsumeOneOperation(
-            authorizationToken, GatedOperation.Export, GatedOperation.ExportParameters());
+            authorizationToken, GatedOperation.Export, GatedOperation.ExportParameters(filter, destinationPath));
     }
 
     /// <summary>

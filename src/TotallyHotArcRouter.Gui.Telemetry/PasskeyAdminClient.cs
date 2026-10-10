@@ -201,6 +201,78 @@ public sealed class PasskeyAdminClient
         ];
     }
 
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<PendingApprovalInfo>> ListPendingApprovalsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var response = await CallAsync(
+            call: (client, ct) => client.ListPendingApprovalsAsync(
+                request: new Contract.ListPendingApprovalsRequest(), cancellationToken: ct),
+            action: "Could not read the pending approval requests",
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return [.. response.Approvals.Select(ToInfo)];
+    }
+
+    /// <inheritdoc/>
+    public async Task<string> BeginApprovalAsync(string approvalId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(approvalId);
+
+        var response = await CallAsync(
+            call: (client, ct) => client.BeginApprovalAsync(
+                request: new Contract.BeginApprovalRequest { ApprovalId = approvalId }, cancellationToken: ct),
+            action: "Could not start the passkey verification",
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return response.OptionsJson;
+    }
+
+    /// <inheritdoc/>
+    public async Task FinishApprovalAsync(string approvalId, string assertionJson,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(approvalId);
+        ArgumentNullException.ThrowIfNull(assertionJson);
+
+        await CallAsync(
+            call: (client, ct) => client.FinishApprovalAsync(
+                request: new Contract.FinishApprovalRequest { ApprovalId = approvalId, AssertionJson = assertionJson },
+                cancellationToken: ct),
+            action: "Could not finish the passkey verification",
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task DenyApprovalAsync(string approvalId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(approvalId);
+
+        await CallAsync(
+            call: (client, ct) => client.DenyApprovalAsync(
+                request: new Contract.DenyApprovalRequest { ApprovalId = approvalId }, cancellationToken: ct),
+            action: "Could not deny the approval request",
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Converts a wire <see cref="Contract.PendingApproval"/> into a <see cref="PendingApprovalInfo"/>.</summary>
+    private static PendingApprovalInfo ToInfo(Contract.PendingApproval pending)
+    {
+        var export = pending.Export ?? new Contract.ExportApprovalDetails();
+        return new PendingApprovalInfo(
+            ApprovalId: pending.ApprovalId,
+            Filter: new ConversationExportFilterInfo(
+                From: export.FromUtc?.ToDateTimeOffset(),
+                To: export.ToUtc?.ToDateTimeOffset(),
+                SessionId: export.HasSessionId ? export.SessionId : null,
+                Harness: export.HasHarness ? export.Harness : null,
+                Provider: export.HasProvider ? export.Provider : null,
+                Model: export.HasModel ? export.Model : null),
+            DestinationPath: export.DestinationPath,
+            CreatedAtUtc: pending.CreatedAtUtc.ToDateTimeOffset(),
+            ExpiresAtUtc: pending.ExpiresAtUtc.ToDateTimeOffset());
+    }
+
     /// <summary>Converts a wire <see cref="Contract.PasskeyCredentialInfo"/> into a <see cref="PasskeyInfo"/>.</summary>
     private static PasskeyInfo ToInfo(Contract.PasskeyCredentialInfo credential)
     {

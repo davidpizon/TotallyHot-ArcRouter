@@ -32,6 +32,7 @@ public sealed class SessionBodySpool : IDisposable
     private FileStream? _file;
     private StreamingSecretObscurer? _obscurer;
     private BrotliStream? _brotli;
+    private HashingStream? _hashing;
     private SealingStream? _sealing;
 
     /// <summary>
@@ -63,7 +64,10 @@ public sealed class SessionBodySpool : IDisposable
 
         _sealing = new SealingStream(_file, _aes, _aad, path, minFreeBytes, freeSpace);
         _brotli = new BrotliStream(_sealing, CompressionLevel.Fastest, leaveOpen: true);
-        _obscurer = new StreamingSecretObscurer(_brotli, leaveOpen: true, windowChars);
+
+        // Between the obscurer and the compressor, so the hash is of the obscured plaintext that is stored.
+        _hashing = new HashingStream(_brotli, leaveOpen: true);
+        _obscurer = new StreamingSecretObscurer(_hashing, leaveOpen: true, windowChars);
     }
 
     /// <summary>Where a spool is in its life: filling, holding a whole body, given up, or released.</summary>
@@ -87,6 +91,16 @@ public sealed class SessionBodySpool : IDisposable
 
     /// <summary>Gets a value indicating whether the capture was given up and the body must be recorded as missing.</summary>
     public bool IsAbandoned => _state == SpoolState.Abandoned;
+
+    /// <summary>
+    /// Gets the SHA-256 of the obscured plaintext the spool stored, the form an export reads back. It is
+    /// <see langword="null"/> until <see cref="TryComplete"/> succeeds and stays <see langword="null"/> for an
+    /// abandoned spool, which has no body to hash.
+    /// </summary>
+    public byte[]? PlaintextSha256 { get; private set; }
+
+    /// <summary>Gets the length in bytes of the obscured plaintext, valid once <see cref="IsComplete"/>; zero before.</summary>
+    public long PlaintextLength { get; private set; }
 
     /// <summary>
     /// Starts a spool in <paramref name="folder"/>. Unlike the writes, this can throw an I/O exception (the
@@ -146,6 +160,8 @@ public sealed class SessionBodySpool : IDisposable
         {
             _obscurer!.Finish();
             _obscurer.Dispose();
+            var sha256 = _hashing!.FinishHash();
+            var length = _hashing.BytesWritten;
             _brotli!.Dispose();
             _sealing!.FinishBody();
             _file!.Flush(flushToDisk: true);
@@ -153,7 +169,11 @@ public sealed class SessionBodySpool : IDisposable
             _file = null;
             _obscurer = null;
             _brotli = null;
+            DisposeQuietly(_hashing);
+            _hashing = null;
             _sealing = null;
+            PlaintextSha256 = sha256;
+            PlaintextLength = length;
             _state = SpoolState.Completed;
             return true;
         }
@@ -243,8 +263,10 @@ public sealed class SessionBodySpool : IDisposable
         _file = null;
         DisposeQuietly(_obscurer);
         DisposeQuietly(_brotli);
+        DisposeQuietly(_hashing);
         _obscurer = null;
         _brotli = null;
+        _hashing = null;
         _sealing = null;
     }
 

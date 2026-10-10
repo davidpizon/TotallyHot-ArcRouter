@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Sessions.Export;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -46,6 +47,10 @@ internal static class SessionsServiceCollectionExtensions
 
         services.AddSingleton<SessionMaintenance>();
         services.AddHostedService<SessionRetentionService>();
+
+        // One shared writer: its single-flight rule (one export at a time) only holds across callers that
+        // share the instance.
+        services.AddSingleton(sp => new ConversationExportWriter(sp.GetRequiredService<ILogger<ConversationExportWriter>>()));
         return services;
     }
 

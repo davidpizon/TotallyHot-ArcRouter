@@ -7,6 +7,7 @@
 @inject PasskeyAdminStore PasskeyStore
 @inject ContentGrantStore ContentGrant
 @inject ToastService Toasts
+@inject NavigationManager Navigation
 
 <div class="flex flex-col h-screen overflow-hidden ds-surface-base">
     @* ── HEADER ── *@
@@ -20,6 +21,12 @@
 
             @* Actions *@
             <div class="flex items-center gap-2">
+                <button @onclick="() => OpenApprovals(null)"
+                        data-testid="open-approvals"
+                        class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
+                    <Icon Name="shield-check" Size="20"/>
+                    Approvals
+                </button>
                 <button @onclick="() => _showSettings = true"
                         class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
                     <Icon Name="settings" Size="20"/>
@@ -114,7 +121,8 @@
                                 ContentExpiresAtUtc="@ContentGrant.ExpiresAtUtc"
                                 OnUnlockRequested="() => _showUnlock = true"
                                 OnAddPasskeyRequested="() => _showAddPasskey = true"
-                                OnLockRequested="LockContentAsync"/>
+                                OnLockRequested="LockContentAsync"
+                                OnExportRequested="() => _showExport = true"/>
                     break;
                 case Tab.Analytics:
                     <CostAnalytics Conversations="LiveDataStore.Conversations" InitialSessionId="@_selectedConversationId"/>
@@ -142,6 +150,18 @@
     @if (_showSettings)
     {
         <SettingsModal OnClose="() => _showSettings = false"/>
+    }
+
+    @* ── EXPORT (#165 phase 3) ── *@
+    @if (_showExport)
+    {
+        <ExportDialog OnClose="() => _showExport = false"/>
+    }
+
+    @* ── APPROVALS FILED BY THE COMMAND LINE (ADR-0020, Amendment 1) ── *@
+    @if (_showApprovals)
+    {
+        <ApprovalRequestsDialog FocusApprovalId="@_focusApprovalId" OnClose="CloseApprovals"/>
     }
 
     @* ── PASSKEY CONTENT GATE (ADR-0020) ── *@
@@ -190,6 +210,9 @@
         await PersistedSessionStore.LoadTurnTextsAsync(id);
     }
     private bool _showSettings;
+    private bool _showExport;
+    private bool _showApprovals;
+    private string? _focusApprovalId;
     private bool _showUnlock;
     private bool _showAddPasskey;
 
@@ -211,6 +234,10 @@
         ProviderStore.Changed += HandleProvidersChanged;
         PasskeyStore.Changed += HandlePasskeyGateChanged;
         ContentGrant.Changed += HandlePasskeyGateChanged;
+
+        // The link `--export-conversations` prints ends in ?approval=<id>: open the approval view on that request.
+        if (TryReadApprovalId(Navigation.Uri) is { } approvalId) OpenApprovals(approvalId);
+
         await LiveDataStore.StartAsync();
 
         // Best-effort: tells the Sessions tab whether to offer Unlock or the enrollment hint. A failure is
@@ -234,6 +261,36 @@
         {
             _systemTokensDisplay = FormatTokenCount(summary.PromptTokens + summary.CompletionTokens + summary.CacheCreationTokens + summary.CacheReadTokens);
         }
+    }
+
+    /// <summary>Opens the approval view, optionally focused on the request a printed link pointed at.</summary>
+    /// <param name="approvalId">The request id from the link, or <see langword="null"/> when opened from the header.</param>
+    private void OpenApprovals(string? approvalId)
+    {
+        _focusApprovalId = approvalId;
+        _showApprovals = true;
+    }
+
+    /// <summary>
+    /// Closes the approval view and drops <c>?approval=</c> from the address, so a reload does not reopen a request that
+    /// has been dealt with.
+    /// </summary>
+    private void CloseApprovals()
+    {
+        _showApprovals = false;
+        if (_focusApprovalId is null) return;
+
+        _focusApprovalId = null;
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("approval", (string?)null), replace: true);
+    }
+
+    /// <summary>Reads the <c>approval</c> query parameter from the page address.</summary>
+    /// <param name="uri">The page's absolute address.</param>
+    /// <returns>The request id, or <see langword="null"/> when the address carries none.</returns>
+    private static string? TryReadApprovalId(string uri)
+    {
+        var approvalId = System.Web.HttpUtility.ParseQueryString(new Uri(uri).Query)["approval"];
+        return string.IsNullOrWhiteSpace(approvalId) ? null : approvalId;
     }
 
     /// <summary>Abbreviates a token count for the ticker tile: "12.4M", "830.0K", or the bare number under 1,000.</summary>

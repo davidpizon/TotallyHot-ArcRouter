@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace TotallyHot.ArcRouter.Sessions;
@@ -48,6 +49,12 @@ public sealed class SessionFile : IDisposable
         _aes = new AesGcm(_sessionKey, SessionKeyMaterial.TagLengthBytes);
         _frameCount = frameCount;
     }
+
+    /// <summary>
+    /// The offset of the first frame, just past the file header. A turn reader starts the session's first turn
+    /// here; every later turn starts where the previous one ended.
+    /// </summary>
+    public static long FirstFrameOffset => DataStart;
 
     /// <summary>The stable cross-machine session id baked into the file header.</summary>
     public Guid ArchiveSessionId { get; }
@@ -164,24 +171,7 @@ public sealed class SessionFile : IDisposable
         var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         try
         {
-            Span<byte> header = stackalloc byte[Magic.Length + IdLength + VersionLength];
-            if (!TryReadPartial(stream, header) || !header[..Magic.Length].SequenceEqual(Magic))
-            {
-                throw new InvalidDataException("Session file magic mismatch.");
-            }
-
-            var archiveSessionId = new Guid(header.Slice(Magic.Length, IdLength));
-            if (expectedArchiveSessionId is { } expected && expected != archiveSessionId)
-            {
-                throw new InvalidDataException("Session file archive id does not match the index.");
-            }
-
-            var version = BinaryPrimitives.ReadUInt16LittleEndian(header[(Magic.Length + IdLength)..]);
-            if (version != FormatVersion)
-            {
-                throw new InvalidDataException($"Unsupported session file version {version}.");
-            }
-
+            var archiveSessionId = ReadHeader(stream, expectedArchiveSessionId);
             var (end, frameCount) = FindEndOfLastCompleteFrame(stream);
             if (end < stream.Length)
             {
@@ -190,6 +180,37 @@ public sealed class SessionFile : IDisposable
 
             stream.Seek(0, SeekOrigin.End);
             return new SessionFile(stream, archiveSessionId, sessionKey, frameCount);
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Opens an existing session file for reading only, without scanning the file for a torn tail. A turn
+    /// reader uses this so reading one turn costs that turn, not a walk over every chunk of the session. The
+    /// file is never modified, so a torn tail is left for <see cref="Open"/> and recovery to cut away, and the
+    /// caller bounds its reads by the index's committed extent. <see cref="FrameCount"/> is not tracked on
+    /// such a handle. The caller must hold the session's gate: the file is opened shared for reading, which
+    /// fails while an appender holds it. The key is copied; the caller's array is left untouched.
+    /// </summary>
+    /// <param name="path">Absolute path of the session file.</param>
+    /// <param name="sessionKey">Unwrapped session key.</param>
+    /// <param name="expectedArchiveSessionId">Optional id check against the header.</param>
+    /// <returns>A read-only session file.</returns>
+    /// <exception cref="InvalidDataException">When the header is malformed, unsupported, or for another session.</exception>
+    public static SessionFile OpenReadOnly(string path, byte[] sessionKey, Guid? expectedArchiveSessionId = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        SessionKeyMaterial.ValidateKeyLength(sessionKey);
+
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        try
+        {
+            var archiveSessionId = ReadHeader(stream, expectedArchiveSessionId);
+            return new SessionFile(stream, archiveSessionId, sessionKey, frameCount: 0);
         }
         catch
         {
@@ -209,21 +230,26 @@ public sealed class SessionFile : IDisposable
     /// <param name="plaintext">Raw body bytes; an empty span is a legitimately empty body. Use
     /// <see cref="AppendMissingBody"/> when capture failed.</param>
     /// <param name="archiveTurnId">The turn's stable archive id.</param>
-    public void AppendBody(uint turnSequence, SessionBodyKind kind, ReadOnlySpan<byte> plaintext, Guid archiveTurnId)
+    /// <returns>
+    /// The body's hash row: the SHA-256 and length of the obscured plaintext, which is what is stored, computed
+    /// in the same pass that obscures it.
+    /// </returns>
+    public SessionBodyHashRow AppendBody(uint turnSequence, SessionBodyKind kind, ReadOnlySpan<byte> plaintext, Guid archiveTurnId)
     {
-        var compressed = SessionRecordCodec.ObscureAndCompress(plaintext);
+        var (compressed, sha256, length, obscured) = SessionRecordCodec.ObscureCompressAndHash(plaintext);
         AppendFrame(turnSequence, kind, flags: 0, archiveTurnId, writeChunks: write =>
         {
             var offset = 0;
             do
             {
-                var length = Math.Min(SessionChunkCodec.ChunkBytes, compressed.Length - offset);
-                var final = offset + length >= compressed.Length;
-                write(compressed.AsSpan(offset, length), final);
-                offset += length;
+                var take = Math.Min(SessionChunkCodec.ChunkBytes, compressed.Length - offset);
+                var final = offset + take >= compressed.Length;
+                write(compressed.AsSpan(offset, take), final);
+                offset += take;
             }
             while (offset < compressed.Length);
         });
+        return new SessionBodyHashRow(archiveTurnId, kind, sha256, length, Missing: false, obscured);
     }
 
     /// <summary>
@@ -235,11 +261,20 @@ public sealed class SessionFile : IDisposable
     /// <param name="kind">Which body this frame holds.</param>
     /// <param name="spool">A completed spool; the caller keeps ownership and disposes it after the turn commits.</param>
     /// <param name="archiveTurnId">The turn's stable archive id.</param>
+    /// <returns>The body's hash row, taken from the hash the spool computed as it obscured the body.</returns>
     /// <exception cref="InvalidOperationException">When the spool did not complete.</exception>
-    public void AppendBodyFromSpool(uint turnSequence, SessionBodyKind kind, SessionBodySpool spool, Guid archiveTurnId)
+    public SessionBodyHashRow AppendBodyFromSpool(uint turnSequence, SessionBodyKind kind, SessionBodySpool spool, Guid archiveTurnId)
     {
         ArgumentNullException.ThrowIfNull(spool);
+        if (!spool.IsComplete || spool.PlaintextSha256 is not { } sha256)
+        {
+            throw new InvalidOperationException("The spool is not complete.");
+        }
+
         AppendFrame(turnSequence, kind, flags: 0, archiveTurnId, writeChunks: spool.Replay);
+
+        // The streaming obscurer does not report whether it changed anything, so that is not known here.
+        return new SessionBodyHashRow(archiveTurnId, kind, sha256, spool.PlaintextLength, Missing: false, Obscured: null);
     }
 
     /// <summary>
@@ -250,8 +285,12 @@ public sealed class SessionFile : IDisposable
     /// <param name="turnSequence">Zero-based turn order inside the session.</param>
     /// <param name="kind">Which body is missing.</param>
     /// <param name="archiveTurnId">The turn's stable archive id.</param>
-    public void AppendMissingBody(uint turnSequence, SessionBodyKind kind, Guid archiveTurnId) =>
+    /// <returns>A hash row marked missing, with no hash and a zero length.</returns>
+    public SessionBodyHashRow AppendMissingBody(uint turnSequence, SessionBodyKind kind, Guid archiveTurnId)
+    {
         AppendFrame(turnSequence, kind, FlagMissing, archiveTurnId, writeChunks: write => write([], true));
+        return new SessionBodyHashRow(archiveTurnId, kind, Sha256: null, Length: 0, Missing: true, Obscured: null);
+    }
 
     /// <summary>
     /// Reads every body frame from the file start (after the header) for tests and export rebuilds.
@@ -311,6 +350,111 @@ public sealed class SessionFile : IDisposable
     }
 
     /// <summary>
+    /// Reads one turn's frames one at a time, each body as a stream that decrypts a chunk and decompresses as
+    /// it is read, so memory stays at one chunk however large the body is. Nothing outside the turn is read:
+    /// the reader seeks to <paramref name="startOffset"/> and stops after <paramref name="frameCount"/> frames.
+    /// Each chunk authenticates its frame's position, so a wrong offset or ordinal fails authentication instead
+    /// of returning another frame's bytes. A body the caller leaves unread is skipped without decrypting.
+    /// </summary>
+    /// <remarks>
+    /// The enumeration is single-pass and not safe to share: a frame's body must be read and disposed before
+    /// asking for the next frame, because both walk the same file stream. Call this again to read the turn
+    /// a second time. The instance must not be used by another thread meanwhile; the store guarantees that by
+    /// holding the session's gate for the life of a turn reader and opening a private handle per turn.
+    /// </remarks>
+    /// <param name="startOffset">Where the turn's first frame begins: <see cref="FirstFrameOffset"/> for the first turn, otherwise the previous turn's end offset.</param>
+    /// <param name="firstFrameOrdinal">The zero-based position of the turn's first frame in the file.</param>
+    /// <param name="frameCount">How many frames the turn holds.</param>
+    /// <returns>The turn's frames, in file order.</returns>
+    /// <exception cref="InvalidDataException">When a frame is malformed or the file ends inside the turn.</exception>
+    /// <exception cref="CryptographicException">When a chunk fails authentication; raised as the body is read.</exception>
+    public IEnumerable<SessionFrameStream> ReadTurn(long startOffset, long firstFrameOrdinal, int frameCount)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentOutOfRangeException.ThrowIfLessThan(startOffset, DataStart);
+        ArgumentOutOfRangeException.ThrowIfNegative(firstFrameOrdinal);
+        ArgumentOutOfRangeException.ThrowIfNegative(frameCount);
+        return ReadTurnFrames(startOffset, firstFrameOrdinal, frameCount);
+    }
+
+    /// <summary>The iterator behind <see cref="ReadTurn"/>, split off so argument checks run at the call.</summary>
+    /// <param name="startOffset">Where the turn's first frame begins.</param>
+    /// <param name="firstFrameOrdinal">The zero-based position of the turn's first frame.</param>
+    /// <param name="frameCount">How many frames the turn holds.</param>
+    /// <returns>The turn's frames.</returns>
+    private IEnumerable<SessionFrameStream> ReadTurnFrames(long startOffset, long firstFrameOrdinal, int frameCount)
+    {
+        _stream.Seek(startOffset, SeekOrigin.Begin);
+        var header = new byte[FrameHeaderLength];
+        ChunkStream? previous = null;
+        for (var i = 0; i < frameCount; i++)
+        {
+            previous?.SkipRemaining();
+            if (!TryReadPartial(_stream, header))
+            {
+                throw new InvalidDataException("The session file ends before the turn's last frame.");
+            }
+
+            var kind = (SessionBodyKind)header[0];
+            ValidateKind(kind);
+            var flags = header[1];
+            if (flags is not (0 or FlagMissing))
+            {
+                throw new InvalidDataException($"Unknown session frame flags {flags}.");
+            }
+
+            var turnSequence = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(2, 4));
+            var archiveTurnId = new Guid(header.AsSpan(6, IdLength));
+            var chunks = new ChunkStream(_stream, _aes, BuildAssociatedData(header, (ulong)(firstFrameOrdinal + i)));
+            previous = chunks;
+
+            if (flags == FlagMissing)
+            {
+                // The marker is one sealed empty chunk; opening it is what authenticates the flag.
+                chunks.SkipRemaining(authenticate: true);
+                yield return new SessionFrameStream(turnSequence, kind, archiveTurnId, body: null);
+            }
+            else
+            {
+                yield return new SessionFrameStream(
+                    turnSequence, kind, archiveTurnId, new BrotliStream(chunks, CompressionMode.Decompress));
+            }
+        }
+
+        previous?.SkipRemaining();
+    }
+
+    /// <summary>
+    /// Validates the file header and returns the session id it names.
+    /// </summary>
+    /// <param name="stream">The open file, positioned at its start.</param>
+    /// <param name="expectedArchiveSessionId">Optional id check against the header.</param>
+    /// <returns>The archive session id from the header; the stream is left just after the header.</returns>
+    /// <exception cref="InvalidDataException">When the header is malformed, unsupported, or for another session.</exception>
+    private static Guid ReadHeader(Stream stream, Guid? expectedArchiveSessionId)
+    {
+        Span<byte> header = stackalloc byte[Magic.Length + IdLength + VersionLength];
+        if (!TryReadPartial(stream, header) || !header[..Magic.Length].SequenceEqual(Magic))
+        {
+            throw new InvalidDataException("Session file magic mismatch.");
+        }
+
+        var archiveSessionId = new Guid(header.Slice(Magic.Length, IdLength));
+        if (expectedArchiveSessionId is { } expected && expected != archiveSessionId)
+        {
+            throw new InvalidDataException("Session file archive id does not match the index.");
+        }
+
+        var version = BinaryPrimitives.ReadUInt16LittleEndian(header[(Magic.Length + IdLength)..]);
+        if (version != FormatVersion)
+        {
+            throw new InvalidDataException($"Unsupported session file version {version}.");
+        }
+
+        return archiveSessionId;
+    }
+
+    /// <summary>
     /// Decrypts the Extracts frame for <paramref name="archiveTurnId"/>. A convenience over
     /// <see cref="TryReadExtracts"/> for one turn.
     /// </summary>
@@ -330,10 +474,29 @@ public sealed class SessionFile : IDisposable
     /// <returns>The Extracts plaintext by turn id; a turn whose frame is absent or marked missing has no entry.</returns>
     public Dictionary<Guid, byte[]> TryReadExtracts(IReadOnlySet<Guid> archiveTurnIds, long maxFrames)
     {
-        ArgumentNullException.ThrowIfNull(archiveTurnIds);
-        var found = new Dictionary<Guid, byte[]>();
-        if (archiveTurnIds.Count == 0) return found;
+        var bodies = TryReadBodies(new HashSet<SessionBodyKind> { SessionBodyKind.Extracts }, archiveTurnIds, maxFrames);
+        return bodies.ToDictionary(pair => pair.Key.ArchiveTurnId, pair => pair.Value);
+    }
 
+    /// <summary>
+    /// Decrypts the frames of the wanted kinds for the wanted turns in one pass and skips every other frame's
+    /// ciphertext without opening it. Stops at <paramref name="maxFrames"/> so a torn tail past the committed
+    /// extent is not read, and as soon as every wanted frame has been found. This is what the export filter
+    /// uses to read the small <see cref="SessionBodyKind.TurnMetadata"/> frames without touching bodies.
+    /// </summary>
+    /// <param name="kinds">The body kinds wanted.</param>
+    /// <param name="archiveTurnIds">The turns whose frames are wanted.</param>
+    /// <param name="maxFrames">How many committed frames to walk.</param>
+    /// <returns>The decompressed plaintext by turn and kind; a frame that is absent or marked missing has no entry.</returns>
+    public Dictionary<(Guid ArchiveTurnId, SessionBodyKind Kind), byte[]> TryReadBodies(
+        IReadOnlySet<SessionBodyKind> kinds, IReadOnlySet<Guid> archiveTurnIds, long maxFrames)
+    {
+        ArgumentNullException.ThrowIfNull(kinds);
+        ArgumentNullException.ThrowIfNull(archiveTurnIds);
+        var found = new Dictionary<(Guid ArchiveTurnId, SessionBodyKind Kind), byte[]>();
+        if (archiveTurnIds.Count == 0 || kinds.Count == 0) return found;
+
+        var wanted = archiveTurnIds.Count * kinds.Count;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -343,7 +506,7 @@ public sealed class SessionFile : IDisposable
             {
                 _stream.Seek(DataStart, SeekOrigin.Begin);
                 Span<byte> header = stackalloc byte[FrameHeaderLength];
-                while (ordinal < (ulong)maxFrames && found.Count < archiveTurnIds.Count && TryReadExact(_stream, header))
+                while (ordinal < (ulong)maxFrames && found.Count < wanted && TryReadExact(_stream, header))
                 {
                     var kind = (SessionBodyKind)header[0];
                     ValidateKind(kind);
@@ -354,11 +517,10 @@ public sealed class SessionFile : IDisposable
                     }
 
                     var turnId = new Guid(header[6..FrameHeaderLength]);
-                    var take = kind == SessionBodyKind.Extracts && flags != FlagMissing &&
-                               archiveTurnIds.Contains(turnId);
+                    var take = kinds.Contains(kind) && flags != FlagMissing && archiveTurnIds.Contains(turnId);
                     if (take)
                     {
-                        found[turnId] = ReadCompressedBody(header, ordinal);
+                        found[(turnId, kind)] = ReadCompressedBody(header, ordinal);
                     }
                     else if (!SkipBody())
                     {
@@ -569,6 +731,109 @@ public sealed class SessionFile : IDisposable
         }
 
         return (good, count);
+    }
+
+    /// <summary>
+    /// A read-only stream over one frame's compressed bytes that opens one sealed chunk at a time. It never
+    /// owns the file: disposing it leaves the session file's stream where it is, and
+    /// <see cref="SkipRemaining"/> moves past whatever the reader did not consume.
+    /// </summary>
+    private sealed class ChunkStream : Stream
+    {
+        private readonly Stream _file;
+        private readonly AesGcm _aes;
+        private readonly byte[] _frameAad;
+        private byte[] _current = [];
+        private int _offset;
+        private uint _chunkIndex;
+        private bool _final;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ChunkStream"/> class.
+        /// </summary>
+        /// <param name="file">The session file's stream, positioned at the frame's first chunk record.</param>
+        /// <param name="aes">The cipher for the session key.</param>
+        /// <param name="frameAad">The frame's authenticated data.</param>
+        public ChunkStream(Stream file, AesGcm aes, byte[] frameAad)
+        {
+            _file = file;
+            _aes = aes;
+            _frameAad = frameAad;
+        }
+
+        /// <inheritdoc/>
+        public override bool CanRead => true;
+
+        /// <inheritdoc/>
+        public override bool CanSeek => false;
+
+        /// <inheritdoc/>
+        public override bool CanWrite => false;
+
+        /// <inheritdoc/>
+        public override long Length => throw new NotSupportedException();
+
+        /// <inheritdoc/>
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        /// <summary>
+        /// Moves the file past the frame's remaining chunk records, so the next frame header is next.
+        /// </summary>
+        /// <param name="authenticate">Whether to open each remaining chunk (a missing-body marker must be authenticated) rather than step over it.</param>
+        /// <exception cref="InvalidDataException">When a record is torn.</exception>
+        public void SkipRemaining(bool authenticate = false)
+        {
+            while (!_final)
+            {
+                if (authenticate)
+                {
+                    SessionChunkCodec.ReadRecord(_file, _aes, _frameAad, _chunkIndex, out _final);
+                }
+                else if (!SessionChunkCodec.TrySkipRecord(_file, out _final))
+                {
+                    throw new InvalidDataException("The session file ends inside a frame.");
+                }
+
+                _chunkIndex++;
+            }
+        }
+
+        /// <inheritdoc/>
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        /// <inheritdoc/>
+        public override int Read(Span<byte> buffer)
+        {
+            while (_offset >= _current.Length)
+            {
+                if (_final) return 0;
+                _current = SessionChunkCodec.ReadRecord(_file, _aes, _frameAad, _chunkIndex++, out _final);
+                _offset = 0;
+            }
+
+            var count = Math.Min(buffer.Length, _current.Length - _offset);
+            _current.AsSpan(_offset, count).CopyTo(buffer);
+            _offset += count;
+            return count;
+        }
+
+        /// <inheritdoc/>
+        public override void Flush()
+        {
+        }
+
+        /// <inheritdoc/>
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        /// <inheritdoc/>
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        /// <inheritdoc/>
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     /// <summary>Fills <paramref name="buffer"/>; returns false on a clean EOF before the first byte.</summary>

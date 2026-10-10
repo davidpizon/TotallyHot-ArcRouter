@@ -32,7 +32,7 @@ public sealed class PasskeyAdminGrpcServiceTests
                 new ChallengeStore(Harness.Options), Harness.Credentials);
             Service = new PasskeyAdminGrpcService(
                 Harness.Gate, Codes, ceremonies, Harness.Grants, Harness.OneOperations, Log,
-                Harness.Credentials, Harness.Options);
+                Harness.Credentials, Harness.Options, new PendingApprovalTable(new Uri("https://localhost:47104")));
         }
     }
 

@@ -99,6 +99,8 @@ public sealed class SessionStore : ISessionExtractReader
 
     private const string FolderName = "sessions";
 
+    private static readonly HashSet<SessionBodyKind> ExtractsKind = [SessionBodyKind.Extracts];
+
     private readonly SessionIndex _index;
     private readonly ISessionMasterKeyStore _masterKeys;
     private readonly string _folder;
@@ -226,6 +228,41 @@ public sealed class SessionStore : ISessionExtractReader
         var results = new Dictionary<Guid, SessionExtracts>();
         if (archiveTurnIds.Count == 0) return results;
 
+        var bodies = TryReadBodies(archiveSessionId, ExtractsKind, archiveTurnIds);
+        try
+        {
+            foreach (var ((turnId, _), plaintext) in bodies)
+            {
+                if (plaintext.Length > 0) results[turnId] = SessionExtracts.Parse(plaintext);
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Decrypts the frames of the wanted kinds for the wanted turns of one session in a single pass over its
+    /// file, skipping every other frame without decrypting it. Export uses this to read the small
+    /// <see cref="SessionBodyKind.TurnMetadata"/> frames for its harness, provider and model filters without
+    /// touching a body. A session that cannot be read yields what was read before the failure, and the failure
+    /// is logged.
+    /// </summary>
+    /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <param name="kinds">The body kinds wanted.</param>
+    /// <param name="archiveTurnIds">The turns whose frames are wanted.</param>
+    /// <returns>The decompressed plaintext by turn and kind; a frame that is absent, missing or unreadable has no entry.</returns>
+    public IReadOnlyDictionary<(Guid ArchiveTurnId, SessionBodyKind Kind), byte[]> TryReadBodies(
+        Guid archiveSessionId, IReadOnlySet<SessionBodyKind> kinds, IReadOnlyCollection<Guid> archiveTurnIds)
+    {
+        ArgumentNullException.ThrowIfNull(kinds);
+        ArgumentNullException.ThrowIfNull(archiveTurnIds);
+        var results = new Dictionary<(Guid ArchiveTurnId, SessionBodyKind Kind), byte[]>();
+        if (archiveTurnIds.Count == 0) return results;
+
         _rotationLock.EnterReadLock();
         try
         {
@@ -243,18 +280,11 @@ public sealed class SessionStore : ISessionExtractReader
                         return results;
                     }
 
-                    var wanted = archiveTurnIds.ToHashSet();
-                    foreach (var (turnId, plaintext) in file.TryReadExtracts(wanted, row.CommittedFrames))
-                    {
-                        if (plaintext.Length > 0) results[turnId] = SessionExtracts.Parse(plaintext);
-                    }
-
-                    return results;
+                    return file.TryReadBodies(kinds, archiveTurnIds.ToHashSet(), row.CommittedFrames);
                 }
-                catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException
-                                               or JsonException)
+                catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException)
                 {
-                    _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
+                    _logger.LogWarning(ex, "Could not read bodies for session {ArchiveSessionId}.", archiveSessionId);
                     return results;
                 }
                 finally
@@ -267,6 +297,174 @@ public sealed class SessionStore : ISessionExtractReader
         {
             _rotationLock.ExitReadLock();
         }
+    }
+
+    /// <summary>
+    /// Opens one turn for streaming, for export. It holds the master-key rotation lock (shared) and the
+    /// session's gate until the reader is disposed, so a rotation or a delete cannot pull the file away
+    /// mid-turn, but only for that one turn: appends to the session wait for it, other sessions and later
+    /// turns do not. The caller reads and disposes the reader on the thread that opened it, because the locks
+    /// are owned by a thread.
+    /// </summary>
+    /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <param name="archiveTurnId">The turn's archive id.</param>
+    /// <returns>A reader for the turn, or <see langword="null"/> when the session or turn is not in the index (for instance, it was deleted).</returns>
+    /// <exception cref="InvalidDataException">When the session file is shorter than the turn's committed extent.</exception>
+    /// <exception cref="IOException">When the session file is gone or cannot be opened.</exception>
+    public SessionTurnReader? OpenTurn(Guid archiveSessionId, Guid archiveTurnId)
+    {
+        var gate = _sessionGates.GetOrAdd(archiveSessionId, static _ => new object());
+        _rotationLock.EnterReadLock();
+        var gateTaken = false;
+        var handedOff = false;
+        try
+        {
+            Monitor.Enter(gate, ref gateTaken);
+            var turn = _index.TryGetTurn(archiveTurnId);
+            var row = turn is null ? null : _index.TryGetSession(archiveSessionId);
+            if (turn is null || row is null || turn.ArchiveSessionId != archiveSessionId) return null;
+
+            var startOffset = SessionFile.FirstFrameOffset;
+            if (turn.TurnSequence > 0)
+            {
+                startOffset = _index.TryGetTurnBySequence(archiveSessionId, turn.TurnSequence - 1)?.EndOffset
+                              ?? throw new InvalidDataException(
+                                  $"Session {archiveSessionId} has no turn before sequence {turn.TurnSequence}.");
+            }
+
+            var sessionKey = UnwrapSessionKey(row.WrappedKey);
+            SessionFile? file = null;
+            try
+            {
+                file = SessionFile.OpenReadOnly(PathOf(row), sessionKey, archiveSessionId);
+                if (file.Length < turn.EndOffset)
+                {
+                    throw new InvalidDataException(
+                        $"Session {archiveSessionId} is shorter than the turn being read.");
+                }
+
+                var reader = new SessionTurnReader(turn, file, startOffset, () =>
+                {
+                    Monitor.Exit(gate);
+                    _rotationLock.ExitReadLock();
+                });
+                handedOff = true;
+                return reader;
+            }
+            catch
+            {
+                file?.Dispose();
+                throw;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(sessionKey);
+            }
+        }
+        finally
+        {
+            if (!handedOff)
+            {
+                if (gateTaken) Monitor.Exit(gate);
+                _rotationLock.ExitReadLock();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Computes the body hashes and the checksum for a session captured before hashes existed, by stream
+    /// decrypting it once under the session's gate. A session that already has them is left alone. A failure
+    /// is logged and leaves the session unhashed, so an export can say so instead of failing.
+    /// </summary>
+    /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <returns><see langword="true"/> when the session has hashes now; <see langword="false"/> when it is unknown or could not be read.</returns>
+    public bool BackfillBodyHashes(Guid archiveSessionId)
+    {
+        _rotationLock.EnterReadLock();
+        try
+        {
+            lock (_sessionGates.GetOrAdd(archiveSessionId, static _ => new object()))
+            {
+                var row = _index.TryGetSession(archiveSessionId);
+                if (row is null) return false;
+                if (_index.HasBodyHashes(archiveSessionId)) return true;
+
+                var sessionKey = UnwrapSessionKey(row.WrappedKey);
+                try
+                {
+                    using var file = SessionFile.OpenReadOnly(PathOf(row), sessionKey, archiveSessionId);
+                    if (file.Length < row.CommittedLength)
+                    {
+                        _logger.LogWarning(
+                            "Session {ArchiveSessionId} is shorter than its committed extent and cannot be hashed.", archiveSessionId);
+                        return false;
+                    }
+
+                    var hashes = new List<SessionBodyHashRow>();
+                    var startOffset = SessionFile.FirstFrameOffset;
+                    foreach (var turn in _index.ListTurns(archiveSessionId))
+                    {
+                        foreach (var frame in file.ReadTurn(startOffset, turn.FirstFrameOrdinal, turn.FrameCount))
+                        {
+                            using (frame) hashes.Add(HashFrame(frame));
+                        }
+
+                        startOffset = turn.EndOffset;
+                    }
+
+                    _index.ReplaceBodyHashes(archiveSessionId, hashes);
+                    return true;
+                }
+                catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException)
+                {
+                    _logger.LogWarning(ex, "Could not compute body hashes for session {ArchiveSessionId}.", archiveSessionId);
+                    return false;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(sessionKey);
+                }
+            }
+        }
+        finally
+        {
+            _rotationLock.ExitReadLock();
+        }
+    }
+
+    /// <summary>Lists the hashes of every body of a session, in turn order then kind order.</summary>
+    /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <returns>The hash rows; empty for an unknown session or one without hashes.</returns>
+    public IReadOnlyList<SessionBodyHashRow> ListBodyHashes(Guid archiveSessionId) =>
+        _index.ListBodiesForSession(archiveSessionId);
+
+    /// <summary>Reports whether every turn of a session has body hashes.</summary>
+    /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <returns><see langword="false"/> for a session that still needs <see cref="BackfillBodyHashes"/>.</returns>
+    public bool HasBodyHashes(Guid archiveSessionId) => _index.HasBodyHashes(archiveSessionId);
+
+    /// <summary>Reads a session's checksum over its exchange bodies.</summary>
+    /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <returns>The 32-byte checksum, or <see langword="null"/> when the session is unknown or unhashed.</returns>
+    public byte[]? GetSessionSha256(Guid archiveSessionId) => _index.GetSessionSha256(archiveSessionId);
+
+    /// <summary>Gets the absolute path of the folder that holds the session files.</summary>
+    public string Folder => _folder;
+
+    /// <summary>Hashes one frame's stored plaintext for a backfill.</summary>
+    /// <param name="frame">The frame, whose body is read to the end.</param>
+    /// <returns>The frame's hash row; a missing marker has no hash.</returns>
+    private static SessionBodyHashRow HashFrame(SessionFrameStream frame)
+    {
+        if (frame.Body is null)
+        {
+            return new SessionBodyHashRow(frame.ArchiveTurnId, frame.Kind, Sha256: null, Length: 0, Missing: true, Obscured: null);
+        }
+
+        using var hashing = new HashingStream(Stream.Null, leaveOpen: true);
+        frame.Body.CopyTo(hashing);
+        return new SessionBodyHashRow(
+            frame.ArchiveTurnId, frame.Kind, hashing.FinishHash(), hashing.BytesWritten, Missing: false, Obscured: null);
     }
 
     /// <summary>Lists a session's committed turns in order.</summary>
@@ -687,13 +885,14 @@ public sealed class SessionStore : ISessionExtractReader
 
             var firstOrdinal = (long)file.FrameCount;
             var sequence = (uint)row.TurnCount;
+            var hashes = new List<SessionBodyHashRow>(turn.Bodies.Count);
             try
             {
                 foreach (var body in turn.Bodies)
                 {
-                    if (body.Spool is { IsComplete: true } spool) file.AppendBodyFromSpool(sequence, body.Kind, spool, turn.ArchiveTurnId);
-                    else if (body.Body is null) file.AppendMissingBody(sequence, body.Kind, turn.ArchiveTurnId);
-                    else file.AppendBody(sequence, body.Kind, body.Body, turn.ArchiveTurnId);
+                    if (body.Spool is { IsComplete: true } spool) hashes.Add(file.AppendBodyFromSpool(sequence, body.Kind, spool, turn.ArchiveTurnId));
+                    else if (body.Body is null) hashes.Add(file.AppendMissingBody(sequence, body.Kind, turn.ArchiveTurnId));
+                    else hashes.Add(file.AppendBody(sequence, body.Kind, body.Body, turn.ArchiveTurnId));
                 }
             }
             catch
@@ -707,7 +906,7 @@ public sealed class SessionStore : ISessionExtractReader
                 turn.Bodies.Count, file.Length, turn.CreatedAtUtc, turn.Origin);
             try
             {
-                _index.CommitTurn(turnRow);
+                _index.CommitTurn(turnRow, hashes);
             }
             catch
             {
