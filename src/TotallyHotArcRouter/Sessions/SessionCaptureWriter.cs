@@ -16,7 +16,8 @@ public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput
 /// Writes captured turns to <see cref="SessionStore"/> off the request path: a bounded channel with one
 /// consumer, shaped like ADR-0018's writer so the two can be merged later. Nothing the writer does can fail a
 /// proxy response; a turn that cannot be stored is logged and lost, and its spools are always disposed. A
-/// producer that finds the queue full waits (it does not drop the turn).
+/// producer that finds the queue full waits (it does not drop the turn). A lost turn is also reported to an
+/// optional callback so its transcript row stops waiting for text; a callback that fails is logged and absorbed.
 /// </summary>
 /// <remarks>
 /// A plain hosted service rather than a <see cref="BackgroundService"/>: on .NET 10 a <c>BackgroundService</c>
@@ -49,7 +50,8 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
     /// </param>
     /// <param name="onTurnDropped">
     /// Marks the matching transcript row terminal when a turn is refused, epoch-dropped, abandoned, or fails to
-    /// write (#165 phase 2 follow-up). Optional so hand-built writers in tests need no transcript store.
+    /// write (#165 phase 2 follow-up). Optional so hand-built writers in tests need no transcript store. A callback
+    /// that throws is logged and ignored; it never reaches a caller or stops the consumer.
     /// </param>
     public SessionCaptureWriter(
         Lazy<SessionStore> store,
@@ -216,15 +218,48 @@ public sealed class SessionCaptureWriter : IHostedService, IDisposable
         }
     }
 
-    /// <summary>Disposes the turn's spools and counts the turn as no longer in flight.</summary>
+    /// <summary>
+    /// Disposes the turn's spools, tells the drop callback when the turn was lost, and counts the turn as no longer
+    /// in flight. The count is released however the first two steps end, because <see cref="WaitForIdleAsync"/>,
+    /// <see cref="StopAsync"/> and Clear all wait on it.
+    /// </summary>
     /// <param name="item">The turn that was written, dropped or refused.</param>
     /// <param name="dropped">
     /// Whether the turn never reached the session file, so its transcript row must be marked terminal.
     /// </param>
     private void Complete(SessionCaptureItem item, bool dropped)
     {
-        foreach (var body in item.Turn.Bodies) body.Spool?.Dispose();
-        if (dropped) _onTurnDropped?.Invoke(item.Turn.ArchiveTurnId);
-        Interlocked.Decrement(ref _inFlight);
+        try
+        {
+            foreach (var body in item.Turn.Bodies) body.Spool?.Dispose();
+            if (dropped) NotifyTurnDropped(item.Turn.ArchiveTurnId);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _inFlight);
+        }
+    }
+
+    /// <summary>
+    /// Tells the drop callback that a turn will never reach a session file. The callback writes to the transcript
+    /// database, which is unwell exactly when a write has just failed (locked, disk full), and this runs on the
+    /// single consumer and on producers. A failure is therefore logged and absorbed: it must not stop the consumer,
+    /// strand the turn as in flight, or fail a request. The row it would have marked is covered by the
+    /// missing-extract grace window instead.
+    /// </summary>
+    /// <param name="archiveTurnId">The dropped turn's archive turn id.</param>
+    private void NotifyTurnDropped(Guid archiveTurnId)
+    {
+        if (_onTurnDropped is null) return;
+
+        try
+        {
+            _onTurnDropped(archiveTurnId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex, "A dropped turn's transcript row could not be marked unavailable; the missing-extract grace window will cover it.");
+        }
     }
 }

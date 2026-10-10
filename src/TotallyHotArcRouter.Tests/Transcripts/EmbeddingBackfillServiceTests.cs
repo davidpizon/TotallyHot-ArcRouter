@@ -170,7 +170,7 @@ public class EmbeddingBackfillServiceTests
         var transcript = new TranscriptRecord(
             Id: 7,
             CorrelationId: "sess:1",
-            CreatedAtUtc: DateTimeOffset.UtcNow - EmbeddingBackfillService.MissingExtractGrace - TimeSpan.FromSeconds(1),
+            CreatedAtUtc: DateTimeOffset.UtcNow - TranscriptRecord.MissingExtractGrace - TimeSpan.FromSeconds(1),
             RequestedModel: "model-a",
             RoutedModel: "model-b",
             Dimension: "code_quality",

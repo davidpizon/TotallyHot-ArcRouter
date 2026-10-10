@@ -625,29 +625,28 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     {
         EnsureSchema();
         using var connection = _database.OpenConnection();
-        using var transaction = connection.BeginTransaction();
 
+        // One statement, so the rows and the memory links they carried leave together and no read lock has to be
+        // upgraded to a write lock. A SELECT followed by a DELETE in a deferred transaction fails with
+        // SQLITE_BUSY_SNAPSHOT whenever another connection commits between the two, and the busy timeout cannot
+        // retry that; this runs on every retention pass against a database every request writes to.
         var memoryIds = new List<long>();
-        using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = """
-                                 SELECT memory_entry_id FROM request_transcripts
-                                 WHERE archive_session_id IS NULL AND memory_entry_id IS NOT NULL;
-                                 """;
-            using var reader = select.ExecuteReader();
-            while (reader.Read()) memoryIds.Add(reader.GetInt64(0));
-        }
-
-        int deleted;
+        var deleted = 0;
         using (var delete = connection.CreateCommand())
         {
-            delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM request_transcripts WHERE archive_session_id IS NULL;";
-            deleted = delete.ExecuteNonQuery();
+            delete.CommandText = """
+                                 DELETE FROM request_transcripts
+                                 WHERE archive_session_id IS NULL
+                                 RETURNING memory_entry_id;
+                                 """;
+            using var reader = delete.ExecuteReader();
+            while (reader.Read())
+            {
+                deleted++;
+                if (!reader.IsDBNull(0)) memoryIds.Add(reader.GetInt64(0));
+            }
         }
 
-        transaction.Commit();
         if (deleted > 0) TruncateWalAfterDelete(connection);
         return new NullArchivePurgeResult(deleted, memoryIds);
     }

@@ -21,12 +21,6 @@ public sealed class EmbeddingBackfillService : BackgroundService
 {
     private const int BackfillBatchSize = 100;
     private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// How long after a row is inserted a missing session-file extract is still treated as in-flight
-    /// (#165 phase 2 follow-up). Younger rows are left for a later batch instead of being marked unavailable.
-    /// </summary>
-    internal static readonly TimeSpan MissingExtractGrace = TimeSpan.FromMinutes(2);
     private readonly IEmbeddingClient _embeddingClient;
 
     private readonly ILogger<EmbeddingBackfillService> _logger;
@@ -133,7 +127,7 @@ public sealed class EmbeddingBackfillService : BackgroundService
                 {
                     // The words live in a session file the turn may never have reached. Without marking, the
                     // row stays selected and starves every later batch - but a young row may still be writing.
-                    if (DateTimeOffset.UtcNow - transcript.CreatedAtUtc < MissingExtractGrace)
+                    if (transcript.IsWithinMissingExtractGrace(DateTimeOffset.UtcNow))
                     {
                         _logger.LogDebug(
                             message: "Transcript row {TranscriptId} has no prompt text yet; leaving it for a later backfill.",

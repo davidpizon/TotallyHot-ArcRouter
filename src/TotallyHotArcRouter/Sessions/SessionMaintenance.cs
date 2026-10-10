@@ -58,6 +58,8 @@ public sealed class SessionMaintenance(
 
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);
 
+    private readonly string _databasePath = database.DatabasePath;
+
     /// <summary>
     /// Deletes every session, so the Clear action leaves no conversation text on disk. It first advances the
     /// <see cref="CaptureEpoch"/>: a turn that began before this point is dropped wherever it is (still being
@@ -89,7 +91,10 @@ public sealed class SessionMaintenance(
     /// <c>archive_session_id</c> (legacy or unbound metadata), even when no session file is removed.
     /// </summary>
     /// <param name="maxTurns">The most turns to keep (the Sample Size setting).</param>
-    /// <returns>What was deleted; zero sessions when the store is within the limit or was never opened.</returns>
+    /// <returns>
+    /// What was deleted, including how many unbound transcript rows were purged; zero sessions when the store is
+    /// within the limit or was never opened.
+    /// </returns>
     public SessionDeletionResult EnforceRetention(int maxTurns)
     {
         var sessionResult = Directory.Exists(_folder) ? Open().EnforceRetention(maxTurns) : NothingToDelete;
@@ -120,12 +125,15 @@ public sealed class SessionMaintenance(
     }
 
     /// <summary>
-    /// Removes transcript rows that can never gain a session-file extract, and their linked embeddings.
+    /// Removes transcript rows that can never gain a session-file extract, and their linked embeddings. Does
+    /// nothing until the transcript database exists: the store creates its schema on first use, and a router that
+    /// never captured has no database and must not get one from a retention pass. The file, not the capture
+    /// toggle, says there is something to purge, because retention runs whether or not capture is on.
     /// </summary>
     /// <returns>How many transcript rows were deleted.</returns>
     private int PurgeNullArchiveRows()
     {
-        if (transcripts is null) return 0;
+        if (transcripts is null || !File.Exists(_databasePath)) return 0;
 
         var purge = transcripts.DeleteNullArchiveRows();
         DeleteMemoryEntries(purge.MemoryEntryIds);

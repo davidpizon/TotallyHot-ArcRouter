@@ -128,6 +128,12 @@ internal sealed class TurnCapture : IDisposable
     private byte[]? _providerRequest;
     private bool _interrupted;
     private bool _submitted;
+
+    /// <summary>Whether <see cref="BindArchive"/> handed this turn's id to a transcript insert, so a row may carry it.</summary>
+    private bool _archiveBound;
+
+    /// <summary>Whether the drop callback has already been told about this turn.</summary>
+    private bool _dropNotified;
     private readonly Func<string, Guid>? _resolveArchiveSession;
     private readonly Action<Guid>? _onTurnDropped;
 
@@ -149,7 +155,9 @@ internal sealed class TurnCapture : IDisposable
     /// row and the file share one id. Null only for a capture that is never bound to a transcript row.
     /// </param>
     /// <param name="onTurnDropped">
-    /// Marks the transcript row terminal when this capture is dropped before the writer stores it. Optional.
+    /// Marks the transcript row terminal when this capture is dropped before the writer stores it. Optional. It
+    /// runs at most once, only for a capture that bound its turn id to a transcript row, and a failure in it is
+    /// logged and absorbed.
     /// </param>
     internal TurnCapture(
         CaptureBodyPump pump,
@@ -187,7 +195,11 @@ internal sealed class TurnCapture : IDisposable
             throw new InvalidOperationException("This capture has no session-id resolver.");
         }
 
-        return new ArchiveBinding(_resolveArchiveSession(clientSessionId), ArchiveTurnId);
+        var binding = new ArchiveBinding(_resolveArchiveSession(clientSessionId), ArchiveTurnId);
+
+        // From here a transcript row can carry this turn's id; before it, none can.
+        _archiveBound = true;
+        return binding;
     }
 
     /// <summary>
@@ -350,8 +362,6 @@ internal sealed class TurnCapture : IDisposable
     {
         if (_submitted) return;
 
-        NotifyTurnDropped();
-
         _requestBuffer?.Dispose();
         _requestBuffer = null;
         _request?.Release();
@@ -363,10 +373,33 @@ internal sealed class TurnCapture : IDisposable
         // The request's completion was posted when the first candidate began answering, so by now the worker
         // has usually finished that spool and handed it to the completion task, out of Release's reach.
         DisposeWhenFinished(_requestCompletion);
+
+        // Last, so a slow or failing database can never keep the buffers and spools above alive.
+        NotifyTurnDropped();
     }
 
-    /// <summary>Marks the transcript row terminal when this turn will never reach a session file.</summary>
-    private void NotifyTurnDropped() => _onTurnDropped?.Invoke(ArchiveTurnId);
+    /// <summary>
+    /// Marks the transcript row terminal when this turn will never reach a session file. It does nothing for a
+    /// capture that never handed its turn id to a transcript insert (a request rejected before routing has no row,
+    /// and the callback writes to the database on the request's thread), and it tells the callback once however
+    /// many places notice the drop. A callback that fails is logged, not thrown: it must not skip the release in
+    /// <see cref="Dispose"/> or fail the request, and the row is covered by the missing-extract grace window.
+    /// </summary>
+    private void NotifyTurnDropped()
+    {
+        if (_onTurnDropped is null || !_archiveBound || _dropNotified) return;
+
+        _dropNotified = true;
+        try
+        {
+            _onTurnDropped(ArchiveTurnId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex, "A dropped turn's transcript row could not be marked unavailable; the missing-extract grace window will cover it.");
+        }
+    }
 
     /// <summary>
     /// Starts the request's spool from the bytes buffered while the router read the body, and ends it. A

@@ -139,7 +139,7 @@ public class QualityRescanServiceTests
             record: MakeRecord(7) with
             {
                 ResponseText = null,
-                CreatedAtUtc = DateTimeOffset.UtcNow - QualityRescanService.MissingExtractGrace -
+                CreatedAtUtc = DateTimeOffset.UtcNow - TranscriptRecord.MissingExtractGrace -
                                TimeSpan.FromSeconds(1)
             });
         var grader = new RecordingGrader();

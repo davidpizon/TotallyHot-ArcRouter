@@ -44,6 +44,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
     private SessionCaptureOptions _captureOptions = new();
     private ILogger<TurnCaptureFactory> _factoryLogger = NullLogger<TurnCaptureFactory>.Instance;
     private readonly StaticOptionsMonitor<TranscriptOptions> _transcriptOptions = new(new TranscriptOptions { Enabled = true });
+    private readonly List<Guid> _droppedTurns = [];
 
     private SessionStore Store => _lazyStore.Value;
 
@@ -626,6 +627,55 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         Assert.Empty(AllFiles());
     }
 
+    /// <summary>
+    /// A request the router rejects never wrote a transcript row, so its capture has no row to mark: the drop
+    /// callback, which writes to the transcript database, must not run for it.
+    /// </summary>
+    [Fact]
+    public async Task CaptureOn_RejectedRequest_DoesNotNotifyTheDropCallback()
+    {
+        await RunAsync("{\"model\":", _ => Json("{}"), transcripts: NewTranscriptStore(), onTurnDropped: _droppedTurns.Add);
+        await _writer.WaitForIdleAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Empty(_droppedTurns);
+    }
+
+    /// <summary>
+    /// Clear runs while a turn is in flight: the row the turn already wrote is told that no session file will ever
+    /// hold its text, once, however many places in the capture notice the drop.
+    /// </summary>
+    [Fact]
+    public async Task CaptureOn_ClearRunsWhileTheTurnIsInFlight_NotifiesTheDropCallbackOnce()
+    {
+        await RunAsync(ChatRequest("history that Clear wipes"), _ =>
+        {
+            _epoch.Advance();
+            return Json("{\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
+        }, transcripts: NewTranscriptStore(), onTurnDropped: _droppedTurns.Add);
+        await WaitForNoSpoolsAsync();
+
+        Assert.Single(_droppedTurns);
+    }
+
+    /// <summary>
+    /// A drop callback that throws (the transcript database is locked) must not fail the request or strand the
+    /// capture's buffers and spools.
+    /// </summary>
+    [Fact]
+    public async Task CaptureOn_DropCallbackThrows_TheRequestStillCompletesAndLeavesNoSpool()
+    {
+        var context = await RunAsync(ChatRequest("history that Clear wipes"), _ =>
+        {
+            _epoch.Advance();
+            return Json("{\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
+        }, transcripts: NewTranscriptStore(),
+            onTurnDropped: _ => throw new InvalidOperationException("transcripts.db is locked."));
+        await WaitForNoSpoolsAsync();
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Empty(SpoolFiles());
+    }
+
     /// <summary>A telemetry publisher that throws does not stop the turn from being stored, and the client still gets its response.</summary>
     [Fact]
     public async Task CaptureOn_TelemetryPublisherThrows_TheTurnIsStillStored()
@@ -689,6 +739,9 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         AssertReplyTextWithheld(frames);
     }
 
+    /// <summary>A real transcript store over the test database, so the request writes a row bound to its archive ids.</summary>
+    private SqliteTranscriptStore NewTranscriptStore() => new(_database, _transcriptOptions);
+
     private static string ChatRequest(string userText) =>
         "{\"model\":\"primary\",\"messages\":[{\"role\":\"user\",\"content\":\"" + userText + "\"}]}";
 
@@ -723,7 +776,9 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
         Stream? responseBody = null,
         CancellationToken requestAborted = default,
         ITelemetryPublisher? telemetry = null,
-        Action<DefaultHttpContext>? configureContext = null)
+        Action<DefaultHttpContext>? configureContext = null,
+        ITranscriptStore? transcripts = null,
+        Action<Guid>? onTurnDropped = null)
     {
         resolver ??= ModelRouteResolverTestFactory.CreateWithModels(("primary", "openai", "primary-upstream", "https://primary.test"));
         var middleware = new ProxyMiddleware(
@@ -734,6 +789,7 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
             {
                 Translators = translators,
                 TelemetryPublisher = telemetry,
+                TranscriptStore = transcripts,
                 BedrockClientFactory = bedrock is null ? null : new FakeBedrockClientFactory(bedrock),
                 TurnCapture = new TurnCaptureFactory(
                     _pump,
@@ -743,7 +799,8 @@ public sealed class ProxyMiddlewareSessionCaptureTests : IDisposable
                     _transcriptOptions,
                     Options.Create(_captureOptions),
                     _database,
-                    _factoryLogger)
+                    _factoryLogger,
+                    onTurnDropped)
             });
 
         var context = new DefaultHttpContext();

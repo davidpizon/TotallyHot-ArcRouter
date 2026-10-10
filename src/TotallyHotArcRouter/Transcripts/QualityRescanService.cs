@@ -39,12 +39,6 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// </remarks>
 public sealed class QualityRescanService : BackgroundService
 {
-    /// <summary>
-    /// How long after a row is inserted a missing session-file extract is still treated as in-flight
-    /// (#165 phase 2 follow-up). Younger rows are left for a later sweep instead of being stamped unscorable.
-    /// </summary>
-    internal static readonly TimeSpan MissingExtractGrace = TimeSpan.FromMinutes(2);
-
     private readonly ISignalExtractor _extractor;
     private readonly IQualityGrader _grader;
     private readonly ILogger<QualityRescanService> _logger;
@@ -160,7 +154,7 @@ public sealed class QualityRescanService : BackgroundService
 
         _logger.LogInformation(
             message:
-            "Quality rescan swept {Considered} row(s) at scorer version {ScorerVersion}: {Graded} graded, {Skipped} carried no gradable snippet.",
+            "Quality rescan swept {Considered} row(s) at scorer version {ScorerVersion}: {Graded} graded, {Skipped} not graded (no gradable snippet, or too new to judge).",
             ids.Count,
             _qualityOptions.ScorerVersion,
             graded,
@@ -174,13 +168,15 @@ public sealed class QualityRescanService : BackgroundService
     /// <param name="stoppingToken">A cancellation token.</param>
     /// <returns>
     /// <see langword="true"/> when a score was produced; <see langword="false"/> when the row carried nothing
-    /// gradable.
+    /// gradable, or was too new to judge and was left for a later sweep.
     /// </returns>
     /// <remarks>
     /// A row that yields no snippet is still stamped, with a null score. Leaving it unstamped would put it
     /// back at the head of the very next sweep - and because the sweep is ordered oldest-first and bounded,
     /// a run of prose-only rows would consume every batch forever and no gradable row would ever be
-    /// reached.
+    /// reached. The one exception is a row with no response text that is still inside
+    /// <see cref="TranscriptRecord.MissingExtractGrace"/>: its extract may not be written yet, so it is left
+    /// unstamped. It is the newest kind of row, so it sits at the tail of the sweep and is stamped once it ages out.
     /// </remarks>
     private async Task<bool> RescanOneAsync(long transcriptId, CancellationToken stoppingToken)
     {
@@ -194,7 +190,7 @@ public sealed class QualityRescanService : BackgroundService
             // from before capture, one captured with its reply left out, or one whose file is unreadable has
             // none to grade. Stamp it with a null score once it is past the in-flight grace; younger rows may
             // still be writing and must not head every sweep as permanently empty.
-            if (DateTimeOffset.UtcNow - record.CreatedAtUtc < MissingExtractGrace) return false;
+            if (record.IsWithinMissingExtractGrace(DateTimeOffset.UtcNow)) return false;
 
             await _transcriptStore
                 .MarkQualityRescannedAsync(transcriptId: transcriptId, scorerVersion: _qualityOptions.ScorerVersion,
