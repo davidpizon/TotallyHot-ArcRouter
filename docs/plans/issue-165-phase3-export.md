@@ -2,7 +2,7 @@
 
 **Status:** Approved (David, Cursor chat, 2026-10-10 — “I sign off”). Also recorded on [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165#issuecomment-6100715658) and [PR #230](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/230). Implementation may begin; each implementation PR must link this plan.
 
-**Issue:** [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165). **Parent plan:** [`docs/plans/issue-165-export-import-history.md`](docs/plans/issue-165-export-import-history.md) §1 and §5 phase 3 (approved 2026-10-08). 
+**Issue:** [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165). **Parent plan:** [`issue-165-export-import-history.md`](issue-165-export-import-history.md) §1 and §5 phase 3 (approved 2026-10-08).
 **ADR-0008:** no `ManagementFacade` change, no smell work. The proxy hot path is not touched. `SessionStore`'s capture write path gains hashing (PR 3a), so the golden-path smoke is re-run once.
 
 ## Context
@@ -19,6 +19,7 @@ Phases 1 and 2 are merged. Every captured turn lives in an encrypted per-session
 | 2 | **Add the `session_sha256` index column now**, updated on every append (not computed only at export). |
 | 3 | **`turns.jsonl` carries the capture-time snapshot only.** No score, scorer version or judge flag (they are not in the `TurnMetadata` frame; the parent plan §10 already lists them as not covered). |
 | 4 | **Zip is written to a path on the router machine**; the RPC streams progress. The Export-only modal goes on the **current** Sessions tab and moves with #176 later. |
+| 5 | **`session_sha256` is an appendable hash chain** (2026-10-10), not a recomputed digest, so an append costs one hash. |
 
 ## Findings from CodeGraph that shape the design
 
@@ -30,9 +31,9 @@ Phases 1 and 2 are merged. Every captured turn lives in an encrypted per-session
 - Existing patterns to copy: server-stream RPC `UsageAdminGrpcService.ExportUsageRollup`; one-shot CLI dispatch via `ExtractFlag` in `Program.cs` (`ShredConversationsCommand` is the closest analog); `.tmp` files in the session folder are already swept by `SessionStore.DeleteOrphanFiles`.
 - `PasskeyAdminGrpcService` already has `BeginOneOperation` / `FinishOneOperation`, and `OneOperationAuthorizationTable` holds the token (see `telemetry.proto`).
 
-## Delivery: three stacked draft PRs
+## Delivery: three stacked draft PRs (planned) — landed as one PR
 
-Per the standing rules each PR is opened as a **draft**, iterated with a local `/code-review`, then marked ready once (one Copilot review). Each links this plan.
+Per the standing rules each PR is opened as a **draft**, iterated with a local `/code-review`, then marked ready once (one Copilot review). Each links this plan. The work was planned as the three PRs below; it was implemented on one branch and opened as a single draft, [#231](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/231), and can be split at the 3a/3b/3c seams if a smaller review is wanted. The headings below stay as the unit of description.
 
 ```mermaid
 flowchart LR
@@ -46,9 +47,9 @@ flowchart LR
    - in-memory path: in `SessionStore.AppendLocked`;
    - spooled path: incrementally in `SessionBodySpool` as obscured bytes are produced.
 
-   The rows are inserted in the same transaction as the turn's `session_turns` row, so the commit order of ADR-0019 is unchanged. `obscured` records whether the obscurer changed anything; it feeds `secrets_obscured`. **Verify first** that `StreamingSecretObscurer` / `SecretObscurer` can report that. If not, `secrets_obscured` is exported as `null`, not guessed. Rows for bodies captured before this change, and rows written by backfill, always have `obscured = null`: legacy files hold only already-obscured bytes, so whether obscuring changed anything cannot be known.
+   The rows are inserted in the same transaction as the turn's `session_turns` row, so the commit order of ADR-0019 is unchanged. `obscured` records whether the obscurer changed anything where it can be known: the in-memory path compares input and output, but `StreamingSecretObscurer` (the spooled path) cannot report it. So the column is `null` for spooled bodies and the exported `secrets_obscured` is always `null` in schema version 1, never guessed; the column is kept for a later schema. Rows for bodies captured before this change, and rows written by backfill, always have `obscured = null`: legacy files hold only already-obscured bytes, so whether obscuring changed anything cannot be known.
 2. **`session_sha256` column on `session_files`.** A hash chain over the session's turns: `H(0)` is 32 zero bytes and `H(n) = SHA-256(H(n-1) || turn record)`, where a turn record is the turn's `archive_turn_id` (16 bytes) and, for each exchange kind in the fixed order `ClientRequest, ClientResponse, ProviderRequest, ProviderResponse`, one byte for the kind plus either the body's 32-byte SHA-256 or 32 zero bytes if the body is missing or absent. It excludes `TurnMetadata`, `Extracts` and every timestamp, so `import-time` cannot change it (parent plan §2). An append reads the stored `H(n-1)` and writes `H(n)` in `AppendTurn`'s index transaction, so it costs one hash however long the session is (David chose the chain over recomputing, 2026-10-10, after review). Backfill folds every turn through the same chain. Two sessions with the same turns in the same order always agree, which is all phase 4's comparison needs.
-3. **Backfill for sessions captured before this PR.** They have no hash rows. A one-time, lazy backfill when export (or a startup maintenance pass, to be decided in review) first meets a session without them: stream-decrypt, hash, write the rows and the checksum, then continue. Backfill runs under the session gate, and a failure leaves the session with `hashes_unavailable` and exports it with `content_fidelity` set accordingly rather than failing the export.
+3. **Backfill for sessions captured before this PR.** They have no hash rows. A one-time, lazy backfill when an export first meets a session without them (decided: lazy at export, not a startup pass): stream-decrypt, hash, write the rows and the checksum, then continue. Backfill runs under the session gate, and a failure leaves the session with `hashes_unavailable` and exports it with `content_fidelity` set accordingly rather than failing the export.
 4. **Streaming turn reader.** `SessionFile.ReadTurn(startOffset, firstFrameOrdinal, frameCount)` yields frames one at a time, with each body exposed as a `Stream` (chunk-by-chunk decrypt, streaming Brotli). `SessionStore.OpenTurn(archiveSessionId, archiveTurnId)` wraps it, taking `_rotationLock` (read) and the session gate **per turn only**, never for the whole export, so a long export cannot block appends or deletion for hours. A turn start offset is the previous turn's `end_offset`, or `DataStart` for the first.
    - Generalize `TryReadExtracts` into `TryReadBodies(kinds, wantedTurnIds)` for the harness/provider/model filter.
 5. **`ConversationExportWriter`** (new, `src/TotallyHotArcRouter/Sessions/Export/`). Pure library: takes a filter, an output path, an `IProgress`, and a cancellation token.
@@ -68,7 +69,7 @@ flowchart LR
 
 1. **Proto.** New `ConversationAdminService` in `src/Protos/` with `ExportConversations(ExportConversationsRequest) returns (stream ExportProgress)` (filter fields, destination path, `authorization_token`; progress carries turns written, bytes written, then a terminal result with path, counts and missing/corrupt/incomplete totals). Not a `ManagementFacade` method and not an `ExportUsageRollup` change (parent decision 7). Register it beside the other loopback admin services.
 2. **Gate.** The service calls `ContentGateHooks.RequireExport` before any file I/O. Change `GatedOperation.ExportParameters` to take the canonical filter and destination and return their SHA-256, so the dashboard's approval is bound to exactly what will be written. An approval for one export cannot run another. Update `ContentGateHooksTests` and `GatedOperation` docs.
-3. **Modal.** An "Export / Import" button at the top of the Sessions tab opens a modal built on `DialogShell` (`Title`, `CloseAriaLabel`, `OnClose`). The modal shows whether capture is on, session and turn counts, bytes on disk and the Sample Size, then a filter row (from/to, session, harness, provider, model) and a destination-path field (a path on the router machine). Export runs the existing dashboard one-operation passkey ceremony (reuse the component the management-token copy uses; locate it with CodeGraph when starting), then shows progress and the result path. Import and the imports list are visible-but-disabled or absent until phase 4; the title still says "Export / Import" only if the Import half exists, otherwise "Export" (decide at implementation, no dead controls).
+3. **Modal.** An "Export" button at the top of the Sessions tab opens a modal built on `DialogShell` (`Title`, `CloseAriaLabel`, `OnClose`). The modal shows whether capture is on, session and turn counts, bytes on disk and the Sample Size, then a filter row (from/to, session, harness, provider, model) and a destination-path field (a path on the router machine). Export runs the existing dashboard one-operation passkey ceremony (reuse the component the management-token copy uses; locate it with CodeGraph when starting), then shows progress and the result path. Import and the imports list are absent until phase 4, with no disabled stand-ins, so the dialog and its button are titled "Export" and gain the Import half in phase 4.
    - Put the client call in `TotallyHotArcRouter.Gui.Telemetry` beside `PersistedSessionsClient`, throwing `GrpcAdminException` like the other clients.
    - Add the button to the current layout in the smallest way; #176's redesign will relocate it.
 4. **bUnit test** of the modal and one manual click against a local router (parent plan §6).
@@ -85,17 +86,17 @@ sequenceDiagram
     CLI->>R: CreateApprovalRequest(export, filter, path)
     R-->>CLI: approval_id + dashboard URL
     CLI->>CLI: print "Approve this export in your browser: URL"
-    D->>R: Begin/FinishOneOperation (bound to the request's digest)
-    R->>R: hold the token against approval_id (5-minute TTL)
+    D->>R: ListPendingApprovals, then BeginApproval/FinishApproval(approval_id)
+    R->>R: mark the request approved (operation and digest come from the stored request)
     CLI->>R: WaitForApproval(approval_id)
-    R-->>CLI: token
+    R-->>CLI: one-operation token, minted now
     CLI->>R: ExportConversations(filter, path, token)
     R-->>CLI: progress stream, then the path
 ```
 
-1. **ADR-0020 amendment** (via the `adr-writer` skill): the CLI on every platform hands off to the dashboard instead of refusing. Record the threat analysis. Another local app can create a pending request, but the dashboard shows the destination and filter and needs the operator's gesture; flooding is the already-accepted denial of service; the token stays in the router and the CLI only receives it for one call and for the digest it was bound to.
+1. **ADR-0020 amendment** (via the `adr-writer` skill): the CLI on every platform hands off to the dashboard instead of refusing. Record the threat analysis. Another local app can create a pending request, but the dashboard shows the destination and filter and needs the operator's gesture; flooding is the already-accepted denial of service. The browser never receives a token: the router derives the ceremony's operation and digest from the stored request and mints the one-operation authorization only when a caller collects it. **Residual risk:** whoever holds the management token can list pending ids (`ListPendingApprovals`) and call `WaitForApproval` first, so it, not the CLI, would collect the authorization. That authorization is bound to the approved filter and destination, so it can run only that export, and a holder of the management token could already file its own request; the plan accepts this as the same trust level ADR-0020 already grants that token.
 2. **Router side.** An in-memory pending-approval table (TTL 5 minutes, bounded count) with `CreateApprovalRequest` / `WaitForApproval` on `PasskeyAdminService`; the dashboard gets an approval view that lists pending requests and runs the existing ceremony for one of them.
-3. **CLI.** `--export-conversations <path>` plus `--from`, `--to`, `--session`, `--harness`, `--provider`, `--model`, dispatched with `ExtractFlag` in `Program.Main` before host build, like `--shred-conversations`. It is a gRPC client of the **running** router, not a reader of the files, so there is one code path and the gate cannot be bypassed. It prints progress and exits non-zero on denial, timeout, router unreachable, or a refused export. Authentication to the loopback gRPC (how the CLI gets the admin token without the gated management-token RPC) must be settled by reading ADR-0012 and ADR-0020 before coding; it is the main open item below.
+3. **CLI.** `--export-conversations <path>` plus `--from`, `--to`, `--session`, `--harness`, `--provider`, `--model`, dispatched with `ExtractFlag` in `Program.Main` before host build, like `--shred-conversations`. It is a gRPC client of the **running** router, not a reader of the files, so there is one code path and the gate cannot be bypassed. It prints progress and exits non-zero on denial, timeout, router unreachable, or a refused export. It authenticates to the loopback gRPC with the management token read from the elevated secret-store path (the same elevation gate as `--print-management-token`), never through the passkey-gated token RPC, and sends it only to a loopback `CN=localhost` endpoint. Pinning that connection to the router's local CA (ADR-0013) rather than trusting the subject alone is a recorded follow-up.
 4. **Exit codes and messages** are documented in `README.md` next to the other host flags.
 
 ## Test strategy
@@ -127,13 +128,14 @@ A small test fixture builds a store with real `SessionStore` files (fake master 
 
 ## Risks and open items
 
-1. **CLI authentication to loopback gRPC** (3c). How does the CLI get a credential for the admin API without the gated management-token RPC, on all three platforms? Read ADR-0012/0014/0020 before 3c; if it needs a new local channel, that gets its own ADR (the elevated pipe in ADR-0020 is the precedent).
+1. **CLI connection trust** (3c). Resolved: the CLI uses the management token from the elevated secret-store path. Open follow-up: it accepts any certificate whose subject is `CN=localhost` on a loopback host, so a local process squatting the port (or editing the discovery file) could receive the token; pin the chain to the router's local CA (ADR-0013).
 2. **Backfill timing.** Lazy-at-export (planned) vs a startup pass. Lazy is simpler and costs one decrypt per old session; a startup pass delays boot on large stores. Revisit if exports of old data are slow in practice.
-3. **`secrets_obscured` plumbing.** Depends on the obscurer reporting "changed". Fallback is `null` in the schema, with no guess.
+3. **`secrets_obscured` plumbing.** The streaming obscurer cannot report "changed", so schema version 1 exports `null`. Making it real needs the streaming obscurer to count replacements and a schema bump if the field's meaning changes.
 4. **Extracts are not exported.** The newest-user-message and reply-text extracts are derivable from the request and response, so the zip omits them. Phase 4 must regenerate them with `RequestTextExtractor` / `ResponseTextExtractor` on import, which also means imported turns get extracts in the current extractor's shape. Confirm this is wanted before phase 4.
 5. **Hash cost on the capture path.** Hashing the obscured plaintext adds CPU on the pump thread. The parent plan §10 says no hot-path measurement exists; take one in 3a with a large streamed body, and keep the work on the pump's worker, never the relay.
 6. **Hold-open time for the lock.** Per-turn locking means a very large single turn holds the session gate while one body streams. Acceptable: appends to that one session wait, other sessions do not.
 7. **Reserve value.** The 1 GiB / 10% reserve is taken from the import rules; if that is too strict for export on small disks, make it an option with the same default.
+8. **Double read.** Verify-then-write decrypts, decompresses and hashes every body twice, because a zip entry cannot be removed once written in create mode. Accepted for correctness; revisit if exports of large stores are slow, for example by verifying against the stored hash while writing and aborting the export on a mismatch.
 
 ## Verification (end to end)
 
